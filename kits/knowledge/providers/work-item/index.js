@@ -31,7 +31,18 @@
  * that reports `notModified` on the FIRST fetch (no cache to revalidate against)
  * is a contract violation and raises a clear error — never a TypeError.
  * GitHub's REST API does not reliably support ETag on list endpoints; this is for
- * providers that do. Uses shared conditional-get utilities.
+ * providers that do. Uses shared conditional-get utilities. A legacy runner
+ * (plain string or plain array, no `{ issues }` wrapper) carries no ETag/
+ * Last-Modified channel at all, but still benefits from the shared module's
+ * sha256 body-hash fallback: a byte-identical re-fetch is detected and served
+ * from cache without a re-parse.
+ *
+ * `capabilities().conditional_get` REFLECTS OBSERVED RUNNER SUPPORT — it is
+ * `false` until a structured, validator-bearing response (`{ issues, etag }`
+ * or `{ issues, lastModified }`) has actually been seen from the injected
+ * runner. A legacy string/array runner can never produce one, so
+ * `conditional_get` correctly stays `false` for that provider instance for
+ * its entire lifetime — it is not a static claim independent of the runner.
  *
  * @module providers/work-item
  */
@@ -42,6 +53,8 @@ import {
   processConditionalResponse,
   createCacheEntry,
   isCacheFresh,
+  isBodyUnchanged,
+  computeBodyHash,
 } from "../../adapters/shared/conditional-get.js";
 
 const PROVIDER_ID = "work-item";
@@ -98,6 +111,11 @@ export class WorkItemProvider {
     this.id = PROVIDER_ID;
     this._cache = null;
     this._cacheEntry = null; // { data, validators, cachedAt }
+    // capabilities().conditional_get is derived from this, not a static claim
+    // (see module docstring) — flips true only once a structured,
+    // validator-bearing response has actually been observed.
+    this._observedValidatorSupport = false;
+    this._inFlightFetch = null; // single-flight guard, see _issues()
   }
 
   capabilities() {
@@ -109,7 +127,9 @@ export class WorkItemProvider {
       write_mode: "proposals-only",
       proposal_targets: ["comment", "label"],
       source_of_truth: "GitHub issues (read via injected runner; write = draft comments/labels)",
-      conditional_get: true,
+      // Derived, not static: true only once a structured validator-bearing
+      // response has actually been observed from the injected runner.
+      conditional_get: Boolean(this._observedValidatorSupport),
     };
   }
 
@@ -119,6 +139,22 @@ export class WorkItemProvider {
       this.cacheTtlMs != null && this._cacheEntry && !isCacheFresh(this._cacheEntry, this.cacheTtlMs);
     if (this._cacheEntry && !forceRefresh && !cacheExpired) return this._cacheEntry.data;
 
+    // Single-flight: concurrent callers on a cold/expired cache (e.g.
+    // readGraph()'s Promise.all(readNodes(), readEdges())) must share ONE
+    // underlying fetch, not each independently issue one. This entire method
+    // body up to here and up to the assignment below runs synchronously (no
+    // `await` yet), so a second concurrent call always observes the in-flight
+    // promise already set by the first. Cleared on rejection (via .finally())
+    // so the next call retries rather than being permanently stuck.
+    if (this._inFlightFetch) return this._inFlightFetch;
+
+    this._inFlightFetch = this._fetchIssues().finally(() => {
+      this._inFlightFetch = null;
+    });
+    return this._inFlightFetch;
+  }
+
+  async _fetchIssues() {
     const args = ["issue", "list"];
     if (this.repo) args.push("--repo", this.repo);
     args.push("--state", "all", "--json", "number,title,state,labels,body", "--limit", "200");
@@ -136,16 +172,31 @@ export class WorkItemProvider {
     // Runner may return { issues: [...], etag, lastModified, notModified }
     let result;
     if (typeof out === "string") {
-      // Legacy runner: plain JSON array string
-      result = { data: JSON.parse(out), notModified: false };
+      // Legacy runner: plain JSON array string. No ETag/Last-Modified channel
+      // at all, but a byte-identical re-fetch still benefits from the shared
+      // module's sha256 body-hash fallback (this module's docstring "no
+      // validators -> body-hash compare" path — wired here, not dead code).
+      if (isBodyUnchanged(this._cacheEntry, out)) {
+        result = { data: this._cacheEntry.data, notModified: true, validators: this._cacheEntry.validators };
+      } else {
+        result = { data: JSON.parse(out), notModified: false, validators: { bodyHash: computeBodyHash(out) } };
+      }
     } else if (out && Array.isArray(out.issues)) {
       // Structured response with validators
+      if (out.etag || out.lastModified) this._observedValidatorSupport = true;
       result = processConditionalResponse(
         { status: out.notModified ? 304 : 200, body: JSON.stringify(out.issues), headers: { etag: out.etag, "last-modified": out.lastModified } },
         this._cacheEntry
       );
     } else {
-      result = { data: out, notModified: false };
+      // Legacy runner: plain array (or other JS value) with no wrapper. Same
+      // body-hash fallback as the string branch, hashed over its JSON form.
+      const raw = JSON.stringify(out) ?? String(out);
+      if (isBodyUnchanged(this._cacheEntry, raw)) {
+        result = { data: this._cacheEntry.data, notModified: true, validators: this._cacheEntry.validators };
+      } else {
+        result = { data: out, notModified: false, validators: { bodyHash: computeBodyHash(raw) } };
+      }
     }
 
     // Update cache entry with new validators

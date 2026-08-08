@@ -49,13 +49,31 @@ describe("structured runner receives conditional validators on re-fetch", () => 
     assert.equal(graph.nodes.length, 1);
     assert.equal(graph.nodes[0].id, "issue:7");
 
-    // A second readGraph() must be served from cache (no new runner call) —
-    // readNodes()+readEdges() race in parallel on the FIRST call (before
-    // either has populated the cache, so that pair legitimately double-fetches),
-    // but once cached, subsequent reads must not re-hit the runner.
-    const callsAfterFirstRead = calls;
+    // Single-flight guard: readNodes()+readEdges() race in parallel inside
+    // Promise.all on a COLD cache, but must share the same in-flight fetch —
+    // exactly ONE underlying runner call, not two.
+    assert.equal(calls, 1, "readGraph() on a cold cache must issue exactly one underlying fetch");
+
+    // A second readGraph() must be served from cache (no new runner call).
     await provider.readGraph();
-    assert.equal(calls, callsAfterFirstRead, "second readGraph() must be served from cache");
+    assert.equal(calls, 1, "second readGraph() must be served from cache");
+  });
+
+  test("single-flight: a rejected in-flight fetch is cleared so the next call retries", async () => {
+    let calls = 0;
+    const runner = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("transient failure");
+      return { issues: [issue(1)] };
+    };
+    const provider = new WorkItemProvider({ repo: "x/y", runner });
+
+    await assert.rejects(() => provider.readGraph(), /transient failure/);
+    assert.equal(calls, 1, "first (failing) attempt made exactly one call across the concurrent pair");
+
+    const graph = await provider.readGraph();
+    assert.equal(graph.nodes.length, 1, "the next call must retry, not stay stuck on the cleared in-flight promise");
+    assert.equal(calls, 2);
   });
 });
 
@@ -97,6 +115,32 @@ describe("legacy runner shapes still work unmodified", () => {
     const nodes = await provider.readNodes();
     assert.equal(nodes.length, 1);
   });
+
+  test("legacy string runner: a byte-identical refetch reuses cached parsed data (body-hash fallback)", async () => {
+    const body = JSON.stringify([issue(11), issue(12)]);
+    const runner = async () => body; // identical bytes every call
+    const provider = new WorkItemProvider({ repo: "x/y", runner, cacheTtlMs: 10 });
+
+    const first = await provider._issues();
+    assert.equal(first.length, 2);
+
+    await new Promise((r) => setTimeout(r, 30)); // force TTL expiry -> refetch path
+    const second = await provider._issues();
+    assert.deepEqual(second, first, "byte-identical body must reuse the cached parsed array, not re-parse");
+    assert.equal(second, first, "must be the SAME cached array instance, not a freshly re-parsed one");
+  });
+
+  test("legacy array runner: a byte-identical refetch (JSON.stringify-equal) reuses cached data", async () => {
+    const runner = async () => [issue(21), issue(22)]; // a NEW array instance every call, same content
+    const provider = new WorkItemProvider({ repo: "x/y", runner, cacheTtlMs: 10 });
+
+    const first = await provider._issues();
+    await new Promise((r) => setTimeout(r, 30));
+    const second = await provider._issues();
+    assert.deepEqual(second, first);
+    // The cache entry itself is untouched on a body-hash-unchanged hit — same object identity.
+    assert.equal(second, first);
+  });
 });
 
 describe("misbehaving runner: notModified on the first call", () => {
@@ -112,6 +156,40 @@ describe("misbehaving runner: notModified on the first call", () => {
         return true;
       }
     );
+  });
+});
+
+describe("capabilities().conditional_get is derived from observed runner support", () => {
+  test("a legacy string runner never flips conditional_get true", async () => {
+    const provider = new WorkItemProvider({ repo: "x/y", runner: async () => JSON.stringify([issue(1)]) });
+    assert.equal(provider.capabilities().conditional_get, false, "false before any fetch");
+    await provider._issues();
+    assert.equal(provider.capabilities().conditional_get, false, "still false — a legacy runner can never carry validators");
+  });
+
+  test("a legacy plain-array runner never flips conditional_get true", async () => {
+    const provider = new WorkItemProvider({ repo: "x/y", runner: async () => [issue(1)] });
+    await provider._issues();
+    assert.equal(provider.capabilities().conditional_get, false);
+  });
+
+  test("a structured runner with no etag/lastModified does not flip conditional_get true", async () => {
+    const provider = new WorkItemProvider({ repo: "x/y", runner: async () => ({ issues: [issue(1)] }) });
+    await provider._issues();
+    assert.equal(provider.capabilities().conditional_get, false, "structured but no validators observed yet");
+  });
+
+  test("a structured runner carrying an etag flips conditional_get true after the first fetch", async () => {
+    const provider = new WorkItemProvider({ repo: "x/y", runner: async () => ({ issues: [issue(1)], etag: "W/1" }) });
+    assert.equal(provider.capabilities().conditional_get, false, "false before any fetch has been observed");
+    await provider._issues();
+    assert.equal(provider.capabilities().conditional_get, true);
+  });
+
+  test("a structured runner carrying only lastModified also flips conditional_get true", async () => {
+    const provider = new WorkItemProvider({ repo: "x/y", runner: async () => ({ issues: [issue(1)], lastModified: "Mon, 01 Jan 2026 00:00:00 GMT" }) });
+    await provider._issues();
+    assert.equal(provider.capabilities().conditional_get, true);
   });
 });
 

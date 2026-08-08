@@ -207,9 +207,21 @@ describe("MarkdownVaultProvider: version-keyed read memoization (wave 2 / findin
       };
 
       const provider = new MarkdownVaultProvider({ store: countingStore, storeRoot: dir, agent: "t" });
+
+      // ALL_RECORD_TYPES in markdown-vault/index.js has 5 entries (raw,
+      // compiled, concept, snapshot, person) -> readNodes()/readEdges() each
+      // loop over all 5 via _allRecords(). readGraph() dispatches both
+      // concurrently via Promise.all on a COLD memo; single-flight in-flight
+      // promise memoization must make them share ONE underlying fetch, so
+      // this must be exactly 5 listByType calls, not 10.
+      const RECORD_TYPE_COUNT = 5;
       await provider.readGraph();
       const callsAfterFirst = listByTypeCalls;
-      assert.ok(callsAfterFirst > 0, "the first read must hit the store");
+      assert.equal(
+        callsAfterFirst,
+        RECORD_TYPE_COUNT,
+        "cold readGraph() must issue exactly one underlying fetch (single-flight), not double-fetch via the readNodes/readEdges race"
+      );
 
       await provider.readGraph();
       await provider.queryByType("note");
@@ -218,7 +230,35 @@ describe("MarkdownVaultProvider: version-keyed read memoization (wave 2 / findin
       // Mutate -> cache version bumps -> next read must refetch.
       await store.create({ type: "raw", title: "R2", body: "b2", category: "eng", provenance: { agent: "t" } });
       await provider.readGraph();
-      assert.ok(listByTypeCalls > callsAfterFirst, "a mutation must invalidate the memo and trigger a refetch");
+      assert.equal(
+        listByTypeCalls,
+        callsAfterFirst + RECORD_TYPE_COUNT,
+        "a mutation must invalidate the memo and trigger exactly one refetch"
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("single-flight: a rejected in-flight fetch is cleared so the next call retries", async () => {
+    const dir = makeTempDir();
+    try {
+      const store = new DefaultKnowledgeStore({ storeRoot: dir });
+      await store.create({ type: "raw", title: "R", body: "b", category: "eng", provenance: { agent: "t" } });
+
+      let calls = 0;
+      const failOnceStore = Object.create(store);
+      failOnceStore.listByType = (...args) => {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new Error("transient failure"));
+        return store.listByType(...args);
+      };
+
+      const provider = new MarkdownVaultProvider({ store: failOnceStore, storeRoot: dir, agent: "t" });
+      await assert.rejects(() => provider.readGraph(), /transient failure/);
+
+      const graph = await provider.readGraph();
+      assert.ok(graph.nodes.length >= 1, "the next call must retry, not stay stuck on the cleared in-flight promise");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

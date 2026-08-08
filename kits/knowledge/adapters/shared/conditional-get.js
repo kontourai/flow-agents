@@ -10,6 +10,12 @@
  * - On re-fetch, send If-None-Match / If-Modified-Since
  * - 304 Not Modified → return cached data + notModified: true
  * - No validators → normal fetch + sha256 body-hash compare (fallback)
+ *
+ * The body-hash fallback (`isBodyUnchanged`) is wired into
+ * `providers/work-item/index.js`'s legacy runner branches (plain string /
+ * plain array, no `{ etag, lastModified }` wrapper) — a byte-identical
+ * refetch is detected and served from cache without a re-parse, even though
+ * that runner shape has no ETag/Last-Modified channel at all.
  */
 
 import { createHash } from "node:crypto";

@@ -56,6 +56,7 @@ export class MarkdownVaultProvider {
     // _allRecords() below — covers readNodes/readEdges/readGraph/queryByType
     // (they all funnel through _allRecords()).
     this._recordsMemo = null; // { version, records } | null
+    this._inFlightFetch = null; // single-flight guard, see _allRecords()
   }
 
   capabilities() {
@@ -80,6 +81,23 @@ export class MarkdownVaultProvider {
       return this._recordsMemo.records;
     }
 
+    // Single-flight: concurrent callers on a cold/invalidated memo (e.g.
+    // readGraph()'s Promise.all(readNodes(), readEdges())) must share ONE
+    // underlying fetch across all ALL_RECORD_TYPES, not each independently
+    // re-fetch. Everything above this point (the memo check) and the
+    // assignment below run synchronously (no `await` yet), so a second
+    // concurrent call always observes the in-flight promise already set by
+    // the first. Cleared on rejection (via .finally()) so the next call
+    // retries rather than being permanently stuck.
+    if (this._inFlightFetch) return this._inFlightFetch;
+
+    this._inFlightFetch = this._fetchAllRecords(currentVersion).finally(() => {
+      this._inFlightFetch = null;
+    });
+    return this._inFlightFetch;
+  }
+
+  async _fetchAllRecords(currentVersion) {
     const out = [];
     for (const t of ALL_RECORD_TYPES) {
       const recs = await this.store.listByType(t, { includeRetired: true });
