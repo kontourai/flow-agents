@@ -157,6 +157,54 @@ export function readActiveKits(dest: string): ActiveKitEntry[] | null {
   return entries;
 }
 
+export type ActiveKitsReadResult = { ok: true; entries: ActiveKitEntry[] } | { ok: false; errors: string[] };
+
+/**
+ * Read + schema-validate `install.json`'s `active_kits` field -- the READ-side counterpart of
+ * `writeActiveKits`'s existing write-side validation (r1 review finding: validation was
+ * write-only, so a single hand-edited/corrupt entry already sitting in the registry turned an
+ * unrelated, otherwise-valid `kit activate`/`kit deactivate` call into a partial write --
+ * files copied/removed before `writeActiveKits` finally threw).
+ *
+ * Distinguishes "absent" (no `active_kits` field at all -- a legacy record, or a runtime that
+ * never populates it) from "present but malformed": the former returns
+ * `{ ok: true, entries: [] }` (fail OPEN, matching `readActiveKits`'s existing null-means-absent
+ * contract), the latter returns `{ ok: false, errors }` naming every malformed entry. Callers
+ * (`activateBuiltinKit`/`deactivateBuiltinKit`) MUST check `ok` and refuse cleanly BEFORE any
+ * filesystem mutation -- never fall back to `readActiveKits`'s loose parse (which silently drops
+ * malformed entries and silently coerces an invalid `scope` to `"project"`) once this function is
+ * available at the call site.
+ */
+export function readActiveKitsValidated(dest: string, packageRoot: string): ActiveKitsReadResult {
+  const record = readInstallRecord(dest);
+  if (!record || !Array.isArray(record.active_kits)) return { ok: true, entries: [] };
+  const entries: ActiveKitEntry[] = [];
+  const parseErrors: string[] = [];
+  record.active_kits.forEach((raw, index) => {
+    if (typeof raw !== "object" || raw === null) {
+      parseErrors.push(`active_kits[${index}] is not an object`);
+      return;
+    }
+    const candidate = raw as Record<string, unknown>;
+    if (typeof candidate.id !== "string" || !candidate.id) {
+      parseErrors.push(`active_kits[${index}] has a missing or invalid id`);
+      return;
+    }
+    // Scope is intentionally NOT coerced here (unlike readActiveKits's loose parse) -- an
+    // invalid scope must surface as a validation error below, not silently become "project".
+    entries.push({
+      id: candidate.id,
+      version: typeof candidate.version === "string" ? candidate.version : "",
+      activated_at: typeof candidate.activated_at === "string" ? candidate.activated_at : "",
+      scope: candidate.scope as KitScope,
+    });
+  });
+  if (parseErrors.length) return { ok: false, errors: parseErrors };
+  const shapeErrors = validateActiveKitEntries(entries, new Set(catalogKitIds(packageRoot)));
+  if (shapeErrors.length) return { ok: false, errors: shapeErrors };
+  return { ok: true, entries };
+}
+
 /** Structural + catalog validation for an `active_kits` array: every entry must be well-shaped
  * and reference a kit id present in `validKitIds` (unknown kits rejected). Returns an empty
  * array when valid. */
@@ -191,8 +239,17 @@ export function validateActiveKitEntries(entries: ActiveKitEntry[], validKitIds:
 }
 
 /**
- * Atomic read-modify-write of `install.json`'s `active_kits` field only -- every other field on
- * the record (version, installedAt, runtime, global, active_kit_ids, ...) is preserved verbatim.
+ * Atomic read-modify-write of `install.json`'s `active_kits` field -- every other field on the
+ * record (version, installedAt, runtime, global, ...) is preserved verbatim, EXCEPT
+ * `active_kit_ids`, which is also overwritten here with `activeKits.map(e => e.id)` (r1 review
+ * finding: `kit activate`/`kit deactivate` updated only `active_kits`, leaving the pre-existing
+ * `active_kit_ids` field -- consumed by `effective-flow-agents-config.ts` for its per-kit
+ * `activation` diagnostic label -- stale/desynced the moment either verb ran). `active_kit_ids`
+ * is kept as exactly the legacy string[] projection of `active_kits`' ids, so both fields always
+ * agree about WHICH kits are active (they can still differ in what they say ABOUT each one --
+ * `active_kits` carries version/activated_at/scope, `active_kit_ids` does not -- but never in the
+ * set of ids itself).
+ *
  * Schema-validates (shape + catalog membership) before writing; throws rather than persisting an
  * invalid record. Requires the durable install record to already exist (created by `flow-agents
  * init`) -- `kit activate`/`kit deactivate` are extensions to an existing install, not a
@@ -212,6 +269,6 @@ export function writeActiveKits(dest: string, packageRoot: string, activeKits: A
   } catch (error) {
     throw new Error(`existing install record is not valid JSON, refusing to modify it: ${recordPath}: ${(error as Error).message}`);
   }
-  const next = { ...existing, active_kits: activeKits };
+  const next = { ...existing, active_kit_ids: activeKits.map((entry) => entry.id), active_kits: activeKits };
   atomicWriteJson(dest, recordPath, next);
 }

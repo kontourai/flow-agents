@@ -211,6 +211,18 @@ function workflowTriggerValidationErrors(manifest, manifestPath) {
  * treat null as "leave current behavior unchanged" -- deliberately fail-open, never fail-closed,
  * so an install that predates this feature (or one whose install.json is momentarily
  * unreadable) keeps steering every installed built-in kit exactly as it always has.
+ *
+ * r1 review HIGH finding: a PRESENT-but-fully-malformed `active_kits` array (every entry missing
+ * or wrong-typed `id` -- a plausible hand-edit or merge artifact) used to return an empty, non-
+ * null `Set`, which the caller cannot tell apart from a deliberate "zero kits active" state --
+ * silently suppressing EVERY built-in kit's `workflow_triggers` with no signal anywhere. Fixed
+ * two ways: (1) a malformed entry is now skipped INDIVIDUALLY, so a partially-malformed array
+ * still honors its valid entries instead of discarding the whole array; (2) only when the array
+ * is non-empty AND every single entry turned out to be unusable does this fall back to the
+ * fail-open `null` contract above (indistinguishable from corruption, not a genuine "nothing
+ * active" decision) -- and, unlike the other `null` cases, that one prints a single stderr
+ * diagnostic naming the corruption, because silently reinterpreting "can't decide" as "everything
+ * is active" must never be as quiet as the ordinary legacy/absent case.
  */
 function readActiveBuiltinKitIds(root) {
   try {
@@ -219,8 +231,23 @@ function readActiveBuiltinKitIds(root) {
     const record = readJson(installJsonPath);
     if (!record || !Array.isArray(record.active_kits)) return null;
     const ids = new Set();
+    let malformedCount = 0;
     for (const entry of record.active_kits) {
-      if (entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id) ids.add(entry.id);
+      if (entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id) {
+        ids.add(entry.id);
+      } else {
+        malformedCount += 1;
+      }
+    }
+    if (record.active_kits.length > 0 && ids.size === 0) {
+      process.stderr.write(
+        `[flow-agents] WARNING: ${installJsonPath}: active_kits has ${malformedCount} ` +
+        `entr${malformedCount === 1 ? 'y' : 'ies'} and none has a valid id -- cannot determine ` +
+        `which built-in kits are active. Failing open: steering every installed built-in kit's ` +
+        `workflow_triggers as if active_kits were absent, not treating this as zero active kits. ` +
+        `Repair or regenerate this install's active_kits (kontourai/flow-agents kit-activation-registry).\n`
+      );
+      return null;
     }
     return ids;
   } catch {

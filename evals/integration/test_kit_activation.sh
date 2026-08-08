@@ -22,6 +22,25 @@
 #      trigger loading UNCHANGED when the install record has no `active_kits` field at all
 #      (legacy-record fail-open).
 #
+# r1 review fix-round scenarios (kit-activation-review-r1.md):
+#   J. HIGH: `kit activate` no longer clobbers a file `kit deactivate` preserved -- it preserves
+#      + reports the same conflict on reactivation, and --force is required to overwrite it.
+#   K. HIGH: scripts/hooks/lib/kit-catalog.js's steering filter fails OPEN (not silently closed)
+#      when active_kits is present but every entry is malformed, with a stderr diagnostic; a
+#      partially-malformed array honors its valid entries and skips the bad ones silently.
+#   L. MEDIUM: deactivate's apply-time containment re-check (TOCTOU) catches a skill directory
+#      swapped for an escaping symlink between planning and removal (mirrors
+#      test_init_uninstall.sh's Scenario H4).
+#   M. MEDIUM: `kit deactivate --dry-run` reports the exact same removed/preserved split the real
+#      run performs (no longer overclaims removal of a file that would actually be preserved).
+#   N. MEDIUM: `active_kit_ids` stays the exact string[] projection of `active_kits`' ids after
+#      every activate/deactivate call.
+#   O. MEDIUM: a corrupt (duplicate-id) active_kits entry unrelated to the kit being acted on
+#      makes activate/deactivate refuse cleanly, naming the bad entry, BEFORE touching any file.
+#   P. MEDIUM (eval power): a locally-installed third-party kit's workflow_triggers are never
+#      filtered by active_kits (which only ever lists built-in kits), before and after a built-in
+#      kit is deactivated.
+#
 # Isolation: every scenario runs against its own fixture $HOME / project dest under a private
 # TMPDIR_EVAL; the real $HOME is never touched.
 set -euo pipefail
@@ -430,6 +449,378 @@ if [[ "$TRIGGERS_LEGACY" == '["builder"]' ]]; then
   _pass "kit-catalog.js: a legacy record (no active_kits field) leaves trigger loading unchanged (fail-open)"
 else
   _fail "kit-catalog.js: legacy no-active_kits record unexpectedly changed trigger loading, got $TRIGGERS_LEGACY"
+fi
+echo ""
+
+# ─── Scenario J: activate preserves a user-modified file across deactivate<->activate ─────────
+echo "--- Scenario J: kit activate preserves (never silently clobbers) a file deactivate preserved; --force overwrites ---"
+
+J_HOME="$TMPDIR_EVAL/j-home"
+mkdir -p "$J_HOME"
+HOME="$J_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+J_TARGET="$J_HOME/.claude/skills/deliver/SKILL.md"
+if [[ ! -f "$J_TARGET" ]]; then
+  _fail "activate-preserve: fixture skill deliver/SKILL.md was not installed; cannot run scenario"
+else
+  printf '\nMY USER EDIT\n' >> "$J_TARGET"
+  HOME="$J_HOME" $FA kit deactivate builder --global >/dev/null 2>&1
+
+  J_REACT_OUT="$TMPDIR_EVAL/j-reactivate.out"
+  HOME="$J_HOME" $FA kit activate builder --global >"$J_REACT_OUT" 2>&1
+  J_REACT_RC=$?
+
+  if [[ "$J_REACT_RC" -eq 0 ]]; then
+    _pass "activate (no --force) after deactivate-preserve: exits 0"
+  else
+    _fail "activate (no --force): expected exit 0, got $J_REACT_RC"
+    cat "$J_REACT_OUT"
+  fi
+  if [[ -f "$J_TARGET" ]] && grep -q 'MY USER EDIT' "$J_TARGET"; then
+    _pass "activate (no --force): user's edit to deliver/SKILL.md was NOT clobbered"
+  else
+    _fail "activate (no --force): user's edit was silently overwritten"
+  fi
+  if grep -q 'preserved: skills/deliver/SKILL.md' "$J_REACT_OUT" && grep -qi 'NOT overwritten' "$J_REACT_OUT"; then
+    _pass "activate (no --force): reports the conflict using uninstall's preserved vocabulary"
+  else
+    _fail "activate (no --force): did not report the preserved-file conflict"
+    cat "$J_REACT_OUT"
+  fi
+
+  # Second cycle: deactivate again (still preserves the modified file), then reactivate --force.
+  HOME="$J_HOME" $FA kit deactivate builder --global >/dev/null 2>&1
+  J_FORCE_OUT="$TMPDIR_EVAL/j-force-activate.out"
+  HOME="$J_HOME" $FA kit activate builder --global --force >"$J_FORCE_OUT" 2>&1
+  J_FORCE_RC=$?
+
+  if [[ "$J_FORCE_RC" -eq 0 ]]; then
+    _pass "activate --force: exits 0"
+  else
+    _fail "activate --force: expected exit 0, got $J_FORCE_RC"
+    cat "$J_FORCE_OUT"
+  fi
+  if [[ -f "$J_TARGET" ]] && ! grep -q 'MY USER EDIT' "$J_TARGET"; then
+    _pass "activate --force: overwrote the user-modified file with canonical content"
+  else
+    _fail "activate --force: user's edit is still present (force did not overwrite)"
+  fi
+  if grep -qi "overwritten (--force): skills/deliver/SKILL.md" "$J_FORCE_OUT"; then
+    _pass "activate --force: reports the forced overwrite"
+  else
+    _fail "activate --force: did not report the forced overwrite"
+    cat "$J_FORCE_OUT"
+  fi
+fi
+echo ""
+
+# ─── Scenario K: steering filter fail-open on malformed active_kits (+ diagnostic) ────────────
+echo "--- Scenario K: kit-catalog.js steering filter fails OPEN on fully-malformed active_kits (with diagnostic); honors valid entries when partially-malformed ---"
+
+K_PROJECT="$TMPDIR_EVAL/k-project"
+mkdir -p "$K_PROJECT"
+(cd "$K_PROJECT" && git init -q)
+$FA init --runtime claude-code --dest "$K_PROJECT" --yes >/dev/null 2>&1
+
+# All-malformed: every active_kits entry lacks a usable id.
+node - "$K_PROJECT/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const p = process.argv[2];
+const record = JSON.parse(fs.readFileSync(p, "utf8"));
+record.active_kits = [{ kit_id: "builder" }, { kit_id: "knowledge" }, {}];
+fs.writeFileSync(p, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+NODE
+
+K_ALL_MALFORMED_ERR="$TMPDIR_EVAL/k-all-malformed.err"
+K_ALL_MALFORMED_OUT="$(node -e "
+const { workflowTriggersFor } = require('$K_PROJECT/scripts/hooks/lib/kit-catalog.js');
+console.log(JSON.stringify(workflowTriggersFor('$K_PROJECT', 'implementation-work-detected').map((t) => t.kit_id)));
+" 2>"$K_ALL_MALFORMED_ERR")"
+
+if [[ "$K_ALL_MALFORMED_OUT" == '["builder"]' ]]; then
+  _pass "kit-catalog.js: fully-malformed active_kits fails OPEN -- builder's triggers still load"
+else
+  _fail "kit-catalog.js: expected [\"builder\"] (fail-open) with fully-malformed active_kits, got $K_ALL_MALFORMED_OUT"
+fi
+if grep -qi 'WARNING' "$K_ALL_MALFORMED_ERR" && grep -q 'active_kits' "$K_ALL_MALFORMED_ERR"; then
+  _pass "kit-catalog.js: fully-malformed active_kits prints a stderr diagnostic naming the corruption"
+else
+  _fail "kit-catalog.js: no stderr diagnostic for fully-malformed active_kits"
+  cat "$K_ALL_MALFORMED_ERR"
+fi
+
+# Partially-malformed: one valid entry (builder) alongside malformed ones -- valid entry honored,
+# malformed ones skipped individually, and (since a valid decision WAS made) no diagnostic.
+node - "$K_PROJECT/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const p = process.argv[2];
+const record = JSON.parse(fs.readFileSync(p, "utf8"));
+record.active_kits = [
+  { id: "builder", version: "0.0.0", activated_at: new Date().toISOString(), scope: "project" },
+  { kit_id: "garbage-shape" },
+  {},
+];
+fs.writeFileSync(p, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+NODE
+
+K_PARTIAL_ERR="$TMPDIR_EVAL/k-partial.err"
+K_PARTIAL_OUT="$(node -e "
+const { workflowTriggersFor } = require('$K_PROJECT/scripts/hooks/lib/kit-catalog.js');
+console.log(JSON.stringify(workflowTriggersFor('$K_PROJECT', 'implementation-work-detected').map((t) => t.kit_id)));
+" 2>"$K_PARTIAL_ERR")"
+
+if [[ "$K_PARTIAL_OUT" == '["builder"]' ]]; then
+  _pass "kit-catalog.js: partially-malformed active_kits honors its one valid entry (builder)"
+else
+  _fail "kit-catalog.js: expected [\"builder\"] with a partially-malformed active_kits, got $K_PARTIAL_OUT"
+fi
+if [[ ! -s "$K_PARTIAL_ERR" ]]; then
+  _pass "kit-catalog.js: partially-malformed active_kits prints no diagnostic (a valid decision was made)"
+else
+  _fail "kit-catalog.js: unexpected stderr for a partially-malformed active_kits with a valid entry present"
+  cat "$K_PARTIAL_ERR"
+fi
+echo ""
+
+# ─── Scenario L: deactivate apply-time containment re-check (TOCTOU) ─────────────────────────
+echo "--- Scenario L: a skill directory swapped for an escaping symlink AFTER planning is preserved, never followed (mirrors test_init_uninstall.sh H4) ---"
+
+L_HOME="$TMPDIR_EVAL/l-home"
+mkdir -p "$L_HOME"
+HOME="$L_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+
+L_SKILL_DIR="$L_HOME/.claude/skills/deliver"
+if [[ ! -d "$L_SKILL_DIR" ]]; then
+  _fail "deactivate-apply-containment: fixture skill deliver was not installed; cannot run scenario"
+else
+  L_SAFE_DIR="$TMPDIR_EVAL/l-external-safe"
+  mkdir -p "$L_SAFE_DIR"
+  cp -a "$L_SKILL_DIR/." "$L_SAFE_DIR/"
+
+  L_OUT="$TMPDIR_EVAL/l-deactivate.out"
+  # TEST-ONLY hook: replaces the deliver skill directory -- a plain directory at plan time,
+  # captured as a normal removable entry -- with a symlink escaping dest, after planning but
+  # before the removal loop runs.
+  HOME="$L_HOME" FLOW_AGENTS_KIT_TEST_TOCTOU_SYMLINK_SWAP_PATH="$L_SKILL_DIR" FLOW_AGENTS_KIT_TEST_TOCTOU_SYMLINK_SWAP_TARGET="$L_SAFE_DIR" \
+    $FA kit deactivate builder --global >"$L_OUT" 2>&1
+  L_RC=$?
+
+  if [[ "$L_RC" -eq 0 ]]; then
+    _pass "deactivate-apply-containment: run still exits 0 (a correctly-blocked preserve is not a failure)"
+  else
+    _fail "deactivate-apply-containment: run exited $L_RC, expected 0"
+    cat "$L_OUT"
+  fi
+  if [[ -f "$L_SAFE_DIR/SKILL.md" ]]; then
+    _pass "deactivate-apply-containment: the external directory the symlink now points to survived untouched"
+  else
+    _fail "deactivate-apply-containment: the external directory was deleted through the swapped symlink"
+  fi
+  if grep -q 'preserved: skills/deliver/SKILL.md' "$L_OUT" && grep -q 'outside the install root through a symlink' "$L_OUT"; then
+    _pass "deactivate-apply-containment: report names the entry as preserved due to the apply-time containment re-check"
+  else
+    _fail "deactivate-apply-containment: report does not explain why the entry was preserved"
+    cat "$L_OUT"
+  fi
+fi
+echo ""
+
+# ─── Scenario M: dry-run accuracy matches the real removed/preserved split ────────────────────
+echo "--- Scenario M: kit deactivate --dry-run reports the same removed/preserved split as the real run ---"
+
+M_HOME="$TMPDIR_EVAL/m-home"
+mkdir -p "$M_HOME"
+HOME="$M_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+M_TARGET="$M_HOME/.claude/skills/deliver/SKILL.md"
+if [[ ! -f "$M_TARGET" ]]; then
+  _fail "dry-run-accuracy: fixture skill deliver/SKILL.md was not installed; cannot run scenario"
+else
+  printf '\nMY USER EDIT\n' >> "$M_TARGET"
+
+  M_DRY_OUT="$TMPDIR_EVAL/m-dry-run.out"
+  HOME="$M_HOME" $FA kit deactivate builder --global --dry-run >"$M_DRY_OUT" 2>&1
+  M_DRY_REMOVE_COUNT="$(grep -c '^would remove:' "$M_DRY_OUT" || true)"
+  M_DRY_PRESERVE_COUNT="$(grep -c '^  would preserve:' "$M_DRY_OUT" || true)"
+
+  if grep -q '^  would preserve: skills/deliver/SKILL.md' "$M_DRY_OUT"; then
+    _pass "dry-run-accuracy: dry-run reports the modified file as would-preserve, not would-remove"
+  else
+    _fail "dry-run-accuracy: dry-run did not report deliver/SKILL.md as preserved"
+    cat "$M_DRY_OUT"
+  fi
+  if ! grep -q '^would remove: skills/deliver/SKILL.md' "$M_DRY_OUT"; then
+    _pass "dry-run-accuracy: dry-run does NOT claim it would remove the modified file"
+  else
+    _fail "dry-run-accuracy: dry-run incorrectly claims it would remove the modified file"
+  fi
+
+  M_REAL_OUT="$TMPDIR_EVAL/m-real.out"
+  HOME="$M_HOME" $FA kit deactivate builder --global >"$M_REAL_OUT" 2>&1
+  M_REAL_REMOVED="$(node -e "const m = '$M_REAL_OUT'; const fs=require('fs'); const t=fs.readFileSync(m,'utf8'); const line = t.split('\n').find((l) => l.startsWith('deactivated kit')); console.log((line.match(/removed (\d+) file/) || [,'?'])[1]);")"
+  M_REAL_PRESERVED="$(node -e "const m = '$M_REAL_OUT'; const fs=require('fs'); const t=fs.readFileSync(m,'utf8'); const line = t.split('\n').find((l) => l.startsWith('deactivated kit')); console.log((line.match(/preserved (\d+) modified/) || [,'?'])[1]);")"
+
+  if [[ "$M_DRY_REMOVE_COUNT" == "$M_REAL_REMOVED" && "$M_DRY_PRESERVE_COUNT" == "$M_REAL_PRESERVED" ]]; then
+    _pass "dry-run-accuracy: dry-run counts ($M_DRY_REMOVE_COUNT remove / $M_DRY_PRESERVE_COUNT preserve) match the real run ($M_REAL_REMOVED removed / $M_REAL_PRESERVED preserved)"
+  else
+    _fail "dry-run-accuracy: dry-run counts ($M_DRY_REMOVE_COUNT/$M_DRY_PRESERVE_COUNT) do not match the real run ($M_REAL_REMOVED/$M_REAL_PRESERVED)"
+  fi
+  if [[ "$M_DRY_PRESERVE_COUNT" -ge 1 ]]; then
+    _pass "dry-run-accuracy: at least one file is genuinely reported as preserved (test exercises the real gap)"
+  else
+    _fail "dry-run-accuracy: no preserved file reported at all -- scenario is not exercising anything"
+  fi
+fi
+echo ""
+
+# ─── Scenario N: active_kit_ids stays coherent with active_kits after each verb ───────────────
+echo "--- Scenario N: active_kit_ids stays the exact string[] projection of active_kits' ids after activate/deactivate ---"
+
+assert_ids_coherent() {
+  local install_json="$1" label="$2"
+  if node - "$install_json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const fromIds = [...record.active_kit_ids].sort();
+const fromKits = record.active_kits.map((k) => k.id).sort();
+if (JSON.stringify(fromIds) !== JSON.stringify(fromKits)) {
+  throw new Error(`active_kit_ids ${JSON.stringify(fromIds)} != active_kits ids ${JSON.stringify(fromKits)}`);
+}
+console.log("ok");
+NODE
+  then
+    _pass "active_kit_ids/active_kits coherence: $label"
+  else
+    _fail "active_kit_ids/active_kits coherence: $label"
+  fi
+}
+
+N_HOME="$TMPDIR_EVAL/n-home"
+mkdir -p "$N_HOME"
+# Explicit --activate-kit selection at init (matching the r1 review's own live repro): the
+# pre-existing default-flags asymmetry (active_kit_ids stays [] while active_kits lists every
+# catalog kit) is disclosed in the review as pre-dating this fix and out of its scope -- this
+# scenario tests coherence ACROSS activate/deactivate calls, starting from a state where both
+# fields already agree.
+HOME="$N_HOME" $FA init --runtime claude-code --global --activate-kit builder --activate-kit knowledge --activate-kit release-evidence --yes >/dev/null 2>&1
+assert_ids_coherent "$N_HOME/.claude/.flow-agents/install.json" "after fresh init (explicit kit selection)"
+
+HOME="$N_HOME" $FA kit deactivate builder --global >/dev/null 2>&1
+assert_ids_coherent "$N_HOME/.claude/.flow-agents/install.json" "after kit deactivate builder"
+if node - "$N_HOME/.claude/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (record.active_kit_ids.includes("builder")) throw new Error("active_kit_ids still lists builder after deactivate");
+console.log("ok");
+NODE
+then
+  _pass "active_kit_ids: no longer lists builder after deactivate"
+else
+  _fail "active_kit_ids: still lists builder after deactivate (stale)"
+fi
+
+HOME="$N_HOME" $FA kit activate builder --global >/dev/null 2>&1
+assert_ids_coherent "$N_HOME/.claude/.flow-agents/install.json" "after kit activate builder"
+echo ""
+
+# ─── Scenario O: corrupt registry entry refuses cleanly BEFORE any file operation ─────────────
+echo "--- Scenario O: an unrelated corrupt active_kits entry makes activate/deactivate refuse cleanly, touching zero files ---"
+
+O_DEST="$TMPDIR_EVAL/o-project"
+mkdir -p "$O_DEST"
+(cd "$O_DEST" && git init -q)
+$FA init --runtime claude-code --dest "$O_DEST" --activate-kit builder --yes >/dev/null 2>&1
+
+# Hand-corrupt: duplicate 'builder' entry appended (simulates a bad hand-edit/merge), unrelated
+# to 'knowledge', the kit we are about to try to activate.
+node - "$O_DEST/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const p = process.argv[2];
+const record = JSON.parse(fs.readFileSync(p, "utf8"));
+record.active_kits.push({ ...record.active_kits[0] });
+fs.writeFileSync(p, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+NODE
+
+O_SNAPSHOT_BEFORE="$(tree_snapshot "$O_DEST")"
+
+O_OUT="$TMPDIR_EVAL/o-activate.out"
+set +e
+$FA kit activate knowledge --dest "$O_DEST" >"$O_OUT" 2>&1
+O_RC=$?
+set -e
+
+if [[ "$O_RC" -eq 1 ]]; then
+  _pass "corrupt-registry: kit activate refuses with a clean, defined exit code (1), not an unhandled exception"
+else
+  _fail "corrupt-registry: expected exit 1, got $O_RC"
+  cat "$O_OUT"
+fi
+if grep -qi "corrupt" "$O_OUT" && grep -q "duplicate" "$O_OUT" && grep -q "builder" "$O_OUT"; then
+  _pass "corrupt-registry: error message names the bad entry (duplicate 'builder') before any change"
+else
+  _fail "corrupt-registry: error message does not clearly name the corruption"
+  cat "$O_OUT"
+fi
+if echo "$O_OUT" | grep -Eqi "at .*kit-registry|at .*kit\.js|    at "; then
+  _fail "corrupt-registry: raw stack trace leaked to output (not a clean error)"
+else
+  _pass "corrupt-registry: no raw stack trace in the output"
+fi
+
+O_SNAPSHOT_AFTER="$(tree_snapshot "$O_DEST")"
+if [[ "$O_SNAPSHOT_BEFORE" == "$O_SNAPSHOT_AFTER" ]]; then
+  _pass "corrupt-registry: destination is byte-identical before/after -- ZERO files touched"
+else
+  _fail "corrupt-registry: destination changed despite the refusal"
+  diff <(echo "$O_SNAPSHOT_BEFORE") <(echo "$O_SNAPSHOT_AFTER") || true
+fi
+echo ""
+
+# ─── Scenario P: third-party/local kit steering is never filtered by active_kits ──────────────
+echo "--- Scenario P: a locally-installed third-party kit's workflow_triggers are never filtered by active_kits ---"
+
+P_PROJECT="$TMPDIR_EVAL/p-project"
+mkdir -p "$P_PROJECT"
+(cd "$P_PROJECT" && git init -q)
+$FA init --runtime claude-code --dest "$P_PROJECT" --yes >/dev/null 2>&1
+
+mkdir -p "$P_PROJECT/kits/local/repositories/thirdparty-kit"
+cat > "$P_PROJECT/kits/local/repositories/thirdparty-kit/kit.json" << 'JSON'
+{
+  "schema_version": "1.0",
+  "id": "thirdparty-kit",
+  "name": "Third Party Kit",
+  "workflow_triggers": [
+    { "id": "thirdparty-trigger", "when": "implementation-work-detected", "target_flow_id": "thirdparty.build" }
+  ]
+}
+JSON
+cat > "$P_PROJECT/kits/local/installed-kits.json" << 'JSON'
+{
+  "schema_version": "1.0",
+  "kits": [
+    { "id": "thirdparty-kit", "source": "local-fixture", "hash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "installed_at": "2026-01-01T00:00:00.000Z", "installed_path": "kits/local/repositories/thirdparty-kit", "state": "installed" }
+  ]
+}
+JSON
+
+P_BEFORE="$(node -e "
+const { workflowTriggersFor } = require('$P_PROJECT/scripts/hooks/lib/kit-catalog.js');
+console.log(JSON.stringify(workflowTriggersFor('$P_PROJECT', 'implementation-work-detected').map((t) => t.kit_id).sort()));
+")"
+if [[ "$P_BEFORE" == '["builder","thirdparty-kit"]' ]]; then
+  _pass "third-party steering: both the active built-in kit and the local kit's triggers load"
+else
+  _fail "third-party steering: expected [\"builder\",\"thirdparty-kit\"], got $P_BEFORE"
+fi
+
+$FA kit deactivate builder --dest "$P_PROJECT" >/dev/null 2>&1
+P_AFTER="$(node -e "
+const { workflowTriggersFor } = require('$P_PROJECT/scripts/hooks/lib/kit-catalog.js');
+console.log(JSON.stringify(workflowTriggersFor('$P_PROJECT', 'implementation-work-detected').map((t) => t.kit_id).sort()));
+")"
+if [[ "$P_AFTER" == '["thirdparty-kit"]' ]]; then
+  _pass "third-party steering: after deactivating builder, the local kit's trigger STILL loads (never filtered by active_kits)"
+else
+  _fail "third-party steering: expected [\"thirdparty-kit\"] after deactivating builder, got $P_AFTER"
 fi
 echo ""
 

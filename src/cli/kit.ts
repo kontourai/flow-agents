@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
-import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction, copyDirMerge, ensureSafeDirectory, isoNow, pruneEmptyDirs, readJson } from "../lib/fs.js";
+import { assertPathContained, assertPathsDisjoint, atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction, ensureSafeDirectory, isoNow, pruneEmptyDirs, readJson } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
@@ -13,14 +13,15 @@ import { defaultCodexHome, claudeCodeGlobalDest } from "../lib/local-artifact-ro
 import { root } from "../tools/common.js";
 import {
   hashFile,
+  listOwnedTree,
   readOwnedFilesManifest,
   writeOwnedFilesManifest,
-  buildOwnedFilesManifest,
   mergeOwnedFilesManifestEntries,
   removeOwnedFilesManifestEntries,
   resolveManifestEntryPath,
   resolveManifestEntrySha256,
   assertManifestEntryParentContained,
+  ManifestContainmentViolationError,
   type OwnedFileEntry,
 } from "../lib/owned-files-manifest.js";
 import {
@@ -28,7 +29,7 @@ import {
   loadCatalogKitManifest,
   kitDependencyIds,
   catalogKitSkillNames,
-  readActiveKits,
+  readActiveKitsValidated,
   writeActiveKits,
   readPackageVersion,
   type ActiveKitEntry,
@@ -647,9 +648,79 @@ function unknownBuiltinKitError(command: string, kitId: string): string {
   return `kit ${command}: unknown built-in kit '${kitId}'; known kits: ${known.join(", ") || "(none)"}`;
 }
 
+type ActivateFilePlan = { skillName: string; rel: string; manifestPath: string; srcFile: string; destFile: string };
+
+/**
+ * Classify every file a kit's skills would install against the current destination state,
+ * BEFORE any copy happens (r1 review HIGH finding: `copyDirMerge` used to overwrite any
+ * differing dest file unconditionally, silently clobbering a file `kit deactivate` had just
+ * preserved and reported as user-modified).
+ *
+ * A file is a CONFLICT (preserved, not overwritten, unless `force`) when it exists at dest, its
+ * content differs from the incoming bundle content, AND EITHER there is no existing manifest
+ * record for it OR the manifest's recorded hash does not match the file's current content -- i.e.
+ * it was modified since it was last (or would have been) recorded, exactly uninstall.ts's own
+ * "content modified since install (sha256 mismatch)" signal, reused here on the write side. A
+ * file whose current content matches what the manifest already recorded is NOT a conflict even
+ * though it differs from the new bundle content -- that is an ordinary kit-content update
+ * (a newer bundle shipping different skill text), safe to overwrite exactly like a normal
+ * reinstall already does.
+ */
+type ActivateFileConflict = { plan: ActivateFilePlan; reason: string };
+
+function planActivateFiles(
+  skillNames: string[],
+  skillsSourceRoot: string,
+  skillsDestRoot: string,
+  skillsPrefix: string,
+  manifestByPath: Map<string, OwnedFileEntry>,
+): { toCopy: ActivateFilePlan[]; conflicts: ActivateFileConflict[] } {
+  const toCopy: ActivateFilePlan[] = [];
+  const conflicts: ActivateFileConflict[] = [];
+  for (const name of skillNames) {
+    const sourceDir = path.join(skillsSourceRoot, name);
+    const destDir = path.join(skillsDestRoot, name);
+    const { files } = listOwnedTree(sourceDir);
+    for (const rel of files) {
+      const srcFile = path.join(sourceDir, ...rel.split("/"));
+      const destFile = path.join(destDir, ...rel.split("/"));
+      const manifestPath = `${skillsPrefix}/${name}/${rel}`;
+      const plan: ActivateFilePlan = { skillName: name, rel, manifestPath, srcFile, destFile };
+      let destStat: fs.Stats | undefined;
+      try {
+        destStat = fs.lstatSync(destFile);
+      } catch {
+        destStat = undefined;
+      }
+      if (!destStat) {
+        toCopy.push(plan);
+        continue;
+      }
+      if (destStat.isSymbolicLink() || !destStat.isFile()) {
+        conflicts.push({ plan, reason: "existing destination is not a regular file; preserved" });
+        continue;
+      }
+      const destHash = hashFile(destFile);
+      const srcHash = hashFile(srcFile);
+      if (destHash === srcHash) {
+        toCopy.push(plan); // already identical; harmless to (re-)write
+        continue;
+      }
+      const manifestEntry = manifestByPath.get(manifestPath);
+      if (manifestEntry && manifestEntry.sha256 === destHash) {
+        toCopy.push(plan); // matches what was recorded installed -- an ordinary kit-content update
+        continue;
+      }
+      conflicts.push({ plan, reason: "content modified since install (sha256 mismatch); preserved" });
+    }
+  }
+  return { toCopy, conflicts };
+}
+
 async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const dryRun = flagBool(args.flags, "dry-run") ?? false;
+  const force = flagBool(args.flags, "force") ?? false;
   const destResult = resolveBuiltinKitDest(args.flags);
   if (!destResult.ok) {
     console.error(destResult.error);
@@ -676,7 +747,15 @@ async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number
     return 1;
   }
 
-  const activeKits = readActiveKits(dest) ?? [];
+  // Validate the registry BEFORE any filesystem mutation (r1 review MEDIUM finding: a single
+  // corrupt/hand-edited entry anywhere in active_kits used to only surface as an unhandled
+  // exception thrown by writeActiveKits AFTER files had already been copied).
+  const activeKitsResult = readActiveKitsValidated(dest, root);
+  if (!activeKitsResult.ok) {
+    console.error(`kit activate: active_kits registry at ${dest} is corrupt, refusing before any change: ${activeKitsResult.errors.join("; ")}`);
+    return 1;
+  }
+  const activeKits = activeKitsResult.entries;
   if (activeKits.some((entry) => entry.id === kitId)) {
     console.log(`kit '${kitId}' is already active at ${dest}`);
     return 0;
@@ -705,24 +784,26 @@ async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number
     return 1;
   }
 
+  const manifestByPath = new Map(manifest.files.map((entry) => [entry.path, entry]));
+  const { toCopy, conflicts } = planActivateFiles(skillNames, skillsSourceRoot, skillsDestRoot, skillsPrefix, manifestByPath);
+  // With --force, a conflict is overwritten instead of preserved -- fold it into the copy set.
+  const preserved = force ? [] : conflicts;
+  const forced = force ? conflicts : [];
+  const filesToWrite: ActivateFilePlan[] = [...toCopy, ...forced.map((c) => c.plan)];
+
   if (dryRun) {
-    for (const name of skillNames) console.log(`would copy: ${path.join(skillsSourceRoot, name)} -> ${path.join(skillsDestRoot, name)}`);
-    console.log(`dry-run: would activate kit '${kitId}' (${skillNames.length} skill(s)) at ${dest}`);
+    for (const plan of filesToWrite) console.log(`would copy: ${plan.srcFile} -> ${plan.destFile}`);
+    for (const entry of preserved) console.log(`  would preserve: ${entry.plan.manifestPath}  [${entry.reason}]`);
+    for (const entry of forced) console.log(`  would overwrite (--force): ${entry.plan.manifestPath}  [${entry.reason}]`);
+    console.log(`dry-run: would activate kit '${kitId}' (${skillNames.length} skill(s), ${filesToWrite.length} file(s) to copy, ${preserved.length} preserved) at ${dest}`);
     return 0;
   }
 
   const newManifestEntries: OwnedFileEntry[] = [];
-  for (const name of skillNames) {
-    const sourceDir = path.join(skillsSourceRoot, name);
-    const destDir = path.join(skillsDestRoot, name);
-    copyDirMerge(sourceDir, destDir);
-    const built = buildOwnedFilesManifest({
-      mappings: [{ sourceDir, destDir, prefix: `${skillsPrefix}/${name}` }],
-      runtime: "claude-code",
-      version: manifest.version,
-      global,
-    });
-    newManifestEntries.push(...built.files);
+  for (const plan of filesToWrite) {
+    fs.mkdirSync(path.dirname(plan.destFile), { recursive: true });
+    fs.copyFileSync(plan.srcFile, plan.destFile);
+    newManifestEntries.push({ path: plan.manifestPath, sha256: hashFile(plan.destFile) });
   }
   writeOwnedFilesManifest(dest, mergeOwnedFilesManifestEntries(manifest, newManifestEntries));
 
@@ -730,7 +811,15 @@ async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number
   const nextActiveKits: ActiveKitEntry[] = [...activeKits, { id: kitId, version: pkgVersion, activated_at: isoNow(), scope: global ? "global" : "project" }];
   writeActiveKits(dest, root, nextActiveKits);
 
-  console.log(`activated kit '${kitId}' (${skillNames.length} skill(s)) at ${dest}`);
+  console.log(`activated kit '${kitId}' (${skillNames.length} skill(s), ${filesToWrite.length} file(s) copied) at ${dest}`);
+  if (preserved.length) {
+    console.log(`${preserved.length} file(s) were user-modified and NOT overwritten (rerun with --force to overwrite):`);
+    for (const entry of preserved) console.log(`  preserved: ${entry.plan.manifestPath}  [${entry.reason}]`);
+  }
+  if (forced.length) {
+    console.log(`${forced.length} user-modified file(s) were overwritten because --force was given:`);
+    for (const entry of forced) console.log(`  overwritten (--force): ${entry.plan.manifestPath}  [${entry.reason}]`);
+  }
 
   // Dependency awareness (non-blocking): suggest, never auto-install.
   const depIds = kitDependencyIds(loaded.manifest, loaded.manifestPath);
@@ -742,6 +831,35 @@ async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number
     }
   }
   return 0;
+}
+
+type DeactivatePlanEntry = { relPath: string; absPath: string; expectedSha256: string };
+
+/**
+ * Classify each planned removal against the CURRENT on-disk state, without mutating anything --
+ * the accurate removed/preserved split, shared by `--dry-run` (report only) and the real apply
+ * path (report AND actually remove). r1 review MEDIUM finding: `--dry-run` used to print `would
+ * remove: X` for every planned entry unconditionally, overclaiming for any file a real run would
+ * preserve because it was user-modified -- this is the single source of truth both paths now read
+ * from, matching uninstall.ts's own dry-run/apply parity (`dryRunOutcome` there is fed from the
+ * same plan-time hash-checked split apply uses, never a separate weaker check).
+ */
+function classifyDeactivateEntries(planned: DeactivatePlanEntry[]): { toRemove: DeactivatePlanEntry[]; preserved: { relPath: string; reason: string }[] } {
+  const toRemove: DeactivatePlanEntry[] = [];
+  const preserved: { relPath: string; reason: string }[] = [];
+  for (const entry of planned) {
+    if (!fs.existsSync(entry.absPath)) {
+      toRemove.push(entry); // already gone -- counts as "removed" (no-op) for both dry-run and apply
+      continue;
+    }
+    const stat = fs.lstatSync(entry.absPath);
+    if (stat.isSymbolicLink() || !stat.isFile() || hashFile(entry.absPath) !== entry.expectedSha256) {
+      preserved.push({ relPath: entry.relPath, reason: "content modified since install (sha256 mismatch); preserved" });
+      continue;
+    }
+    toRemove.push(entry);
+  }
+  return { toRemove, preserved };
 }
 
 async function deactivateBuiltinKit(kitId: string, argv: string[]): Promise<number> {
@@ -769,8 +887,21 @@ async function deactivateBuiltinKit(kitId: string, argv: string[]): Promise<numb
     console.error(`kit deactivate: no ownership manifest found at ${dest}; built-in kit deactivation requires a manifest-backed claude-code install`);
     return 1;
   }
+  // Parity with activateBuiltinKit's own check (r1 review LOW finding). Currently unreachable in
+  // practice -- owned-files.json is only ever written on claude-code install paths -- but a
+  // future manifest-writing runtime must not silently let deactivate touch its files.
+  if (manifest.runtime !== "claude-code") {
+    console.error(`kit deactivate: durable ownership manifest at ${dest} belongs to runtime '${manifest.runtime}', not claude-code`);
+    return 1;
+  }
 
-  const activeKits = readActiveKits(dest) ?? [];
+  // Validate the registry BEFORE any filesystem mutation (same rationale as activateBuiltinKit).
+  const activeKitsResult = readActiveKitsValidated(dest, root);
+  if (!activeKitsResult.ok) {
+    console.error(`kit deactivate: active_kits registry at ${dest} is corrupt, refusing before any change: ${activeKitsResult.errors.join("; ")}`);
+    return 1;
+  }
+  const activeKits = activeKitsResult.entries;
   if (!activeKits.some((entry) => entry.id === kitId)) {
     console.log(`kit '${kitId}' is not active at ${dest}`);
     return 3;
@@ -799,7 +930,7 @@ async function deactivateBuiltinKit(kitId: string, argv: string[]): Promise<numb
   const ownedPrefixes = skillNames.map((name) => `${skillsPrefix}/${name}/`);
   const relevantEntries = manifest.files.filter((entry) => ownedPrefixes.some((prefix) => entry.path.startsWith(prefix)));
 
-  const planned: { relPath: string; absPath: string; expectedSha256: string }[] = [];
+  const planned: DeactivatePlanEntry[] = [];
   for (const entry of relevantEntries) {
     const absPath = resolveManifestEntryPath(dest, entry.path);
     const expectedSha256 = resolveManifestEntrySha256(entry.path, entry.sha256);
@@ -808,24 +939,56 @@ async function deactivateBuiltinKit(kitId: string, argv: string[]): Promise<numb
   }
 
   if (dryRun) {
-    for (const entry of planned) console.log(`would remove: ${entry.relPath}`);
-    console.log(`dry-run: would deactivate kit '${kitId}' (${planned.length} file(s)) at ${dest}`);
+    const { toRemove, preserved } = classifyDeactivateEntries(planned);
+    for (const entry of toRemove) console.log(`would remove: ${entry.relPath}`);
+    for (const entry of preserved) console.log(`  would preserve: ${entry.relPath}  [${entry.reason}]`);
+    console.log(`dry-run: would deactivate kit '${kitId}' (${toRemove.length} file(s) to remove, ${preserved.length} preserved) at ${dest}`);
     return 0;
   }
 
+  // TEST-ONLY hook (mirrors uninstall.ts's FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_*):
+  // simulate an external actor swapping a planned entry's parent directory for a symlink escaping
+  // `dest` between planning and removal, so the apply-time containment re-check below can be
+  // exercised deterministically without racing a real background process. Never read outside this
+  // module's own eval fixtures; not part of the public CLI surface.
+  const toctouSwapPath = process.env["FLOW_AGENTS_KIT_TEST_TOCTOU_SYMLINK_SWAP_PATH"];
+  const toctouSwapTarget = process.env["FLOW_AGENTS_KIT_TEST_TOCTOU_SYMLINK_SWAP_TARGET"];
+  if (toctouSwapPath && toctouSwapTarget) {
+    fs.rmSync(toctouSwapPath, { recursive: true, force: true });
+    fs.symlinkSync(toctouSwapTarget, toctouSwapPath);
+  }
+
+  const { toRemove, preserved } = classifyDeactivateEntries(planned);
   const removedRelPaths = new Set<string>();
   const removedParentDirs = new Set<string>();
-  const preserved: { relPath: string; reason: string }[] = [];
   const failed: { relPath: string; reason: string }[] = [];
-  for (const entry of planned) {
+  for (const entry of toRemove) {
     try {
       if (!fs.existsSync(entry.absPath)) {
         removedRelPaths.add(entry.relPath); // already gone: treat as removed for manifest purposes
         continue;
       }
+      // Apply-time re-check #1 (r1 review MEDIUM finding): re-verify the REAL (symlink-resolved)
+      // parent directory still sits inside `dest` immediately before touching anything --
+      // `owned-files-manifest.ts`'s own docstring for assertManifestEntryParentContained mandates
+      // this at BOTH plan time (above) and apply time (here), since an intermediate directory
+      // could be swapped for an escaping symlink during the window between the two. Reuses
+      // uninstall.ts's exact helper and classification, not a re-implementation.
+      try {
+        assertManifestEntryParentContained(dest, entry.absPath, entry.relPath);
+      } catch (error) {
+        const reason = error instanceof ManifestContainmentViolationError
+          ? "parent directory now resolves outside the install root through a symlink"
+          : `could not verify parent directory containment: ${(error as Error).message}`;
+        preserved.push({ relPath: entry.relPath, reason: `${reason}; preserved (re-checked immediately before removal)` });
+        continue;
+      }
+      // Apply-time re-check #2: content hash TOCTOU re-check, same class as uninstall.ts's own
+      // apply loop (redundant with classifyDeactivateEntries under normal conditions; exists for
+      // the race window between classification and this removal).
       const stat = fs.lstatSync(entry.absPath);
       if (stat.isSymbolicLink() || !stat.isFile() || hashFile(entry.absPath) !== entry.expectedSha256) {
-        preserved.push({ relPath: entry.relPath, reason: "content modified since install (sha256 mismatch); preserved" });
+        preserved.push({ relPath: entry.relPath, reason: "content changed since the plan was computed; preserved (re-checked immediately before removal)" });
         continue;
       }
       fs.rmSync(entry.absPath);
