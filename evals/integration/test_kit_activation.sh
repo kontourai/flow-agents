@@ -55,6 +55,13 @@
 #      invocation, even when `workflowTriggersFor` is called more than once (matching
 #      `kitWorkflowSteering`'s multi-category call pattern).
 #
+# CI-fallout regression (caught by src/cli/kit-provisioning.test.mjs, not by this eval):
+#   U. `flow-agents init --activate-kit <id>` with a mix of a built-in catalog kit id and a
+#      locally-installed THIRD-PARTY kit id no longer crashes ("active_kits references unknown
+#      kit id"). `active_kits` (the built-in-only registry) contains only the catalog kit;
+#      `active_kit_ids` (the legacy, unfiltered field) contains both; the third-party kit's own
+#      local registry entry is unaffected.
+#
 # Isolation: every scenario runs against its own fixture $HOME / project dest under a private
 # TMPDIR_EVAL; the real $HOME is never touched.
 set -euo pipefail
@@ -1028,6 +1035,69 @@ if [[ "$T_WARNING_COUNT" -eq 1 ]]; then
 else
   _fail "dedupe diagnostic: expected exactly 1 WARNING, got $T_WARNING_COUNT"
   cat "$T_ERR"
+fi
+echo ""
+
+# ─── Scenario U: init with a mixed catalog + third-party --activate-kit selection ─────────────
+echo "--- Scenario U: init --activate-kit <catalog-id> --activate-kit <local-third-party-id> succeeds; active_kits holds only catalog ids ---"
+
+U_KIT_SRC="$TMPDIR_EVAL/u-thirdparty-kit-src"
+mkdir -p "$U_KIT_SRC/flows"
+cat > "$U_KIT_SRC/flows/review.flow.json" << 'JSON'
+{"id":"fixture-u.review","version":"1.0","steps":[{"id":"review","next":"done"},{"id":"done","next":null}],"gates":{}}
+JSON
+cat > "$U_KIT_SRC/kit.json" << 'JSON'
+{"schema_version":"1.0","id":"fixture-u","name":"Fixture U","flows":[{"id":"fixture-u.review","path":"flows/review.flow.json"}]}
+JSON
+
+U_DEST="$TMPDIR_EVAL/u-project"
+mkdir -p "$U_DEST"
+(cd "$U_DEST" && git init -q)
+U_INSTALL_OUT="$TMPDIR_EVAL/u-kit-install.out"
+$FA kit install "$U_KIT_SRC" --dest "$U_DEST" >"$U_INSTALL_OUT" 2>&1
+U_INSTALL_RC=$?
+if [[ "$U_INSTALL_RC" -eq 0 ]]; then
+  _pass "mixed-activate-kit init: local third-party kit installs cleanly (fixture setup)"
+else
+  _fail "mixed-activate-kit init: local third-party kit install failed, cannot run scenario"
+  cat "$U_INSTALL_OUT"
+fi
+
+U_INIT_OUT="$TMPDIR_EVAL/u-init.out"
+set +e
+$FA init --runtime claude-code --dest "$U_DEST" --telemetry-sink local-files --activate-kit builder --activate-kit fixture-u --yes >"$U_INIT_OUT" 2>&1
+U_INIT_RC=$?
+set -e
+
+if [[ "$U_INIT_RC" -eq 0 ]]; then
+  _pass "mixed-activate-kit init: exits 0 (does not crash on the third-party id)"
+else
+  _fail "mixed-activate-kit init: expected exit 0, got $U_INIT_RC"
+  cat "$U_INIT_OUT"
+fi
+if node - "$U_DEST/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const activeKitIds = [...record.active_kit_ids].sort();
+const activeKitsIds = record.active_kits.map((k) => k.id).sort();
+if (JSON.stringify(activeKitIds) !== JSON.stringify(["builder", "fixture-u"])) {
+  throw new Error("active_kit_ids should keep the raw unfiltered selection: " + JSON.stringify(activeKitIds));
+}
+if (JSON.stringify(activeKitsIds) !== JSON.stringify(["builder"])) {
+  throw new Error("active_kits should contain ONLY the catalog kit id: " + JSON.stringify(activeKitsIds));
+}
+console.log("ok");
+NODE
+then
+  _pass "mixed-activate-kit init: active_kit_ids keeps the raw selection, active_kits holds only the catalog id"
+else
+  _fail "mixed-activate-kit init: active_kits/active_kit_ids do not match the expected catalog-only filtering"
+fi
+
+if [[ -f "$U_DEST/kits/local/repositories/fixture-u/kit.json" ]]; then
+  _pass "mixed-activate-kit init: the third-party kit's own local registry/repository is unaffected"
+else
+  _fail "mixed-activate-kit init: the third-party kit's local repository is missing after init"
 fi
 echo ""
 

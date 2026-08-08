@@ -195,14 +195,26 @@ function selectedKitIdsFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): 
  */
 function computeActiveKits(runtime: Runtime, global: boolean | undefined, activeKitIds: string[], version: string, installedAt: string): ActiveKitEntry[] {
   const scope: KitScope = global ? "global" : "project";
-  const ids = activeKitIds.length > 0 ? activeKitIds : (runtime === "claude-code" ? catalogKitIds() : []);
+  const catalogIds = new Set(catalogKitIds());
+  // `active_kits` (the built-in kit activation registry -- see src/lib/kit-registry.ts) tracks
+  // ONLY built-in (catalog) kits, by design: third-party/local kits have their own independent
+  // activation lifecycle (presence in kits/local/installed-kits.json IS their activation). The
+  // caller's raw `--activate-kit` selection (`activeKitIds`, preserved verbatim in the separate
+  // `active_kit_ids` field below) can legitimately include a local kit id -- e.g. one just
+  // `kit install`ed -- for runtimes whose own activation step (`activateCodexLocal`'s
+  // `kitIdFilter`, `resolveOpencodeSkillNames`) accepts a mix of catalog and local ids. Filtering
+  // to catalog ids HERE (not rejecting the whole call) is the fix for a real bug caught by
+  // src/cli/kit-provisioning.test.mjs: `init --activate-kit <local-kit-id>` used to crash with
+  // "active_kits references unknown kit id" because every explicitly-selected id was recorded
+  // into active_kits unfiltered, then rejected by the catalog-membership check below.
+  const ids = activeKitIds.length > 0
+    ? activeKitIds.filter((id) => catalogIds.has(id))
+    : (runtime === "claude-code" ? catalogKitIds() : []);
   const entries = ids.map((id) => ({ id, version, activated_at: installedAt, scope }));
-  // Defensive only: `ids` is always either the catalog itself or a caller-supplied selection that
-  // downstream kit-activation code (activateKits/activateCodexLocal) independently validates
-  // before it can affect what's actually installed -- this must never fire in practice, but a
-  // record this function itself computed incorrectly should fail loudly, not get silently
-  // persisted as a bogus `active_kits` value.
-  const invalid = validateActiveKitEntries(entries, new Set(catalogKitIds()));
+  // Defensive only: `ids` is now always the catalog itself or a subset of it (filtered above), so
+  // this must never fire in practice -- but a record this function itself computed incorrectly
+  // should fail loudly, not get silently persisted as a bogus `active_kits` value.
+  const invalid = validateActiveKitEntries(entries, catalogIds);
   if (invalid.length) throw new Error(`internal error computing active_kits: ${invalid.join("; ")}`);
   return entries;
 }
