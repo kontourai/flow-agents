@@ -90,6 +90,28 @@ flow-agents workflow evidence --session-dir <session-dir> \
 When a policy check applies, publish `policy-compliance` in the same way. Do
 not publish that optional expectation when no policy check applies.
 
+### Fault Injection
+
+A check that has never failed has not been shown to discriminate. When a silent
+revert of the change would otherwise be undetectable, inject the original defect,
+observe the specific named checks redden, restore, and observe green again.
+
+Two failure modes make an injection lie, both observed in delivery:
+
+- **Restoring over uncommitted work.** `git checkout -- <file>` restores from
+  `HEAD`, so injecting into a file whose fix is not yet committed destroys the
+  fix and "restored" silently measures the pre-fix state. Commit the change
+  before the first injection; never inject into an uncommitted tree.
+- **Reading output instead of exit status.** A sentinel that greps a runner's
+  stdout reports on text, not on the process result, and reports success for a
+  run that never executed, matched nothing, or crashed. Gate on the command
+  itself — `if <cmd>; then …; else …; fi` — and read the failure text before
+  accepting a red as the injection's red: an unrelated failure, a filter that
+  selected no tests, or a transform error all produce a non-zero exit.
+
+Record which checks reddened by name. An injection the suite does not catch is a
+finding about the suite, not a formality to note and move past.
+
 ## Output
 
 Record completed criteria as the required `acceptance-criteria` slice and the

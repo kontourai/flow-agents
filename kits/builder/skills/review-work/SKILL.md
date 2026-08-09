@@ -76,7 +76,16 @@ fallback or escalation in the critique artifact.
 4. Keep findings actionable: severity, affected scope, evidence, and the
    required route back. Do not install scanners or change code to obtain a
    cleaner result.
-5. Produce the critique artifact. Open blocking findings route to implementation;
+5. Reviewing a fix round, establish its production scope before reading it:
+   diff the round against the state it repairs and confirm the non-test files
+   actually changed. A round that lands only its tests is green by
+   construction — the tests were written against the intended behavior, and the
+   suite passes because the assertions moved, not because the defect is fixed.
+   An empty or unexpectedly small production diff is a finding, not an
+   observation to note in passing; it routes back with the missing scope named.
+   The mechanism is ordinary — a fix wiped by a restore, a partial re-apply, a
+   stash that never popped — and the round's own green suite cannot see it.
+6. Produce the critique artifact. Open blocking findings route to implementation;
    unavailable required review remains `NOT_VERIFIED`.
 
 ## Output
