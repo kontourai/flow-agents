@@ -159,6 +159,12 @@ export function readActiveKits(dest: string): ActiveKitEntry[] | null {
 
 export type ActiveKitsReadResult = { ok: true; entries: ActiveKitEntry[] } | { ok: false; errors: string[] };
 
+/** Canonical id projection for set-oriented activation callers. Keeping this beside the durable
+ * registry shape avoids each CLI path independently deciding how active entries become a set. */
+export function activeKitIdSet(entries: readonly ActiveKitEntry[]): Set<string> {
+  return new Set(entries.map((entry) => entry.id));
+}
+
 /**
  * Read + schema-validate `install.json`'s `active_kits` field -- the READ-side counterpart of
  * `writeActiveKits`'s existing write-side validation (r1 review finding: validation was

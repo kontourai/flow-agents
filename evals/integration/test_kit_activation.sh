@@ -1101,6 +1101,106 @@ else
 fi
 echo ""
 
+# ─── Scenario V: multi-kit set planning, ordering, no-op, and truthful stop ──────────────────
+echo "--- Scenario V: multi-kit activate/deactivate sets are atomic at validation and dependency ordered ---"
+
+V_HOME="$TMPDIR_EVAL/v-home"
+mkdir -p "$V_HOME"
+HOME="$V_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+V_DEST="$V_HOME/.claude"
+
+# RED/GREEN power: old single-id dependency logic rejects this exact pair because builder is
+# still active when knowledge is considered. The set's POST-state has neither active, so it must
+# succeed without --force and report dependent-first ordering.
+V_DEACT_OUT="$TMPDIR_EVAL/v-deactivate-pair.out"
+set +e
+HOME="$V_HOME" $FA kit deactivate knowledge builder --global >"$V_DEACT_OUT" 2>&1
+V_DEACT_RC=$?
+set -e
+if [[ "$V_DEACT_RC" -eq 0 ]] && grep -q "kit deactivate 'builder' (1/2)" "$V_DEACT_OUT" && grep -q "kit deactivate 'knowledge' (2/2)" "$V_DEACT_OUT"; then
+  _pass "multi-set POST-state dependency rule: deactivate knowledge+builder succeeds without --force, dependents first (RED/GREEN guard)"
+else
+  _fail "multi-set POST-state dependency rule/order failed (expected builder then knowledge, rc 0)"
+  cat "$V_DEACT_OUT"
+fi
+
+V_ACT_OUT="$TMPDIR_EVAL/v-activate-pair.out"
+set +e
+HOME="$V_HOME" $FA kit activate builder knowledge --global >"$V_ACT_OUT" 2>&1
+V_ACT_RC=$?
+set -e
+if [[ "$V_ACT_RC" -eq 0 ]] && grep -q "kit activate 'knowledge' (1/2)" "$V_ACT_OUT" && grep -q "kit activate 'builder' (2/2)" "$V_ACT_OUT"; then
+  _pass "multi-set activate order is dependencies first (knowledge then builder)"
+else
+  _fail "multi-set activate ordering failed"
+  cat "$V_ACT_OUT"
+fi
+
+V_SNAPSHOT_BEFORE="$(tree_snapshot "$V_DEST")"
+V_INVALID_OUT="$TMPDIR_EVAL/v-invalid.out"
+set +e
+HOME="$V_HOME" $FA kit deactivate builder not-a-kit --global >"$V_INVALID_OUT" 2>&1
+V_INVALID_RC=$?
+set -e
+V_SNAPSHOT_AFTER="$(tree_snapshot "$V_DEST")"
+if [[ "$V_INVALID_RC" -eq 2 ]] && grep -q "not-a-kit" "$V_INVALID_OUT" && [[ "$V_SNAPSHOT_BEFORE" == "$V_SNAPSHOT_AFTER" ]]; then
+  _pass "multi-set invalid member refuses the entire set with byte-identical destination (RED/GREEN guard)"
+else
+  _fail "multi-set invalid-member atomicity failed"
+  cat "$V_INVALID_OUT"
+fi
+
+# An already-inactive member is skipped while the active member is applied.
+HOME="$V_HOME" $FA kit deactivate builder --global >/dev/null 2>&1
+V_SKIP_OUT="$TMPDIR_EVAL/v-skip.out"
+set +e
+HOME="$V_HOME" $FA kit deactivate builder release-evidence --global >"$V_SKIP_OUT" 2>&1
+V_SKIP_RC=$?
+set -e
+if [[ "$V_SKIP_RC" -eq 0 ]] && grep -q "builder.*inactive.*skipped" "$V_SKIP_OUT" && grep -q "deactivated kit 'release-evidence'" "$V_SKIP_OUT"; then
+  _pass "multi-set idempotent inactive member is skipped while another member applies"
+else
+  _fail "multi-set idempotent-member behavior failed"
+  cat "$V_SKIP_OUT"
+fi
+
+# Restore the fixture then make the second ordered member fail. The first member must remain
+# truthfully completed in active_kits and the report must name the unattempted remainder.
+HOME="$V_HOME" $FA kit activate builder release-evidence --global >/dev/null 2>&1
+V_FAIL_OUT="$TMPDIR_EVAL/v-mid-failure.out"
+set +e
+HOME="$V_HOME" FLOW_AGENTS_KIT_TEST_FAIL_APPLY_KIT=builder $FA kit deactivate release-evidence builder --global >"$V_FAIL_OUT" 2>&1
+V_FAIL_RC=$?
+set -e
+if [[ "$V_FAIL_RC" -eq 4 ]] && grep -q "1 completed, 1 failed, 0 not attempted" "$V_FAIL_OUT" && node - "$V_DEST/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs");
+const ids = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).active_kits.map((entry) => entry.id);
+if (ids.includes("release-evidence") || !ids.includes("builder")) throw new Error(JSON.stringify(ids));
+NODE
+then
+  _pass "multi-set mid-apply failure stops the queue and leaves registry coherent with completed disk work"
+else
+  _fail "multi-set mid-apply failure reporting/registry coherence failed"
+  cat "$V_FAIL_OUT"
+fi
+
+V_ALL_OUT="$TMPDIR_EVAL/v-all.out"
+set +e
+HOME="$V_HOME" $FA kit deactivate --all --global >"$V_ALL_OUT" 2>&1
+V_ALL_RC=$?
+set -e
+if [[ "$V_ALL_RC" -eq 0 ]] && node - "$V_DEST/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs");
+if (JSON.parse(fs.readFileSync(process.argv[2], "utf8")).active_kits.length !== 0) throw new Error("active kits remain");
+NODE
+then
+  _pass "kit deactivate --all deactivates every currently active built-in kit"
+else
+  _fail "kit deactivate --all failed"
+  cat "$V_ALL_OUT"
+fi
+echo ""
+
 echo "==========================="
 total=$((pass + fail))
 echo "Results: ${pass}/${total} passed, ${fail} failed"
