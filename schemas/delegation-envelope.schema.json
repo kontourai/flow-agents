@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/delegation-envelope/1.0.json",
+  "title": "Provider-neutral delegation envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "envelope_id", "generation", "correlation", "flow_binding", "actor_id", "subject_id", "source", "authority", "budget", "runtime", "continuation_id", "cancellation_id", "revisions"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "envelope_id": { "$ref": "#/$defs/uuid" },
+    "generation": { "type": "integer", "minimum": 0 },
+    "parent_envelope_id": { "$ref": "#/$defs/uuid" },
+    "correlation": {
+      "oneOf": [
+        { "$ref": "https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json" },
+        { "type": "object", "additionalProperties": false, "required": ["status", "reason"], "properties": { "status": { "const": "incomplete" }, "reason": { "$ref": "#/$defs/reason" } } }
+      ]
+    },
+    "flow_binding": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["status", "flow_run_id", "flow_step_id", "gate_attempt"], "properties": { "status": { "const": "bound" }, "flow_run_id": { "$ref": "#/$defs/id" }, "flow_step_id": { "$ref": "#/$defs/id" }, "gate_attempt": { "type": "integer", "minimum": 0 } } },
+        { "type": "object", "additionalProperties": false, "required": ["status", "reason"], "properties": { "status": { "const": "unbound" }, "reason": { "$ref": "#/$defs/reason" } } }
+      ]
+    },
+    "actor_id": { "$ref": "#/$defs/id" },
+    "subject_id": { "$ref": "#/$defs/id" },
+    "source": { "type": "object", "additionalProperties": false, "required": ["repository_id", "worktree_id", "source_state_id"], "properties": { "repository_id": { "$ref": "#/$defs/id" }, "worktree_id": { "$ref": "#/$defs/id" }, "source_state_id": { "$ref": "#/$defs/id" }, "dirty_state_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "authority": { "type": "object", "additionalProperties": false, "required": ["allowed_tools", "allowed_effects", "mutable_resources", "posture", "approval", "escalation"], "properties": { "allowed_tools": { "$ref": "#/$defs/idList" }, "allowed_effects": { "$ref": "#/$defs/idList" }, "mutable_resources": { "$ref": "#/$defs/resourceList" }, "posture": { "enum": ["report-only", "writer"] }, "approval": { "enum": ["automatic", "requires_approval"] }, "escalation": { "enum": ["deny", "request"] } } },
+    "budget": { "type": "object", "additionalProperties": false, "required": ["max_attempts", "max_depth", "max_concurrent_children", "max_input_tokens", "max_output_tokens", "max_cost_micros", "expires_at"], "properties": { "max_attempts": { "$ref": "#/$defs/nonNegativeInteger" }, "max_depth": { "$ref": "#/$defs/nonNegativeInteger" }, "max_concurrent_children": { "$ref": "#/$defs/nonNegativeInteger" }, "max_input_tokens": { "$ref": "#/$defs/nonNegativeInteger" }, "max_output_tokens": { "$ref": "#/$defs/nonNegativeInteger" }, "max_cost_micros": { "$ref": "#/$defs/nonNegativeInteger" }, "expires_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$" } } },
+    "runtime": { "type": "object", "additionalProperties": false, "required": ["required_capabilities", "runtime_receipt_ref", "model_receipt_ref"], "properties": { "required_capabilities": { "$ref": "#/$defs/idList" }, "runtime_receipt_ref": { "$ref": "#/$defs/id" }, "model_receipt_ref": { "$ref": "#/$defs/id" } } },
+    "continuation_id": { "$ref": "#/$defs/id" },
+    "cancellation_id": { "$ref": "#/$defs/id" },
+    "revisions": { "type": "object", "additionalProperties": false, "required": ["prompt_revision", "rubric_revision", "policy_revision"], "properties": { "prompt_revision": { "$ref": "#/$defs/id" }, "rubric_revision": { "$ref": "#/$defs/id" }, "policy_revision": { "$ref": "#/$defs/id" } } }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["parent_envelope_id"] },
+      "then": { "properties": { "generation": { "minimum": 1 } } },
+      "else": { "properties": { "generation": { "const": 0 } } }
+    }
+  ],
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "id": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@#/-]{0,254}$" },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]+$" },
+    "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "idList": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "resourceList": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^(?!.*(?:^|/)\\.\\.?(?:/|$))[A-Za-z0-9][A-Za-z0-9._@-]*(?:/[A-Za-z0-9][A-Za-z0-9._@-]*)*$" } }
+  }
+}
