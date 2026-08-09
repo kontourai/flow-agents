@@ -93,21 +93,21 @@ not publish that optional expectation when no policy check applies.
 ### Fault Injection
 
 A check that has never failed has not been shown to discriminate. When a silent
-revert of the change would otherwise be undetectable, inject the original defect,
-observe the specific named checks redden, restore, and observe green again.
+revert of the change would otherwise be undetectable, inject the original defect
+in a scratch copy — never the live working tree, per the verification contract's
+scratch-copy rule, which the report-only role and the clean-worktree gate both
+depend on — and observe which named checks redden.
 
-Two failure modes make an injection lie, both observed in delivery:
+Two readings of the result are unsafe:
 
-- **Restoring over uncommitted work.** `git checkout -- <file>` restores from
-  `HEAD`, so injecting into a file whose fix is not yet committed destroys the
-  fix and "restored" silently measures the pre-fix state. Commit the change
-  before the first injection; never inject into an uncommitted tree.
-- **Reading output instead of exit status.** A sentinel that greps a runner's
-  stdout reports on text, not on the process result, and reports success for a
-  run that never executed, matched nothing, or crashed. Gate on the command
-  itself — `if <cmd>; then …; else …; fi` — and read the failure text before
-  accepting a red as the injection's red: an unrelated failure, a filter that
-  selected no tests, or a transform error all produce a non-zero exit.
+- **A red is not automatically the injection's red.** An unrelated failure, a
+  crash, or a path that matched no tests also fails. Read the failure text and
+  confirm it names the behavior the injection broke.
+- **A green run is not automatically a passing run.** A selection that matches
+  nothing can exit zero having executed no tests (`node --test` with a glob that
+  matches no file reports `tests 0` and exits 0). Confirm the run's test count
+  is non-zero before reading green as evidence — for the baseline as much as for
+  the injection.
 
 Record which checks reddened by name. An injection the suite does not catch is a
 finding about the suite, not a formality to note and move past.

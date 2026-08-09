@@ -76,15 +76,16 @@ fallback or escalation in the critique artifact.
 4. Keep findings actionable: severity, affected scope, evidence, and the
    required route back. Do not install scanners or change code to obtain a
    cleaner result.
-5. Reviewing a fix round, establish its production scope before reading it:
-   diff the round against the state it repairs and confirm the non-test files
-   actually changed. A round that lands only its tests is green by
-   construction — the tests were written against the intended behavior, and the
-   suite passes because the assertions moved, not because the defect is fixed.
-   An empty or unexpectedly small production diff is a finding, not an
-   observation to note in passing; it routes back with the missing scope named.
-   The mechanism is ordinary — a fix wiped by a restore, a partial re-apply, a
-   stash that never popped — and the round's own green suite cannot see it.
+5. Reviewing a fix round, establish its scope against the head the superseded
+   critique targeted (`flow_run_head` on that critique record) before reading
+   the change, and check the scope against what each finding's remedy requires.
+   A round whose remedy was behavioral but which landed only test or doc changes
+   is green by construction — the assertions moved, not the behavior — and the
+   round's own passing suite cannot see it. Missing remedy scope is a finding
+   that routes back with the absent change named, not an observation in passing.
+   A round that legitimately lands only tests or docs (a coverage gap, a
+   documentation defect) is in scope by that same test — say which finding it
+   answers rather than treating the file mix itself as the verdict.
 6. Produce the critique artifact. Open blocking findings route to implementation;
    unavailable required review remains `NOT_VERIFIED`.
 

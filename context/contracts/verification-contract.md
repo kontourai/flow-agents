@@ -26,9 +26,9 @@ Each visit to a verification gate establishes a critique generation. Critiques a
 
 When Flow routes back and later re-enters verification, a fresh critique generation is required. Older reviewer slices remain immutable audit history in the trust bundle and evidence manifest, but their prior snapshot hashes are not reinterpreted as reviews of the new implementation. A reviewer handoff must use the public critique writer; it must never require actor impersonation or direct trust-bundle edits.
 
-## Mutation Testing Runs In A Scratch Copy
+## Defect Injection Runs In A Scratch Copy
 
-Mutation-testing tools (Stryker or equivalent) **must** run against a scratch/throwaway copy of the working tree, never the live working tree. They deliberately introduce defects to measure test-suite sensitivity; running them in place risks leaving mutated source, corrupting the checkout, or tripping the gate/anchor on injected failures. Copy the tree to a temporary directory (or a git worktree/clone) and run the mutation tool there; discard it afterward.
+Mutation-testing tools (Stryker or equivalent) **and hand-written defect injection** — any edit made to confirm a check discriminates, then reverted — **must** run against a scratch/throwaway copy of the working tree, never the live working tree. They deliberately introduce defects to measure test-suite sensitivity; running them in place risks leaving mutated source, corrupting the checkout, or tripping the gate/anchor on injected failures. Copy the tree to a temporary directory (or a git worktree/clone) and run the mutation tool there; discard it afterward.
 
 ## Verification Phases
 
