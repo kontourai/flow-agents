@@ -968,6 +968,53 @@ else
   _fail "opencode: round trip or config surgery did not preserve the fixture"
 fi
 
+# Merge-owned scalars require positive pre-install provenance. A legacy install record cannot
+# distinguish a user's pre-existing OpenCode schema from the byte-identical default we add.
+OPENCODE_LEGACY_SCHEMA_HOME="$TMPDIR_EVAL/opencode-legacy-schema-home"
+mkdir -p "$OPENCODE_LEGACY_SCHEMA_HOME"
+node - "$OPENCODE_LEGACY_SCHEMA_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], JSON.stringify({ "$schema": "https://opencode.ai/config.json", custom: "legacy-user" }, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/opencode-legacy-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_LEGACY_SCHEMA_HOME" --yes >/dev/null 2>&1
+node - "$OPENCODE_LEGACY_SCHEMA_HOME/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8"));
+delete record.config_premerge; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/opencode-legacy-schema-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_LEGACY_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/opencode-legacy-schema.out" 2>&1
+if node - "$OPENCODE_LEGACY_SCHEMA_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (c.$schema !== "https://opencode.ai/config.json" || c.custom !== "legacy-user" || "instructions" in c) throw new Error("legacy scalar or instruction handling was wrong");
+NODE
+then
+  if sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/opencode-legacy-schema.out" | grep -Fq 'cannot prove Flow Agents added it (no pre-install snapshot)'; then _pass "opencode scalar provenance: legacy schema is retained and disclosed while self-identifying instruction is removed"; else _fail "opencode scalar provenance: legacy retention was not disclosed"; fi
+else
+  _fail "opencode scalar provenance: legacy schema was deleted or instruction was retained"
+fi
+
+# Conversely, a modern snapshot that records the key as absent proves this install introduced
+# the default and permits its removal.
+OPENCODE_NEW_SCHEMA_HOME="$TMPDIR_EVAL/opencode-new-schema-home"
+mkdir -p "$OPENCODE_NEW_SCHEMA_HOME"
+printf '{"custom":"new-user"}\n' > "$OPENCODE_NEW_SCHEMA_HOME/opencode.json"
+HOME="$TMPDIR_EVAL/opencode-new-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_NEW_SCHEMA_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-new-schema-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_NEW_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/opencode-new-schema.out" 2>&1
+if node - "$OPENCODE_NEW_SCHEMA_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if ("$schema" in c || "instructions" in c || c.custom !== "new-user") throw new Error("snapshot-proven scalar was not removed cleanly");
+NODE
+then _pass "opencode scalar provenance: snapshot-proven schema and self-identifying instruction are removed"; else _fail "opencode scalar provenance: snapshot-proven removal failed"; fi
+
+# Telemetry is intentionally durable residue even though it lives under the runtime tree. Its
+# surviving in-destination directory must be named in the uninstall report.
+OPENCODE_RESIDUE_HOME="$TMPDIR_EVAL/opencode-residue-home"
+mkdir -p "$OPENCODE_RESIDUE_HOME"
+HOME="$TMPDIR_EVAL/opencode-residue-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_RESIDUE_HOME" --yes >/dev/null 2>&1
+mkdir -p "$OPENCODE_RESIDUE_HOME/.flow-agents/runtime/.kontourai/telemetry"
+printf 'telemetry evidence\n' > "$OPENCODE_RESIDUE_HOME/.flow-agents/runtime/.kontourai/telemetry/events.jsonl"
+HOME="$TMPDIR_EVAL/opencode-residue-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_RESIDUE_HOME" --yes >"$TMPDIR_EVAL/opencode-residue.out" 2>&1
+if [[ -f "$OPENCODE_RESIDUE_HOME/.flow-agents/runtime/.kontourai/telemetry/events.jsonl" ]] && sed -n '/^Residue/,/^$/p' "$TMPDIR_EVAL/opencode-residue.out" | grep -Fq '.flow-agents/runtime/.kontourai/telemetry'; then _pass "opencode residue: surviving in-destination telemetry is retained and disclosed"; else _fail "opencode residue: telemetry was deleted or hidden from the Residue report"; fi
+
 echo ""
 # ─── Scenario M: all-provider uninstall hardening regressions ────────────────────────────────
 echo "--- Scenario M: provider uninstall Stow, durable, drift, and TOCTOU hardening ---"
@@ -1042,10 +1089,14 @@ fs.writeFileSync(file, JSON.stringify({ active_kit_ids: record.active_kit_ids ??
 NODE
 FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_AUTH_HOME/opencode.json" HOME="$LEGACY_AUTH_USER_HOME" $FA init --uninstall --runtime opencode --global --authorize-backing-root "$LEGACY_AUTH_ROOT_REAL" --yes >"$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" 2>&1
 if [[ -L "$LEGACY_AUTH_HOME/opencode.json" && -L "$LEGACY_AUTH_HOME/skills" ]] && node - "$LEGACY_AUTH_ROOT/opencode.json" "$LEGACY_AUTH_BEFORE" <<'NODE'
-const fs = require("node:fs"); const actual = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); const expected = JSON.parse(process.argv[3]); if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("legacy user config was not restored with deep equality");
+// A LEGACY record carries no config_premerge snapshot, so uninstall cannot prove Flow Agents
+// added "$schema" and conservatively RETAINS it (issue #1238: removal requires positive
+// provenance). Deep equality is therefore against the user's original object PLUS that one
+// retained, disclosed key -- not a weaker check.
+const fs = require("node:fs"); const actual = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); const expected = { ...JSON.parse(process.argv[3]), $schema: "https://opencode.ai/config.json" }; if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`legacy user config was not restored with deep equality: ${JSON.stringify(actual)}`);
 NODE
 then
-  if [[ ! -e "$LEGACY_AUTH_ROOT/skills/agentic-engineering/SKILL.md" && ! -e "$LEGACY_AUTH_RECORD_DEST/.flow-agents/install.json" ]] && grep -q 'operator-authorized backing roots' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" && grep -q 'wrote through' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out"; then _pass "legacy Stow authorization: canonical root round-trips without severing links or persisting authorization"; else _fail "legacy Stow authorization: authorized round-trip, reporting, surgical config restoration, or non-persistence failed"; fi
+  if [[ ! -e "$LEGACY_AUTH_ROOT/skills/agentic-engineering/SKILL.md" && ! -e "$LEGACY_AUTH_RECORD_DEST/.flow-agents/install.json" ]] && grep -q 'operator-authorized backing roots' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" && grep -q 'wrote through' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" && grep -q 'cannot prove Flow Agents added it' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out"; then _pass "legacy Stow authorization: canonical root round-trips, links intact, authorization not persisted, and the unprovable scalar is retained AND disclosed"; else _fail "legacy Stow authorization: authorized round-trip, reporting, surgical config restoration, or non-persistence failed"; fi
 else
   _fail "legacy Stow authorization: link or user config was not preserved"
 fi

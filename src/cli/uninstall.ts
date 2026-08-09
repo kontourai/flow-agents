@@ -20,6 +20,13 @@
 // file, not an owned one), and a fixed set of durable `.flow-agents/*` stamp files are removed
 // when they belong to claude-code.
 //
+// Removal requires positive provenance; absence of provenance means retain and disclose. In
+// particular, a merge-owned scalar whose value is ordinary user data is never removed merely
+// because it equals Flow Agents' default: only the pre-install config snapshot can prove that
+// the key was absent before we added it. Self-identifying entries (our marked hooks, the
+// flow-agents statusLine command, and OpenCode's exact runtime instruction path) remain
+// removable by their own unambiguous marker.
+//
 // Safety discipline: `buildPlan()` is pure/read-only (no filesystem mutation). `applyPlan()` is
 // the only mutating step, is only reached after an explicit confirmation, re-verifies every
 // file's content hash immediately before removing it (closing the plan/confirm/apply TOCTOU
@@ -91,6 +98,11 @@ type InstallMergeModule = {
   isManagedInnerHook: (hook: unknown) => boolean;
   FA_MARKERS: string[];
   restoreConfigPremergeBytes: (premerge: unknown, nextContent: unknown, currentBytes: Buffer) => Buffer | null;
+};
+
+type ConfigPremerge = {
+  schema_version?: unknown;
+  parsed?: unknown;
 };
 
 function loadInstallMergeModule(): InstallMergeModule {
@@ -196,7 +208,17 @@ type DurableFile = { path: string; relPath: string; root: string; expectedSha256
 // A group mixing a user hook with an FA hook keeps the user hook (and every other group-level
 // field, e.g. `matcher`); a group is dropped entirely only when every inner hook was FA-owned.
 
-function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean, settingsPathOverride?: string): SettingsPlan {
+function scalarRemovalProvenance(premerge: ConfigPremerge | undefined, key: string): { introduced: boolean; reason: string } {
+  if (!premerge || premerge.schema_version !== "1.0" || typeof premerge.parsed !== "object" || premerge.parsed === null || Array.isArray(premerge.parsed)) {
+    return { introduced: false, reason: "cannot prove Flow Agents added it (no pre-install snapshot)" };
+  }
+  if (Object.prototype.hasOwnProperty.call(premerge.parsed, key)) {
+    return { introduced: false, reason: "cannot prove Flow Agents added it (pre-install snapshot shows it already existed)" };
+  }
+  return { introduced: true, reason: "" };
+}
+
+function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean, premerge?: ConfigPremerge, settingsPathOverride?: string): SettingsPlan {
   const settingsPath = settingsPathOverride ?? config.configPath(dest, global);
   if (!fs.existsSync(settingsPath)) {
     return { settingsPath, exists: false, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null, preserved: [], protectedRuntimePaths: [] };
@@ -279,8 +301,13 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   let removedOwnedValue = false;
   for (const [key, value] of Object.entries(config.removeOwnedValues ?? {})) {
     if (JSON.stringify(existing[key]) === JSON.stringify(value)) {
-      delete next[key];
-      removedOwnedValue = true;
+      const provenance = scalarRemovalProvenance(premerge, key);
+      if (provenance.introduced) {
+        delete next[key];
+        removedOwnedValue = true;
+      } else {
+        preserved.push({ relPath: `${path.basename(settingsPath)}#${key}`, absPath: settingsPath, reason: provenance.reason });
+      }
     } else if (existing[key] !== undefined) {
       preserved.push({ relPath: `${path.basename(settingsPath)}#${key}`, absPath: settingsPath, reason: "managed OpenCode setting was modified; retained" });
     }
@@ -303,13 +330,24 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   return { settingsPath, exists: true, removedHookEntryCount, removedEventKeys, removedStatusLine, action, nextContent: next, preserved, protectedRuntimePaths };
 }
 
+function readConfigPremerge(dest: string): ConfigPremerge | undefined {
+  try {
+    const record = JSON.parse(fs.readFileSync(path.join(durableFlowAgentsRoot(dest), "install.json"), "utf8")) as Record<string, unknown>;
+    const premerge = record["config_premerge"];
+    return typeof premerge === "object" && premerge !== null ? premerge as ConfigPremerge : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function applySettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean, opencodeBinding?: OpenCodeConfigBinding): { backupPath: string | null; preserved?: PreservedFile } {
   // Deliberately re-plan after confirmation. Config is user-owned and a hook or setting can
   // arrive while confirmation is pending; applying the stale object would silently erase it.
   // For OpenCode, bind its authorized canonical target BEFORE the read/plan so the object
   // inspected and the object rewritten are the same file even if the visible link is raced.
   const binding = config.runtime === "opencode" ? opencodeBinding : undefined;
-  const plan = planSettings(dest, global, config, isManagedInnerHook, binding?.canonicalPath);
+  const premerge = readConfigPremerge(dest);
+  const plan = planSettings(dest, global, config, isManagedInnerHook, premerge, binding?.canonicalPath);
   if (plan.action === "none") return { backupPath: null };
   const writePath = binding?.canonicalPath ?? plan.settingsPath;
   // The binding check is immediately adjacent to the write: for Stow, write the canonical
@@ -320,9 +358,6 @@ function applySettings(dest: string, global: boolean, config: RuntimeConfig, isM
   let tmp: string | undefined;
   try {
     fs.copyFileSync(writePath, backupPath);
-    const recordPath = path.join(durableFlowAgentsRoot(dest), "install.json");
-    let premerge: unknown;
-    try { premerge = (JSON.parse(fs.readFileSync(recordPath, "utf8")) as Record<string, unknown>)["config_premerge"]; } catch { /* legacy/no durable snapshot: surgical JSON write below */ }
     const currentBytes = fs.readFileSync(writePath);
     const originalBytes = loadInstallMergeModule().restoreConfigPremergeBytes(premerge, plan.nextContent, currentBytes);
     // Test-only fault seam: exercise the failure path after applyPlan's pre-apply check and
@@ -752,6 +787,22 @@ function planResidue(dest: string, global: boolean): ResidueEntry[] {
   }
   const etcLifecycleAuthority = "/etc/kontourai";
   if (fs.existsSync(etcLifecycleAuthority)) residue.push({ path: etcLifecycleAuthority, note: "system-wide lifecycle authority; out of scope for a per-destination uninstall" });
+  // Runtime telemetry is deliberately outside the ownership manifest: a runtime can continue
+  // to hold its historical evidence after uninstall. Report the surviving in-destination tree
+  // explicitly so the report never implies that `.flow-agents/runtime` was fully cleaned.
+  const runtimeTelemetry = path.join(dest, ".flow-agents", "runtime", ".kontourai", "telemetry");
+  if (fs.existsSync(runtimeTelemetry)) {
+    let fileCount = 0;
+    const countFiles = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const child = path.join(dir, entry.name);
+        if (entry.isDirectory()) countFiles(child);
+        else if (entry.isFile() || entry.isSymbolicLink()) fileCount += 1;
+      }
+    };
+    countFiles(runtimeTelemetry);
+    residue.push({ path: runtimeTelemetry, note: `runtime telemetry data (${fileCount} file${fileCount === 1 ? "" : "s"}); never removed by uninstall` });
+  }
   return residue;
 }
 
@@ -764,7 +815,7 @@ function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime, ope
   // authorized target that applySettings will bind and revalidate before writing.
   const opencodeAuthorization = runtime === "opencode" ? resolveAuthorizedOpenCodeUninstallBinding(dest, global, operatorRoots) : undefined;
   const opencodeBinding = opencodeAuthorization?.binding;
-  const settings = planSettings(dest, global, config, isManagedInnerHook, opencodeBinding?.canonicalPath);
+  const settings = planSettings(dest, global, config, isManagedInnerHook, readConfigPremerge(dest), opencodeBinding?.canonicalPath);
 
   const manifest = readOwnedFilesManifest(dest, config.manifestName);
   let mode: UninstallPlan["mode"];
