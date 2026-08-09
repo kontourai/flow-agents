@@ -77,9 +77,11 @@ fallback or escalation in the critique artifact.
    required route back. Do not install scanners or change code to obtain a
    cleaner result.
 5. Reviewing a fix round, establish its scope against the head the superseded
-   critique targeted — `review_target.workspace_snapshot.head_sha` on that
-   critique record, a real commit — before reading the change, and check the
-   scope against what each finding's remedy requires.
+   critique targeted — read `<session-dir>/trust.bundle`, match the critique by
+   `metadata.critique_record_id`, and take
+   `metadata.review_target.workspace_snapshot.head_sha`, a real commit — before
+   reading the change, and check the scope against what each finding's remedy
+   requires.
    A round whose remedy was behavioral but which landed only test or doc changes
    is green by construction — the assertions moved, not the behavior — and the
    round's own passing suite cannot see it. Missing remedy scope is a finding
