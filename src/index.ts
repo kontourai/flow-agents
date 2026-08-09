@@ -44,6 +44,7 @@ export {
   RUN_CORRELATION_IDENTITY_KEYS,
   RUN_CORRELATION_IDENTITY_STATUSES,
   RUN_CORRELATION_SCHEMA_VERSION,
+  CREDENTIAL_PATTERN_SOURCES,
   RunCorrelationValidationError,
   RUNTIME_CORRELATION_IDENTITY_DECLARATIONS,
   attachRunCorrelation,
@@ -67,6 +68,24 @@ export type {
   RuntimeCorrelationIdentityDeclaration,
   RuntimeCorrelationIdentitySupport,
 } from "./run-correlation.js";
+export {
+  DELEGATION_ENVELOPE_SCHEMA_VERSION,
+  assertDelegationEnvelopeActiveAt,
+  DelegationEnvelopeNarrowingError,
+  DelegationEnvelopeValidationError,
+  narrowDelegationEnvelope,
+  validateDelegationEnvelope,
+} from "./delegation-envelope.js";
+export type {
+  DelegationApprovalPosture,
+  DelegationAuthority,
+  DelegationBudget,
+  DelegationEnvelope,
+  DelegationEscalationPosture,
+  DelegationFlowBinding,
+  DelegationPosture,
+  DelegationSourceBinding,
+} from "./delegation-envelope.js";
 export {
   TOOL_RESULT_STATUSES,
   USAGE_METRICS,
