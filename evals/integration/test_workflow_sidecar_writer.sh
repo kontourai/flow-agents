@@ -4128,7 +4128,12 @@ cat > "$MULTI_DIR/release.json" <<'JSON'
 {"decision":"merge","gates":[{"id":"merge","required":true,"status":"pass"}]}
 JSON
 if node "$ROOT/scripts/publish-change-helper.js" reconcile-final-state "$MULTI_DIR" >"$TMPDIR_EVAL/multi-publish-reconcile.out" \
-  && [[ "$(json_query "$TMPDIR_EVAL/multi-publish-reconcile.out" "status")" == "pass" ]]; then
+  && node - "$TMPDIR_EVAL/multi-publish-reconcile.out" <<'NODE'
+const fs = require('node:fs');
+const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (result?.status !== 'pass') process.exit(1);
+NODE
+then
   _pass "canonical multi-command gate claim reconciles through publish authority"
 else
   _fail "canonical multi-command gate claim did not reconcile: $(cat "$TMPDIR_EVAL/multi-publish-reconcile.out")"
