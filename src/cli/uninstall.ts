@@ -71,7 +71,7 @@ import {
   ManifestContainmentViolationError,
   type OwnedFilesManifest,
 } from "../lib/owned-files-manifest.js";
-import { ensureBundle, globalDest, opencodeGlobalConfigPath, resolveOpenCodeConfigBinding, revalidateOpenCodeConfigBinding } from "./init.js";
+import { ensureBundle, globalDest, opencodeGlobalConfigPath, resolveOpenCodeConfigBinding, revalidateOpenCodeConfigBinding, type OpenCodeConfigBinding } from "./init.js";
 
 type UninstallRuntime = "claude-code" | "codex" | "opencode";
 type RuntimeConfig = { runtime: UninstallRuntime; manifestName: string; configPath: (dest: string, global: boolean) => string; removeStatusLine: boolean; removeInstructionsPath?: (dest: string) => string; removeOwnedValues?: Record<string, unknown>; additionalManifestRoots?: () => { dest: string; manifestName: string; label: string }[] };
@@ -87,7 +87,7 @@ type InstallMergeModule = {
   isManagedHookGroup: (hookGroup: unknown) => boolean;
   isManagedInnerHook: (hook: unknown) => boolean;
   FA_MARKERS: string[];
-  restoreConfigPremergeBytes: (premerge: unknown, nextContent: unknown) => Buffer | null;
+  restoreConfigPremergeBytes: (premerge: unknown, nextContent: unknown, currentBytes: Buffer) => Buffer | null;
 };
 
 function loadInstallMergeModule(): InstallMergeModule {
@@ -105,12 +105,16 @@ const STATUSLINE_MARKER = "flow-agents-statusline.js";
 function usage(): void {
   console.error(`usage: flow-agents init --uninstall --runtime <claude-code|codex|opencode> [--global | --dest PATH] [options]
 
-Removes a prior Flow Agents claude-code install: managed settings.json hook entries/statusLine,
+Removes a prior Flow Agents runtime install: managed settings.json hook entries/statusLine,
 installed skill/agent files (manifest-backed when an ownership manifest is present, otherwise
 inferred against the currently-installed package's own bundle content), and the durable
 .flow-agents/* stamp files. Never removes: per-repo .kontourai/ state, the /etc/kontourai
 lifecycle authority, telemetry data files, or the npm package itself (a final
 'npm rm -g @kontourai/flow-agents' instruction is printed).
+
+For merged Claude Code and OpenCode configs, .flow-agents/install.json contains a copy of the
+pre-install config bytes so uninstall can restore exact formatting when the installed config is
+otherwise unchanged. That record is written owner-readable only and removed by uninstall.
 
 Options:
   --runtime RUNTIME       Required: claude-code, codex, or opencode.
@@ -149,7 +153,9 @@ type SettingsPlan = {
   //   so a settings.json this install created from nothing round-trips back to absent,
   //   rather than leaving a vestigial `{}` behind.
   action: "none" | "rewrite" | "delete";
-  nextContent: Record<string, unknown> | null; // set only when action === "rewrite"
+  // The surgical JSON result. Kept even for "delete" so a matching pre-install `{}` can be
+  // restored byte-for-byte instead of being mistaken for an originally absent config.
+  nextContent: Record<string, unknown> | null;
   preserved: PreservedFile[];
   protectedRuntimePaths: string[];
 };
@@ -179,8 +185,8 @@ type DurableFile = { path: string; relPath: string; root: string; expectedSha256
 // A group mixing a user hook with an FA hook keeps the user hook (and every other group-level
 // field, e.g. `matcher`); a group is dropped entirely only when every inner hook was FA-owned.
 
-function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean): SettingsPlan {
-  const settingsPath = config.configPath(dest, global);
+function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean, settingsPathOverride?: string): SettingsPlan {
+  const settingsPath = settingsPathOverride ?? config.configPath(dest, global);
   if (!fs.existsSync(settingsPath)) {
     return { settingsPath, exists: false, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null, preserved: [], protectedRuntimePaths: [] };
   }
@@ -283,15 +289,17 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   // to genuinely absent, not to a vestigial empty file. Because stripping is now entry-granular,
   // this is never true while a co-located user hook (or any other user key) survives.
   const action: SettingsPlan["action"] = Object.keys(next).length === 0 ? "delete" : "rewrite";
-  return { settingsPath, exists: true, removedHookEntryCount, removedEventKeys, removedStatusLine, action, nextContent: action === "rewrite" ? next : null, preserved, protectedRuntimePaths };
+  return { settingsPath, exists: true, removedHookEntryCount, removedEventKeys, removedStatusLine, action, nextContent: next, preserved, protectedRuntimePaths };
 }
 
 function applySettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean): { backupPath: string | null; preserved?: PreservedFile } {
   // Deliberately re-plan after confirmation. Config is user-owned and a hook or setting can
   // arrive while confirmation is pending; applying the stale object would silently erase it.
-  const plan = planSettings(dest, global, config, isManagedInnerHook);
+  // For OpenCode, bind its authorized canonical target BEFORE the read/plan so the object
+  // inspected and the object rewritten are the same file even if the visible link is raced.
+  const binding = config.runtime === "opencode" ? resolveAuthorizedOpenCodeUninstallBinding(dest, global) : undefined;
+  const plan = planSettings(dest, global, config, isManagedInnerHook, binding?.canonicalPath);
   if (plan.action === "none") return { backupPath: null };
-  const binding = config.runtime === "opencode" ? resolveOpenCodeConfigBinding(plan.settingsPath) : undefined;
   const writePath = binding?.canonicalPath ?? plan.settingsPath;
   // The binding check is immediately adjacent to the write: for Stow, write the canonical
   // backing file and keep the host-visible link intact.
@@ -299,16 +307,17 @@ function applySettings(dest: string, global: boolean, config: RuntimeConfig, isM
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const backupPath = `${writePath}.bak-uninstall-${ts}`;
   fs.copyFileSync(writePath, backupPath);
-  if (plan.action === "delete") {
-    fs.rmSync(writePath);
-    return { backupPath };
-  }
   const recordPath = path.join(durableFlowAgentsRoot(dest), "install.json");
   let premerge: unknown;
   try { premerge = (JSON.parse(fs.readFileSync(recordPath, "utf8")) as Record<string, unknown>)["config_premerge"]; } catch { /* legacy/no durable snapshot: surgical JSON write below */ }
-  const originalBytes = loadInstallMergeModule().restoreConfigPremergeBytes(premerge, plan.nextContent);
+  const currentBytes = fs.readFileSync(writePath);
+  const originalBytes = loadInstallMergeModule().restoreConfigPremergeBytes(premerge, plan.nextContent, currentBytes);
+  if (plan.action === "delete" && !originalBytes) {
+    fs.rmSync(writePath);
+    return { backupPath };
+  }
   const tmp = `${writePath}.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, originalBytes ?? `${JSON.stringify(plan.nextContent, null, 2)}\n`, "utf8");
+  fs.writeFileSync(tmp, originalBytes ?? `${JSON.stringify(plan.nextContent, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: fs.statSync(writePath).mode & 0o777 });
   if (binding) revalidateOpenCodeConfigBinding(binding);
   fs.renameSync(tmp, writePath);
   return {
@@ -324,6 +333,33 @@ function applySettings(dest: string, global: boolean, config: RuntimeConfig, isM
 function pathIsWithin(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function readRecordedBackingRoots(dest: string): string[] {
+  try {
+    const record = JSON.parse(fs.readFileSync(path.join(durableFlowAgentsRoot(dest), "install.json"), "utf8")) as Record<string, unknown>;
+    const roots = record["authorized_backing_roots"];
+    if (!Array.isArray(roots) || roots.some((root) => typeof root !== "string")) return [];
+    // A record only remains trustworthy while each stored canonical root still resolves to
+    // itself. This rejects an install-time backing directory later replaced by a symlink.
+    return roots.filter((root) => {
+      try { return fs.realpathSync(root) === root; } catch { return false; }
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Resolve before reading, and only follow a Stow link explicitly authorized at install time. */
+function resolveAuthorizedOpenCodeUninstallBinding(dest: string, global: boolean): OpenCodeConfigBinding {
+  const visiblePath = RUNTIME_CONFIGS.opencode.configPath(dest, global);
+  const binding = resolveOpenCodeConfigBinding(visiblePath);
+  if (!binding.wasSymlink) return binding;
+  const currentRoot = binding.trustedSymlinkRoot ? fs.realpathSync(binding.trustedSymlinkRoot) : undefined;
+  if (!currentRoot || !readRecordedBackingRoots(dest).includes(currentRoot)) {
+    throw new Error(`OpenCode config backing root was not authorized by this install record; refusing to follow symlink: ${visiblePath}`);
+  }
+  return binding;
 }
 
 /**
@@ -656,7 +692,10 @@ function planResidue(dest: string, global: boolean): ResidueEntry[] {
 function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime): UninstallPlan {
   const config = RUNTIME_CONFIGS[runtime];
   const { isManagedInnerHook } = loadInstallMergeModule();
-  const settings = planSettings(dest, global, config, isManagedInnerHook);
+  // Resolve the canonical OpenCode file before reading it. This makes planning use the same
+  // authorized target that applySettings will bind and revalidate before writing.
+  const opencodeBinding = runtime === "opencode" ? resolveAuthorizedOpenCodeUninstallBinding(dest, global) : undefined;
+  const settings = planSettings(dest, global, config, isManagedInnerHook, opencodeBinding?.canonicalPath);
 
   const manifest = readOwnedFilesManifest(dest, config.manifestName);
   let mode: UninstallPlan["mode"];
@@ -669,13 +708,7 @@ function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime): Un
     mode = "manifest";
     // Validated entry-by-entry inside planFromManifest -- throws (aborting before any deletion)
     // on the first unsafe or malformed entry rather than skipping it and continuing.
-    let backingRoot: string | undefined;
-    if (runtime === "opencode") {
-      const configPath = config.configPath(dest, global);
-      if (fs.existsSync(configPath) && fs.lstatSync(configPath).isSymbolicLink()) {
-        backingRoot = resolveOpenCodeConfigBinding(configPath).trustedSymlinkRoot;
-      }
-    }
+    const backingRoot = opencodeBinding?.trustedSymlinkRoot;
     const result = planFromManifest(dest, manifest, "", backingRoot);
     removeFiles = result.removeFiles;
     preserved = result.preserved;

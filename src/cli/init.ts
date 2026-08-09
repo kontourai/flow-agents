@@ -4,6 +4,7 @@ import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
@@ -219,17 +220,19 @@ function computeActiveKits(runtime: Runtime, global: boolean | undefined, active
   return entries;
 }
 
-function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = [], configPremerge?: unknown): void {
+function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = [], configPremerge?: unknown, authorizedBackingRoots: string[] = []): void {
   const recordPath = durableInstallRecordPath(dest);
   const installRecordDir = path.dirname(recordPath);
   fs.mkdirSync(installRecordDir, { recursive: true });
   const version = readPackageVersion(root);
   const installedAt = new Date().toISOString();
   const activeKits = computeActiveKits(runtime, global, activeKitIds, version, installedAt);
-  const record = { version, installedAt, runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds, active_kits: activeKits, ...(configPremerge ? { config_premerge: configPremerge } : {}) };
+  const record = { version, installedAt, runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds, active_kits: activeKits, ...(configPremerge ? { config_premerge: configPremerge } : {}), ...(authorizedBackingRoots.length > 0 ? { authorized_backing_roots: authorizedBackingRoots } : {}) };
   const recordTmp = `${recordPath}.tmp.${process.pid}`;
-  fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  fs.chmodSync(recordTmp, 0o600);
   fs.renameSync(recordTmp, recordPath);
+  fs.chmodSync(recordPath, 0o600);
 }
 
 function normalizeRuntime(value: string | undefined): Runtime | undefined {
@@ -796,6 +799,14 @@ function writeJsonAtomic(target: string, value: unknown): void {
   }
 }
 
+function stampConfigPremergePostInstallHash(premerge: unknown, configPath: string): unknown {
+  if (!premerge || typeof premerge !== "object") return premerge;
+  return {
+    ...(premerge as Record<string, unknown>),
+    post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(configPath)).digest("hex"),
+  };
+}
+
 function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
   return command
     .replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "")
@@ -1278,7 +1289,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       revalidateOpenCodeConfigBinding(configBinding);
       writeJsonAtomic(configBinding.canonicalPath, merged);
       // Stamp only after every required runtime asset and its content manifest exist.
-      writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? [], configPremerge);
+      writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? [], stampConfigPremergePostInstallHash(configPremerge, configBinding.canonicalPath), configBinding.trustedSymlinkRoot ? [fs.realpathSync(configBinding.trustedSymlinkRoot)] : []);
       console.log(`Flow Agents global config and runtime assets synced for opencode in ${options.dest}`);
       console.log(`Reconciled ${installedAssetCount} managed runtime files and ${skillNames.length} discoverable skills`);
       return configureWorkflowProviders(options);

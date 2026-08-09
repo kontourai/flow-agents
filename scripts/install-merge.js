@@ -37,6 +37,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const path = require("node:path");
 const os = require("node:os");
 
@@ -320,11 +321,18 @@ function captureConfigPremerge(configPath) {
  * pre-merge JSON value. Formatting is user data too, so a structural round
  * trip must not silently reformat a config that otherwise came back intact.
  */
-function restoreConfigPremergeBytes(premerge, nextContent) {
+function restoreConfigPremergeBytes(premerge, nextContent, currentBytes) {
   if (!premerge || premerge.schema_version !== "1.0") return null;
   if (!premerge.existed || typeof premerge.bytes_base64 !== "string") return null;
+  if (typeof premerge.post_install_sha256 !== "string" || !Buffer.isBuffer(currentBytes)) return null;
+  if (crypto.createHash("sha256").update(currentBytes).digest("hex") !== premerge.post_install_sha256) return null;
   if (!valuesEqual(premerge.parsed, nextContent)) return null;
   return Buffer.from(premerge.bytes_base64, "base64");
+}
+
+function stampConfigPremergePostInstallHash(premerge, configPath) {
+  if (!premerge || typeof premerge !== "object") return premerge;
+  return { ...premerge, post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(configPath)).digest("hex") };
 }
 
 function writeInstallRecord(installRecordPath, version, runtime, configPremerge) {
@@ -334,7 +342,17 @@ function writeInstallRecord(installRecordPath, version, runtime, configPremerge)
     runtime,
     ...(configPremerge ? { config_premerge: configPremerge } : {}),
   };
-  atomicWriteJson(installRecordPath, record);
+  const dir = path.dirname(installRecordPath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${installRecordPath}.tmp.${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, installRecordPath);
+    fs.chmodSync(installRecordPath, 0o600);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
 }
 
 /**
@@ -388,7 +406,7 @@ function runMerge({ configPath, managedHooksPath, version, installRecordPath, ru
   atomicWriteJson(configPath, merged);
 
   // (f) Write version stamp.
-  writeInstallRecord(installRecordPath, version, runtime, configPremerge);
+  writeInstallRecord(installRecordPath, version, runtime, stampConfigPremergePostInstallHash(configPremerge, configPath));
 }
 
 // ─── CLI wrapper ──────────────────────────────────────────────────────────────

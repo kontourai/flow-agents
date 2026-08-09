@@ -1012,6 +1012,41 @@ FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_HOME/opencode.json" HOME="$TMPDIR_EVAL/s
 FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-opencode-user-home" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/stow-uninstall.out" 2>&1
 if [[ -L "$STOW_HOME/opencode.json" && -L "$STOW_HOME/skills" ]] && [[ "$(cat "$STOW_DOTFILES/opencode.json")" == "$STOW_BEFORE" ]] && [[ ! -e "$STOW_DOTFILES/skills/deliver/SKILL.md" ]]; then _pass "opencode Stow: install-to-uninstall preserves links and restores backing config"; else _fail "opencode Stow: link or backing config was not safely restored"; fi
 
+# A Stow root is an install-time authorization, not a property inferred later from a
+# currently-private link target. A re-point after install must therefore stop before touching
+# either backing root.
+STOW_AUTH_HOME="$TMPDIR_EVAL/stow-auth-home"; STOW_AUTH_ONE="$TMPDIR_EVAL/stow-auth-one"; STOW_AUTH_TWO="$TMPDIR_EVAL/stow-auth-two"
+mkdir -p "$STOW_AUTH_HOME" "$STOW_AUTH_ONE/skills" "$STOW_AUTH_TWO"; chmod 700 "$STOW_AUTH_ONE" "$STOW_AUTH_TWO"
+printf '{"model":"one"}\n' > "$STOW_AUTH_ONE/opencode.json"; printf '{"model":"two"}\n' > "$STOW_AUTH_TWO/opencode.json"
+ln -s "$STOW_AUTH_ONE/opencode.json" "$STOW_AUTH_HOME/opencode.json"; ln -s "$STOW_AUTH_ONE/skills" "$STOW_AUTH_HOME/skills"
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_AUTH_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-auth-user-home" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+rm "$STOW_AUTH_HOME/opencode.json"; ln -s "$STOW_AUTH_TWO/opencode.json" "$STOW_AUTH_HOME/opencode.json"
+set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_AUTH_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-auth-user-home" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/stow-auth-uninstall.out" 2>&1; STOW_AUTH_RC=$?; set -e
+if [[ "$STOW_AUTH_RC" -eq 2 && -f "$STOW_AUTH_ONE/skills/agentic-engineering/SKILL.md" ]] && grep -q 'not authorized by this install record' "$TMPDIR_EVAL/stow-auth-uninstall.out"; then _pass "opencode Stow: backing root introduced after install is refused"; else _fail "opencode Stow: re-pointed backing root was followed or not clearly refused"; fi
+
+# The pre-install snapshot is secret-bearing data: its record and temporary write are private,
+# it is refreshed on every install, and only the current install's post-image can restore it.
+REINSTALL_HOME="$TMPDIR_EVAL/reinstall-snapshot-home"; mkdir -p "$REINSTALL_HOME"
+printf '{\n  "token": "first"\n}\n' > "$REINSTALL_HOME/opencode.json"
+HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --global --dest "$REINSTALL_HOME" --yes >/dev/null 2>&1
+REINSTALL_BEFORE=$'{\n    "token": "second"\n}\n'; printf '%s' "$REINSTALL_BEFORE" > "$REINSTALL_HOME/opencode.json"
+HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --global --dest "$REINSTALL_HOME" --yes >/dev/null 2>&1
+node - "$REINSTALL_HOME/.flow-agents/install.json" "$REINSTALL_BEFORE" <<'NODE'
+const fs = require("node:fs"); const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if ((fs.statSync(process.argv[2]).mode & 0o777) !== 0o600) throw new Error("install.json is not 0600");
+if (!record.config_premerge?.post_install_sha256) throw new Error("missing post-install config hash");
+if (Buffer.from(record.config_premerge.bytes_base64, "base64").toString() !== process.argv[3]) throw new Error("reinstall retained the first install snapshot");
+NODE
+HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --uninstall --runtime opencode --dest "$REINSTALL_HOME" --yes >"$TMPDIR_EVAL/reinstall-snapshot.out" 2>&1
+if node - "$REINSTALL_HOME/opencode.json" "$REINSTALL_BEFORE" <<'NODE'
+const fs = require("node:fs"); if (fs.readFileSync(process.argv[2], "utf8") !== process.argv[3]) throw new Error("not byte-exact");
+NODE
+then
+  if [[ ! -e "$REINSTALL_HOME/.flow-agents/install.json" ]]; then _pass "opencode snapshot: current install baseline restores byte-exactly and secret snapshot is removed"; else _fail "opencode snapshot: reinstall snapshot was retained"; fi
+else
+  _fail "opencode snapshot: reinstall baseline was stale or non-exact"
+fi
+
 # Durable runtime content is manifest-owned file-by-file; an edit survives and is reported.
 DURABLE_HOME="$TMPDIR_EVAL/durable-preserve-home"; mkdir -p "$DURABLE_HOME"
 HOME="$TMPDIR_EVAL/durable-preserve-user-home" $FA init --runtime opencode --global --dest "$DURABLE_HOME" --yes >/dev/null 2>&1
@@ -1036,16 +1071,17 @@ NODE
 HOME="$TMPDIR_EVAL/instruction-drift-user-home" $FA init --runtime opencode --global --dest "$INSTRUCTION_HOME" --yes >/dev/null 2>&1
 node - "$INSTRUCTION_HOME/opencode.json" "$INSTRUCTION_HOME" <<'NODE'
 const fs = require("node:fs"), path = require("node:path"); const file = process.argv[2], root = process.argv[3], c = JSON.parse(fs.readFileSync(file, "utf8"));
-c.instructions = c.instructions.map(x => x === path.join(root, ".flow-agents", "runtime", "AGENTS.md") ? path.join(root, ".flow-agents", "runtime", "..", "runtime", "AGENTS.md") : x); c.$schema = "https://user.example/schema"; fs.writeFileSync(file, JSON.stringify(c, null, 2) + "\n");
+// String concat, NOT path.join: path.join would normalize the ".." away and produce the exact
+// installed string, making this fixture assert nothing about drift (caught in review).
+c.instructions = c.instructions.map(x => x.endsWith(".flow-agents/runtime/AGENTS.md") ? `${root}/.flow-agents/runtime/../runtime/AGENTS.md` : x); c.$schema = "https://user.example/schema"; fs.writeFileSync(file, JSON.stringify(c, null, 2) + "\n");
 NODE
 HOME="$TMPDIR_EVAL/instruction-drift-user-home" $FA init --uninstall --runtime opencode --dest "$INSTRUCTION_HOME" --yes >"$TMPDIR_EVAL/instruction-drift.out" 2>&1
 # Contract (two cases, both asserted):
-#  (a) PATH-EQUIVALENT drift (same file written differently, e.g. runtime/../runtime/AGENTS.md) is
-#      still OUR entry -- removed together with its runtime file, leaving no dangling reference
-#      ("what we install, we uninstall"). A drifted $schema is retained and reported.
-#  (b) GENUINELY DIVERGENT edit (managed entry re-pointed at a user-owned file) is retained and
-#      that user file is never touched -- the real user-data protection.
-if grep -q '"/user/AGENTS.md"' "$INSTRUCTION_HOME/opencode.json" && ! grep -q 'runtime/AGENTS.md' "$INSTRUCTION_HOME/opencode.json" && [[ ! -f "$INSTRUCTION_HOME/.flow-agents/runtime/AGENTS.md" ]] && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/instruction-drift.out" | grep -q 'modified\|drifted'; then _pass "opencode instructions (a): path-equivalent drift removed with its runtime file, no dangling reference; schema drift reported"; else _fail "opencode instructions (a): path-equivalent drift handling or drift reporting failed"; fi
+#  (a) A managed instruction edited to a PATH-EQUIVALENT variant is treated as a USER edit: it is
+#      retained, reported, and the runtime file it references is protected from removal (safe
+#      direction -- we cannot distinguish a deliberate rewrite from tooling normalization).
+#  (b) A managed entry re-pointed at a user-owned file is likewise retained with that file untouched.
+if grep -q '"/user/AGENTS.md"' "$INSTRUCTION_HOME/opencode.json" && grep -q '\.\./runtime/AGENTS.md' "$INSTRUCTION_HOME/opencode.json" && [[ -f "$INSTRUCTION_HOME/.flow-agents/runtime/AGENTS.md" ]] && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/instruction-drift.out" | grep -q 'instruction was edited' && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/instruction-drift.out" | grep -q 'still references this runtime file'; then _pass "opencode instructions (a): path-equivalent drift is retained, reported, and its runtime file protected"; else _fail "opencode instructions (a): drift retention, reporting, or runtime-file protection failed"; fi
 
 INSTRUCTION_DIVERGE_HOME="$TMPDIR_EVAL/instruction-diverge-home"; mkdir -p "$INSTRUCTION_DIVERGE_HOME/custom"
 node - "$INSTRUCTION_DIVERGE_HOME/opencode.json" <<'NODE'
