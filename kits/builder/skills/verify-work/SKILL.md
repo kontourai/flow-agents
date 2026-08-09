@@ -94,9 +94,10 @@ not publish that optional expectation when no policy check applies.
 
 A check that has never failed has not been shown to discriminate. When a silent
 revert of the change would otherwise be undetectable, inject the original defect
-in a scratch copy — never the live working tree, per the verification contract's
-scratch-copy rule, which the report-only role and the clean-worktree gate both
-depend on — and observe which named checks redden.
+in a scratch copy — never the live working tree, which the report-only role
+forbids and the clean-worktree gate would reject — and observe which named
+checks redden. The verification contract governs the scratch copy itself,
+including which forms carry the change under test.
 
 Two readings of the result are unsafe:
 
@@ -104,10 +105,11 @@ Two readings of the result are unsafe:
   crash, or a path that matched no tests also fails. Read the failure text and
   confirm it names the behavior the injection broke.
 - **A green run is not automatically a passing run.** A selection that matches
-  nothing can exit zero having executed no tests (`node --test` with a glob that
-  matches no file reports `tests 0` and exits 0). Confirm the run's test count
-  is non-zero before reading green as evidence — for the baseline as much as for
-  the injection.
+  nothing still reports: `node --test` with a glob matching no file reports
+  `tests 0`, and a name filter matching nothing still reports the file itself as
+  one test entry. Confirm the run reported the tests you expected — by name or
+  count — rather than reading any green, or any non-zero total, as evidence.
+  This applies to the baseline run as much as to the injection.
 
 Record which checks reddened by name. An injection the suite does not catch is a
 finding about the suite, not a formality to note and move past.
