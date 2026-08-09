@@ -78,6 +78,7 @@ export class RunCorrelationValidationError extends Error {
 const identityPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$/;
 const workItemIdentityPattern = /^(?:[A-Za-z0-9][A-Za-z0-9._:@#-]{0,254}|(?:[A-Za-z0-9][A-Za-z0-9._@-]*:)?[A-Za-z0-9._@-]+(?:\/[A-Za-z0-9._@-]+)+(?:#[A-Za-z0-9._@-]+)?)$/;
 const credentialPatterns = [
+  /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s/?#@]*@/,
   /bearer\s+/i,
   /(?:api[_-]?key|access[_-]?token|client[_-]?secret|token|secret|password)\s*[:=]/i,
   /(?:sk|gh[oprsu]|npm|pypi|hf)_[A-Za-z0-9_-]{8,}/i,

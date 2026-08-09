@@ -122,8 +122,10 @@ const revisionKeys = new Set(["prompt_revision", "rubric_revision", "policy_revi
 const boundFlowKeys = new Set(["status", "flow_run_id", "flow_step_id", "gate_attempt"]);
 const unboundFlowKeys = new Set(["status", "reason"]);
 const opaqueIdentifier = /^[A-Za-z0-9][A-Za-z0-9._:@#/-]{0,254}$/;
+const uriIdentifier = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const resource = /^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9][A-Za-z0-9._@-]*(?:\/[A-Za-z0-9][A-Za-z0-9._@-]*)*$/;
+const canonicalTimestamp = /^(?:(?:[0-9]{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))|(?:(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:00|0[48]|[2468][048]|[13579][26])00)-02-29))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\.[0-9]{3}Z$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -136,6 +138,7 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string
 function isSafeIdentifier(value: unknown): value is string {
   return typeof value === "string"
     && opaqueIdentifier.test(value)
+    && !uriIdentifier.test(value)
     && !containsSensitiveCredential(value);
 }
 
@@ -148,7 +151,7 @@ function isSafeReason(value: unknown): value is string {
 }
 
 function isCanonicalTimestamp(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  if (typeof value !== "string" || !canonicalTimestamp.test(value)) return false;
   const time = Date.parse(value);
   return Number.isFinite(time) && new Date(time).toISOString() === value;
 }
@@ -285,6 +288,29 @@ export function validateDelegationEnvelope(value: unknown): DelegationEnvelope {
   return structuredClone(value) as DelegationEnvelope;
 }
 
+/**
+ * Return a defensive copy only when the supplied canonical observation time is
+ * strictly before the envelope expiry. Callers provide time explicitly so this
+ * portable contract never consults a host clock.
+ */
+export function assertDelegationEnvelopeActiveAt(
+  value: unknown,
+  observedAt: unknown,
+): DelegationEnvelope {
+  const envelope = validateDelegationEnvelope(value);
+  if (!isCanonicalTimestamp(observedAt)) {
+    throw new DelegationEnvelopeValidationError([
+      "observed_at must be a canonical UTC milliseconds timestamp",
+    ]);
+  }
+  if (Date.parse(observedAt) >= Date.parse(envelope.budget.expires_at)) {
+    throw new DelegationEnvelopeNarrowingError([
+      "envelope is expired at observed_at",
+    ]);
+  }
+  return structuredClone(envelope);
+}
+
 function isSubset(child: readonly string[], parent: readonly string[]): boolean {
   const allowed = new Set(parent);
   return child.every((value) => allowed.has(value));
@@ -298,9 +324,13 @@ function equalJson(left: unknown, right: unknown): boolean {
  * Accept a child only when it is exactly linked to the parent and narrows the
  * parent's executable authority. The returned child is a defensive copy.
  */
-export function narrowDelegationEnvelope(parentValue: unknown, childValue: unknown): DelegationEnvelope {
-  const parent = validateDelegationEnvelope(parentValue);
-  const child = validateDelegationEnvelope(childValue);
+export function narrowDelegationEnvelope(
+  parentValue: unknown,
+  childValue: unknown,
+  observedAt: unknown,
+): DelegationEnvelope {
+  const parent = assertDelegationEnvelopeActiveAt(parentValue, observedAt);
+  const child = assertDelegationEnvelopeActiveAt(childValue, observedAt);
   const issues: string[] = [];
   if (child.envelope_id === parent.envelope_id) issues.push("child envelope_id must differ from parent");
   if (child.parent_envelope_id !== parent.envelope_id) issues.push("child parent_envelope_id must equal parent envelope_id");
@@ -323,11 +353,15 @@ export function narrowDelegationEnvelope(parentValue: unknown, childValue: unkno
   if (!isSubset(child.authority.mutable_resources, parent.authority.mutable_resources)) issues.push("child mutable_resources must be a subset of parent mutable_resources");
   if (parent.authority.posture === "report-only" && child.authority.posture !== "report-only") issues.push("child cannot widen report-only posture to writer");
   if (parent.authority.approval === "requires_approval" && child.authority.approval !== "requires_approval") issues.push("child cannot weaken required approval");
-  if (child.authority.escalation !== parent.authority.escalation) issues.push("child escalation posture must equal parent escalation posture");
+  if (parent.authority.escalation === "deny" && child.authority.escalation !== "deny") issues.push("child cannot widen denied escalation to request");
   for (const key of ["max_attempts", "max_concurrent_children", "max_input_tokens", "max_output_tokens", "max_cost_micros"] as const) {
     if (child.budget[key] > parent.budget[key]) issues.push(`child budget.${key} exceeds parent`);
   }
-  if (child.budget.max_depth > Math.max(0, parent.budget.max_depth - 1)) issues.push("child budget.max_depth must consume one parent depth");
+  if (parent.budget.max_depth === 0) {
+    issues.push("a parent with zero depth cannot derive a child");
+  } else if (child.budget.max_depth > parent.budget.max_depth - 1) {
+    issues.push("child budget.max_depth must consume one parent depth");
+  }
   if (Date.parse(child.budget.expires_at) > Date.parse(parent.budget.expires_at)) issues.push("child budget.expires_at must not exceed parent expiry");
   if (issues.length > 0) throw new DelegationEnvelopeNarrowingError(issues);
   return structuredClone(child);

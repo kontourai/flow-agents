@@ -6,9 +6,12 @@ import {
   DELEGATION_ENVELOPE_SCHEMA_VERSION,
   DelegationEnvelopeNarrowingError,
   DelegationEnvelopeValidationError,
+  assertDelegationEnvelopeActiveAt,
   narrowDelegationEnvelope,
   validateDelegationEnvelope,
 } from "../../build/src/index.js";
+
+const OBSERVED_AT = "2026-08-09T12:00:00.000Z";
 
 const delegationSchema = JSON.parse(readFileSync(
   new URL("../../schemas/delegation-envelope.schema.json", import.meta.url),
@@ -119,10 +122,10 @@ test("validates a closed, explicit-unbound delegation envelope and matches the s
 
 test("parent, child, and grandchild preserve immutable lineage while authority and budget narrow", () => {
   const parent = validateDelegationEnvelope(root());
-  const child = narrowDelegationEnvelope(parent, childOf(parent, "22222222-2222-4222-8222-222222222222", 1));
+  const child = narrowDelegationEnvelope(parent, childOf(parent, "22222222-2222-4222-8222-222222222222", 1), OBSERVED_AT);
   const grandchildDraft = childOf(child, "33333333-3333-4333-8333-333333333333", 2);
   grandchildDraft.budget.max_depth = 0;
-  const grandchild = narrowDelegationEnvelope(child, grandchildDraft);
+  const grandchild = narrowDelegationEnvelope(child, grandchildDraft, OBSERVED_AT);
 
   assert.equal(child.parent_envelope_id, parent.envelope_id);
   assert.equal(grandchild.parent_envelope_id, child.envelope_id);
@@ -144,14 +147,14 @@ test("rejects every authority, source, posture, and budget widening", () => {
   ]) {
     const child = childOf(parent, "22222222-2222-4222-8222-222222222222", 1);
     mutate(child);
-    assert.throws(() => narrowDelegationEnvelope(parent, child), DelegationEnvelopeNarrowingError);
+    assert.throws(() => narrowDelegationEnvelope(parent, child, OBSERVED_AT), DelegationEnvelopeNarrowingError);
   }
   const reportOnlyParent = root();
   reportOnlyParent.authority.posture = "report-only";
   const postureWidening = childOf(reportOnlyParent, "22222222-2222-4222-8222-222222222222", 1);
   postureWidening.authority.posture = "writer";
   assert.throws(
-    () => narrowDelegationEnvelope(reportOnlyParent, postureWidening),
+    () => narrowDelegationEnvelope(reportOnlyParent, postureWidening, OBSERVED_AT),
     DelegationEnvelopeNarrowingError,
   );
 });
@@ -169,12 +172,18 @@ test("rejects unknown, malformed, and secret-bearing envelope data before it can
   invalidLineage.generation = 1;
   assert.throws(() => validateDelegationEnvelope(invalidLineage), DelegationEnvelopeValidationError);
 
-  const secret = root();
-  secret.authority.allowed_tools = ["token=never-embed-this"];
-  assert.throws(() => validateDelegationEnvelope(secret), DelegationEnvelopeValidationError);
+  for (const mutate of [
+    (candidate) => { candidate.authority.allowed_tools = ["token=never-embed-this"]; },
+    (candidate) => { candidate.runtime.runtime_receipt_ref = "https://user:password@example.com/receipt"; },
+    (candidate) => { candidate.flow_binding.reason = "https://user:password@example.com/why"; },
+  ]) {
+    const secret = root();
+    mutate(secret);
+    assert.throws(() => validateDelegationEnvelope(secret), DelegationEnvelopeValidationError);
+  }
 });
 
-test("schema and runtime reject the same structural malformed forms", () => {
+test("schema and runtime reject the same structural, credential, and timestamp forms", () => {
   const validate = schemaValidator();
   for (const mutate of [
     (candidate) => { candidate.extra = true; },
@@ -182,12 +191,72 @@ test("schema and runtime reject the same structural malformed forms", () => {
     (candidate) => { candidate.authority.mutable_resources = ["../escape"]; },
     (candidate) => { candidate.authority.mutable_resources = ["src/../escape"]; },
     (candidate) => { candidate.generation = 1; },
+    (candidate) => { candidate.budget.expires_at = "2026-02-30T12:00:00.000Z"; },
+    (candidate) => { candidate.runtime.runtime_receipt_ref = "https://example.com/receipt"; },
+    (candidate) => { candidate.runtime.runtime_receipt_ref = "https://user:password@example.com/receipt"; },
+    (candidate) => { candidate.flow_binding.reason = "https://user:password@example.com/why"; },
   ]) {
     const candidate = root();
     mutate(candidate);
     assert.equal(validate(candidate), false);
     assert.throws(() => validateDelegationEnvelope(candidate), DelegationEnvelopeValidationError);
   }
+
+  const leapYearZero = root();
+  leapYearZero.budget.expires_at = "0000-02-29T12:00:00.000Z";
+  assert.equal(validate(leapYearZero), true, JSON.stringify(validate.errors));
+  assert.equal(validateDelegationEnvelope(leapYearZero).budget.expires_at, leapYearZero.budget.expires_at);
+});
+
+test("requires an explicit canonical observation before active envelopes derive", () => {
+  const parent = root();
+  const child = childOf(parent, "22222222-2222-4222-8222-222222222222", 1);
+
+  assert.deepEqual(assertDelegationEnvelopeActiveAt(parent, OBSERVED_AT), parent);
+  assert.throws(
+    () => assertDelegationEnvelopeActiveAt(parent, "2026-08-10T00:00:00.000Z"),
+    DelegationEnvelopeNarrowingError,
+  );
+  assert.throws(
+    () => narrowDelegationEnvelope(parent, child),
+    DelegationEnvelopeValidationError,
+  );
+  assert.throws(
+    () => narrowDelegationEnvelope(parent, child, "2026-02-30T12:00:00.000Z"),
+    DelegationEnvelopeValidationError,
+  );
+  assert.throws(
+    () => narrowDelegationEnvelope(parent, child, "2026-08-10T00:00:00.000Z"),
+    DelegationEnvelopeNarrowingError,
+  );
+});
+
+test("cannot derive past the depth bound and can reduce escalation requests to deny", () => {
+  const noDepthParent = root();
+  noDepthParent.budget.max_depth = 0;
+  const noDepthChild = childOf(noDepthParent, "22222222-2222-4222-8222-222222222222", 1);
+  noDepthChild.budget.max_depth = 0;
+  assert.throws(
+    () => narrowDelegationEnvelope(noDepthParent, noDepthChild, OBSERVED_AT),
+    DelegationEnvelopeNarrowingError,
+  );
+
+  const requestParent = root();
+  requestParent.authority.escalation = "request";
+  const denyChild = childOf(requestParent, "22222222-2222-4222-8222-222222222222", 1);
+  denyChild.authority.escalation = "deny";
+  assert.equal(
+    narrowDelegationEnvelope(requestParent, denyChild, OBSERVED_AT).authority.escalation,
+    "deny",
+  );
+
+  const denyParent = root();
+  const requestChild = childOf(denyParent, "22222222-2222-4222-8222-222222222222", 1);
+  requestChild.authority.escalation = "request";
+  assert.throws(
+    () => narrowDelegationEnvelope(denyParent, requestChild, OBSERVED_AT),
+    DelegationEnvelopeNarrowingError,
+  );
 });
 
 test("validator and narrowing return defensive copies", () => {
@@ -197,7 +266,7 @@ test("validator and narrowing return defensive copies", () => {
   assert.equal(parent.authority.allowed_tools.includes("mutated-after-validation"), false);
 
   const child = childOf(parent, "22222222-2222-4222-8222-222222222222", 1);
-  const narrowed = narrowDelegationEnvelope(parent, child);
+  const narrowed = narrowDelegationEnvelope(parent, child, OBSERVED_AT);
   narrowed.authority.allowed_tools.push("mutated-after-narrowing");
   assert.equal(child.authority.allowed_tools.includes("mutated-after-narrowing"), false);
 });

@@ -52,7 +52,8 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 512,
-      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+      "not": { "pattern": "[A-Za-z][A-Za-z0-9+.-]*://[^\\s/?#@]*@" }
     },
     "identity": {
       "oneOf": [

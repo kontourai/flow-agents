@@ -69,6 +69,7 @@ export type {
 } from "./run-correlation.js";
 export {
   DELEGATION_ENVELOPE_SCHEMA_VERSION,
+  assertDelegationEnvelopeActiveAt,
   DelegationEnvelopeNarrowingError,
   DelegationEnvelopeValidationError,
   narrowDelegationEnvelope,
