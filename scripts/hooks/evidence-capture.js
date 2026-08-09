@@ -19,6 +19,8 @@
  *                                       // absence check) or an unintended miss
  *                                       // (FAIL for a presence check); #362)
  *     "exitCode":       <integer> | null,  // null when only pass/fail is inferable
+ *     "observed_at_commit": "<immutable Git commit SHA at observation time>",
+ *     "worktree_clean": true | false,
  *     "capturedAt":     "<ISO-8601 timestamp>",
  *     "source":         "postToolUse-capture",
  *     "_chain":         { "seq": <n>, "prevHash": "<hex>", "hash": "<hex>" }
@@ -57,6 +59,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
 const { resolveActor, isUnresolvedActor } = require('./lib/actor-identity.js');
 const { readOwnCurrentPointer } = require('./lib/current-pointer.js');
@@ -66,6 +69,18 @@ const crypto = require('crypto');
 const MAX_STDIN = 1024 * 1024;
 const MAX_COMMAND_LEN = 4096;
 const MAX_OUTPUT_SCAN = 64 * 1024;
+// Each fixed Git command receives the same finite cap as its canonical
+// snapshot counterpart. A single 64 KiB cap rejects ordinary repositories
+// whose tracked-index listing exceeds that size.
+const MAX_GIT_HEAD_OUTPUT = 256;
+const MAX_GIT_TRACKED_DIFF_OUTPUT = 16 * 1024 * 1024;
+const MAX_GIT_TRACKED_INDEX_OUTPUT = 4 * 1024 * 1024;
+const MAX_GIT_UNTRACKED_LIST_OUTPUT = 4 * 1024 * 1024;
+const MAX_GIT_UNTRACKED_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_GIT_UNTRACKED_TOTAL_BYTES = 64 * 1024 * 1024;
+const GIT_HASH_READ_CHUNK_BYTES = 64 * 1024;
+const GIT_TIMEOUT_MS = 3000;
+const COMMIT_SHA_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 // Tools whose tool_input.command is a shell/command execution. Identified by the
 // presence of tool_input.command plus a command/shell-ish tool_name. We keep the
@@ -116,6 +131,21 @@ function findRepoRoot(startDir) {
     dir = path.dirname(dir);
   }
   return path.resolve(startDir || process.cwd());
+}
+
+function resolveCanonicalGitRoot(startDir) {
+  try {
+    const start = fs.realpathSync(path.resolve(startDir || process.cwd()));
+    const output = runTrustedGit(start, ['rev-parse', '--show-toplevel'], MAX_GIT_HEAD_OUTPUT);
+    const reported = output ? output.toString('utf8').trim() : '';
+    if (!reported || !path.isAbsolute(reported)) return null;
+    const root = fs.realpathSync(reported);
+    const confirmed = runTrustedGit(root, ['rev-parse', '--show-toplevel'], MAX_GIT_HEAD_OUTPUT);
+    if (!confirmed || fs.realpathSync(confirmed.toString('utf8').trim()) !== root) return null;
+    return root;
+  } catch {
+    return null;
+  }
 }
 
 function readJsonFile(file) {
@@ -292,13 +322,188 @@ function isFailureIndicated(error, response, output) {
   return false;
 }
 
+// Hook-side Git calls use a fixed executable, a bounded argv, and no ambient
+// system/global configuration. This mirrors the existing trusted hook pattern:
+// the command capture must not load repository-configured hooks or fsmonitor
+// helpers merely to observe the worktree that produced a host result.
+function trustedGitEnvironment() {
+  return {
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_NO_REPLACE_OBJECTS: '1',
+    LANG: 'C',
+    LC_ALL: 'C',
+    PATH: process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd;C:\\Windows\\System32;C:\\Windows' : '/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+  };
+}
+
+function trustedGitCandidates() {
+  if (process.platform === 'darwin') return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'];
+  if (process.platform === 'win32') return ['C:\\Program Files\\Git\\cmd\\git.exe'];
+  return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/usr/local/bin/git'];
+}
+
+function trustedGitIdentity(candidate) {
+  const resolved = fs.realpathSync(candidate);
+  const stat = fs.statSync(resolved);
+  if (!path.isAbsolute(resolved) || !stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) throw new Error('untrusted Git executable');
+  if (process.platform !== 'win32') {
+    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error('untrusted Git executable ownership');
+    for (let cursor = path.dirname(resolved);;) {
+      const parent = fs.statSync(cursor);
+      if (!parent.isDirectory() || parent.uid !== 0 || (parent.mode & 0o022) !== 0) throw new Error('untrusted Git executable parent');
+      const next = path.dirname(cursor);
+      if (next === cursor) break;
+      cursor = next;
+    }
+  }
+  return { candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode };
+}
+
+function resolveTrustedGitExecutable() {
+  for (const candidate of trustedGitCandidates()) {
+    try { return trustedGitIdentity(candidate); } catch {}
+  }
+  return null;
+}
+
+function revalidateTrustedGit(identity) {
+  const current = trustedGitIdentity(identity.candidate);
+  return current.device === identity.device && current.inode === identity.inode && current.size === identity.size
+    && current.mtimeMs === identity.mtimeMs && current.mode === identity.mode;
+}
+
+function runTrustedGit(root, args, maxOutput) {
+  try {
+    const executable = resolveTrustedGitExecutable();
+    if (!executable) return null;
+    const hardenedArgs = args[0] === 'diff'
+      ? ['diff', '--no-ext-diff', '--no-textconv', ...args.slice(1)]
+      : args;
+    const result = spawnSync(executable.path, [
+      '--no-replace-objects',
+      '-c', 'core.fsmonitor=false',
+      '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
+      '-c', 'diff.external=',
+      '-C', root,
+      ...hardenedArgs,
+    ], {
+      encoding: 'buffer',
+      env: trustedGitEnvironment(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: maxOutput + 1,
+    });
+    if (!result || result.error || result.signal || result.status !== 0 || !Buffer.isBuffer(result.stdout) || result.stdout.length > maxOutput || !revalidateTrustedGit(executable)) return null;
+    return result.stdout;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Capture the repository state after the host has reported its result but
+ * before this hook adds the command-log entry. Any Git uncertainty yields no
+ * record: provenance cannot be represented safely, so an unconfirmed command
+ * is preferable to an optimistic or unchained record.
+ */
+function observeGitWorktree(root, hooks = {}) {
+  const head = runTrustedGit(root, ['rev-parse', '--verify', 'HEAD^{commit}'], MAX_GIT_HEAD_OUTPUT);
+  if (!head) return null;
+  const observed_at_commit = head.toString('utf8').trim().toLowerCase();
+  if (!COMMIT_SHA_RE.test(observed_at_commit)) return null;
+
+  if (!ordinaryTrackedIndex(root)) return null;
+  // Match the canonical Git-worktree snapshot inputs instead of status
+  // porcelain. Index flags can suppress tracked changes from status, while
+  // explicit ls-files tag inspection rejects those states.
+  const trackedDiff = runTrustedGit(root, ['diff', '--binary', 'HEAD', '--', '.'], MAX_GIT_TRACKED_DIFF_OUTPUT);
+  const untracked = runTrustedGit(root, ['ls-files', '--others', '--exclude-standard', '-z'], MAX_GIT_UNTRACKED_LIST_OUTPUT);
+  if (!trackedDiff || !untracked) return null;
+  if (!hashUntrackedFiles(root, untracked)) return null;
+  hooks.afterInitialInputsRead?.();
+  const settledTrackedDiff = runTrustedGit(root, ['diff', '--binary', 'HEAD', '--', '.'], MAX_GIT_TRACKED_DIFF_OUTPUT);
+  const settledUntracked = runTrustedGit(root, ['ls-files', '--others', '--exclude-standard', '-z'], MAX_GIT_UNTRACKED_LIST_OUTPUT);
+  if (!settledTrackedDiff || !settledUntracked || !settledTrackedDiff.equals(trackedDiff) || !settledUntracked.equals(untracked) || !ordinaryTrackedIndex(root)) return null;
+  // A concurrent checkout or commit can otherwise pair worktree bytes with a
+  // different revision. Refuse that uncertain boundary without appending a
+  // confirming record; capture remains deliberately process-nonblocking.
+  const settledHead = runTrustedGit(root, ['rev-parse', '--verify', 'HEAD^{commit}'], MAX_GIT_HEAD_OUTPUT);
+  if (!settledHead || settledHead.toString('utf8').trim().toLowerCase() !== observed_at_commit) return null;
+  return { observed_at_commit, worktree_clean: trackedDiff.length === 0 && untracked.length === 0 };
+}
+
+// The hook does not retain this digest, but it reads the same bounded
+// untracked-file bytes as the canonical snapshot before settling the list.
+// This keeps a clean observation from crossing a change that appears while
+// the initial inputs are being collected.
+function hashUntrackedFiles(root, untrackedBytes) {
+  try {
+    const files = untrackedBytes.toString('utf8').split('\0').filter(Boolean).sort();
+    const hash = crypto.createHash('sha256');
+    let totalBytes = 0;
+    for (const file of files) {
+      const absolute = path.resolve(root, file);
+      if (!pathIsWithin(absolute, root)) return false;
+      const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+      const descriptor = fs.openSync(absolute, fs.constants.O_RDONLY | noFollow);
+      try {
+        const before = fs.fstatSync(descriptor);
+        if (!before.isFile() || before.size > MAX_GIT_UNTRACKED_FILE_BYTES || totalBytes + before.size > MAX_GIT_UNTRACKED_TOTAL_BYTES) return false;
+        hash.update(file).update('\0');
+        const buffer = Buffer.allocUnsafe(GIT_HASH_READ_CHUNK_BYTES);
+        let remaining = before.size;
+        let position = 0;
+        while (remaining > 0) {
+          const bytesRead = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, remaining), position);
+          if (bytesRead <= 0) return false;
+          hash.update(buffer.subarray(0, bytesRead));
+          remaining -= bytesRead;
+          position += bytesRead;
+        }
+        const after = fs.fstatSync(descriptor);
+        if (!sameFileIdentity(before, after)) return false;
+        hash.update('\0');
+        totalBytes += before.size;
+      } finally { fs.closeSync(descriptor); }
+    }
+    hash.digest();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sameFileIdentity(before, after) {
+  return before.dev === after.dev && before.ino === after.ino && before.size === after.size
+    && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs;
+}
+
+function pathIsWithin(candidate, root) {
+  const relative = path.relative(root, candidate);
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function ordinaryTrackedIndex(root, trustedGit = runTrustedGit) {
+  const entries = trustedGit(root, ['ls-files', '-v', '-z'], MAX_GIT_TRACKED_INDEX_OUTPUT);
+  if (!entries) return false;
+  for (const entry of entries.toString('utf8').split('\0')) {
+    if (entry && !entry.startsWith('H ')) return false;
+  }
+  return true;
+}
+
 function run(rawInput) {
   try {
     const input = parseJson(rawInput);
     const command = input.tool_input && input.tool_input.command;
     if (!isCommandTool(input.tool_name, command)) return rawInput;
 
-    const root = findRepoRoot(input.cwd || process.cwd());
+    const root = resolveCanonicalGitRoot(input.cwd || process.cwd());
+    if (!root) {
+      process.stderr.write('[evidence-capture] Git observation uncertain; command-log left unchanged\n');
+      return rawInput;
+    }
     const artifactDir = resolveArtifactDir(root);
     if (!artifactDir) return rawInput; // no active workflow — nothing to anchor the log to
 
@@ -316,10 +521,17 @@ function run(rawInput) {
       command,
     });
 
+    const gitObservation = observeGitWorktree(root);
+    if (!gitObservation) {
+      process.stderr.write('[evidence-capture] Git observation uncertain; command-log left unchanged\n');
+      return rawInput;
+    }
+
     const record = {
       command: clamp(command, MAX_COMMAND_LEN).replace(/\s+/g, ' ').trim(),
       observedResult,
       exitCode,
+      ...gitObservation,
       capturedAt: new Date().toISOString(),
       source: 'postToolUse-capture',
     };
@@ -357,7 +569,12 @@ function run(rawInput) {
         process.stderr.write('[evidence-capture] command-log generation release uncertain; later capture may require operator recovery\n');
       }
     }
-  } catch { /* fail-open: capture never blocks or corrupts */ }
+  } catch {
+    // Deliberately omit exception data: hook stderr can be surfaced outside the
+    // repository and must not disclose file paths or host details. The command
+    // result remains non-confirming because no new record was appended.
+    process.stderr.write('[evidence-capture] capture failed; command-log left unchanged\n');
+  }
   return rawInput;
 }
 
@@ -377,8 +594,13 @@ module.exports = {
   run,
   resolveArtifactDir,
   observeResult,
+  observeGitWorktree,
+  ordinaryTrackedIndex,
+  hashUntrackedFiles,
   isCommandTool,
   findRepoRoot,
+  resolveCanonicalGitRoot,
+  resolveTrustedGitExecutable,
   // Chain helpers exported for testing and gate verification.
   canonicalJsonForChain,
   computeChainHash,

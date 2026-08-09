@@ -206,7 +206,7 @@ echo "--- Guided Console-Connect Wizard (G2/G3): headless regression + summary/v
 # both install paths.
 BASE_SUMMARY_LOCAL_DEST="$TMPDIR_EVAL/base-summary-local-workspace"
 BASE_SUMMARY_LOCAL_STDOUT="$TMPDIR_EVAL/base-summary-local-stdout.txt"
-if node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_LOCAL_DEST" --telemetry-sink local-files --yes >"$BASE_SUMMARY_LOCAL_STDOUT" 2>&1; then
+if TELEMETRY_CONFIG_FILE="$BASE_SUMMARY_LOCAL_DEST/scripts/telemetry/telemetry.conf" node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_LOCAL_DEST" --telemetry-sink local-files --yes >"$BASE_SUMMARY_LOCAL_STDOUT" 2>&1; then
   _pass "flow-agents init headless local-files install succeeded (G3 summary case)"
 else
   _fail "flow-agents init headless local-files install failed (G3 summary case)"
@@ -226,7 +226,7 @@ fi
 BASE_SUMMARY_HOSTED_DEST="$TMPDIR_EVAL/base-summary-hosted-workspace"
 BASE_SUMMARY_HOSTED_STDOUT="$TMPDIR_EVAL/base-summary-hosted-stdout.txt"
 SECONDS=0
-if node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_HOSTED_DEST" --telemetry-sink kontour-hosted-console --console-tenant tenant-x --console-token-file "$CONSOLE_TOKEN_FILE" --yes >"$BASE_SUMMARY_HOSTED_STDOUT" 2>&1; then
+if TELEMETRY_CONFIG_FILE="$BASE_SUMMARY_HOSTED_DEST/scripts/telemetry/telemetry.conf" node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_HOSTED_DEST" --telemetry-sink kontour-hosted-console --console-tenant tenant-x --console-token-file "$CONSOLE_TOKEN_FILE" --yes >"$BASE_SUMMARY_HOSTED_STDOUT" 2>&1; then
   _pass "flow-agents init headless kontour-hosted-console install succeeded (G2/G3 case)"
 else
   _fail "flow-agents init headless kontour-hosted-console install failed (G2/G3 case)"
@@ -274,7 +274,7 @@ fi
 # of leaving the operator with a bare "not checked". Never for local-only.
 BASE_SUMMARY_SELFHOSTED_DEST="$TMPDIR_EVAL/base-summary-selfhosted-workspace"
 BASE_SUMMARY_SELFHOSTED_STDOUT="$TMPDIR_EVAL/base-summary-selfhosted-stdout.txt"
-if node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_SELFHOSTED_DEST" --telemetry-sink user-hosted-console --console-url https://console.example.test --console-tenant tenant-selfhosted --console-token-file "$CONSOLE_TOKEN_FILE" --yes >"$BASE_SUMMARY_SELFHOSTED_STDOUT" 2>&1; then
+if TELEMETRY_CONFIG_FILE="$BASE_SUMMARY_SELFHOSTED_DEST/scripts/telemetry/telemetry.conf" node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_SELFHOSTED_DEST" --telemetry-sink user-hosted-console --console-url https://console.example.test --console-tenant tenant-selfhosted --console-token-file "$CONSOLE_TOKEN_FILE" --yes >"$BASE_SUMMARY_SELFHOSTED_STDOUT" 2>&1; then
   _pass "flow-agents init headless self-hosted/BYO Console install succeeds (unverified is honest, not a failure)"
 else
   _fail "flow-agents init headless self-hosted/BYO Console install unexpectedly failed"
@@ -956,13 +956,15 @@ mkdir -p "$PACKAGE_PROJECT"
 git -C "$PACKAGE_PROJECT" init -q
 git -C "$PACKAGE_PROJECT" config user.email bundle-install@example.invalid
 git -C "$PACKAGE_PROJECT" config user.name "Bundle Install Eval"
-printf '.kontourai/\n' > "$PACKAGE_PROJECT/.gitignore"
+printf '.kontourai/\npacked-flow-amendment/\n' > "$PACKAGE_PROJECT/.gitignore"
 git -C "$PACKAGE_PROJECT" add .gitignore
 git -C "$PACKAGE_PROJECT" commit -qm "seed bundle install fixture"
 PACKAGE_AMBIENT="$TMPDIR_EVAL/package-ambient"
 mkdir -p "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT/.kontourai/flow-agents" "$PACKAGE_PROJECT/checks" "$PACKAGE_AMBIENT/kits/builder/flows"
 printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$PACKAGE_PROJECT/checks/check-packed-workflow.sh"
 chmod +x "$PACKAGE_PROJECT/checks/check-packed-workflow.sh"
+git -C "$PACKAGE_PROJECT" add checks/check-packed-workflow.sh
+git -C "$PACKAGE_PROJECT" commit -qm "add packed workflow verification command"
 cat >"$PACKAGE_AMBIENT/kits/builder/flows/build.flow.json" <<'JSON'
 {
   "id": "builder.build",

@@ -62,6 +62,12 @@ type: deliver
 
 ### Verdict: PASS
 MD
+  printf '.kontourai/\n' > "$p/.gitignore"
+  git -C "$p" init -q -b main
+  git -C "$p" config user.email 'eval@example.invalid'
+  git -C "$p" config user.name 'Command log integrity eval'
+  git -C "$p" add AGENTS.md .gitignore
+  git -C "$p" commit -qm 'seed clean workspace'
 }
 
 # Write two chained entries to command-log.jsonl via evidence-capture.js.

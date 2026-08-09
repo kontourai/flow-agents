@@ -171,6 +171,8 @@ test('the canonical Builder run reached verify', () => {
   assert.equal(state.flow_run?.current_step, 'verify');
 });
 JS
+git -C "$TMP/main-project" add checks/check-flow-step.test.mjs
+git -C "$TMP/main-project" commit -qm "add flow activation verification command"
 
 record_passing_producer_evidence() {
   local expectation="$1" artifact="$2"
@@ -343,6 +345,8 @@ test('the tamper fixture has a substantive passing command', () => {
   assert.equal(1 + 1, 2);
 });
 JS
+git -C "$TAMPER_DIR" add checks/tamper-flow-step.test.mjs
+git -C "$TAMPER_DIR" commit -qm "add tamper verification command"
 
 # Create every reviewable byte before capturing the critique workspace snapshot.
 if ! tamper_critique_output="$(FLOW_AGENTS_ACTOR=tamper-reviewer node "$ROOT/build/src/cli.js" workflow critique \

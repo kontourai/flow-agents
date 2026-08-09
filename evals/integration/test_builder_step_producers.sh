@@ -460,6 +460,16 @@ public_review() {
   env -u CODEX_THREAD_ID CODEX_SESSION_ID=builder-public-reviewer node "$ROOT/build/src/cli.js" workflow "$@"
 }
 
+ensure_public_fixture_clean_baseline() {
+  git -C "$TMP/public" add checks/check-public-session.sh
+  if ! git -C "$TMP/public" diff --cached --quiet; then
+    git -C "$TMP/public" commit -qm "add public producer verification command"
+  fi
+  if [ -n "$(git -C "$TMP/public" status --porcelain --untracked-files=all)" ]; then
+    _fail "public producer fixture is not clean before command-backed verification"
+  fi
+}
+
 assert_public_step() {
   local step="$1" skills="$2" operations="$3" status="${4:-active}"
   local report
@@ -502,6 +512,7 @@ record_public_expectation() {
     args+=(--route-reason implementation_defect)
   fi
   if [ "$expectation" = "tests-evidence" ] && [ "$status" = "pass" ]; then
+    ensure_public_fixture_clean_baseline
     local test_command criterion_one criterion_two command_ref
     test_command="bash checks/check-public-session.sh .kontourai/flow-agents/$slug/state.json"
     criterion_one="$(node - "$test_command" <<'NODE'
@@ -558,6 +569,7 @@ public_flow start --artifact-root "$PUBLIC_ROOT" --flow builder.build \
   --work-item acme/builder#901 --assignment-provider local-file --summary "Public producer path" >/dev/null 2>&1 \
   || _fail "public workflow start failed"
 prepare_public_artifacts
+ensure_public_fixture_clean_baseline
 assert_public_step "design-probe" "pickup-probe" ""
 record_public_expectation "pickup-probe-readiness"
 assert_public_step "design-probe" "pickup-probe" "" "active-or-blocked"
@@ -654,6 +666,7 @@ public_flow start --artifact-root "$PUBLIC_ROOT" --flow builder.build \
   --work-item acme/builder#902 --assignment-provider local-file --summary "Public route-back path" >/dev/null 2>&1 \
   || _fail "route-back workflow start failed"
 prepare_public_artifacts
+ensure_public_fixture_clean_baseline
 for expectation in pickup-probe-readiness probe-decisions-or-accepted-gaps implementation-plan implementation-scope; do
   record_public_expectation "$expectation"
 done
@@ -683,14 +696,10 @@ const command = process.argv[2];
 process.stdout.write(JSON.stringify({ id: 'AC-2', status: 'pass', evidence_refs: [{ kind: 'command', excerpt: command, summary: 'Current AC-2 prerequisite.' }] }));
 NODE
 )"
-ROUTE_OBSERVED="$(node - "$ROUTE_TEST_COMMAND" <<'NODE'
-const command = process.argv[2];
-process.stdout.write(JSON.stringify({ command, exit_code: 0, test_count: 1, output_sha256: '0'.repeat(64) }));
-NODE
-)"
+ensure_public_fixture_clean_baseline
 CODEX_SESSION_ID=builder-public-producers flow_agents_node "workflow-sidecar" record-gate-claim "$PUBLIC_SESSION" \
   --expectation tests-evidence --status pass --summary "Seed complete current acceptance prerequisites before routed failure." \
-  --command "$ROUTE_TEST_COMMAND" --observed-command-json "$ROUTE_OBSERVED" \
+  --command "$ROUTE_TEST_COMMAND" \
   --evidence-ref-json "$ROUTE_COMMAND_REF" --criterion-json "$ROUTE_CRITERION_ONE" --criterion-json "$ROUTE_CRITERION_TWO" >/dev/null 2>&1 \
   || _fail "failed to seed current acceptance prerequisites for routed failure"
 record_public_expectation "tests-evidence" "fail"
@@ -746,6 +755,7 @@ NODE
   }
 
   prepare_public_artifacts
+  ensure_public_fixture_clean_baseline
   assert_public_shape_step "shape" "idea-to-backlog" "active-or-blocked"
   for expectation in shaped-problem shaped-outcome shaped-constraints shaped-non-goals shaped-success shaped-risk; do
     record_public_expectation "$expectation"
@@ -760,7 +770,7 @@ fi
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 if [ "$errors" -eq 0 ]; then
-  echo "Builder step producer tests passed (legacy tamper checks plus full public happy path and route-back)."
+  echo "Builder step producer tests passed (tamper checks plus full public happy path and route-back)."
   exit 0
 fi
 echo "Builder step producer tests FAILED: $errors issue(s)."

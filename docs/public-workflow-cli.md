@@ -201,6 +201,22 @@ planning artifact. Do not edit `acceptance.json` to repair a planned placeholder
 package-private `workflow:sidecar record-evidence` writer for that purpose. Generic/private
 evidence writes continue to validate their final refs and fail closed on incomplete source refs.
 
+### Revision-bound command observations
+
+The public evidence command does not accept caller-supplied Git provenance. Repository-owned
+capture records `observed_at_commit` and `worktree_clean` after each command result settles, then
+preserves them in `trust.bundle` metadata and the consumer-facing `workflow-evidence` v2 projection.
+For an item to contribute to a passing gate, its captured commit must resolve through trusted Git
+and be an ancestor of current `HEAD`, its cleanliness must be `true`, and its exact captured
+Git-worktree snapshot must equal the current snapshot. Ancestry is not byte proof; the snapshot
+comparison is required as well.
+
+Dirty, missing, non-Git, malformed, unavailable, unresolved/shallow, or non-ancestor provenance
+is `NOT_VERIFIED`/`not_verified`, never an implicit pass. Schema v1 is rejected and must be
+re-recorded; v2 command entries missing these fields are non-confirming. A delivery checkpoint or attestation `commit_sha` is
+aggregate transport provenance, not a substitute for an individual command's
+`observed_at_commit`.
+
 An embedding host whose current runtime identity cannot reproduce the active
 assignment actor must establish an expiring recovery-capable session binding,
 then authorize each ordinary evidence mutation separately. Run

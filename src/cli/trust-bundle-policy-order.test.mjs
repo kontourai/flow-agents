@@ -1,6 +1,6 @@
 // trust-bundle-policy-order.test.mjs — WS8 (AC1, iteration 2) policy-cache order regression.
 //
-// The verifier found that ensurePolicy cached the first-seen requiredEvidence per legacy
+// The verifier found that ensurePolicy cached the first-seen requiredEvidence per
 // claimType, so two checks of the SAME kind that differ in command-presence (browser/security/
 // runtime with vs without a command) collided: the first-recorded requiredEvidence won and
 // corrupted the SECOND claim's derived status (verified -> proposed) depending on record order.
@@ -79,13 +79,16 @@ test("buildTrustBundle: same-kind checks with different command-presence get DIS
     assert.equal(p.requiredEvidence.length, 1, `policy ${p.id} must require exactly one evidence type (not a merged union)`);
   }
 
-  // Each claim references its own policy, and both derive 'verified' (neither corrupted).
+  // Each claim references its own policy. The command check is deliberately
+  // non-confirming because this regression fixture does not execute it or fabricate
+  // its required provenance; the no-command check remains verified. This isolates
+  // policy construction and ordering from command-observation confirmation.
   const statuses = statusByClaimId(bundle);
   const cmdClaim = bundle.claims.find((c) => c.subjectId === "perm/browser-cmd");
   const noCmdClaim = bundle.claims.find((c) => c.subjectId === "perm/browser-nocmd");
   assert.ok(cmdClaim && noCmdClaim);
   assert.notEqual(cmdClaim.verificationPolicyId, noCmdClaim.verificationPolicyId);
-  assert.equal(statuses[cmdClaim.id], "verified");
+  assert.equal(statuses[cmdClaim.id], "proposed");
   assert.equal(statuses[noCmdClaim.id], "verified");
 });
 

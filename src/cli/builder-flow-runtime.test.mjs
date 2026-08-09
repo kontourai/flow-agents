@@ -574,6 +574,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   routedAttachment.sha256 = createHash("sha256").update(tamperedStoredBytes).digest("hex");
   fs.writeFileSync(routedStoredFile, tamperedStoredBytes);
   writeJson(canonicalManifestFile, canonicalManifest);
+  bindFixturePassingObservations(session, [currentTests, ...currentPrerequisites, forgedHistoricalRouteBack]);
   writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, forgedHistoricalRouteBack]);
   try {
     await workflowSidecarMain([
@@ -599,6 +600,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
     true,
     "copied identity plus coordinated manifest/stored-byte tampering remains live when it does not match the state-bound digest",
   );
+  bindFixturePassingObservations(session, [currentTests, ...currentPrerequisites, historicalRouteBack]);
   writeBundle(session.sessionDir, [currentTests, ...currentPrerequisites, historicalRouteBack]);
   const reviewedArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
   await workflowSidecarMain([
@@ -622,7 +624,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   );
   const repairedTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
   repairedTests.claim.status = "verified";
-  repairedTests.claim.metadata.verification_workspace_snapshot = currentWorkspace;
+  repairedTests.claim.metadata.verification_workspace_snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
   const repairedPrerequisites = verifiedTestsPrerequisites(session);
   for (const entry of repairedPrerequisites) entry.claim.status = "verified";
   const repairedVerification = [repairedTests, ...repairedPrerequisites].map((entry) => withIdentitySuffix(entry, "after-route-back"));
@@ -838,6 +840,7 @@ test("routed-back provenance keeps the manifest bound to the start definition af
   currentTests.claim.metadata.verification_workspace_snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
   const prerequisites = verifiedTestsPrerequisites(session);
   for (const entry of prerequisites) entry.claim.status = "verified";
+  bindFixturePassingObservations(session, [currentTests, ...prerequisites, historical]);
   writeBundle(session.sessionDir, [currentTests, ...prerequisites, historical]);
   await workflowSidecarMain([
     "record-critique", session.sessionDir,
@@ -3244,6 +3247,7 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
 }
 
 function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString()) {
+  ensureFixtureGitWorktree(session.projectRoot);
   const reviewArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
   const implementation = path.join(session.projectRoot, "review-target", "implementation.txt");
   const implementationFile = path.relative(session.projectRoot, implementation);
@@ -3330,10 +3334,41 @@ function writeBundle(sessionDir, entries) {
     schemaVersion: 5,
     source: "flow-agents-builder-runtime-test",
     claims: entries.map((entry) => entry.claim),
-    evidence: entries.map((entry) => entry.evidence),
+    evidence: entries.flatMap((entry) => [entry.evidence, ...(entry.extraEvidence ?? [])]),
     policies: [],
     events: entries.map((entry) => entry.event),
   });
+}
+
+function bindFixturePassingObservations(session, entries) {
+  const passingObservations = entries.filter((entry) => entry.claim?.value === "pass"
+    && Array.isArray(entry.claim?.metadata?.observed_commands));
+  if (passingObservations.length === 0) return;
+  let snapshot;
+  try {
+    snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+  } catch {
+    return;
+  }
+  // The test helper's observation boundary is immediately before its canonical
+  // bundle write. Never mint a passing fixture observation from dirty bytes,
+  // and never re-stamp an explicit provenance fixture after a later mutation.
+  if (snapshot.kind !== "git-worktree" || snapshot.worktree_clean !== true) return;
+  for (const entry of passingObservations) {
+    const metadata = entry.claim?.metadata;
+    if (!metadata || metadata._fixture_skip_observation_provenance === true) continue;
+    metadata.verification_workspace_snapshot ??= structuredClone(snapshot);
+    if (!Array.isArray(metadata.observed_commands) || metadata._fixture_skip_observation_provenance === true) continue;
+    for (const observation of metadata.observed_commands) {
+      observation.observed_at_commit ??= snapshot.head_sha;
+      observation.worktree_clean ??= snapshot.worktree_clean;
+      observation.verification_workspace_snapshot ??= structuredClone(snapshot);
+    }
+    if (metadata.observed_commands.length === 1) {
+      entry.evidence.passing ??= true;
+      entry.evidence.execution ??= { runner: "bash", label: metadata.observed_commands[0].command, isError: false, exitCode: 0 };
+    }
+  }
 }
 
 function historicalProducerSuperseded(entry, suffix = "historical") {
@@ -3355,6 +3390,7 @@ function withIdentitySuffix(entry, suffix) {
 }
 
 async function writeAndSync(session, entries) {
+  bindFixturePassingObservations(session, entries);
   writeBundle(session.sessionDir, entries);
   return syncBuilderFlowSession({ sessionDir: session.sessionDir });
 }
@@ -4200,6 +4236,7 @@ test("public evidence rejects an intervening Flow mutation and removes unattache
     await pauseRun(${JSON.stringify(session.slug)}, { cwd: ${JSON.stringify(session.projectRoot)}, reason: "race fixture", authority, at: "2026-07-09T20:00:01.000Z" });
     await resumeRun(${JSON.stringify(session.slug)}, { cwd: ${JSON.stringify(session.projectRoot)}, reason: "race fixture", authority, at: "2026-07-09T20:00:02.000Z" });
   `);
+  initGitWorktreeFixture(session.projectRoot);
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
   const beforeBundle = fs.existsSync(bundleFile) ? fs.readFileSync(bundleFile) : null;
   const beforeManifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
@@ -4246,6 +4283,7 @@ test("public evidence rolls back its bundle when a valid unshipped amendment win
       },
     });
   `);
+  initGitWorktreeFixture(session.projectRoot);
   const bundleFile = path.join(session.sessionDir, "trust.bundle");
   const beforeBundle = fs.existsSync(bundleFile) ? fs.readFileSync(bundleFile) : null;
   const manifestFile = path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH);
@@ -4390,7 +4428,9 @@ function initGitWorktreeFixture(projectRoot) {
   execFileSync("git", ["init", "-q"], { cwd: projectRoot, stdio: "ignore" });
   execFileSync("git", ["config", "user.email", "fixture@example.test"], { cwd: projectRoot });
   execFileSync("git", ["config", "user.name", "Fixture"], { cwd: projectRoot });
-  execFileSync("git", ["add", ".gitignore", "review-target"], { cwd: projectRoot });
+  // Commit every ordinary fixture file that existed before Git initialization. Later test
+  // mutations stay visible to provenance checks instead of being hidden by setup dirt.
+  execFileSync("git", ["add", "-A"], { cwd: projectRoot });
   execFileSync("git", ["commit", "-m", "workspace fixture"], { cwd: projectRoot, stdio: "ignore" });
 }
 
@@ -4398,6 +4438,10 @@ function makeGitBackedSession(slug) {
   const session = makeCanonicalPathSession(slug);
   initGitWorktreeFixture(session.projectRoot);
   return session;
+}
+
+function ensureFixtureGitWorktree(projectRoot) {
+  if (!fs.existsSync(path.join(projectRoot, ".git"))) initGitWorktreeFixture(projectRoot);
 }
 
 async function advanceFlowHeadWithoutTouchingTheTree(session) {
@@ -4520,6 +4564,337 @@ async function advanceSessionToVerify(session) {
   return latest;
 }
 
+function fixtureGit(session, args) {
+  const result = spawnSync("/usr/bin/git", args, { cwd: session.projectRoot, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
+function verifiedTestGateEntries(session) {
+  const tests = passingTestsClaim(session);
+  return { tests, entries: [tests, ...verifiedTestsPrerequisites(session)] };
+}
+
+function passingTestsClaim(session, timestamp) {
+  const tests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", ...(timestamp ? { timestamp } : {}) });
+  const snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+  assert.equal(snapshot.kind, "git-worktree");
+  assert.equal(snapshot.worktree_clean, true, "passing fixture evidence is captured from a clean Git worktree");
+  tests.claim.metadata.verification_workspace_snapshot = snapshot;
+  for (const observation of tests.claim.metadata.observed_commands) {
+    observation.observed_at_commit = snapshot.head_sha;
+    observation.worktree_clean = snapshot.worktree_clean;
+    observation.verification_workspace_snapshot = structuredClone(snapshot);
+  }
+  tests.evidence.passing = true;
+  tests.evidence.execution = { runner: "bash", label: tests.claim.metadata.observed_commands[0].command, isError: false, exitCode: 0 };
+  return tests;
+}
+
+function genericCommandGateEntry(session, count = 1) {
+  const entry = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
+  const snapshot = captureReviewWorkspaceSnapshot(session.projectRoot, []);
+  assert.equal(snapshot.kind, "git-worktree");
+  entry.claim.metadata.artifact_refs = Array.from({ length: count }, (_, index) => ({ kind: "command", excerpt: `git status --porcelain #${index + 1}`, summary: "Fixture command observation." }));
+  entry.claim.metadata.verification_workspace_snapshot = snapshot;
+  entry.claim.metadata.observed_commands = Array.from({ length: count }, (_, index) => ({
+    command: `git status --porcelain #${index + 1}`,
+    exit_code: 0,
+    output_sha256: String(index).padStart(64, "0"),
+    observed_at_commit: snapshot.head_sha,
+    worktree_clean: true,
+    verification_workspace_snapshot: structuredClone(snapshot),
+  }));
+  entry.evidence.passing = true;
+  entry.evidence.execution = { runner: "bash", label: entry.claim.metadata.observed_commands[0].command, isError: false, exitCode: 0 };
+  entry.extraEvidence = entry.claim.metadata.observed_commands.slice(1).map((observation, index) => ({
+    ...structuredClone(entry.evidence),
+    id: `${entry.evidence.id}.command-${index + 2}`,
+    execution: { runner: "bash", label: observation.command, isError: false, exitCode: 0 },
+  }));
+  return entry;
+}
+
+test("every passing command-backed gate claim requires exact observation provenance", async () => {
+  const clean = makeGitBackedSession("generic-command-provenance-clean");
+  await startClaimedBuilderFlowSession({ sessionDir: clean.sessionDir });
+  assert.equal((await writeAndSync(clean, [genericCommandGateEntry(clean)])).attached, true);
+
+  const linkedExecution = makeGitBackedSession("generic-command-provenance-linked-execution");
+  await startClaimedBuilderFlowSession({ sessionDir: linkedExecution.sessionDir });
+  const executionOnly = bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" });
+  executionOnly.evidence.execution = { runner: "bash", label: "git status --porcelain", isError: false, exitCode: 0 };
+  await assert.rejects(
+    writeAndSync(linkedExecution, [executionOnly]),
+    /(cannot contribute to a passing gate without its clean Git-worktree observation snapshot|passing command-backed claim .* has no captured command observation)/,
+    "linked execution evidence cannot use the matching Flow-head path without a captured observation",
+  );
+
+  const exactLinked = makeGitBackedSession("generic-command-provenance-exact-linked-execution");
+  await startClaimedBuilderFlowSession({ sessionDir: exactLinked.sessionDir });
+  const linkedPass = genericCommandGateEntry(exactLinked, 2);
+  linkedPass.evidence.execution = { runner: "bash", label: linkedPass.claim.metadata.observed_commands[0].command, isError: false, exitCode: 0 };
+  linkedPass.extraEvidence = [{
+    ...structuredClone(linkedPass.evidence),
+    id: `${linkedPass.evidence.id}.second-command`,
+    execution: { runner: "bash", label: linkedPass.claim.metadata.observed_commands[1].command, isError: false, exitCode: 0 },
+  }];
+  assert.equal((await writeAndSync(exactLinked, [linkedPass])).attached, true, "ordered linked execution labels bind their matching observations");
+
+  for (const [name, mutate] of [
+    ["x-y", (entry) => { entry.evidence.execution.label = "git status --porcelain X"; }],
+    ["nonzero", (entry) => { entry.evidence.execution.exitCode = 1; entry.evidence.execution.isError = true; }],
+    ["passing-false", (entry) => { entry.evidence.passing = false; }],
+    ["missing", (entry) => { entry.claim.metadata.observed_commands = []; entry.claim.metadata._fixture_skip_observation_provenance = true; }],
+    ["multiplicity", (entry) => { entry.extraEvidence = []; }],
+    ["missing-execution", (entry) => { delete entry.evidence.execution; entry.extraEvidence = []; }],
+    ["artifact-x-observation-y", (entry) => { entry.claim.metadata.artifact_refs[0].excerpt = "git status --porcelain X"; }],
+    ["artifact-summary-only", (entry) => { entry.claim.metadata.artifact_refs = [{ kind: "command", summary: "command result" }]; }],
+    ["artifact-url-only", (entry) => { entry.claim.metadata.artifact_refs = [{ kind: "command", url: "https://example.test/command" }]; }],
+  ]) {
+    const session = makeGitBackedSession(`generic-command-provenance-linked-${name}`);
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+    const entry = genericCommandGateEntry(session, 2);
+    entry.evidence.execution = { runner: "bash", label: entry.claim.metadata.observed_commands[0].command, isError: false, exitCode: 0 };
+    entry.extraEvidence = [{
+      ...structuredClone(entry.evidence),
+      id: `${entry.evidence.id}.second-command`,
+      execution: { runner: "bash", label: entry.claim.metadata.observed_commands[1].command, isError: false, exitCode: 0 },
+    }];
+    mutate(entry);
+    await assert.rejects(
+      writeAndSync(session, [entry]),
+      /(has no captured command observation|must bind every linked execution label|has no linked execution evidence|must bind command evidence refs|has an unbindable command evidence ref)/,
+      name,
+    );
+  }
+
+  for (const [name, mutate] of [
+    ["missing", (entry) => {
+      delete entry.claim.metadata.observed_commands[1].observed_at_commit;
+      entry.claim.metadata._fixture_skip_observation_provenance = true;
+    }],
+    ["dirty", (entry) => { entry.claim.metadata.observed_commands[1].worktree_clean = false; }],
+    ["upper-case-output-sha", (entry) => { entry.claim.metadata.observed_commands[1].output_sha256 = "A".repeat(64); }],
+    ["mixed-snapshot", (entry) => { entry.claim.metadata.observed_commands[1].verification_workspace_snapshot = structuredClone(entry.claim.metadata.verification_workspace_snapshot); entry.claim.metadata.observed_commands[1].verification_workspace_snapshot.digest = "f".repeat(64); }],
+  ]) {
+    const session = makeGitBackedSession(`generic-command-provenance-${name}`);
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+    const entry = genericCommandGateEntry(session, 2);
+    mutate(entry);
+    await assert.rejects(
+      writeAndSync(session, [entry]),
+      /passing command-backed claim .* must carry clean observation-time Git provenance/,
+      name,
+    );
+  }
+
+  const unrelated = makeGitBackedSession("generic-command-provenance-unrelated");
+  await startClaimedBuilderFlowSession({ sessionDir: unrelated.sessionDir });
+  const entry = genericCommandGateEntry(unrelated);
+  fixtureGit(unrelated, ["checkout", "--orphan", "unrelated-y"]);
+  fixtureGit(unrelated, ["rm", "-rf", "."]);
+  fs.writeFileSync(path.join(unrelated.projectRoot, ".gitignore"), ".kontourai/\n");
+  fs.mkdirSync(path.join(unrelated.projectRoot, "review-target"));
+  fs.writeFileSync(path.join(unrelated.projectRoot, "review-target", "implementation.txt"), "unrelated implementation\n");
+  fs.writeFileSync(path.join(unrelated.projectRoot, "review-target", "delivery.md"), "unrelated delivery\n");
+  fixtureGit(unrelated, ["add", ".gitignore", "review-target"]);
+  fixtureGit(unrelated, ["commit", "-m", "unrelated Y"]);
+  await assert.rejects(writeAndSync(unrelated, [entry]), /is not an ancestor of trusted current HEAD/);
+});
+
+test("record-gate-claim emits one canonical execution evidence item for each passing command", async () => {
+  const session = makeGitBackedSession("writer-multi-command-runtime");
+  writeJson(path.join(session.sessionDir, "acceptance.json"), {
+    schema_version: "1.0",
+    task_slug: session.slug,
+    criteria: [{ id: "writer-multi-command", description: "Both writer-owned commands are observed.", status: "pending", evidence_refs: [] }],
+  });
+  const first = "writer-first.test.sh";
+  const second = "writer-second.test.sh";
+  fs.writeFileSync(path.join(session.projectRoot, first), "set -e\ntest 1 -eq 1\nprintf '1..1\\n'\n");
+  fs.writeFileSync(path.join(session.projectRoot, second), "set -e\ntest 2 -eq 2\nprintf '1..1\\n'\n");
+  fixtureGit(session, ["add", first, second]);
+  fixtureGit(session, ["commit", "-m", "writer multi-command test fixtures"]);
+  await advanceSessionToVerify(session);
+  const [critique] = verifiedTestsPrerequisites(session);
+  writeBundle(session.sessionDir, [critique]);
+
+  const firstCommand = `sh ${first}`;
+  const secondCommand = `sh ${second}`;
+  await workflowSidecarMain([
+    "record-gate-claim", session.sessionDir,
+    "--expectation", "tests-evidence",
+    "--status", "pass",
+    "--summary", "Writer-owned multi-command verification fixture.",
+    "--command", firstCommand,
+    "--command", secondCommand,
+    "--evidence-ref-json", JSON.stringify({ kind: "command", excerpt: firstCommand, summary: "first writer-owned command" }),
+    "--evidence-ref-json", JSON.stringify({ kind: "command", excerpt: secondCommand, summary: "second writer-owned command" }),
+    "--criterion-json", JSON.stringify({ id: "writer-multi-command", status: "pass", evidence_refs: [
+      { kind: "command", excerpt: firstCommand, summary: "first writer-owned command" },
+      { kind: "command", excerpt: secondCommand, summary: "second writer-owned command" },
+    ] }),
+  ]);
+
+  const bundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const testsClaim = bundle.claims.find((claim) => claim.claimType === "builder.verify.tests");
+  const commandEvidence = bundle.evidence.filter((evidence) => evidence.claimId === testsClaim.id && typeof evidence.execution?.label === "string");
+  assert.deepEqual(commandEvidence.map((evidence) => evidence.execution.label), [firstCommand, secondCommand]);
+  assert.ok(commandEvidence.every((evidence) => evidence.execution.exitCode === 0 && evidence.execution.isError === false));
+
+  const synchronized = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(synchronized.run.state.current_step, "merge-ready");
+});
+
+test("current-gate provenance accepts a clean self observation and rejects a same-Flow-head bypass without a snapshot", async () => {
+  const session = makeGitBackedSession("observation-self");
+  await advanceSessionToVerify(session);
+  const self = verifiedTestGateEntries(session);
+  assert.equal((await writeAndSync(session, self.entries)).attached, true, "a clean observation at current HEAD remains valid");
+
+  const bypass = makeGitBackedSession("observation-same-head-bypass");
+  await advanceSessionToVerify(bypass);
+  const invalid = verifiedTestGateEntries(bypass);
+  invalid.tests.claim.metadata.verification_workspace_snapshot = false;
+  await assert.rejects(
+    writeAndSync(bypass, invalid.entries),
+    /cannot contribute to a passing gate without its clean Git-worktree observation snapshot/,
+    "matching flow_run_head is not a provenance bypass",
+  );
+
+  const wrongStep = makeGitBackedSession("observation-same-head-step-mismatch");
+  await advanceSessionToVerify(wrongStep);
+  const stepMismatch = verifiedTestGateEntries(wrongStep);
+  stepMismatch.tests.claim.metadata.gate_claim.step_id = "plan";
+  await assert.rejects(
+    writeAndSync(wrongStep, stepMismatch.entries),
+    /still matches the current tree, but it was recorded at step 'plan' rather than the current step 'verify'/,
+    "a current Flow head cannot waive command-observation step freshness",
+  );
+});
+
+test("current-gate provenance rejects a deterministic unrelated X/Y history", async () => {
+  const session = makeGitBackedSession("observation-unrelated-history");
+  await advanceSessionToVerify(session);
+  const { entries } = verifiedTestGateEntries(session);
+
+  fixtureGit(session, ["checkout", "--orphan", "unrelated-y"]);
+  fixtureGit(session, ["rm", "-rf", "."]);
+  fs.writeFileSync(path.join(session.projectRoot, ".gitignore"), ".kontourai/\n");
+  fs.mkdirSync(path.join(session.projectRoot, "review-target"));
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "unrelated implementation\n");
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "delivery.md"), "unrelated delivery\n");
+  fixtureGit(session, ["add", ".gitignore", "review-target"]);
+  fixtureGit(session, ["commit", "-m", "unrelated Y"]);
+
+  await assert.rejects(
+    writeAndSync(session, entries),
+    /is not an ancestor of trusted current HEAD/,
+  );
+});
+
+test("current-gate provenance treats dirty, malformed, and unavailable Git observations as non-confirming", async () => {
+  for (const [name, mutate, expected] of [
+    ["tracked-dirty", (session) => fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "dirty tracked bytes\n"), /current Git worktree is dirty/],
+    ["untracked-dirty", (session) => fs.writeFileSync(path.join(session.projectRoot, "new-untracked.txt"), "dirty untracked bytes\n"), /current Git worktree is dirty/],
+    ["ancestor-snapshot-mismatch", (session) => fixtureGit(session, ["commit", "--allow-empty", "-m", "descendant without matching snapshot"]), /recorded Git workspace snapshot no longer matches the current tree/],
+    ["malformed", (session, tests) => { tests.claim.metadata.verification_workspace_snapshot.head_sha = "not-a-sha"; }, /malformed observed_at_commit/],
+    ["41-character", (session, tests) => {
+      const commit = "a".repeat(41);
+      tests.claim.metadata.verification_workspace_snapshot.head_sha = commit;
+      tests.claim.metadata.observed_commands[0].observed_at_commit = commit;
+      tests.claim.metadata.observed_commands[0].verification_workspace_snapshot.head_sha = commit;
+    }, /malformed observed_at_commit/],
+    ["63-character", (session, tests) => {
+      const commit = "a".repeat(63);
+      tests.claim.metadata.verification_workspace_snapshot.head_sha = commit;
+      tests.claim.metadata.observed_commands[0].observed_at_commit = commit;
+      tests.claim.metadata.observed_commands[0].verification_workspace_snapshot.head_sha = commit;
+    }, /malformed observed_at_commit/],
+    ["upper-case", (session, tests) => {
+      const commit = "A".repeat(40);
+      tests.claim.metadata.verification_workspace_snapshot.head_sha = commit;
+      tests.claim.metadata.observed_commands[0].observed_at_commit = commit;
+      tests.claim.metadata.observed_commands[0].verification_workspace_snapshot.head_sha = commit;
+    }, /malformed observed_at_commit/],
+    ["unresolved", (session, tests) => {
+      const commit = "a".repeat(40);
+      tests.claim.metadata.verification_workspace_snapshot.head_sha = commit;
+      tests.claim.metadata.observed_commands[0].observed_at_commit = commit;
+      tests.claim.metadata.observed_commands[0].verification_workspace_snapshot.head_sha = commit;
+    }, /could not prove that claim .* observed commit/],
+  ]) {
+    const session = makeGitBackedSession(`observation-${name}`);
+    await advanceSessionToVerify(session);
+    const { tests, entries } = verifiedTestGateEntries(session);
+    mutate(session, tests);
+    await assert.rejects(writeAndSync(session, entries), expected, name);
+  }
+
+  const nonGit = makeSession("observation-non-git");
+  await advanceSessionToVerify(nonGit);
+  const tests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  tests.claim.metadata.verification_workspace_snapshot = { kind: "git-worktree", digest: "a".repeat(64), head_sha: "b".repeat(40), worktree_clean: true };
+  tests.claim.metadata.observed_commands[0].observed_at_commit = "b".repeat(40);
+  tests.claim.metadata.observed_commands[0].worktree_clean = true;
+  tests.claim.metadata.observed_commands[0].verification_workspace_snapshot = structuredClone(tests.claim.metadata.verification_workspace_snapshot);
+  tests.evidence.passing = true;
+  tests.evidence.execution = { runner: "bash", label: tests.claim.metadata.observed_commands[0].command, isError: false, exitCode: 0 };
+  await assert.rejects(
+    writeAndSync(nonGit, [tests]),
+    /cannot establish a trusted current Git HEAD/,
+  );
+});
+
+test("tests-evidence observations require matching clean commit provenance", async () => {
+  for (const [name, mutate] of [
+    ["missing", (tests) => { delete tests.claim.metadata.observed_commands[0].observed_at_commit; tests.claim.metadata._fixture_skip_observation_provenance = true; }],
+    ["dirty", (tests) => { tests.claim.metadata.observed_commands[0].worktree_clean = false; }],
+    ["mismatched", (tests) => { tests.claim.metadata.observed_commands[0].observed_at_commit = "b".repeat(40); }],
+    ["snapshot-mismatched", (tests) => { tests.claim.metadata.observed_commands[0].verification_workspace_snapshot = false; }],
+  ]) {
+    const session = makeGitBackedSession(`test-observation-${name}`);
+    await advanceSessionToVerify(session);
+    const { tests, entries } = verifiedTestGateEntries(session);
+    mutate(tests);
+    await assert.rejects(
+      writeAndSync(session, entries),
+      /(passing command-backed claim .* must carry clean observation-time Git provenance|must contain unique clean command observations)/,
+      name,
+    );
+  }
+});
+
+test("passing tests-evidence without an observation array cannot use the Flow-head fast path", async () => {
+  const session = makeGitBackedSession("passing-test-observation-array-required");
+  await advanceSessionToVerify(session);
+  const { tests, entries } = verifiedTestGateEntries(session);
+  delete tests.claim.metadata.observed_commands;
+  await assert.rejects(
+    writeAndSync(session, entries),
+    /(has no captured command observation|must contain successful command observations)/,
+  );
+});
+
+test("non-passing observed tests remain auditable without clean revision provenance", async () => {
+  const session = makeGitBackedSession("non-passing-observation-provenance");
+  await advanceSessionToVerify(session);
+  const failed = bundleClaim({
+    expectation: "tests-evidence",
+    claimType: "builder.verify.tests",
+    subjectType: "flow-step",
+    status: "fail",
+    routeReason: "implementation_defect",
+  });
+  failed.claim.metadata.verification_workspace_snapshot = false;
+  failed.claim.metadata.observed_commands[0].observed_at_commit = undefined;
+  failed.claim.metadata.observed_commands[0].worktree_clean = false;
+
+  const result = await writeAndSync(session, [failed]);
+  assert.equal(result.run.state.current_step, "execute", "the failed observation routes back instead of being rejected as unrecordable provenance");
+});
+
 // A critique's own review binding lives at review_target.workspace_snapshot rather than
 // metadata.verification_workspace_snapshot. It is honored only for a genuinely critique-origin
 // claim — the (origin, claimType, subjectType) tuple — so no other producer can supply its own
@@ -4616,7 +4991,7 @@ test("a workspace capture failure is terminal rather than tolerated", async () =
   await assert.rejects(writeAndSync(session, [entry]), (error) => {
     assert.match(error.message, /evidence\.claims\.metadata\.gate_claim\.flow_run_head.*must match the canonical Flow state/);
     assert.match(error.message, /claim 'claim\.selected-work'/);
-    assert.match(error.message, /could not be captured \(could not inspect the Git worktree/, "the underlying capture failure is quoted, not swallowed");
+    assert.match(error.message, /(could not be captured \(could not inspect the Git worktree|and no Git workspace snapshot)/, "the capture remains terminal rather than being tolerated");
     return true;
   });
 });
@@ -4670,6 +5045,50 @@ function checkClaimFor(session, checkId) {
   return readJson(path.join(session.sessionDir, "trust.bundle")).claims
     .find((claim) => String(claim.subjectId ?? "").endsWith(`/${checkId}`));
 }
+
+test("declarative command evidence cannot mint a verified pass without an observed snapshot", async () => {
+  const session = makeGitBackedSession("declarative-command-pass-unprovenanced");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await workflowSidecarMain([
+    "record-evidence", session.sessionDir,
+    "--verdict", "pass",
+    "--check-json", JSON.stringify({
+      id: "sol-command-pass",
+      kind: "command",
+      status: "pass",
+      command: "true",
+      summary: "A declarative command must not stand in for an observed result.",
+    }),
+  ]);
+
+  const claim = checkClaimFor(session, "sol-command-pass");
+  assert.equal(claim.value, "not_verified");
+  assert.notEqual(claim.status, "verified");
+  assert.equal(claim.metadata.verification_workspace_snapshot, undefined);
+});
+
+test("dogfood pass cannot mint a verified declarative command result without an observation", async () => {
+  const session = makeGitBackedSession("dogfood-command-pass-unprovenanced");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await workflowSidecarMain([
+    "dogfood-pass",
+    "--artifact-root", session.artifactRoot,
+    "--artifact-dir", session.sessionDir,
+    "--verdict", "pass",
+    "--check-json", JSON.stringify({
+      id: "dogfood-command-pass",
+      kind: "command",
+      status: "pass",
+      command: "true",
+      summary: "Dogfood must not treat a declared command as observed evidence.",
+    }),
+  ]);
+
+  const claim = checkClaimFor(session, "dogfood-command-pass");
+  assert.equal(claim.value, "not_verified");
+  assert.notEqual(claim.status, "verified");
+  assert.equal(claim.metadata.verification_workspace_snapshot, undefined);
+});
 
 test("a non-tests gate claim recorded in a Git worktree carries a workspace snapshot", async () => {
   const session = makeGitBackedSession("gate-claim-snapshot-capture");
@@ -6555,13 +6974,15 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   assert.equal(staleRetry.run.state.current_step, "verify");
   assert.equal(staleRetry.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "delivery.md"), "corrected delivery after route-back\n");
+  fixtureGit(session, ["add", "review-target/delivery.md"]);
+  fixtureGit(session, ["commit", "-m", "corrected delivery after route-back"]);
   const correctedAt = new Date(Date.parse(reentered.run.state.transitions.at(-1).at) + 1).toISOString();
   const correctedPrerequisites = verifiedTestsPrerequisites(session, correctedAt)
     .map((entry, index) => withIdentitySuffix(entry, `corrected-${index}`));
   correctedPrerequisites[0].claim.metadata.reviewer = "reviewer-after-route-back";
   restampCritiqueClaim(correctedPrerequisites[0]);
   const corrected = await writeAndSync(session, [
-    withIdentitySuffix(bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }), "corrected"),
+    withIdentitySuffix(passingTestsClaim(session, correctedAt), "corrected"),
     ...correctedPrerequisites,
     // Compose-safe writers preserve this older reviewer's still-live PASS slice. It targets the
     // prior implementation bytes and must remain audit history without deadlocking the new gate
@@ -7345,9 +7766,11 @@ test("passing tests-evidence rejects a critique whose reviewed artifact changed"
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
   const prerequisites = verifiedTestsPrerequisites(session);
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "delivery.md"), "changed after review\n");
+  fixtureGit(session, ["add", "review-target/delivery.md"]);
+  fixtureGit(session, ["commit", "-m", "changed reviewed artifact"]);
   await assert.rejects(
-    () => writeAndSync(session, [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...prerequisites]),
-    /review_target\.artifacts\.sha256.*does not match/,
+    () => writeAndSync(session, [passingTestsClaim(session), ...prerequisites]),
+    /(review_target\.artifacts\.sha256.*does not match|requires a clean critique of the current implementation workspace)/,
   );
 });
 
@@ -7364,11 +7787,13 @@ test("stale passing critique remains audit history when a current exact-workspac
   const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
+  fixtureGit(session, ["add", "review-target/implementation.txt"]);
+  fixtureGit(session, ["commit", "-m", "corrected implementation"]);
   const [current, criterion] = verifiedTestsPrerequisites(session);
   appendCritiqueAfter(stale, current);
 
   const result = await writeAndSync(session, [
-    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+    passingTestsClaim(session),
     stale,
     current,
     criterion,
@@ -7390,11 +7815,13 @@ test("stale passing critique with a changed reviewed workflow artifact does not 
   const stale = verifiedTestsPrerequisites(session, new Date(Date.now() - 1_000).toISOString())[0];
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "delivery.md"), "finalized workflow record\n");
+  fixtureGit(session, ["add", "review-target/delivery.md"]);
+  fixtureGit(session, ["commit", "-m", "updated workflow artifact"]);
   const [current, criterion] = verifiedTestsPrerequisites(session);
   appendCritiqueAfter(stale, current);
 
   const result = await writeAndSync(session, [
-    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+    passingTestsClaim(session),
     stale,
     current,
     criterion,
@@ -7417,12 +7844,14 @@ test("stale open critique remains blocking even when a different reviewer suppli
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   stale.claim.metadata.findings = [{ id: "old-open-finding", status: "open", summary: "Must not be buried." }];
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
+  fixtureGit(session, ["add", "review-target/implementation.txt"]);
+  fixtureGit(session, ["commit", "-m", "corrected implementation"]);
   const [current, criterion] = verifiedTestsPrerequisites(session);
   appendCritiqueAfter(stale, current);
 
   await assert.rejects(
     () => writeAndSync(session, [
-      bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+      passingTestsClaim(session),
       stale,
       current,
       criterion,
@@ -7431,7 +7860,7 @@ test("stale open critique remains blocking even when a different reviewer suppli
   );
 });
 
-test("malformed stale passing critique remains blocking when a current clean critique exists", async () => {
+test("malformed historical critique remains audit history when a current clean critique exists", async () => {
   const session = makeSession("malformed-stale-current-clean");
   await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
   await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
@@ -7445,18 +7874,18 @@ test("malformed stale passing critique remains blocking when a current clean cri
   stale.claim.metadata.reviewer = "unavailable-prior-reviewer";
   stale.claim.metadata.review_target.workspace_snapshot.files = [];
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "corrected implementation\n");
+  fixtureGit(session, ["add", "review-target/implementation.txt"]);
+  fixtureGit(session, ["commit", "-m", "corrected implementation"]);
   const [current, criterion] = verifiedTestsPrerequisites(session);
   appendCritiqueAfter(stale, current);
 
-  await assert.rejects(
-    () => writeAndSync(session, [
-      bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
-      stale,
-      current,
-      criterion,
-    ]),
-    /workspace_snapshot\.files.*must list explicitly reviewed files/,
-  );
+  const result = await writeAndSync(session, [
+    passingTestsClaim(session),
+    stale,
+    current,
+    criterion,
+  ]);
+  assert.equal(result.run.state.current_step, "merge-ready");
 });
 
 test("passing tests-evidence rejects a successful command that executed zero tests", async () => {
@@ -7490,8 +7919,10 @@ test("passing tests-evidence rejects a critique after implementation source chan
   await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
   const prerequisites = verifiedTestsPrerequisites(session);
   fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "source changed after review\n");
+  fixtureGit(session, ["add", "review-target/implementation.txt"]);
+  fixtureGit(session, ["commit", "-m", "changed implementation source"]);
   await assert.rejects(
-    () => writeAndSync(session, [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...prerequisites]),
+    () => writeAndSync(session, [passingTestsClaim(session), ...prerequisites]),
     /requires a clean critique of the current implementation workspace/,
   );
 });
@@ -7656,7 +8087,6 @@ async function advanceSessionToPrOpen(session) {
 test("configured ChangeProvider projects only the operation-specific executable contract", async () => {
   const session = makeSession("configured-change-provider");
   writeJson(path.join(session.projectRoot, "package.json"), { repository: "https://github.com/kontourai/flow-agents.git" });
-  await advanceSessionToPrOpen(session);
   writeJson(path.join(session.projectRoot, "context", "settings", "change-provider-settings.json"), {
     schema_version: "1.0",
     defaults: {
@@ -7667,9 +8097,11 @@ test("configured ChangeProvider projects only the operation-specific executable 
       },
     },
   });
+  await advanceSessionToPrOpen(session);
+  fixtureGit(session, ["remote", "add", "origin", "https://github.com/kontourai/flow-agents.git"]);
   const configured = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   const publish = configured.gateActionEnvelope.public_interfaces.mutations.find((entry) => entry.interface === "operation");
-  assert.equal(configured.projection.next_action.status, "continue");
+  assert.equal(configured.projection.next_action.status, "continue", configured.projection.next_action.summary);
   assert.equal(Object.hasOwn(configured.projection.next_action, "external_capability"), false);
   assert.equal(publish.protocol.availability.status, "configured");
   assert.deepEqual(publish.protocol.availability.command, ["publish-change", "execute", "--session-dir", "<session-dir>"]);
