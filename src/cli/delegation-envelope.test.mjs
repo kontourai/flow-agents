@@ -4,6 +4,7 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 import {
   DELEGATION_ENVELOPE_SCHEMA_VERSION,
+  CREDENTIAL_PATTERN_SOURCES,
   DelegationEnvelopeNarrowingError,
   DelegationEnvelopeValidationError,
   assertDelegationEnvelopeActiveAt,
@@ -12,6 +13,23 @@ import {
 } from "../../build/src/index.js";
 
 const OBSERVED_AT = "2026-08-09T12:00:00.000Z";
+const CREDENTIAL_FIXTURES = [
+  "https://user:password@example.com/path",
+  "Bearer credential",
+  "TOKEN=credential",
+  "sk_abcdefgh",
+  "github_pat_123456789012",
+  "xoxb-abcdefgh",
+  "glpat-abcdefgh",
+  "AKIAABCDEFGHIJKL",
+  "AIza12345678901234567890",
+  "ya29.abcdefgh",
+  "SG.abcdefgh.ijklmnop",
+  "whsec_abcdefgh",
+  "sk-proj-abcdefgh",
+  "sq0atp-abcdefgh",
+  "eyJabcdefgh.ijklmnop.",
+];
 
 const delegationSchema = JSON.parse(readFileSync(
   new URL("../../schemas/delegation-envelope.schema.json", import.meta.url),
@@ -113,6 +131,10 @@ function schemaValidator() {
   return ajv.compile(delegationSchema);
 }
 
+function schemaCredentialPatternSources(schema) {
+  return schema.$defs.credentialFreeText.allOf[1].not.anyOf.map(({ pattern }) => pattern);
+}
+
 test("validates a closed, explicit-unbound delegation envelope and matches the shipped schema", () => {
   const envelope = root();
   assert.equal(validateDelegationEnvelope(envelope).flow_binding.status, "unbound");
@@ -206,6 +228,67 @@ test("schema and runtime reject the same structural, credential, and timestamp f
   leapYearZero.budget.expires_at = "0000-02-29T12:00:00.000Z";
   assert.equal(validate(leapYearZero), true, JSON.stringify(validate.errors));
   assert.equal(validateDelegationEnvelope(leapYearZero).budget.expires_at, leapYearZero.budget.expires_at);
+});
+
+test("every canonical credential family is rejected at every envelope string boundary", () => {
+  const validate = schemaValidator();
+  assert.deepEqual(schemaCredentialPatternSources(delegationSchema), CREDENTIAL_PATTERN_SOURCES);
+  assert.deepEqual(schemaCredentialPatternSources(correlationSchema), CREDENTIAL_PATTERN_SOURCES);
+  for (const fixture of CREDENTIAL_FIXTURES) {
+    assert.ok(CREDENTIAL_PATTERN_SOURCES.some((source) => new RegExp(source).test(fixture)), fixture);
+  }
+
+  const mutateStringFields = [
+    (candidate, value) => { candidate.schema_version = value; },
+    (candidate, value) => { candidate.envelope_id = value; },
+    (candidate, value) => { candidate.parent_envelope_id = value; },
+    (candidate, value) => { candidate.correlation.schema_version = value; },
+    (candidate, value) => { candidate.correlation.correlation_id = value; },
+    (candidate, value) => { candidate.correlation.identities.runtime_session.status = value; },
+    (candidate, value) => { candidate.correlation.identities.runtime_session.value = value; },
+    (candidate, value) => { candidate.correlation.identities.runtime_turn.status = value; },
+    (candidate, value) => { candidate.correlation.identities.runtime_turn.reason = value; },
+    (candidate, value) => { candidate.flow_binding.status = value; },
+    (candidate, value) => { candidate.flow_binding.reason = value; },
+    (candidate, value) => { candidate.actor_id = value; },
+    (candidate, value) => { candidate.subject_id = value; },
+    (candidate, value) => { candidate.source.repository_id = value; },
+    (candidate, value) => { candidate.source.worktree_id = value; },
+    (candidate, value) => { candidate.source.source_state_id = value; },
+    (candidate, value) => { candidate.source.dirty_state_fingerprint = value; },
+    (candidate, value) => { candidate.authority.allowed_tools = [value]; },
+    (candidate, value) => { candidate.authority.allowed_effects = [value]; },
+    (candidate, value) => { candidate.authority.mutable_resources = [value]; },
+    (candidate, value) => { candidate.authority.posture = value; },
+    (candidate, value) => { candidate.authority.approval = value; },
+    (candidate, value) => { candidate.authority.escalation = value; },
+    (candidate, value) => { candidate.budget.expires_at = value; },
+    (candidate, value) => { candidate.runtime.required_capabilities = [value]; },
+    (candidate, value) => { candidate.runtime.runtime_receipt_ref = value; },
+    (candidate, value) => { candidate.runtime.model_receipt_ref = value; },
+    (candidate, value) => { candidate.continuation_id = value; },
+    (candidate, value) => { candidate.cancellation_id = value; },
+    (candidate, value) => { candidate.revisions.prompt_revision = value; },
+    (candidate, value) => { candidate.revisions.rubric_revision = value; },
+    (candidate, value) => { candidate.revisions.policy_revision = value; },
+  ];
+
+  for (const mutate of mutateStringFields) {
+    for (const fixture of CREDENTIAL_FIXTURES) {
+      const candidate = root();
+      mutate(candidate, fixture);
+      assert.equal(validate(candidate), false, JSON.stringify(validate.errors));
+      assert.throws(() => validateDelegationEnvelope(candidate), DelegationEnvelopeValidationError);
+    }
+  }
+});
+
+test("rejects non-primitive dirty fingerprints before write-capable state can propagate", () => {
+  for (const fingerprint of [new String("a".repeat(64)), { toString: () => "a".repeat(64) }]) {
+    const candidate = root();
+    candidate.source.dirty_state_fingerprint = fingerprint;
+    assert.throws(() => validateDelegationEnvelope(candidate), DelegationEnvelopeValidationError);
+  }
 });
 
 test("requires an explicit canonical observation before active envelopes derive", () => {

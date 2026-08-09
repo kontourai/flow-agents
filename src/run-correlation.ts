@@ -77,23 +77,29 @@ export class RunCorrelationValidationError extends Error {
 
 const identityPattern = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,254}$/;
 const workItemIdentityPattern = /^(?:[A-Za-z0-9][A-Za-z0-9._:@#-]{0,254}|(?:[A-Za-z0-9][A-Za-z0-9._@-]*:)?[A-Za-z0-9._@-]+(?:\/[A-Za-z0-9._@-]+)+(?:#[A-Za-z0-9._@-]+)?)$/;
-const credentialPatterns = [
-  /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s/?#@]*@/,
-  /bearer\s+/i,
-  /(?:api[_-]?key|access[_-]?token|client[_-]?secret|token|secret|password)\s*[:=]/i,
-  /(?:sk|gh[oprsu]|npm|pypi|hf)_[A-Za-z0-9_-]{8,}/i,
-  /github_pat_[A-Za-z0-9_]{12,}/i,
-  /xox[baprs]-[A-Za-z0-9-]{8,}/i,
-  /glpat-[A-Za-z0-9_-]{8,}/i,
-  /AKIA[A-Z0-9]{12,}/,
-  /AIza[A-Za-z0-9_-]{20,}/,
-  /ya29\.[A-Za-z0-9_-]{8,}/i,
-  /SG\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/,
-  /(?:whsec|[srp]k_(?:live|test))_[A-Za-z0-9_-]{8,}/i,
-  /(?:^|[^A-Za-z0-9])sk-(?:proj-|ant-)?[A-Za-z0-9_-]{8,}/i,
-  /sq0(?:atp|csp)-[A-Za-z0-9_-]{8,}/i,
-  /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\./,
+/**
+ * Case-explicit ECMAScript sources shared by runtime validation and the
+ * published JSON Schemas. Keep these schema-safe: JSON Schema has no regex
+ * flags, so each case-insensitive credential family is encoded directly.
+ */
+export const CREDENTIAL_PATTERN_SOURCES = [
+  String.raw`[A-Za-z][A-Za-z0-9+.-]*://[^\s/?#@]*@`,
+  String.raw`[Bb][Ee][Aa][Rr][Ee][Rr]\s+`,
+  String.raw`(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt][_-]?[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd])\s*[:=]`,
+  String.raw`(?:[Ss][Kk]|[Gg][Hh][OoPpRrSsUu]|[Nn][Pp][Mm]|[Pp][Yy][Pp][Ii]|[Hh][Ff])_[A-Za-z0-9_-]{8,}`,
+  String.raw`[Gg][Ii][Tt][Hh][Uu][Bb]_[Pp][Aa][Tt]_[A-Za-z0-9_]{12,}`,
+  String.raw`[Xx][Oo][Xx][BbAaPpRrSs]-[A-Za-z0-9-]{8,}`,
+  String.raw`[Gg][Ll][Pp][Aa][Tt]-[A-Za-z0-9_-]{8,}`,
+  String.raw`AKIA[A-Z0-9]{12,}`,
+  String.raw`AIza[A-Za-z0-9_-]{20,}`,
+  String.raw`[Yy][Aa]29\.[A-Za-z0-9_-]{8,}`,
+  String.raw`SG\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`,
+  String.raw`(?:[Ww][Hh][Ss][Ee][Cc]|[SsRrPp][Kk]_(?:[Ll][Ii][Vv][Ee]|[Tt][Ee][Ss][Tt]))_[A-Za-z0-9_-]{8,}`,
+  String.raw`(?:^|[^A-Za-z0-9])[Ss][Kk]-(?:[Pp][Rr][Oo][Jj]-|[Aa][Nn][Tt]-)?[A-Za-z0-9_-]{8,}`,
+  String.raw`[Ss][Qq]0(?:[Aa][Tt][Pp]|[Cc][Ss][Pp])-[A-Za-z0-9_-]{8,}`,
+  String.raw`eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.`,
 ] as const;
+const credentialPatterns = CREDENTIAL_PATTERN_SOURCES.map((source) => new RegExp(source));
 const allowedEnvelopeKeys = new Set(["schema_version", "correlation_id", "identities"]);
 const allowedPresentKeys = new Set(["status", "value"]);
 const allowedAbsentKeys = new Set(["status", "reason"]);

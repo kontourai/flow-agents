@@ -167,7 +167,7 @@ function isUniqueList(value: unknown, validator: (item: unknown) => boolean): va
 }
 
 function isResourceList(value: unknown): value is string[] {
-  return isUniqueList(value, (item) => typeof item === "string" && resource.test(item));
+  return isUniqueList(value, (item) => typeof item === "string" && resource.test(item) && !containsSensitiveCredential(item));
 }
 
 function validateFlowBinding(value: unknown, issues: string[]): value is DelegationFlowBinding {
@@ -200,7 +200,7 @@ function validateSource(value: unknown, issues: string[]): value is DelegationSo
   for (const key of ["repository_id", "worktree_id", "source_state_id"] as const) {
     if (!isSafeIdentifier(value[key])) issues.push(`source.${key} must be a safe identifier`);
   }
-  if (value.dirty_state_fingerprint !== undefined && !/^[0-9a-f]{64}$/.test(String(value.dirty_state_fingerprint))) {
+  if (value.dirty_state_fingerprint !== undefined && (typeof value.dirty_state_fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(value.dirty_state_fingerprint))) {
     issues.push("source.dirty_state_fingerprint must be a SHA-256 digest");
   }
   return true;

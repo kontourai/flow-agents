@@ -42,11 +42,28 @@
   ],
   "$defs": {
     "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
-    "id": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://)(?!.*[A-Za-z][A-Za-z0-9+.-]*://[^\\s/?#@]*@)[A-Za-z0-9][A-Za-z0-9._:@#/-]{0,254}$" },
-    "reason": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]+$", "not": { "pattern": "[A-Za-z][A-Za-z0-9+.-]*://[^\\s/?#@]*@" } },
+    "credentialFreeText": { "allOf": [ { "type": "string" }, { "not": { "anyOf": [
+      { "pattern": "[A-Za-z][A-Za-z0-9+.-]*://[^\\s/?#@]*@" },
+      { "pattern": "[Bb][Ee][Aa][Rr][Ee][Rr]\\s+" },
+      { "pattern": "(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt][_-]?[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd])\\s*[:=]" },
+      { "pattern": "(?:[Ss][Kk]|[Gg][Hh][OoPpRrSsUu]|[Nn][Pp][Mm]|[Pp][Yy][Pp][Ii]|[Hh][Ff])_[A-Za-z0-9_-]{8,}" },
+      { "pattern": "[Gg][Ii][Tt][Hh][Uu][Bb]_[Pp][Aa][Tt]_[A-Za-z0-9_]{12,}" },
+      { "pattern": "[Xx][Oo][Xx][BbAaPpRrSs]-[A-Za-z0-9-]{8,}" },
+      { "pattern": "[Gg][Ll][Pp][Aa][Tt]-[A-Za-z0-9_-]{8,}" },
+      { "pattern": "AKIA[A-Z0-9]{12,}" },
+      { "pattern": "AIza[A-Za-z0-9_-]{20,}" },
+      { "pattern": "[Yy][Aa]29\\.[A-Za-z0-9_-]{8,}" },
+      { "pattern": "SG\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}" },
+      { "pattern": "(?:[Ww][Hh][Ss][Ee][Cc]|[SsRrPp][Kk]_(?:[Ll][Ii][Vv][Ee]|[Tt][Ee][Ss][Tt]))_[A-Za-z0-9_-]{8,}" },
+      { "pattern": "(?:^|[^A-Za-z0-9])[Ss][Kk]-(?:[Pp][Rr][Oo][Jj]-|[Aa][Nn][Tt]-)?[A-Za-z0-9_-]{8,}" },
+      { "pattern": "[Ss][Qq]0(?:[Aa][Tt][Pp]|[Cc][Ss][Pp])-[A-Za-z0-9_-]{8,}" },
+      { "pattern": "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\." }
+    ] } } ] },
+    "id": { "allOf": [ { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://)[A-Za-z0-9][A-Za-z0-9._:@#/-]{0,254}$" }, { "$ref": "#/$defs/credentialFreeText" } ] },
+    "reason": { "allOf": [ { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]+$" }, { "$ref": "#/$defs/credentialFreeText" } ] },
     "nonNegativeInteger": { "type": "integer", "minimum": 0 },
     "canonicalTimestamp": { "type": "string", "pattern": "^(?:(?:[0-9]{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))|(?:(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:00|0[48]|[2468][048]|[13579][26])00)-02-29))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$" },
     "idList": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
-    "resourceList": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^(?!.*(?:^|/)\\.\\.?(?:/|$))[A-Za-z0-9][A-Za-z0-9._@-]*(?:/[A-Za-z0-9][A-Za-z0-9._@-]*)*$" } }
+    "resourceList": { "type": "array", "uniqueItems": true, "items": { "allOf": [ { "type": "string", "pattern": "^(?!.*(?:^|/)\\.\\.?(?:/|$))[A-Za-z0-9][A-Za-z0-9._@-]*(?:/[A-Za-z0-9][A-Za-z0-9._@-]*)*$" }, { "$ref": "#/$defs/credentialFreeText" } ] } }
   }
 }
