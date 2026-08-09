@@ -4233,9 +4233,10 @@ function writeBundle(dir, claimedSnapshot) {
 function writeUnrelatedLog(dir) {
   fs.writeFileSync(path.join(dir, 'command-log.jsonl'), `${JSON.stringify({ command: 'echo unrelated', exitCode: 0, observedResult: 'pass' })}\n`);
 }
-function expectNotVerified(label, needle, authorityRoot = repo, workspaceRoot = repo, dir = artifact) {
+function expectNotVerified(label, expected, authorityRoot = repo, workspaceRoot = repo, dir = artifact) {
   const warnings = stop.captureCrossReference(authorityRoot, dir, null, workspaceRoot);
-  if (!warnings.some((warning) => warning.includes('NOT_VERIFIED') && warning.includes(needle))) throw new Error(`${label}: ${warnings.join('\n')}`);
+  const fragments = Array.isArray(expected) ? expected : [expected];
+  if (!warnings.some((warning) => warning.includes('NOT_VERIFIED') && fragments.every((fragment) => warning.includes(fragment)))) throw new Error(`${label}: ${warnings.join('\n')}`);
 }
 writeAcceptance(artifact);
 writeBundle(artifact, snapshot);
@@ -4252,7 +4253,7 @@ fs.mkdirSync(nonGitArtifact, { recursive: true });
 writeAcceptance(nonGitArtifact);
 writeBundle(nonGitArtifact, snapshot);
 writeUnrelatedLog(nonGitArtifact);
-expectNotVerified('non-Git backstop worktree', 'current canonical workspace snapshot is unavailable or dirty', nonGitRoot, nonGitRoot, nonGitArtifact);
+expectNotVerified('non-Git backstop worktree', ['capture record', 'observed_at_commit'], nonGitRoot, nonGitRoot, nonGitArtifact);
 NODE
 then
   _pass "trusted backstop passes require exact clean observed-worktree provenance"

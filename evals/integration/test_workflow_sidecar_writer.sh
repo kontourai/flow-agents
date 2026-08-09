@@ -3605,10 +3605,17 @@ fi
 # ─── #270/#298 compose layer: gate-claim accumulation, gate-claim typing survives rebuild, ──
 # compose-two/three/four-writer round-trip, waiver + artifact_refs/standard_refs round-trip,
 # runnability rejection at record time (AC1-AC6, AC8, AC10) ──────────────────────────────────
-COMPOSE_ROOT="$TMPDIR_EVAL/compose-project/.kontourai/flow-agents"
+COMPOSE_PROJECT_ROOT="$TMPDIR_EVAL/compose-project"
+COMPOSE_ROOT="$COMPOSE_PROJECT_ROOT/.kontourai/flow-agents"
 COMPOSE_SLUG="compose-270"
 COMPOSE_DIR="$COMPOSE_ROOT/$COMPOSE_SLUG"
 mkdir -p "$COMPOSE_ROOT"
+git -C "$COMPOSE_PROJECT_ROOT" init -q
+git -C "$COMPOSE_PROJECT_ROOT" config user.email sidecar-writer@example.invalid
+git -C "$COMPOSE_PROJECT_ROOT" config user.name "Sidecar Writer Eval"
+printf '.kontourai/\n' > "$COMPOSE_PROJECT_ROOT/.gitignore"
+git -C "$COMPOSE_PROJECT_ROOT" add .gitignore
+git -C "$COMPOSE_PROJECT_ROOT" commit -qm "seed compose writer fixture"
 
 flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$COMPOSE_ROOT" \

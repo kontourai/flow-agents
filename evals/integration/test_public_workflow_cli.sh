@@ -120,7 +120,7 @@ printf '#!/usr/bin/env bash\nset -eu\ntrap "" TERM\n( trap "" TERM; sleep 5; tou
 chmod +x "$CONSUMER/checks/check-command-timeout.sh"
 printf '#!/usr/bin/env bash\nset -eu\n( trap "" TERM; while ! sleep 5; do :; done; touch "$2" ) &\nprintf "%s\\n" "$!" > "$1"\n' > "$CONSUMER/checks/check-success-background.sh"
 chmod +x "$CONSUMER/checks/check-success-background.sh"
-printf '.kontourai/\n' > "$CONSUMER/.gitignore"
+printf '.kontourai/\nprovider-assignment-state.json\ncancel.authorization.json\narchive.authorization.json\n' > "$CONSUMER/.gitignore"
 (cd "$CONSUMER" && git init -q && git config user.email public-workflow@example.invalid && git config user.name 'Public Workflow Eval' && git add . && git commit -qm 'seed public workflow consumer')
 
 run_candidate() {
@@ -131,6 +131,10 @@ run_candidate_as() {
   local actor="$1"
   shift
   (cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID="$actor" "$FLOW_AGENTS_BIN" workflow "$@")
+}
+
+assert_consumer_clean() {
+  [[ -z "$(git -C "$CONSUMER" status --porcelain --untracked-files=all)" ]] || fail "consumer fixture must be clean before passing command evidence"
 }
 
 snapshot_tree() {
@@ -411,6 +415,7 @@ const command = process.argv[2];
 process.stdout.write(JSON.stringify({ kind: 'command', excerpt: command, summary: 'Exact second additional project-local check.' }));
 NODE
 )"
+assert_consumer_clean
 run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation tests-evidence --status pass --summary "Passing fixture assertion." --command "$TEST_COMMAND" --command "$TEST_COMMAND_TWO" --command "$TEST_COMMAND_THREE" --evidence-ref-json "$COMMAND_REF" --evidence-ref-json "$COMMAND_REF_TWO" --evidence-ref-json "$COMMAND_REF_THREE" --criterion-json "$CRITERION_JSON" --json >/dev/null
 node - "$RELEASE_SESSION/trust.bundle" <<'NODE'
 const fs = require('node:fs');
@@ -490,6 +495,7 @@ state.status = 'active';
 state.current_step = 'verify';
 fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
 NODE
+assert_consumer_clean
 run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation tests-evidence --status pass --summary "Re-run verification for source snapshot B." --command "$TEST_COMMAND" --command "$TEST_COMMAND_TWO" --command "$TEST_COMMAND_THREE" --evidence-ref-json "$COMMAND_REF" --evidence-ref-json "$COMMAND_REF_TWO" --evidence-ref-json "$COMMAND_REF_THREE" --criterion-json "$CRITERION_JSON" --json >/dev/null
 node - "$FLOW_STATE" <<'NODE'
 const fs = require('node:fs');
@@ -643,6 +649,7 @@ LOCK_DELIVER_REPORT="$LOCK_SESSION/$(basename "$LOCK_SESSION")--deliver.md"
 LOCK_DELIVER_REF="{\"kind\":\"artifact\",\"file\":\"$LOCK_DELIVER_REPORT\",\"summary\":\"Lock fixture execution report.\"}"
 LOCK_STARTED="$TMP/command-lock.started"
 LOCK_COMMAND="bash checks/check-command-lock.sh '$LOCK_STARTED'"
+assert_consumer_clean
 run_candidate evidence --session-dir "$LOCK_SESSION" --expectation implementation-scope --status pass --summary "Long command retains authority lock." --evidence-ref-json "$LOCK_DELIVER_REF" --command "$LOCK_COMMAND" --json >"$TMP/command-lock-evidence.out" 2>&1 &
 LOCK_EVIDENCE_PID=$!
 for _ in $(seq 1 250); do [[ -f "$LOCK_STARTED" ]] && break; sleep 0.02; done
@@ -674,6 +681,7 @@ pass "timed-out evidence commands terminate their complete process group"
 BACKGROUND_CHILD_PID="$TMP/success-background-child.pid"
 BACKGROUND_MARKER="$TMP/success-background-marker"
 TIMEOUT_PULL_REPORT="$TIMEOUT_SESSION/$(basename "$TIMEOUT_SESSION")--pull-work.md"
+assert_consumer_clean
 (cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS=50 "$FLOW_AGENTS_BIN" workflow evidence \
   --session-dir "$TIMEOUT_SESSION" --expectation pickup-probe-readiness --status pass \
   --summary "Successful evidence cleans up surviving background processes." \
