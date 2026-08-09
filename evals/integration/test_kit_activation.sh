@@ -1164,24 +1164,59 @@ else
   cat "$V_SKIP_OUT"
 fi
 
-# Restore the fixture then make the second ordered member fail. The first member must remain
-# truthfully completed in active_kits and the report must name the unattempted remainder.
+# Restore the fixture then make the second ordered member fail DURING real filesystem removal.
+# The earlier member is committed; the failing member must remain registered because its disk
+# work is only partial (the old synthetic coordinator stop could not prove this).
 HOME="$V_HOME" $FA kit activate builder release-evidence --global >/dev/null 2>&1
 V_FAIL_OUT="$TMPDIR_EVAL/v-mid-failure.out"
 set +e
-HOME="$V_HOME" FLOW_AGENTS_KIT_TEST_FAIL_APPLY_KIT=builder $FA kit deactivate release-evidence builder --global >"$V_FAIL_OUT" 2>&1
+HOME="$V_HOME" FLOW_AGENTS_KIT_TEST_FAIL_REMOVE_AFTER=builder $FA kit deactivate release-evidence builder --global >"$V_FAIL_OUT" 2>&1
 V_FAIL_RC=$?
 set -e
-if [[ "$V_FAIL_RC" -eq 4 ]] && grep -q "1 completed, 1 failed, 0 not attempted" "$V_FAIL_OUT" && node - "$V_DEST/.flow-agents/install.json" <<'NODE'
+if [[ "$V_FAIL_RC" -eq 4 ]] && grep -q "1 committed, 1 partially_applied, 0 not attempted" "$V_FAIL_OUT" && grep -q "remains registered as active" "$V_FAIL_OUT" && node - "$V_DEST/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs");
 const ids = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).active_kits.map((entry) => entry.id);
 if (ids.includes("release-evidence") || !ids.includes("builder")) throw new Error(JSON.stringify(ids));
 NODE
 then
-  _pass "multi-set mid-apply failure stops the queue and leaves registry coherent with completed disk work"
+  _pass "multi-set real mid-member removal failure stops the queue and keeps the partial kit registered"
 else
-  _fail "multi-set mid-apply failure reporting/registry coherence failed"
+  _fail "multi-set real mid-member failure reporting/registry coherence failed"
   cat "$V_FAIL_OUT"
+fi
+
+# Restore the partial member before exercising argument and all-noop semantics.
+HOME="$V_HOME" $FA kit activate release-evidence --global >/dev/null 2>&1
+HOME="$V_HOME" $FA kit deactivate builder --global >/dev/null 2>&1
+HOME="$V_HOME" $FA kit activate builder --global >/dev/null 2>&1
+
+set +e
+HOME="$V_HOME" $FA kit deactivate builder builder --global >"$TMPDIR_EVAL/v-duplicate.out" 2>&1
+V_DUP_RC=$?
+HOME="$V_HOME" $FA kit deactivate builder --all --global >"$TMPDIR_EVAL/v-all-positional.out" 2>&1
+V_ALL_POSITIONAL_RC=$?
+set -e
+if [[ "$V_DUP_RC" -eq 2 ]] && grep -q "duplicate kit ids" "$TMPDIR_EVAL/v-duplicate.out"; then
+  _pass "multi-set duplicate ids are rejected before apply"
+else
+  _fail "multi-set duplicate-id rejection failed"
+fi
+if [[ "$V_ALL_POSITIONAL_RC" -eq 2 ]] && grep -q -- "--all cannot be combined" "$TMPDIR_EVAL/v-all-positional.out"; then
+  _pass "kit deactivate --all combined with positional ids is rejected (surviving-mutation guard)"
+else
+  _fail "kit deactivate --all plus positional id was not rejected"
+fi
+
+V_THROW_OUT="$TMPDIR_EVAL/v-throw.out"
+set +e
+HOME="$V_HOME" FLOW_AGENTS_KIT_TEST_THROW_APPLY_KIT=builder $FA kit deactivate release-evidence builder --global >"$V_THROW_OUT" 2>&1
+V_THROW_RC=$?
+set -e
+if [[ "$V_THROW_RC" -eq 4 ]] && grep -q "apply threw: test-injected apply exception" "$V_THROW_OUT" && grep -q "1 committed, 1 partially_applied" "$V_THROW_OUT"; then
+  _pass "multi-set thrown member exception is caught and reported in the structured summary"
+else
+  _fail "multi-set thrown member exception escaped the structured summary"
+  cat "$V_THROW_OUT"
 fi
 
 V_ALL_OUT="$TMPDIR_EVAL/v-all.out"
@@ -1198,6 +1233,16 @@ then
 else
   _fail "kit deactivate --all failed"
   cat "$V_ALL_OUT"
+fi
+
+set +e
+HOME="$V_HOME" $FA kit deactivate --all --global >"$TMPDIR_EVAL/v-all-noop.out" 2>&1
+V_ALL_NOOP_RC=$?
+set -e
+if [[ "$V_ALL_NOOP_RC" -eq 3 ]]; then
+  _pass "kit deactivate --all exits 3 when every member is already inactive"
+else
+  _fail "kit deactivate --all noop expected exit 3, got $V_ALL_NOOP_RC"
 fi
 echo ""
 

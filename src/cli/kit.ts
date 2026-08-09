@@ -64,7 +64,8 @@ const KIT_USAGE: Record<string, string> = {
   activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]\n"
     + "   or: flow-agents kit activate <kit-id> [<kit-id> ...] (--global | --dest <path>) [--dry-run]  (built-in kit activation)",
   deactivate: "usage: flow-agents kit deactivate <kit-id> [<kit-id> ...] (--global | --dest <path>) [--dry-run] [--force]\n"
-    + "   or: flow-agents kit deactivate --all (--global | --dest <path>) [--dry-run] [--force]  (built-in kit deactivation)",
+    + "   or: flow-agents kit deactivate --all (--global | --dest <path>) [--dry-run] [--force]  (built-in kit deactivation)\n"
+    + "   set preflight: dependency/set-rule refusals exit 1; malformed input or containment refusals exit 2; mixed refusals use the highest class, then first encountered.",
   validate: "usage: flow-agents kit validate [<kit-dir>]",
   provision: "usage: flow-agents kit provision <kit-id-or-path> [--target <dir>] [--dest <path>] [--force] [--dry-run]",
   inspect: "usage: flow-agents kit inspect [<kit-dir>] [--json]",
@@ -733,12 +734,20 @@ async function runBuiltinKitSet(action: "activate" | "deactivate", argv: string[
   const args = parseArgs(argv);
   const dryRun = flagBool(args.flags, "dry-run") ?? false;
   const all = flagBool(args.flags, "all") ?? false;
+  if (args.flags["all"] !== undefined && args.flags["all"] !== true) {
+    console.error(`kit ${action}: --all does not accept a value`);
+    return 2;
+  }
   const destResult = resolveBuiltinKitDest(args.flags);
   if (!destResult.ok) { console.error(destResult.error); return 2; }
   if (all && action !== "deactivate") { console.error("kit activate: --all is only supported by kit deactivate"); return 2; }
   if (all && args.positionals.length) { console.error("kit deactivate: --all cannot be combined with kit ids"); return 2; }
   if (!all && !args.positionals.length) { console.error(`${action}: missing <kit-id> argument`); console.error(KIT_USAGE[action]); return 2; }
 
+  if (!all && new Set(args.positionals).size !== args.positionals.length) {
+    console.error(`kit ${action}: duplicate kit ids in one invocation are not allowed`);
+    return 2;
+  }
   const requested = all ? (() => {
     const current = readActiveKitsValidated(destResult.dest, root);
     return current.ok ? current.entries.map((entry) => entry.id) : [];
@@ -762,6 +771,17 @@ async function runBuiltinKitSet(action: "activate" | "deactivate", argv: string[
     return action === "deactivate" ? 3 : 0;
   }
 
+  // A set is a transaction at its validation boundary: discover every member's actual
+  // filesystem plan, including containment, before the first member is allowed to write.
+  // Do not delegate this to the per-member functions below: doing so makes a bad later member
+  // observable only after an earlier member has changed the destination.
+  try {
+    preflightBuiltinKitSet(action, targetIds, destResult.dest, destResult.global, validation.activeKits, flagBool(args.flags, "force") ?? false);
+  } catch (error) {
+    console.error(`kit ${action}: refusing whole set before apply: ${(error as Error).message}`);
+    return error instanceof BuiltinKitSetPreflightError ? error.exitCode : 1;
+  }
+
   const flagArgv = parsedFlagsArgv(args.flags);
   const completed: string[] = [];
   for (const kitId of targetIds) {
@@ -773,17 +793,26 @@ async function runBuiltinKitSet(action: "activate" | "deactivate", argv: string[
       return 4;
     }
     console.log(`kit ${action} '${kitId}' (${completed.length + 1}/${targetIds.length})`);
-    const code = action === "activate"
-      ? await activateBuiltinKit(kitId, flagArgv)
-      : await deactivateBuiltinKit(kitId, flagArgv, new Set(targetIds));
+    let code: number;
+    try {
+      if (process.env["FLOW_AGENTS_KIT_TEST_THROW_APPLY_KIT"] === kitId) throw new Error("test-injected apply exception");
+      code = action === "activate"
+        ? await activateBuiltinKit(kitId, flagArgv)
+        : await deactivateBuiltinKit(kitId, flagArgv, new Set(targetIds));
+    } catch (error) {
+      console.error(`kit '${kitId}': apply threw: ${(error as Error).message}`);
+      console.log(`kit ${action} set summary: ${completed.length} committed, 1 partially_applied, ${targetIds.length - completed.length - 1} not attempted`);
+      return 4;
+    }
     if (code !== 0) {
-      console.error(`kit '${kitId}': apply failed with exit ${code}; remaining kit(s) not attempted`);
-      console.log(`kit ${action} set summary: ${completed.length} completed, 1 failed, ${targetIds.length - completed.length - 1} not attempted`);
-      return code;
+      const state = code === 4 ? "partially_applied" : "untouched";
+      console.error(`kit '${kitId}': apply ${state} with exit ${code}; remaining kit(s) not attempted`);
+      console.log(`kit ${action} set summary: ${completed.length} committed, 1 ${state}, ${targetIds.length - completed.length - 1} not attempted`);
+      return code === 4 ? 4 : code;
     }
     completed.push(kitId);
   }
-  console.log(`kit ${action} set summary: ${completed.length} applied, ${skipped.length} skipped${dryRun ? " (dry-run)" : ""}`);
+  console.log(`kit ${action} set summary: ${completed.length} ${dryRun ? "would apply" : "applied"}, ${skipped.length} skipped`);
   return 0;
 }
 
@@ -1082,6 +1111,86 @@ function classifyDeactivateEntries(planned: DeactivatePlanEntry[]): { toRemove: 
   return { toRemove, preserved };
 }
 
+class BuiltinKitSetPreflightError extends Error {
+  constructor(readonly exitCode: 1 | 2, message: string) { super(message); }
+}
+
+/**
+ * Build every member's exact pre-apply plan. This deliberately repeats no mutation and keeps
+ * the coordinator's set-level refusal independent of the member apply functions' progress.
+ * Member failures retain their established CLI class: dependency/set-rule failures are 1 and
+ * malformed-manifest or containment failures are 2. When several members refuse, the set exits
+ * with the highest class; within that class, the first encountered failure supplies its message.
+ */
+function preflightBuiltinKitSet(
+  action: "activate" | "deactivate",
+  kitIds: string[],
+  dest: string,
+  global: boolean,
+  activeKits: ActiveKitEntry[],
+  force: boolean,
+): void {
+  const manifest = readOwnedFilesManifest(dest);
+  if (!manifest) throw new BuiltinKitSetPreflightError(1, "ownership manifest disappeared during preflight");
+  const failures: BuiltinKitSetPreflightError[] = [];
+  const capture = (exitCode: 1 | 2, plan: () => void): void => {
+    try {
+      plan();
+    } catch (error) {
+      failures.push(new BuiltinKitSetPreflightError(exitCode, (error as Error).message));
+    }
+  };
+  const throwFailures = (): void => {
+    if (!failures.length) return;
+    const highestClass = Math.max(...failures.map((failure) => failure.exitCode)) as 1 | 2;
+    throw failures.find((failure) => failure.exitCode === highestClass)!;
+  };
+  const skillsPrefix = skillsPrefixFor(global);
+  if (action === "deactivate") {
+    const requested = new Set(kitIds);
+    // Validate the requested post-state up front: a dependency may disappear only when every
+    // active dependent is also in this same requested set (or --force says otherwise).
+    for (const kitId of kitIds) {
+      const dependents = activeKits.filter((other) => {
+        if (other.id === kitId || requested.has(other.id)) return false;
+        const loaded = loadCatalogKitManifest(root, other.id);
+        return Boolean(loaded && kitDependencyIds(loaded.manifest, loaded.manifestPath).includes(kitId));
+      });
+      if (dependents.length && !force) failures.push(new BuiltinKitSetPreflightError(1, `'${kitId}' is a dependency of active kit(s): ${dependents.map((entry) => entry.id).join(", ")}`));
+    }
+    for (const kitId of kitIds) {
+      const ownedPrefixes = catalogKitSkillNames(root, kitId).map((name) => `${skillsPrefix}/${name}/`);
+      for (const entry of manifest.files.filter((candidate) => ownedPrefixes.some((prefix) => candidate.path.startsWith(prefix)))) {
+        // These are the same malformed-manifest/containment plan failures that a single-kit
+        // deactivate reports as exit 2.
+        capture(2, () => {
+          const absPath = resolveManifestEntryPath(dest, entry.path);
+          resolveManifestEntrySha256(entry.path, entry.sha256);
+          assertManifestEntryParentContained(dest, absPath, entry.path);
+        });
+      }
+    }
+    throwFailures();
+    return;
+  }
+
+  let bundle = "";
+  capture(1, () => { bundle = resolveClaudeCodeBundleDir(); });
+  if (!bundle) throwFailures();
+  const sourceRoot = path.join(bundle, ".claude", "skills");
+  const destinationRoot = path.join(dest, ...skillsPrefix.split("/"));
+  const manifestByPath = new Map(manifest.files.map((entry) => [entry.path, entry]));
+  for (const kitId of kitIds) {
+    const skillNames = catalogKitSkillNames(root, kitId);
+    const missing = skillNames.find((name) => !fs.existsSync(path.join(sourceRoot, name, "SKILL.md")));
+    if (missing) failures.push(new BuiltinKitSetPreflightError(1, `kit '${kitId}' declares skill '${missing}' but it is missing from the compiled claude-code bundle`));
+    // planActivateFiles performs the containment verification before it classifies even a
+    // missing destination path, which is the important symlink-ancestor case.
+    capture(2, () => { planActivateFiles(dest, skillNames, sourceRoot, destinationRoot, skillsPrefix, manifestByPath); });
+  }
+  throwFailures();
+}
+
 async function deactivateBuiltinKit(kitId: string, argv: string[], requestedDeactivationIds = new Set<string>()): Promise<number> {
   const args = parseArgs(argv);
   const dryRun = flagBool(args.flags, "dry-run") ?? false;
@@ -1197,6 +1306,7 @@ async function deactivateBuiltinKit(kitId: string, argv: string[], requestedDeac
   const removedRelPaths = new Set<string>();
   const removedParentDirs = new Set<string>();
   const failed: { relPath: string; reason: string }[] = [];
+  let removalAttempts = 0;
   for (const entry of toRemove) {
     try {
       if (!fs.existsSync(entry.absPath)) {
@@ -1226,6 +1336,10 @@ async function deactivateBuiltinKit(kitId: string, argv: string[], requestedDeac
         preserved.push({ relPath: entry.relPath, reason: "content changed since the plan was computed; preserved (re-checked immediately before removal)" });
         continue;
       }
+      // Test-only apply-time fault seam. Unlike the old coordinator seam this runs inside a
+      // member after earlier files have actually been removed, so it exercises recovery truth.
+      if (process.env["FLOW_AGENTS_KIT_TEST_FAIL_REMOVE_AFTER"] === kitId
+          && removalAttempts++ > 0) throw new Error("test-injected removal failure during apply");
       fs.rmSync(entry.absPath);
       removedRelPaths.add(entry.relPath);
       removedParentDirs.add(path.dirname(entry.absPath));
@@ -1233,14 +1347,27 @@ async function deactivateBuiltinKit(kitId: string, argv: string[], requestedDeac
       failed.push({ relPath: entry.relPath, reason: (error as Error).message });
     }
   }
-  pruneEmptyDirs(dest, removedParentDirs);
+  try {
+    pruneEmptyDirs(dest, removedParentDirs);
+    // The manifest describes the disk, even in a partial member result. The active registry is
+    // intentionally NOT advanced to the requested post-state until every removal succeeded.
+    writeOwnedFilesManifest(dest, removeOwnedFilesManifestEntries(manifest, removedRelPaths));
+  } catch (error) {
+    failed.push({ relPath: "ownership manifest", reason: (error as Error).message });
+  }
 
-  writeOwnedFilesManifest(dest, removeOwnedFilesManifestEntries(manifest, removedRelPaths));
-  writeActiveKits(dest, root, activeKits.filter((entry) => entry.id !== kitId));
+  if (!failed.length) {
+    try {
+      writeActiveKits(dest, root, activeKits.filter((entry) => entry.id !== kitId));
+    } catch (error) {
+      failed.push({ relPath: "active_kits registry", reason: (error as Error).message });
+    }
+  }
 
   console.log(`deactivated kit '${kitId}': removed ${removedRelPaths.size} file(s), preserved ${preserved.length} modified file(s), failed ${failed.length}`);
   for (const entry of preserved) console.log(`  preserved: ${entry.relPath}  [${entry.reason}]`);
   for (const entry of failed) console.log(`  failed: ${entry.relPath}  [${entry.reason}]`);
+  if (failed.length) console.log(`kit '${kitId}' remains registered as active because its filesystem removal was only partially applied`);
   return failed.length > 0 ? 4 : 0;
 }
 
