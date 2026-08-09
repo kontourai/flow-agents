@@ -1027,6 +1027,65 @@ rm "$STOW_AUTH_HOME/opencode.json"; ln -s "$STOW_AUTH_TWO/opencode.json" "$STOW_
 set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_AUTH_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-auth-user-home" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/stow-auth-uninstall.out" 2>&1; STOW_AUTH_RC=$?; set -e
 if [[ "$STOW_AUTH_RC" -eq 2 && -f "$STOW_AUTH_ONE/skills/agentic-engineering/SKILL.md" ]] && grep -q 'not authorized by this install record' "$TMPDIR_EVAL/stow-auth-uninstall.out"; then _pass "opencode Stow: backing root introduced after install is refused"; else _fail "opencode Stow: re-pointed backing root was followed or not clearly refused"; fi
 
+# Legacy install records predate authorized_backing_roots. An operator may authorize the one
+# live, canonical Stow root for this invocation, but the authorization is never persisted.
+LEGACY_AUTH_HOME="$TMPDIR_EVAL/legacy-stow-auth-home"; LEGACY_AUTH_ROOT="$TMPDIR_EVAL/legacy-stow-auth-root"; LEGACY_AUTH_USER_HOME="$TMPDIR_EVAL/legacy-stow-auth-user-home"; LEGACY_AUTH_RECORD_DEST="$LEGACY_AUTH_HOME"
+mkdir -p "$LEGACY_AUTH_HOME" "$LEGACY_AUTH_ROOT/skills"; chmod 700 "$LEGACY_AUTH_ROOT"
+LEGACY_AUTH_ROOT_REAL="$(cd "$LEGACY_AUTH_ROOT" && pwd -P)"
+LEGACY_AUTH_BEFORE=$'{\n  "model": "legacy-user",\n  "instructions": ["/user/AGENTS.md"]\n}\n'
+printf '%s' "$LEGACY_AUTH_BEFORE" > "$LEGACY_AUTH_ROOT/opencode.json"; chmod 600 "$LEGACY_AUTH_ROOT/opencode.json"
+ln -s "$LEGACY_AUTH_ROOT/opencode.json" "$LEGACY_AUTH_HOME/opencode.json"; ln -s "$LEGACY_AUTH_ROOT/skills" "$LEGACY_AUTH_HOME/skills"
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_AUTH_HOME/opencode.json" HOME="$LEGACY_AUTH_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+node - "$LEGACY_AUTH_RECORD_DEST/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8"));
+fs.writeFileSync(file, JSON.stringify({ active_kit_ids: record.active_kit_ids ?? [], global: record.global, installedAt: record.installedAt, runtime: record.runtime, version: "5.5.0" }, null, 2) + "\n");
+NODE
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_AUTH_HOME/opencode.json" HOME="$LEGACY_AUTH_USER_HOME" $FA init --uninstall --runtime opencode --global --authorize-backing-root "$LEGACY_AUTH_ROOT_REAL" --yes >"$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" 2>&1
+if [[ -L "$LEGACY_AUTH_HOME/opencode.json" && -L "$LEGACY_AUTH_HOME/skills" ]] && node - "$LEGACY_AUTH_ROOT/opencode.json" <<'NODE'
+const fs = require("node:fs"); const value = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); if (value.model !== "legacy-user" || value.instructions?.join() !== "/user/AGENTS.md") throw new Error("legacy user config was not surgically restored");
+NODE
+then
+  if [[ ! -e "$LEGACY_AUTH_ROOT/skills/agentic-engineering/SKILL.md" && ! -e "$LEGACY_AUTH_RECORD_DEST/.flow-agents/install.json" ]] && grep -q 'operator-authorized backing roots' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" && grep -q 'wrote through' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out"; then _pass "legacy Stow authorization: canonical root round-trips without severing links or persisting authorization"; else _fail "legacy Stow authorization: authorized round-trip, reporting, surgical config restoration, or non-persistence failed"; fi
+else
+  _fail "legacy Stow authorization: link or user config was not preserved"
+fi
+
+# A supplied root must be the root the live config link actually references; an unrelated root
+# is an error, never a no-op that weakens the fail-closed default.
+LEGACY_WRONG_HOME="$TMPDIR_EVAL/legacy-stow-wrong-home"; LEGACY_WRONG_ROOT="$TMPDIR_EVAL/legacy-stow-wrong-root"; LEGACY_OTHER_ROOT="$TMPDIR_EVAL/legacy-stow-other-root"; LEGACY_WRONG_USER_HOME="$TMPDIR_EVAL/legacy-stow-wrong-user-home"; LEGACY_WRONG_RECORD_DEST="$LEGACY_WRONG_HOME"
+mkdir -p "$LEGACY_WRONG_HOME" "$LEGACY_WRONG_ROOT/skills" "$LEGACY_OTHER_ROOT"; chmod 700 "$LEGACY_WRONG_ROOT" "$LEGACY_OTHER_ROOT"
+LEGACY_OTHER_ROOT_REAL="$(cd "$LEGACY_OTHER_ROOT" && pwd -P)"
+printf '{"model":"wrong-root"}\n' > "$LEGACY_WRONG_ROOT/opencode.json"; chmod 600 "$LEGACY_WRONG_ROOT/opencode.json"
+ln -s "$LEGACY_WRONG_ROOT/opencode.json" "$LEGACY_WRONG_HOME/opencode.json"; ln -s "$LEGACY_WRONG_ROOT/skills" "$LEGACY_WRONG_HOME/skills"
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_WRONG_HOME/opencode.json" HOME="$LEGACY_WRONG_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+node - "$LEGACY_WRONG_RECORD_DEST/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8")); delete record.authorized_backing_roots; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+NODE
+set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_WRONG_HOME/opencode.json" HOME="$LEGACY_WRONG_USER_HOME" $FA init --uninstall --runtime opencode --global --authorize-backing-root "$LEGACY_OTHER_ROOT_REAL" --yes >"$TMPDIR_EVAL/legacy-stow-wrong.out" 2>&1; LEGACY_WRONG_RC=$?; set -e
+if [[ "$LEGACY_WRONG_RC" -eq 2 && -f "$LEGACY_WRONG_ROOT/skills/agentic-engineering/SKILL.md" ]] && grep -q 'does not match a backing root currently referenced' "$TMPDIR_EVAL/legacy-stow-wrong.out"; then _pass "legacy Stow authorization: unrelated supplied root is refused without writes"; else _fail "legacy Stow authorization: unrelated root was accepted or content changed"; fi
+
+# Even a modern record does not turn an extra flag into a harmless no-op: every supplied root
+# must be live and referenced by this install.
+UNREFERENCED_ROOT="$TMPDIR_EVAL/unreferenced-backing-root"; mkdir -p "$UNREFERENCED_ROOT"; chmod 700 "$UNREFERENCED_ROOT"
+UNREFERENCED_ROOT_REAL="$(cd "$UNREFERENCED_ROOT" && pwd -P)"
+set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_WRONG_HOME/opencode.json" HOME="$LEGACY_WRONG_USER_HOME" $FA init --uninstall --runtime opencode --global --authorize-backing-root "$UNREFERENCED_ROOT_REAL" --dry-run >"$TMPDIR_EVAL/unreferenced-backing-root.out" 2>&1; UNREFERENCED_RC=$?; set -e
+if [[ "$UNREFERENCED_RC" -eq 2 ]] && grep -q 'does not match a backing root currently referenced' "$TMPDIR_EVAL/unreferenced-backing-root.out"; then _pass "backing-root authorization: unreferenced supplied root is an error"; else _fail "backing-root authorization: unreferenced root was silently accepted"; fi
+
+# The plan's exact bound link is checked again before the first write. Re-pointing it after
+# planning therefore aborts the entire apply, preserving both old and new backing roots.
+LEGACY_SWAP_HOME="$TMPDIR_EVAL/legacy-stow-swap-home"; LEGACY_SWAP_ONE="$TMPDIR_EVAL/legacy-stow-swap-one"; LEGACY_SWAP_TWO="$TMPDIR_EVAL/legacy-stow-swap-two"; LEGACY_SWAP_USER_HOME="$TMPDIR_EVAL/legacy-stow-swap-user-home"; LEGACY_SWAP_RECORD_DEST="$LEGACY_SWAP_HOME"
+mkdir -p "$LEGACY_SWAP_HOME" "$LEGACY_SWAP_ONE/skills" "$LEGACY_SWAP_TWO"; chmod 700 "$LEGACY_SWAP_ONE" "$LEGACY_SWAP_TWO"
+LEGACY_SWAP_ONE_REAL="$(cd "$LEGACY_SWAP_ONE" && pwd -P)"
+printf '{"model":"one"}\n' > "$LEGACY_SWAP_ONE/opencode.json"; printf '{"model":"two"}\n' > "$LEGACY_SWAP_TWO/opencode.json"; chmod 600 "$LEGACY_SWAP_ONE/opencode.json" "$LEGACY_SWAP_TWO/opencode.json"
+ln -s "$LEGACY_SWAP_ONE/opencode.json" "$LEGACY_SWAP_HOME/opencode.json"; ln -s "$LEGACY_SWAP_ONE/skills" "$LEGACY_SWAP_HOME/skills"
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_SWAP_HOME/opencode.json" HOME="$LEGACY_SWAP_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+node - "$LEGACY_SWAP_RECORD_DEST/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8")); delete record.authorized_backing_roots; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+NODE
+LEGACY_SWAP_ONE_BEFORE="$(cat "$LEGACY_SWAP_ONE/opencode.json")"; LEGACY_SWAP_TWO_BEFORE="$(cat "$LEGACY_SWAP_TWO/opencode.json")"
+set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_SWAP_HOME/opencode.json" HOME="$LEGACY_SWAP_USER_HOME" FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_PATH="$LEGACY_SWAP_HOME/opencode.json" FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_TARGET="$LEGACY_SWAP_TWO/opencode.json" $FA init --uninstall --runtime opencode --global --authorize-backing-root "$LEGACY_SWAP_ONE_REAL" --yes >"$TMPDIR_EVAL/legacy-stow-swap.out" 2>&1; LEGACY_SWAP_RC=$?; set -e
+if [[ "$LEGACY_SWAP_RC" -eq 2 && -L "$LEGACY_SWAP_HOME/opencode.json" ]] && [[ "$(cat "$LEGACY_SWAP_ONE/opencode.json")" == "$LEGACY_SWAP_ONE_BEFORE" ]] && [[ "$(cat "$LEGACY_SWAP_TWO/opencode.json")" == "$LEGACY_SWAP_TWO_BEFORE" ]] && [[ -f "$LEGACY_SWAP_ONE/skills/agentic-engineering/SKILL.md" ]] && grep -q 'symlink target changed' "$TMPDIR_EVAL/legacy-stow-swap.out"; then _pass "legacy Stow authorization TOCTOU: re-pointed link aborts before every write"; else _fail "legacy Stow authorization TOCTOU: re-pointed link was followed or prior root changed"; fi
+
 # The pre-install snapshot is secret-bearing data: its record and temporary write are private,
 # it is refreshed on every install, and only the current install's post-image can restore it.
 REINSTALL_HOME="$TMPDIR_EVAL/reinstall-snapshot-home"; mkdir -p "$REINSTALL_HOME"
