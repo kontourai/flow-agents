@@ -1209,14 +1209,90 @@ fi
 
 V_THROW_OUT="$TMPDIR_EVAL/v-throw.out"
 set +e
-HOME="$V_HOME" FLOW_AGENTS_KIT_TEST_THROW_APPLY_KIT=builder $FA kit deactivate release-evidence builder --global >"$V_THROW_OUT" 2>&1
+HOME="$V_HOME" FLOW_AGENTS_KIT_TEST_FAIL_APPLY_KIT=builder $FA kit deactivate release-evidence builder --global >"$V_THROW_OUT" 2>&1
 V_THROW_RC=$?
 set -e
-if [[ "$V_THROW_RC" -eq 4 ]] && grep -q "apply threw: test-injected apply exception" "$V_THROW_OUT" && grep -q "1 committed, 1 partially_applied" "$V_THROW_OUT"; then
-  _pass "multi-set thrown member exception is caught and reported in the structured summary"
+if [[ "$V_THROW_RC" -eq 1 ]] && grep -q "pre-apply validation failed" "$V_THROW_OUT" && grep -q "1 committed, 1 untouched" "$V_THROW_OUT"; then
+  _pass "multi-set pre-member failure preserves validation exit 1 and reports untouched"
 else
-  _fail "multi-set thrown member exception escaped the structured summary"
+  _fail "multi-set pre-member failure was flattened to partial apply"
   cat "$V_THROW_OUT"
+fi
+
+# Restore the first committed member so the class-2 assertion also exercises a completed prefix.
+HOME="$V_HOME" $FA kit activate release-evidence --global >/dev/null 2>&1
+V_CLASS2_OUT="$TMPDIR_EVAL/v-class2.out"
+set +e
+HOME="$V_HOME" FLOW_AGENTS_KIT_TEST_RETURN_APPLY_CODE=builder:2 $FA kit deactivate release-evidence builder --global >"$V_CLASS2_OUT" 2>&1
+V_CLASS2_RC=$?
+set -e
+if [[ "$V_CLASS2_RC" -eq 2 ]] && grep -q "apply untouched with exit 2" "$V_CLASS2_OUT" && grep -q "1 committed, 1 untouched" "$V_CLASS2_OUT"; then
+  _pass "post-preflight member validation class 2 reports untouched (mutation guard)"
+else
+  _fail "post-preflight member validation class 2 was not preserved as untouched"
+  cat "$V_CLASS2_OUT"
+fi
+
+# A real activation copy-loop failure must leave every copied file represented in the ownership
+# manifest, while withholding the active registry entry until the member completes.
+V_ACTIVATE_FAIL_HOME="$TMPDIR_EVAL/v-activate-fail-home"
+mkdir -p "$V_ACTIVATE_FAIL_HOME"
+HOME="$V_ACTIVATE_FAIL_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+V_ACTIVATE_FAIL_DEST="$V_ACTIVATE_FAIL_HOME/.claude"
+HOME="$V_ACTIVATE_FAIL_HOME" $FA kit deactivate builder --global >/dev/null 2>&1
+V_ACTIVATE_FAIL_OUT="$TMPDIR_EVAL/v-activate-mid-failure.out"
+set +e
+HOME="$V_ACTIVATE_FAIL_HOME" FLOW_AGENTS_KIT_TEST_FAIL_ACTIVATE_AFTER=builder $FA kit activate builder --global >"$V_ACTIVATE_FAIL_OUT" 2>&1
+V_ACTIVATE_FAIL_RC=$?
+set -e
+if [[ "$V_ACTIVATE_FAIL_RC" -eq 4 ]] && grep -q "partially applied after copying" "$V_ACTIVATE_FAIL_OUT" && grep -q "^  copied: skills/" "$V_ACTIVATE_FAIL_OUT" && node - "$V_ACTIVATE_FAIL_DEST" "$V_ACTIVATE_FAIL_OUT" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [dest, output] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(path.join(dest, ".flow-agents", "owned-files.json"), "utf8"));
+const copied = fs.readFileSync(output, "utf8").split("\n").filter((line) => line.startsWith("  copied: ")).map((line) => line.slice("  copied: ".length));
+if (!copied.length) throw new Error("fault seam copied no files");
+for (const rel of copied) {
+  if (!fs.existsSync(path.join(dest, ...rel.split("/")))) throw new Error(`copied file missing from disk: ${rel}`);
+  if (!manifest.files.some((entry) => entry.path === rel)) throw new Error(`copied file missing from manifest: ${rel}`);
+}
+const active = JSON.parse(fs.readFileSync(path.join(dest, ".flow-agents", "install.json"), "utf8")).active_kits;
+if (active.some((entry) => entry.id === "builder")) throw new Error("partially copied kit was incorrectly registered active");
+NODE
+then
+  _pass "activation mid-copy failure keeps copied files and ownership manifest coherent, without registry activation"
+else
+  _fail "activation mid-copy failure left disk/manifest/registry incoherent"
+  cat "$V_ACTIVATE_FAIL_OUT"
+fi
+
+# Mixed preflight failures select the highest class across DIFFERENT requested members: knowledge
+# has a missing compiled source (class 1) while builder has a poisoned destination parent
+# (class 2). Neither member may start applying.
+V_PRIORITY_HOME="$TMPDIR_EVAL/v-priority-home"
+mkdir -p "$V_PRIORITY_HOME"
+HOME="$V_PRIORITY_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+V_PRIORITY_DEST="$V_PRIORITY_HOME/.claude"
+HOME="$V_PRIORITY_HOME" $FA kit deactivate knowledge builder --global >/dev/null 2>&1
+V_PRIORITY_OUTSIDE="$TMPDIR_EVAL/v-priority-outside"
+mkdir -p "$V_PRIORITY_OUTSIDE"
+ln -s "$V_PRIORITY_OUTSIDE" "$V_PRIORITY_DEST/skills/builder-shape"
+V_KNOWLEDGE_SOURCE="$ROOT_DIR/dist/claude-code/.claude/skills/knowledge-capture/SKILL.md"
+V_KNOWLEDGE_SOURCE_HOLD="$TMPDIR_EVAL/knowledge-capture.SKILL.md.hold"
+mv "$V_KNOWLEDGE_SOURCE" "$V_KNOWLEDGE_SOURCE_HOLD"
+V_PRIORITY_OUT="$TMPDIR_EVAL/v-preflight-priority.out"
+set +e
+HOME="$V_PRIORITY_HOME" $FA kit activate knowledge builder --global >"$V_PRIORITY_OUT" 2>&1
+V_PRIORITY_RC=$?
+set -e
+mv "$V_KNOWLEDGE_SOURCE_HOLD" "$V_KNOWLEDGE_SOURCE"
+# "escapes the install root" is emitted only by the containment refusal path, never by the
+# class-1 (missing source / dependency) path -- so this stays discriminating between the classes.
+if [[ "$V_PRIORITY_RC" -eq 2 ]] && grep -q "escapes the install root" "$V_PRIORITY_OUT" && ! grep -q "kit activate 'knowledge' (" "$V_PRIORITY_OUT" && ! grep -q "kit activate 'builder' (" "$V_PRIORITY_OUT"; then
+  _pass "mixed containment/dependency-class preflight selects exit 2 before either member applies"
+else
+  _fail "mixed preflight classes did not select containment exit 2 atomically"
+  cat "$V_PRIORITY_OUT"
 fi
 
 V_ALL_OUT="$TMPDIR_EVAL/v-all.out"

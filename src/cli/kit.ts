@@ -767,7 +767,7 @@ async function runBuiltinKitSet(action: "activate" | "deactivate", argv: string[
   const skipped = ordered.filter((kitId) => !targetIds.includes(kitId));
   for (const kitId of skipped) console.log(`kit '${kitId}' is already ${action === "activate" ? "active" : "inactive"} at ${destResult.dest}; skipped`);
   if (!targetIds.length) {
-    console.log(`kit ${action} set summary: 0 applied, ${skipped.length} skipped`);
+    console.log(`kit ${action} set summary: 0 ${dryRun ? "would apply" : "applied"}, ${skipped.length} skipped`);
     return action === "deactivate" ? 3 : 0;
   }
 
@@ -785,24 +785,28 @@ async function runBuiltinKitSet(action: "activate" | "deactivate", argv: string[
   const flagArgv = parsedFlagsArgv(args.flags);
   const completed: string[] = [];
   for (const kitId of targetIds) {
-    // Test-only deterministic apply-failure seam for the set coordinator. It deliberately runs
-    // after earlier members have completed, proving reports and registry state remain truthful.
+    // Test-only pre-member seam. It runs after set preflight but before this member touches disk,
+    // so it retains a validation-class exit and an `untouched` report.
     if (process.env["FLOW_AGENTS_KIT_TEST_FAIL_APPLY_KIT"] === kitId) {
-      console.error(`kit '${kitId}': apply failed (test-injected failure); remaining kit(s) not attempted`);
-      console.log(`kit ${action} set summary: ${completed.length} completed, 1 failed, ${targetIds.length - completed.length - 1} not attempted`);
-      return 4;
+      console.error(`kit '${kitId}': pre-apply validation failed (test-injected failure); remaining kit(s) not attempted`);
+      console.log(`kit ${action} set summary: ${completed.length} committed, 1 untouched, ${targetIds.length - completed.length - 1} not attempted`);
+      return 1;
     }
     console.log(`kit ${action} '${kitId}' (${completed.length + 1}/${targetIds.length})`);
     let code: number;
     try {
-      if (process.env["FLOW_AGENTS_KIT_TEST_THROW_APPLY_KIT"] === kitId) throw new Error("test-injected apply exception");
-      code = action === "activate"
-        ? await activateBuiltinKit(kitId, flagArgv)
-        : await deactivateBuiltinKit(kitId, flagArgv, new Set(targetIds));
+      const injectedCode = process.env["FLOW_AGENTS_KIT_TEST_RETURN_APPLY_CODE"];
+      if (injectedCode && injectedCode.startsWith(`${kitId}:`)) {
+        code = Number(injectedCode.slice(kitId.length + 1));
+      } else {
+        code = action === "activate"
+          ? await activateBuiltinKit(kitId, flagArgv)
+          : await deactivateBuiltinKit(kitId, flagArgv, new Set(targetIds));
+      }
     } catch (error) {
       console.error(`kit '${kitId}': apply threw: ${(error as Error).message}`);
-      console.log(`kit ${action} set summary: ${completed.length} committed, 1 partially_applied, ${targetIds.length - completed.length - 1} not attempted`);
-      return 4;
+      console.log(`kit ${action} set summary: ${completed.length} committed, 1 untouched, ${targetIds.length - completed.length - 1} not attempted`);
+      return 1;
     }
     if (code !== 0) {
       const state = code === 4 ? "partially_applied" : "untouched";
@@ -1015,10 +1019,19 @@ async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number
     return 0;
   }
 
+  // Persist ownership immediately after each copy. A member's registry entry is still delayed
+  // until all copies finish, but a crash or apply failure can never leave a copied file absent
+  // from the ownership manifest that later deactivation relies upon.
   const newManifestEntries: OwnedFileEntry[] = [];
+  let manifestAfterCopiedFiles = manifest;
   const applyPreserved: { relPath: string; reason: string }[] = [];
   const replacedSymlinkPaths = new Set<string>();
+  let applyFailure: Error | undefined;
   for (const plan of filesToWrite) {
+    if (process.env["FLOW_AGENTS_KIT_TEST_FAIL_ACTIVATE_AFTER"] === kitId && newManifestEntries.length > 0) {
+      applyFailure = new Error("test-injected activation failure during copy loop");
+      break;
+    }
     // APPLY-TIME containment re-check (TOCTOU), same class and same reused primitive as
     // deactivateBuiltinKit's own apply-time re-check: violation here does NOT abort the rest of
     // the run (plan-time already ruled out every OTHER entry) -- preserve-not-write this one file
@@ -1037,15 +1050,38 @@ async function activateBuiltinKit(kitId: string, argv: string[]): Promise<number
     // file) sitting at the exact destination path -- --force used to fold a symlinked-FILE
     // conflict into a plain fs.copyFileSync, which follows the symlink and overwrites its
     // EXTERNAL target while the report claimed the in-dest manifest path was overwritten.
-    const { replacedSymlink } = writeActivateFileNeverFollowingSymlink(plan);
-    if (replacedSymlink) replacedSymlinkPaths.add(plan.manifestPath);
-    newManifestEntries.push({ path: plan.manifestPath, sha256: hashFile(plan.destFile) });
+    try {
+      const { replacedSymlink } = writeActivateFileNeverFollowingSymlink(plan);
+      if (replacedSymlink) replacedSymlinkPaths.add(plan.manifestPath);
+      const copied = { path: plan.manifestPath, sha256: hashFile(plan.destFile) };
+      const nextManifest = mergeOwnedFilesManifestEntries(manifestAfterCopiedFiles, [copied]);
+      writeOwnedFilesManifest(dest, nextManifest);
+      manifestAfterCopiedFiles = nextManifest;
+      newManifestEntries.push(copied);
+    } catch (error) {
+      applyFailure = error instanceof Error ? error : new Error(String(error));
+      break;
+    }
   }
-  writeOwnedFilesManifest(dest, mergeOwnedFilesManifestEntries(manifest, newManifestEntries));
+  if (applyFailure) {
+    console.error(`kit activate: '${kitId}' was partially applied after copying ${newManifestEntries.length} file(s): ${applyFailure.message}`);
+    for (const entry of newManifestEntries) console.log(`  copied: ${entry.path}`);
+    console.log(`kit '${kitId}' remains inactive because activation did not complete`);
+    return 4;
+  }
 
-  const pkgVersion = readPackageVersion(root);
-  const nextActiveKits: ActiveKitEntry[] = [...activeKits, { id: kitId, version: pkgVersion, activated_at: isoNow(), scope: global ? "global" : "project" }];
-  writeActiveKits(dest, root, nextActiveKits);
+  let nextActiveKits: ActiveKitEntry[];
+  try {
+    const pkgVersion = readPackageVersion(root);
+    nextActiveKits = [...activeKits, { id: kitId, version: pkgVersion, activated_at: isoNow(), scope: global ? "global" : "project" }];
+    writeActiveKits(dest, root, nextActiveKits);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`kit activate: '${kitId}' was partially applied after copying ${newManifestEntries.length} file(s): active_kits registry was not updated: ${reason}`);
+    for (const entry of newManifestEntries) console.log(`  copied: ${entry.path}`);
+    console.log(`kit '${kitId}' remains inactive because activation did not complete`);
+    return 4;
+  }
 
   console.log(`activated kit '${kitId}' (${skillNames.length} skill(s), ${newManifestEntries.length} file(s) copied) at ${dest}`);
   if (preserved.length) {
