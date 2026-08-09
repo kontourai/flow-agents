@@ -52,13 +52,16 @@
 //     apply is printed as "would be removed" even though a real run's apply-time re-checks would
 //     preserve it. The error direction is conservative (dry-run over-states removal; the real run
 //     never removes more than dry-run showed), and no eval currently exercises dry-run fidelity.
+//   - `--authorize-backing-root` revalidates a canonical pathname immediately before each config
+//     write. It is not an openat-style defense against a same-user filesystem race that replaces
+//     the backing directory at that pathname between validation and the pathname-based operation.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { parseArgs, flagBool, flagString } from "../lib/args.js";
+import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { root } from "../tools/common.js";
 import { durableFlowAgentsRoot } from "../lib/local-artifact-root.js";
 import {
@@ -123,6 +126,12 @@ Options:
   --dest PATH             Target an explicit project-scoped destination.
                           A bare positional argument is accepted as an alias for --dest.
   --dry-run               Print the removal plan without deleting or modifying anything.
+  --authorize-backing-root PATH
+                          OpenCode only; explicitly authorize one resolved, real backing root
+                          for this invocation. Repeat for each currently referenced root. This
+                          is never recorded in install.json. Revalidated by canonical path
+                          immediately before write; not a defense against a same-user
+                          filesystem race.
   --yes, --headless       Confirm the destructive removal non-interactively. Without one of
                           these, a non-interactive invocation (no TTY, e.g. CI or a pipe) is
                           refused rather than silently proceeding or silently doing nothing.
@@ -171,6 +180,8 @@ type UninstallPlan = {
   preserved: PreservedFile[];
   removeDurable: DurableFile[];
   residue: ResidueEntry[];
+  opencodeBinding?: OpenCodeConfigBinding;
+  operatorAuthorizedBackingRoots: string[];
 };
 
 type DurableFile = { path: string; relPath: string; root: string; expectedSha256: string; reason: string };
@@ -292,12 +303,12 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   return { settingsPath, exists: true, removedHookEntryCount, removedEventKeys, removedStatusLine, action, nextContent: next, preserved, protectedRuntimePaths };
 }
 
-function applySettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean): { backupPath: string | null; preserved?: PreservedFile } {
+function applySettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean, opencodeBinding?: OpenCodeConfigBinding): { backupPath: string | null; preserved?: PreservedFile } {
   // Deliberately re-plan after confirmation. Config is user-owned and a hook or setting can
   // arrive while confirmation is pending; applying the stale object would silently erase it.
   // For OpenCode, bind its authorized canonical target BEFORE the read/plan so the object
   // inspected and the object rewritten are the same file even if the visible link is raced.
-  const binding = config.runtime === "opencode" ? resolveAuthorizedOpenCodeUninstallBinding(dest, global) : undefined;
+  const binding = config.runtime === "opencode" ? opencodeBinding : undefined;
   const plan = planSettings(dest, global, config, isManagedInnerHook, binding?.canonicalPath);
   if (plan.action === "none") return { backupPath: null };
   const writePath = binding?.canonicalPath ?? plan.settingsPath;
@@ -306,26 +317,48 @@ function applySettings(dest: string, global: boolean, config: RuntimeConfig, isM
   if (binding) revalidateOpenCodeConfigBinding(binding);
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const backupPath = `${writePath}.bak-uninstall-${ts}`;
-  fs.copyFileSync(writePath, backupPath);
-  const recordPath = path.join(durableFlowAgentsRoot(dest), "install.json");
-  let premerge: unknown;
-  try { premerge = (JSON.parse(fs.readFileSync(recordPath, "utf8")) as Record<string, unknown>)["config_premerge"]; } catch { /* legacy/no durable snapshot: surgical JSON write below */ }
-  const currentBytes = fs.readFileSync(writePath);
-  const originalBytes = loadInstallMergeModule().restoreConfigPremergeBytes(premerge, plan.nextContent, currentBytes);
-  if (plan.action === "delete" && !originalBytes) {
-    fs.rmSync(writePath);
-    return { backupPath };
+  let tmp: string | undefined;
+  try {
+    fs.copyFileSync(writePath, backupPath);
+    const recordPath = path.join(durableFlowAgentsRoot(dest), "install.json");
+    let premerge: unknown;
+    try { premerge = (JSON.parse(fs.readFileSync(recordPath, "utf8")) as Record<string, unknown>)["config_premerge"]; } catch { /* legacy/no durable snapshot: surgical JSON write below */ }
+    const currentBytes = fs.readFileSync(writePath);
+    const originalBytes = loadInstallMergeModule().restoreConfigPremergeBytes(premerge, plan.nextContent, currentBytes);
+    // Test-only fault seam: exercise the failure path after applyPlan's pre-apply check and
+    // after this attempt has created its backup, without a nondeterministic background race.
+    const testSwapPath = process.env["FLOW_AGENTS_UNINSTALL_TEST_APPLY_SETTINGS_SYMLINK_SWAP_PATH"];
+    const testSwapTarget = process.env["FLOW_AGENTS_UNINSTALL_TEST_APPLY_SETTINGS_SYMLINK_SWAP_TARGET"];
+    if (testSwapPath && testSwapTarget) {
+      fs.rmSync(testSwapPath, { recursive: true, force: true });
+      fs.symlinkSync(testSwapTarget, testSwapPath);
+    }
+    // Deleting the config is also a write through the backing link, so it gets the same late
+    // binding check as the replacement path.
+    if (plan.action === "delete" && !originalBytes) {
+      if (binding) revalidateOpenCodeConfigBinding(binding);
+      fs.rmSync(writePath);
+      return { backupPath };
+    }
+    tmp = `${writePath}.tmp.${process.pid}`;
+    fs.writeFileSync(tmp, originalBytes ?? `${JSON.stringify(plan.nextContent, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: fs.statSync(writePath).mode & 0o777 });
+    if (binding) revalidateOpenCodeConfigBinding(binding);
+    fs.renameSync(tmp, writePath);
+    return {
+      backupPath,
+      ...(premerge && !originalBytes
+        ? { preserved: { relPath: path.basename(plan.settingsPath), absPath: plan.settingsPath, reason: "config content drifted since install; retained surgical result but exact pre-install bytes could not be restored" } }
+        : {}),
+    };
+  } catch (error) {
+    // A failed backing-link revalidation must be transactional: no temporary or backup artifact
+    // from this attempt may remain in either the original or a newly re-pointed backing root.
+    if (tmp) {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* retain the original failure */ }
+    }
+    try { fs.rmSync(backupPath, { force: true }); } catch { /* retain the original failure */ }
+    throw error;
   }
-  const tmp = `${writePath}.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, originalBytes ?? `${JSON.stringify(plan.nextContent, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: fs.statSync(writePath).mode & 0o777 });
-  if (binding) revalidateOpenCodeConfigBinding(binding);
-  fs.renameSync(tmp, writePath);
-  return {
-    backupPath,
-    ...(premerge && !originalBytes
-      ? { preserved: { relPath: path.basename(plan.settingsPath), absPath: plan.settingsPath, reason: "config content drifted since install; retained surgical result but exact pre-install bytes could not be restored" } }
-      : {}),
-  };
 }
 
 // ─── Manifest-backed removal ────────────────────────────────────────────────────────────────
@@ -351,21 +384,55 @@ function readRecordedBackingRoots(dest: string): string[] {
 }
 
 /** Resolve before reading, and only follow a Stow link explicitly authorized at install time. */
-function resolveAuthorizedOpenCodeUninstallBinding(dest: string, global: boolean): OpenCodeConfigBinding {
+function validateOperatorBackingRoots(values: string[]): string[] {
+  return [...new Set(values.map((value) => {
+    if (!path.isAbsolute(value)) throw new Error(`--authorize-backing-root must be the resolved real absolute path, got: ${value}`);
+    let real: string;
+    try { real = fs.realpathSync(value); } catch { throw new Error(`--authorize-backing-root does not resolve to an existing root: ${value}`); }
+    if (value !== real) throw new Error(`--authorize-backing-root must be the resolved real path (not a symlink or lexical alias): ${value}; use: ${real}`);
+    if (!fs.statSync(real).isDirectory()) throw new Error(`--authorize-backing-root is not a directory: ${real}`);
+    return real;
+  }))];
+}
+
+/** Resolve before reading, accepting only a recorded root or an invocation-scoped exact match. */
+function resolveAuthorizedOpenCodeUninstallBinding(dest: string, global: boolean, operatorRoots: string[]): { binding: OpenCodeConfigBinding; operatorAuthorizedRoots: string[] } {
   const visiblePath = RUNTIME_CONFIGS.opencode.configPath(dest, global);
   const binding = resolveOpenCodeConfigBinding(visiblePath);
-  if (!binding.wasSymlink) return binding;
-  const currentRoot = binding.trustedSymlinkRoot ? fs.realpathSync(binding.trustedSymlinkRoot) : undefined;
-  if (!currentRoot || !readRecordedBackingRoots(dest).includes(currentRoot)) {
-    throw new Error(`OpenCode config backing root was not authorized by this install record; refusing to follow symlink: ${visiblePath}`);
+  if (!binding.wasSymlink) {
+    if (operatorRoots.length > 0) throw new Error(`--authorize-backing-root was supplied, but this install does not reference a symlinked OpenCode backing root: ${operatorRoots.join(", ")}`);
+    return { binding, operatorAuthorizedRoots: [] };
   }
-  return binding;
+  const currentRoot = binding.trustedSymlinkRoot ? fs.realpathSync(binding.trustedSymlinkRoot) : undefined;
+  if (!currentRoot) throw new Error(`OpenCode config symlink has no resolvable backing root: ${visiblePath}`);
+  const matchingOperatorRoots = operatorRoots.filter((root) => root === currentRoot);
+  const unreferencedOperatorRoots = operatorRoots.filter((root) => root !== currentRoot);
+  if (unreferencedOperatorRoots.length > 0) {
+    throw new Error(`--authorize-backing-root does not match a backing root currently referenced by this install: ${unreferencedOperatorRoots.join(", ")}`);
+  }
+  if (!readRecordedBackingRoots(dest).includes(currentRoot) && matchingOperatorRoots.length === 0) {
+    throw new Error(`OpenCode config backing root was not authorized by this install record; refusing to follow symlink: ${visiblePath}. To authorize this invocation only, pass --authorize-backing-root ${currentRoot}`);
+  }
+  return { binding, operatorAuthorizedRoots: matchingOperatorRoots };
+}
+
+/** Re-check the exact plan binding and its invocation-scoped authorization before any mutation. */
+function revalidateAuthorizedOpenCodeUninstallBinding(binding: OpenCodeConfigBinding | undefined, operatorRoots: string[]): void {
+  if (!binding) return;
+  revalidateOpenCodeConfigBinding(binding);
+  if (binding.wasSymlink && operatorRoots.length > 0) {
+    const currentRoot = binding.trustedSymlinkRoot ? fs.realpathSync(binding.trustedSymlinkRoot) : undefined;
+    if (!currentRoot || !operatorRoots.includes(currentRoot)) {
+      throw new Error(`OpenCode config backing root changed before write; refusing to follow symlink: ${binding.visiblePath}`);
+    }
+  }
 }
 
 /**
  * Resolve a manifest path through the one Stow shape the OpenCode installer explicitly
- * authorizes: a direct plugins/, agents/, or skills/ child link whose target is inside the
- * private backing root of the bound opencode.json link. All other links remain hostile.
+ * authorizes: a direct plugins/, agents/, or skills/ child link whose target is exactly the
+ * corresponding child of the private backing root of the bound opencode.json link. All other
+ * links remain hostile.
  */
 function resolveManifestPathWithBackingRoot(dest: string, relPath: string, backingRoot?: string): { absPath: string; root: string } {
   const lexical = resolveManifestEntryPath(dest, relPath);
@@ -382,8 +449,9 @@ function resolveManifestPathWithBackingRoot(dest: string, relPath: string, backi
     throw new ManifestContainmentViolationError(`owned-files.json manifest entry "${relPath}" escapes the install root through a symlinked parent directory`);
   }
   const target = fs.realpathSync(visibleChild);
-  if (!fs.statSync(target).isDirectory() || !pathIsWithin(backingRoot, target)) {
-    throw new ManifestContainmentViolationError(`owned-files.json manifest entry "${relPath}" escapes the explicitly authorized OpenCode backing root`);
+  const expectedTarget = path.join(backingRoot, first);
+  if (!fs.statSync(target).isDirectory() || target !== expectedTarget) {
+    throw new ManifestContainmentViolationError(`owned-files.json manifest entry "${relPath}" uses a symlink target other than the authorized OpenCode asset tree: expected ${expectedTarget}`);
   }
   return { absPath: path.join(target, ...rest), root: target };
 }
@@ -689,12 +757,13 @@ function planResidue(dest: string, global: boolean): ResidueEntry[] {
 
 // ─── Plan assembly ──────────────────────────────────────────────────────────────────────────
 
-function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime): UninstallPlan {
+function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime, operatorRoots: string[]): UninstallPlan {
   const config = RUNTIME_CONFIGS[runtime];
   const { isManagedInnerHook } = loadInstallMergeModule();
   // Resolve the canonical OpenCode file before reading it. This makes planning use the same
   // authorized target that applySettings will bind and revalidate before writing.
-  const opencodeBinding = runtime === "opencode" ? resolveAuthorizedOpenCodeUninstallBinding(dest, global) : undefined;
+  const opencodeAuthorization = runtime === "opencode" ? resolveAuthorizedOpenCodeUninstallBinding(dest, global, operatorRoots) : undefined;
+  const opencodeBinding = opencodeAuthorization?.binding;
   const settings = planSettings(dest, global, config, isManagedInnerHook, opencodeBinding?.canonicalPath);
 
   const manifest = readOwnedFilesManifest(dest, config.manifestName);
@@ -748,7 +817,7 @@ function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime): Un
   removeDurable.push(...extraDurable);
   const residue = planResidue(dest, global);
 
-  return { runtime, dest, global, settings, mode, removeFiles, removeSymlinks, preserved, removeDurable, residue };
+  return { runtime, dest, global, settings, mode, removeFiles, removeSymlinks, preserved, removeDurable, residue, opencodeBinding, operatorAuthorizedBackingRoots: opencodeAuthorization?.operatorAuthorizedRoots ?? [] };
 }
 
 function planIsEmpty(plan: UninstallPlan): boolean {
@@ -772,14 +841,19 @@ type ApplyOutcome = {
 };
 
 /**
- * The only mutating step. Never lets an exception escape: every removal (settings, each file,
- * each symlink chain, each durable artifact) is individually try/caught, so a single failure
- * midway through never hides the accounting of everything that happened before or after it --
- * the caller always gets a complete, truthful outcome to report. Re-verifies each file/symlink
+ * The only mutating step. Settings are applied before every irreversible asset or durable
+ * manifest deletion. A settings failure therefore aborts the remaining apply; in particular a
+ * backing-link validation failure leaves runtime assets and durable manifests untouched.
+ * After settings succeeds, every removal (each file, each symlink chain, each durable artifact)
+ * is individually try/caught so one failure never hides the accounting of everything that
+ * happened before or after it. Re-verifies each file/symlink
  * chain's content immediately before removing it (closing the plan/confirm/apply TOCTOU window):
  * anything that no longer matches what `buildPlan()` observed is preserved, not deleted.
  */
 function applyPlan(plan: UninstallPlan): ApplyOutcome {
+  // This is deliberately before the first settings backup, file removal, or durable-stamp
+  // deletion: a re-pointed operator-authorized link aborts the whole apply with zero writes.
+  revalidateAuthorizedOpenCodeUninstallBinding(plan.opencodeBinding, plan.operatorAuthorizedBackingRoots);
   const failed: RemovalFailure[] = [];
   const preservedAtApply: PreservedFile[] = [];
   const removedFiles: RemovableFile[] = [];
@@ -788,11 +862,12 @@ function applyPlan(plan: UninstallPlan): ApplyOutcome {
 
   let settingsBackupPath: string | null = null;
   try {
-    const settingsOutcome = applySettings(plan.dest, plan.global, RUNTIME_CONFIGS[plan.runtime], loadInstallMergeModule().isManagedInnerHook);
+    const settingsOutcome = applySettings(plan.dest, plan.global, RUNTIME_CONFIGS[plan.runtime], loadInstallMergeModule().isManagedInnerHook, plan.opencodeBinding);
     settingsBackupPath = settingsOutcome.backupPath;
     if (settingsOutcome.preserved) preservedAtApply.push(settingsOutcome.preserved);
   } catch (error) {
     failed.push({ relPath: plan.settings.settingsPath, absPath: plan.settings.settingsPath, reason: `settings update failed: ${(error as Error).message}` });
+    return { settingsBackupPath, removedFiles, removedSymlinks, removedDurable, failed, preservedAtApply };
   }
 
   const removedParents = new Set<string>();
@@ -958,6 +1033,14 @@ function printReport(plan: UninstallPlan, applied: boolean, outcome: ApplyOutcom
   console.log(`${heading}`);
   console.log(`  target: ${plan.dest} (${plan.global ? "global" : "project-scoped"})`);
   console.log(`  ownership mode: ${plan.mode}`);
+  if (plan.operatorAuthorizedBackingRoots.length > 0) {
+    console.log("  operator-authorized backing roots (this invocation only):");
+    for (const backingRoot of plan.operatorAuthorizedBackingRoots) {
+      console.log(`    ${backingRoot}`);
+      const paths = [plan.settings.settingsPath, ...plan.removeFiles.map((entry) => entry.absPath)].filter((entry) => pathIsWithin(backingRoot, entry));
+      for (const writePath of paths) console.log(`      ${applied ? "wrote through" : "would write through"}: ${writePath}`);
+    }
+  }
   console.log("");
 
   console.log(`Settings: ${plan.settings.settingsPath}`);
@@ -1037,6 +1120,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       usage();
       return 2;
     }
+    if (args.flags["authorize-backing-root"] === true) {
+      console.error("flow-agents init --uninstall: --authorize-backing-root requires a path");
+      return 2;
+    }
+    const operatorRoots = validateOperatorBackingRoots(flagList(args.flags, "authorize-backing-root"));
+    if (operatorRoots.length > 0 && runtime !== "opencode") {
+      console.error("flow-agents init --uninstall: --authorize-backing-root is only valid with --runtime opencode");
+      return 2;
+    }
     const isGlobal = flagBool(args.flags, "global");
     const destFlag = flagString(args.flags, "dest") ?? args.positionals[0];
     if (isGlobal && destFlag) {
@@ -1053,7 +1145,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return 3;
     }
 
-    const plan = buildPlan(dest, isGlobal || !destFlag, runtime);
+    const plan = buildPlan(dest, isGlobal || !destFlag, runtime, operatorRoots);
     const dryRun = flagBool(args.flags, "dry-run");
 
     if (planIsEmpty(plan)) {
