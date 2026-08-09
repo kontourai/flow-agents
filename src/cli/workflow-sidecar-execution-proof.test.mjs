@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 
-import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
+import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, observedExecutedTestCount, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 import * as workflowSidecar from "../../build/src/cli/workflow-sidecar.js";
 import { lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
 
@@ -390,4 +390,165 @@ test("cargo and go require substantive local test sources", () => {
   });
   assert.equal(testExecutionProof("cargo test", covered)?.static_test_units, 1);
   assert.equal(testExecutionProof("go test ./...", covered)?.static_test_units, 1);
+});
+
+
+// --- #1039: declared reconcile-manifest commands as test evidence ---
+//
+// Inferring "is this a test?" from a script's source text cannot carry a provenance boundary. An
+// earlier attempt recognised a `pass`/`fail` tally SHAPE and was withdrawn: the matching had no
+// lexical awareness, so a `;` inside a printed string satisfied its "exits non-zero" condition and
+// a script that could never fail its process scored as evidence. These tests pin the replacement —
+// proof by declaration — and, more importantly, pin the bypasses that must stay closed.
+
+function declaredFixture(extra = {}) {
+  return fixture({
+    "package.json": JSON.stringify({
+      name: "declared-fixture",
+      "trust-reconcile-manifest": [
+        { id: "liveness-integration", command: "bash evals/integration/test_liveness.sh" },
+        { id: "boundary", command: "npm run check:boundary --" },
+      ],
+    }),
+    // Deliberately NOT a recognisable harness: no set -e, no inline assertions, no tally shape.
+    // Its acceptance must come from the declaration alone, never from reading this text.
+    "evals/integration/test_liveness.sh": "#!/bin/bash\necho '  PASS: one'\necho '  PASS: two'\n",
+    ...extra,
+  });
+}
+
+test("#1039: a command the repo declares in its reconcile manifest is accepted as evidence", () => {
+  const root = declaredFixture();
+  const proof = testExecutionProof("bash evals/integration/test_liveness.sh", root);
+  assert.notEqual(proof, null, "a declared reconcilable check must qualify as test evidence");
+  assert.equal(proof.runner, "declared-manifest");
+  assert.equal(proof.kind, "local-process-exit");
+  assert.equal(isMeaningfulTestCommand("bash evals/integration/test_liveness.sh", root), true);
+});
+
+test("#1039: an UNdeclared script with the same contents is refused", () => {
+  const root = declaredFixture({
+    "evals/integration/test_undeclared.sh": "#!/bin/bash\necho '  PASS: one'\necho '  PASS: two'\n",
+  });
+  assert.equal(
+    testExecutionProof("bash evals/integration/test_undeclared.sh", root),
+    null,
+    "acceptance must come from the declaration, not from the file's contents",
+  );
+});
+
+test("#1039: a declaration cannot launder a vacuous or metadata command into evidence", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({
+      name: "hostile-declaration",
+      "trust-reconcile-manifest": [
+        { id: "a", command: "echo hi" },
+        { id: "b", command: "true" },
+        { id: "c", command: "npm --version" },
+      ],
+    }),
+  });
+  // The vacuous/metadata refusals run BEFORE the declaration lookup precisely so a manifest entry
+  // widens what counts as a runner without exempting a command from being substantive.
+  for (const command of ["echo hi", "true", "npm --version"]) {
+    assert.equal(testExecutionProof(command, root), null, `${command} must stay refused even when declared`);
+  }
+});
+
+test("#1039: the withdrawn shape-matching bypasses stay closed", () => {
+  // Each of these was ACCEPTED by the withdrawn tally-shape heuristic. None is declared, and none
+  // may be accepted by reading its text.
+  const root = fixture({
+    "package.json": JSON.stringify({ name: "shape-bypasses", "trust-reconcile-manifest": [] }),
+    // Reproduced CRITICAL: the tally is inert — a failing check cannot affect the exit code — and
+    // the only "exit 1" is inside a printed string.
+    "evals/test_always_green.sh": [
+      "#!/bin/bash",
+      "errors=0",
+      'pass() { echo "PASS: $1"; }',
+      'fail() { echo "FAIL: $1"; errors=$((errors + 1)); }',
+      '[[ 1 -eq 2 ]] && pass "two" || fail "two"',
+      'echo "a real harness would; exit 1 here, but this one never does"',
+      "exit 0",
+      "",
+    ].join("\n"),
+    // Reproduced HIGH: an ordinary ops script whose step logging happens to use these names.
+    "evals/test_deploy.sh": [
+      "#!/bin/bash",
+      "errors=0",
+      'fail() { echo "deploy failed: $1"; errors=$((errors + 1)); }',
+      'pass() { echo "deploy step ok: $1"; }',
+      'pass "build"; pass "upload"; pass "restart"',
+      "if [[ $errors -eq 0 ]]; then exit 0; else exit 1; fi",
+      "",
+    ].join("\n"),
+  });
+  assert.equal(testExecutionProof("bash evals/test_always_green.sh", root), null,
+    "a script that can never fail its process must never be evidence");
+  assert.equal(testExecutionProof("bash evals/test_deploy.sh", root), null,
+    "an ops script with incidental pass/fail helpers must never be evidence");
+});
+
+test("#1039: a manifest-emitting package script is honoured, and a broken one declares nothing", () => {
+  const emitting = fixture({
+    "package.json": JSON.stringify({
+      name: "emitting",
+      "trust-reconcile-manifest": "cat manifest.json",
+    }),
+    "manifest.json": JSON.stringify([{ id: "eval", command: "bash evals/test_emitted.sh" }]),
+    "evals/test_emitted.sh": "#!/bin/bash\necho '  PASS: one'\n",
+  });
+  assert.notEqual(testExecutionProof("bash evals/test_emitted.sh", emitting), null);
+
+  const broken = fixture({
+    "package.json": JSON.stringify({ name: "broken", "trust-reconcile-manifest": "exit 3" }),
+    "evals/test_emitted.sh": "#!/bin/bash\necho '  PASS: one'\n",
+  });
+  assert.equal(
+    testExecutionProof("bash evals/test_emitted.sh", broken), null,
+    "a manifest that fails to emit declares nothing; it must not fail open",
+  );
+});
+
+test("#1039: declaration matching normalizes whitespace but is otherwise exact", () => {
+  const root = declaredFixture();
+  assert.notEqual(testExecutionProof("bash   evals/integration/test_liveness.sh", root), null,
+    "collapsed whitespace is the same declared command");
+  assert.equal(testExecutionProof("bash evals/integration/test_liveness.sh --only-fast", root), null,
+    "extra arguments are a different command than the one declared");
+});
+
+test("#1039: the repo's own tally-harness output is counted, so test_count can exceed zero", () => {
+  // The gate requires test_count > 0 from the command's stdout (normalizeObservedCommands). Before
+  // this change these suites reported 0 and could never satisfy it, whatever the static side said.
+  const worktreeRootStyle = ["  PASS: a", "  PASS: b", "  FAIL: c", ""].join("\n");
+  const relayStyle = ["  [PASS] a", "  [PASS] b", ""].join("\n");
+  assert.equal(observedExecutedTestCount(worktreeRootStyle), 2);
+  assert.equal(observedExecutedTestCount(relayStyle), 2);
+  // Unchanged conventions still work.
+  assert.equal(observedExecutedTestCount("--- PASS: TestOne\n--- PASS: TestTwo\n"), 2);
+  assert.equal(observedExecutedTestCount("# tests 7\n"), 7);
+  // Output alone is still not proof: an undeclared script printing PASS lines has no static proof,
+  // so inferExecutedTestCount yields 0 regardless of what it printed.
+  const root = declaredFixture({
+    "evals/integration/test_liar.sh": "#!/bin/bash\necho '  PASS: fake'\n",
+  });
+  assert.equal(inferExecutedTestCount("bash evals/integration/test_liar.sh", root, "  PASS: fake\n"), 0);
+});
+
+test("#1039: declared-manifest acceptance does not disturb the existing runners", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({
+      name: "coexist",
+      scripts: { "test:unit": "node --test unit/sample.test.mjs" },
+      "trust-reconcile-manifest": [{ id: "eval", command: "bash evals/test_declared.sh" }],
+    }),
+    "unit/sample.test.mjs": "import test from 'node:test';\ntest('a', () => {});\ntest('b', () => {});\n",
+    "evals/test_declared.sh": "#!/bin/bash\necho '  PASS: one'\n",
+  });
+  const node = testExecutionProof("node --test unit/sample.test.mjs", root);
+  assert.equal(node?.runner, "node --test", "the node runner must still win on its own merits");
+  assert.equal(node?.static_test_units, 2, "and keep its source-derived count");
+  assert.equal(testExecutionProof("npm run test:unit", root)?.runner, "node --test");
+  assert.equal(testExecutionProof("bash evals/test_declared.sh", root)?.runner, "declared-manifest");
 });

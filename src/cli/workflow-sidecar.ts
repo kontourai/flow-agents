@@ -3560,6 +3560,80 @@ function staticTestUnits(file: string, executable: string): number {
 }
 
 /**
+ * #1039: commands the repository DECLARES as its own reconcilable checks.
+ *
+ * Inferring "is this a test?" from a script's source text cannot carry a provenance boundary. The
+ * first attempt at this tried to (recognising a `pass`/`fail` tally shape) and was withdrawn: the
+ * matching had no lexical awareness, so a `;` inside a printed string satisfied its "exits
+ * non-zero" condition and a script that could never fail its process scored as evidence. Text
+ * shape is simply not proof of intent.
+ *
+ * A declaration is. This is the same manifest `scripts/ci/trust-reconcile.js` reconciles against —
+ * a tracked, reviewed list of `{id, command}` entries, every one of which runs in a required CI
+ * lane by construction. Adding a bogus entry is a visible repository change that a reviewer sees
+ * in the diff, rather than an accident of how a script happens to be written.
+ *
+ * Resolution mirrors that reconciler's own order so the two can never disagree about what this
+ * repo declares. Tiers that would execute a command to PRODUCE the manifest are deliberately
+ * included — this runs where the repo is checked out, and the emitting script is itself tracked —
+ * but every result is cached per project root so a multi-command claim resolves it once.
+ */
+const declaredTestCommandCache = new Map<string, Set<string>>();
+
+function normalizeDeclaredCommand(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized ? normalized : null;
+}
+
+function parseDeclaredManifest(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const entry of raw) {
+    const command = typeof entry === "string"
+      ? normalizeDeclaredCommand(entry)
+      : entry && typeof entry === "object" ? normalizeDeclaredCommand((entry as AnyObj).command) : null;
+    if (command) out.push(command);
+  }
+  return out;
+}
+
+function emitDeclaredManifest(command: string, projectRoot: string): string[] {
+  try {
+    const result = spawnSync("bash", ["-c", command], { cwd: projectRoot, encoding: "utf8", timeout: 60_000 });
+    if (result.status !== 0 || !result.stdout) return [];
+    return parseDeclaredManifest(JSON.parse(result.stdout));
+  } catch { return []; }
+}
+
+export function declaredTestCommands(projectRoot: string): Set<string> {
+  const root = path.resolve(projectRoot);
+  const cached = declaredTestCommandCache.get(root);
+  if (cached) return cached;
+  const commands = new Set<string>();
+  const add = (values: string[]) => { for (const value of values) commands.add(value); };
+  try {
+    if (process.env.TRUST_RECONCILE_MANIFEST) {
+      try { add(parseDeclaredManifest(JSON.parse(process.env.TRUST_RECONCILE_MANIFEST))); } catch { /* ignore */ }
+    }
+    const packageFile = path.join(root, "package.json");
+    if (commands.size === 0 && fs.existsSync(packageFile)) {
+      const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8")) as AnyObj;
+      const declared = pkg["trust-reconcile-manifest"]
+        ?? (pkg.scripts as AnyObj | undefined)?.["trust-reconcile-manifest"];
+      if (Array.isArray(declared)) add(parseDeclaredManifest(declared));
+      else if (typeof declared === "string" && declared.trim()) add(emitDeclaredManifest(declared, root));
+    }
+    const baseline = path.join(root, "evals", "ci", "run-baseline.sh");
+    if (commands.size === 0 && fs.existsSync(baseline)) {
+      add(emitDeclaredManifest(`bash ${JSON.stringify(baseline)} --manifest-json`, root));
+    }
+  } catch { /* a missing or unreadable manifest simply declares nothing */ }
+  declaredTestCommandCache.set(root, commands);
+  return commands;
+}
+
+/**
  * Produce evidence from the locally executed command and statically reviewable
  * test units. Runner stdout is deliberately excluded: any executable can print
  * a Vitest/Jest-looking success summary, but it cannot turn a non-test script
@@ -3576,6 +3650,16 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
   if (/^(?:true|:|\/usr\/bin\/true)$/i.test(normalized)) return null;
   if (/^(?:echo|printf)(?:\s|$)/i.test(normalized)) return null;
   if (/(?:^|\s)(?:--version|-v|--help|-h)(?:\s|$)/.test(normalized)) return null;
+  // #1039: a command the repository DECLARES as one of its reconcilable checks is proof by
+  // declaration, and needs no inference from its implementation's source text. Placed AFTER the
+  // vacuous/metadata refusals above so a declaration can never launder `echo`, `true`, or a
+  // `--version` probe into evidence — a declaration widens what counts as a test runner, it does
+  // not exempt a command from being substantive. `static_test_units` is 1 because the declaration
+  // proves exactly one declared check exists; the real magnitude comes from the observed run,
+  // which inferExecutedTestCount clamps against this.
+  if (declaredTestCommands(projectRoot).has(normalized)) {
+    return { kind: "local-process-exit", runner: "declared-manifest", static_test_units: 1 };
+  }
   const tokens = normalized.split(" ").filter(Boolean);
   while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) tokens.shift();
   const executable = tokens[0] ?? "";
@@ -3690,7 +3774,11 @@ export function observedExecutedTestCount(output: string): number {
   ]) {
     for (const match of output.matchAll(pattern)) counts.push(Number(match[1]));
   }
-  const explicitPasses = output.match(/^\s*(?:---\s+PASS:|ok\s+\d+\s+-)/gm)?.length ?? 0;
+  // `--- PASS:` is Go's form and `ok N -` is TAP's. #1039 adds this repo's own tally-harness
+  // convention (`  PASS: <name>` / `  [PASS] <name>`), which previously matched nothing here — so
+  // a 46-check suite reported an observed count of 0 and could never satisfy the `test_count > 0`
+  // requirement in normalizeObservedCommands, no matter what the static side allowed.
+  const explicitPasses = output.match(/^\s*(?:---\s+PASS:|ok\s+\d+\s+-|\[PASS\]|PASS:)/gm)?.length ?? 0;
   if (explicitPasses > 0) counts.push(explicitPasses);
   const goPackages = output.match(/^ok\s+\S+(?:\s|$)/gm)?.length ?? 0;
   if (goPackages > 0) counts.push(goPackages);
