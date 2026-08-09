@@ -53,6 +53,15 @@ if (metadataIndex !== -1) {
   if (Object.hasOwn(manifestMetadata, "schema_version") || Object.hasOwn(manifestMetadata, "files")) fail("manifest metadata cannot replace schema_version or files");
   args.splice(metadataIndex, 2);
 }
+const adoptGeneratedMarkerIndex = args.indexOf("--adopt-generated-seed-marker");
+let adoptGeneratedSeedMarker;
+if (adoptGeneratedMarkerIndex !== -1) {
+  adoptGeneratedSeedMarker = args[adoptGeneratedMarkerIndex + 1];
+  if (!adoptGeneratedSeedMarker || adoptGeneratedSeedMarker.startsWith("--")) {
+    fail("--adopt-generated-seed-marker requires an exact first-line marker");
+  }
+  args.splice(adoptGeneratedMarkerIndex, 2);
+}
 const [sourceArg, destArg, manifestArg, ...extraArgs] = args;
 if (!sourceArg || !destArg || !manifestArg) fail("usage: install-owned-files.js <overlay> <destination> <manifest-relative-path>");
 if (extraArgs.length) fail(`unexpected arguments: ${extraArgs.join(" ")}`);
@@ -73,6 +82,16 @@ const manifestPath = path.join(dest, manifestArg);
 
 function hashFile(file) {
   return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+function isAdoptableGeneratedSeed(rel, target) {
+  // Codex config/profile seeds are generated from the packaging manifest. A
+  // legacy install predating ownership manifests can therefore be adopted only
+  // when its first line carries the exact generated-file marker. This remains
+  // deliberately narrower than a general overwrite exception.
+  if (!adoptGeneratedSeedMarker || (rel !== "config.toml" && !rel.endsWith(".config.toml"))) return false;
+  const firstLine = fs.readFileSync(target, "utf8").split(/\r?\n/, 1)[0];
+  return firstLine === adoptGeneratedSeedMarker;
 }
 
 function lstatIfPresent(file) {
@@ -229,7 +248,9 @@ for (const entry of incoming) {
   if (!oldHash) {
     if (currentHash !== entry.hash) {
       const recognizableLegacy = legacyCutoff !== null && wasLegacyManagedPath(entry.rel) && stat.mtimeMs <= legacyCutoff;
-      if (!recognizableLegacy) fail(`refusing to overwrite unowned or ambiguous file: ${target}`);
+      if (!recognizableLegacy && !isAdoptableGeneratedSeed(entry.rel, target)) {
+        fail(`refusing to overwrite unowned or ambiguous file: ${target}`);
+      }
     }
   } else if (currentHash !== oldHash && currentHash !== entry.hash) {
     fail(`refusing to overwrite modified Flow Agents file: ${target}`);

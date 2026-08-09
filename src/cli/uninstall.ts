@@ -1,4 +1,4 @@
-// flow-agents init --uninstall — remove a prior claude-code install.
+// flow-agents init --uninstall — remove a prior runtime install.
 //
 // Two removal modes, chosen purely by whether an ownership manifest exists (never mixed):
 //   - manifest-backed: `.flow-agents/owned-files.json` (written by a manifest-era install,
@@ -7,7 +7,7 @@
 //     reported. Every manifest entry is validated (path containment, sha256 shape) before use --
 //     a manifest is not a trusted input (see resolveManifestEntryPath in owned-files-manifest.ts)
 //     -- and the whole run aborts, before any deletion, on the first unsafe/malformed entry.
-//   - legacy inference: no manifest. The candidate set is derived by hashing the *executing*
+//   - legacy inference: claude-code only, when no manifest exists. The candidate set is derived by hashing the *executing*
 //     package's own dist/claude-code bundle content against the target and removing only exact
 //     matches (skills/, agents/, and the known pre-manifest full-bundle-rsync payload names).
 //     Anything present-but-differing is preserved and reported as user-modified/unknown; anything
@@ -53,6 +53,7 @@
 //     preserve it. The error direction is conservative (dry-run over-states removal; the real run
 //     never removes more than dry-run showed), and no eval currently exercises dry-run fidelity.
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { createInterface } from "node:readline/promises";
@@ -73,6 +74,16 @@ import {
 } from "../lib/owned-files-manifest.js";
 import { ensureBundle, globalDest } from "./init.js";
 
+type UninstallRuntime = "claude-code" | "codex" | "opencode";
+type RuntimeConfig = { runtime: UninstallRuntime; manifestName: string; configPath: (dest: string, global: boolean) => string; removeStatusLine: boolean; removeInstructionsPath?: (dest: string) => string; removeOwnedValues?: Record<string, unknown>; additionalManifestRoots?: () => { dest: string; manifestName: string; label: string }[] };
+
+const RUNTIME_CONFIGS: Record<UninstallRuntime, RuntimeConfig> = {
+  "claude-code": { runtime: "claude-code", manifestName: "owned-files.json", configPath: (dest, global) => global ? path.join(dest, "settings.json") : path.join(dest, ".claude", "settings.json"), removeStatusLine: true },
+  codex: { runtime: "codex", manifestName: "codex-install-manifest.json", configPath: (dest) => path.join(dest, "hooks.json"), removeStatusLine: false,
+    additionalManifestRoots: () => [{ dest: path.resolve(process.env["FLOW_AGENTS_SKILLS_DIR"] ?? path.join(os.homedir(), ".agents", "skills")), manifestName: "codex-universal-skills-install-manifest.json", label: "universal-skills" }] },
+  opencode: { runtime: "opencode", manifestName: "runtime-assets.json", configPath: (dest) => path.join(dest, "opencode.json"), removeStatusLine: false, removeInstructionsPath: (dest) => path.join(dest, ".flow-agents", "runtime", "AGENTS.md"), removeOwnedValues: { "$schema": "https://opencode.ai/config.json" } },
+};
+
 type InstallMergeModule = { isManagedHookGroup: (hookGroup: unknown) => boolean; isManagedInnerHook: (hook: unknown) => boolean; FA_MARKERS: string[] };
 
 function loadInstallMergeModule(): InstallMergeModule {
@@ -88,7 +99,7 @@ function loadInstallMergeModule(): InstallMergeModule {
 const STATUSLINE_MARKER = "flow-agents-statusline.js";
 
 function usage(): void {
-  console.error(`usage: flow-agents init --uninstall --runtime claude-code [--global | --dest PATH] [options]
+  console.error(`usage: flow-agents init --uninstall --runtime <claude-code|codex|opencode> [--global | --dest PATH] [options]
 
 Removes a prior Flow Agents claude-code install: managed settings.json hook entries/statusLine,
 installed skill/agent files (manifest-backed when an ownership manifest is present, otherwise
@@ -98,7 +109,7 @@ lifecycle authority, telemetry data files, or the npm package itself (a final
 'npm rm -g @kontourai/flow-agents' instruction is printed).
 
 Options:
-  --runtime claude-code   Required; only claude-code is currently supported.
+  --runtime RUNTIME       Required: claude-code, codex, or opencode.
   --global                Target the runtime's global install (~/.claude, honors
                           FLOW_AGENTS_USER_CLAUDE_SETTINGS for test isolation).
   --dest PATH             Target an explicit project-scoped destination.
@@ -116,7 +127,7 @@ found to uninstall, 4 one or more removals failed (see the report's "Failed to r
 
 // ─── Discovery types ────────────────────────────────────────────────────────────────────────
 
-type RemovableFile = { relPath: string; absPath: string; reason: string; expectedSha256: string };
+type RemovableFile = { relPath: string; absPath: string; root?: string; reason: string; expectedSha256: string };
 type PreservedFile = { relPath: string; absPath: string; reason: string };
 type RemovableSymlink = { relPath: string; symlinkPath: string; targetDir: string; reason: string; bundleSkillDir: string };
 type RemovalFailure = { relPath: string; absPath: string; reason: string };
@@ -151,10 +162,6 @@ type UninstallPlan = {
 
 // ─── Settings (hooks + statusLine) ─────────────────────────────────────────────────────────
 
-function settingsPathFor(dest: string, global: boolean): string {
-  return global ? path.join(dest, "settings.json") : path.join(dest, ".claude", "settings.json");
-}
-
 // Entry-granular "is this hook FA-owned" is imported from install-merge.js's
 // isManagedInnerHook (see loadInstallMergeModule/buildPlan) rather than duplicated here --
 // mergeSettings' hooks step (the ordinary `flow-agents init` merge/re-install path) and this
@@ -163,8 +170,8 @@ function settingsPathFor(dest: string, global: boolean): string {
 // A group mixing a user hook with an FA hook keeps the user hook (and every other group-level
 // field, e.g. `matcher`); a group is dropped entirely only when every inner hook was FA-owned.
 
-function planSettings(dest: string, global: boolean, isManagedInnerHook: (hook: unknown) => boolean): SettingsPlan {
-  const settingsPath = settingsPathFor(dest, global);
+function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean): SettingsPlan {
+  const settingsPath = config.configPath(dest, global);
   if (!fs.existsSync(settingsPath)) {
     return { settingsPath, exists: false, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null };
   }
@@ -214,11 +221,28 @@ function planSettings(dest: string, global: boolean, isManagedInnerHook: (hook: 
   }
   let removedStatusLine = false;
   const statusLine = existing["statusLine"];
-  if (statusLine !== undefined && JSON.stringify(statusLine).includes(STATUSLINE_MARKER)) {
+  if (config.removeStatusLine && statusLine !== undefined && JSON.stringify(statusLine).includes(STATUSLINE_MARKER)) {
     delete next["statusLine"];
     removedStatusLine = true;
   }
-  const changed = removedHookEntryCount > 0 || removedStatusLine;
+  let removedInstructions = false;
+  if (config.removeInstructionsPath && Array.isArray(existing["instructions"])) {
+    const instructionPath = config.removeInstructionsPath(dest);
+    const kept = (existing["instructions"] as unknown[]).filter((entry) => entry !== instructionPath);
+    if (kept.length !== (existing["instructions"] as unknown[]).length) {
+      removedInstructions = true;
+      if (kept.length > 0) next["instructions"] = kept;
+      else delete next["instructions"];
+    }
+  }
+  let removedOwnedValue = false;
+  for (const [key, value] of Object.entries(config.removeOwnedValues ?? {})) {
+    if (JSON.stringify(existing[key]) === JSON.stringify(value)) {
+      delete next[key];
+      removedOwnedValue = true;
+    }
+  }
+  const changed = removedHookEntryCount > 0 || removedStatusLine || removedInstructions || removedOwnedValue;
   if (!changed) {
     return { settingsPath, exists: true, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null };
   }
@@ -253,7 +277,7 @@ function applySettings(plan: SettingsPlan): string | null {
 
 // ─── Manifest-backed removal ────────────────────────────────────────────────────────────────
 
-function planFromManifest(dest: string, manifest: OwnedFilesManifest): { removeFiles: RemovableFile[]; preserved: PreservedFile[] } {
+function planFromManifest(dest: string, manifest: OwnedFilesManifest, label = ""): { removeFiles: RemovableFile[]; preserved: PreservedFile[] } {
   const removeFiles: RemovableFile[] = [];
   const preserved: PreservedFile[] = [];
   for (const entry of manifest.files) {
@@ -286,7 +310,7 @@ function planFromManifest(dest: string, manifest: OwnedFilesManifest): { removeF
       continue;
     }
     if (hashFile(absPath) === expectedSha256) {
-      removeFiles.push({ relPath, absPath, reason: "owned-files.json: content unmodified since install", expectedSha256 });
+      removeFiles.push({ relPath: `${label}${relPath}`, absPath, root: dest, reason: "ownership manifest: content unmodified since install", expectedSha256 });
     } else {
       preserved.push({ relPath, absPath, reason: "content modified since install (sha256 mismatch)" });
     }
@@ -507,17 +531,17 @@ function diffSingleLegacyFile(
 
 // ─── Durable artifacts + residue ────────────────────────────────────────────────────────────
 
-const DURABLE_ARTIFACT_FILES = ["install.json", "skills-manifest.json", "owned-files.json", "runtime-assets.json", "registry-latest.json"];
+const DURABLE_ARTIFACT_FILES = ["install.json", "skills-manifest.json", "owned-files.json", "codex-install-manifest.json", "codex-universal-skills-install-manifest.json", "runtime-assets.json", "registry-latest.json"];
 const DURABLE_ARTIFACT_DIRS = ["runtime"];
 
-function planDurableArtifacts(dest: string): { removeDurable: { path: string; reason: string }[]; note?: string } {
+function planDurableArtifacts(dest: string, runtime: UninstallRuntime): { removeDurable: { path: string; reason: string }[]; note?: string } {
   const durableRoot = durableFlowAgentsRoot(dest);
   const installRecordPath = path.join(durableRoot, "install.json");
   if (fs.existsSync(installRecordPath)) {
     try {
       const record = JSON.parse(fs.readFileSync(installRecordPath, "utf8")) as Record<string, unknown>;
-      if (record["runtime"] !== undefined && record["runtime"] !== "claude-code") {
-        return { removeDurable: [], note: `${installRecordPath}: durable install record belongs to runtime '${String(record["runtime"])}', not claude-code; leaving all .flow-agents/* durable artifacts in place` };
+      if (record["runtime"] !== undefined && record["runtime"] !== runtime) {
+        return { removeDurable: [], note: `${installRecordPath}: durable install record belongs to runtime '${String(record["runtime"])}', not ${runtime}; leaving all .flow-agents/* durable artifacts in place` };
       }
     } catch {
       // Unreadable install.json: fall through and still offer to remove the known durable
@@ -549,15 +573,17 @@ function planResidue(dest: string, global: boolean): ResidueEntry[] {
 
 // ─── Plan assembly ──────────────────────────────────────────────────────────────────────────
 
-function buildPlan(dest: string, global: boolean): UninstallPlan {
+function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime): UninstallPlan {
+  const config = RUNTIME_CONFIGS[runtime];
   const { isManagedInnerHook } = loadInstallMergeModule();
-  const settings = planSettings(dest, global, isManagedInnerHook);
+  const settings = planSettings(dest, global, config, isManagedInnerHook);
 
-  const manifest = readOwnedFilesManifest(dest);
+  const manifest = readOwnedFilesManifest(dest, config.manifestName);
   let mode: UninstallPlan["mode"];
   let removeFiles: RemovableFile[] = [];
   let removeSymlinks: RemovableSymlink[] = [];
   let preserved: PreservedFile[] = [];
+  const extraDurable: { path: string; reason: string }[] = [];
   if (manifest) {
     mode = "manifest";
     // Validated entry-by-entry inside planFromManifest -- throws (aborting before any deletion)
@@ -565,16 +591,30 @@ function buildPlan(dest: string, global: boolean): UninstallPlan {
     const result = planFromManifest(dest, manifest);
     removeFiles = result.removeFiles;
     preserved = result.preserved;
-  } else {
+    for (const extra of config.additionalManifestRoots?.() ?? []) {
+      const extraManifest = readOwnedFilesManifest(extra.dest, extra.manifestName);
+      if (!extraManifest) {
+        throw new Error(`${runtime} uninstall requires its ownership manifest (${path.join(durableFlowAgentsRoot(extra.dest), extra.manifestName)}); refusing manifest-less inference`);
+      }
+      const extraResult = planFromManifest(extra.dest, extraManifest, `${extra.label}/`);
+      removeFiles.push(...extraResult.removeFiles);
+      preserved.push(...extraResult.preserved.map((entry) => ({ ...entry, relPath: `${extra.label}/${entry.relPath}` })));
+      extraDurable.push({ path: path.join(durableFlowAgentsRoot(extra.dest), extra.manifestName), reason: "flow-agents durable install artifact" });
+    }
+  } else if (runtime === "claude-code") {
     const bundle = ensureBundle("claude-code");
     const result = planLegacy(bundle, dest, global);
     removeFiles = result.removeFiles;
     removeSymlinks = result.removeSymlinks;
     preserved = result.preserved;
     mode = removeFiles.length > 0 || removeSymlinks.length > 0 || preserved.length > 0 ? "legacy" : "none";
+  } else {
+    const expectedManifest = path.join(durableFlowAgentsRoot(dest), config.manifestName);
+    throw new Error(`${runtime} uninstall requires its ownership manifest (${expectedManifest}); refusing manifest-less inference`);
   }
 
-  const { removeDurable } = planDurableArtifacts(dest);
+  const { removeDurable } = planDurableArtifacts(dest, runtime);
+  removeDurable.push(...extraDurable);
   const residue = planResidue(dest, global);
 
   return { dest, global, settings, mode, removeFiles, removeSymlinks, preserved, removeDurable, residue };
@@ -635,7 +675,7 @@ function applyPlan(plan: UninstallPlan): ApplyOutcome {
       let containmentOk = true;
       let containmentPreserveReason: string | undefined;
       try {
-        assertManifestEntryParentContained(plan.dest, entry.absPath, entry.relPath);
+        assertManifestEntryParentContained(entry.root ?? plan.dest, entry.absPath, entry.relPath);
       } catch (error) {
         containmentOk = false;
         // Distinguish a genuine containment violation (the function's own thrown error type)
@@ -750,8 +790,8 @@ function applyPlan(plan: UninstallPlan): ApplyOutcome {
 
 // ─── Reporting ──────────────────────────────────────────────────────────────────────────────
 
-function printReport(plan: UninstallPlan, applied: boolean, outcome: ApplyOutcome): void {
-  const heading = applied ? "Flow Agents claude-code uninstall" : "Flow Agents claude-code uninstall (dry run — nothing changed)";
+function printReport(plan: UninstallPlan, applied: boolean, outcome: ApplyOutcome, runtime: UninstallRuntime): void {
+  const heading = applied ? `Flow Agents ${runtime} uninstall` : `Flow Agents ${runtime} uninstall (dry run — nothing changed)`;
   console.log(`${heading}`);
   console.log(`  target: ${plan.dest} (${plan.global ? "global" : "project-scoped"})`);
   console.log(`  ownership mode: ${plan.mode}`);
@@ -828,8 +868,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   try {
     const args = parseArgs(argv);
     const runtime = flagString(args.flags, "runtime");
-    if (runtime !== "claude-code") {
-      console.error(`flow-agents init --uninstall: --runtime is required and only 'claude-code' is currently supported (got: ${runtime ?? "(none)"})`);
+    if (runtime !== "claude-code" && runtime !== "codex" && runtime !== "opencode") {
+      console.error(`flow-agents init --uninstall: --runtime must be claude-code, codex, or opencode (got: ${runtime ?? "(none)"})`);
       usage();
       return 2;
     }
@@ -839,27 +879,27 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       console.error("flow-agents init --uninstall: --global and an explicit destination are mutually exclusive");
       return 2;
     }
-    if (!isGlobal && !destFlag) {
+    if (!isGlobal && !destFlag && runtime === "claude-code") {
       console.error("flow-agents init --uninstall: provide --global or an explicit destination (--dest PATH, or a positional path)");
       return 2;
     }
-    const dest = isGlobal ? globalDest("claude-code") : path.resolve(destFlag as string);
+    const dest = isGlobal || !destFlag ? globalDest(runtime) : path.resolve(destFlag);
     if (!fs.existsSync(dest)) {
       console.error(`flow-agents init --uninstall: nothing to uninstall (destination does not exist): ${dest}`);
       return 3;
     }
 
-    const plan = buildPlan(dest, isGlobal);
+    const plan = buildPlan(dest, isGlobal || !destFlag, runtime);
     const dryRun = flagBool(args.flags, "dry-run");
 
     if (planIsEmpty(plan)) {
-      printReport(plan, false, dryRunOutcome(plan));
+      printReport(plan, false, dryRunOutcome(plan), runtime);
       console.error("flow-agents init --uninstall: nothing found to uninstall");
       return 3;
     }
 
     if (dryRun) {
-      printReport(plan, false, dryRunOutcome(plan));
+      printReport(plan, false, dryRunOutcome(plan), runtime);
       return 0;
     }
 
@@ -891,7 +931,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
 
     const outcome = applyPlan(plan);
-    printReport(plan, true, outcome);
+    printReport(plan, true, outcome, runtime);
     return outcome.failed.length > 0 ? 4 : 0;
   } catch (error) {
     console.error(`flow-agents init --uninstall: ${(error as Error).message}`);

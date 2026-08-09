@@ -888,6 +888,82 @@ else
 fi
 
 echo ""
+# ─── Scenario L: Codex/OpenCode manifest-backed round trips ──────────────────────────────────
+echo "--- Scenario L: Codex and OpenCode uninstall round trips, preservation, and containment ---"
+
+CODEX_HOME="$TMPDIR_EVAL/codex-home"
+CODEX_SKILLS="$TMPDIR_EVAL/codex-skills"
+mkdir -p "$CODEX_HOME" "$CODEX_SKILLS"
+node - "$CODEX_HOME/hooks.json" <<'NODE'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], `${JSON.stringify({ user: true, hooks: { Stop: [{ hooks: [{ type: "command", command: "echo user-codex-hook" }] }] } }, null, 2)}\n`);
+NODE
+CODEX_BEFORE="$(tree_snapshot "$CODEX_HOME")|$(tree_snapshot "$CODEX_SKILLS")"
+HOME="$TMPDIR_EVAL/codex-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_SKILLS" $FA init --runtime codex --global --dest "$CODEX_HOME" --yes >/dev/null 2>&1
+CODEX_OUT="$TMPDIR_EVAL/codex-uninstall.out"
+HOME="$TMPDIR_EVAL/codex-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_SKILLS" $FA init --uninstall --runtime codex --dest "$CODEX_HOME" --yes >"$CODEX_OUT" 2>&1
+CODEX_AFTER="$(tree_snapshot "$CODEX_HOME" | grep -v 'hooks\.json\.bak-uninstall-' || true)|$(tree_snapshot "$CODEX_SKILLS")"
+if [[ "$CODEX_BEFORE" == "$CODEX_AFTER" ]] && node - "$CODEX_HOME/hooks.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!c.user || !String(c.hooks.Stop[0].hooks[0].command).includes("user-codex-hook")) throw new Error("user hook missing");
+if (JSON.stringify(c).includes("Recording Flow Agents telemetry")) throw new Error("managed hook remains");
+NODE
+then
+  _pass "codex: manifest replay removes owned files and only managed hooks, preserving user hooks"
+else
+  _fail "codex: round trip or hook surgery did not preserve the fixture"
+fi
+
+CODEX_PRESERVE_HOME="$TMPDIR_EVAL/codex-preserve-home"
+CODEX_PRESERVE_SKILLS="$TMPDIR_EVAL/codex-preserve-skills"
+mkdir -p "$CODEX_PRESERVE_HOME" "$CODEX_PRESERVE_SKILLS"
+HOME="$TMPDIR_EVAL/codex-preserve-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_PRESERVE_SKILLS" $FA init --runtime codex --global --dest "$CODEX_PRESERVE_HOME" --yes >/dev/null 2>&1
+printf '\nuser edit sentinel\n' >> "$CODEX_PRESERVE_HOME/build/src/cli.js"
+HOME="$TMPDIR_EVAL/codex-preserve-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_PRESERVE_SKILLS" $FA init --uninstall --runtime codex --dest "$CODEX_PRESERVE_HOME" --yes >"$TMPDIR_EVAL/codex-preserve.out" 2>&1
+if [[ -f "$CODEX_PRESERVE_HOME/build/src/cli.js" ]] && grep -q 'user edit sentinel' "$CODEX_PRESERVE_HOME/build/src/cli.js" && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/codex-preserve.out" | grep -q 'build/src/cli.js'; then
+  _pass "codex: modified owned file is preserved and reported"
+else
+  _fail "codex: modified owned file was not safely preserved"
+fi
+
+CODEX_CONTAIN_HOME="$TMPDIR_EVAL/codex-containment-home"
+CODEX_CONTAIN_SKILLS="$TMPDIR_EVAL/codex-containment-skills"
+CODEX_EXTERNAL="$TMPDIR_EVAL/codex-external"
+mkdir -p "$CODEX_CONTAIN_HOME" "$CODEX_CONTAIN_SKILLS" "$CODEX_EXTERNAL"
+HOME="$TMPDIR_EVAL/codex-containment-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_CONTAIN_SKILLS" $FA init --runtime codex --global --dest "$CODEX_CONTAIN_HOME" --yes >/dev/null 2>&1
+mv "$CODEX_CONTAIN_HOME/build" "$CODEX_EXTERNAL/build"
+ln -s "$CODEX_EXTERNAL/build" "$CODEX_CONTAIN_HOME/build"
+set +e
+HOME="$TMPDIR_EVAL/codex-containment-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_CONTAIN_SKILLS" $FA init --uninstall --runtime codex --dest "$CODEX_CONTAIN_HOME" --yes >"$TMPDIR_EVAL/codex-containment.out" 2>&1
+CODEX_CONTAIN_STATUS=$?
+set -e
+if [[ "$CODEX_CONTAIN_STATUS" -eq 2 ]] && [[ -f "$CODEX_EXTERNAL/build/src/cli.js" ]] && grep -qi 'symlinked parent' "$TMPDIR_EVAL/codex-containment.out"; then
+  _pass "codex: symlinked intermediate containment attack is refused before deletion"
+else
+  _fail "codex: containment attack was not refused safely"
+fi
+
+OPENCODE_HOME="$TMPDIR_EVAL/opencode-home"
+mkdir -p "$OPENCODE_HOME"
+node - "$OPENCODE_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], `${JSON.stringify({ custom: "preserve", instructions: ["/user/instructions.md"] }, null, 2)}\n`);
+NODE
+OPENCODE_BEFORE="$(tree_snapshot "$OPENCODE_HOME")"
+HOME="$TMPDIR_EVAL/opencode-fixture-home" $FA init --runtime opencode --global --dest "$OPENCODE_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-fixture-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_HOME" --yes >"$TMPDIR_EVAL/opencode-uninstall.out" 2>&1
+OPENCODE_AFTER="$(tree_snapshot "$OPENCODE_HOME" | grep -v 'opencode\.json\.bak-uninstall-' || true)"
+if [[ "$OPENCODE_BEFORE" == "$OPENCODE_AFTER" ]] && node - "$OPENCODE_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (c.custom !== "preserve" || c.instructions.join() !== "/user/instructions.md") throw new Error("user config missing");
+NODE
+then
+  _pass "opencode: manifest replay removes runtime assets and only its managed instruction"
+else
+  _fail "opencode: round trip or config surgery did not preserve the fixture"
+fi
+
+echo ""
 echo "==========================="
 total=$((pass + fail))
 echo "Results: ${pass}/${total} passed, ${fail} failed"
