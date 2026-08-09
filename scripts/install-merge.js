@@ -306,14 +306,41 @@ function atomicWriteJson(filePath, data) {
  * @param {string} runtime
  */
 function captureConfigPremerge(configPath) {
-  if (!fs.existsSync(configPath)) return { schema_version: "1.0", existed: false, parsed: {} };
+  if (!fs.existsSync(configPath)) return { schema_version: "1.0", existed: false, bytes_base64: "", parsed: {}, config_path: path.resolve(configPath) };
   const bytes = fs.readFileSync(configPath);
   return {
     schema_version: "1.0",
     existed: true,
     bytes_base64: bytes.toString("base64"),
     parsed: JSON.parse(bytes.toString("utf8")),
+    config_path: path.resolve(configPath),
   };
+}
+
+function validConfigPremergeSnapshot(value, runtime) {
+  if (!value || typeof value !== "object" || value.schema_version !== "1.0"
+    || typeof value.existed !== "boolean" || typeof value.bytes_base64 !== "string"
+    || typeof value.post_install_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(value.post_install_sha256)
+    || typeof value.config_path !== "string" || value.runtime !== runtime
+    || !value.parsed || typeof value.parsed !== "object" || Array.isArray(value.parsed)) return false;
+  if (!value.existed) return value.bytes_base64 === "" && Object.keys(value.parsed).length === 0;
+  try {
+    const bytes = Buffer.from(value.bytes_base64, "base64");
+    return bytes.toString("base64") === value.bytes_base64
+      && JSON.stringify(JSON.parse(bytes.toString("utf8"))) === JSON.stringify(value.parsed);
+  } catch { return false; }
+}
+
+function priorOrigin(installRecordPath, runtime) {
+  try {
+    const record = JSON.parse(fs.readFileSync(installRecordPath, "utf8"));
+    if (record.runtime !== runtime) return null;
+    const premerge = record.config_premerge;
+    if (premerge?.schema_version === "2.0" && validConfigPremergeSnapshot(premerge.origin, runtime)) return premerge.origin;
+    // Version 1 had one snapshot serving both purposes. It is the best available
+    // lineage origin when upgrading; new records split the responsibilities.
+    return validConfigPremergeSnapshot(premerge, runtime) ? premerge : null;
+  } catch { return null; }
 }
 
 /**
@@ -368,7 +395,8 @@ function writeInstallRecord(installRecordPath, version, runtime, configPremerge)
  */
 function runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime }) {
   // (a) Read dest JSON (or {} if absent).
-  const configPremerge = captureConfigPremerge(configPath);
+  const capturedPremerge = { ...captureConfigPremerge(configPath), runtime };
+  const carriedOrigin = priorOrigin(installRecordPath, runtime);
   let existing = {};
   if (fs.existsSync(configPath)) {
     try {
@@ -406,7 +434,13 @@ function runMerge({ configPath, managedHooksPath, version, installRecordPath, ru
   atomicWriteJson(configPath, merged);
 
   // (f) Write version stamp.
-  writeInstallRecord(installRecordPath, version, runtime, stampConfigPremergePostInstallHash(configPremerge, configPath));
+  const previous = stampConfigPremergePostInstallHash(capturedPremerge, configPath);
+  // `origin` answers ownership provenance (before Flow Agents first touched this
+  // path); `previous` answers byte-fidelity restore (before this install). They
+  // must not be conflated: a reinstall otherwise either loses user edits or
+  // mistakes our first install's values for user-owned values forever.
+  const origin = carriedOrigin ?? previous;
+  writeInstallRecord(installRecordPath, version, runtime, { schema_version: "2.0", origin, previous });
 }
 
 // ─── CLI wrapper ──────────────────────────────────────────────────────────────

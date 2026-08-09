@@ -20,12 +20,10 @@
 // file, not an owned one), and a fixed set of durable `.flow-agents/*` stamp files are removed
 // when they belong to claude-code.
 //
-// Removal requires positive provenance; absence of provenance means retain and disclose. In
-// particular, a merge-owned scalar whose value is ordinary user data is never removed merely
-// because it equals Flow Agents' default: only the pre-install config snapshot can prove that
-// the key was absent before we added it. Self-identifying entries (our marked hooks, the
-// flow-agents statusLine command, and OpenCode's exact runtime instruction path) remain
-// removable by their own unambiguous marker.
+// Removal uses a three-tier ownership rule. A valid pre-install snapshot is authoritative.
+// Without one, an installation-specific value is removable only when it is byte-identical to
+// the value this install writes; a marker match that differs is retained and disclosed. Generic
+// defaults (for example OpenCode's public $schema URL) are never removed without a snapshot.
 //
 // Safety discipline: `buildPlan()` is pure/read-only (no filesystem mutation). `applyPlan()` is
 // the only mutating step, is only reached after an explicit confirmation, re-verifies every
@@ -87,7 +85,7 @@ type UninstallRuntime = "claude-code" | "codex" | "opencode";
 type RuntimeConfig = { runtime: UninstallRuntime; manifestName: string; configPath: (dest: string, global: boolean) => string; removeStatusLine: boolean; removeInstructionsPath?: (dest: string) => string; removeOwnedValues?: Record<string, unknown>; additionalManifestRoots?: () => { dest: string; manifestName: string; label: string }[] };
 
 const RUNTIME_CONFIGS: Record<UninstallRuntime, RuntimeConfig> = {
-  "claude-code": { runtime: "claude-code", manifestName: "owned-files.json", configPath: (dest, global) => global ? path.join(dest, "settings.json") : path.join(dest, ".claude", "settings.json"), removeStatusLine: true },
+  "claude-code": { runtime: "claude-code", manifestName: "owned-files.json", configPath: (dest, global) => global ? path.join(dest, "settings.json") : path.join(dest, ".claude", "settings.json"), removeStatusLine: true, removeOwnedValues: { "permissions.defaultMode": "auto", "skipDangerousModePermissionPrompt": true } },
   codex: { runtime: "codex", manifestName: "codex-install-manifest.json", configPath: (dest) => path.join(dest, "hooks.json"), removeStatusLine: false,
     additionalManifestRoots: () => [{ dest: path.resolve(process.env["FLOW_AGENTS_SKILLS_DIR"] ?? path.join(os.homedir(), ".agents", "skills")), manifestName: "codex-universal-skills-install-manifest.json", label: "universal-skills" }] },
   opencode: { runtime: "opencode", manifestName: "runtime-assets.json", configPath: (dest, global) => global ? opencodeGlobalConfigPath(dest) : path.join(dest, "opencode.json"), removeStatusLine: false, removeInstructionsPath: (dest) => path.join(dest, ".flow-agents", "runtime", "AGENTS.md"), removeOwnedValues: { "$schema": "https://opencode.ai/config.json" } },
@@ -100,9 +98,24 @@ type InstallMergeModule = {
   restoreConfigPremergeBytes: (premerge: unknown, nextContent: unknown, currentBytes: Buffer) => Buffer | null;
 };
 
-type ConfigPremerge = {
-  schema_version?: unknown;
-  parsed?: unknown;
+type ConfigPremergeSnapshot = {
+  schema_version: "1.0";
+  existed: boolean;
+  bytes_base64: string;
+  parsed: Record<string, unknown>;
+  post_install_sha256: string;
+  config_path: string;
+  runtime: UninstallRuntime;
+};
+
+type PremergeRead = {
+  /** Earliest lineage baseline: only scalar ownership/provenance reads this. */
+  origin?: ConfigPremergeSnapshot;
+  /** Immediately before this install: only byte-fidelity restore reads this. */
+  previous?: ConfigPremergeSnapshot;
+  provenanceReason: string;
+  restoreReason: string;
+  hasPreviousRecord: boolean;
 };
 
 function loadInstallMergeModule(): InstallMergeModule {
@@ -208,17 +221,89 @@ type DurableFile = { path: string; relPath: string; root: string; expectedSha256
 // A group mixing a user hook with an FA hook keeps the user hook (and every other group-level
 // field, e.g. `matcher`); a group is dropped entirely only when every inner hook was FA-owned.
 
-function scalarRemovalProvenance(premerge: ConfigPremerge | undefined, key: string): { introduced: boolean; reason: string } {
-  if (!premerge || premerge.schema_version !== "1.0" || typeof premerge.parsed !== "object" || premerge.parsed === null || Array.isArray(premerge.parsed)) {
-    return { introduced: false, reason: "cannot prove Flow Agents added it (no pre-install snapshot)" };
+function getPath(value: Record<string, unknown>, dotted: string): unknown {
+  return dotted.split(".").reduce<unknown>((current, segment) => current && typeof current === "object" && !Array.isArray(current) ? (current as Record<string, unknown>)[segment] : undefined, value);
+}
+
+function deletePath(value: Record<string, unknown>, dotted: string): void {
+  const parts = dotted.split("."); let current: Record<string, unknown> = value;
+  for (const part of parts.slice(0, -1)) { const child = current[part]; if (!child || typeof child !== "object" || Array.isArray(child)) return; current = child as Record<string, unknown>; }
+  delete current[parts[parts.length - 1]];
+  if (parts.length === 2 && Object.keys(value[parts[0]] as Record<string, unknown>).length === 0) delete value[parts[0]];
+}
+
+function snapshotHasManagedHook(premerge: ConfigPremergeSnapshot, isManagedInnerHook: (hook: unknown) => boolean): boolean {
+  const hooks = premerge.parsed["hooks"];
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return false;
+  return Object.values(hooks as Record<string, unknown>).some((groups) => Array.isArray(groups) && groups.some((group) => {
+    const inner = group && typeof group === "object" && Array.isArray((group as Record<string, unknown>)["hooks"]) ? (group as Record<string, unknown>)["hooks"] as unknown[] : [];
+    return inner.some(isManagedInnerHook);
+  }));
+}
+
+function rewriteExpectedGlobalClaudeCommands(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) rewriteExpectedGlobalClaudeCommands(entry);
+    return;
   }
-  if (Object.prototype.hasOwnProperty.call(premerge.parsed, key)) {
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  for (const [key, entry] of Object.entries(record)) {
+    if (key === "command" && typeof entry === "string") {
+      record[key] = entry
+        .replace(/root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g, "")
+        .replace(/"\$root\//g, `"${root}/`);
+    } else rewriteExpectedGlobalClaudeCommands(entry);
+  }
+}
+
+/** Values emitted by this package for this runtime/install location. */
+function expectedManagedConfig(config: RuntimeConfig, global: boolean): Record<string, unknown> {
+  const bundle = ensureBundle(config.runtime);
+  const source = config.runtime === "claude-code"
+    ? path.join(bundle, ".claude", "settings.json")
+    : config.runtime === "codex"
+      ? path.join(bundle, ".codex", "hooks.json")
+      : path.join(bundle, "opencode.json");
+  const managed = JSON.parse(fs.readFileSync(source, "utf8")) as Record<string, unknown>;
+  if (config.runtime === "claude-code" && global) {
+    delete managed["permissions"];
+    delete managed["skipDangerousModePermissionPrompt"];
+    rewriteExpectedGlobalClaudeCommands(managed);
+  }
+  return managed;
+}
+
+function expectedManagedInnerHooks(managed: Record<string, unknown>): unknown[] {
+  const hooks = managed["hooks"];
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return [];
+  const expected: unknown[] = [];
+  for (const groups of Object.values(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!group || typeof group !== "object" || !Array.isArray((group as Record<string, unknown>)["hooks"])) continue;
+      expected.push(...(group as Record<string, unknown>)["hooks"] as unknown[]);
+    }
+  }
+  return expected;
+}
+
+function valuesByteIdentical(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function scalarRemovalProvenance(snapshot: PremergeRead, key: string): { introduced: boolean; reason: string } {
+  const premerge = snapshot.origin;
+  if (!premerge) {
+    return { introduced: false, reason: `cannot prove Flow Agents added it (${snapshot.provenanceReason})` };
+  }
+  if (getPath(premerge.parsed, key) !== undefined) {
     return { introduced: false, reason: "cannot prove Flow Agents added it (pre-install snapshot shows it already existed)" };
   }
   return { introduced: true, reason: "" };
 }
 
-function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean, premerge?: ConfigPremerge, settingsPathOverride?: string): SettingsPlan {
+function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean, snapshot: PremergeRead, settingsPathOverride?: string): SettingsPlan {
   const settingsPath = settingsPathOverride ?? config.configPath(dest, global);
   if (!fs.existsSync(settingsPath)) {
     return { settingsPath, exists: false, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null, preserved: [], protectedRuntimePaths: [] };
@@ -230,6 +315,13 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
     throw new Error(`existing settings file is not valid JSON, refusing to modify it: ${settingsPath}: ${(error as Error).message}`);
   }
   const next: Record<string, unknown> = { ...existing };
+  // Structural ownership decisions use the lineage origin, never the current
+  // reinstall baseline. Byte restoration below deliberately uses `previous`.
+  const premerge = snapshot.origin;
+  const managed = expectedManagedConfig(config, global);
+  const expectedHooks = expectedManagedInnerHooks(managed);
+  const preserved: PreservedFile[] = [];
+  const protectedRuntimePaths: string[] = [];
   let removedHookEntryCount = 0;
   const removedEventKeys: string[] = [];
   if (existing["hooks"] && typeof existing["hooks"] === "object") {
@@ -249,7 +341,20 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
           keptGroups.push(group);
           continue;
         }
-        const keptInner = innerHooks.filter((hook) => !isManagedInnerHook(hook));
+        const markedHooks = innerHooks.filter(isManagedInnerHook);
+        if (premerge && snapshotHasManagedHook(premerge, isManagedInnerHook) && markedHooks.length > 0) {
+          keptGroups.push(group);
+          preserved.push({ relPath: `${path.basename(settingsPath)}#hooks`, absPath: settingsPath, reason: "pre-install snapshot shows a matching marked hook; retained for user restoration" });
+          continue;
+        }
+        const removableMarked = premerge
+          ? markedHooks
+          : markedHooks.filter((hook) => expectedHooks.some((expected) => valuesByteIdentical(hook, expected)));
+        const retainedMarked = markedHooks.filter((hook) => !removableMarked.includes(hook));
+        if (!premerge && retainedMarked.length > 0) {
+          preserved.push({ relPath: `${path.basename(settingsPath)}#hooks`, absPath: settingsPath, reason: `marker-matching but not byte-identical to this install's value; cannot prove Flow Agents authored it (${snapshot.provenanceReason})` });
+        }
+        const keptInner = innerHooks.filter((hook) => !removableMarked.includes(hook));
         const removedInner = innerHooks.length - keptInner.length;
         if (removedInner === 0) {
           keptGroups.push(group);
@@ -273,15 +378,21 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
     && (statusLine as Record<string, unknown>)["type"] === "command"
     && typeof (statusLine as Record<string, unknown>)["command"] === "string"
     && ((statusLine as Record<string, unknown>)["command"] as string).includes(STATUSLINE_MARKER)) {
-    delete next["statusLine"];
-    removedStatusLine = true;
+    if (premerge && Object.prototype.hasOwnProperty.call(premerge.parsed, "statusLine")) {
+      next["statusLine"] = premerge.parsed["statusLine"];
+      preserved.push({ relPath: `${path.basename(settingsPath)}#statusLine`, absPath: settingsPath, reason: "pre-install snapshot shows a statusLine; restored its prior value" });
+    } else if (premerge) { delete next["statusLine"]; removedStatusLine = true; }
+    else if (valuesByteIdentical(statusLine, managed["statusLine"])) { delete next["statusLine"]; removedStatusLine = true; }
+    else preserved.push({ relPath: `${path.basename(settingsPath)}#statusLine`, absPath: settingsPath, reason: `marker-matching but not byte-identical to this install's value; cannot prove Flow Agents authored it (${snapshot.provenanceReason})` });
   }
   let removedInstructions = false;
-  const preserved: PreservedFile[] = [];
-  const protectedRuntimePaths: string[] = [];
   if (config.removeInstructionsPath && Array.isArray(existing["instructions"])) {
     const instructionPath = config.removeInstructionsPath(dest);
     const kept = (existing["instructions"] as unknown[]).filter((entry) => entry !== instructionPath);
+    if (premerge && Array.isArray(premerge.parsed["instructions"]) && (premerge.parsed["instructions"] as unknown[]).includes(instructionPath)) {
+      next["instructions"] = [...kept, ...(premerge.parsed["instructions"] as unknown[]).filter((entry) => entry === instructionPath)];
+      preserved.push({ relPath: `${path.basename(settingsPath)}#instructions`, absPath: settingsPath, reason: "pre-install snapshot shows the runtime instruction; restored its prior entry" });
+    } else {
     for (const entry of kept) {
       if (typeof entry !== "string") continue;
       // Exact string match is ownership. A lexical variant that resolves to the managed
@@ -297,18 +408,19 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
       if (kept.length > 0) next["instructions"] = kept;
       else delete next["instructions"];
     }
+    }
   }
   let removedOwnedValue = false;
   for (const [key, value] of Object.entries(config.removeOwnedValues ?? {})) {
-    if (JSON.stringify(existing[key]) === JSON.stringify(value)) {
-      const provenance = scalarRemovalProvenance(premerge, key);
+    if (JSON.stringify(getPath(existing, key)) === JSON.stringify(value)) {
+      const provenance = scalarRemovalProvenance(snapshot, key);
       if (provenance.introduced) {
-        delete next[key];
+        deletePath(next, key);
         removedOwnedValue = true;
       } else {
         preserved.push({ relPath: `${path.basename(settingsPath)}#${key}`, absPath: settingsPath, reason: provenance.reason });
       }
-    } else if (existing[key] !== undefined) {
+    } else if (getPath(existing, key) !== undefined) {
       preserved.push({ relPath: `${path.basename(settingsPath)}#${key}`, absPath: settingsPath, reason: "managed OpenCode setting was modified; retained" });
     }
   }
@@ -330,13 +442,38 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   return { settingsPath, exists: true, removedHookEntryCount, removedEventKeys, removedStatusLine, action, nextContent: next, preserved, protectedRuntimePaths };
 }
 
-function readConfigPremerge(dest: string): ConfigPremerge | undefined {
+function validateConfigPremerge(value: unknown, runtime: UninstallRuntime, configPath: string): { premerge?: ConfigPremergeSnapshot; reason: string } {
+  const premerge = value as Record<string, unknown> | undefined;
+  if (!premerge || premerge["schema_version"] !== "1.0" || typeof premerge["existed"] !== "boolean" || typeof premerge["bytes_base64"] !== "string" || typeof premerge["post_install_sha256"] !== "string" || !/^[a-f0-9]{64}$/i.test(premerge["post_install_sha256"] as string) || typeof premerge["config_path"] !== "string" || premerge["runtime"] !== runtime || typeof premerge["parsed"] !== "object" || premerge["parsed"] === null || Array.isArray(premerge["parsed"])) return { reason: "snapshot is malformed or incomplete" };
+  if (path.resolve(premerge["config_path"] as string) !== path.resolve(configPath)) return { reason: "snapshot config path does not match this uninstall" };
+  if (premerge["existed"] === false) {
+    if (premerge["bytes_base64"] !== "" || Object.keys(premerge["parsed"] as Record<string, unknown>).length > 0) return { reason: "snapshot claims the config did not exist but carries prior content" };
+    return { premerge: premerge as ConfigPremergeSnapshot, reason: "" };
+  }
+  try {
+    const bytes = Buffer.from(premerge["bytes_base64"] as string, "base64");
+    if (bytes.toString("base64") !== premerge["bytes_base64"] || JSON.stringify(JSON.parse(bytes.toString("utf8"))) !== JSON.stringify(premerge["parsed"])) return { reason: "snapshot bytes do not match its parsed value" };
+    return { premerge: premerge as ConfigPremergeSnapshot, reason: "" };
+  } catch { return { reason: "snapshot is unreadable" }; }
+}
+
+function readConfigPremerge(dest: string, runtime: UninstallRuntime, configPath: string): PremergeRead {
+  const none = (reason: string): PremergeRead => ({ provenanceReason: reason, restoreReason: reason, hasPreviousRecord: false });
   try {
     const record = JSON.parse(fs.readFileSync(path.join(durableFlowAgentsRoot(dest), "install.json"), "utf8")) as Record<string, unknown>;
-    const premerge = record["config_premerge"];
-    return typeof premerge === "object" && premerge !== null ? premerge as ConfigPremerge : undefined;
-  } catch {
-    return undefined;
+    const premerge = record["config_premerge"] as Record<string, unknown> | undefined;
+    if (!premerge) return none("no pre-install snapshot");
+    if (record["runtime"] !== runtime) return none("snapshot runtime does not match this uninstall");
+    // v1 intentionally remains compatible: its single snapshot was previously used for both.
+    if (premerge["schema_version"] === "1.0") {
+      const validated = validateConfigPremerge(premerge, runtime, configPath);
+      return { origin: validated.premerge, previous: validated.premerge, provenanceReason: validated.reason, restoreReason: validated.reason, hasPreviousRecord: true };
+    }
+    if (premerge["schema_version"] !== "2.0") return none("pre-install snapshot has an unsupported schema version");
+    const origin = validateConfigPremerge(premerge["origin"], runtime, configPath);
+    const previous = validateConfigPremerge(premerge["previous"], runtime, configPath);
+    return { origin: origin.premerge, previous: previous.premerge, provenanceReason: origin.reason, restoreReason: previous.reason, hasPreviousRecord: true };
+  } catch { return none("pre-install snapshot is unreadable");
   }
 }
 
@@ -346,8 +483,8 @@ function applySettings(dest: string, global: boolean, config: RuntimeConfig, isM
   // For OpenCode, bind its authorized canonical target BEFORE the read/plan so the object
   // inspected and the object rewritten are the same file even if the visible link is raced.
   const binding = config.runtime === "opencode" ? opencodeBinding : undefined;
-  const premerge = readConfigPremerge(dest);
-  const plan = planSettings(dest, global, config, isManagedInnerHook, premerge, binding?.canonicalPath);
+  const snapshot = readConfigPremerge(dest, config.runtime, binding?.canonicalPath ?? config.configPath(dest, global));
+  const plan = planSettings(dest, global, config, isManagedInnerHook, snapshot, binding?.canonicalPath);
   if (plan.action === "none") return { backupPath: null };
   const writePath = binding?.canonicalPath ?? plan.settingsPath;
   // The binding check is immediately adjacent to the write: for Stow, write the canonical
@@ -359,7 +496,7 @@ function applySettings(dest: string, global: boolean, config: RuntimeConfig, isM
   try {
     fs.copyFileSync(writePath, backupPath);
     const currentBytes = fs.readFileSync(writePath);
-    const originalBytes = loadInstallMergeModule().restoreConfigPremergeBytes(premerge, plan.nextContent, currentBytes);
+    const originalBytes = loadInstallMergeModule().restoreConfigPremergeBytes(snapshot.previous, plan.nextContent, currentBytes);
     // Test-only fault seam: exercise the failure path after applyPlan's pre-apply check and
     // after this attempt has created its backup, without a nondeterministic background race.
     const testSwapPath = process.env["FLOW_AGENTS_UNINSTALL_TEST_APPLY_SETTINGS_SYMLINK_SWAP_PATH"];
@@ -381,8 +518,8 @@ function applySettings(dest: string, global: boolean, config: RuntimeConfig, isM
     fs.renameSync(tmp, writePath);
     return {
       backupPath,
-      ...(premerge && !originalBytes
-        ? { preserved: { relPath: path.basename(plan.settingsPath), absPath: plan.settingsPath, reason: "config content drifted since install; retained surgical result but exact pre-install bytes could not be restored" } }
+      ...((snapshot.previous || snapshot.hasPreviousRecord) && !originalBytes
+        ? { preserved: { relPath: path.basename(plan.settingsPath), absPath: plan.settingsPath, reason: snapshot.previous ? "config content drifted since install; retained surgical result but exact pre-install bytes could not be restored" : `previous-install snapshot is invalid (${snapshot.restoreReason}); retained surgical result but exact pre-install bytes could not be restored` } }
         : {}),
     };
   } catch (error) {
@@ -815,7 +952,7 @@ function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime, ope
   // authorized target that applySettings will bind and revalidate before writing.
   const opencodeAuthorization = runtime === "opencode" ? resolveAuthorizedOpenCodeUninstallBinding(dest, global, operatorRoots) : undefined;
   const opencodeBinding = opencodeAuthorization?.binding;
-  const settings = planSettings(dest, global, config, isManagedInnerHook, readConfigPremerge(dest), opencodeBinding?.canonicalPath);
+  const settings = planSettings(dest, global, config, isManagedInnerHook, readConfigPremerge(dest, runtime, opencodeBinding?.canonicalPath ?? config.configPath(dest, global)), opencodeBinding?.canonicalPath);
 
   const manifest = readOwnedFilesManifest(dest, config.manifestName);
   let mode: UninstallPlan["mode"];
@@ -1131,7 +1268,10 @@ function printReport(plan: UninstallPlan, applied: boolean, outcome: ApplyOutcom
   if (durableEntries.length === 0) console.log("  (none)");
   console.log("");
 
-  console.log(`Residue (never removed by uninstall, reported only) (${plan.residue.length}):`);
+  // Header intentionally still starts with "Residue" -- report sections are anchored by their
+  // leading word (evals and any downstream parser match /^Residue/), so the coverage caveat goes
+  // after it rather than in front of it.
+  console.log(`Residue — explicitly retained (never removed by uninstall; covers known telemetry/coordination locations only, not every surviving path under the destination) (${plan.residue.length}):`);
   for (const entry of plan.residue) console.log(`  ${entry.path}  — ${entry.note}`);
   if (plan.residue.length === 0) console.log("  (none)");
   console.log("");
