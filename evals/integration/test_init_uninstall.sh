@@ -1041,8 +1041,8 @@ const fs = require("node:fs"); const file = process.argv[2]; const record = JSON
 fs.writeFileSync(file, JSON.stringify({ active_kit_ids: record.active_kit_ids ?? [], global: record.global, installedAt: record.installedAt, runtime: record.runtime, version: "5.5.0" }, null, 2) + "\n");
 NODE
 FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_AUTH_HOME/opencode.json" HOME="$LEGACY_AUTH_USER_HOME" $FA init --uninstall --runtime opencode --global --authorize-backing-root "$LEGACY_AUTH_ROOT_REAL" --yes >"$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" 2>&1
-if [[ -L "$LEGACY_AUTH_HOME/opencode.json" && -L "$LEGACY_AUTH_HOME/skills" ]] && node - "$LEGACY_AUTH_ROOT/opencode.json" <<'NODE'
-const fs = require("node:fs"); const value = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); if (value.model !== "legacy-user" || value.instructions?.join() !== "/user/AGENTS.md") throw new Error("legacy user config was not surgically restored");
+if [[ -L "$LEGACY_AUTH_HOME/opencode.json" && -L "$LEGACY_AUTH_HOME/skills" ]] && node - "$LEGACY_AUTH_ROOT/opencode.json" "$LEGACY_AUTH_BEFORE" <<'NODE'
+const fs = require("node:fs"); const actual = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); const expected = JSON.parse(process.argv[3]); if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("legacy user config was not restored with deep equality");
 NODE
 then
   if [[ ! -e "$LEGACY_AUTH_ROOT/skills/agentic-engineering/SKILL.md" && ! -e "$LEGACY_AUTH_RECORD_DEST/.flow-agents/install.json" ]] && grep -q 'operator-authorized backing roots' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" && grep -q 'wrote through' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out"; then _pass "legacy Stow authorization: canonical root round-trips without severing links or persisting authorization"; else _fail "legacy Stow authorization: authorized round-trip, reporting, surgical config restoration, or non-persistence failed"; fi
@@ -1085,6 +1085,33 @@ NODE
 LEGACY_SWAP_ONE_BEFORE="$(cat "$LEGACY_SWAP_ONE/opencode.json")"; LEGACY_SWAP_TWO_BEFORE="$(cat "$LEGACY_SWAP_TWO/opencode.json")"
 set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_SWAP_HOME/opencode.json" HOME="$LEGACY_SWAP_USER_HOME" FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_PATH="$LEGACY_SWAP_HOME/opencode.json" FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_SYMLINK_SWAP_TARGET="$LEGACY_SWAP_TWO/opencode.json" $FA init --uninstall --runtime opencode --global --authorize-backing-root "$LEGACY_SWAP_ONE_REAL" --yes >"$TMPDIR_EVAL/legacy-stow-swap.out" 2>&1; LEGACY_SWAP_RC=$?; set -e
 if [[ "$LEGACY_SWAP_RC" -eq 2 && -L "$LEGACY_SWAP_HOME/opencode.json" ]] && [[ "$(cat "$LEGACY_SWAP_ONE/opencode.json")" == "$LEGACY_SWAP_ONE_BEFORE" ]] && [[ "$(cat "$LEGACY_SWAP_TWO/opencode.json")" == "$LEGACY_SWAP_TWO_BEFORE" ]] && [[ -f "$LEGACY_SWAP_ONE/skills/agentic-engineering/SKILL.md" ]] && grep -q 'symlink target changed' "$TMPDIR_EVAL/legacy-stow-swap.out"; then _pass "legacy Stow authorization TOCTOU: re-pointed link aborts before every write"; else _fail "legacy Stow authorization TOCTOU: re-pointed link was followed or prior root changed"; fi
+
+# A binding failure inside applySettings (after the pre-apply check and after its backup exists)
+# is fatal for the whole apply: assets and durable records stay put and attempt artifacts vanish.
+APPLY_SWAP_HOME="$TMPDIR_EVAL/apply-settings-swap-home"; APPLY_SWAP_ONE="$TMPDIR_EVAL/apply-settings-swap-one"; APPLY_SWAP_TWO="$TMPDIR_EVAL/apply-settings-swap-two"; APPLY_SWAP_USER_HOME="$TMPDIR_EVAL/apply-settings-swap-user-home"
+mkdir -p "$APPLY_SWAP_HOME" "$APPLY_SWAP_ONE/skills" "$APPLY_SWAP_TWO"; chmod 700 "$APPLY_SWAP_ONE" "$APPLY_SWAP_TWO"
+APPLY_SWAP_ONE_REAL="$(cd "$APPLY_SWAP_ONE" && pwd -P)"
+printf '{"model":"one"}\n' > "$APPLY_SWAP_ONE/opencode.json"; printf '{"model":"two"}\n' > "$APPLY_SWAP_TWO/opencode.json"; chmod 600 "$APPLY_SWAP_ONE/opencode.json" "$APPLY_SWAP_TWO/opencode.json"
+ln -s "$APPLY_SWAP_ONE/opencode.json" "$APPLY_SWAP_HOME/opencode.json"; ln -s "$APPLY_SWAP_ONE/skills" "$APPLY_SWAP_HOME/skills"
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$APPLY_SWAP_HOME/opencode.json" HOME="$APPLY_SWAP_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+node - "$APPLY_SWAP_HOME/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8")); delete record.authorized_backing_roots; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+NODE
+set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$APPLY_SWAP_HOME/opencode.json" HOME="$APPLY_SWAP_USER_HOME" FLOW_AGENTS_UNINSTALL_TEST_APPLY_SETTINGS_SYMLINK_SWAP_PATH="$APPLY_SWAP_HOME/opencode.json" FLOW_AGENTS_UNINSTALL_TEST_APPLY_SETTINGS_SYMLINK_SWAP_TARGET="$APPLY_SWAP_TWO/opencode.json" $FA init --uninstall --runtime opencode --global --authorize-backing-root "$APPLY_SWAP_ONE_REAL" --yes >"$TMPDIR_EVAL/apply-settings-swap.out" 2>&1; APPLY_SWAP_RC=$?; set -e
+if [[ "$APPLY_SWAP_RC" -ne 0 && -f "$APPLY_SWAP_ONE/skills/agentic-engineering/SKILL.md" && -f "$APPLY_SWAP_HOME/.flow-agents/runtime-assets.json" && -f "$APPLY_SWAP_HOME/.flow-agents/install.json" ]] && ! compgen -G "$APPLY_SWAP_ONE/opencode.json.bak-uninstall-*" >/dev/null && ! compgen -G "$APPLY_SWAP_ONE/opencode.json.tmp.*" >/dev/null && ! compgen -G "$APPLY_SWAP_TWO/opencode.json.bak-uninstall-*" >/dev/null && ! compgen -G "$APPLY_SWAP_TWO/opencode.json.tmp.*" >/dev/null && grep -q 'settings update failed.*symlink target changed' "$TMPDIR_EVAL/apply-settings-swap.out"; then _pass "legacy Stow authorization apply failure: no deletion or stray backup/temp"; else _fail "legacy Stow authorization apply failure: validation did not abort transactionally"; fi
+
+# An authorized backing root grants only its three exact managed asset trees, not arbitrary
+# descendants: a re-pointed skills link to a sibling under that root is refused before planning.
+SIBLING_LINK_HOME="$TMPDIR_EVAL/sibling-link-home"; SIBLING_LINK_ROOT="$TMPDIR_EVAL/sibling-link-root"; SIBLING_LINK_USER_HOME="$TMPDIR_EVAL/sibling-link-user-home"
+mkdir -p "$SIBLING_LINK_HOME" "$SIBLING_LINK_ROOT/skills" "$SIBLING_LINK_ROOT/unrelated-skills/agentic-engineering"; chmod 700 "$SIBLING_LINK_ROOT"
+SIBLING_LINK_ROOT_REAL="$(cd "$SIBLING_LINK_ROOT" && pwd -P)"
+printf '{"model":"sibling"}\n' > "$SIBLING_LINK_ROOT/opencode.json"; chmod 600 "$SIBLING_LINK_ROOT/opencode.json"
+ln -s "$SIBLING_LINK_ROOT/opencode.json" "$SIBLING_LINK_HOME/opencode.json"; ln -s "$SIBLING_LINK_ROOT/skills" "$SIBLING_LINK_HOME/skills"
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$SIBLING_LINK_HOME/opencode.json" HOME="$SIBLING_LINK_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+printf 'unrelated sibling content\n' > "$SIBLING_LINK_ROOT/unrelated-skills/agentic-engineering/SKILL.md"
+rm "$SIBLING_LINK_HOME/skills"; ln -s "$SIBLING_LINK_ROOT/unrelated-skills" "$SIBLING_LINK_HOME/skills"
+set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$SIBLING_LINK_HOME/opencode.json" HOME="$SIBLING_LINK_USER_HOME" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/sibling-link.out" 2>&1; SIBLING_LINK_RC=$?; set -e
+if [[ "$SIBLING_LINK_RC" -eq 2 && -f "$SIBLING_LINK_ROOT/unrelated-skills/agentic-engineering/SKILL.md" && -f "$SIBLING_LINK_HOME/.flow-agents/runtime-assets.json" ]] && grep -q 'other than the authorized OpenCode asset tree' "$TMPDIR_EVAL/sibling-link.out"; then _pass "opencode Stow: sibling asset tree is refused and untouched"; else _fail "opencode Stow: sibling asset tree escaped authorization"; fi
 
 # The pre-install snapshot is secret-bearing data: its record and temporary write are private,
 # it is refreshed on every install, and only the current install's post-image can restore it.
