@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
-import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, resolveCanonicalFlowRunIdentity, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, provisionalWorkspaceSnapshot, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, resolveCanonicalFlowRunIdentity, resolveProvisionalTrustedGitExecutable, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { captureReviewWorkspaceSnapshot } from "../../build/src/lib/review-workspace-snapshot.js";
 import * as pinnedFlow from "../../node_modules/@kontourai/flow/dist/index.js";
 import { amendRunDefinition, definitionDigest, definitionIdentity, flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
 import { withRunMutationLock } from "../../node_modules/@kontourai/flow/dist/runtime/flow-run-store.js";
@@ -226,7 +227,7 @@ function provisionalAuthorization(overrides = {}) {
     assignment_generation: now.toISOString(), published_head_sha: "a".repeat(40), provider_record_id: "provider-957",
     provider_observation_sha256: "9".repeat(64), flow_definition_id: "builder.build", flow_definition_version: "1.3",
     flow_definition_digest: "1".repeat(64), flow_run_head: "2".repeat(64), flow_gate_id: "merge-ready-ci-gate",
-    flow_gate_visit: now.toISOString(), workspace_snapshot: { kind: "git-worktree", head_sha: "a".repeat(40), digest: "3".repeat(64) },
+    flow_gate_visit: now.toISOString(), workspace_snapshot: { version: 1, kind: "git-worktree", algorithm: "sha256", head_sha: "a".repeat(40), digest: "3".repeat(64), worktree_clean: true },
     checkpoint_slug: "session-a", checkpoint_commit_sha: "a".repeat(40), checkpoint_sha256: "4".repeat(64),
     bundle_sha256: "5".repeat(64), attestation_sha256: "6".repeat(64),
     companions: [
@@ -252,6 +253,64 @@ test("provisional authorization validator rejects forged and wrong-session bindi
   assert.throws(() => validateProvisionalDeliveryAuthorizationBinding({ ...authorization, companions: [...authorization.companions, { path: "extra", sha256: "8".repeat(64) }] }, {
     project_root: "/project", run_id: "session-a", checkpoint_slug: "session-a", companions: authorization.companions,
   }), /companions do not match/);
+  assert.throws(() => validateProvisionalDeliveryAuthorizationBinding({ ...authorization, workspace_snapshot: { ...authorization.workspace_snapshot, worktree_clean: "true" } }, {
+    project_root: "/project", run_id: "session-a", checkpoint_slug: "session-a",
+  }), /workspace snapshot/);
+  for (const length of [41, 63]) {
+    assert.throws(() => validateProvisionalDeliveryAuthorizationBinding({ ...authorization, workspace_snapshot: { ...authorization.workspace_snapshot, head_sha: "a".repeat(length) } }, {
+      project_root: "/project", run_id: "session-a", checkpoint_slug: "session-a",
+    }), /workspace snapshot/, `workspace snapshot ${length}-character SHA must be rejected without an expected snapshot`);
+  }
+  assert.throws(() => validateProvisionalDeliveryAuthorizationBinding({ ...authorization, published_head_sha: "a".repeat(41) }, {
+    project_root: "/project", run_id: "session-a", checkpoint_slug: "session-a",
+  }), /published_head_sha is invalid/);
+  assert.throws(() => validateProvisionalDeliveryAuthorizationBinding({ ...authorization, checkpoint_commit_sha: "a".repeat(63) }, {
+    project_root: "/project", run_id: "session-a", checkpoint_slug: "session-a",
+  }), /checkpoint_commit_sha is invalid/);
+});
+
+test("provisional coordinator snapshot includes cleanliness and rejects hidden index entries", () => {
+  const executable = resolveProvisionalTrustedGitExecutable();
+  assert.ok(path.isAbsolute(executable.path));
+  assert.ok(["/usr/bin/git", "/run/current-system/sw/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git", "C:\\Program Files\\Git\\cmd\\git.exe"].includes(executable.candidate));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "provisional-workspace-snapshot-"));
+  try {
+    fs.writeFileSync(path.join(root, "tracked.txt"), "clean\n");
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["add", "tracked.txt"], { cwd: root });
+    execFileSync("git", ["-c", "user.email=fixture@example.invalid", "-c", "user.name=Fixture", "commit", "-qm", "fixture"], { cwd: root });
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    const clean = provisionalWorkspaceSnapshot(root, "session-a");
+    assert.deepEqual(
+      Object.keys(clean).sort(),
+      ["algorithm", "digest", "head_sha", "kind", "version", "worktree_clean"],
+      "the coordinator signs the complete canonical snapshot shape",
+    );
+    assert.equal(clean.head_sha, head);
+    assert.equal(clean.worktree_clean, true);
+    assert.deepEqual(clean, captureReviewWorkspaceSnapshot(root, [], ["delivery/session-a"]), "the privileged coordinator uses the exact canonical snapshot representation");
+
+    fs.writeFileSync(path.join(root, "untracked.txt"), "dirty\n");
+    assert.equal(provisionalWorkspaceSnapshot(root, "session-a").worktree_clean, false);
+    fs.unlinkSync(path.join(root, "untracked.txt"));
+    execFileSync("git", ["update-index", "--assume-unchanged", "tracked.txt"], { cwd: root });
+    assert.throws(() => provisionalWorkspaceSnapshot(root, "session-a"), /nonordinary ls-files tag/);
+    execFileSync("git", ["update-index", "--no-assume-unchanged", "tracked.txt"], { cwd: root });
+    for (const mutation of [
+      { label: "tracked", apply() { fs.appendFileSync(path.join(root, "tracked.txt"), "mutation\n"); } },
+      { label: "untracked", apply() { fs.writeFileSync(path.join(root, "arrived.txt"), "mutation\n"); } },
+    ]) {
+      assert.throws(
+        () => provisionalWorkspaceSnapshot(root, "session-a", { afterInitialInputsRead: mutation.apply }),
+        /workspace inputs changed/,
+        `${mutation.label} mutation after the first read must reject the authorization snapshot`,
+      );
+      if (mutation.label === "tracked") execFileSync("git", ["checkout", "--", "tracked.txt"], { cwd: root });
+      else fs.unlinkSync(path.join(root, "arrived.txt"));
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("provisional authority ledger rejects forged signatures and broken predecessor chains", async () => {

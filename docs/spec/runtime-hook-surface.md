@@ -355,7 +355,7 @@ Known limitations, disclosed rather than detected:
 
 ### 2.5 Evidence Capture (capture-first determinism)
 
-**Intent**: Make evidence about what actually ran *machine-recorded at the source* rather than transcribed later by the model. `evidence.json` is the model's narration and can claim a test passed when it did not. The capture policy deterministically records every command/shell tool execution and its observed result to an append-only log, which the Stop-Goal-Fit gate (§2.3) cross-references against the model's claims. This makes re-running at the gate a thin backstop, not the primary check.
+**Intent**: Make evidence about what actually ran *machine-recorded at the source* rather than transcribed later by the model. `trust.bundle` is the runtime authority; its v2 `workflow-evidence` projection cannot replace its gate decision. The capture policy deterministically records every command/shell tool execution and its observed result to an append-only log, which the Stop-Goal-Fit gate (§2.3) cross-references against the model's claims. This makes re-running at the gate a thin backstop, not the primary check.
 
 **Canonical script**: `scripts/hooks/evidence-capture.js`
 
@@ -366,11 +366,22 @@ Known limitations, disclosed rather than detected:
 - `tool_response` / `tool_output` / `error` — the host tool result (per §1, `postToolUse`); the source of the deterministically-observed outcome.
 - `.kontourai/flow-agents/current.json` (`active_slug` / `artifact_dir`) then newest-mtime `state.json` — resolves the active artifact dir, the same way Workflow Steering and Stop-Goal-Fit do.
 
-**Output**: appends one JSON object per line to `.kontourai/flow-agents/<slug>/command-log.jsonl`:
+**Observation boundary and output**: after the host result has been classified, and before the
+record is appended or chain-hashed, capture the repository `HEAD` and cleanliness. The resulting
+record appends one JSON object per line to `.kontourai/flow-agents/<slug>/command-log.jsonl`:
 
 ```json
-{ "command": "npm test", "observedResult": "pass", "exitCode": 0, "capturedAt": "2026-06-23T00:00:00Z", "source": "postToolUse-capture" }
+{ "command": "npm test", "observedResult": "pass", "exitCode": 0, "observed_at_commit": "0123456789abcdef0123456789abcdef01234567", "worktree_clean": true, "capturedAt": "2026-06-23T00:00:00Z", "source": "postToolUse-capture" }
 ```
+
+The capture uses fixed, bounded trusted-Git calls. If `HEAD` cannot be resolved, the root is not a
+Git worktree, or the state cannot be captured consistently, it leaves the log unchanged rather than
+fabricating a clean/current record. A missing observation is
+`NOT_VERIFIED` and non-confirming downstream. `worktree_clean: false` is representable for audit,
+but provisional: it cannot become a verified event or satisfy a gate. The canonical writer applies
+the same timing after its child process settles and additionally retains the exact
+`verification_workspace_snapshot`; the gate requires item-level trusted ancestry plus that exact
+snapshot equality. Neither ancestry nor cleanliness alone proves the tested bytes.
 
 **Exit-code handling (deterministic observation only)**: a clean integer exit code is host-dependent. The policy extracts the real exit code where the host surfaces one (`tool_response`/`tool_output` `.exitCode`/`.exit_code`/`.status`/`.code`/`.returnCode`, or top-level equivalents) and sets `observedResult` to `pass` iff that code is `0`. When no clean integer exit code is present, `exitCode` is recorded as `null` and `observedResult` is inferred *only* from deterministic failure signals — a non-empty `error`, a `success:false`/`failed:true`/`is_error:true` flag, or a non-empty stderr with no stdout. When no clean integer exit code is present AND no deterministic failure signal exists, `exitCode` is recorded as `null` and `observedResult` is **`ambiguous`** — never `pass`. A `pass` always requires positive evidence (a clean integer exit code of 0; no host currently surfaces a positive success flag). Plain stdout text is never scanned for the words "error"/"fail"; the model's narration is never consulted.
 
@@ -378,9 +389,18 @@ Known limitations, disclosed rather than detected:
 
 **Codex host-banner carve-out**: On the Codex runtime, the host serializes the real exit code as host-generated prose (`Process exited with code N`) inside the tool result / session rollout rather than as a structured field (observed on codex-cli 0.142.5). The codex ADAPTER (`scripts/hooks/codex-hook-adapter.js`, scoped to the evidence-capture invocation on `postToolUse` only) extracts exactly that banner and injects it as a structured `tool_response.exitCode` BEFORE capture observes; this is a deterministic HOST signal (host-authored fixed format), not narration scanning — capture itself still never scans stdout or model narration. Extraction (`scripts/hooks/lib/codex-exit-code.js`) is **preamble-anchored**: the banner in a `function_call_output.output` string sits in the HOST-authored preamble, before the model's own stdout, which the codex CLI appends after a literal `Output:` delimiter; extraction matches the banner only in the portion BEFORE that delimiter (the FIRST match when no delimiter is present) and never scans the post-delimiter model stdout, so a command that deliberately prints a forged `Process exited with code 0` to its own stdout cannot override the real host-reported code. Reads are **head-anchored and bounded**: the target rollout line is located via a bounded backward scan (default 1MB), and only the first ~64KB of that line is read/parsed — the preamble/banner lives within the first few hundred bytes of the `output` field regardless of how much model stdout follows, so a >64KB flood of stdout after the banner can never displace it out of the read window; beyond either bound, extraction yields no signal (`null` → the `ambiguous` default above), never a guess. Extraction **correlates or declines** rather than blindly trusting the newest rollout entry: a payload-carried call_id match is authoritative when present; absent that, the newest `function_call_output` is cross-checked against its paired `function_call`'s command, and a resolvable match uses it while a resolvable **mismatch DECLINES to no signal** (never attributes another call's exit code); only when no correlation signal exists at all (the common single-call case) does it fall back to the newest banner. The `transcript_path` is resolved through `realpath` and required to be a regular file — and, when the codex sessions root itself is resolvable, contained within it — before any read. Extraction is fail-open throughout (missing/unreadable rollout, an unresolvable line, a declined correlation, or no banner → no injection → the `ambiguous` default above, subject to the consumer semantics described above).
 
-**Decision contract**: Non-blocking. Always exits 0 and echoes stdin. Idempotent/append-only. Fail-open on any error — a capture failure must never block the agent or corrupt the log. Only records when an active workflow artifact dir resolves (otherwise there is nothing to anchor the log to).
+**Decision contract**: The PostToolUse process path is the explicit non-blocking exception: it
+always exits 0 and echoes stdin so capture trouble does not block the agent. It is
+idempotent/append-only, but an unexpected capture error must emit a diagnostic and append no
+confirming observation. Missing or uncertain capture state is `not_verified`, never a substitute
+for a successful observation. The policy records only when an active workflow artifact directory
+resolves (otherwise there is nothing to anchor the log to).
 
-**Degradation when host lacks trigger**: If the host has no `postToolUse` hook, command results are not captured. The Stop gate then has no capture log to cross-reference and falls back to its trusted backstop re-run (§2.3) for claimed-pass command checks. Log the gap as `postToolUse: no native equivalent — evidence capture unavailable; Stop gate relies on backstop re-run only`.
+**Degradation when host lacks trigger**: If the host has no `postToolUse` hook, command results
+are not captured. Emit `postToolUse: no native equivalent — evidence capture unavailable` and
+mark capture-dependent evidence `not_verified`; the absence of a capture record cannot confirm a
+claim. The Stop gate may independently re-run a command as fresh evidence (§2.3), but that new
+observation does not transform the missing capture into a successful one.
 
 ---
 

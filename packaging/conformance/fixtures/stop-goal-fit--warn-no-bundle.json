@@ -11,10 +11,13 @@
   },
   "workspace_setup": {
     "AGENTS.md": "# Test Repo\n",
-    ".flow-agents/my-task/my-task--deliver.md": "# My Task\n\nbranch: main\nstatus: executing\ntype: deliver\n\n## Plan\n\nWork in progress — no sidecars yet.\n"
+    ".kontourai/flow-agents/my-task/my-task--deliver.md": "# My Task\n\nbranch: main\nstatus: executing\ntype: deliver\n\n## Plan\n\nWork in progress — no sidecars yet.\n",
+    ".kontourai/flow-agents/current/conformance-6c1d6cedf276ea3f.json": "{\"active_slug\":\"my-task\",\"artifact_dir\":\"my-task\"}"
   },
+  "workspace_git": true,
   "env": {
-    "FLOW_AGENTS_GOAL_FIT_MODE": "block"
+    "FLOW_AGENTS_GOAL_FIT_MODE": "block",
+    "FLOW_AGENTS_ACTOR": "conformance"
   },
   "expected": {
     "exit_code": 2,

@@ -81,7 +81,11 @@ records under concurrency.)
 
 ### Structured Sidecars
 
-Markdown artifacts remain the human-readable handoff surface. JSON sidecars are the machine-readable recovery and gate surface. When a workflow creates or updates the corresponding information, write the sidecar beside the Markdown artifacts in `.kontourai/flow-agents/<slug>/`.
+Markdown artifacts remain the human-readable handoff surface. JSON sidecars are the machine-readable
+recovery surface and consumer-facing v2 inputs. `trust.bundle` is the sole runtime verification authority;
+`evidence.json` is a schema-backed v2 projection, not a competing gate authority. When a
+workflow creates or updates the corresponding information, use the sidecar writer beside the Markdown
+artifacts in `.kontourai/flow-agents/<slug>/`.
 
 Draft sidecars:
 
@@ -95,9 +99,12 @@ Draft sidecars:
 
 Sidecar rules:
 
-- Keep `schema_version` at `1.0` until the schema changes incompatibly.
+- Keep `schema_version` at `1.0` until the schema changes. `workflow-evidence` now uses
+  `2.0`; version 1 evidence is rejected and must be re-recorded with v2
+  provenance before it can confirm a gate.
 - Keep `task_slug` stable across all sidecars for a workflow.
-- Prefer `npm run workflow:sidecar --` for creating and updating sidecars. If a harness cannot run the writer, produce equivalent JSON and validate it with `npm run workflow:validate-artifacts --`.
+- Use `npm run workflow:sidecar --` for creating and updating sidecars. If the writer is
+  unavailable, record the exact gap; do not create an equivalent hand-authored gate record.
 - Use `npm run workflow:sidecar -- ensure-session` when available to create or select the current `.kontourai/flow-agents/<slug>/` session artifact before substantial work starts.
 - Update `state.json` at phase transitions.
 - Create or update `acceptance.json` when planning defines or changes acceptance criteria.
@@ -109,10 +116,20 @@ Sidecar rules:
 - Create or update the configured critique artifact/sink when a reviewer, critique subagent, or human review pass evaluates the workflow; locally this is materialized as `critique.json`.
 - Create or update `release.json` when release-readiness records a merge, release, deploy, hold, or rollback decision.
 - Create or update `learning.json` when a learning review turns completed work, repeated friction, or accepted critique into system improvements.
-- Do not let sidecars silently contradict the Markdown artifact. If they disagree, the sidecar is the machine-readable gate input and the Markdown summary should be corrected.
+- Do not let sidecars silently contradict the Markdown artifact. If they disagree, the authoritative
+  `trust.bundle` gate input prevails; correct the Markdown summary and any v2 projection.
 - Record `NOT_VERIFIED` in sidecars as `not_verified`; do not omit uncertain checks.
+- A command check in `workflow-evidence` v2 requires the capture-time `observed_at_commit` and
+  boolean `worktree_clean`. These are recorded by repository-owned observation producers, not
+  reconstructed by consumers. Dirty, missing, unavailable, malformed, unresolved/shallow, or
+  non-ancestor provenance is `not_verified` and cannot confirm a gate. Passing claims also require
+  the exact observation-time Git-worktree snapshot to equal the current snapshot; ancestry alone
+  never proves byte identity.
 - For substantial work, critique findings must be `fixed`, `accepted`, `deferred`, or `false_positive` before marking critique `pass`; open findings block a pass.
-- Treat sidecars as authoritative gate inputs. Temporary verifier-local mismatch notes are observations only; before terminal delivery, the orchestrator must update or reconcile `acceptance.json`, `evidence.json`, `release.json`, and the final Markdown summary so stale mismatch notes are superseded by final evidence or release validation.
+- Treat `trust.bundle` as the authoritative runtime gate input. Temporary verifier-local mismatch
+  notes are observations only; before terminal delivery, the orchestrator must reconcile the bundle,
+  `acceptance.json`, schema-backed v2 `evidence.json`, `release.json`, and final Markdown summary so stale
+  mismatch notes are superseded by final evidence or release validation.
 
 Evidence reference rules:
 
