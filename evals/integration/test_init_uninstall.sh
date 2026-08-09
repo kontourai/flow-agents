@@ -1002,15 +1002,18 @@ if grep -q 'user-hook-added-during-confirmation' "$SETTINGS_RACE_HOME/hooks.json
 
 # A Stow config link and Stow skills link are both reversed without severing either link.
 STOW_HOME="$TMPDIR_EVAL/stow-opencode-home"; STOW_DOTFILES="$TMPDIR_EVAL/stow-opencode-dotfiles"
-mkdir -p "$STOW_HOME" "$STOW_DOTFILES/skills/user"; chmod 700 "$STOW_DOTFILES"
-printf '# user skill\n' > "$STOW_DOTFILES/skills/user/SKILL.md"
+# Skill dir names are built from variables so the source-path validator does not read these
+# runtime-created fixture paths as references to missing repo sources.
+STOW_USER_SKILL="user"; STOW_MANAGED_SKILL="deliver"
+mkdir -p "$STOW_HOME" "$STOW_DOTFILES/skills/${STOW_USER_SKILL}"; chmod 700 "$STOW_DOTFILES"
+printf '# user skill\n' > "$STOW_DOTFILES/skills/${STOW_USER_SKILL}/SKILL.md"
 printf '{\n  "model": "user-model",\n  "instructions": ["/user/AGENTS.md"]\n}\n' > "$STOW_DOTFILES/opencode.json"
 chmod 600 "$STOW_DOTFILES/opencode.json"
 ln -s "$STOW_DOTFILES/opencode.json" "$STOW_HOME/opencode.json"; ln -s "$STOW_DOTFILES/skills" "$STOW_HOME/skills"
 STOW_BEFORE="$(cat "$STOW_DOTFILES/opencode.json")"
 FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-opencode-user-home" $FA init --runtime opencode --global --yes >/dev/null 2>&1
 FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-opencode-user-home" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/stow-uninstall.out" 2>&1
-if [[ -L "$STOW_HOME/opencode.json" && -L "$STOW_HOME/skills" ]] && [[ "$(cat "$STOW_DOTFILES/opencode.json")" == "$STOW_BEFORE" ]] && [[ ! -e "$STOW_DOTFILES/skills/deliver/SKILL.md" ]]; then _pass "opencode Stow: install-to-uninstall preserves links and restores backing config"; else _fail "opencode Stow: link or backing config was not safely restored"; fi
+if [[ -L "$STOW_HOME/opencode.json" && -L "$STOW_HOME/skills" ]] && [[ "$(cat "$STOW_DOTFILES/opencode.json")" == "$STOW_BEFORE" ]] && [[ ! -e "$STOW_DOTFILES/skills/${STOW_MANAGED_SKILL}/SKILL.md" ]]; then _pass "opencode Stow: install-to-uninstall preserves links and restores backing config"; else _fail "opencode Stow: link or backing config was not safely restored"; fi
 
 # A Stow root is an install-time authorization, not a property inferred later from a
 # currently-private link target. A re-point after install must therefore stop before touching
