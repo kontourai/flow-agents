@@ -968,6 +968,222 @@ else
   _fail "opencode: round trip or config surgery did not preserve the fixture"
 fi
 
+# Merge-owned scalars require positive pre-install provenance. A legacy install record cannot
+# distinguish a user's pre-existing OpenCode schema from the byte-identical default we add.
+OPENCODE_LEGACY_SCHEMA_HOME="$TMPDIR_EVAL/opencode-legacy-schema-home"
+mkdir -p "$OPENCODE_LEGACY_SCHEMA_HOME"
+node - "$OPENCODE_LEGACY_SCHEMA_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], JSON.stringify({ "$schema": "https://opencode.ai/config.json", custom: "legacy-user" }, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/opencode-legacy-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_LEGACY_SCHEMA_HOME" --yes >/dev/null 2>&1
+node - "$OPENCODE_LEGACY_SCHEMA_HOME/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8"));
+delete record.config_premerge; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/opencode-legacy-schema-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_LEGACY_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/opencode-legacy-schema.out" 2>&1
+if node - "$OPENCODE_LEGACY_SCHEMA_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (c.$schema !== "https://opencode.ai/config.json" || c.custom !== "legacy-user" || "instructions" in c) throw new Error("legacy scalar or instruction handling was wrong");
+NODE
+then
+  if sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/opencode-legacy-schema.out" | grep -Fq 'cannot prove Flow Agents added it (no pre-install snapshot)'; then _pass "opencode scalar provenance: legacy schema is retained and disclosed while self-identifying instruction is removed"; else _fail "opencode scalar provenance: legacy retention was not disclosed"; fi
+else
+  _fail "opencode scalar provenance: legacy schema was deleted or instruction was retained"
+fi
+
+# Legacy records have no config_premerge. Exact generated Claude values remain removable: this
+# is the regression guard for legacy owners whose whole harness must actually be unwired.
+LEGACY_CLAUDE_HOME="$TMPDIR_EVAL/legacy-claude-owned-values-home"; mkdir -p "$LEGACY_CLAUDE_HOME"
+HOME="$LEGACY_CLAUDE_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+node - "$LEGACY_CLAUDE_HOME/.claude/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8"));
+delete record.config_premerge; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+NODE
+HOME="$LEGACY_CLAUDE_HOME" $FA init --uninstall --runtime claude-code --global --yes >"$TMPDIR_EVAL/legacy-claude-owned-values.out" 2>&1
+if node - "$LEGACY_CLAUDE_HOME/.claude/settings.json" <<'NODE'
+const fs = require("node:fs"); if (!fs.existsSync(process.argv[2])) process.exit(0); const settings = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (settings.statusLine) throw new Error("legacy Flow Agents statusLine remains");
+const entries = Object.values(settings.hooks || {}).flatMap((groups) => Array.isArray(groups) ? groups : []).flatMap((group) => Array.isArray(group.hooks) ? group.hooks : []);
+if (entries.some((hook) => String(hook.statusMessage || "").includes("Flow Agents"))) throw new Error("legacy Flow Agents hook remains");
+NODE
+then _pass "legacy ownership: byte-identical Claude hooks and statusLine are removed and the harness is unwired"; else _fail "legacy ownership: exact generated Claude wiring was retained"; fi
+
+# A marker alone is not ownership. Changing an installed hook command produces sol's near-match
+# case: legacy uninstall must retain it and say precisely why.
+LEGACY_MODIFIED_HOOK_HOME="$TMPDIR_EVAL/legacy-modified-hook-home"; mkdir -p "$LEGACY_MODIFIED_HOOK_HOME"
+HOME="$LEGACY_MODIFIED_HOOK_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+node - "$LEGACY_MODIFIED_HOOK_HOME/.claude/settings.json" "$LEGACY_MODIFIED_HOOK_HOME/.claude/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const settingsFile = process.argv[2], recordFile = process.argv[3];
+const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+const hook = Object.values(settings.hooks).flat().flatMap((group) => group.hooks).find((entry) => String(entry.statusMessage || "").includes("Recording Flow Agents telemetry"));
+if (!hook) throw new Error("fixture has no managed hook"); hook.command += " # user-near-match";
+fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + "\n");
+const record = JSON.parse(fs.readFileSync(recordFile, "utf8")); delete record.config_premerge;
+fs.writeFileSync(recordFile, JSON.stringify(record, null, 2) + "\n");
+NODE
+HOME="$LEGACY_MODIFIED_HOOK_HOME" $FA init --uninstall --runtime claude-code --global --yes >"$TMPDIR_EVAL/legacy-modified-hook.out" 2>&1
+if node - "$LEGACY_MODIFIED_HOOK_HOME/.claude/settings.json" <<'NODE'
+const fs = require("node:fs"); const settings = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!JSON.stringify(settings).includes("user-near-match")) throw new Error("modified marker hook was removed");
+NODE
+then
+  if grep -Fq "marker-matching but not byte-identical to this install's value; cannot prove Flow Agents authored it" "$TMPDIR_EVAL/legacy-modified-hook.out"; then _pass "legacy ownership: marker-matching modified hook is retained and precisely disclosed"; else _fail "legacy ownership: modified hook retention was not precisely disclosed"; fi
+else
+  _fail "legacy ownership: marker-matching modified hook was removed"
+fi
+
+# A marker collision in the pre-install baseline is a user value, not permission
+# to retain the newly-installed harness. Uninstall must restore its exact command
+# while removing every generated hook.
+ORIGIN_MARKER_HOME="$TMPDIR_EVAL/origin-marker-home"; mkdir -p "$ORIGIN_MARKER_HOME/.claude"
+node - "$ORIGIN_MARKER_HOME/.claude/settings.json" <<'NODE'
+const fs = require("node:fs");
+const custom = { type: "command", command: "echo exact-user-marker-command", statusMessage: "Recording Flow Agents telemetry" };
+fs.writeFileSync(process.argv[2], JSON.stringify({ hooks: { Stop: [{ matcher: "user-marker", hooks: [custom] }] }, statusLine: { type: "command", command: "node /user/flow-agents-statusline.js" } }, null, 2) + "\n");
+NODE
+HOME="$ORIGIN_MARKER_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$ORIGIN_MARKER_HOME" $FA init --uninstall --runtime claude-code --global --yes >"$TMPDIR_EVAL/origin-marker.out" 2>&1
+if node - "$ORIGIN_MARKER_HOME/.claude/settings.json" <<'NODE'
+const fs = require("node:fs"); const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const all = Object.values(s.hooks || {}).flat().flatMap((g) => g.hooks || []);
+if (!all.some((h) => h.command === "echo exact-user-marker-command")) throw new Error("origin hook was not restored");
+if (all.some((h) => h.command !== "echo exact-user-marker-command" && String(h.statusMessage || "").includes("Flow Agents"))) throw new Error("generated harness remains wired");
+if (s.statusLine?.command !== "node /user/flow-agents-statusline.js") throw new Error("origin statusLine was not restored");
+NODE
+then _pass "origin marker collision: exact user hook/statusLine restored and generated harness unwired"; else _fail "origin marker collision: user hook was lost or generated harness remained"; fi
+
+# Tier 2 compares the installation image, not the package currently executing
+# uninstall. This models the retired projected-action hook emitted by an older
+# package after an upgrade without a re-init.
+STALE_IMAGE_HOME="$TMPDIR_EVAL/stale-installed-image-home"; mkdir -p "$STALE_IMAGE_HOME"
+HOME="$STALE_IMAGE_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+node - "$STALE_IMAGE_HOME/.claude/settings.json" "$STALE_IMAGE_HOME/.claude/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const [settingsFile, recordFile] = process.argv.slice(2);
+const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8")); const record = JSON.parse(fs.readFileSync(recordFile, "utf8"));
+const stale = { type: "command", command: "node /old-package/projected-action.js", statusMessage: "Enforcing Flow Agents projected action" };
+(settings.hooks.Stop ??= []).push({ hooks: [stale] });
+const key = Object.keys(record.installed_values)[0]; record.installed_values[key].hooks.push(stale); delete record.config_premerge;
+fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + "\n"); fs.writeFileSync(recordFile, JSON.stringify(record, null, 2) + "\n");
+NODE
+HOME="$STALE_IMAGE_HOME" $FA init --uninstall --runtime claude-code --global --yes >"$TMPDIR_EVAL/stale-installed-image.out" 2>&1
+if node - "$STALE_IMAGE_HOME/.claude/settings.json" <<'NODE'
+const fs = require("node:fs"); if (fs.existsSync(process.argv[2]) && fs.readFileSync(process.argv[2], "utf8").includes("projected-action.js")) throw new Error("stale installed hook retained");
+NODE
+then _pass "installed-values provenance: stale prior-version hook is removed after simulated package bump"; else _fail "installed-values provenance: current package values overrode install image"; fi
+
+# Conversely, a modern snapshot that records the key as absent proves this install introduced
+# the default and permits its removal.
+OPENCODE_NEW_SCHEMA_HOME="$TMPDIR_EVAL/opencode-new-schema-home"
+mkdir -p "$OPENCODE_NEW_SCHEMA_HOME"
+printf '{"custom":"new-user"}\n' > "$OPENCODE_NEW_SCHEMA_HOME/opencode.json"
+HOME="$TMPDIR_EVAL/opencode-new-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_NEW_SCHEMA_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-new-schema-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_NEW_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/opencode-new-schema.out" 2>&1
+if node - "$OPENCODE_NEW_SCHEMA_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if ("$schema" in c || "instructions" in c || c.custom !== "new-user") throw new Error("snapshot-proven scalar was not removed cleanly");
+NODE
+then _pass "opencode scalar provenance: snapshot-proven schema and self-identifying instruction are removed"; else _fail "opencode scalar provenance: snapshot-proven removal failed"; fi
+
+# A present pre-install scalar is retained even when byte-identical to the managed default.
+# This is the mutation-killer for a false condition around hasOwnProperty.
+OPENCODE_PRESENT_SCHEMA_HOME="$TMPDIR_EVAL/opencode-present-schema-home"; mkdir -p "$OPENCODE_PRESENT_SCHEMA_HOME"
+printf '{"$schema":"https://opencode.ai/config.json","custom":"preexisting"}\n' > "$OPENCODE_PRESENT_SCHEMA_HOME/opencode.json"
+HOME="$TMPDIR_EVAL/opencode-present-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_PRESENT_SCHEMA_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-present-schema-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_PRESENT_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/opencode-present-schema.out" 2>&1
+if node - "$OPENCODE_PRESENT_SCHEMA_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); if (JSON.parse(fs.readFileSync(process.argv[2], "utf8")).$schema !== "https://opencode.ai/config.json") throw new Error("pre-existing schema deleted");
+NODE
+then _pass "opencode scalar provenance: pre-existing byte-identical schema is retained (mutation killed)"; else _fail "opencode scalar provenance: pre-existing schema was deleted"; fi
+
+# Parseable but incomplete and wrong-runtime snapshots fail closed.
+for SNAPSHOT_CASE in malformed wrong-runtime; do
+  SNAP_HOME="$TMPDIR_EVAL/opencode-snapshot-$SNAPSHOT_CASE"; mkdir -p "$SNAP_HOME"
+  printf '{"custom":"snapshot-test"}\n' > "$SNAP_HOME/opencode.json"
+  HOME="$TMPDIR_EVAL/opencode-snapshot-$SNAPSHOT_CASE-user-home" $FA init --runtime opencode --global --dest "$SNAP_HOME" --yes >/dev/null 2>&1
+  node - "$SNAP_HOME/.flow-agents/install.json" "$SNAPSHOT_CASE" <<'NODE'
+const fs = require("node:fs"); const p = process.argv[2], mode = process.argv[3], r = JSON.parse(fs.readFileSync(p, "utf8"));
+if (mode === "malformed") r.config_premerge = { schema_version: "1.0", parsed: {} }; else r.config_premerge.origin.runtime = "claude-code";
+fs.writeFileSync(p, JSON.stringify(r, null, 2) + "\n");
+NODE
+  HOME="$TMPDIR_EVAL/opencode-snapshot-$SNAPSHOT_CASE-user-home" $FA init --uninstall --runtime opencode --dest "$SNAP_HOME" --yes >"$TMPDIR_EVAL/opencode-snapshot-$SNAPSHOT_CASE.out" 2>&1
+  if node - "$SNAP_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); if (!JSON.parse(fs.readFileSync(process.argv[2], "utf8")).$schema) throw new Error("schema deleted despite invalid snapshot");
+NODE
+  then _pass "opencode scalar provenance: $SNAPSHOT_CASE snapshot is retained fail-closed"; else _fail "opencode scalar provenance: $SNAPSHOT_CASE snapshot authorized deletion"; fi
+done
+
+# Released v1 snapshots lacked snapshot-local runtime and config_path. They are
+# valid when their enclosing install record and current target supply that context.
+# Discriminating by construction: the config has NO $schema pre-install, so honoring the v1
+# origin means "Flow Agents added it" -> REMOVED. Ignoring the record yields the conservative
+# retain, so this assertion distinguishes honored-from-ignored (a prior version asserted only
+# that a pre-existing $schema survived, which is also the ignored outcome).
+VALID_V1_HOME="$TMPDIR_EVAL/valid-v1-provenance-home"; mkdir -p "$VALID_V1_HOME"
+printf '{"custom":"v1-user"}\n' > "$VALID_V1_HOME/opencode.json"
+HOME="$VALID_V1_HOME" $FA init --runtime opencode --global --dest "$VALID_V1_HOME" --yes >/dev/null 2>&1
+node - "$VALID_V1_HOME/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const p = process.argv[2], r = JSON.parse(fs.readFileSync(p, "utf8"));
+r.config_premerge = r.config_premerge.origin; delete r.config_premerge.runtime; delete r.config_premerge.config_path;
+fs.writeFileSync(p, JSON.stringify(r, null, 2) + "\n");
+NODE
+HOME="$VALID_V1_HOME" $FA init --uninstall --runtime opencode --dest "$VALID_V1_HOME" --yes >"$TMPDIR_EVAL/valid-v1-provenance.out" 2>&1
+if node - "$VALID_V1_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (c.$schema !== undefined) throw new Error("v1 origin was ignored: FA-added $schema was retained instead of removed");
+if (c.custom !== "v1-user") throw new Error("user content was lost");
+NODE
+then _pass "v1 provenance: released snapshot shape is honored as lineage origin (FA-added scalar removed, user content intact)"; else _fail "v1 provenance: valid released record was rejected or user content lost"; fi
+
+# A v1 record whose own scope resolves to a DIFFERENT file must not become this config's origin.
+# claude-code makes the contrast concrete: a global record describes <dest>/settings.json while a
+# project uninstall targets <dest>/.claude/settings.json. Accepting one as the other's baseline
+# would let a key the global config never had authorize deleting the user's project value.
+V1_SCOPE_DEST="$TMPDIR_EVAL/v1-scope-dest"; mkdir -p "$V1_SCOPE_DEST/.claude"
+printf '{"permissions":{"defaultMode":"auto"},"custom":"scope-user"}\n' > "$V1_SCOPE_DEST/.claude/settings.json"
+HOME="$TMPDIR_EVAL/v1-scope-user-home" $FA init --runtime claude-code --dest "$V1_SCOPE_DEST" --yes >/dev/null 2>&1
+node - "$V1_SCOPE_DEST/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const p = process.argv[2], r = JSON.parse(fs.readFileSync(p, "utf8"));
+const origin = r.config_premerge?.origin ?? r.config_premerge;
+if (origin) { delete origin.runtime; delete origin.config_path; r.config_premerge = origin; }
+r.global = true; // v1 record now claims GLOBAL scope -> describes <dest>/settings.json, a different file
+fs.writeFileSync(p, JSON.stringify(r, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/v1-scope-user-home" $FA init --uninstall --runtime claude-code --dest "$V1_SCOPE_DEST" --yes >"$TMPDIR_EVAL/v1-scope.out" 2>&1
+if node - "$V1_SCOPE_DEST/.claude/settings.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (c.permissions?.defaultMode !== "auto") throw new Error("a v1 record describing a different config authorized deleting the user's value");
+NODE
+then _pass "v1 provenance: a record whose scope resolves to a different config is not accepted as this one's origin"; else _fail "v1 provenance: cross-config record authorized a removal"; fi
+
+# A damaged prior record must never promote the currently-installed image to
+# origin on reinstall. Unknown origin falls back to conservative tier 2/3.
+DAMAGED_LINEAGE_HOME="$TMPDIR_EVAL/damaged-lineage-home"; mkdir -p "$DAMAGED_LINEAGE_HOME"
+printf '{"$schema":"https://opencode.ai/config.json","custom":"damaged-user"}\n' > "$DAMAGED_LINEAGE_HOME/opencode.json"
+HOME="$DAMAGED_LINEAGE_HOME" $FA init --runtime opencode --global --dest "$DAMAGED_LINEAGE_HOME" --yes >/dev/null 2>&1
+printf '{truncated' > "$DAMAGED_LINEAGE_HOME/.flow-agents/install.json"
+HOME="$DAMAGED_LINEAGE_HOME" $FA init --runtime opencode --global --dest "$DAMAGED_LINEAGE_HOME" --yes >/dev/null 2>&1
+if node - "$DAMAGED_LINEAGE_HOME/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const r = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); if (r.config_premerge?.origin?.schema_version !== "unknown") throw new Error("damaged record was promoted to origin");
+NODE
+then
+  HOME="$DAMAGED_LINEAGE_HOME" $FA init --uninstall --runtime opencode --dest "$DAMAGED_LINEAGE_HOME" --yes >"$TMPDIR_EVAL/damaged-lineage.out" 2>&1
+  if node - "$DAMAGED_LINEAGE_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); if (JSON.parse(fs.readFileSync(process.argv[2], "utf8")).$schema !== "https://opencode.ai/config.json") throw new Error("unknown origin authorized scalar deletion");
+NODE
+  then _pass "damaged lineage: reinstall records unknown origin and uninstall remains conservative"; else _fail "damaged lineage: unknown origin became authoritative during uninstall"; fi
+else _fail "damaged lineage: reinstall promoted an unreadable prior record"; fi
+
+# Telemetry is intentionally durable residue even though it lives under the runtime tree. Its
+# surviving in-destination directory must be named in the uninstall report.
+OPENCODE_RESIDUE_HOME="$TMPDIR_EVAL/opencode-residue-home"
+mkdir -p "$OPENCODE_RESIDUE_HOME"
+HOME="$TMPDIR_EVAL/opencode-residue-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_RESIDUE_HOME" --yes >/dev/null 2>&1
+mkdir -p "$OPENCODE_RESIDUE_HOME/.flow-agents/runtime/.kontourai/telemetry"
+printf 'telemetry evidence\n' > "$OPENCODE_RESIDUE_HOME/.flow-agents/runtime/.kontourai/telemetry/events.jsonl"
+HOME="$TMPDIR_EVAL/opencode-residue-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_RESIDUE_HOME" --yes >"$TMPDIR_EVAL/opencode-residue.out" 2>&1
+if [[ -f "$OPENCODE_RESIDUE_HOME/.flow-agents/runtime/.kontourai/telemetry/events.jsonl" ]] && sed -n '/^Residue/,/^$/p' "$TMPDIR_EVAL/opencode-residue.out" | grep -Fq '.flow-agents/runtime/.kontourai/telemetry'; then _pass "opencode residue: surviving in-destination telemetry is retained and disclosed"; else _fail "opencode residue: telemetry was deleted or hidden from the Residue report"; fi
+
 echo ""
 # ─── Scenario M: all-provider uninstall hardening regressions ────────────────────────────────
 echo "--- Scenario M: provider uninstall Stow, durable, drift, and TOCTOU hardening ---"
@@ -1042,10 +1258,14 @@ fs.writeFileSync(file, JSON.stringify({ active_kit_ids: record.active_kit_ids ??
 NODE
 FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_AUTH_HOME/opencode.json" HOME="$LEGACY_AUTH_USER_HOME" $FA init --uninstall --runtime opencode --global --authorize-backing-root "$LEGACY_AUTH_ROOT_REAL" --yes >"$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" 2>&1
 if [[ -L "$LEGACY_AUTH_HOME/opencode.json" && -L "$LEGACY_AUTH_HOME/skills" ]] && node - "$LEGACY_AUTH_ROOT/opencode.json" "$LEGACY_AUTH_BEFORE" <<'NODE'
-const fs = require("node:fs"); const actual = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); const expected = JSON.parse(process.argv[3]); if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("legacy user config was not restored with deep equality");
+// A LEGACY record carries no config_premerge snapshot, so uninstall cannot prove Flow Agents
+// added "$schema" and conservatively RETAINS it (issue #1238: removal requires positive
+// provenance). Deep equality is therefore against the user's original object PLUS that one
+// retained, disclosed key -- not a weaker check.
+const fs = require("node:fs"); const actual = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); const expected = { ...JSON.parse(process.argv[3]), $schema: "https://opencode.ai/config.json" }; if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`legacy user config was not restored with deep equality: ${JSON.stringify(actual)}`);
 NODE
 then
-  if [[ ! -e "$LEGACY_AUTH_ROOT/skills/agentic-engineering/SKILL.md" && ! -e "$LEGACY_AUTH_RECORD_DEST/.flow-agents/install.json" ]] && grep -q 'operator-authorized backing roots' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" && grep -q 'wrote through' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out"; then _pass "legacy Stow authorization: canonical root round-trips without severing links or persisting authorization"; else _fail "legacy Stow authorization: authorized round-trip, reporting, surgical config restoration, or non-persistence failed"; fi
+  if [[ ! -e "$LEGACY_AUTH_ROOT/skills/agentic-engineering/SKILL.md" && ! -e "$LEGACY_AUTH_RECORD_DEST/.flow-agents/install.json" ]] && grep -q 'operator-authorized backing roots' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" && grep -q 'wrote through' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out" && grep -q 'cannot prove Flow Agents added it' "$TMPDIR_EVAL/legacy-stow-auth-uninstall.out"; then _pass "legacy Stow authorization: canonical root round-trips, links intact, authorization not persisted, and the unprovable scalar is retained AND disclosed"; else _fail "legacy Stow authorization: authorized round-trip, reporting, surgical config restoration, or non-persistence failed"; fi
 else
   _fail "legacy Stow authorization: link or user config was not preserved"
 fi
@@ -1113,8 +1333,8 @@ rm "$SIBLING_LINK_HOME/skills"; ln -s "$SIBLING_LINK_ROOT/unrelated-skills" "$SI
 set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$SIBLING_LINK_HOME/opencode.json" HOME="$SIBLING_LINK_USER_HOME" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/sibling-link.out" 2>&1; SIBLING_LINK_RC=$?; set -e
 if [[ "$SIBLING_LINK_RC" -eq 2 && -f "$SIBLING_LINK_ROOT/unrelated-skills/agentic-engineering/SKILL.md" && -f "$SIBLING_LINK_HOME/.flow-agents/runtime-assets.json" ]] && grep -q 'other than the authorized OpenCode asset tree' "$TMPDIR_EVAL/sibling-link.out"; then _pass "opencode Stow: sibling asset tree is refused and untouched"; else _fail "opencode Stow: sibling asset tree escaped authorization"; fi
 
-# The pre-install snapshot is secret-bearing data: its record and temporary write are private,
-# it is refreshed on every install, and only the current install's post-image can restore it.
+# The two snapshots are secret-bearing data: `origin` remains the first baseline for provenance,
+# while `previous` refreshes on each install for byte-exact restoration of intervening user edits.
 REINSTALL_HOME="$TMPDIR_EVAL/reinstall-snapshot-home"; mkdir -p "$REINSTALL_HOME"
 printf '{\n  "token": "first"\n}\n' > "$REINSTALL_HOME/opencode.json"
 HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --global --dest "$REINSTALL_HOME" --yes >/dev/null 2>&1
@@ -1123,15 +1343,17 @@ HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --g
 node - "$REINSTALL_HOME/.flow-agents/install.json" "$REINSTALL_BEFORE" <<'NODE'
 const fs = require("node:fs"); const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if ((fs.statSync(process.argv[2]).mode & 0o777) !== 0o600) throw new Error("install.json is not 0600");
-if (!record.config_premerge?.post_install_sha256) throw new Error("missing post-install config hash");
-if (Buffer.from(record.config_premerge.bytes_base64, "base64").toString() !== process.argv[3]) throw new Error("reinstall retained the first install snapshot");
+const snapshots = record.config_premerge;
+if (snapshots?.schema_version !== "2.0" || !snapshots.origin?.post_install_sha256 || !snapshots.previous?.post_install_sha256) throw new Error("missing two-field post-install snapshot hashes");
+if (Buffer.from(snapshots.previous.bytes_base64, "base64").toString() !== process.argv[3]) throw new Error("previous did not refresh to the user edit before reinstall");
+if (Buffer.from(snapshots.origin.bytes_base64, "base64").toString() !== '{\n  "token": "first"\n}\n') throw new Error("origin did not retain the first lineage baseline");
 NODE
 HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --uninstall --runtime opencode --dest "$REINSTALL_HOME" --yes >"$TMPDIR_EVAL/reinstall-snapshot.out" 2>&1
 if node - "$REINSTALL_HOME/opencode.json" "$REINSTALL_BEFORE" <<'NODE'
 const fs = require("node:fs"); if (fs.readFileSync(process.argv[2], "utf8") !== process.argv[3]) throw new Error("not byte-exact");
 NODE
 then
-  if [[ ! -e "$REINSTALL_HOME/.flow-agents/install.json" ]]; then _pass "opencode snapshot: current install baseline restores byte-exactly and secret snapshot is removed"; else _fail "opencode snapshot: reinstall snapshot was retained"; fi
+  if [[ ! -e "$REINSTALL_HOME/.flow-agents/install.json" ]]; then _pass "opencode snapshots: previous restores user edit byte-exactly while origin proves FA-owned schema removal"; else _fail "opencode snapshots: reinstall snapshot was retained"; fi
 else
   _fail "opencode snapshot: reinstall baseline was stale or non-exact"
 fi
