@@ -30,6 +30,7 @@ function runKit(args) {
 const COMMANDS = [
   ["install", "usage: flow-agents kit install"],
   ["activate", "usage: flow-agents kit activate"],
+  ["deactivate", "usage: flow-agents kit deactivate <kit-id> [<kit-id> ...]"],
   ["validate", "usage: flow-agents kit validate"],
   ["provision", "usage: flow-agents kit provision"],
   ["inspect", "usage: flow-agents kit inspect"],
