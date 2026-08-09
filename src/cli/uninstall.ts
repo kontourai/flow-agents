@@ -61,7 +61,6 @@ import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { root } from "../tools/common.js";
 import { durableFlowAgentsRoot } from "../lib/local-artifact-root.js";
-import { pruneEmptyDirs } from "../lib/fs.js";
 import {
   hashFile,
   listOwnedTree,
@@ -72,7 +71,7 @@ import {
   ManifestContainmentViolationError,
   type OwnedFilesManifest,
 } from "../lib/owned-files-manifest.js";
-import { ensureBundle, globalDest } from "./init.js";
+import { ensureBundle, globalDest, opencodeGlobalConfigPath, resolveOpenCodeConfigBinding, revalidateOpenCodeConfigBinding } from "./init.js";
 
 type UninstallRuntime = "claude-code" | "codex" | "opencode";
 type RuntimeConfig = { runtime: UninstallRuntime; manifestName: string; configPath: (dest: string, global: boolean) => string; removeStatusLine: boolean; removeInstructionsPath?: (dest: string) => string; removeOwnedValues?: Record<string, unknown>; additionalManifestRoots?: () => { dest: string; manifestName: string; label: string }[] };
@@ -81,10 +80,15 @@ const RUNTIME_CONFIGS: Record<UninstallRuntime, RuntimeConfig> = {
   "claude-code": { runtime: "claude-code", manifestName: "owned-files.json", configPath: (dest, global) => global ? path.join(dest, "settings.json") : path.join(dest, ".claude", "settings.json"), removeStatusLine: true },
   codex: { runtime: "codex", manifestName: "codex-install-manifest.json", configPath: (dest) => path.join(dest, "hooks.json"), removeStatusLine: false,
     additionalManifestRoots: () => [{ dest: path.resolve(process.env["FLOW_AGENTS_SKILLS_DIR"] ?? path.join(os.homedir(), ".agents", "skills")), manifestName: "codex-universal-skills-install-manifest.json", label: "universal-skills" }] },
-  opencode: { runtime: "opencode", manifestName: "runtime-assets.json", configPath: (dest) => path.join(dest, "opencode.json"), removeStatusLine: false, removeInstructionsPath: (dest) => path.join(dest, ".flow-agents", "runtime", "AGENTS.md"), removeOwnedValues: { "$schema": "https://opencode.ai/config.json" } },
+  opencode: { runtime: "opencode", manifestName: "runtime-assets.json", configPath: (dest, global) => global ? opencodeGlobalConfigPath(dest) : path.join(dest, "opencode.json"), removeStatusLine: false, removeInstructionsPath: (dest) => path.join(dest, ".flow-agents", "runtime", "AGENTS.md"), removeOwnedValues: { "$schema": "https://opencode.ai/config.json" } },
 };
 
-type InstallMergeModule = { isManagedHookGroup: (hookGroup: unknown) => boolean; isManagedInnerHook: (hook: unknown) => boolean; FA_MARKERS: string[] };
+type InstallMergeModule = {
+  isManagedHookGroup: (hookGroup: unknown) => boolean;
+  isManagedInnerHook: (hook: unknown) => boolean;
+  FA_MARKERS: string[];
+  restoreConfigPremergeBytes: (premerge: unknown, nextContent: unknown) => Buffer | null;
+};
 
 function loadInstallMergeModule(): InstallMergeModule {
   const installMergePath = path.join(root, "scripts", "install-merge.js");
@@ -146,9 +150,12 @@ type SettingsPlan = {
   //   rather than leaving a vestigial `{}` behind.
   action: "none" | "rewrite" | "delete";
   nextContent: Record<string, unknown> | null; // set only when action === "rewrite"
+  preserved: PreservedFile[];
+  protectedRuntimePaths: string[];
 };
 
 type UninstallPlan = {
+  runtime: UninstallRuntime;
   dest: string;
   global: boolean;
   settings: SettingsPlan;
@@ -156,9 +163,11 @@ type UninstallPlan = {
   removeFiles: RemovableFile[];
   removeSymlinks: RemovableSymlink[];
   preserved: PreservedFile[];
-  removeDurable: { path: string; reason: string }[];
+  removeDurable: DurableFile[];
   residue: ResidueEntry[];
 };
+
+type DurableFile = { path: string; relPath: string; root: string; expectedSha256: string; reason: string };
 
 // ─── Settings (hooks + statusLine) ─────────────────────────────────────────────────────────
 
@@ -173,7 +182,7 @@ type UninstallPlan = {
 function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean): SettingsPlan {
   const settingsPath = config.configPath(dest, global);
   if (!fs.existsSync(settingsPath)) {
-    return { settingsPath, exists: false, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null };
+    return { settingsPath, exists: false, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null, preserved: [], protectedRuntimePaths: [] };
   }
   let existing: Record<string, unknown>;
   try {
@@ -221,14 +230,29 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   }
   let removedStatusLine = false;
   const statusLine = existing["statusLine"];
-  if (config.removeStatusLine && statusLine !== undefined && JSON.stringify(statusLine).includes(STATUSLINE_MARKER)) {
+  if (config.removeStatusLine && typeof statusLine === "object" && statusLine !== null
+    && (statusLine as Record<string, unknown>)["type"] === "command"
+    && typeof (statusLine as Record<string, unknown>)["command"] === "string"
+    && ((statusLine as Record<string, unknown>)["command"] as string).includes(STATUSLINE_MARKER)) {
     delete next["statusLine"];
     removedStatusLine = true;
   }
   let removedInstructions = false;
+  const preserved: PreservedFile[] = [];
+  const protectedRuntimePaths: string[] = [];
   if (config.removeInstructionsPath && Array.isArray(existing["instructions"])) {
     const instructionPath = config.removeInstructionsPath(dest);
     const kept = (existing["instructions"] as unknown[]).filter((entry) => entry !== instructionPath);
+    for (const entry of kept) {
+      if (typeof entry !== "string") continue;
+      // Exact string match is ownership. A lexical variant that resolves to the managed
+      // instruction is user drift: retain and name it, then protect the referenced runtime
+      // file from the otherwise independent manifest cleanup.
+      if (path.resolve(entry) === path.resolve(instructionPath)) {
+        preserved.push({ relPath: `${path.basename(settingsPath)}#instructions`, absPath: settingsPath, reason: "managed OpenCode instruction was edited; retained and its referenced runtime file is preserved" });
+        protectedRuntimePaths.push(instructionPath);
+      }
+    }
     if (kept.length !== (existing["instructions"] as unknown[]).length) {
       removedInstructions = true;
       if (kept.length > 0) next["instructions"] = kept;
@@ -240,11 +264,13 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
     if (JSON.stringify(existing[key]) === JSON.stringify(value)) {
       delete next[key];
       removedOwnedValue = true;
+    } else if (existing[key] !== undefined) {
+      preserved.push({ relPath: `${path.basename(settingsPath)}#${key}`, absPath: settingsPath, reason: "managed OpenCode setting was modified; retained" });
     }
   }
   const changed = removedHookEntryCount > 0 || removedStatusLine || removedInstructions || removedOwnedValue;
   if (!changed) {
-    return { settingsPath, exists: true, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null };
+    return { settingsPath, exists: true, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null, preserved, protectedRuntimePaths };
   }
   // Never leave a spurious `"hooks": {}` behind once every managed entry is gone -- mirrors
   // mergeSettings' own "don't inject a spurious empty hooks key" rule (install-merge.js), applied
@@ -257,27 +283,76 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   // to genuinely absent, not to a vestigial empty file. Because stripping is now entry-granular,
   // this is never true while a co-located user hook (or any other user key) survives.
   const action: SettingsPlan["action"] = Object.keys(next).length === 0 ? "delete" : "rewrite";
-  return { settingsPath, exists: true, removedHookEntryCount, removedEventKeys, removedStatusLine, action, nextContent: action === "rewrite" ? next : null };
+  return { settingsPath, exists: true, removedHookEntryCount, removedEventKeys, removedStatusLine, action, nextContent: action === "rewrite" ? next : null, preserved, protectedRuntimePaths };
 }
 
-function applySettings(plan: SettingsPlan): string | null {
-  if (plan.action === "none") return null;
+function applySettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean): { backupPath: string | null; preserved?: PreservedFile } {
+  // Deliberately re-plan after confirmation. Config is user-owned and a hook or setting can
+  // arrive while confirmation is pending; applying the stale object would silently erase it.
+  const plan = planSettings(dest, global, config, isManagedInnerHook);
+  if (plan.action === "none") return { backupPath: null };
+  const binding = config.runtime === "opencode" ? resolveOpenCodeConfigBinding(plan.settingsPath) : undefined;
+  const writePath = binding?.canonicalPath ?? plan.settingsPath;
+  // The binding check is immediately adjacent to the write: for Stow, write the canonical
+  // backing file and keep the host-visible link intact.
+  if (binding) revalidateOpenCodeConfigBinding(binding);
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupPath = `${plan.settingsPath}.bak-uninstall-${ts}`;
-  fs.copyFileSync(plan.settingsPath, backupPath);
+  const backupPath = `${writePath}.bak-uninstall-${ts}`;
+  fs.copyFileSync(writePath, backupPath);
   if (plan.action === "delete") {
-    fs.rmSync(plan.settingsPath);
-    return backupPath;
+    fs.rmSync(writePath);
+    return { backupPath };
   }
-  const tmp = `${plan.settingsPath}.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, `${JSON.stringify(plan.nextContent, null, 2)}\n`, "utf8");
-  fs.renameSync(tmp, plan.settingsPath);
-  return backupPath;
+  const recordPath = path.join(durableFlowAgentsRoot(dest), "install.json");
+  let premerge: unknown;
+  try { premerge = (JSON.parse(fs.readFileSync(recordPath, "utf8")) as Record<string, unknown>)["config_premerge"]; } catch { /* legacy/no durable snapshot: surgical JSON write below */ }
+  const originalBytes = loadInstallMergeModule().restoreConfigPremergeBytes(premerge, plan.nextContent);
+  const tmp = `${writePath}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, originalBytes ?? `${JSON.stringify(plan.nextContent, null, 2)}\n`, "utf8");
+  if (binding) revalidateOpenCodeConfigBinding(binding);
+  fs.renameSync(tmp, writePath);
+  return {
+    backupPath,
+    ...(premerge && !originalBytes
+      ? { preserved: { relPath: path.basename(plan.settingsPath), absPath: plan.settingsPath, reason: "config content drifted since install; retained surgical result but exact pre-install bytes could not be restored" } }
+      : {}),
+  };
 }
 
 // ─── Manifest-backed removal ────────────────────────────────────────────────────────────────
 
-function planFromManifest(dest: string, manifest: OwnedFilesManifest, label = ""): { removeFiles: RemovableFile[]; preserved: PreservedFile[] } {
+function pathIsWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+/**
+ * Resolve a manifest path through the one Stow shape the OpenCode installer explicitly
+ * authorizes: a direct plugins/, agents/, or skills/ child link whose target is inside the
+ * private backing root of the bound opencode.json link. All other links remain hostile.
+ */
+function resolveManifestPathWithBackingRoot(dest: string, relPath: string, backingRoot?: string): { absPath: string; root: string } {
+  const lexical = resolveManifestEntryPath(dest, relPath);
+  const [first, ...rest] = relPath.split("/");
+  const visibleChild = path.join(dest, first);
+  let stat: fs.Stats | undefined;
+  try { stat = fs.lstatSync(visibleChild); } catch { /* absent child uses ordinary root */ }
+  if (!stat?.isSymbolicLink()) return { absPath: lexical, root: dest };
+  // For ordinary roots, defer the containment refusal until after the harmless lstat below:
+  // missing stale manifest entries need no removal plan, while a present one is rejected by
+  // assertManifestEntryParentContained with that exact entry named in the diagnostic.
+  if (!backingRoot) return { absPath: lexical, root: dest };
+  if (!["plugins", "agents", "skills"].includes(first)) {
+    throw new ManifestContainmentViolationError(`owned-files.json manifest entry "${relPath}" escapes the install root through a symlinked parent directory`);
+  }
+  const target = fs.realpathSync(visibleChild);
+  if (!fs.statSync(target).isDirectory() || !pathIsWithin(backingRoot, target)) {
+    throw new ManifestContainmentViolationError(`owned-files.json manifest entry "${relPath}" escapes the explicitly authorized OpenCode backing root`);
+  }
+  return { absPath: path.join(target, ...rest), root: target };
+}
+
+function planFromManifest(dest: string, manifest: OwnedFilesManifest, label = "", backingRoot?: string): { removeFiles: RemovableFile[]; preserved: PreservedFile[] } {
   const removeFiles: RemovableFile[] = [];
   const preserved: PreservedFile[] = [];
   for (const entry of manifest.files) {
@@ -286,21 +361,23 @@ function planFromManifest(dest: string, manifest: OwnedFilesManifest, label = ""
     // and edited by anyone with write access), so it is treated as untrustworthy as a whole
     // rather than partially honored. Nothing has been deleted yet at this point (buildPlan is
     // pure/read-only), so this throw aborts the whole run before any mutation.
-    const absPath = resolveManifestEntryPath(dest, (entry as { path?: unknown }).path);
+    const manifestPath = (entry as { path?: unknown }).path;
+    // Keep lexical validation separate from backing-root resolution so malformed manifest
+    // paths still fail closed before any filesystem lookup.
+    resolveManifestEntryPath(dest, manifestPath);
+    const { absPath, root: entryRoot } = resolveManifestPathWithBackingRoot(dest, String(manifestPath), backingRoot);
     const expectedSha256 = resolveManifestEntrySha256(String((entry as { path?: unknown }).path), (entry as { sha256?: unknown }).sha256);
     const relPath = entry.path;
-    // Second, filesystem-real half of containment (see assertManifestEntryParentContained's
-    // docstring): resolveManifestEntryPath alone is purely lexical and cannot catch an
-    // intermediate directory that is on-disk a symlink pointing outside dest. Checked here at
-    // plan time too (not just at apply time) so a poisoned/coincidentally-symlinked entry is
-    // never even planned -- throws, aborting the whole run before any deletion.
-    assertManifestEntryParentContained(dest, absPath, relPath);
     let stat: fs.Stats;
     try {
       stat = fs.lstatSync(absPath);
     } catch {
       continue; // already gone
     }
+    // Second, filesystem-real containment. An absent entry needs no removal plan, but a
+    // present entry must never be planned through an intermediate symlink outside its root.
+    // This order keeps the refusal diagnostic tied to the actual present manifest entry.
+    assertManifestEntryParentContained(entryRoot, absPath, relPath);
     if (stat.isSymbolicLink()) {
       preserved.push({ relPath, absPath, reason: "manifest entry is now a symlink; refusing to remove" });
       continue;
@@ -310,7 +387,7 @@ function planFromManifest(dest: string, manifest: OwnedFilesManifest, label = ""
       continue;
     }
     if (hashFile(absPath) === expectedSha256) {
-      removeFiles.push({ relPath: `${label}${relPath}`, absPath, root: dest, reason: "ownership manifest: content unmodified since install", expectedSha256 });
+      removeFiles.push({ relPath: `${label}${relPath}`, absPath, root: entryRoot, reason: "ownership manifest: content unmodified since install", expectedSha256 });
     } else {
       preserved.push({ relPath, absPath, reason: "content modified since install (sha256 mismatch)" });
     }
@@ -531,10 +608,11 @@ function diffSingleLegacyFile(
 
 // ─── Durable artifacts + residue ────────────────────────────────────────────────────────────
 
-const DURABLE_ARTIFACT_FILES = ["install.json", "skills-manifest.json", "owned-files.json", "codex-install-manifest.json", "codex-universal-skills-install-manifest.json", "runtime-assets.json", "registry-latest.json"];
-const DURABLE_ARTIFACT_DIRS = ["runtime"];
+// Manifest stamp names are derived from runtime configuration so a newly added runtime cannot
+// accidentally leave its ownership record behind (or reintroduce a second hand-maintained list).
+const DURABLE_ARTIFACT_FILES = ["install.json", "skills-manifest.json", "registry-latest.json", ...new Set(Object.values(RUNTIME_CONFIGS).map((config) => config.manifestName))];
 
-function planDurableArtifacts(dest: string, runtime: UninstallRuntime): { removeDurable: { path: string; reason: string }[]; note?: string } {
+function planDurableArtifacts(dest: string, runtime: UninstallRuntime): { removeDurable: DurableFile[]; note?: string } {
   const durableRoot = durableFlowAgentsRoot(dest);
   const installRecordPath = path.join(durableRoot, "install.json");
   if (fs.existsSync(installRecordPath)) {
@@ -548,14 +626,16 @@ function planDurableArtifacts(dest: string, runtime: UninstallRuntime): { remove
       // names below -- they are self-evidently Flow Agents' own namespaced files regardless.
     }
   }
-  const removeDurable: { path: string; reason: string }[] = [];
+  const removeDurable: DurableFile[] = [];
   for (const name of DURABLE_ARTIFACT_FILES) {
     const file = path.join(durableRoot, name);
-    if (fs.existsSync(file) && fs.lstatSync(file).isFile()) removeDurable.push({ path: file, reason: "flow-agents durable install artifact" });
-  }
-  for (const name of DURABLE_ARTIFACT_DIRS) {
-    const dir = path.join(durableRoot, name);
-    if (fs.existsSync(dir) && fs.lstatSync(dir).isDirectory()) removeDurable.push({ path: dir, reason: "flow-agents durable install artifact" });
+    if (!fs.existsSync(file)) continue;
+    // Stamps are user-visible durable files, not a license to recurse through their parent.
+    // Capture their hash now and re-check it at apply just like every owned payload file.
+    assertManifestEntryParentContained(dest, file, `.flow-agents/${name}`);
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile()) continue;
+    removeDurable.push({ path: file, relPath: `.flow-agents/${name}`, root: dest, expectedSha256: hashFile(file), reason: "flow-agents durable install artifact" });
   }
   return { removeDurable };
 }
@@ -583,14 +663,29 @@ function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime): Un
   let removeFiles: RemovableFile[] = [];
   let removeSymlinks: RemovableSymlink[] = [];
   let preserved: PreservedFile[] = [];
-  const extraDurable: { path: string; reason: string }[] = [];
+  preserved.push(...settings.preserved);
+  const extraDurable: DurableFile[] = [];
   if (manifest) {
     mode = "manifest";
     // Validated entry-by-entry inside planFromManifest -- throws (aborting before any deletion)
     // on the first unsafe or malformed entry rather than skipping it and continuing.
-    const result = planFromManifest(dest, manifest);
+    let backingRoot: string | undefined;
+    if (runtime === "opencode") {
+      const configPath = config.configPath(dest, global);
+      if (fs.existsSync(configPath) && fs.lstatSync(configPath).isSymbolicLink()) {
+        backingRoot = resolveOpenCodeConfigBinding(configPath).trustedSymlinkRoot;
+      }
+    }
+    const result = planFromManifest(dest, manifest, "", backingRoot);
     removeFiles = result.removeFiles;
     preserved = result.preserved;
+    preserved.push(...settings.preserved);
+    if (settings.protectedRuntimePaths.length > 0) {
+      const protectedPaths = new Set(settings.protectedRuntimePaths.map((entry) => path.resolve(entry)));
+      const protectedFiles = removeFiles.filter((entry) => protectedPaths.has(path.resolve(entry.absPath)));
+      removeFiles = removeFiles.filter((entry) => !protectedPaths.has(path.resolve(entry.absPath)));
+      preserved.push(...protectedFiles.map((entry) => ({ relPath: entry.relPath, absPath: entry.absPath, reason: "retained drifted OpenCode instruction still references this runtime file" })));
+    }
     for (const extra of config.additionalManifestRoots?.() ?? []) {
       const extraManifest = readOwnedFilesManifest(extra.dest, extra.manifestName);
       if (!extraManifest) {
@@ -599,7 +694,9 @@ function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime): Un
       const extraResult = planFromManifest(extra.dest, extraManifest, `${extra.label}/`);
       removeFiles.push(...extraResult.removeFiles);
       preserved.push(...extraResult.preserved.map((entry) => ({ ...entry, relPath: `${extra.label}/${entry.relPath}` })));
-      extraDurable.push({ path: path.join(durableFlowAgentsRoot(extra.dest), extra.manifestName), reason: "flow-agents durable install artifact" });
+      const extraStamp = path.join(durableFlowAgentsRoot(extra.dest), extra.manifestName);
+      assertManifestEntryParentContained(extra.dest, extraStamp, `.flow-agents/${extra.manifestName}`);
+      extraDurable.push({ path: extraStamp, relPath: `${extra.label}/.flow-agents/${extra.manifestName}`, root: extra.dest, expectedSha256: hashFile(extraStamp), reason: "flow-agents durable install artifact" });
     }
   } else if (runtime === "claude-code") {
     const bundle = ensureBundle("claude-code");
@@ -607,6 +704,7 @@ function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime): Un
     removeFiles = result.removeFiles;
     removeSymlinks = result.removeSymlinks;
     preserved = result.preserved;
+    preserved.push(...settings.preserved);
     mode = removeFiles.length > 0 || removeSymlinks.length > 0 || preserved.length > 0 ? "legacy" : "none";
   } else {
     const expectedManifest = path.join(durableFlowAgentsRoot(dest), config.manifestName);
@@ -617,7 +715,7 @@ function buildPlan(dest: string, global: boolean, runtime: UninstallRuntime): Un
   removeDurable.push(...extraDurable);
   const residue = planResidue(dest, global);
 
-  return { dest, global, settings, mode, removeFiles, removeSymlinks, preserved, removeDurable, residue };
+  return { runtime, dest, global, settings, mode, removeFiles, removeSymlinks, preserved, removeDurable, residue };
 }
 
 function planIsEmpty(plan: UninstallPlan): boolean {
@@ -635,6 +733,7 @@ type ApplyOutcome = {
   settingsBackupPath: string | null;
   removedFiles: RemovableFile[];
   removedSymlinks: RemovableSymlink[];
+  removedDurable: DurableFile[];
   failed: RemovalFailure[];
   preservedAtApply: PreservedFile[];
 };
@@ -652,10 +751,13 @@ function applyPlan(plan: UninstallPlan): ApplyOutcome {
   const preservedAtApply: PreservedFile[] = [];
   const removedFiles: RemovableFile[] = [];
   const removedSymlinks: RemovableSymlink[] = [];
+  const removedDurable: DurableFile[] = [];
 
   let settingsBackupPath: string | null = null;
   try {
-    settingsBackupPath = applySettings(plan.settings);
+    const settingsOutcome = applySettings(plan.dest, plan.global, RUNTIME_CONFIGS[plan.runtime], loadInstallMergeModule().isManagedInnerHook);
+    settingsBackupPath = settingsOutcome.backupPath;
+    if (settingsOutcome.preserved) preservedAtApply.push(settingsOutcome.preserved);
   } catch (error) {
     failed.push({ relPath: plan.settings.settingsPath, absPath: plan.settings.settingsPath, reason: `settings update failed: ${(error as Error).message}` });
   }
@@ -773,19 +875,47 @@ function applyPlan(plan: UninstallPlan): ApplyOutcome {
       removedSymlinks.push(entry);
     }
   }
-  pruneEmptyDirs(plan.dest, removedParents);
+  pruneEmptyDirsSafely(plan.dest, removedParents);
 
   for (const entry of plan.removeDurable) {
     try {
       if (!fs.existsSync(entry.path)) continue;
-      fs.rmSync(entry.path, { recursive: true, force: true });
+      assertManifestEntryParentContained(entry.root, entry.path, entry.relPath);
+      const stat = fs.lstatSync(entry.path);
+      if (stat.isSymbolicLink() || !stat.isFile() || hashFile(entry.path) !== entry.expectedSha256) {
+        preservedAtApply.push({ relPath: entry.relPath, absPath: entry.path, reason: "content changed since the plan was computed; preserved (re-checked immediately before removal)" });
+        continue;
+      }
+      fs.rmSync(entry.path);
+      removedDurable.push(entry);
+      removedParents.add(path.dirname(entry.path));
     } catch (error) {
       failed.push({ relPath: entry.path, absPath: entry.path, reason: (error as Error).message });
     }
   }
-  pruneEmptyDirs(plan.dest, [durableFlowAgentsRoot(plan.dest)]);
+  pruneEmptyDirsSafely(plan.dest, [...removedParents, durableFlowAgentsRoot(plan.dest)]);
 
-  return { settingsBackupPath, removedFiles, removedSymlinks, failed, preservedAtApply };
+  return { settingsBackupPath, removedFiles, removedSymlinks, removedDurable, failed, preservedAtApply };
+}
+
+/** Remove only empty, real directories whose live canonical path remains under root. */
+function pruneEmptyDirsSafely(rootPath: string, starts: Iterable<string>): void {
+  let rootReal: string;
+  try { rootReal = fs.realpathSync(rootPath); } catch { return; }
+  for (const start of starts) {
+    let current = start;
+    while (path.resolve(current) !== path.resolve(rootPath)) {
+      try {
+        assertManifestEntryParentContained(rootPath, current, path.relative(rootPath, current));
+        const stat = fs.lstatSync(current);
+        if (stat.isSymbolicLink() || !stat.isDirectory() || !pathIsWithin(rootReal, fs.realpathSync(current))) break;
+        fs.rmdirSync(current);
+        current = path.dirname(current);
+      } catch {
+        break;
+      }
+    }
+  }
 }
 
 // ─── Reporting ──────────────────────────────────────────────────────────────────────────────
@@ -828,9 +958,10 @@ function printReport(plan: UninstallPlan, applied: boolean, outcome: ApplyOutcom
   if (outcome.failed.length === 0) console.log("  (none)");
   console.log("");
 
-  console.log(`Durable artifacts ${applied ? "removed" : "to remove"} (${plan.removeDurable.length}):`);
-  for (const entry of plan.removeDurable) console.log(`  ${entry.path}`);
-  if (plan.removeDurable.length === 0) console.log("  (none)");
+  const durableEntries = applied ? outcome.removedDurable : plan.removeDurable;
+  console.log(`Durable artifacts ${applied ? "removed" : "to remove"} (${durableEntries.length}):`);
+  for (const entry of durableEntries) console.log(`  ${entry.path}`);
+  if (durableEntries.length === 0) console.log("  (none)");
   console.log("");
 
   console.log(`Residue (never removed by uninstall, reported only) (${plan.residue.length}):`);
@@ -843,7 +974,7 @@ function printReport(plan: UninstallPlan, applied: boolean, outcome: ApplyOutcom
 }
 
 function dryRunOutcome(plan: UninstallPlan): ApplyOutcome {
-  return { settingsBackupPath: null, removedFiles: plan.removeFiles, removedSymlinks: plan.removeSymlinks, failed: [], preservedAtApply: [] };
+  return { settingsBackupPath: null, removedFiles: plan.removeFiles, removedSymlinks: plan.removeSymlinks, removedDurable: plan.removeDurable, failed: [], preservedAtApply: [] };
 }
 
 // ─── CLI entry ──────────────────────────────────────────────────────────────────────────────
@@ -911,6 +1042,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const toctouTestMutateFile = process.env["FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_MUTATE_FILE"];
     if (toctouTestMutateFile) {
       fs.appendFileSync(toctouTestMutateFile, "\nTOCTOU-test-mutation\n", "utf8");
+    }
+    const toctouAddHook = process.env["FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_ADD_USER_HOOK"];
+    if (toctouAddHook) {
+      const existing = JSON.parse(fs.readFileSync(toctouAddHook, "utf8")) as Record<string, unknown>;
+      const hooks = (existing["hooks"] && typeof existing["hooks"] === "object" ? existing["hooks"] : {}) as Record<string, unknown>;
+      const stop = Array.isArray(hooks["Stop"]) ? hooks["Stop"] : [];
+      stop.push({ hooks: [{ type: "command", command: "echo user-hook-added-during-confirmation" }] });
+      hooks["Stop"] = stop;
+      existing["hooks"] = hooks;
+      fs.writeFileSync(toctouAddHook, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
     }
     // Re-points an existing symlink, or replaces an existing directory with a new symlink, at
     // PATH to point at TARGET -- used to exercise both the removeSymlinks branch's live-target

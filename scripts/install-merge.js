@@ -304,11 +304,35 @@ function atomicWriteJson(filePath, data) {
  * @param {string} version
  * @param {string} runtime
  */
-function writeInstallRecord(installRecordPath, version, runtime) {
+function captureConfigPremerge(configPath) {
+  if (!fs.existsSync(configPath)) return { schema_version: "1.0", existed: false, parsed: {} };
+  const bytes = fs.readFileSync(configPath);
+  return {
+    schema_version: "1.0",
+    existed: true,
+    bytes_base64: bytes.toString("base64"),
+    parsed: JSON.parse(bytes.toString("utf8")),
+  };
+}
+
+/**
+ * Return the original bytes only when config surgery fully restored the
+ * pre-merge JSON value. Formatting is user data too, so a structural round
+ * trip must not silently reformat a config that otherwise came back intact.
+ */
+function restoreConfigPremergeBytes(premerge, nextContent) {
+  if (!premerge || premerge.schema_version !== "1.0") return null;
+  if (!premerge.existed || typeof premerge.bytes_base64 !== "string") return null;
+  if (!valuesEqual(premerge.parsed, nextContent)) return null;
+  return Buffer.from(premerge.bytes_base64, "base64");
+}
+
+function writeInstallRecord(installRecordPath, version, runtime, configPremerge) {
   const record = {
     version,
     installedAt: new Date().toISOString(),
     runtime,
+    ...(configPremerge ? { config_premerge: configPremerge } : {}),
   };
   atomicWriteJson(installRecordPath, record);
 }
@@ -326,6 +350,7 @@ function writeInstallRecord(installRecordPath, version, runtime) {
  */
 function runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime }) {
   // (a) Read dest JSON (or {} if absent).
+  const configPremerge = captureConfigPremerge(configPath);
   let existing = {};
   if (fs.existsSync(configPath)) {
     try {
@@ -363,7 +388,7 @@ function runMerge({ configPath, managedHooksPath, version, installRecordPath, ru
   atomicWriteJson(configPath, merged);
 
   // (f) Write version stamp.
-  writeInstallRecord(installRecordPath, version, runtime);
+  writeInstallRecord(installRecordPath, version, runtime, configPremerge);
 }
 
 // ─── CLI wrapper ──────────────────────────────────────────────────────────────
@@ -417,4 +442,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { mergeSettings, isManagedHookGroup, isManagedInnerHook, FA_MARKERS };
+module.exports = { mergeSettings, isManagedHookGroup, isManagedInnerHook, FA_MARKERS, captureConfigPremerge, restoreConfigPremergeBytes };
