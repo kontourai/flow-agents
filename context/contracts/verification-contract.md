@@ -28,7 +28,7 @@ When Flow routes back and later re-enters verification, a fresh critique generat
 
 ## Defect Injection Runs In A Scratch Copy
 
-Mutation-testing tools (Stryker or equivalent) **and hand-written defect injection** — any edit made to confirm a check discriminates, then reverted — **must not** mutate a **tracked** file in the live working tree. They deliberately introduce defects to measure test-suite sensitivity; mutating tracked source in place risks leaving mutated source behind, corrupting the checkout, or tripping the gate/anchor on injected failures, and a restore that silently fails is indistinguishable from one that worked.
+Mutation-testing tools (Stryker or equivalent) **and hand-written defect injection** — any edit made to confirm a check discriminates, then reverted — **must not** mutate, in the live working tree, **any tracked file or any untracked file git does not ignore** — that is, anything the workspace snapshot covers. They deliberately introduce defects to measure test-suite sensitivity; mutating tracked source in place risks leaving mutated source behind, corrupting the checkout, or tripping the gate/anchor on injected failures, and a restore that silently fails is indistinguishable from one that worked.
 
 **Copy the working tree** to a temporary directory (`cp -R`) and run there; discard it afterward. `git clone` and `git worktree add` materialize a commit, so on a tree with uncommitted work they silently produce a scratch copy that does not contain the change under test — the injection then "catches" a defect that was never fixed in that copy, which is a false catch with no dirty tree or failed restore to make it visible.
 

@@ -101,8 +101,7 @@ including which forms carry the change under test.
 
 Two readings of the result are unsafe:
 
-- **A red is not automatically the injection's red.** An unrelated failure, a
-  crash, or a path that matched no tests also fails. Read the failure text and
+- **A red is not automatically the injection's red.** Read the failure text and
   confirm it names the behavior the injection broke.
 - **A green run is not automatically a passing run.** A selection that matches
   nothing still reports: `node --test` with a glob matching no file reports
