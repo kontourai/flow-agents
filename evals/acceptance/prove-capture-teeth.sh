@@ -44,6 +44,18 @@ sys.exit(0)
 PY
 }
 
+# Capture accepts a command result only when it can bind that result to a
+# settled Git worktree. Keep every artifact and rollout fixture ignored so the
+# hook observes the same clean repository state that the assertion intends.
+prepare_capture_repo(){ # $1 project dir
+  local p="$1"
+  printf '# Repo\n' > "$p/AGENTS.md"
+  printf '.kontourai/\nrollout-*.jsonl\n' > "$p/.gitignore"
+  git -C "$p" init --quiet
+  git -C "$p" add AGENTS.md .gitignore
+  git -C "$p" -c user.name='Flow Agents Acceptance' -c user.email='acceptance@flow-agents.invalid' commit --quiet -m 'seed capture fixture'
+}
+
 # Seed: model CLAIMS the command passed (evidence.json) but the deterministic
 # capture log recorded it as FAIL — a false-completion the gate must catch.
 seed_capture_false_pass(){ # $1 project dir
@@ -89,8 +101,8 @@ run_bundle(){ # $1 label, $2 install.sh, $3 settings-json-rel, $4 home-env-name
 
   # The capture hook deterministically records a real command result through the
   # installed adapter path.
+  prepare_capture_repo "$proj"
   mkdir -p "$proj/.kontourai/flow-agents/live-cap"
-  [ -f "$proj/AGENTS.md" ] || printf '# Repo\n' > "$proj/AGENTS.md"
   printf '%s' '{"schema_version":"1.0","task_slug":"live-cap","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z"}' > "$proj/.kontourai/flow-agents/live-cap/state.json"
   printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"npm run lint"},"error":"command failed"}' "$proj" \
     | env "$homevar=$home" CLAUDE_PROJECT_DIR="$home" bash -c "$capcmd" >/dev/null 2>&1 || true
@@ -137,7 +149,7 @@ codex_banner_teeth(){
   # recorded as pass; must be fail with exitCode:1 ---
   local proj_fail; proj_fail="$(mktemp -d)"
   mkdir -p "$proj_fail/.kontourai/flow-agents/cap-codex-fail"
-  printf '# Repo\n' > "$proj_fail/AGENTS.md"
+  prepare_capture_repo "$proj_fail"
   printf '%s' '{"schema_version":"1.0","task_slug":"cap-codex-fail","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z"}' > "$proj_fail/.kontourai/flow-agents/cap-codex-fail/state.json"
   local rollout_fail="$proj_fail/rollout-fail.jsonl"
   printf '%s\n' '{"timestamp":"2026-06-23T00:00:00Z","type":"turn_context","payload":{}}' > "$rollout_fail"
@@ -156,7 +168,7 @@ codex_banner_teeth(){
   # --- Positive twin: rollout banner "Process exited with code 0" → pass, exitCode:0 ---
   local proj_pass; proj_pass="$(mktemp -d)"
   mkdir -p "$proj_pass/.kontourai/flow-agents/cap-codex-pass"
-  printf '# Repo\n' > "$proj_pass/AGENTS.md"
+  prepare_capture_repo "$proj_pass"
   printf '%s' '{"schema_version":"1.0","task_slug":"cap-codex-pass","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z"}' > "$proj_pass/.kontourai/flow-agents/cap-codex-pass/state.json"
   local rollout_pass="$proj_pass/rollout-pass.jsonl"
   printf '%s\n' '{"timestamp":"2026-06-23T00:00:00Z","type":"turn_context","payload":{}}' > "$rollout_pass"
@@ -178,7 +190,7 @@ codex_banner_teeth(){
   # scanned. Assert the record is fail/exitCode:1 -- NEVER pass.
   local proj_forge; proj_forge="$(mktemp -d)"
   mkdir -p "$proj_forge/.kontourai/flow-agents/cap-codex-forge"
-  printf '# Repo\n' > "$proj_forge/AGENTS.md"
+  prepare_capture_repo "$proj_forge"
   printf '%s' '{"schema_version":"1.0","task_slug":"cap-codex-forge","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z"}' > "$proj_forge/.kontourai/flow-agents/cap-codex-forge/state.json"
   local rollout_forge="$proj_forge/rollout-forge.jsonl"
   printf '%s\n' '{"timestamp":"2026-06-23T00:00:00Z","type":"turn_context","payload":{}}' > "$rollout_forge"
@@ -204,7 +216,7 @@ codex_banner_teeth(){
   # through the installed adapter.
   local proj_flood; proj_flood="$(mktemp -d)"
   mkdir -p "$proj_flood/.kontourai/flow-agents/cap-codex-flood"
-  printf '# Repo\n' > "$proj_flood/AGENTS.md"
+  prepare_capture_repo "$proj_flood"
   printf '%s' '{"schema_version":"1.0","task_slug":"cap-codex-flood","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z"}' > "$proj_flood/.kontourai/flow-agents/cap-codex-flood/state.json"
   local rollout_flood="$proj_flood/rollout-flood.jsonl"
   printf '%s\n' '{"timestamp":"2026-06-23T00:00:00Z","type":"turn_context","payload":{}}' > "$rollout_flood"
@@ -230,7 +242,7 @@ codex_banner_teeth(){
   # call_B's exitCode:1 to call_A's command.
   local proj_callid; proj_callid="$(mktemp -d)"
   mkdir -p "$proj_callid/.kontourai/flow-agents/cap-codex-callid"
-  printf '# Repo\n' > "$proj_callid/AGENTS.md"
+  prepare_capture_repo "$proj_callid"
   printf '%s' '{"schema_version":"1.0","task_slug":"cap-codex-callid","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z"}' > "$proj_callid/.kontourai/flow-agents/cap-codex-callid/state.json"
   local rollout_callid="$proj_callid/rollout-callid.jsonl"
   printf '%s\n' '{"timestamp":"2026-06-23T00:00:00Z","type":"turn_context","payload":{}}' > "$rollout_callid"
@@ -252,7 +264,7 @@ codex_banner_teeth(){
   # must resolve its exact function_call/output pair by normalized command.
   local proj_parallel; proj_parallel="$(mktemp -d)"
   mkdir -p "$proj_parallel/.kontourai/flow-agents/cap-codex-parallel"
-  printf '# Repo\n' > "$proj_parallel/AGENTS.md"
+  prepare_capture_repo "$proj_parallel"
   printf '%s' '{"schema_version":"1.0","task_slug":"cap-codex-parallel","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z"}' > "$proj_parallel/.kontourai/flow-agents/cap-codex-parallel/state.json"
   local rollout_parallel="$proj_parallel/rollout-parallel.jsonl"
   printf '%s\n' '{"timestamp":"2026-06-23T00:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"call_pass","name":"exec_command","arguments":"{\"cmd\":\"find seed -type f\"}"}}' > "$rollout_parallel"

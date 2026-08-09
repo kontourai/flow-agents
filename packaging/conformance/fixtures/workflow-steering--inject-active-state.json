@@ -11,7 +11,7 @@
   },
   "workspace_setup": {
     "AGENTS.md": "# Test Repo\n",
-    ".flow-agents/my-task/state.json": {
+    ".kontourai/flow-agents/my-task/state.json": {
       "task_slug": "my-task",
       "status": "blocked",
       "phase": "execute",
@@ -20,7 +20,15 @@
         "status": "needs_user",
         "target_phase": "verify"
       }
+    },
+    ".kontourai/flow-agents/current/conformance-6c1d6cedf276ea3f.json": {
+      "active_slug": "my-task",
+      "artifact_dir": "my-task"
     }
+  },
+  "workspace_git": true,
+  "env": {
+    "FLOW_AGENTS_ACTOR": "conformance"
   },
   "expected": {
     "exit_code": 0,

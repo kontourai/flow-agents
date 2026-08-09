@@ -1,11 +1,26 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { captureReviewWorkspaceSnapshot, isGitWorktreeSnapshot, type GitWorktreeSnapshot } from "./review-workspace-snapshot.js";
+
+export type ObservedWorkspaceState =
+  | {
+    status: "captured";
+    observed_at_commit: string;
+    worktree_clean: boolean;
+    verification_workspace_snapshot: GitWorktreeSnapshot;
+  }
+  | {
+    /** Git state could not be derived, so this execution is non-confirming. */
+    status: "unavailable";
+    reason: string;
+  };
 
 export type ObservedProcessResult = {
   command: string;
   exit_code: number | null;
   output_sha256: string;
   output: string;
+  observation: ObservedWorkspaceState;
 };
 
 function configuredTimeout(variable: string, fallback: number): number {
@@ -92,5 +107,33 @@ export async function runObservedCommand(command: string, projectRoot: string): 
     child.once("exit", (code) => { closedCode = code; beginCleanup(); });
     child.once("close", () => { streamsClosed = true; complete(); });
   });
-  return { command, exit_code: result.code, output_sha256: result.outputSha256, output: result.output };
+  // This must follow the process's `close` event, which is the point at which
+  // its stdout/stderr streams have settled. The resulting snapshot is the
+  // observation boundary for both the command result and its Git provenance.
+  return {
+    command,
+    exit_code: result.code,
+    output_sha256: result.outputSha256,
+    output: result.output,
+    observation: captureObservedWorkspaceState(projectRoot),
+  };
+}
+
+function captureObservedWorkspaceState(projectRoot: string): ObservedWorkspaceState {
+  try {
+    const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+    if (!isGitWorktreeSnapshot(snapshot)) {
+      return { status: "unavailable", reason: "canonical Git workspace state is unavailable" };
+    }
+    return {
+      status: "captured",
+      observed_at_commit: snapshot.head_sha,
+      worktree_clean: snapshot.worktree_clean,
+      verification_workspace_snapshot: snapshot,
+    };
+  } catch {
+    // The completed process observation remains useful for an observed failure,
+    // but cannot confirm a pass without the matching Git workspace state.
+    return { status: "unavailable", reason: "canonical Git workspace state could not be captured" };
+  }
 }

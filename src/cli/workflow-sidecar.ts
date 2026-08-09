@@ -18,7 +18,7 @@ import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
-import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
+import { assertTrustedGitAncestor, isExactLowercaseCommitSha } from "../lib/trusted-git.js";
 import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
@@ -834,11 +834,12 @@ function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | nu
  * Three-way classification, keyed on `observedResult` (never re-derived from `exitCode` alone,
  * which would miscoerce the #362 grep/diff absence carve-out `ambiguous,exitCode:1` entry to
  * `fail`):
- *   - "fail"      when `observedResult==="fail"`, or (legacy, no observedResult) a nonzero
+ *   - "fail"      when `observedResult==="fail"`, or (older format, no observedResult) a nonzero
  *                 integer `exitCode`.
- *   - "ambiguous" when `observedResult==="ambiguous"`, or (legacy) `exitCode` is `null` with no
+ *   - "ambiguous" when `observedResult==="ambiguous"`, or (older format) `exitCode` is `null` with no
  *                 fail signal.
- *   - "pass"      when `observedResult==="pass"`, or (legacy) `exitCode===0`.
+ *   - "pass"      when `observedResult==="pass"` with captured clean provenance. Older-format
+ *                 exit-zero records are non-confirming and must be re-recorded.
  *
  * Precedence across repeated entries for the same command: fail > pass > ambiguous. A genuine
  * exit-0 pass is positive evidence and confirms; ambiguous holds only when there is neither a
@@ -849,20 +850,42 @@ function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | nu
  * `checkStatusToEventStatus("not_verified")` returns null (no verification event emitted) and the
  * evidence item is stamped `passing:false`. See Decision/finding #2 in the iteration-2 plan.
  */
-export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map<string, { observedResult: "pass" | "fail" | "ambiguous"; exitCode: number | null }> {
-  const captureByCommand = new Map<string, { observedResult: "pass" | "fail" | "ambiguous"; exitCode: number | null }>();
+export type FoldedCommandObservation = {
+  observedResult: "pass" | "fail" | "ambiguous";
+  exitCode: number | null;
+  observedAtCommit?: string;
+  worktreeClean?: boolean;
+  verificationWorkspaceSnapshot?: AnyObj;
+};
+
+/** A pass is confirmation only when it names the clean snapshot it observed. */
+function commandLogPassProvenance(entry: AnyObj): Pick<FoldedCommandObservation, "observedAtCommit" | "worktreeClean" | "verificationWorkspaceSnapshot"> | null {
+  const observedAtCommit = typeof entry.observed_at_commit === "string" ? entry.observed_at_commit : "";
+  const worktreeClean = entry.worktree_clean;
+  const snapshot = entry.verification_workspace_snapshot
+    ?? (entry.writer && typeof entry.writer === "object" ? entry.writer.verification_workspace_snapshot : undefined);
+  if (!isExactLowercaseCommitSha(observedAtCommit) || worktreeClean !== true
+    || !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)
+    || snapshot.kind !== "git-worktree" || snapshot.head_sha !== observedAtCommit
+    || snapshot.worktree_clean !== true || typeof snapshot.digest !== "string" || !/^[a-f0-9]{64}$/.test(snapshot.digest)) return null;
+  return { observedAtCommit, worktreeClean: true, verificationWorkspaceSnapshot: snapshot as AnyObj };
+}
+
+export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map<string, FoldedCommandObservation> {
+  const captureByCommand = new Map<string, FoldedCommandObservation>();
   for (const entry of Array.isArray(commandLog) ? commandLog : []) {
     if (!entry || typeof entry.command !== "string") continue;
     const key = entry.command.replace(/\s+/g, " ").trim();
     if (!key) continue;
     const exitCode = Number.isInteger(entry.exitCode) ? (entry.exitCode as number) : null;
     let result: "pass" | "fail" | "ambiguous";
+    const passProvenance = commandLogPassProvenance(entry);
     if (entry.observedResult === "fail" || (entry.observedResult === undefined && exitCode !== null && exitCode !== 0)) {
       result = "fail";
-    } else if (entry.observedResult === "pass" || (entry.observedResult === undefined && exitCode === 0)) {
+    } else if ((entry.observedResult === "pass" || (entry.observedResult === undefined && exitCode === 0)) && passProvenance) {
       result = "pass";
     } else {
-      // Covers observedResult==="ambiguous" AND the legacy no-observedResult, exitCode:null case.
+      // Covers observedResult==="ambiguous" and older-format records with no usable signal.
       result = "ambiguous";
     }
     const prev = captureByCommand.get(key);
@@ -887,7 +910,12 @@ export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map
     } else {
       mergedExitCode = prev.exitCode;
     }
-    captureByCommand.set(key, { observedResult: merged, exitCode: mergedExitCode });
+    const winningEntry = merged === result ? passProvenance : prev;
+    captureByCommand.set(key, {
+      observedResult: merged,
+      exitCode: mergedExitCode,
+      ...(merged === "pass" && winningEntry?.observedAtCommit ? winningEntry : {}),
+    });
   }
   return captureByCommand;
 }
@@ -905,7 +933,7 @@ export function composeGateVerdict(
 ): "pass" | "fail" | "not_verified" {
   if (requestedStatus !== "pass") return requestedStatus;
   if (observedResult === "fail") return "fail";
-  if (observedResult === "ambiguous") return "not_verified";
+  if (observedResult !== "pass") return "not_verified";
   return "pass";
 }
 
@@ -1173,24 +1201,11 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   }
   // ────────────────────────────────────────────────────────────────────────────
 
-  /**
-   * #1170 (PR2): the workspace snapshot stamped onto a FRESHLY-recorded kit-typed gate claim.
-   *
-   * Captured at most once per bundle write (the Git diff is whole-tree) and only if some check
-   * actually needs it.
-   *
-   * ONLY fresh writes are stamped — see `_fresh_record_write`, set by the recording verb on the
-   * checks supplied in THIS invocation. Every writer in this file rebuilds the whole bundle from
-   * `checksFromBundle` + its own new checks, so stamping unconditionally would re-anchor a check
-   * recorded against an OLD tree to the CURRENT one on every unrelated later write (a
-   * record-critique or record-learning call would silently refresh a stale verifier check).
-   * That is precisely the evidence laundering PR1's read-time predicate is built to prevent:
-   * "no path re-stamps a snapshot". A previously-recorded snapshot round-trips untouched through
-   * `checksFromBundle`'s `_verification_workspace_snapshot` restoration, so a rebuild preserves
-   * the original binding rather than renewing it.
-   */
+  // #1170: non-command records are bound at record time. They have no process observation
+  // boundary, so this remains the producer for ordinary fresh sidecar checks. Command-backed
+  // evidence is intentionally excluded: it must carry the snapshot captured by its command.
   let capturedFreshWorkspaceSnapshot: AnyObj | null | undefined;
-  const freshWorkspaceSnapshot = (): AnyObj | null => {
+  const freshNonCommandWorkspaceSnapshot = (): AnyObj | null => {
     if (capturedFreshWorkspaceSnapshot === undefined) {
       capturedFreshWorkspaceSnapshot = flowAgentsDir
         ? tryCaptureGitWorktreeSnapshot(tryCanonicalProjectRootForSession(path.join(flowAgentsDir, slug)))
@@ -1232,9 +1247,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // evidence item below is stamped passing:false. `isError` stays fail-only (ambiguous is
     // not an error).
     const requestedStatus = String(check.status ?? "");
-    const effectiveStatus = ["pass", "fail", "not_verified"].includes(requestedStatus)
+    const effectiveStatus = cmd && ["pass", "fail", "not_verified"].includes(requestedStatus)
       ? composeGateVerdict(requestedStatus as "pass" | "fail" | "not_verified", captured?.observedResult)
       : requestedStatus;
+    if (cmd && requestedStatus === "pass" && effectiveStatus === "not_verified") {
+      process.stderr.write(`[trust.bundle] command-backed check '${String(check.id)}' cannot confirm pass without an exact clean command observation; re-run and re-record the command through record-check or record-gate-claim.\n`);
+    }
     const evStatus = waiver ? "assumed" : checkStatusToEventStatus(effectiveStatus);
     // Promotion claim marker (issue #312): a `promote` check carries a session-local
     // _promotion object that must survive onto claim.metadata.promotion so the archive gate
@@ -1257,13 +1275,22 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // raw command output — a command producing >64KiB of output has its digest computed only over
     // the retained prefix, so two runs whose outputs diverge only past the 64KiB boundary hash
     // identically.
-    const outputDigestMeta = typeof check._output_sha256 === "string" && check._output_sha256.length > 0
+    const outputDigestMeta = typeof check._output_sha256 === "string" && /^[a-f0-9]{64}$/.test(check._output_sha256)
       ? { algorithm: "sha256", hex: check._output_sha256 }
       : null;
     const observedCommandsMeta = Array.isArray(check._observed_commands)
       ? check._observed_commands
-        .filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string")
-        .map((entry: AnyObj) => ({ command: entry.command, exit_code: entry.exit_code, output_sha256: entry.output_sha256, ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}), ...(entry.execution_proof && typeof entry.execution_proof === "object" ? { execution_proof: entry.execution_proof } : {}) }))
+        .filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string" && /^[a-f0-9]{64}$/.test(entry.output_sha256))
+        .map((entry: AnyObj) => ({
+          command: entry.command,
+          exit_code: entry.exit_code,
+          output_sha256: entry.output_sha256,
+          ...(typeof entry.observed_at_commit === "string" ? { observed_at_commit: entry.observed_at_commit } : {}),
+          ...(typeof entry.worktree_clean === "boolean" ? { worktree_clean: entry.worktree_clean } : {}),
+          ...(entry.verification_workspace_snapshot && typeof entry.verification_workspace_snapshot === "object" ? { verification_workspace_snapshot: entry.verification_workspace_snapshot } : {}),
+          ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}),
+          ...(entry.execution_proof && typeof entry.execution_proof === "object" ? { execution_proof: entry.execution_proof } : {}),
+        }))
       : null;
     const verificationWorkspaceSnapshotMeta = check._verification_workspace_snapshot
       && typeof check._verification_workspace_snapshot === "object"
@@ -1304,6 +1331,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const claimMetadata: AnyObj = {
       origin: "check",
       check_kind: String(check.kind ?? "external"),
+      ...(cmd ? { command: cmd } : {}),
       ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
       ...(typeof check._producer === "string" ? { expected_producer: check._producer } : {}),
       ...(typeof check._recorded_by === "string" ? { recorded_by: check._recorded_by } : {}),
@@ -1319,25 +1347,40 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(acceptanceContractMeta ? { acceptance_contract: acceptanceContractMeta } : {}),
     };
 
+    // A multi-command gate claim has one check but multiple real executions. Preserve each
+    // execution as separately linked evidence so consumers can bind every observed command
+    // without accepting unrepresented extras.
+    const evItems: AnyObj[] = observedCommandsMeta && observedCommandsMeta.length > 0
+      ? observedCommandsMeta.map((observation, index) => ({
+        id: `${evId}:${index + 1}`,
+        claimId,
+        evidenceType: evClass.evidenceType,
+        method: evClass.method,
+        sourceRef: `${slug}/command-log.jsonl`,
+        excerptOrSummary: fieldOrBehavior,
+        observedAt: ts,
+        collectedBy: "flow-agents/workflow-sidecar",
+        passing: effectiveStatus === "pass" && observation.exit_code === 0,
+        execution: { runner: "bash", label: observation.command, isError: observation.exit_code !== 0, exitCode: observation.exit_code },
+      }))
+      : (() => {
+        const evItem: AnyObj = { id: evId, claimId, evidenceType: evClass.evidenceType, method: evClass.method, sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: effectiveStatus === "pass" };
+        if (captured) {
+          evItem.sourceRef = `${slug}/command-log.jsonl`;
+          evItem.collectedBy = "flow-agents/evidence-capture";
+          evItem.execution = { runner: "bash", label: cmd, isError: captured.observedResult === "fail", ...(captured.exitCode != null ? { exitCode: captured.exitCode } : {}) };
+        } else if (cmd && !waiver) {
+          evItem.execution = { runner: "bash", label: cmd, isError: effectiveStatus !== "pass" };
+        }
+        return [evItem];
+      })();
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
-      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [evId], createdAt: ts, verifiedAt: ts };
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: evItems.map((item) => item.id), createdAt: ts, verifiedAt: ts };
       events.push(evt);
       claimEvents.push(evt);
     }
-    const evItem: AnyObj = { id: evId, claimId, evidenceType: evClass.evidenceType, method: evClass.method, sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: effectiveStatus === "pass" };
-    if (captured) {
-      evItem.sourceRef = `${slug}/command-log.jsonl`;
-      evItem.collectedBy = "flow-agents/evidence-capture";
-      evItem.execution = { runner: "bash", label: cmd, isError: captured.observedResult === "fail", ...(captured.exitCode != null ? { exitCode: captured.exitCode } : {}) };
-    } else if (cmd && !waiver) {
-      // WS8 (ADR 0020): always stamp execution.label on command-backed checks so the CI
-      // reconciler has a stable key to match against the manifest, even when the local
-      // command-log capture did not happen to run this command. isError is derived from
-      // the check's own reported status (no captured exit code available in this path).
-      evItem.execution = { runner: "bash", label: cmd, isError: effectiveStatus !== "pass" };
-    }
-    evidenceItems.push(evItem);
+    evidenceItems.push(...evItems);
 
     // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
     // When record-gate-claim sets _gate_claim_expectation_id, pass it for exact lookup (ADR 0016 P-d Increment 2).
@@ -1396,7 +1439,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // still: it would let a stale claim pass the head fast path without any tree comparison at
       // all. The snapshot is the whole producer gap, and it is the binding that actually describes
       // a claim whose subject is repository content.
-      const declaredWorkspaceSnapshot = verificationWorkspaceSnapshotMeta ?? (check._fresh_record_write === true ? freshWorkspaceSnapshot() : null);
+      // A workspace snapshot belongs to the observation that produced this check. Rebuilds may
+      // only preserve that exact object; recapturing here would re-anchor old evidence.
+      const declaredWorkspaceSnapshot = verificationWorkspaceSnapshotMeta
+        ?? (check._fresh_record_write === true && !cmd ? freshNonCommandWorkspaceSnapshot() : null);
       const declaredBaseMetadata: AnyObj = declaredWorkspaceSnapshot
         ? { ...claimMetadata, verification_workspace_snapshot: declaredWorkspaceSnapshot }
         : claimMetadata;
@@ -1404,12 +1450,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
         ? { ...declaredBaseMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
         : declaredBaseMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
-      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
+      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: evItems as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
       // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
       const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, ...(claimMetadata ? { metadata: claimMetadata } : {}) };
-      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
+      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: evItems as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
     }
   }
@@ -1433,17 +1479,26 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       && commandRefs.includes(observation.command)
       && observation.exit_code === 0
       && typeof observation.output_sha256 === "string"
-      && /^[a-f0-9]{64}$/i.test(observation.output_sha256)
+      && /^[a-f0-9]{64}$/.test(observation.output_sha256)
+      && typeof observation.observed_at_commit === "string"
+      && isExactLowercaseCommitSha(observation.observed_at_commit)
+      && observation.worktree_clean === true
+      && observation.verification_workspace_snapshot?.kind === "git-worktree"
+      && observation.verification_workspace_snapshot?.head_sha === observation.observed_at_commit
+      && observation.verification_workspace_snapshot?.worktree_clean === true
+      && /^[a-f0-9]{64}$/.test(String(observation.verification_workspace_snapshot?.digest ?? ""))
       && Number.isSafeInteger(observation.test_count)
       && observation.test_count > 0
       && ["local-process-exit", "coordinated-command-receipt"].includes(String(observation.execution_proof?.kind)),
     );
+    const criterionSnapshot = passingObservationSnapshot(observedCommands as ObservedCommand[]);
     const hasObservedCommandProvenance = CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA.has(criterion)
       && criterionIdentityVersion === 2
       && criterionVerifiedAt !== null
       && Number.isFinite(Date.parse(criterionVerifiedAt))
       && observedCommands.length === rawObservedCommands.length
       && observedCommands.length > 0
+      && criterionSnapshot !== null
       && commandRefs.every((command: string) => observedCommands.some((observation: AnyObj) => observation.command === command));
     const criterionStatus = normalizedCriterionStatus === "pass" && !hasObservedCommandProvenance
       ? "pending"
@@ -2115,7 +2170,10 @@ function loadRunnableCommandHelper(): { isRunnableCommandText: (text: string) =>
 const AMBIGUOUS_REMEDIATION_ADVICE = "self-asserting command ('! grep ...' or 'grep -c ... | grep -qx 0')";
 
 function validateRunnableCheckCommand(check: AnyObj, context: string): void {
-  if (check.kind !== "command" || !hasNonEmptyString(check.command)) return;
+  if (check.kind !== "command") return;
+  if (!hasNonEmptyString(check.command)) {
+    die(`${context}: kind:"command" checks require a non-empty runnable command; move descriptive-only evidence to kind:"external" instead.`);
+  }
   const { isRunnableCommandText } = loadRunnableCommandHelper();
   if (!isRunnableCommandText(check.command)) {
     die(`${context}: kind:"command" check command is not a runnable shell command: "${check.command}" — remediate by either (1) moving the prose to summary and omitting command/execution.label, or (2) reclassifying this check as kind:"external" (session-local attestation) instead of kind:"command".`);
@@ -3646,7 +3704,47 @@ export function inferExecutedTestCount(command: string, projectRoot: string, out
   return observed > 0 ? Math.min(proof.static_test_units, observed) : 0;
 }
 
-type ObservedCommand = { command: string; exit_code: number; output_sha256: string; test_count?: number; execution_proof?: TestExecutionProof };
+type ObservedCommand = {
+  command: string;
+  exit_code: number;
+  output_sha256: string;
+  observed_at_commit?: string;
+  worktree_clean?: boolean;
+  verification_workspace_snapshot?: AnyObj;
+  test_count?: number;
+  execution_proof?: TestExecutionProof;
+};
+
+function passingObservationSnapshot(observations: readonly ObservedCommand[]): AnyObj | null {
+  if (observations.length === 0) return null;
+  let snapshot: AnyObj | null = null;
+  for (const observation of observations) {
+    const provenance = commandLogPassProvenance({
+      observed_at_commit: observation.observed_at_commit,
+      worktree_clean: observation.worktree_clean,
+      verification_workspace_snapshot: observation.verification_workspace_snapshot,
+    });
+    if (!provenance?.verificationWorkspaceSnapshot) return null;
+    if (snapshot && !isDeepStrictEqual(snapshot, provenance.verificationWorkspaceSnapshot)) return null;
+    snapshot = provenance.verificationWorkspaceSnapshot;
+  }
+  return snapshot;
+}
+
+/** Every confirming observation must bind exactly to one clean Git snapshot. */
+export function observedCommandsBindExactWorkspaceSnapshot(observed: unknown, expected: unknown): boolean {
+  if (!expected || typeof expected !== "object" || Array.isArray(expected)) return false;
+  const snapshot = expected as AnyObj;
+  if (snapshot.version !== 1 || snapshot.kind !== "git-worktree" || snapshot.algorithm !== "sha256"
+    || typeof snapshot.digest !== "string" || !/^[a-f0-9]{64}$/.test(snapshot.digest)
+    || !isExactLowercaseCommitSha(snapshot.head_sha) || snapshot.worktree_clean !== true) return false;
+  return Array.isArray(observed) && observed.length > 0 && observed.every((entry: AnyObj) =>
+    entry && typeof entry === "object" && !Array.isArray(entry)
+    && isExactLowercaseCommitSha(entry.observed_at_commit)
+    && entry.observed_at_commit === snapshot.head_sha
+    && entry.worktree_clean === true
+    && isDeepStrictEqual(entry.verification_workspace_snapshot, snapshot));
+}
 
 function observedCommandReference(commands: readonly string[], command: string, observation?: { exit_code: number | null; output_sha256: string }): string {
   const ordinal = commands.indexOf(command) + 1;
@@ -3663,18 +3761,38 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
     if (!isRunnableCommandText(command)) die(`record-gate-claim ${observedCommandReference(commands, command)} is not a runnable shell command — prose belongs in --summary, which is never executed.`);
     if (requireTestIntent && !isMeaningfulTestCommand(command, projectRoot)) die("record-gate-claim tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
   }
-  // Passing test evidence is always executed exactly once by this canonical
-  // writer. Caller-supplied observations remain available for non-test
-  // attestations but can never stand in for locally observed test execution.
+  // The canonical writer executes every command and records its own observation.
   const observeCommand = async (command: string) => {
     const result = await runObservedCommand(command, projectRoot);
     const coordinated = requireTestIntent ? resolveCoordinatedCommandBinding(command, projectRoot) : null;
     if (coordinated) {
       const receipt = observeCoordinatedCommandReceipt(coordinated, projectRoot, result);
-      return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...receipt };
+      const { test_count, execution_proof } = receipt;
+      return {
+        command,
+        exit_code: result.exit_code,
+        output_sha256: result.output_sha256,
+        ...(result.observation.status === "captured" ? {
+          observed_at_commit: result.observation.observed_at_commit,
+          worktree_clean: result.observation.worktree_clean,
+          verification_workspace_snapshot: result.observation.verification_workspace_snapshot,
+        } : {}),
+        test_count,
+        execution_proof,
+      };
     }
     const proof = requireTestIntent ? testExecutionProof(command, projectRoot) : null;
-    return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}) };
+    return {
+      command,
+      exit_code: result.exit_code,
+      output_sha256: result.output_sha256,
+      ...(result.observation.status === "captured" ? {
+        observed_at_commit: result.observation.observed_at_commit,
+        worktree_clean: result.observation.worktree_clean,
+        verification_workspace_snapshot: result.observation.verification_workspace_snapshot,
+      } : {}),
+      ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}),
+    };
   };
   // Sequential, never concurrent: evidence commands are test runs against one working tree, so
   // any two that build shared artifacts (every eval here starts with `npm run build:bundles`)
@@ -3684,17 +3802,17 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
   // claim is persisted. Narrowing here instead would just fail to compile.
   const observed: Awaited<ReturnType<typeof observeCommand>>[] = [];
   for (const command of commands) observed.push(await observeCommand(command));
-  if (observed.length !== commands.length) die("record-gate-claim requires exactly one --observed-command-json for every --command");
+  if (observed.length !== commands.length) die("record-gate-claim writer did not return one observation for every --command");
   const byCommand = new Map<string, ObservedCommand>();
   for (const entry of observed) {
-    if (typeof entry.command !== "string" || typeof entry.exit_code !== "number" || !Number.isInteger(entry.exit_code) || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256)) die("--observed-command-json must contain command, integer exit_code, and sha256 output_sha256");
-    if (!commands.includes(entry.command)) die("--observed-command-json command must exactly match one supplied --command");
+    if (typeof entry.command !== "string" || typeof entry.exit_code !== "number" || !Number.isInteger(entry.exit_code) || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.output_sha256)) die("record-gate-claim writer produced an invalid command observation");
+    if (!commands.includes(entry.command)) die("record-gate-claim writer observation command does not match a supplied --command");
     if (expectedStatus === "pass" && entry.exit_code !== 0) die(`record-gate-claim passing evidence ${observedCommandReference(commands, entry.command, entry)} failed`);
     if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || !["local-process-exit", "coordinated-command-receipt"].includes(String(entry.execution_proof.kind)))) die(`record-gate-claim passing tests-evidence ${observedCommandReference(commands, entry.command, entry)} did not produce a local execution proof`);
-    if (byCommand.has(entry.command)) die("--observed-command-json command values must be unique");
+    if (byCommand.has(entry.command)) die("record-gate-claim writer produced duplicate command observations");
     byCommand.set(entry.command, entry as ObservedCommand);
   }
-  if (commands.some((command) => !byCommand.has(command))) die("every --command requires a corresponding --observed-command-json");
+  if (commands.some((command) => !byCommand.has(command))) die("record-gate-claim writer did not observe every supplied --command");
   return commands.map((command) => byCommand.get(command)!);
 }
 
@@ -3752,10 +3870,13 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
           command: entry.command,
           observedResult: entry.exit_code === 0 ? "pass" : "fail",
           exitCode: entry.exit_code,
+          ...(typeof entry.observed_at_commit === "string" ? { observed_at_commit: entry.observed_at_commit } : {}),
+          ...(typeof entry.worktree_clean === "boolean" ? { worktree_clean: entry.worktree_clean } : {}),
           capturedAt: timestamp,
           source: WRITER_OBSERVATION_SOURCE,
           writer: {
             output_sha256: entry.output_sha256,
+            ...(entry.verification_workspace_snapshot ? { verification_workspace_snapshot: entry.verification_workspace_snapshot } : {}),
             ...(transactionId ? { transaction_id: transactionId } : {}),
             ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}),
             ...(entry.execution_proof ? { execution_proof: entry.execution_proof } : {}),
@@ -3912,7 +4033,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
   const commandRefs = refs.filter((ref) => ref.kind === "command");
   if (commandRefs.length === 0) die(`${label} requires a command evidence ref matching a successful observed command`);
   for (const ref of commandRefs) {
-    if (!observedCommands.has(commandFromEvidenceRef(ref))) die(`${label} command evidence ref must exactly match a successful --observed-command-json command`);
+    if (!observedCommands.has(commandFromEvidenceRef(ref))) die(`${label} command evidence ref must exactly match a successful writer-observed command`);
   }
   if (requireAll) {
     const referenced = new Set(commandRefs.map(commandFromEvidenceRef));
@@ -4626,12 +4747,12 @@ function checksFromBundle(dir: string): AnyObj[] {
   const outputSha256Of = (claim: AnyObj): string | undefined => {
     const md = claim.metadata as AnyObj;
     const od = md && typeof md === "object" ? md.output_digest as AnyObj : undefined;
-    return od && typeof od === "object" && od.algorithm === "sha256" && typeof od.hex === "string" && od.hex.length > 0 ? od.hex : undefined;
+    return od && typeof od === "object" && od.algorithm === "sha256" && typeof od.hex === "string" && /^[a-f0-9]{64}$/.test(od.hex) ? od.hex : undefined;
   };
   const observedCommandsOf = (claim: AnyObj): ObservedCommand[] | undefined => {
     const md = claim.metadata as AnyObj;
     const observed = md && typeof md === "object" ? md.observed_commands : undefined;
-    return Array.isArray(observed) ? observed.filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string") : undefined;
+    return Array.isArray(observed) ? observed.filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string" && /^[a-f0-9]{64}$/.test(entry.output_sha256)) : undefined;
   };
   const verificationWorkspaceSnapshotOf = (claim: AnyObj): AnyObj | undefined => {
     const md = claim.metadata as AnyObj;
@@ -5136,7 +5257,14 @@ async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[
   // stderr note and the check summary text, not a new status value.
   const { isAmbiguousAbsenceCommand } = loadRunnableCommandHelper();
   const ambiguous = exitCode === 1 && isAmbiguousAbsenceCommand(displayCommand ?? "");
-  const status = exitCode === 0 ? "pass" : (ambiguous ? "not_verified" : "fail");
+  const observedSnapshot = tryCaptureGitWorktreeSnapshot(repoRoot);
+  const observedAtCommit = observedSnapshot && typeof observedSnapshot.head_sha === "string" ? observedSnapshot.head_sha : undefined;
+  const worktreeClean = observedSnapshot?.worktree_clean;
+  // record-check has no caller-requested pass to refuse, so an unavailable or dirty provenance
+  // degrades an otherwise-zero exit to the existing non-confirming status.
+  const status = exitCode === 0 && !(observedAtCommit && worktreeClean === true)
+    ? "not_verified"
+    : exitCode === 0 ? "pass" : (ambiguous ? "not_verified" : "fail");
   // #270 MEDIUM fix: hash the captured (clamped) output — the digest itself is what gets
   // persisted onto claim.metadata (below, via buildTrustBundle), NEVER the raw output. This is
   // secret-safe by construction: even if the executed command's stdout/stderr contained a
@@ -5146,7 +5274,7 @@ async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[
   // anywhere (dead code) — this replaces it with a REAL digest that IS persisted.
   const capturedOutput = clampOutput(`${stdout}${stderr ? `
 ${stderr}` : ""}`.trim());
-  const outputSha256 = capturedOutput ? createHash("sha256").update(capturedOutput, "utf8").digest("hex") : null;
+  const outputSha256 = createHash("sha256").update(capturedOutput, "utf8").digest("hex");
   const checkIdRaw = opt(p, "id") || displayCommand;
   const checkId = checkIdRaw.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "record-check";
   const summary = opt(p, "summary", `record-check: ${displayCommand}${exitCode !== null ? ` (exit ${exitCode})` : ""}${ambiguous ? " — AMBIGUOUS (bare grep/diff exit 1): NOT_VERIFIED, not silently pass/fail" : ""}`);
@@ -5166,7 +5294,20 @@ ${stderr}` : ""}`.trim());
     summary,
     command: displayCommand,
   }, false, _existingCheckStampById, repoRoot);
-  if (outputSha256) check._output_sha256 = outputSha256;
+  check._output_sha256 = outputSha256;
+  if (exitCode !== null) {
+    const observed: ObservedCommand = {
+      command: displayCommand,
+      exit_code: exitCode,
+      output_sha256: outputSha256,
+      ...(observedAtCommit ? { observed_at_commit: observedAtCommit } : {}),
+      ...(typeof worktreeClean === "boolean" ? { worktree_clean: worktreeClean } : {}),
+      ...(observedSnapshot ? { verification_workspace_snapshot: observedSnapshot } : {}),
+    };
+    check._observed_commands = [observed];
+    if (status === "pass") check._verification_workspace_snapshot = observedSnapshot;
+    appendWriterObservedCommands(dir, [observed], ts);
+  }
 
   const _mergedChecks = mergeChecksById(_existingState.checks, [check]);
   assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, _existingState.criteria, _existingState.critiques));
@@ -5305,7 +5446,9 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const gateCommands = opts(p, "command");
   const gateCommand = gateCommands[0] ?? "";
   const mustRunTests = targetExpectation.id === "tests-evidence" && statusVal === "pass";
-  const observedCommandRaw = opts(p, "observed-command-json");
+  if (opts(p, "observed-command-json").length > 0) {
+    die("record-gate-claim does not accept --observed-command-json; the canonical writer executes and records every --command");
+  }
   if (mustRunTests && gateCommands.length === 0) die("record-gate-claim requires at least one --command for a passing tests-evidence claim");
   // #619: the narrative evidence-ref guards (validateEvidenceRef / normalizeCheck /
   // completePassingCriteria) need a non-null, location-independent project root that never
@@ -5317,6 +5460,15 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const observedCommands = gateCommands.length > 0
     ? await normalizeObservedCommands(gateCommands, canonicalRoot!, mustRunTests, statusVal)
     : [];
+  // A requested pass is bound to the command-time Git state, never to a later writer rebuild.
+  // Every confirming command must name the SAME clean canonical snapshot; otherwise a later
+  // observation could launder an earlier one under its newer tree.
+  const observedWorkspaceSnapshot = statusVal === "pass" && observedCommands.length > 0
+    ? passingObservationSnapshot(observedCommands)
+    : null;
+  if (statusVal === "pass" && observedCommands.length > 0 && !observedWorkspaceSnapshot) {
+    die("record-gate-claim passing command evidence requires captured clean Git provenance with one exact shared workspace snapshot");
+  }
   // #634: persist the writer's real executions into the hash-chained command-log so the
   // capture fold has a deterministic observation even on exit-code-blind hosts.
   appendWriterObservedCommands(dir, observedCommands, ts, writerTransactionId);
@@ -5328,8 +5480,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // (do not run commands for a claim we will reject) but will fail that eval — update it in the
   // same change rather than treating the failure as an unrelated regression.
   if (!mustRunTests && gateCommands.length > 1) die("record-gate-claim accepts repeatable --command only for passing tests-evidence claims");
-  if (gateCommands.length === 0 && observedCommandRaw.length > 0) die("--observed-command-json requires --command");
-  if (!mustRunTests && gateCommand && observedCommandRaw.length === 0) {
+  if (!mustRunTests && gateCommand) {
     const { isRunnableCommandText } = loadRunnableCommandHelper();
     if (!isRunnableCommandText(gateCommand)) die(`record-gate-claim --command "${gateCommand}" is not a runnable shell command — prose belongs in --summary, which is never executed.`);
   }
@@ -5383,14 +5534,12 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
   if (mustRunTests && publicWorkflowAuthority) {
-    // Unchanged strict path: a passing public tests-evidence claim REQUIRES a Git-backed
-    // snapshot and dies without one. `canonicalRoot` is non-null here because mustRunTests
-    // already required at least one --command above.
-    const verificationSnapshot = captureReviewWorkspaceSnapshot(canonicalRoot!, []);
-    if (verificationSnapshot.kind !== "git-worktree" || typeof verificationSnapshot.head_sha !== "string") {
-      die("a passing public tests-evidence claim requires a canonical Git workspace snapshot");
-    }
-    checkNormalized._verification_workspace_snapshot = verificationSnapshot;
+    // The public tests-evidence claim must use the exact snapshot returned by the observed
+    // process, not a fresh capture after command execution.
+    if (!observedWorkspaceSnapshot) die("a passing public tests-evidence claim requires captured clean Git provenance");
+    checkNormalized._verification_workspace_snapshot = observedWorkspaceSnapshot;
+  } else if (observedWorkspaceSnapshot) {
+    checkNormalized._verification_workspace_snapshot = observedWorkspaceSnapshot;
   } else {
     // #1170 (PR2) producer completeness: capture the workspace snapshot for EVERY gate claim
     // recorded while a canonical Git root resolves, not only the passing-public-tests case.
@@ -5404,8 +5553,14 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     // Strictly additive: absent a Git root this records exactly what it recorded before (no
     // snapshot, no failure — legacy semantics), and a claim whose head still matches never
     // consults the snapshot at all.
-    const snapshot = tryCaptureGitWorktreeSnapshot(canonicalRoot ?? tryCanonicalProjectRootForSession(dir));
-    if (snapshot) checkNormalized._verification_workspace_snapshot = snapshot;
+    // Preserve #1170's non-command producer behavior. A claim with no executed command has no
+    // command-time observation to launder, so its record-time Git snapshot remains the binding.
+    // Command-backed claims deliberately never enter this capture path: their snapshot must come
+    // from the exact observed process result above, including for non-pass observations.
+    if (gateCommands.length === 0) {
+      const snapshot = tryCaptureGitWorktreeSnapshot(tryCanonicalProjectRootForSession(dir));
+      if (snapshot) checkNormalized._verification_workspace_snapshot = snapshot;
+    }
   }
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
@@ -7465,10 +7620,8 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   return 0;
 }
 function evidenceClean(dir: string): boolean {
-  // Phase 4c: read from trust.bundle (sole verification artifact); fall back to evidence.json for
-  // legacy (pre-bundle-era) sessions that never wrote a trust.bundle at all — unrelated to origin
-  // stamping. When a trust.bundle IS present, every claim must be stamped (requireStampedClaim);
-  // there is no claimType-derivation fallback for an unstamped claim (#268/#344).
+  // trust.bundle is the sole runtime verification authority. An older evidence.json record must
+  // be upgraded by re-recording through the writer; it can never make a clean pass on its own.
   const bundle = loadTrustBundleForTrustMachinery(dir);
   if (Array.isArray(bundle.claims)) {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
@@ -7486,12 +7639,7 @@ function evidenceClean(dir: string): boolean {
       return historicalRoutedBackCheckClaim(c, provenance);
     });
   }
-  // Legacy fallback: evidence.json (pre-bundle-era sessions with no trust.bundle at all)
-  const e = loadJson(path.join(dir, "evidence.json"), {});
-  return e.verdict === "pass" && Array.isArray(e.checks) && e.checks.length > 0 && e.checks.every((c: AnyObj) => {
-    if (!(c.status === "pass" || c.status === "skip")) return false;
-    return !Array.isArray(c.standard_refs) || c.standard_refs.every((r: AnyObj) => ["junit", "sarif", "coverage", "veritas"].includes(r.standard));
-  });
+  return false;
 }
 function critiqueClean(dir: string): boolean {
   // trust.bundle is the sole critique artifact. Legacy critique.json must not influence gates.
@@ -7551,10 +7699,9 @@ export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
   const metadata = testsClaims[0]!.metadata as AnyObj;
   const observed = metadata.observed_commands;
   const expected = metadata.verification_workspace_snapshot;
-  if (!Array.isArray(observed) || observed.length === 0
-    || observed.some((entry: AnyObj) => typeof entry?.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || entry.test_count <= 0 || !/^[a-f0-9]{64}$/i.test(String(entry.output_sha256)))
-    || !expected || typeof expected !== "object" || Array.isArray(expected)
-    || expected.kind !== "git-worktree" || typeof expected.head_sha !== "string") fail();
+  if (!observedCommandsBindExactWorkspaceSnapshot(observed, expected)
+    || !Array.isArray(observed)
+    || observed.some((entry: AnyObj) => typeof entry?.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || entry.test_count <= 0 || !/^[a-f0-9]{64}$/.test(String(entry.output_sha256)))) fail();
   if (!isDeepStrictEqual(expected, current)) fail();
   return structuredClone(current);
 }
@@ -7595,13 +7742,10 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     const _dogfoodExistingCheckStampById = existingCheckStampMap(readBundleState(dir).checks);
     const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _dogfoodExistingCheckStampById, projectRoot));
     if (checks.some((c) => c.status !== "pass" && c.status !== "skip")) die("clean evidence requires all non-skipped checks to pass");
-    // Phase 4c: evidence check reads from trust.bundle (sole verification artifact); legacy evidence.json fallback in evidenceClean.
     // #268/#344: builder.* check/critique claims count as clean evidence via their authoritative origin stamp.
     const _hasBundleEvidence = fs.existsSync(path.join(dir, "trust.bundle")) && evidenceClean(dir);
-    const _hasLegacyEvidence = fs.existsSync(path.join(dir, "evidence.json")) && evidenceClean(dir);
-    if (!_hasBundleEvidence && !_hasLegacyEvidence && fs.existsSync(path.join(dir, "trust.bundle"))) die("cannot mark clean without passing evidence");
-    if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && fs.existsSync(path.join(dir, "evidence.json"))) die("cannot mark clean without passing evidence");
-    if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && !fs.existsSync(path.join(dir, "evidence.json")) && checks.length === 0) die("cannot mark clean without passing evidence");
+    if (fs.existsSync(path.join(dir, "trust.bundle")) && !_hasBundleEvidence) die("cannot mark clean without passing evidence");
+    if (!fs.existsSync(path.join(dir, "trust.bundle")) && checks.length === 0) die("cannot mark clean without passing evidence; upgrade by re-recording checks into trust.bundle");
     if (p.flags.has("require-critique") || opt(p, "release-decision")) {
       const newCritiqueVerdict = opt(p, "critique-verdict", "pass");
       for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"), projectRoot);

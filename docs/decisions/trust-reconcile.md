@@ -107,3 +107,25 @@ its bundle under `delivery/<slug>/`; CI selects prefer-newest. Publishing must *
 `delivery/<slug>/` directories** from `origin/main` before committing — after a soft-reset,
 `git add -A` would otherwise stage the deletion of other sessions' delivery dirs that the branch
 predates. This is the standard step in the publish sequence documented in the coordination guide.
+
+## Command observation provenance is item-level (#1081)
+
+`commit_sha` on a delivery checkpoint or attestation is aggregate publication provenance: it binds
+the checkpoint/bundle transport as a whole at seal time. It is not a statement that any individual
+command ran at that commit, and it must not be used as one. Individual command provenance lives in
+the runtime-authoritative `trust.bundle`: a confirming command observation carries
+`observed_at_commit`, `worktree_clean`, and the exact observation-time
+`verification_workspace_snapshot`.
+
+At gate evaluation, every item offered as passing proof must have captured a well-formed commit,
+a `true` cleanliness value, and a clean Git-worktree snapshot. Trusted Git must resolve that
+commit and establish it as an ancestor of trusted current `HEAD`; then the item's snapshot must
+equal the current canonical snapshot. This is intentionally a conjunction: ancestry alone does
+not prove the bytes are unchanged, and exact snapshot comparison does not replace history
+ancestry. Dirty, missing, unavailable, malformed, unrelated, or unresolved/shallow provenance is
+`not_verified` and cannot be upgraded by a checkpoint, waiver, aggregate `commit_sha`, or a
+version 1 record. Version 1 records are rejected and require re-recording under v2.
+
+The `workflow-evidence` schema v2 projects the same per-command fields for
+consumers. It is not a runtime reconciliation authority. Version 1 is rejected; runtime decisions
+continue to derive from `trust.bundle`.
