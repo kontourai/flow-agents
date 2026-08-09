@@ -50,8 +50,13 @@ trap cleanup EXIT
 # ─── helper: seed a minimal delivered workflow artifact ───────────────────────
 seed_repo() { # $1=dir $2=slug
   local p="$1" slug="$2"
-  mkdir -p "$p/.kontourai/flow-agents/$slug"
+  mkdir -p "$p"
   printf '# Repo\n' > "$p/AGENTS.md"
+  printf '.kontourai/\n' > "$p/.gitignore"
+  git -C "$p" init --quiet
+  git -C "$p" add AGENTS.md .gitignore
+  git -C "$p" -c user.name='Flow Agents Acceptance' -c user.email='acceptance@flow-agents.invalid' commit --quiet -m 'seed declared capture fixture'
+  mkdir -p "$p/.kontourai/flow-agents/$slug"
   printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-27T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}" \
     > "$p/.kontourai/flow-agents/$slug/state.json"
   cat > "$p/.kontourai/flow-agents/$slug/$slug--deliver.md" << MD
@@ -69,6 +74,20 @@ type: deliver
 
 ### Verdict: PASS
 MD
+}
+
+bind_bundle_to_current_snapshot() { # $1=project root $2=trust.bundle
+  node - "$ROOT" "$1" "$2" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const [root, projectRoot, bundleFile] = process.argv.slice(2);
+const { currentCanonicalWorkspaceSnapshot } = require(path.join(root, 'scripts', 'hooks', 'stop-goal-fit.js'));
+const snapshot = currentCanonicalWorkspaceSnapshot(projectRoot);
+if (!snapshot || snapshot.worktree_clean !== true) process.exit(1);
+const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
+bundle.claims[0].metadata = { ...(bundle.claims[0].metadata || {}), verification_workspace_snapshot: snapshot };
+fs.writeFileSync(bundleFile, JSON.stringify(bundle));
+NODE
 }
 
 # ─── helper: write the declared-type trust.bundle ─────────────────────────────
@@ -240,9 +259,13 @@ bundle = {
 json.dump(bundle, open(sys.argv[1], 'w'))
 PY
 
-# command-log: npm test recorded as PASS — confirming evidence
-printf '%s\n' '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$T2/.kontourai/flow-agents/declared-pass/command-log.jsonl"
+# Capture the host result through the real producer, then bind the claim to the
+# exact clean snapshot recorded at that observation boundary.
+printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"npm test"},"tool_response":{"exitCode":0}}' "$T2" \
+  | node "$ROOT/scripts/hooks/evidence-capture.js" >/dev/null
+bind_bundle_to_current_snapshot "$T2" "$T2/.kontourai/flow-agents/declared-pass/trust.bundle" || {
+  _fail "could not bind declared-type pass to a clean canonical workspace snapshot"
+}
 
 set +e
 t2_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block \
@@ -252,10 +275,10 @@ t2_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block \
 t2_exit="$?"
 set -e
 
-if [ "$t2_exit" -ne 2 ]; then
-  _pass "confirming log clears the cross-reference (no false-block, exit $t2_exit)"
+if [ "$t2_exit" -ne 2 ] && ! echo "$t2_out" | grep -q "NOT_VERIFIED"; then
+  _pass "real captured pass with exact snapshot clears the cross-reference (no false-block, exit $t2_exit)"
 else
-  _fail "confirming log incorrectly blocked (exit 2): $t2_out"
+  _fail "real captured pass did not confirm cleanly: exit=$t2_exit output=$t2_out"
 fi
 
 if echo "$t2_out" | grep -q "caught false-completion"; then

@@ -2942,10 +2942,10 @@ else
   ac362_dialect_e2e_status=$?
 fi
 
-if ! grep -qi 'caught false-completion\|ambiguous\|NOT_VERIFIED' "$TMPDIR_EVAL/ac362-dialect-e2e.err"; then
-  _pass "ac-dialect-preservation (end-to-end): the recorded 'grep -E' ERE-alternation evidence ref is confirmed a clean deterministic pass on backstop replay -- no caught-false-completion, no ambiguous/NOT_VERIFIED warning, proving the dialect was preserved through the full Stop-hook path"
+if [[ "$ac362_dialect_e2e_status" -eq 0 ]] && grep -qi 'trusted backstop (acceptance) passed' "$TMPDIR_EVAL/ac362-dialect-e2e.err" && grep -qi 'trust.bundle is required' "$TMPDIR_EVAL/ac362-dialect-e2e.err" && ! grep -qi 'caught false-completion\|NOT_VERIFIED (ambiguous)' "$TMPDIR_EVAL/ac362-dialect-e2e.err"; then
+  _pass "ac-dialect-preservation (end-to-end): the trusted acceptance backstop preserves the recorded 'grep -E' ERE dialect, while bundle-less sidecar evidence remains nonconfirming"
 else
-  _fail "ac-dialect-preservation (end-to-end): backstop replay of the recorded 'grep -E' ERE-alternation command did NOT confirm a clean pass -- possible dialect drift (BRE reinterpretation would miss the match): exit=$ac362_dialect_e2e_status $(cat "$TMPDIR_EVAL/ac362-dialect-e2e.out" "$TMPDIR_EVAL/ac362-dialect-e2e.err")"
+  _fail "ac-dialect-preservation (end-to-end): trusted backstop did not preserve the recorded 'grep -E' ERE dialect or bundle-less evidence was treated as confirming: exit=$ac362_dialect_e2e_status $(cat "$TMPDIR_EVAL/ac362-dialect-e2e.out" "$TMPDIR_EVAL/ac362-dialect-e2e.err")"
 fi
 
 # ─── Mutation test (iteration-2 fix item 3/LOW): dialect-preservation evals lacked the ────────
@@ -3047,7 +3047,7 @@ else
   _fail "mutation-test cleanup REGRESSION: scripts/hooks/stop-goal-fit.js differs from its own pre-mutation-test content"
 fi
 
-# Re-confirm GREEN: both dialect evals pass again against the restored file.
+# Re-confirm the recorded dialect after restoring the real hook.
 if node - "$ROOT/scripts/hooks/stop-goal-fit.js" "$DIALECT_FIXTURE_DIR/haystack.txt" >"$TMPDIR_EVAL/dialect-restore-unit.out" 2>"$TMPDIR_EVAL/dialect-restore-unit.err" <<'NODEEOF3'
 const { spawnSync } = require('child_process');
 const { resolveTrustedCommand } = require(process.argv[2]);
@@ -3073,11 +3073,13 @@ fi
 if node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/dialect-restore-e2e.out" 2>"$TMPDIR_EVAL/dialect-restore-e2e.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$AC362_DIALECT_REPO"}
 JSON
-then :; fi
-if ! grep -qi 'ambiguous\|NOT_VERIFIED\|caught false-completion' "$TMPDIR_EVAL/dialect-restore-e2e.err"; then
-  _pass "mutation-test cleanup re-check: the restored real stop-goal-fit.js confirms a clean end-to-end pass again for the dialect fixture"
+then dialect_restore_e2e_status=0
+else dialect_restore_e2e_status=$?
+fi
+if [[ "$dialect_restore_e2e_status" -eq 0 ]] && grep -qi 'trusted backstop (acceptance) passed' "$TMPDIR_EVAL/dialect-restore-e2e.err" && grep -qi 'trust.bundle is required' "$TMPDIR_EVAL/dialect-restore-e2e.err" && ! grep -qi 'caught false-completion\|NOT_VERIFIED (ambiguous)' "$TMPDIR_EVAL/dialect-restore-e2e.err"; then
+  _pass "mutation-test cleanup re-check: the restored real stop-goal-fit.js preserves the dialect through its trusted backstop while keeping bundle-less sidecar evidence nonconfirming"
 else
-  _fail "mutation-test cleanup re-check REGRESSION: restored stop-goal-fit.js no longer confirms a clean end-to-end pass for the dialect fixture: $(cat "$TMPDIR_EVAL/dialect-restore-e2e.out" "$TMPDIR_EVAL/dialect-restore-e2e.err")"
+  _fail "mutation-test cleanup re-check REGRESSION: restored stop-goal-fit.js did not preserve the dialect through its trusted backstop: exit=$dialect_restore_e2e_status $(cat "$TMPDIR_EVAL/dialect-restore-e2e.out" "$TMPDIR_EVAL/dialect-restore-e2e.err")"
 fi
 
 # Canonical Flow is authoritative for an active scoped session. Parent-directory
@@ -4061,6 +4063,201 @@ if [[ "$scope_two_all_status" -eq 0 ]] && ! grep -q 'tests-evidence scope diverg
   _pass "#1171 finding 2: when EVERY claim naming the command is disclosed, the check is clean even under the escalation opt-in"
 else
   _fail "#1171 finding 2: fully-disclosed sibling claims were still flagged: exit=$scope_two_all_status $(cat "$TMPDIR_EVAL/scope-two-all.out" "$TMPDIR_EVAL/scope-two-all.err")"
+fi
+
+# Command-log success is corroboration only: a trusted bundle claim must bind the
+# capture commit and clean flag to its exact canonical snapshot and the current
+# canonical snapshot. The positive case uses the real evidence-capture producer.
+if node - "$ROOT" "$TMPDIR_EVAL" <<'NODE'
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const [root, temp] = process.argv.slice(2);
+const repo = path.join(temp, 'capture-provenance', 'repo');
+const artifact = path.join(repo, '.kontourai', 'flow-agents', 'capture-provenance');
+fs.mkdirSync(artifact, { recursive: true });
+fs.writeFileSync(path.join(repo, '.gitignore'), '.kontourai/\n');
+fs.writeFileSync(path.join(repo, 'tracked.txt'), 'clean\n');
+execFileSync('git', ['init', '-q'], { cwd: repo });
+execFileSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: repo });
+execFileSync('git', ['-c', 'user.name=eval', '-c', 'user.email=eval@example.test', 'commit', '-qm', 'initial'], { cwd: repo });
+fs.writeFileSync(path.join(artifact, 'state.json'), JSON.stringify({ schema_version: '1.0', task_slug: 'capture-provenance', status: 'delivered', phase: 'done' }));
+execFileSync(process.execPath, [path.join(root, 'scripts', 'hooks', 'evidence-capture.js')], {
+  cwd: repo,
+  input: JSON.stringify({ tool_name: 'bash', cwd: repo, tool_input: { command: 'true' }, exitCode: 0 }),
+  stdio: ['pipe', 'pipe', 'pipe'],
+});
+const stop = require(path.join(root, 'scripts', 'hooks', 'stop-goal-fit.js'));
+const executable = stop.resolveTrustedWorkspaceGitExecutable();
+if (!executable || !path.isAbsolute(executable.path) || !['/usr/bin/git', '/run/current-system/sw/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git', 'C:\\Program Files\\Git\\cmd\\git.exe'].includes(executable.candidate)) {
+  throw new Error('trusted Git resolver did not select a fixed allowlisted executable');
+}
+const snapshot = stop.currentCanonicalWorkspaceSnapshot(repo);
+if (!snapshot || snapshot.worktree_clean !== true) throw new Error('could not capture the clean canonical snapshot');
+const logFile = path.join(artifact, 'command-log.jsonl');
+const captured = JSON.parse(fs.readFileSync(logFile, 'utf8').trim());
+if (captured.observedResult !== 'pass' || captured.worktree_clean !== true || !captured.observed_at_commit || captured.verification_workspace_snapshot !== undefined) {
+  throw new Error('real evidence-capture record does not have the expected producer shape');
+}
+function writeBundle(claimSnapshot) {
+  fs.writeFileSync(path.join(artifact, 'trust.bundle'), JSON.stringify({
+    schemaVersion: 5,
+    source: 'flow-agents/workflow-sidecar',
+    claims: [{ id: 'capture-provenance.command', subjectId: 'capture-provenance/command', claimType: 'workflow.check.command', fieldOrBehavior: 'true', value: 'pass', impactLevel: 'high', status: 'verified', createdAt: '2026-08-08T00:00:00Z', updatedAt: '2026-08-08T00:00:00Z', metadata: { verification_workspace_snapshot: claimSnapshot } }],
+    evidence: [{ id: 'ev:capture-provenance.command', claimId: 'capture-provenance.command', evidenceType: 'command_output', method: 'capture', sourceRef: 'command-log.jsonl', excerptOrSummary: 'true', observedAt: '2026-08-08T00:00:00Z', collectedBy: 'flow-agents/workflow-sidecar', passing: true, execution: { label: 'true', exitCode: 0 } }],
+    policies: [], events: [],
+  }));
+}
+function writeRecord(record) {
+  const copy = { ...record };
+  delete copy._chain;
+  fs.writeFileSync(logFile, `${JSON.stringify(copy)}\n`);
+}
+function expectFinding(label, needle) {
+  const warnings = stop.captureCrossReference(repo, artifact, null);
+  if (!warnings.some((warning) => warning.includes('NOT_VERIFIED') && warning.includes(needle))) {
+    throw new Error(`${label}: ${warnings.join('\n')}`);
+  }
+}
+writeBundle(snapshot);
+if (stop.captureCrossReference(repo, artifact, null).some((warning) => warning.includes('NOT_VERIFIED'))) {
+  throw new Error('valid exact clean capture did not confirm');
+}
+fs.writeFileSync(path.join(repo, 'tracked.txt'), 'dirty\n');
+expectFinding('dirty workspace', 'current canonical workspace snapshot is unavailable or dirty');
+fs.writeFileSync(path.join(repo, 'tracked.txt'), 'clean\n');
+writeRecord({ ...captured, observed_at_commit: 'a'.repeat(40) });
+expectFinding('commit mismatch', 'capture record commit does not exactly bind');
+writeRecord({ ...captured, observed_at_commit: captured.observed_at_commit.toUpperCase() });
+expectFinding('noncanonical commit', 'capture record has no canonical observed_at_commit');
+const { observed_at_commit, ...missingCommitRecord } = captured;
+writeRecord(missingCommitRecord);
+expectFinding('missing provenance', 'capture record has no canonical observed_at_commit');
+writeRecord(captured);
+writeBundle({ ...snapshot, digest: 'f'.repeat(64) });
+expectFinding('snapshot mismatch', 'trust.bundle claim snapshot does not match');
+NODE
+then
+  _pass "captured bundle claims require exact clean current workspace provenance"
+else
+  _fail "captured bundle provenance did not reject dirty, commit, missing, or snapshot mismatches"
+fi
+
+# Artifact authority deliberately resolves to the shared checkout, but command
+# provenance must resolve from the linked worktree that invoked Stop. Its HEAD
+# can differ from the shared checkout without weakening the clean-snapshot bind.
+if node - "$ROOT" "$TMPDIR_EVAL" <<'NODE'
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const [root, temp] = process.argv.slice(2);
+const primary = path.join(temp, 'linked-worktree-provenance', 'primary');
+const linked = path.join(temp, 'linked-worktree-provenance', 'linked');
+const artifact = path.join(primary, '.kontourai', 'flow-agents', 'linked-worktree-provenance');
+fs.mkdirSync(primary, { recursive: true });
+fs.writeFileSync(path.join(primary, '.gitignore'), '.kontourai/\n');
+fs.writeFileSync(path.join(primary, 'tracked.txt'), 'primary\n');
+execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: primary });
+execFileSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: primary });
+execFileSync('git', ['-c', 'user.name=eval', '-c', 'user.email=eval@example.test', 'commit', '-qm', 'primary'], { cwd: primary });
+execFileSync('git', ['worktree', 'add', '-q', '-b', 'linked', linked], { cwd: primary });
+fs.writeFileSync(path.join(linked, 'tracked.txt'), 'linked\n');
+execFileSync('git', ['add', 'tracked.txt'], { cwd: linked });
+execFileSync('git', ['-c', 'user.name=eval', '-c', 'user.email=eval@example.test', 'commit', '-qm', 'linked'], { cwd: linked });
+fs.writeFileSync(path.join(linked, 'linked-only.txt'), 'linked only\n');
+execFileSync('git', ['add', 'linked-only.txt'], { cwd: linked });
+execFileSync('git', ['-c', 'user.name=eval', '-c', 'user.email=eval@example.test', 'commit', '-qm', 'linked-only'], { cwd: linked });
+const stop = require(path.join(root, 'scripts', 'hooks', 'stop-goal-fit.js'));
+if (stop.findRepoRoot(linked) !== fs.realpathSync(primary)) throw new Error('artifact root did not resolve to the shared checkout');
+if (stop.resolveObservedWorkspaceRoot(linked) !== fs.realpathSync(linked)) throw new Error('observed worktree root did not resolve to the linked checkout');
+const linkedSnapshot = stop.currentCanonicalWorkspaceSnapshot(linked);
+const primarySnapshot = stop.currentCanonicalWorkspaceSnapshot(primary);
+if (!linkedSnapshot || !primarySnapshot || linkedSnapshot.worktree_clean !== true || primarySnapshot.worktree_clean !== true || linkedSnapshot.head_sha === primarySnapshot.head_sha) {
+  throw new Error('linked and primary worktrees did not produce distinct clean snapshots');
+}
+fs.mkdirSync(artifact, { recursive: true });
+fs.writeFileSync(path.join(artifact, 'command-log.jsonl'), `${JSON.stringify({ command: 'test -f linked-only.txt', exitCode: 0, observedResult: 'pass', observed_at_commit: linkedSnapshot.head_sha, worktree_clean: true })}\n`);
+fs.writeFileSync(path.join(artifact, 'trust.bundle'), JSON.stringify({
+  schemaVersion: 5,
+  source: 'flow-agents/workflow-sidecar',
+  claims: [{ id: 'linked-worktree.command', subjectId: 'linked-worktree/command', claimType: 'workflow.check.command', fieldOrBehavior: 'test -f linked-only.txt', value: 'pass', impactLevel: 'high', status: 'verified', createdAt: '2026-08-08T00:00:00Z', updatedAt: '2026-08-08T00:00:00Z', metadata: { verification_workspace_snapshot: linkedSnapshot } }],
+  evidence: [{ id: 'ev:linked-worktree.command', claimId: 'linked-worktree.command', evidenceType: 'command_output', method: 'capture', sourceRef: 'command-log.jsonl', excerptOrSummary: 'test -f linked-only.txt', observedAt: '2026-08-08T00:00:00Z', collectedBy: 'flow-agents/workflow-sidecar', passing: true, execution: { label: 'test -f linked-only.txt', exitCode: 0 } }],
+  policies: [], events: [],
+}));
+const linkedWarnings = stop.captureCrossReference(primary, artifact, null, linked);
+if (linkedWarnings.some((warning) => warning.includes('NOT_VERIFIED'))) throw new Error(`linked worktree claim did not confirm: ${linkedWarnings.join('\n')}`);
+const primaryWarnings = stop.captureCrossReference(primary, artifact, null, primary);
+if (!primaryWarnings.some((warning) => warning.includes('NOT_VERIFIED') && warning.includes('snapshot does not match'))) {
+  throw new Error(`shared checkout mismatch did not remain nonconfirming: ${primaryWarnings.join('\n')}`);
+}
+fs.writeFileSync(path.join(artifact, 'acceptance.json'), JSON.stringify({ schema_version: '1.0', task_slug: 'linked-worktree-provenance', criteria: [{ id: 'linked-worktree.command', evidence_refs: [{ kind: 'command', excerpt: 'test -f linked-only.txt' }] }] }));
+fs.writeFileSync(path.join(artifact, 'command-log.jsonl'), `${JSON.stringify({ command: 'echo unrelated', exitCode: 0, observedResult: 'pass' })}\n`);
+const linkedBackstopWarnings = stop.captureCrossReference(primary, artifact, null, linked);
+if (linkedBackstopWarnings.some((warning) => warning.includes('NOT_VERIFIED'))) throw new Error(`linked worktree backstop did not confirm: ${linkedBackstopWarnings.join('\n')}`);
+NODE
+then
+  _pass "linked worktree provenance binds the invoked worktree, not the shared artifact checkout"
+else
+  _fail "linked worktree provenance did not distinguish the invoked and shared checkouts"
+fi
+
+# A passing trusted backstop is not independent authority. With only an
+# unrelated capture record, it must create a post-command canonical observation
+# in the invoked worktree and satisfy the bundle's exact clean snapshot binding.
+if node - "$ROOT" "$TMPDIR_EVAL" <<'NODE'
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const [root, temp] = process.argv.slice(2);
+const repo = path.join(temp, 'backstop-provenance', 'repo');
+const artifact = path.join(repo, '.kontourai', 'flow-agents', 'backstop-provenance');
+fs.mkdirSync(artifact, { recursive: true });
+fs.writeFileSync(path.join(repo, '.gitignore'), '.kontourai/\n');
+fs.writeFileSync(path.join(repo, 'tracked.txt'), 'clean\n');
+execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+execFileSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: repo });
+execFileSync('git', ['-c', 'user.name=eval', '-c', 'user.email=eval@example.test', 'commit', '-qm', 'initial'], { cwd: repo });
+const stop = require(path.join(root, 'scripts', 'hooks', 'stop-goal-fit.js'));
+const snapshot = stop.currentCanonicalWorkspaceSnapshot(repo);
+if (!snapshot || snapshot.worktree_clean !== true) throw new Error('clean fixture snapshot unavailable');
+function writeAcceptance(dir) {
+  fs.writeFileSync(path.join(dir, 'acceptance.json'), JSON.stringify({ schema_version: '1.0', task_slug: 'backstop-provenance', criteria: [{ id: 'backstop-provenance.command', evidence_refs: [{ kind: 'command', excerpt: 'true' }] }] }));
+}
+function writeBundle(dir, claimedSnapshot) {
+  fs.writeFileSync(path.join(dir, 'trust.bundle'), JSON.stringify({
+    schemaVersion: 5, source: 'flow-agents/workflow-sidecar',
+    claims: [{ id: 'backstop-provenance.command', subjectId: 'backstop-provenance/command', claimType: 'workflow.check.command', fieldOrBehavior: 'true', value: 'pass', impactLevel: 'high', status: 'verified', createdAt: '2026-08-08T00:00:00Z', updatedAt: '2026-08-08T00:00:00Z', metadata: { verification_workspace_snapshot: claimedSnapshot } }],
+    evidence: [{ id: 'ev:backstop-provenance.command', claimId: 'backstop-provenance.command', evidenceType: 'command_output', method: 'capture', sourceRef: 'command-log.jsonl', excerptOrSummary: 'true', observedAt: '2026-08-08T00:00:00Z', collectedBy: 'flow-agents/workflow-sidecar', passing: true, execution: { label: 'true', exitCode: 0 } }], policies: [], events: [],
+  }));
+}
+function writeUnrelatedLog(dir) {
+  fs.writeFileSync(path.join(dir, 'command-log.jsonl'), `${JSON.stringify({ command: 'echo unrelated', exitCode: 0, observedResult: 'pass' })}\n`);
+}
+function expectNotVerified(label, needle, authorityRoot = repo, workspaceRoot = repo, dir = artifact) {
+  const warnings = stop.captureCrossReference(authorityRoot, dir, null, workspaceRoot);
+  if (!warnings.some((warning) => warning.includes('NOT_VERIFIED') && warning.includes(needle))) throw new Error(`${label}: ${warnings.join('\n')}`);
+}
+writeAcceptance(artifact);
+writeBundle(artifact, snapshot);
+writeUnrelatedLog(artifact);
+if (stop.captureCrossReference(repo, artifact, null, repo).some((warning) => warning.includes('NOT_VERIFIED'))) throw new Error('clean exact backstop observation did not confirm');
+fs.writeFileSync(path.join(repo, 'tracked.txt'), 'dirty\n');
+expectNotVerified('dirty backstop worktree', 'capture record was observed with a dirty worktree');
+fs.writeFileSync(path.join(repo, 'tracked.txt'), 'clean\n');
+writeBundle(artifact, { ...snapshot, digest: 'f'.repeat(64) });
+expectNotVerified('mismatched backstop snapshot', 'trust.bundle claim snapshot does not match');
+const nonGitRoot = path.join(temp, 'backstop-provenance', 'non-git');
+const nonGitArtifact = path.join(nonGitRoot, '.kontourai', 'flow-agents', 'backstop-provenance');
+fs.mkdirSync(nonGitArtifact, { recursive: true });
+writeAcceptance(nonGitArtifact);
+writeBundle(nonGitArtifact, snapshot);
+writeUnrelatedLog(nonGitArtifact);
+expectNotVerified('non-Git backstop worktree', 'current canonical workspace snapshot is unavailable or dirty', nonGitRoot, nonGitRoot, nonGitArtifact);
+NODE
+then
+  _pass "trusted backstop passes require exact clean observed-worktree provenance"
+else
+  _fail "trusted backstop provenance did not reject dirty, mismatched, or non-Git observations"
 fi
 
 if cmp -s "$ROOT/scripts/hooks/stop-goal-fit.js" "$ROOT/context/scripts/hooks/stop-goal-fit.js"; then

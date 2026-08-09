@@ -146,7 +146,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "1.0"
+      "const": "2.0"
     },
     "task_slug": {
       "type": "string",
@@ -181,7 +181,17 @@
             "enum": ["pass", "fail", "not_verified", "skip"]
           },
           "command": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\s*(?:!\\s*)?(?:(?:[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\\S*)\\s+)*(?:(?:npm|npx|pnpm|yarn|node|bash|sh|zsh|make|just|task|cargo|go|pytest|tox|deno|bun|ruby|rake|mvn|gradle|dotnet|swift|flutter|dart|git|tsc|eslint|python|python3|docker|curl|jq|diff|grep|test|exit|cd|false|true|set|unset|export|echo|\\[|return|:|source|\\.)(?:\\s+[\\s\\S]*)?|(?:\\.{1,2}/|/)[^\\s]+(?:\\s+[\\s\\S]*)?|[a-z_][a-z0-9._+-]*\\s*(?:&&|\\|\\||\\||;)[\\s\\S]*)|[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|\\S*)\\s*)$",
+            "description": "A non-empty, runnable-shaped shell command."
+          },
+          "observed_at_commit": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}(?:[a-f0-9]{24})?$"
+          },
+          "worktree_clean": {
+            "type": "boolean"
           },
           "summary": {
             "type": "string",
@@ -322,7 +332,47 @@
             },
             "uniqueItems": true
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["command"]
+            },
+            "then": {
+              "required": ["observed_at_commit", "worktree_clean"]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "command"
+                }
+              },
+              "required": ["kind"]
+            },
+            "then": {
+              "required": ["command", "observed_at_commit", "worktree_clean"]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "worktree_clean": {
+                  "const": false
+                }
+              },
+              "required": ["worktree_clean"]
+            },
+            "then": {
+              "properties": {
+                "status": {
+                  "enum": ["fail", "not_verified", "skip"]
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "external_evidence": {

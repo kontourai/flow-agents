@@ -49,3 +49,29 @@ Reconcile re-executes manifest commands independently of any local observation. 
 (#634 option c): when runtime harnesses surface exit codes in hook payloads, hook capture
 naturally resumes confirming passes first-hand; writer observations then serve as
 corroboration rather than the sole deterministic signal.
+
+## Revision-bound observations (#1081)
+
+**Decision.** A command result is observed only when its result and its repository state have
+both settled. The canonical writer captures its Git-worktree snapshot after the child process's
+`close` event; the PostToolUse capture records the host result first, then captures Git state
+before it appends and chain-hashes the command-log record. Each captured command therefore carries
+its own `observed_at_commit` and `worktree_clean`, as well as the observation-time
+`verification_workspace_snapshot` where the writer can provide it. The fields are copied without
+re-stamping through `command-log.jsonl`, `metadata.observed_commands`, and the canonical
+`trust.bundle` rebuild.
+
+`worktree_clean: false`, missing provenance, a non-Git root, shallow or otherwise unresolved Git
+history, and trusted-Git capture failure are all non-confirming. A successful exit remains useful
+diagnostic evidence, but it is `not_verified` rather than a verified command observation and
+cannot satisfy a gate. Version 1 records are rejected and must be re-recorded with capture-time
+provenance.
+
+**Why both revision and snapshot are required.** For each item that would contribute to a passing
+gate, trusted Git must resolve `observed_at_commit` and prove it is an ancestor of the trusted
+current `HEAD`; the item's captured snapshot must also exactly match the current canonical
+Git-worktree snapshot. Ancestry makes history substitution visible, while the exact snapshot
+catches changed tracked or untracked bytes. Ancestry alone does not prove byte identity, and a
+cleanliness flag alone does not establish currentness. The `trust.bundle` is the runtime authority
+for this decision; `workflow-evidence` v2 is its consumer-facing projection contract, not a second
+authority.

@@ -683,14 +683,9 @@ const command = process.argv[2];
 process.stdout.write(JSON.stringify({ id: 'AC-2', status: 'pass', evidence_refs: [{ kind: 'command', excerpt: command, summary: 'Current AC-2 prerequisite.' }] }));
 NODE
 )"
-ROUTE_OBSERVED="$(node - "$ROUTE_TEST_COMMAND" <<'NODE'
-const command = process.argv[2];
-process.stdout.write(JSON.stringify({ command, exit_code: 0, test_count: 1, output_sha256: '0'.repeat(64) }));
-NODE
-)"
 CODEX_SESSION_ID=builder-public-producers flow_agents_node "workflow-sidecar" record-gate-claim "$PUBLIC_SESSION" \
   --expectation tests-evidence --status pass --summary "Seed complete current acceptance prerequisites before routed failure." \
-  --command "$ROUTE_TEST_COMMAND" --observed-command-json "$ROUTE_OBSERVED" \
+  --command "$ROUTE_TEST_COMMAND" \
   --evidence-ref-json "$ROUTE_COMMAND_REF" --criterion-json "$ROUTE_CRITERION_ONE" --criterion-json "$ROUTE_CRITERION_TWO" >/dev/null 2>&1 \
   || _fail "failed to seed current acceptance prerequisites for routed failure"
 record_public_expectation "tests-evidence" "fail"

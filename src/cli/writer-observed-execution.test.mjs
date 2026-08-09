@@ -13,6 +13,11 @@ const { verifyCommandLogChain } = require(path.join(repoRoot, "scripts/hooks/sto
 const chain = require(path.join(repoRoot, "scripts/lib/command-log-chain.js"));
 
 const NOW = "2026-07-14T14:00:00.000Z";
+const CLEAN_COMMIT = "a".repeat(40);
+const CLEAN_SNAPSHOT = {
+  version: 1, kind: "git-worktree", algorithm: "sha256", digest: "b".repeat(64),
+  head_sha: CLEAN_COMMIT, worktree_clean: true,
+};
 
 function tempSession(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "writer-observed-"));
@@ -36,7 +41,7 @@ test("appendWriterObservedCommands extends an existing hook chain with verifiabl
   fs.writeFileSync(path.join(dir, "command-log.jsonl"), `${JSON.stringify(entry)}\n`);
 
   appendWriterObservedCommands(dir, [
-    { command: "npm run test:unit", exit_code: 0, output_sha256: "a".repeat(64), test_count: 5, execution_proof: { kind: "local-process-exit", pid: 123 } },
+    { command: "npm run test:unit", exit_code: 0, output_sha256: "a".repeat(64), observed_at_commit: CLEAN_COMMIT, worktree_clean: true, verification_workspace_snapshot: CLEAN_SNAPSHOT, test_count: 5, execution_proof: { kind: "local-process-exit", pid: 123 } },
     { command: "npm run validate:source", exit_code: 0, output_sha256: "b".repeat(64) },
   ], NOW);
 
@@ -46,6 +51,9 @@ test("appendWriterObservedCommands extends an existing hook chain with verifiabl
   assert.equal(entries[1].observedResult, "pass");
   assert.equal(entries[1].exitCode, 0);
   assert.equal(entries[1].writer.output_sha256, "a".repeat(64));
+  assert.equal(entries[1].observed_at_commit, CLEAN_COMMIT);
+  assert.equal(entries[1].worktree_clean, true);
+  assert.deepEqual(entries[1].writer.verification_workspace_snapshot, CLEAN_SNAPSHOT);
   assert.equal(entries[1].writer.test_count, 5);
   assert.equal(entries[1]._chain.prevHash, hash);
   assert.equal(entries[2]._chain.prevHash, entries[1]._chain.hash);
@@ -60,6 +68,15 @@ test("a nonzero writer exit code records an observed fail", (t) => {
   const entries = readEntries(dir);
   assert.equal(entries[0].observedResult, "fail");
   assert.equal(entries[0].exitCode, 1);
+});
+
+test("writer provenance is included in the chained record and cannot be altered", (t) => {
+  const dir = tempSession(t);
+  appendWriterObservedCommands(dir, [{ command: "npm test", exit_code: 0, output_sha256: "c".repeat(64), observed_at_commit: CLEAN_COMMIT, worktree_clean: true, verification_workspace_snapshot: CLEAN_SNAPSHOT }], NOW);
+  const entries = readEntries(dir);
+  entries[0].worktree_clean = false;
+  fs.writeFileSync(path.join(dir, "command-log.jsonl"), entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+  assert.equal(verifyCommandLogChain(dir).status, "broken");
 });
 
 test("chain verification tolerates writer/hook fork siblings but rejects any third source", (t) => {

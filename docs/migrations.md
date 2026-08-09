@@ -6,6 +6,17 @@ title: Migrations
 
 ## Unreleased
 
+- `workflow-evidence` now uses `schema_version: "2.0"`. Every command check requires
+  the capture-time `observed_at_commit` and boolean `worktree_clean` fields. Migrate
+  repository-owned producers and accepted fixtures atomically; version 1 records are rejected and
+  must be re-recorded, and v2 command checks missing either field are invalid and non-confirming.
+  Do not copy current `HEAD`
+  into historical evidence: Git provenance is captured only after the command result settles.
+  `worktree_clean: false` is valid for an audited provisional result, but it must be
+  `not_verified` (or a non-passing status) and cannot satisfy a gate. Consumers must use the
+  runtime-authoritative `trust.bundle` for gate decisions; `workflow-evidence` v2 is the
+  consumer-facing v2 projection. A command's trusted-ancestor check is necessary but does not prove byte
+  identity, so passing evidence also requires the exact observation-time Git-worktree snapshot.
 - Economics records produced from runtime telemetry now use
   `version: "0.2"`. Version `0.2` requires exact run correlation,
   declared observation semantics, and producer authority. Its verification

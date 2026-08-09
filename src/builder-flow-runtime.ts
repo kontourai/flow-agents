@@ -19,7 +19,7 @@ import {
   type JsonObject,
 } from "@kontourai/flow";
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
-import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
+import { captureReviewWorkspaceSnapshot, isGitWorktreeSnapshot } from "./lib/review-workspace-snapshot.js";
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, readLocalRecord, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
@@ -28,7 +28,7 @@ import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-p
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
 import type { ChangeProviderSettings } from "./cli/public-contracts.js";
-import { resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
+import { assertTrustedGitAncestor, isExactLowercaseCommitSha, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
 import {
   assertAuthenticatedPublishChangeObservation,
@@ -1627,7 +1627,18 @@ async function bundleGateEvidence(
     const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
     return gateClaim !== null || metadata?.origin === "check";
   });
-  assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot);
+  const executionEvidenceByClaimId = new Map<string, AnyRecord[]>();
+  for (const evidence of Array.isArray(bundle.evidence) ? bundle.evidence : []) {
+    if (!isRecord(evidence)
+      || typeof evidence.claimId !== "string"
+      || !isRecord(evidence.execution)
+      || typeof evidence.execution.label !== "string"
+      || evidence.execution.label.trim().length === 0) continue;
+    const linked = executionEvidenceByClaimId.get(evidence.claimId) ?? [];
+    linked.push(evidence);
+    executionEvidenceByClaimId.set(evidence.claimId, linked);
+  }
+  assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot, executionEvidenceByClaimId);
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
     const selector = expectation.bundle_claim;
@@ -1705,26 +1716,77 @@ const GATE_CLAIM_STALE_REASON = "must match the canonical Flow state authorized 
  * writer-declared file list, so honoring it here would let a claim carry an empty list and
  * declare itself permanently current.
  */
-function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string): void {
+function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string, executionEvidenceByClaimId: ReadonlyMap<string, readonly AnyRecord[]>): void {
   if (headBoundGateClaims.length === 0) return;
   const currentHead = flowRunHead(state);
   const currentStep = state.current_step;
+  let trustedCurrentCommit: string | null = null;
   let currentWorkspace: { snapshot: AnyRecord | null; error: string | null } | null = null;
   for (const claim of headBoundGateClaims) {
     const claimId = typeof claim.id === "string" ? claim.id : "<unknown>";
     const metadata = isRecord(claim.metadata) ? claim.metadata : null;
     const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
     const recordedHead = gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
-    if (recordedHead === currentHead) continue;
+    const observedCommands = metadata && Array.isArray(metadata.observed_commands) ? metadata.observed_commands : [];
+    const linkedExecution = executionEvidenceByClaimId.get(claimId) ?? [];
+    const commandReferences = commandEvidenceReferences(metadata);
+    const hasCommandReference = hasCommandEvidenceReference(metadata);
+    // Only a passing claim can satisfy a gate. Failed, disputed, and
+    // not-verified observations remain auditable route-back evidence even when
+    // their capture-time Git provenance is unavailable or dirty. A passing
+    // tests-evidence claim is command-backed by contract even if an older or
+    // malformed record omitted its observation array, so it cannot evade this
+    // check through a matching Flow head.
+    const commandBacked = claim.claimType === "builder.verify.tests"
+      || claim.claimType === "workflow.check.command"
+      || observedCommands.length > 0
+      || hasCommandReference
+      || metadata?.check_kind === "command"
+      || linkedExecution.length > 0;
+    const requiresObservationProvenance = claim.value === "pass" && commandBacked;
+    // Claims with no command observation retain the #1170 Flow-head fast path.
+    // They cannot establish a verified test gate; command-backed passing claims
+    // receive revision-bound provenance and are validated on the same Flow head.
+    if (!requiresObservationProvenance && recordedHead === currentHead) continue;
     const recordedHeadText = recordedHead === null ? "no recorded head" : `recorded head ${recordedHead}`;
     const recordedSnapshot = gateClaimWorkspaceSnapshot(claim);
     if (recordedSnapshot === null) {
+      if (requiresObservationProvenance) {
+        throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot", `claim '${claimId}' cannot contribute to a passing gate without its clean Git-worktree observation snapshot. Re-record this check after the command completes.`);
+      }
       throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText} and no Git workspace snapshot, so it cannot be reconciled against current head ${currentHead}. Re-record this check at the current head (public: flow-agents workflow evidence; sidecar: workflow:sidecar record-gate-claim).`);
+    }
+    if (requiresObservationProvenance && recordedSnapshot.worktree_clean !== true) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.worktree_clean", `claim '${claimId}' was observed in a dirty Git worktree and is provisional. Clean the worktree and re-record this check.`);
+    }
+    if (requiresObservationProvenance && !isExactLowercaseCommitSha(recordedSnapshot.head_sha)) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.head_sha", `claim '${claimId}' has malformed observed_at_commit '${String(recordedSnapshot.head_sha)}'. Re-record this check from a trusted Git worktree.`);
+    }
+    if (requiresObservationProvenance) {
+      assertPassingCommandObservationProvenance(claimId, observedCommands, recordedSnapshot, linkedExecution, commandReferences, hasCommandReference);
+      if (trustedCurrentCommit === null) {
+        try {
+          trustedCurrentCommit = resolveTrustedLocalGitCommit(projectRoot, "HEAD");
+        } catch (error) {
+          throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.head_sha", `cannot establish a trusted current Git HEAD for passing gate evidence (${errorMessage(error)}). Re-record this check in a complete local Git worktree.`);
+        }
+      }
+      assertObservationAncestor(claimId, recordedSnapshot.head_sha, trustedCurrentCommit, projectRoot);
     }
     currentWorkspace ??= captureCurrentGitWorkspaceSnapshot(projectRoot);
     const recordedStep = gateClaim && typeof gateClaim.step_id === "string" ? gateClaim.step_id : null;
     const treeUnchanged = currentWorkspace.snapshot !== null && isDeepStrictEqual(recordedSnapshot, currentWorkspace.snapshot);
+    if (requiresObservationProvenance && currentWorkspace.snapshot !== null && currentWorkspace.snapshot.worktree_clean !== true) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.worktree_clean", `the current Git worktree is dirty, so clean observation evidence for claim '${claimId}' cannot satisfy this gate. Clean the worktree and re-record this check.`);
+    }
     const stepMatches = recordedStep === null || recordedStep === currentStep;
+    // Flow position equality used to bypass repository-state checks entirely. It
+    // is not evidence that a command observation is bound to this tree, so the
+    // exact snapshot comparison and trusted ancestry above always run first.
+    // A command observation remains step-bound even when its Flow run head is
+    // current. The no-observation fast path above preserves #1170 behavior for
+    // older non-confirming claims; it cannot waive visit/step freshness for a
+    // claim that could satisfy a verified gate.
     if (treeUnchanged && stepMatches) continue;
     const detail = treeUnchanged
       ? `its workspace snapshot still matches the current tree, but it was recorded at step '${recordedStep}' rather than the current step '${currentStep}'`
@@ -1732,6 +1794,69 @@ function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state
         ? `the current Git workspace snapshot could not be captured (${currentWorkspace.error})`
         : "its recorded Git workspace snapshot no longer matches the current tree";
     throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText}, the current head is ${currentHead}, and ${detail}. Re-record this check at the current head.`);
+  }
+}
+
+function commandEvidenceReferences(metadata: AnyRecord | null): string[] {
+  return Array.isArray(metadata?.artifact_refs)
+    ? metadata.artifact_refs.flatMap((reference: unknown) => isRecord(reference)
+      && reference.kind === "command"
+      && typeof reference.excerpt === "string"
+      && reference.excerpt.trim().length > 0
+        ? [reference.excerpt.trim()]
+        : [])
+    : [];
+}
+
+function hasCommandEvidenceReference(metadata: AnyRecord | null): boolean {
+  return Array.isArray(metadata?.artifact_refs)
+    && metadata.artifact_refs.some((reference: unknown) => isRecord(reference) && reference.kind === "command");
+}
+
+function assertPassingCommandObservationProvenance(claimId: string, observedCommands: unknown[], snapshot: AnyRecord, linkedExecution: readonly AnyRecord[], commandReferences: readonly string[], hasCommandReference: boolean): void {
+  if (observedCommands.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands", `passing command-backed claim '${claimId}' has no captured command observation. Re-record the command through the canonical writer.`);
+  }
+  const observedLabels: string[] = [];
+  for (const observation of observedCommands) {
+    if (!isRecord(observation)
+      || typeof observation.command !== "string"
+      || observation.command.length === 0
+      || observation.exit_code !== 0
+      || typeof observation.output_sha256 !== "string"
+      || !/^[a-f0-9]{64}$/u.test(observation.output_sha256)
+      || !isExactLowercaseCommitSha(observation.observed_at_commit)
+      || observation.observed_at_commit !== snapshot.head_sha
+      || observation.worktree_clean !== true
+      || !isValidGitWorktreeSnapshot(observation.verification_workspace_snapshot)
+      || observation.verification_workspace_snapshot.worktree_clean !== true
+      || !isDeepStrictEqual(observation.verification_workspace_snapshot, snapshot)) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands", `passing command-backed claim '${claimId}' must carry clean observation-time Git provenance matching its verification workspace snapshot. Re-run the command and re-record the result.`);
+    }
+    observedLabels.push(observation.command);
+  }
+  if (linkedExecution.length > 0) {
+    const labels = linkedExecution.map((evidence) => isRecord(evidence.execution) && typeof evidence.execution.label === "string" ? evidence.execution.label.trim() : "");
+    if (linkedExecution.some((evidence) => !isRecord(evidence.execution)
+      || evidence.passing !== true
+      || evidence.execution.isError !== false
+      || evidence.execution.exitCode !== 0)
+      || labels.length !== observedLabels.length
+      || labels.some((label, index) => label.length === 0 || label !== observedLabels[index])) {
+      throw new BuilderBuildRunInputError("evidence.evidence.execution", `passing command-backed claim '${claimId}' must bind every linked execution label, in order and multiplicity, to a successful captured command observation. Re-run and re-record the command evidence.`);
+    }
+  }
+  if (linkedExecution.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.evidence.execution", `passing command-backed claim '${claimId}' has no linked execution evidence. Re-run and re-record the command through the canonical writer.`);
+  }
+  if (hasCommandReference && commandReferences.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.artifact_refs", `passing command-backed claim '${claimId}' has an unbindable command evidence ref. Supply the exact runnable command text and re-record the observed command evidence.`);
+  }
+  if (commandReferences.length > 0) {
+    const labels = linkedExecution.map((evidence) => (evidence.execution as AnyRecord).label as string);
+    if (commandReferences.length !== labels.length || commandReferences.some((command, index) => command !== labels[index])) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.artifact_refs", `passing command-backed claim '${claimId}' must bind command evidence refs, linked execution labels, and captured observations in the same order and multiplicity. Re-run and re-record the command evidence.`);
+    }
   }
 }
 
@@ -1763,10 +1888,10 @@ function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state
 function gateClaimWorkspaceSnapshot(claim: AnyRecord): AnyRecord | null {
   const metadata = isRecord(claim.metadata) ? claim.metadata : null;
   if (!metadata) return null;
-  if (isGitWorktreeSnapshot(metadata.verification_workspace_snapshot)) return metadata.verification_workspace_snapshot;
+  if (isValidGitWorktreeSnapshot(metadata.verification_workspace_snapshot)) return metadata.verification_workspace_snapshot;
   if (!isCritiqueOriginClaim(claim, metadata)) return null;
   const reviewTarget = isRecord(metadata.review_target) ? metadata.review_target : null;
-  if (reviewTarget && isGitWorktreeSnapshot(reviewTarget.workspace_snapshot)) return reviewTarget.workspace_snapshot;
+  if (reviewTarget && isValidGitWorktreeSnapshot(reviewTarget.workspace_snapshot)) return reviewTarget.workspace_snapshot;
   return null;
 }
 
@@ -1776,9 +1901,9 @@ function isCritiqueOriginClaim(claim: AnyRecord, metadata: AnyRecord): boolean {
     && claim.subjectType === "workflow-critique";
 }
 
-function isGitWorktreeSnapshot(value: unknown): value is AnyRecord {
+function isValidGitWorktreeSnapshot(value: unknown): value is AnyRecord {
   return isRecord(value)
-    && value.kind === "git-worktree"
+    && isGitWorktreeSnapshot(value)
     && typeof value.digest === "string"
     && typeof value.head_sha === "string";
 }
@@ -1786,10 +1911,26 @@ function isGitWorktreeSnapshot(value: unknown): value is AnyRecord {
 function captureCurrentGitWorkspaceSnapshot(projectRoot: string): { snapshot: AnyRecord | null; error: string | null } {
   try {
     const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
-    return { snapshot: isGitWorktreeSnapshot(snapshot) ? snapshot : null, error: null };
+    return { snapshot: isValidGitWorktreeSnapshot(snapshot) ? snapshot : null, error: null };
   } catch (error) {
     return { snapshot: null, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function assertObservationAncestor(claimId: string, observedCommit: string, currentCommit: string, projectRoot: string): void {
+  try {
+    assertTrustedGitAncestor(projectRoot, observedCommit, currentCommit);
+  } catch (error) {
+    const exitStatus = isRecord(error) && typeof error.status === "number" ? error.status : null;
+    if (exitStatus === 1) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands.observed_at_commit", `claim '${claimId}' was observed at ${observedCommit}, which is not an ancestor of trusted current HEAD ${currentCommit}. Re-run the check against the current revision.`);
+    }
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands.observed_at_commit", `could not prove that claim '${claimId}' observed commit ${observedCommit} is an ancestor of trusted current HEAD ${currentCommit} (${errorMessage(error)}). Git history may be shallow or missing; fetch the required history and re-record this check.`);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function mergeGateClaimsWithCritiqueHistory(
@@ -1964,10 +2105,14 @@ function assertObservedTestsEvidence(testClaim: AnyRecord, criteria: AnyRecord[]
   if (!Array.isArray(observed) || observed.length === 0) {
     throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain successful command observations");
   }
+  const observationSnapshot = gateClaimWorkspaceSnapshot(testClaim);
+  if (observationSnapshot === null || observationSnapshot.worktree_clean !== true) {
+    throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must be bound to a clean Git-worktree observation snapshot");
+  }
   const commands = new Set<string>();
   for (const entry of observed) {
-    if (!isRecord(entry) || typeof entry.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256) || commands.has(entry.command)) {
-      throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain unique commands with exit_code 0, a positive executed-test count, and SHA-256 output digests");
+    if (!isRecord(entry) || typeof entry.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(entry.output_sha256) || !isExactLowercaseCommitSha(entry.observed_at_commit) || entry.worktree_clean !== true || entry.observed_at_commit !== observationSnapshot.head_sha || !isValidGitWorktreeSnapshot(entry.verification_workspace_snapshot) || entry.verification_workspace_snapshot.worktree_clean !== true || !isDeepStrictEqual(entry.verification_workspace_snapshot, observationSnapshot) || commands.has(entry.command)) {
+      throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain unique clean command observations with exit_code 0, a positive executed-test count, SHA-256 output digests, and matching observation-time Git-worktree snapshots");
     }
     commands.add(entry.command);
   }

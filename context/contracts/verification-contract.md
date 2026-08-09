@@ -86,11 +86,14 @@ Diff:      [PASS/FAIL/NOT_VERIFIED] <changed files reviewed>
 <summary>
 ```
 
-## Structured Evidence Sidecar
+## Workflow Evidence v2 Projection
 
-When verification runs as part of a workflow, write or update `evidence.json` beside the workflow artifacts using `schemas/workflow-evidence.schema.json`.
+When verification runs as part of a workflow, use the sidecar writer to update the authoritative
+`trust.bundle`. Its schema-backed v2 `evidence.json` projection must validate against
+`schemas/workflow-evidence.schema.json` v2, but it is not a second runtime authority and must not
+be hand-authored outside the sidecar writer.
 
-Use the sidecar writer when available:
+Use the sidecar writer:
 
 ```bash
 npm run workflow:sidecar -- record-evidence .kontourai/flow-agents/<slug> \
@@ -112,6 +115,14 @@ Map phases to check kinds:
 - Provider checks from publish-change or release surfaces -> `external`
 
 Use lowercase statuses: `pass`, `fail`, `not_verified`, or `skip`. Set the top-level `verdict` to `pass`, `partial`, `fail`, or `not_verified`. Include `not_verified_gaps` for any missing required evidence.
+
+Every command check in the v2 projection carries the observation-time
+`observed_at_commit` and boolean `worktree_clean` recorded by the repository-owned capture path.
+Do not infer or fill these from verification-time `HEAD`. A dirty observation, missing fields,
+unavailable/non-Git workspace state, malformed or unresolved/shallow commit, non-ancestor commit,
+or a mismatch between its exact captured Git-worktree snapshot and the current snapshot is
+`not_verified` and non-confirming. The gate needs both item-level trusted ancestry and exact
+snapshot equality: ancestry alone does not prove the checked bytes still match.
 
 Modified files are part of verification scope. If changed-file scope is unavailable, mark diff/scope integrity `NOT_VERIFIED` instead of inferring from memory. Optional governance providers such as Veritas may use the same modified-file scope as input or as an integrity reference, but their native reports should remain external evidence referenced from `evidence.json`.
 
