@@ -1115,8 +1115,12 @@ done
 
 # Released v1 snapshots lacked snapshot-local runtime and config_path. They are
 # valid when their enclosing install record and current target supply that context.
+# Discriminating by construction: the config has NO $schema pre-install, so honoring the v1
+# origin means "Flow Agents added it" -> REMOVED. Ignoring the record yields the conservative
+# retain, so this assertion distinguishes honored-from-ignored (a prior version asserted only
+# that a pre-existing $schema survived, which is also the ignored outcome).
 VALID_V1_HOME="$TMPDIR_EVAL/valid-v1-provenance-home"; mkdir -p "$VALID_V1_HOME"
-printf '{"$schema":"https://opencode.ai/config.json","custom":"v1-user"}\n' > "$VALID_V1_HOME/opencode.json"
+printf '{"custom":"v1-user"}\n' > "$VALID_V1_HOME/opencode.json"
 HOME="$VALID_V1_HOME" $FA init --runtime opencode --global --dest "$VALID_V1_HOME" --yes >/dev/null 2>&1
 node - "$VALID_V1_HOME/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const p = process.argv[2], r = JSON.parse(fs.readFileSync(p, "utf8"));
@@ -1125,9 +1129,32 @@ fs.writeFileSync(p, JSON.stringify(r, null, 2) + "\n");
 NODE
 HOME="$VALID_V1_HOME" $FA init --uninstall --runtime opencode --dest "$VALID_V1_HOME" --yes >"$TMPDIR_EVAL/valid-v1-provenance.out" 2>&1
 if node - "$VALID_V1_HOME/opencode.json" <<'NODE'
-const fs = require("node:fs"); if (JSON.parse(fs.readFileSync(process.argv[2], "utf8")).$schema !== "https://opencode.ai/config.json") throw new Error("valid v1 origin was ignored");
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (c.$schema !== undefined) throw new Error("v1 origin was ignored: FA-added $schema was retained instead of removed");
+if (c.custom !== "v1-user") throw new Error("user content was lost");
 NODE
-then _pass "v1 provenance: released snapshot shape is honored as lineage origin"; else _fail "v1 provenance: valid released record was rejected"; fi
+then _pass "v1 provenance: released snapshot shape is honored as lineage origin (FA-added scalar removed, user content intact)"; else _fail "v1 provenance: valid released record was rejected or user content lost"; fi
+
+# A v1 record whose own scope resolves to a DIFFERENT file must not become this config's origin.
+# claude-code makes the contrast concrete: a global record describes <dest>/settings.json while a
+# project uninstall targets <dest>/.claude/settings.json. Accepting one as the other's baseline
+# would let a key the global config never had authorize deleting the user's project value.
+V1_SCOPE_DEST="$TMPDIR_EVAL/v1-scope-dest"; mkdir -p "$V1_SCOPE_DEST/.claude"
+printf '{"permissions":{"defaultMode":"auto"},"custom":"scope-user"}\n' > "$V1_SCOPE_DEST/.claude/settings.json"
+HOME="$TMPDIR_EVAL/v1-scope-user-home" $FA init --runtime claude-code --dest "$V1_SCOPE_DEST" --yes >/dev/null 2>&1
+node - "$V1_SCOPE_DEST/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs"); const p = process.argv[2], r = JSON.parse(fs.readFileSync(p, "utf8"));
+const origin = r.config_premerge?.origin ?? r.config_premerge;
+if (origin) { delete origin.runtime; delete origin.config_path; r.config_premerge = origin; }
+r.global = true; // v1 record now claims GLOBAL scope -> describes <dest>/settings.json, a different file
+fs.writeFileSync(p, JSON.stringify(r, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/v1-scope-user-home" $FA init --uninstall --runtime claude-code --dest "$V1_SCOPE_DEST" --yes >"$TMPDIR_EVAL/v1-scope.out" 2>&1
+if node - "$V1_SCOPE_DEST/.claude/settings.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (c.permissions?.defaultMode !== "auto") throw new Error("a v1 record describing a different config authorized deleting the user's value");
+NODE
+then _pass "v1 provenance: a record whose scope resolves to a different config is not accepted as this one's origin"; else _fail "v1 provenance: cross-config record authorized a removal"; fi
 
 # A damaged prior record must never promote the currently-installed image to
 # origin on reinstall. Unknown origin falls back to conservative tier 2/3.

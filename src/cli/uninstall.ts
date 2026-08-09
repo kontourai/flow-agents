@@ -336,7 +336,11 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   // reinstall baseline. Byte restoration below deliberately uses `previous`.
   const premerge = snapshot.origin;
   const managed = expectedManagedConfig(config, global);
-  const expectedHooks = snapshot.installedValues?.hooks ?? expectedManagedInnerHooks(managed);
+  // A corrupt installed_values.hooks (e.g. `{}` or a truncated string) must fall back to the
+  // current package's values, not propagate a non-array into `.some(...)` -- throwing there
+  // fails safe against deletion but PREVENTS UNINSTALL, which is its own failure mode.
+  const recordedHooks = snapshot.installedValues?.hooks;
+  const expectedHooks = Array.isArray(recordedHooks) ? recordedHooks : expectedManagedInnerHooks(managed);
   const preserved: PreservedFile[] = [];
   const protectedRuntimePaths: string[] = [];
   let removedHookEntryCount = 0;
@@ -495,6 +499,17 @@ function readConfigPremerge(dest: string, runtime: UninstallRuntime, configPath:
       : undefined;
     if (!premerge) return none("no pre-install snapshot", installedValues);
     if (record["runtime"] !== runtime) return none("snapshot runtime does not match this uninstall", installedValues);
+    // v1 records carry no snapshot-local identity, so the config they describe is inferred from
+    // the enclosing record's own scope. Identity is the resolved FILE, not the invocation flags:
+    // `--global --dest X` and `--dest X` can name the same file, while a genuinely global record
+    // must never become a *different* (project) config's origin -- accepting it would let a key
+    // the global config never had authorize deleting the user's project value.
+    if (premerge["schema_version"] === "1.0" && premerge["config_path"] === undefined) {
+      const recordedConfigPath = RUNTIME_CONFIGS[runtime].configPath(dest, Boolean(record["global"]));
+      if (path.resolve(recordedConfigPath) !== path.resolve(configPath)) {
+        return none("snapshot describes a different config than this uninstall", installedValues);
+      }
+    }
     // v1 intentionally remains compatible: its single snapshot was previously used for both.
     if (premerge["schema_version"] === "1.0") {
       const validated = validateConfigPremerge(premerge, runtime, configPath);
