@@ -1303,6 +1303,28 @@ else
   _fail "CH4: retired generated Codex profiles were not removed"
 fi
 
+# The marker adoption exception is intentionally limited to the exact first
+# line of Codex seed files. A non-header collision remains an unowned-file
+# refusal and must not be overwritten.
+CH4_UNOWNED_OVERLAY="$TMPDIR_EVAL/ch4-unowned-overlay"
+CH4_UNOWNED_DEST="$TMPDIR_EVAL/ch4-unowned-dest"
+mkdir -p "$CH4_UNOWNED_OVERLAY" "$CH4_UNOWNED_DEST"
+printf '%s\nmodel = "managed"\n' '# Generated from packaging/manifest.json. Edit the manifest, not this file.' > "$CH4_UNOWNED_OVERLAY/builder.config.toml"
+printf 'model = "user-owned"\n' > "$CH4_UNOWNED_DEST/builder.config.toml"
+set +e
+node "$ROOT_DIR/scripts/install-owned-files.js" \
+  --adopt-generated-seed-marker '# Generated from packaging/manifest.json. Edit the manifest, not this file.' \
+  "$CH4_UNOWNED_OVERLAY" "$CH4_UNOWNED_DEST" ".flow-agents/codex-install-manifest.json" >"$TMPDIR_EVAL/ch4-unowned-profile.out" 2>&1
+CH4_UNOWNED_STATUS=$?
+set -e
+if [[ "$CH4_UNOWNED_STATUS" -ne 0 ]] \
+  && grep -q 'unowned or ambiguous' "$TMPDIR_EVAL/ch4-unowned-profile.out" \
+  && grep -q 'user-owned' "$CH4_UNOWNED_DEST/builder.config.toml"; then
+  _pass "CH4: non-header generated-profile collision is refused and preserved"
+else
+  _fail "CH4: non-header generated-profile collision was not refused safely"
+fi
+
 if [[ -f "$CH4_DEST/kits/local/installed-kits.json" && -f "$CH4_DEST/kits/local/repositories/user-kit/kit.json" ]] \
   && node - "$CH4_DEST/kits/local/installed-kits.json" << 'NODE'
 const fs = require("node:fs");

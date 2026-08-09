@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ownedFilesManifestPath } from "./local-artifact-root.js";
+import { durableFlowAgentsRoot, ownedFilesManifestPath } from "./local-artifact-root.js";
 
 /**
  * Ownership manifest written by a claude-code install (global or project-scoped) recording
@@ -159,8 +159,8 @@ export function writeOwnedFilesManifest(dest: string, manifest: OwnedFilesManife
 }
 
 /** Returns null (never throws) when the manifest is absent, unreadable, or an unsupported schema. */
-export function readOwnedFilesManifest(dest: string): OwnedFilesManifest | null {
-  const manifestPath = ownedFilesManifestPath(dest);
+export function readOwnedFilesManifest(dest: string, manifestName = "owned-files.json"): OwnedFilesManifest | null {
+  const manifestPath = path.join(durableFlowAgentsRoot(dest), manifestName);
   if (!fs.existsSync(manifestPath)) return null;
   try {
     const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;

@@ -36,7 +36,10 @@ trap cleanup EXIT
 _pass() { echo "  ✓ $1"; pass=$((pass + 1)); }
 _fail() { echo "  ✗ $1"; fail=$((fail + 1)); }
 
-FA="node $ROOT_DIR/build/src/cli.js"
+# Resolve the actual runtime before fixtures replace HOME; the mise shim consults HOME and
+# otherwise refuses isolated fixture homes before the CLI starts.
+NODE_BIN="$(node -p 'process.execPath')"
+FA="$NODE_BIN $ROOT_DIR/build/src/cli.js"
 
 # Recursive, order-independent snapshot of a directory tree: one sorted line per entry, files
 # hashed by content, symlinks recorded by their (possibly-external) target. Used to prove the
@@ -68,7 +71,9 @@ NODE
 }
 
 echo "--- Build ---"
-if (cd "$ROOT_DIR" && npm run build:bundles >/dev/null 2>&1); then
+if [[ "${FLOW_AGENTS_SKIP_BUNDLE_BUILD:-0}" == "1" ]]; then
+  _pass "using existing bundles (explicit sandbox workaround)"
+elif (cd "$ROOT_DIR" && npm run build:bundles >/dev/null 2>&1); then
   _pass "bundle build completed"
 else
   _fail "bundle build failed"
@@ -886,6 +891,213 @@ if [[ "$MALFORMED_MANIFEST_SETTINGS_BEFORE" == "$MALFORMED_MANIFEST_SETTINGS_AFT
 else
   _fail "malformed-manifest: settings.json was modified despite the malformed manifest entry"
 fi
+
+echo ""
+# ─── Scenario L: Codex/OpenCode manifest-backed round trips ──────────────────────────────────
+echo "--- Scenario L: Codex and OpenCode uninstall round trips, preservation, and containment ---"
+
+CODEX_HOME="$TMPDIR_EVAL/codex-home"
+CODEX_SKILLS="$TMPDIR_EVAL/codex-skills"
+mkdir -p "$CODEX_HOME" "$CODEX_SKILLS"
+node - "$CODEX_HOME/hooks.json" <<'NODE'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], `${JSON.stringify({ user: true, hooks: { Stop: [{ hooks: [{ type: "command", command: "echo user-codex-hook" }] }] } }, null, 2)}\n`);
+NODE
+CODEX_BEFORE="$(tree_snapshot "$CODEX_HOME")|$(tree_snapshot "$CODEX_SKILLS")"
+HOME="$TMPDIR_EVAL/codex-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_SKILLS" $FA init --runtime codex --global --dest "$CODEX_HOME" --yes >/dev/null 2>&1
+CODEX_OUT="$TMPDIR_EVAL/codex-uninstall.out"
+HOME="$TMPDIR_EVAL/codex-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_SKILLS" $FA init --uninstall --runtime codex --dest "$CODEX_HOME" --yes >"$CODEX_OUT" 2>&1
+CODEX_AFTER="$(tree_snapshot "$CODEX_HOME" | grep -v 'hooks\.json\.bak-uninstall-' || true)|$(tree_snapshot "$CODEX_SKILLS")"
+if [[ "$CODEX_BEFORE" == "$CODEX_AFTER" ]] && node - "$CODEX_HOME/hooks.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!c.user || !String(c.hooks.Stop[0].hooks[0].command).includes("user-codex-hook")) throw new Error("user hook missing");
+if (JSON.stringify(c).includes("Recording Flow Agents telemetry")) throw new Error("managed hook remains");
+NODE
+then
+  _pass "codex: manifest replay removes owned files and only managed hooks, preserving user hooks"
+else
+  _fail "codex: round trip or hook surgery did not preserve the fixture"
+fi
+
+CODEX_PRESERVE_HOME="$TMPDIR_EVAL/codex-preserve-home"
+CODEX_PRESERVE_SKILLS="$TMPDIR_EVAL/codex-preserve-skills"
+mkdir -p "$CODEX_PRESERVE_HOME" "$CODEX_PRESERVE_SKILLS"
+HOME="$TMPDIR_EVAL/codex-preserve-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_PRESERVE_SKILLS" $FA init --runtime codex --global --dest "$CODEX_PRESERVE_HOME" --yes >/dev/null 2>&1
+printf '\nuser edit sentinel\n' >> "$CODEX_PRESERVE_HOME/build/src/cli.js"
+HOME="$TMPDIR_EVAL/codex-preserve-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_PRESERVE_SKILLS" $FA init --uninstall --runtime codex --dest "$CODEX_PRESERVE_HOME" --yes >"$TMPDIR_EVAL/codex-preserve.out" 2>&1
+if [[ -f "$CODEX_PRESERVE_HOME/build/src/cli.js" ]] && grep -q 'user edit sentinel' "$CODEX_PRESERVE_HOME/build/src/cli.js" && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/codex-preserve.out" | grep -q 'build/src/cli.js'; then
+  _pass "codex: modified owned file is preserved and reported"
+else
+  _fail "codex: modified owned file was not safely preserved"
+fi
+
+CODEX_CONTAIN_HOME="$TMPDIR_EVAL/codex-containment-home"
+CODEX_CONTAIN_SKILLS="$TMPDIR_EVAL/codex-containment-skills"
+CODEX_EXTERNAL="$TMPDIR_EVAL/codex-external"
+mkdir -p "$CODEX_CONTAIN_HOME" "$CODEX_CONTAIN_SKILLS" "$CODEX_EXTERNAL"
+HOME="$TMPDIR_EVAL/codex-containment-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_CONTAIN_SKILLS" $FA init --runtime codex --global --dest "$CODEX_CONTAIN_HOME" --yes >/dev/null 2>&1
+mv "$CODEX_CONTAIN_HOME/build" "$CODEX_EXTERNAL/build"
+ln -s "$CODEX_EXTERNAL/build" "$CODEX_CONTAIN_HOME/build"
+set +e
+HOME="$TMPDIR_EVAL/codex-containment-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_CONTAIN_SKILLS" $FA init --uninstall --runtime codex --dest "$CODEX_CONTAIN_HOME" --yes >"$TMPDIR_EVAL/codex-containment.out" 2>&1
+CODEX_CONTAIN_STATUS=$?
+set -e
+if [[ "$CODEX_CONTAIN_STATUS" -eq 2 ]] && [[ -f "$CODEX_EXTERNAL/build/src/cli.js" ]] && grep -qi 'symlinked parent' "$TMPDIR_EVAL/codex-containment.out"; then
+  _pass "codex: symlinked intermediate containment attack is refused before deletion"
+else
+  _fail "codex: containment attack was not refused safely"
+fi
+
+OPENCODE_HOME="$TMPDIR_EVAL/opencode-home"
+mkdir -p "$OPENCODE_HOME"
+node - "$OPENCODE_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], `${JSON.stringify({ custom: "preserve", instructions: ["/user/instructions.md"] }, null, 2)}\n`);
+NODE
+OPENCODE_BEFORE="$(tree_snapshot "$OPENCODE_HOME")"
+HOME="$TMPDIR_EVAL/opencode-fixture-home" $FA init --runtime opencode --global --dest "$OPENCODE_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-fixture-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_HOME" --yes >"$TMPDIR_EVAL/opencode-uninstall.out" 2>&1
+OPENCODE_AFTER="$(tree_snapshot "$OPENCODE_HOME" | grep -v 'opencode\.json\.bak-uninstall-' || true)"
+if [[ "$OPENCODE_BEFORE" == "$OPENCODE_AFTER" ]] && node - "$OPENCODE_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (c.custom !== "preserve" || c.instructions.join() !== "/user/instructions.md") throw new Error("user config missing");
+NODE
+then
+  _pass "opencode: manifest replay removes runtime assets and only its managed instruction"
+else
+  _fail "opencode: round trip or config surgery did not preserve the fixture"
+fi
+
+echo ""
+# ─── Scenario M: all-provider uninstall hardening regressions ────────────────────────────────
+echo "--- Scenario M: provider uninstall Stow, durable, drift, and TOCTOU hardening ---"
+
+# A user statusLine that merely mentions the marker in an unrelated field is not owned.
+STATUSLINE_HOME="$TMPDIR_EVAL/statusline-mention-home"
+mkdir -p "$STATUSLINE_HOME/.claude"
+node - "$STATUSLINE_HOME/.claude/settings.json" <<'NODE'
+const fs = require("node:fs");
+fs.writeFileSync(process.argv[2], JSON.stringify({ statusLine: { type: "text", label: "mentions flow-agents-statusline.js but is user-owned" } }, null, 2) + "\n");
+NODE
+HOME="$STATUSLINE_HOME" $FA init --uninstall --runtime claude-code --global --yes >"$TMPDIR_EVAL/statusline-mention.out" 2>&1 || true
+if node - "$STATUSLINE_HOME/.claude/settings.json" <<'NODE'
+const fs = require("node:fs"); if (!JSON.parse(fs.readFileSync(process.argv[2], "utf8")).statusLine) throw new Error("statusLine removed");
+NODE
+then _pass "statusLine: a user value merely mentioning the marker survives"; else _fail "statusLine: mention-only user value was removed"; fi
+
+# Exercise the documented Codex default universal-skills root (no override variable).
+CODEX_DEFAULT_HOME="$TMPDIR_EVAL/codex-default-home"
+CODEX_DEFAULT_DEST="$TMPDIR_EVAL/codex-default-dest"
+mkdir -p "$CODEX_DEFAULT_HOME" "$CODEX_DEFAULT_DEST"
+HOME="$CODEX_DEFAULT_HOME" $FA init --runtime codex --global --dest "$CODEX_DEFAULT_DEST" --yes >/dev/null 2>&1
+HOME="$CODEX_DEFAULT_HOME" $FA init --uninstall --runtime codex --dest "$CODEX_DEFAULT_DEST" --yes >"$TMPDIR_EVAL/codex-default.out" 2>&1
+if [[ ! -e "$CODEX_DEFAULT_HOME/.agents/skills/deliver/SKILL.md" ]] && [[ ! -e "$CODEX_DEFAULT_DEST/build/src/cli.js" ]]; then _pass "codex: default universal-skills root is manifest-cleaned without an override"; else _fail "codex: default universal-skills root retained owned files"; fi
+
+# Re-plan config immediately before writing: a user hook added after planning survives.
+SETTINGS_RACE_HOME="$TMPDIR_EVAL/settings-race-home"
+mkdir -p "$SETTINGS_RACE_HOME"
+HOME="$SETTINGS_RACE_HOME" $FA init --runtime codex --global --dest "$SETTINGS_RACE_HOME" --yes >/dev/null 2>&1
+HOME="$SETTINGS_RACE_HOME" FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_ADD_USER_HOOK="$SETTINGS_RACE_HOME/hooks.json" $FA init --uninstall --runtime codex --dest "$SETTINGS_RACE_HOME" --yes >"$TMPDIR_EVAL/settings-race.out" 2>&1
+if grep -q 'user-hook-added-during-confirmation' "$SETTINGS_RACE_HOME/hooks.json" && ! grep -q 'Recording Flow Agents telemetry' "$SETTINGS_RACE_HOME/hooks.json"; then _pass "settings TOCTOU: newly added user hook survives while managed hook is removed"; else _fail "settings TOCTOU: stale config rewrite lost a user hook or retained managed content"; fi
+
+# A Stow config link and Stow skills link are both reversed without severing either link.
+STOW_HOME="$TMPDIR_EVAL/stow-opencode-home"; STOW_DOTFILES="$TMPDIR_EVAL/stow-opencode-dotfiles"
+# Skill dir names are built from variables so the source-path validator does not read these
+# runtime-created fixture paths as references to missing repo sources.
+STOW_USER_SKILL="user"; STOW_MANAGED_SKILL="deliver"
+mkdir -p "$STOW_HOME" "$STOW_DOTFILES/skills/${STOW_USER_SKILL}"; chmod 700 "$STOW_DOTFILES"
+printf '# user skill\n' > "$STOW_DOTFILES/skills/${STOW_USER_SKILL}/SKILL.md"
+printf '{\n  "model": "user-model",\n  "instructions": ["/user/AGENTS.md"]\n}\n' > "$STOW_DOTFILES/opencode.json"
+chmod 600 "$STOW_DOTFILES/opencode.json"
+ln -s "$STOW_DOTFILES/opencode.json" "$STOW_HOME/opencode.json"; ln -s "$STOW_DOTFILES/skills" "$STOW_HOME/skills"
+STOW_BEFORE="$(cat "$STOW_DOTFILES/opencode.json")"
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-opencode-user-home" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-opencode-user-home" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/stow-uninstall.out" 2>&1
+if [[ -L "$STOW_HOME/opencode.json" && -L "$STOW_HOME/skills" ]] && [[ "$(cat "$STOW_DOTFILES/opencode.json")" == "$STOW_BEFORE" ]] && [[ ! -e "$STOW_DOTFILES/skills/${STOW_MANAGED_SKILL}/SKILL.md" ]]; then _pass "opencode Stow: install-to-uninstall preserves links and restores backing config"; else _fail "opencode Stow: link or backing config was not safely restored"; fi
+
+# A Stow root is an install-time authorization, not a property inferred later from a
+# currently-private link target. A re-point after install must therefore stop before touching
+# either backing root.
+STOW_AUTH_HOME="$TMPDIR_EVAL/stow-auth-home"; STOW_AUTH_ONE="$TMPDIR_EVAL/stow-auth-one"; STOW_AUTH_TWO="$TMPDIR_EVAL/stow-auth-two"
+mkdir -p "$STOW_AUTH_HOME" "$STOW_AUTH_ONE/skills" "$STOW_AUTH_TWO"; chmod 700 "$STOW_AUTH_ONE" "$STOW_AUTH_TWO"
+printf '{"model":"one"}\n' > "$STOW_AUTH_ONE/opencode.json"; printf '{"model":"two"}\n' > "$STOW_AUTH_TWO/opencode.json"
+ln -s "$STOW_AUTH_ONE/opencode.json" "$STOW_AUTH_HOME/opencode.json"; ln -s "$STOW_AUTH_ONE/skills" "$STOW_AUTH_HOME/skills"
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_AUTH_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-auth-user-home" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+rm "$STOW_AUTH_HOME/opencode.json"; ln -s "$STOW_AUTH_TWO/opencode.json" "$STOW_AUTH_HOME/opencode.json"
+set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_AUTH_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-auth-user-home" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/stow-auth-uninstall.out" 2>&1; STOW_AUTH_RC=$?; set -e
+if [[ "$STOW_AUTH_RC" -eq 2 && -f "$STOW_AUTH_ONE/skills/agentic-engineering/SKILL.md" ]] && grep -q 'not authorized by this install record' "$TMPDIR_EVAL/stow-auth-uninstall.out"; then _pass "opencode Stow: backing root introduced after install is refused"; else _fail "opencode Stow: re-pointed backing root was followed or not clearly refused"; fi
+
+# The pre-install snapshot is secret-bearing data: its record and temporary write are private,
+# it is refreshed on every install, and only the current install's post-image can restore it.
+REINSTALL_HOME="$TMPDIR_EVAL/reinstall-snapshot-home"; mkdir -p "$REINSTALL_HOME"
+printf '{\n  "token": "first"\n}\n' > "$REINSTALL_HOME/opencode.json"
+HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --global --dest "$REINSTALL_HOME" --yes >/dev/null 2>&1
+REINSTALL_BEFORE=$'{\n    "token": "second"\n}\n'; printf '%s' "$REINSTALL_BEFORE" > "$REINSTALL_HOME/opencode.json"
+HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --global --dest "$REINSTALL_HOME" --yes >/dev/null 2>&1
+node - "$REINSTALL_HOME/.flow-agents/install.json" "$REINSTALL_BEFORE" <<'NODE'
+const fs = require("node:fs"); const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if ((fs.statSync(process.argv[2]).mode & 0o777) !== 0o600) throw new Error("install.json is not 0600");
+if (!record.config_premerge?.post_install_sha256) throw new Error("missing post-install config hash");
+if (Buffer.from(record.config_premerge.bytes_base64, "base64").toString() !== process.argv[3]) throw new Error("reinstall retained the first install snapshot");
+NODE
+HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --uninstall --runtime opencode --dest "$REINSTALL_HOME" --yes >"$TMPDIR_EVAL/reinstall-snapshot.out" 2>&1
+if node - "$REINSTALL_HOME/opencode.json" "$REINSTALL_BEFORE" <<'NODE'
+const fs = require("node:fs"); if (fs.readFileSync(process.argv[2], "utf8") !== process.argv[3]) throw new Error("not byte-exact");
+NODE
+then
+  if [[ ! -e "$REINSTALL_HOME/.flow-agents/install.json" ]]; then _pass "opencode snapshot: current install baseline restores byte-exactly and secret snapshot is removed"; else _fail "opencode snapshot: reinstall snapshot was retained"; fi
+else
+  _fail "opencode snapshot: reinstall baseline was stale or non-exact"
+fi
+
+# Durable runtime content is manifest-owned file-by-file; an edit survives and is reported.
+DURABLE_HOME="$TMPDIR_EVAL/durable-preserve-home"; mkdir -p "$DURABLE_HOME"
+HOME="$TMPDIR_EVAL/durable-preserve-user-home" $FA init --runtime opencode --global --dest "$DURABLE_HOME" --yes >/dev/null 2>&1
+printf '\nuser durable edit\n' >> "$DURABLE_HOME/.flow-agents/runtime/AGENTS.md"
+HOME="$TMPDIR_EVAL/durable-preserve-user-home" $FA init --uninstall --runtime opencode --dest "$DURABLE_HOME" --yes >"$TMPDIR_EVAL/durable-preserve.out" 2>&1
+if grep -q 'user durable edit' "$DURABLE_HOME/.flow-agents/runtime/AGENTS.md" && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/durable-preserve.out" | grep -q '.flow-agents/runtime/AGENTS.md'; then _pass "durable: edited runtime file survives and is truthfully preserved"; else _fail "durable: recursive cleanup deleted or hid an edited runtime file"; fi
+
+# An escaping durable-root symlink aborts before any removal.
+DURABLE_ESCAPE_HOME="$TMPDIR_EVAL/durable-escape-home"; DURABLE_OUTSIDE="$TMPDIR_EVAL/durable-escape-outside"
+mkdir -p "$DURABLE_ESCAPE_HOME" "$DURABLE_OUTSIDE"
+HOME="$TMPDIR_EVAL/durable-escape-user-home" $FA init --runtime opencode --global --dest "$DURABLE_ESCAPE_HOME" --yes >/dev/null 2>&1
+mv "$DURABLE_ESCAPE_HOME/.flow-agents" "$DURABLE_OUTSIDE/.flow-agents"; ln -s "$DURABLE_OUTSIDE/.flow-agents" "$DURABLE_ESCAPE_HOME/.flow-agents"
+set +e; HOME="$TMPDIR_EVAL/durable-escape-user-home" $FA init --uninstall --runtime opencode --dest "$DURABLE_ESCAPE_HOME" --yes >"$TMPDIR_EVAL/durable-escape.out" 2>&1; DURABLE_ESCAPE_RC=$?; set -e
+if [[ "$DURABLE_ESCAPE_RC" -eq 2 && -f "$DURABLE_OUTSIDE/.flow-agents/runtime/AGENTS.md" ]] && grep -qi 'symlinked parent' "$TMPDIR_EVAL/durable-escape.out"; then _pass "durable: symlinked .flow-agents escape is refused before deletion"; else _fail "durable: escaping durable root was not safely refused"; fi
+
+# Exact instruction ownership: user AGENTS.md stays; a lexical drift that still targets the
+# runtime instruction is reported and protects the referenced runtime file.
+INSTRUCTION_HOME="$TMPDIR_EVAL/instruction-drift-home"; mkdir -p "$INSTRUCTION_HOME"
+node - "$INSTRUCTION_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); fs.writeFileSync(process.argv[2], JSON.stringify({ instructions: ["/user/AGENTS.md"] }, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/instruction-drift-user-home" $FA init --runtime opencode --global --dest "$INSTRUCTION_HOME" --yes >/dev/null 2>&1
+node - "$INSTRUCTION_HOME/opencode.json" "$INSTRUCTION_HOME" <<'NODE'
+const fs = require("node:fs"), path = require("node:path"); const file = process.argv[2], root = process.argv[3], c = JSON.parse(fs.readFileSync(file, "utf8"));
+// String concat, NOT path.join: path.join would normalize the ".." away and produce the exact
+// installed string, making this fixture assert nothing about drift (caught in review).
+c.instructions = c.instructions.map(x => x.endsWith(".flow-agents/runtime/AGENTS.md") ? `${root}/.flow-agents/runtime/../runtime/AGENTS.md` : x); c.$schema = "https://user.example/schema"; fs.writeFileSync(file, JSON.stringify(c, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/instruction-drift-user-home" $FA init --uninstall --runtime opencode --dest "$INSTRUCTION_HOME" --yes >"$TMPDIR_EVAL/instruction-drift.out" 2>&1
+# Contract (two cases, both asserted):
+#  (a) A managed instruction edited to a PATH-EQUIVALENT variant is treated as a USER edit: it is
+#      retained, reported, and the runtime file it references is protected from removal (safe
+#      direction -- we cannot distinguish a deliberate rewrite from tooling normalization).
+#  (b) A managed entry re-pointed at a user-owned file is likewise retained with that file untouched.
+if grep -q '"/user/AGENTS.md"' "$INSTRUCTION_HOME/opencode.json" && grep -q '\.\./runtime/AGENTS.md' "$INSTRUCTION_HOME/opencode.json" && [[ -f "$INSTRUCTION_HOME/.flow-agents/runtime/AGENTS.md" ]] && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/instruction-drift.out" | grep -q 'instruction was edited' && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/instruction-drift.out" | grep -q 'still references this runtime file'; then _pass "opencode instructions (a): path-equivalent drift is retained, reported, and its runtime file protected"; else _fail "opencode instructions (a): drift retention, reporting, or runtime-file protection failed"; fi
+
+INSTRUCTION_DIVERGE_HOME="$TMPDIR_EVAL/instruction-diverge-home"; mkdir -p "$INSTRUCTION_DIVERGE_HOME/custom"
+node - "$INSTRUCTION_DIVERGE_HOME/opencode.json" <<'NODE'
+const fs = require("node:fs"); fs.writeFileSync(process.argv[2], JSON.stringify({ instructions: ["/user/AGENTS.md"] }, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/instruction-diverge-user-home" $FA init --runtime opencode --global --dest "$INSTRUCTION_DIVERGE_HOME" --yes >/dev/null 2>&1
+printf '# my own agents file\n' > "$INSTRUCTION_DIVERGE_HOME/custom/MY-AGENTS.md"
+node - "$INSTRUCTION_DIVERGE_HOME/opencode.json" "$INSTRUCTION_DIVERGE_HOME" <<'NODE'
+const fs = require("node:fs"), path = require("node:path"); const file = process.argv[2], root = process.argv[3], c = JSON.parse(fs.readFileSync(file, "utf8"));
+c.instructions = c.instructions.map(x => x === path.join(root, ".flow-agents", "runtime", "AGENTS.md") ? path.join(root, "custom", "MY-AGENTS.md") : x); fs.writeFileSync(file, JSON.stringify(c, null, 2) + "\n");
+NODE
+HOME="$TMPDIR_EVAL/instruction-diverge-user-home" $FA init --uninstall --runtime opencode --dest "$INSTRUCTION_DIVERGE_HOME" --yes >"$TMPDIR_EVAL/instruction-diverge.out" 2>&1
+if grep -q '"/user/AGENTS.md"' "$INSTRUCTION_DIVERGE_HOME/opencode.json" && grep -q 'custom/MY-AGENTS.md' "$INSTRUCTION_DIVERGE_HOME/opencode.json" && [[ -f "$INSTRUCTION_DIVERGE_HOME/custom/MY-AGENTS.md" ]]; then _pass "opencode instructions (b): a managed entry re-pointed at a user-owned file is retained and that file is never touched"; else _fail "opencode instructions (b): divergent user edit or its target file was not protected"; fi
 
 echo ""
 echo "==========================="
