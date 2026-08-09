@@ -116,6 +116,8 @@ type PremergeRead = {
   provenanceReason: string;
   restoreReason: string;
   hasPreviousRecord: boolean;
+  /** Exact managed values the installing version wrote, keyed by canonical config path. */
+  installedValues?: { hooks?: unknown[]; statusLine?: unknown; instructions?: unknown[] };
 };
 
 function loadInstallMergeModule(): InstallMergeModule {
@@ -288,6 +290,21 @@ function expectedManagedInnerHooks(managed: Record<string, unknown>): unknown[] 
   return expected;
 }
 
+function originManagedHookGroups(premerge: ConfigPremergeSnapshot, isManagedInnerHook: (hook: unknown) => boolean): Record<string, unknown[]> {
+  const hooks = premerge.parsed["hooks"];
+  if (!hooks || typeof hooks !== "object" || Array.isArray(hooks)) return {};
+  const restored: Record<string, unknown[]> = {};
+  for (const [event, groups] of Object.entries(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!group || typeof group !== "object" || !Array.isArray((group as Record<string, unknown>)["hooks"])) continue;
+      const marked = ((group as Record<string, unknown>)["hooks"] as unknown[]).filter(isManagedInnerHook);
+      if (marked.length > 0) (restored[event] ??= []).push({ ...(group as Record<string, unknown>), hooks: marked });
+    }
+  }
+  return restored;
+}
+
 function valuesByteIdentical(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -319,7 +336,7 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   // reinstall baseline. Byte restoration below deliberately uses `previous`.
   const premerge = snapshot.origin;
   const managed = expectedManagedConfig(config, global);
-  const expectedHooks = expectedManagedInnerHooks(managed);
+  const expectedHooks = snapshot.installedValues?.hooks ?? expectedManagedInnerHooks(managed);
   const preserved: PreservedFile[] = [];
   const protectedRuntimePaths: string[] = [];
   let removedHookEntryCount = 0;
@@ -342,11 +359,6 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
           continue;
         }
         const markedHooks = innerHooks.filter(isManagedInnerHook);
-        if (premerge && snapshotHasManagedHook(premerge, isManagedInnerHook) && markedHooks.length > 0) {
-          keptGroups.push(group);
-          preserved.push({ relPath: `${path.basename(settingsPath)}#hooks`, absPath: settingsPath, reason: "pre-install snapshot shows a matching marked hook; retained for user restoration" });
-          continue;
-        }
         const removableMarked = premerge
           ? markedHooks
           : markedHooks.filter((hook) => expectedHooks.some((expected) => valuesByteIdentical(hook, expected)));
@@ -371,6 +383,16 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
       if (keptGroups.length > 0) nextHooks[event] = keptGroups;
     }
     next["hooks"] = nextHooks;
+    // A marker is not exclusive ownership. When the earliest baseline itself
+    // contains marker-matching hooks, put those exact user entries back after
+    // removing the installed image. Retaining the current groups would both
+    // lose the user's command and leave the harness wired.
+    if (premerge && snapshotHasManagedHook(premerge, isManagedInnerHook)) {
+      for (const [event, groups] of Object.entries(originManagedHookGroups(premerge, isManagedInnerHook))) {
+        nextHooks[event] = [...((nextHooks[event] as unknown[]) ?? []), ...groups];
+      }
+      preserved.push({ relPath: `${path.basename(settingsPath)}#hooks`, absPath: settingsPath, reason: "pre-install snapshot contains marker-matching hooks; restored exact prior entries" });
+    }
   }
   let removedStatusLine = false;
   const statusLine = existing["statusLine"];
@@ -382,7 +404,7 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
       next["statusLine"] = premerge.parsed["statusLine"];
       preserved.push({ relPath: `${path.basename(settingsPath)}#statusLine`, absPath: settingsPath, reason: "pre-install snapshot shows a statusLine; restored its prior value" });
     } else if (premerge) { delete next["statusLine"]; removedStatusLine = true; }
-    else if (valuesByteIdentical(statusLine, managed["statusLine"])) { delete next["statusLine"]; removedStatusLine = true; }
+    else if (valuesByteIdentical(statusLine, snapshot.installedValues?.statusLine ?? managed["statusLine"])) { delete next["statusLine"]; removedStatusLine = true; }
     else preserved.push({ relPath: `${path.basename(settingsPath)}#statusLine`, absPath: settingsPath, reason: `marker-matching but not byte-identical to this install's value; cannot prove Flow Agents authored it (${snapshot.provenanceReason})` });
   }
   let removedInstructions = false;
@@ -443,7 +465,11 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
 }
 
 function validateConfigPremerge(value: unknown, runtime: UninstallRuntime, configPath: string): { premerge?: ConfigPremergeSnapshot; reason: string } {
-  const premerge = value as Record<string, unknown> | undefined;
+  let premerge = value as Record<string, unknown> | undefined;
+  // v1 records emitted before snapshot-local identity deliberately relied on
+  // their enclosing install record and target config. Infer only absent fields;
+  // explicitly inconsistent fields still fail closed below.
+  if (premerge?.["schema_version"] === "1.0") premerge = { ...premerge, ...(premerge["runtime"] === undefined ? { runtime } : {}), ...(premerge["config_path"] === undefined ? { config_path: path.resolve(configPath) } : {}) };
   if (!premerge || premerge["schema_version"] !== "1.0" || typeof premerge["existed"] !== "boolean" || typeof premerge["bytes_base64"] !== "string" || typeof premerge["post_install_sha256"] !== "string" || !/^[a-f0-9]{64}$/i.test(premerge["post_install_sha256"] as string) || typeof premerge["config_path"] !== "string" || premerge["runtime"] !== runtime || typeof premerge["parsed"] !== "object" || premerge["parsed"] === null || Array.isArray(premerge["parsed"])) return { reason: "snapshot is malformed or incomplete" };
   if (path.resolve(premerge["config_path"] as string) !== path.resolve(configPath)) return { reason: "snapshot config path does not match this uninstall" };
   if (premerge["existed"] === false) {
@@ -458,21 +484,26 @@ function validateConfigPremerge(value: unknown, runtime: UninstallRuntime, confi
 }
 
 function readConfigPremerge(dest: string, runtime: UninstallRuntime, configPath: string): PremergeRead {
-  const none = (reason: string): PremergeRead => ({ provenanceReason: reason, restoreReason: reason, hasPreviousRecord: false });
+  const none = (reason: string, installedValues?: PremergeRead["installedValues"]): PremergeRead => ({ provenanceReason: reason, restoreReason: reason, hasPreviousRecord: false, installedValues });
   try {
     const record = JSON.parse(fs.readFileSync(path.join(durableFlowAgentsRoot(dest), "install.json"), "utf8")) as Record<string, unknown>;
     const premerge = record["config_premerge"] as Record<string, unknown> | undefined;
-    if (!premerge) return none("no pre-install snapshot");
-    if (record["runtime"] !== runtime) return none("snapshot runtime does not match this uninstall");
+    const installed = record["installed_values"] as Record<string, unknown> | undefined;
+    const rawInstalledValues = installed?.[path.resolve(configPath)];
+    const installedValues = rawInstalledValues && typeof rawInstalledValues === "object" && !Array.isArray(rawInstalledValues)
+      ? rawInstalledValues as { hooks?: unknown[]; statusLine?: unknown; instructions?: unknown[] }
+      : undefined;
+    if (!premerge) return none("no pre-install snapshot", installedValues);
+    if (record["runtime"] !== runtime) return none("snapshot runtime does not match this uninstall", installedValues);
     // v1 intentionally remains compatible: its single snapshot was previously used for both.
     if (premerge["schema_version"] === "1.0") {
       const validated = validateConfigPremerge(premerge, runtime, configPath);
-      return { origin: validated.premerge, previous: validated.premerge, provenanceReason: validated.reason, restoreReason: validated.reason, hasPreviousRecord: true };
+      return { origin: validated.premerge, previous: validated.premerge, provenanceReason: validated.reason, restoreReason: validated.reason, hasPreviousRecord: true, installedValues };
     }
     if (premerge["schema_version"] !== "2.0") return none("pre-install snapshot has an unsupported schema version");
     const origin = validateConfigPremerge(premerge["origin"], runtime, configPath);
     const previous = validateConfigPremerge(premerge["previous"], runtime, configPath);
-    return { origin: origin.premerge, previous: previous.premerge, provenanceReason: origin.reason, restoreReason: previous.reason, hasPreviousRecord: true };
+    return { origin: origin.premerge, previous: previous.premerge, provenanceReason: origin.reason, restoreReason: previous.reason, hasPreviousRecord: true, installedValues };
   } catch { return none("pre-install snapshot is unreadable");
   }
 }

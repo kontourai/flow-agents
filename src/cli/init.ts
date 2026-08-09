@@ -220,7 +220,7 @@ function computeActiveKits(runtime: Runtime, global: boolean | undefined, active
   return entries;
 }
 
-function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = [], configPremerge?: unknown, authorizedBackingRoots: string[] = []): void {
+function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = [], configPremerge?: unknown, authorizedBackingRoots: string[] = [], installedValues?: unknown): void {
   const recordPath = durableInstallRecordPath(dest);
   const installRecordDir = path.dirname(recordPath);
   fs.mkdirSync(installRecordDir, { recursive: true });
@@ -234,13 +234,19 @@ function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | un
   try {
     const prior = JSON.parse(fs.readFileSync(recordPath, "utf8")) as Record<string, unknown>;
     const candidate = prior["config_premerge"] as Record<string, unknown> | undefined;
-    if (prior["runtime"] === runtime && candidate?.["schema_version"] === "2.0" && (configPremerge as Record<string, unknown> | undefined)?.["schema_version"] !== "2.0") normalizedPremerge = { schema_version: "2.0", origin: candidate["origin"], previous: configPremerge };
+    if ((configPremerge as Record<string, unknown> | undefined)?.["schema_version"] === "2.0") { /* bundle installer already wrote the complete lineage */ }
+    else if (prior["runtime"] === runtime && candidate?.["schema_version"] === "2.0") normalizedPremerge = { schema_version: "2.0", origin: candidate["origin"], previous: configPremerge };
     else if (prior["runtime"] === runtime && candidate?.["schema_version"] === "1.0" && configPremerge && typeof configPremerge === "object") normalizedPremerge = { schema_version: "2.0", origin: candidate, previous: configPremerge };
-  } catch { /* no prior record; the generated snapshot is the first origin */ }
+    else if (prior["runtime"] === runtime && configPremerge && typeof configPremerge === "object") normalizedPremerge = { schema_version: "2.0", origin: { schema_version: "unknown" }, previous: configPremerge };
+  } catch {
+    // A prior path that cannot be read is evidence of a damaged lineage, not
+    // evidence that the just-installed image was the user's original config.
+    if (fs.existsSync(recordPath) && configPremerge && typeof configPremerge === "object") normalizedPremerge = { schema_version: "2.0", origin: { schema_version: "unknown" }, previous: configPremerge };
+  }
   if (normalizedPremerge && typeof normalizedPremerge === "object" && (normalizedPremerge as Record<string, unknown>)["schema_version"] === "1.0") {
     normalizedPremerge = { schema_version: "2.0", origin: normalizedPremerge, previous: normalizedPremerge };
   }
-  const record = { version, installedAt, runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds, active_kits: activeKits, ...(normalizedPremerge ? { config_premerge: normalizedPremerge } : {}), ...(authorizedBackingRoots.length > 0 ? { authorized_backing_roots: authorizedBackingRoots } : {}) };
+  const record = { version, installedAt, runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds, active_kits: activeKits, ...(normalizedPremerge ? { config_premerge: normalizedPremerge } : {}), ...(installedValues ? { installed_values: installedValues } : {}), ...(authorizedBackingRoots.length > 0 ? { authorized_backing_roots: authorizedBackingRoots } : {}) };
   const recordTmp = `${recordPath}.tmp.${process.pid}`;
   fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
   fs.chmodSync(recordTmp, 0o600);
@@ -1183,7 +1189,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const destSettingsPath = path.join(options.dest, "settings.json");
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
-      const { mergeSettings, captureConfigPremerge } = _require(installMergePath) as { mergeSettings: MergeSettingsFn; captureConfigPremerge: (configPath: string) => unknown };
+      const { mergeSettings, captureConfigPremerge, installedValues } = _require(installMergePath) as { mergeSettings: MergeSettingsFn; captureConfigPremerge: (configPath: string) => unknown; installedValues: (configPath: string, merged: Record<string, unknown>, managed: Record<string, unknown>) => unknown };
       const configPremerge = { ...(captureConfigPremerge(destSettingsPath) as Record<string, unknown>), runtime: "claude-code" };
       let existing: Record<string, unknown> = {};
       if (fs.existsSync(destSettingsPath)) {
@@ -1198,7 +1204,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const skillsSync = copyDirMerge(path.join(bundle, ".claude", "skills"), path.join(options.dest, "skills"));
       const agentsSync = copyDirMerge(path.join(bundle, ".claude", "agents"), path.join(options.dest, "agents"));
       // Write version stamp.
-      writeInstallRecord(options.dest, "claude-code", true, options.activeKitIds ?? [], { ...configPremerge, post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(destSettingsPath)).digest("hex") });
+      writeInstallRecord(options.dest, "claude-code", true, options.activeKitIds ?? [], { ...configPremerge, post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(destSettingsPath)).digest("hex") }, [], installedValues(destSettingsPath, merged, managed));
       console.log(`Flow Agents global hooks merged for claude-code in ${options.dest}`);
       console.log(`Synced skills (+${skillsSync.added} new, ~${skillsSync.updated} updated) and agents (+${agentsSync.added} new, ~${agentsSync.updated} updated) in ${options.dest}`);
       // Write a per-skill-file sha256 content-hash manifest, sibling of install.json, so
@@ -1273,7 +1279,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const configBinding = resolveOpenCodeConfigBinding(opencodeGlobalConfigPath(options.dest));
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
-      const { mergeSettings, captureConfigPremerge } = _require(installMergePath) as { mergeSettings: MergeSettingsFn; captureConfigPremerge: (configPath: string) => unknown };
+      const { mergeSettings, captureConfigPremerge, installedValues } = _require(installMergePath) as { mergeSettings: MergeSettingsFn; captureConfigPremerge: (configPath: string) => unknown; installedValues: (configPath: string, merged: Record<string, unknown>, managed: Record<string, unknown>) => unknown };
       const configPremerge = { ...(captureConfigPremerge(configBinding.canonicalPath) as Record<string, unknown>), runtime: "opencode" };
       let existing: Record<string, unknown> = {};
       if (fs.existsSync(configBinding.canonicalPath)) {
@@ -1302,7 +1308,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       revalidateOpenCodeConfigBinding(configBinding);
       writeJsonAtomic(configBinding.canonicalPath, merged);
       // Stamp only after every required runtime asset and its content manifest exist.
-      writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? [], stampConfigPremergePostInstallHash(configPremerge, configBinding.canonicalPath), configBinding.trustedSymlinkRoot ? [fs.realpathSync(configBinding.trustedSymlinkRoot)] : []);
+      writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? [], stampConfigPremergePostInstallHash(configPremerge, configBinding.canonicalPath), configBinding.trustedSymlinkRoot ? [fs.realpathSync(configBinding.trustedSymlinkRoot)] : [], installedValues(configBinding.canonicalPath, merged, managed));
       console.log(`Flow Agents global config and runtime assets synced for opencode in ${options.dest}`);
       console.log(`Reconciled ${installedAssetCount} managed runtime files and ${skillNames.length} discoverable skills`);
       return configureWorkflowProviders(options);
@@ -1346,11 +1352,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // Project bundle installers create the merge snapshot themselves. Forward it
     // into the richer outer record instead of erasing provenance on return.
     let configPremerge: unknown;
+    let installedValues: unknown;
     try {
       const generated = JSON.parse(fs.readFileSync(durableInstallRecordPath(options.dest), "utf8")) as Record<string, unknown>;
       configPremerge = generated["config_premerge"];
+      installedValues = generated["installed_values"];
     } catch { /* runtimes without a merged config have no snapshot */ }
-    writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? [], configPremerge);
+    writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? [], configPremerge, [], installedValues);
     // Project-scoped claude-code: write the same ownership manifest the --global path writes
     // (see above), so `flow-agents init --uninstall --runtime claude-code <dest>` has a
     // manifest-backed removal path here too, not just for --global. The source tree is the

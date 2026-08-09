@@ -317,7 +317,20 @@ function captureConfigPremerge(configPath) {
   };
 }
 
-function validConfigPremergeSnapshot(value, runtime) {
+function normalizeV1ConfigPremergeSnapshot(value, runtime, configPath) {
+  if (!value || typeof value !== "object" || value.schema_version !== "1.0") return value;
+  // Released v1 records predate snapshot-local identity. Their enclosing install
+  // record and the config path being operated on were the identity contract.
+  // Preserve explicit fields so a contradictory record still fails validation.
+  return {
+    ...value,
+    ...(value.runtime === undefined ? { runtime } : {}),
+    ...(value.config_path === undefined && configPath ? { config_path: path.resolve(configPath) } : {}),
+  };
+}
+
+function validConfigPremergeSnapshot(value, runtime, configPath) {
+  value = normalizeV1ConfigPremergeSnapshot(value, runtime, configPath);
   if (!value || typeof value !== "object" || value.schema_version !== "1.0"
     || typeof value.existed !== "boolean" || typeof value.bytes_base64 !== "string"
     || typeof value.post_install_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(value.post_install_sha256)
@@ -331,16 +344,34 @@ function validConfigPremergeSnapshot(value, runtime) {
   } catch { return false; }
 }
 
-function priorOrigin(installRecordPath, runtime) {
+function priorOrigin(installRecordPath, runtime, configPath) {
+  if (!fs.existsSync(installRecordPath)) return { state: "absent" };
   try {
     const record = JSON.parse(fs.readFileSync(installRecordPath, "utf8"));
-    if (record.runtime !== runtime) return null;
+    if (record.runtime !== runtime) return { state: "invalid" };
     const premerge = record.config_premerge;
-    if (premerge?.schema_version === "2.0" && validConfigPremergeSnapshot(premerge.origin, runtime)) return premerge.origin;
+    if (premerge?.schema_version === "2.0") {
+      if (!validConfigPremergeSnapshot(premerge.origin, runtime, configPath)) return { state: "invalid" };
+      return { state: "valid", origin: normalizeV1ConfigPremergeSnapshot(premerge.origin, runtime, configPath) };
+    }
     // Version 1 had one snapshot serving both purposes. It is the best available
     // lineage origin when upgrading; new records split the responsibilities.
-    return validConfigPremergeSnapshot(premerge, runtime) ? premerge : null;
-  } catch { return null; }
+    return validConfigPremergeSnapshot(premerge, runtime, configPath)
+      ? { state: "valid", origin: normalizeV1ConfigPremergeSnapshot(premerge, runtime, configPath) }
+      : { state: "invalid" };
+  } catch { return { state: "invalid" }; }
+}
+
+function installedValues(configPath, merged, managed) {
+  const hooks = [];
+  for (const groups of Object.values(managed.hooks || {})) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) if (group && Array.isArray(group.hooks)) hooks.push(...group.hooks);
+  }
+  const values = { hooks };
+  if (valueContainsManagedMarker(merged.statusLine)) values.statusLine = merged.statusLine;
+  if (Array.isArray(managed.instructions)) values.instructions = managed.instructions;
+  return { [path.resolve(configPath)]: values };
 }
 
 /**
@@ -362,12 +393,13 @@ function stampConfigPremergePostInstallHash(premerge, configPath) {
   return { ...premerge, post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(configPath)).digest("hex") };
 }
 
-function writeInstallRecord(installRecordPath, version, runtime, configPremerge) {
+function writeInstallRecord(installRecordPath, version, runtime, configPremerge, installed_values) {
   const record = {
     version,
     installedAt: new Date().toISOString(),
     runtime,
     ...(configPremerge ? { config_premerge: configPremerge } : {}),
+    ...(installed_values ? { installed_values } : {}),
   };
   const dir = path.dirname(installRecordPath);
   fs.mkdirSync(dir, { recursive: true });
@@ -396,7 +428,7 @@ function writeInstallRecord(installRecordPath, version, runtime, configPremerge)
 function runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime }) {
   // (a) Read dest JSON (or {} if absent).
   const capturedPremerge = { ...captureConfigPremerge(configPath), runtime };
-  const carriedOrigin = priorOrigin(installRecordPath, runtime);
+  const carriedOrigin = priorOrigin(installRecordPath, runtime, configPath);
   let existing = {};
   if (fs.existsSync(configPath)) {
     try {
@@ -439,8 +471,10 @@ function runMerge({ configPath, managedHooksPath, version, installRecordPath, ru
   // path); `previous` answers byte-fidelity restore (before this install). They
   // must not be conflated: a reinstall otherwise either loses user edits or
   // mistakes our first install's values for user-owned values forever.
-  const origin = carriedOrigin ?? previous;
-  writeInstallRecord(installRecordPath, version, runtime, { schema_version: "2.0", origin, previous });
+  const origin = carriedOrigin.state === "valid" ? carriedOrigin.origin
+    : carriedOrigin.state === "invalid" ? { schema_version: "unknown" }
+      : previous;
+  writeInstallRecord(installRecordPath, version, runtime, { schema_version: "2.0", origin, previous }, installedValues(configPath, merged, managed));
 }
 
 // ─── CLI wrapper ──────────────────────────────────────────────────────────────
@@ -494,4 +528,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { mergeSettings, isManagedHookGroup, isManagedInnerHook, FA_MARKERS, captureConfigPremerge, restoreConfigPremergeBytes };
+module.exports = { mergeSettings, isManagedHookGroup, isManagedInnerHook, FA_MARKERS, captureConfigPremerge, installedValues, restoreConfigPremergeBytes };
