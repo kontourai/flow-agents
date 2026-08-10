@@ -348,7 +348,7 @@ test("#1048: a committed host-declared ordinary CI lane is substantive tests evi
     ],
   }));
   execFileSync("git", ["add", "package.json"], { cwd: root });
-  execFileSync("git", ["commit", "-qm", "vacuous lanes"], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "vacuous lanes"], { cwd: root });
   for (const command of ["npm run ci:empty", "npm run ci:true", "npm run ci:blank"]) {
     assert.equal(isMeaningfulTestCommand(command, root), false, `${command} remains vacuous despite manifest membership`);
     assert.equal(testExecutionProof(command, root), null);
