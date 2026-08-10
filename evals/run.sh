@@ -218,6 +218,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_hook_certification_matrix.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_gate_certification_matrix.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_hook_category_behaviors.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_artifacts.sh" || result=1
