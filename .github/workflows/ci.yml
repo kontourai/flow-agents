@@ -613,6 +613,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check golden-builder-build-end-to-end-integration
 
+      - name: Effectiveness loop demo integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check effectiveness-loop-demo-integration
+
       - name: Codex hook resolution integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check codex-hook-resolution-integration
