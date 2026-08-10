@@ -1,6 +1,6 @@
 {
   "run_id": "econ-fixture-active-mid-flight",
-  "terminal_status": "active_abandoned",
+  "terminal_status": "active",
   "phase_wall_clock_s": {
     "design-probe": 90,
     "plan": 300,
