@@ -4712,8 +4712,8 @@ test("record-gate-claim emits one canonical execution evidence item for each pas
   });
   const first = "writer-first.test.sh";
   const second = "writer-second.test.sh";
-  fs.writeFileSync(path.join(session.projectRoot, first), "set -e\ntest 1 -eq 1\nprintf '1..1\\n'\n");
-  fs.writeFileSync(path.join(session.projectRoot, second), "set -e\ntest 2 -eq 2\nprintf '1..1\\n'\n");
+  fs.writeFileSync(path.join(session.projectRoot, first), "set -e\ntest 1 -eq 1\nprintf '1..1\\nok 1 - first command\\n'\n");
+  fs.writeFileSync(path.join(session.projectRoot, second), "set -e\ntest 2 -eq 2\nprintf '1..1\\nok 1 - second command\\n'\n");
   fixtureGit(session, ["add", first, second]);
   fixtureGit(session, ["commit", "-m", "writer multi-command test fixtures"]);
   await advanceSessionToVerify(session);
