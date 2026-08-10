@@ -4002,20 +4002,23 @@ else
 fi
 
 cat > "$MULTI_PROJECT/package.json" <<'JSON'
-{"scripts":{"build":"tsc --noEmit","test":"node --test test/*.test.mjs","test:unit":"npm run build && node --test test/*.test.mjs"}}
+{"scripts":{"build":"tsc --noEmit","test":"node --test test/*.test.mjs","test:unit":"npm run build && node --test test/*.test.mjs","verify:static":"node --check checks/static-check.mjs","test:full":"node --test test/*.test.mjs","ci:fast":"npm run verify:static && npm run test:full"},"trust-reconcile-manifest":[{"id":"ci-fast","command":"npm run ci:fast"}]}
 JSON
+printf 'export {};\n' > "$MULTI_PROJECT/checks/static-check.mjs"
 git -C "$MULTI_PROJECT" add package.json
+git -C "$MULTI_PROJECT" add checks/static-check.mjs
 git -C "$MULTI_PROJECT" commit -qm "substantive test fixture"
 if node --input-type=module - "$ROOT/build/src/cli/workflow-sidecar.js" "$MULTI_PROJECT" <<'NODE'
 const [modulePath, projectRoot] = process.argv.slice(2);
 const { isMeaningfulTestCommand } = await import(modulePath);
 if (!isMeaningfulTestCommand('npm test', projectRoot)) process.exit(1);
 if (!isMeaningfulTestCommand('npm run test:unit', projectRoot)) process.exit(2);
+if (!isMeaningfulTestCommand('npm run ci:fast', projectRoot)) process.exit(3);
 NODE
 then
-  _pass "tests-evidence accepts substantive direct and composed Node package test scripts"
+  _pass "tests-evidence accepts substantive direct/composed scripts and an exact committed manifest CI lane"
 else
-  _fail "tests-evidence rejected a substantive package test script"
+  _fail "tests-evidence rejected a substantive package test script or exact committed manifest CI lane"
 fi
 if flow_agents_node "$WRITER" record-critique "$MULTI_DIR" \
   --id multi-review --reviewer multi-reviewer --verdict pass --summary "Review refreshed after the package-script fixture changed." \
@@ -4024,6 +4027,42 @@ if flow_agents_node "$WRITER" record-critique "$MULTI_DIR" \
   _pass "tests-evidence fixture refreshes review after an intentional source change"
 else
   _fail "tests-evidence fixture failed to refresh stale review: $(cat "$TMPDIR_EVAL/multi-critique-refresh.out" "$TMPDIR_EVAL/multi-critique-refresh.err")"
+fi
+
+MULTI_MANIFEST_CI="npm run ci:fast"
+MULTI_MANIFEST_CI_REF="{\"kind\":\"command\",\"excerpt\":\"$MULTI_MANIFEST_CI\",\"summary\":\"Exact committed manifest CI lane observed by the writer.\"}"
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Missing-input batch probe." \
+  >"$TMPDIR_EVAL/multi-missing-inputs.out" 2>"$TMPDIR_EVAL/multi-missing-inputs.err"; then
+  _fail "tests-evidence accepted an invocation missing every required input"
+elif rg -q -- '--command' "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err" \
+  && rg -q -- 'kind:"command".*evidence-ref-json.*excerpt exactly equals' "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err" \
+  && rg -q -- '--criterion-json.*every declared acceptance criterion' "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err" \
+  && rg -q -- 'Do not supply --observed-command-json' "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err"; then
+  _pass "tests-evidence batches missing command, exact command-ref, and criterion inputs while explaining writer-owned observations"
+else
+  _fail "tests-evidence missing-input batch was incomplete: $(cat "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err")"
+fi
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Exact committed manifest CI lane." \
+  --command "$MULTI_MANIFEST_CI" \
+  --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\".kontourai/flow-agents/$MULTI_SLUG/$MULTI_SLUG--plan-work.md\",\"summary\":\"Durable verification plan.\"}" \
+  --evidence-ref-json "$MULTI_MANIFEST_CI_REF" \
+  --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_MANIFEST_CI_REF]}" \
+  --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_MANIFEST_CI_REF]}" \
+  --timestamp "2026-07-11T11:00:28Z" >"$TMPDIR_EVAL/multi-manifest-ci.out" 2>"$TMPDIR_EVAL/multi-manifest-ci.err" \
+  && node - "$MULTI_DIR/trust.bundle" "$MULTI_MANIFEST_CI" <<'NODE'
+const fs = require('node:fs');
+const [bundleFile, command] = process.argv.slice(2);
+const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
+const gate = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence');
+const observed = gate?.metadata?.observed_commands?.[0];
+if (!observed || observed.command !== command || observed.exit_code !== 0 || !/^[a-f0-9]{64}$/.test(observed.output_sha256 ?? '') || observed.execution_proof?.kind !== 'local-process-exit' || observed.test_count < 1) process.exit(1);
+NODE
+then
+  _pass "#1048: exact committed manifest CI lane is writer-observed with exit code, output digest, and substantive local proof"
+else
+  _fail "#1048: manifest CI lane did not record as observed substantive tests-evidence: $(cat "$TMPDIR_EVAL/multi-manifest-ci.out" "$TMPDIR_EVAL/multi-manifest-ci.err")"
 fi
 
 if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \

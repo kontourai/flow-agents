@@ -295,6 +295,54 @@ test("package-script output cannot manufacture a positive test count", () => {
   assert.equal(inferExecutedTestCount("npm test", root, "# tests 999\n"), 0);
 });
 
+test("#1048: a committed host-declared ordinary CI lane is substantive tests evidence", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({
+      scripts: {
+        "verify:static": "node --check checks/static-check.mjs",
+        "test:full": "node --test test/contract.test.mjs",
+        "ci:fast": "npm run verify:static && npm run test:full",
+      },
+      "trust-reconcile-manifest": [{ id: "ci-fast", command: "npm run ci:fast" }],
+    }),
+    "checks/static-check.mjs": "export {};\n",
+    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+  });
+
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "fixture"], { cwd: root });
+
+  assert.equal(isMeaningfulTestCommand("npm run ci:fast", root), true);
+  assert.deepEqual(testExecutionProof("npm run ci:fast", root), {
+    kind: "local-process-exit",
+    runner: "node --test",
+    static_test_units: 1,
+  });
+  assert.equal(isMeaningfulTestCommand("npm run ci:fast -- --verbose", root), false, "manifest matching is exact, not prefix-based");
+
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+    scripts: { "ci:uncommitted": "node --test test/contract.test.mjs" },
+    "trust-reconcile-manifest": [{ id: "ci-uncommitted", command: "npm run ci:uncommitted" }],
+  }));
+  assert.equal(isMeaningfulTestCommand("npm run ci:uncommitted", root), false, "an uncommitted manifest cannot authorize a command");
+
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+    scripts: { "ci:empty": "echo ok", "ci:true": "true", "ci:blank": "" },
+    "trust-reconcile-manifest": [
+      { id: "ci-empty", command: "npm run ci:empty" },
+      { id: "ci-true", command: "npm run ci:true" },
+      { id: "ci-blank", command: "npm run ci:blank" },
+    ],
+  }));
+  execFileSync("git", ["add", "package.json"], { cwd: root });
+  execFileSync("git", ["commit", "-qm", "vacuous lanes"], { cwd: root });
+  for (const command of ["npm run ci:empty", "npm run ci:true", "npm run ci:blank"]) {
+    assert.equal(isMeaningfulTestCommand(command, root), false, `${command} remains vacuous despite manifest membership`);
+    assert.equal(testExecutionProof(command, root), null);
+  }
+});
+
 test("supported node test workflows produce source-derived local proof", () => {
   const root = fixture({
     "package.json": JSON.stringify({ scripts: { test: "node --test test/contract.test.mjs" } }),

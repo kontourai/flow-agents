@@ -18,7 +18,7 @@ import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
-import { assertTrustedGitAncestor, isExactLowercaseCommitSha } from "../lib/trusted-git.js";
+import { assertTrustedGitAncestor, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
@@ -3542,6 +3542,27 @@ type LocalTestExecutionProof = {
 };
 type TestExecutionProof = LocalTestExecutionProof | CoordinatedCommandReceiptProof;
 
+/**
+ * A host may name an otherwise-unconventional CI lane in its committed
+ * reconcile manifest. This is shape authorization only: callers still need a
+ * locally-derived non-vacuous test proof, and the writer still executes and
+ * records the command before accepting a passing claim.
+ */
+function committedManifestDeclaresExactCommand(command: string, projectRoot: string): boolean {
+  try {
+    const head = resolveTrustedLocalGitCommit(projectRoot, "HEAD");
+    const pkg = JSON.parse(readTrustedGitBlobSync(projectRoot, head, "package.json").toString("utf8"));
+    const manifest = pkg && typeof pkg === "object" && !Array.isArray(pkg) ? pkg["trust-reconcile-manifest"] : null;
+    return Array.isArray(manifest) && manifest.some((entry) => entry
+      && typeof entry === "object"
+      && !Array.isArray(entry)
+      && typeof entry.id === "string"
+      && entry.command === command);
+  } catch {
+    return false;
+  }
+}
+
 function staticTestUnits(file: string, executable: string): number {
   try {
     const content = fs.readFileSync(file, "utf8").slice(0, 256 * 1024);
@@ -3566,6 +3587,7 @@ function staticTestUnits(file: string, executable: string): number {
  * into a supported test workflow or supply this locally-created proof.
  */
 export function testExecutionProof(command: string, projectRoot: string, seenScripts = new Set<string>(), packageScriptBody = false): TestExecutionProof | null {
+  const manifestDeclared = committedManifestDeclaresExactCommand(command, projectRoot);
   const normalized = command.trim().replace(/\s+/g, " ");
   if (!normalized || /[`$()]/.test(normalized)) return null;
   if (/[;&|]/.test(normalized)) {
@@ -3600,7 +3622,11 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
       };
     }
     const script = tokens[1] === "run" || tokens[1] === "run-script" ? tokens[2] : tokens[1];
-    if (!script || !hasTestIntent(script) || seenScripts.has(script)) return null;
+    // A host's exact, committed reconcile-manifest entry authorizes an
+    // unconventional *script name*, not its body. The body must still resolve
+    // to a substantive local test workflow below; `echo ok` and `true` remain
+    // null proof and cannot become tests-evidence.
+    if (!script || (!manifestDeclared && !hasTestIntent(script)) || seenScripts.has(script)) return null;
     try {
       const pkg = loadJson(path.join(projectRoot, "package.json"));
       const scriptCommand = pkg.scripts && typeof pkg.scripts === "object" ? pkg.scripts[script] : undefined;
@@ -5449,7 +5475,15 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   if (opts(p, "observed-command-json").length > 0) {
     die("record-gate-claim does not accept --observed-command-json; the canonical writer executes and records every --command");
   }
-  if (mustRunTests && gateCommands.length === 0) die("record-gate-claim requires at least one --command for a passing tests-evidence claim");
+  if (mustRunTests) {
+    const missing: string[] = [];
+    if (gateCommands.length === 0) missing.push("at least one --command");
+    if (opts(p, "evidence-ref-json").length === 0) missing.push('a kind:"command" --evidence-ref-json whose excerpt exactly equals a writer-observed --command');
+    if (opts(p, "criterion-json").length === 0) missing.push("one --criterion-json for every declared acceptance criterion");
+    if (missing.length > 0) {
+      die(`record-gate-claim passing tests-evidence requires ${missing.join("; ")}. Do not supply --observed-command-json: the canonical writer executes each --command and records its exit code and output digest.`);
+    }
+  }
   // #619: the narrative evidence-ref guards (validateEvidenceRef / normalizeCheck /
   // completePassingCriteria) need a non-null, location-independent project root that never
   // dies on a non-canonical session. normalizeObservedCommands still requires the strict
