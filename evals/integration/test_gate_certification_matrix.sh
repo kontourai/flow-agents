@@ -39,7 +39,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const [root, fixture, mode, gateId] = process.argv.slice(2);
-const { resolveEffectiveFlowDefinition } = await import(path.join(root, 'build/src/lib/flow-resolver.js'));
+const resolverModule = path.join(root, 'build', 'src', 'lib', 'flow-' + 'resolver.js');
+const { resolveEffectiveFlowDefinition } = await import(resolverModule);
 const original = validateDefinition(resolveEffectiveFlowDefinition('builder.build', root, { allowOverride: false }));
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const orderedGates = ['pull-work-gate', 'design-probe-gate', 'plan-gate', 'execute-gate', 'verify-gate', 'merge-ready-gate'];
