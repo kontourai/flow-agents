@@ -149,12 +149,13 @@ this emitter), never a guessed one.
   mode never conflates the Flow run id with a session id (per #922's boundary). Binding a real
   session identity into `run_correlation.identities.runtime_session` alongside `flow_run` is
   **out of scope for phase A** — see "What phase A does NOT do" below.
-- **`terminal_status`** (#925 taxonomy) — derived from Flow's own `status` enum, honestly:
-  `completed`, `canceled`, `failed`, and `accepted_by_exception` map straight across; `active`,
-  `blocked`, `needs_decision`, and `paused` all map to **`active_abandoned`** — the run had **not**
-  reached a terminal state as of this record's `at` timestamp, and this mode **never** reports such
-  a run as `completed`. This is the fault-injected case the eval proves: taking a snapshot of a
-  known-active run must never yield `terminal_status: "completed"`.
+- **`terminal_status`** (#925 taxonomy) — the canonical Flow `status` observed at record time.
+  All recognized values map straight across: `completed`, `canceled`, `failed`,
+  `accepted_by_exception`, `active`, `blocked`, `needs_decision`, and `paused`. In particular, an
+  active run records `terminal_status: "active"`, never `active_abandoned`: a snapshot cannot
+  establish that nobody intends to continue the run. `active_abandoned` is not emitted unless a
+  future producer declares and proves a staleness-at-run-close derivation. This mode never reports
+  a non-terminal run as `completed`.
 - **`phases[]`** — one bucket per Builder step actually visited, walked from `transitions[].at`
   timestamps: the interval between transition *i-1* and transition *i* is attributed to the step
   transition *i-1* moved the run **into** (`to_step`, or the unchanged step when a transition
@@ -199,7 +200,7 @@ this emitter), never a guessed one.
 - **`defects.verification_verdict`** — the **last** transition departing the `verify` step, bounded
   by whether the run ever reached a terminal state: `PASS` if that last transition is `allowed`;
   `FAIL` only if it is `blocked` **and** the run has since terminated without a later pass (a block
-  that is still open on a still-`active_abandoned` run is `NOT_VERIFIED`, not `FAIL` — the run has
+  that is still open on a non-terminal run is `NOT_VERIFIED`, not `FAIL` — the run has
   not finished attempting verification); `NOT_VERIFIED` if `verify` was never reached.
 - **`time.human_wait_s`** — real pause→resume (and pause→cancel, and an still-open pause→`now`)
   intervals summed from the run's `lifecycle[]` ledger. This is the TRUE total, independent of
@@ -233,9 +234,7 @@ this emitter), never a guessed one.
   `multi_cursor` are all new). A `state.status` value outside the eight known values
   (`active`/`blocked`/`needs_decision`/`paused`/`canceled`/`completed`/`failed`/
   `accepted_by_exception`) makes `deriveFlowRunEconomics` return `{ok:false, reason:"..."}` — no
-  record is produced — rather than silently folding an unrecognized future status into
-  `active_abandoned`, which would be indistinguishable from a genuinely-observed
-  active/blocked/needs_decision/paused run.
+  record is produced — rather than silently guessing a status.
 - **Active `multi_cursor` concurrent step claims are REFUSED, never silently mis-windowed (#925
   review finding 5 / finding 10).** The installed Flow schema supports durable concurrent step
   claims (`multi_cursor.active_claims`/`claim_history`) for hosts running more than one cursor

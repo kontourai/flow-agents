@@ -33,8 +33,8 @@
     },
     "terminal_status": {
       "type": "string",
-      "enum": ["completed", "canceled", "failed", "accepted_by_exception", "active_abandoned"],
-      "description": "Honest run-termination taxonomy (flow-agents#925), derived from the Flow run's own `status` field. 'active_abandoned' means the run was still active/blocked/needs_decision/paused when THIS record was produced -- it is NEVER reported as 'completed'. Optional/additive on v0.2 (present only on flow_run_record-produced records today); a future shape version may promote it to required."
+      "enum": ["completed", "canceled", "failed", "accepted_by_exception", "active", "blocked", "needs_decision", "paused"],
+      "description": "Canonical Flow status observed when the record was produced (flow-agents#925). Non-terminal states are preserved exactly: this producer does not infer abandonment from a snapshot. Optional/additive on v0.2 (present only on flow_run_record-produced records today); a future shape version may promote it to required."
     },
     "tokens_unattributed": {
       "type": "boolean",

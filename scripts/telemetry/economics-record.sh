@@ -180,7 +180,7 @@ if [[ -n "$flow_run_dir" ]]; then
   # Structural sanity check before the local-first write (mirrors the legacy path's guard).
   # Review finding 3: cost.* token/cost leaves may be null (tokens_unattributed) -- never
   # required to be a real number here. Review finding 11 (defense-in-depth): also pin
-  # terminal_status to the closed #925 taxonomy before it ever reaches the local log.
+  # terminal_status to the canonical observable Flow-status vocabulary before it reaches the local log.
   if ! printf '%s' "$record" | jq -e '
     def number: type == "number" and . >= 0;
     def number_or_null: (type == "number" and . >= 0) or . == null;
@@ -192,7 +192,7 @@ if [[ -n "$flow_run_dir" ]]; then
     and (.time.wall_clock_s | number)
     and (.iterations.count | number)
     and (.defects.gate_fires | number)
-    and (.terminal_status as $t | ["completed","canceled","failed","accepted_by_exception","active_abandoned"] | index($t) != null)
+    and (.terminal_status as $t | ["completed","canceled","failed","accepted_by_exception","active","blocked","needs_decision","paused"] | index($t) != null)
   ' >/dev/null 2>&1; then
     exit 0
   fi

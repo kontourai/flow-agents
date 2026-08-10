@@ -17,7 +17,7 @@
 //   node flow-run-economics.mjs --flow-run-dir <path/to/.kontourai/flow/runs/RUN_ID> [--now <iso>]
 //
 // --now overrides "current time" for the tail phase window (defaults to the real clock) — used by
-// the eval to make the active/active_abandoned case deterministic.
+// the eval to make the active-run case deterministic.
 //
 // Prints one JSON object to stdout and exits 0 always (best-effort, matches economics-record.sh's
 // fail-open philosophy — the caller decides whether {ok:false} means "no record" or "explicit
@@ -28,25 +28,28 @@ import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// --- terminal taxonomy (#925: honest completed/canceled/failed/blocked/active_abandoned) ---------
-// Flow's own `status` enum is the single source of truth (schemas/flow-run.schema.json). A run that
-// is still active/blocked/needs_decision/paused when THIS record is taken is NOT complete — it is
-// "active_abandoned": the record is an honest snapshot of a run that had not reached a terminal
-// state as of `at`, never mislabeled as success or failure.
+// --- status projection -----------------------------------------------------------------------------
+// Flow's own `status` enum is the single source of truth (schemas/flow-run.schema.json). This
+// producer observes state, not intent: an active run is active, and it cannot call that run
+// abandoned merely because it is emitting a snapshot. `active_abandoned` is deliberately absent
+// until an explicit, declared staleness-at-close derivation exists.
 const TERMINAL_STATUS_VALUES = [
   'completed',
   'canceled',
   'failed',
   'accepted_by_exception',
-  'active_abandoned',
+  'active',
+  'blocked',
+  'needs_decision',
+  'paused',
 ];
 
 // Review finding 5 (MEDIUM): every Flow `status` value this tool knows how to map. A value
 // outside this set is REFUSED (deriveFlowRunEconomics returns ok:false) rather than silently
-// folded into active_abandoned — the installed Flow schema's status enum has already grown once
+// folded into a guessed status — the installed Flow schema's status enum has already grown once
 // (paused/canceled/lifecycle/gate_outcome_history/multi_cursor are all new since an earlier
 // working copy), so a future new status value must surface loudly, not vanish into a bucket
-// indistinguishable from a genuinely-observed active/blocked/needs_decision/paused run.
+// indistinguishable from a genuinely-observed status.
 const KNOWN_FLOW_STATUSES = new Set([
   'active', 'blocked', 'needs_decision', 'paused',
   'canceled', 'completed', 'failed', 'accepted_by_exception',
@@ -66,10 +69,10 @@ function deriveTerminalStatus(flowStatus) {
     case 'blocked':
     case 'needs_decision':
     case 'paused':
-      return 'active_abandoned';
+      return flowStatus;
     default:
-      // Unknown/unrecognized flow status: never guess toward "completed" — label honestly.
-      return 'active_abandoned';
+      // Unknown/unrecognized Flow status is refused by deriveFlowRunEconomics.
+      return null;
   }
 }
 
@@ -221,7 +224,7 @@ function deriveGateFires(state, transitions) {
 }
 
 // --- defects.verification_verdict: the LAST transition departing the "verify" step, bounded by
-// whether the run ever reached a terminal state. A block that is still open on an active_abandoned
+// whether the run ever reached a terminal state. A block that is still open on a non-terminal
 // run is NOT a FAIL — the run has not finished attempting verification. A block that is still open
 // when the run terminated (failed/canceled/accepted_by_exception without a later "verify" pass) IS
 // a genuine FAIL. No "verify" transition observed at all -> NOT_VERIFIED (never guessed as PASS).
@@ -235,7 +238,7 @@ function deriveVerificationVerdict(transitions, terminalStatus) {
     return 'PASS';
   }
   if (last.status === 'blocked') {
-    const runEnded = terminalStatus !== 'active_abandoned';
+    const runEnded = isTerminalFlowStatus(terminalStatus);
     return runEnded ? 'FAIL' : 'NOT_VERIFIED';
   }
   return 'NOT_VERIFIED';
@@ -281,7 +284,7 @@ export function deriveFlowRunEconomics(state, { nowIso = new Date().toISOString(
   if (!KNOWN_FLOW_STATUSES.has(state.status)) {
     return {
       ok: false,
-      reason: `flow run state.json has an unrecognized status "${state.status}" — refusing rather than silently bucketing it into active_abandoned (flow-agents#925)`,
+      reason: `flow run state.json has an unrecognized status "${state.status}" — refusing rather than guessing a status (flow-agents#925)`,
     };
   }
   if (multiCursorActive(state)) {

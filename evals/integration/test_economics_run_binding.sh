@@ -11,8 +11,8 @@
 #   AC2  iterations.route_backs / iterations.count derive from transitions[].type=="route_back".
 #   AC3  defects.gate_fires / defects.verification_verdict derive honestly (NOT_VERIFIED when
 #        "verify" was never reached).
-#   AC4  terminal_status honesty (#925): a still-active run is NEVER reported "completed" — RED/GREEN
-#        fault-injection proof that this specific assertion has power.
+#   AC4  terminal_status honesty (#925): a still-active run records `active`, never an inferred
+#        `active_abandoned` or `completed` — RED/GREEN fault-injection proof has power.
 #   AC5  time.human_wait_s derives from real lifecycle pause/resume intervals (canceled run).
 #   AC6  economics-record.sh --flow-run-dir assembles a schema-valid kontour.console.economics
 #        record from the above, with tokens null + tokens_unattributed:true (never fabricated), and
@@ -124,26 +124,25 @@ for phase in design-probe plan execute; do
 done
 
 # ── AC4: terminal_status honesty — RED/GREEN fault-injection power proof -------------------------
-echo "--- AC4: terminal_status honesty — a still-active run is NEVER 'completed' (RED/GREEN) ---"
+echo "--- AC4: terminal_status honesty — a still-active run is 'active', not inferred abandoned (RED/GREEN) ---"
 terminal2_actual="$(jq -r '.terminal_status' "$DERIVED2")"
-[[ "$terminal2_actual" == "active_abandoned" ]] && pass "GREEN: current code reports active_abandoned for a mid-flight run, never completed" \
-  || fail "GREEN case failed: got $terminal2_actual, expected active_abandoned"
+[[ "$terminal2_actual" == "active" ]] && pass "GREEN: current code preserves active for a mid-flight run (not active_abandoned)" \
+  || fail "GREEN case failed: got $terminal2_actual, expected active"
 
 # RED proof: inject the exact defect this AC guards against — a naive terminal-status mapping
-# that folds every non-terminal Flow status into "completed" — and prove the assertion above
-# WOULD catch it. If this broken copy also reported active_abandoned, the assertion above would
-# have no power to catch a real regression.
+# that folds `active` into `active_abandoned` — and prove the assertion above WOULD catch this
+# exact label-vs-derivation regression.
 BROKEN="$TMP/flow-run-economics.broken.mjs"
-sed -E "s/case 'active':\$/case '__never_matches__':/; s/return 'active_abandoned';/return 'completed';/" \
+sed -E "s/return flowStatus;/return 'active_abandoned';/" \
   "$FLOW_RUN_ECON" > "$BROKEN"
 if ! diff -q "$FLOW_RUN_ECON" "$BROKEN" >/dev/null 2>&1; then
   BROKEN_OUT="$TMP/derived2-broken.json"
   node "$BROKEN" --flow-run-dir "$FIX/active-mid-flight" --now "$NOW1" > "$BROKEN_OUT" 2>/dev/null
   broken_terminal="$(jq -r '.terminal_status // "ERROR"' "$BROKEN_OUT" 2>/dev/null)"
-  if [[ "$broken_terminal" == "completed" ]]; then
-    pass "RED: a naive 'always completed' mapping IS caught (would fail the AC4 GREEN assertion above)"
+  if [[ "$broken_terminal" == "active_abandoned" ]]; then
+    pass "RED: an inferred active_abandoned mapping IS caught (would fail the AC4 GREEN assertion above)"
   else
-    fail "RED proof inconclusive: broken copy produced '$broken_terminal', expected 'completed' — injection did not take"
+    fail "RED proof inconclusive: broken copy produced '$broken_terminal', expected 'active_abandoned' — injection did not take"
   fi
 else
   fail "RED fault injection did not modify the script (sed pattern no longer matches source)"
@@ -424,11 +423,11 @@ else
 fi
 
 # ── AC12: unrecognized Flow status is REFUSED, never silently bucketed (review finding 5a) -------
-echo "--- AC12: unrecognized Flow run status refuses the record (never a silent active_abandoned bucket) ---"
+echo "--- AC12: unrecognized Flow run status refuses the record (never a guessed status) ---"
 UNKNOWN_OUT="$TMP/unknown-status.json"
 node "$FLOW_RUN_ECON" --flow-run-dir "$FIX/unknown-status" > "$UNKNOWN_OUT"
 unk_ok="$(jq -r '.ok' "$UNKNOWN_OUT")"
-[[ "$unk_ok" == "false" ]] && pass "an unrecognized status (\"rejected\") is refused (ok:false), not folded into active_abandoned" \
+[[ "$unk_ok" == "false" ]] && pass "an unrecognized status (\"rejected\") is refused (ok:false), not guessed" \
   || fail "unrecognized status was not refused: $(cat "$UNKNOWN_OUT")"
 unk_reason="$(jq -r '.reason' "$UNKNOWN_OUT")"
 [[ "$unk_reason" == *"unrecognized status"* ]] && pass "refusal reason names the problem clearly (\"$unk_reason\")" \
