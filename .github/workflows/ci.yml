@@ -617,6 +617,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check critique-supersession-roundtrip-integration
 
+      - name: Builder #830 squash-critique regression integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check builder-830-squash-critique-regression-integration
+
       - name: Lifecycle authority container integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check lifecycle-authority-container-integration
