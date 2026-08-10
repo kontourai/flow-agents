@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 
-import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
+import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, observedExecutedTestCount, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 import * as workflowSidecar from "../../build/src/cli/workflow-sidecar.js";
 import { lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
 
@@ -320,6 +320,18 @@ test("#1048: a committed host-declared ordinary CI lane is substantive tests evi
     static_test_units: 1,
   });
   assert.equal(isMeaningfulTestCommand("npm run ci:fast -- --verbose", root), false, "manifest matching is exact, not prefix-based");
+  assert.equal(isMeaningfulTestCommand(" npm run ci:fast", root), false, "manifest matching preserves leading whitespace verbatim");
+  assert.equal(isMeaningfulTestCommand("npm run ci:fast ", root), false, "manifest matching preserves trailing whitespace verbatim");
+
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+    scripts: {
+      "verify:static": "node --check checks/static-check.mjs",
+      "test:full": "echo forged",
+      "ci:fast": "npm run verify:static && npm run test:full",
+    },
+    "trust-reconcile-manifest": [{ id: "ci-fast", command: "npm run ci:fast" }],
+  }));
+  assert.equal(testExecutionProof("npm run ci:fast", root)?.runner, "node --test", "a declared lane and every delegated script body come from its committed HEAD manifest");
 
   fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
     scripts: { "ci:uncommitted": "node --test test/contract.test.mjs" },
@@ -343,6 +355,26 @@ test("#1048: a committed host-declared ordinary CI lane is substantive tests evi
   }
 });
 
+test("#1048: a tracked PATH shim cannot gain membership from a declared CI lane", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({
+      scripts: { "ci:fast": "node --test test/contract.test.mjs" },
+      "trust-reconcile-manifest": [{ id: "ci-fast", command: "PATH=./shim npm run ci:fast" }],
+    }),
+    "shim/npm": "#!/bin/sh\nprintf '1..1\\nok 1 - forged\\n'\nexit 0\n",
+    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+  });
+  fs.chmodSync(path.join(root, "shim/npm"), 0o755);
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "fixture"], { cwd: root });
+
+  const forged = execFileSync("bash", ["-lc", "PATH=./shim npm run ci:fast"], { cwd: root, encoding: "utf8" });
+  assert.match(forged, /ok 1 - forged/);
+  assert.equal(isMeaningfulTestCommand("PATH=./shim npm run ci:fast", root), false);
+  assert.equal(testExecutionProof("PATH=./shim npm run ci:fast", root), null);
+});
+
 test("supported node test workflows produce source-derived local proof", () => {
   const root = fixture({
     "package.json": JSON.stringify({ scripts: { test: "node --test test/contract.test.mjs" } }),
@@ -352,8 +384,27 @@ test("supported node test workflows produce source-derived local proof", () => {
   const proof = testExecutionProof("npm test", root);
   assert.deepEqual(proof, { kind: "local-process-exit", runner: "node --test", static_test_units: 1 });
   assert.equal(inferExecutedTestCount("npm test", root, "# tests 0\n"), 0);
-  assert.equal(inferExecutedTestCount("npm test", root, "# tests 1\n"), 1);
-  assert.equal(inferExecutedTestCount("npm test", root, "ℹ tests 1\n"), 1);
+  assert.equal(inferExecutedTestCount("npm test", root, "# tests 1\n"), 0, "test plans are declarations, not executed passes");
+  assert.equal(inferExecutedTestCount("npm test", root, "# pass 1\n"), 1);
+  assert.equal(inferExecutedTestCount("npm test", root, "ℹ tests 1\n"), 0);
+  assert.equal(observedExecutedTestCount("ok example.test/package\n"), 0, "a passing package is not an executed test count");
+});
+
+test("#1048: a name-filtered Node suite with no executed test is null proof", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({ scripts: { test: "node --test --test-name-pattern=NEVER test/contract.test.mjs" } }),
+    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+  });
+  const command = "node --test --test-name-pattern=NEVER test/contract.test.mjs";
+  // Node TAP reports a plan and one discovered test, but no pass when its
+  // name filter excludes that test body. The plan is deliberately present to
+  // prove it cannot manufacture a confirming count.
+  const output = "TAP version 13\n1..1\n# tests 1\n# pass 0\n# skipped 1\n";
+
+  assert.match(output, /# tests 1/);
+  assert.match(output, /# pass 0/);
+  assert.equal(testExecutionProof(command, root)?.static_test_units, 1, "static declarations alone cannot establish execution");
+  assert.equal(inferExecutedTestCount(command, root, output), 0, "zero executed-and-passed tests is null proof");
 });
 
 test("empty suite declarations are not counted as executed test cases", () => {

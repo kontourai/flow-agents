@@ -3548,18 +3548,40 @@ type TestExecutionProof = LocalTestExecutionProof | CoordinatedCommandReceiptPro
  * locally-derived non-vacuous test proof, and the writer still executes and
  * records the command before accepting a passing claim.
  */
-function committedManifestDeclaresExactCommand(command: string, projectRoot: string): boolean {
+function committedManifestDeclaresExactCommand(command: string, pkg: Record<string, unknown> | null): boolean {
+  const manifest = pkg?.["trust-reconcile-manifest"];
+  return Array.isArray(manifest) && manifest.some((entry) => entry
+    && typeof entry === "object"
+    && !Array.isArray(entry)
+    && typeof entry.id === "string"
+    && entry.command === command);
+}
+
+/**
+ * A manifest declaration can name a host-specific lane, but it cannot grant an
+ * alternate process-resolution environment. In particular, a leading
+ * assignment such as `PATH=./shim` can replace a bare runner with a tracked
+ * lookalike before the shell reaches the declared command. Keep this check on
+ * the raw command: normalizing or stripping its prefix first would re-open
+ * that substitution channel for an exact manifest entry.
+ */
+function rawCommandCanUseManifestMembership(command: string): boolean {
+  const tokens = command.trim().split(/\s+/).filter(Boolean);
+  const first = tokens[0] ?? "";
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return false;
+  // A path-qualified executable is likewise chosen by the command text rather
+  // than the trusted host runner resolution. The supported runners below use
+  // their bare executable forms.
+  return first !== "" && !first.includes("/");
+}
+
+function committedPackageJson(projectRoot: string): Record<string, unknown> | null {
   try {
     const head = resolveTrustedLocalGitCommit(projectRoot, "HEAD");
     const pkg = JSON.parse(readTrustedGitBlobSync(projectRoot, head, "package.json").toString("utf8"));
-    const manifest = pkg && typeof pkg === "object" && !Array.isArray(pkg) ? pkg["trust-reconcile-manifest"] : null;
-    return Array.isArray(manifest) && manifest.some((entry) => entry
-      && typeof entry === "object"
-      && !Array.isArray(entry)
-      && typeof entry.id === "string"
-      && entry.command === command);
+    return pkg && typeof pkg === "object" && !Array.isArray(pkg) ? pkg as Record<string, unknown> : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -3586,14 +3608,19 @@ function staticTestUnits(file: string, executable: string): number {
  * a Vitest/Jest-looking success summary, but it cannot turn a non-test script
  * into a supported test workflow or supply this locally-created proof.
  */
-export function testExecutionProof(command: string, projectRoot: string, seenScripts = new Set<string>(), packageScriptBody = false): TestExecutionProof | null {
-  const manifestDeclared = committedManifestDeclaresExactCommand(command, projectRoot);
+export function testExecutionProof(command: string, projectRoot: string, seenScripts = new Set<string>(), packageScriptBody = false, committedScriptPackage: Record<string, unknown> | null = null): TestExecutionProof | null {
+  // Membership is an exception for an unconventional script *name*, never for
+  // a command whose raw process resolution can be redirected.
+  const committedPackage = committedScriptPackage ?? committedPackageJson(projectRoot);
+  const manifestDeclared = rawCommandCanUseManifestMembership(command)
+    && committedPackage !== null
+    && committedManifestDeclaresExactCommand(command, committedPackage);
   const normalized = command.trim().replace(/\s+/g, " ");
   if (!normalized || /[`$()]/.test(normalized)) return null;
   if (/[;&|]/.test(normalized)) {
     if (!packageScriptBody || normalized.includes("||") || /[;|]/.test(normalized)) return null;
     const segments = normalized.split(/\s*&&\s*/).filter(Boolean);
-    return segments.length > 1 ? segments.map((segment) => testExecutionProof(segment, projectRoot, new Set(seenScripts), false)).find(Boolean) ?? null : null;
+    return segments.length > 1 ? segments.map((segment) => testExecutionProof(segment, projectRoot, new Set(seenScripts), false, committedScriptPackage)).find(Boolean) ?? null : null;
   }
   if (/^(?:true|:|\/usr\/bin\/true)$/i.test(normalized)) return null;
   if (/^(?:echo|printf)(?:\s|$)/i.test(normalized)) return null;
@@ -3628,11 +3655,15 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
     // null proof and cannot become tests-evidence.
     if (!script || (!manifestDeclared && !hasTestIntent(script)) || seenScripts.has(script)) return null;
     try {
-      const pkg = loadJson(path.join(projectRoot, "package.json"));
+      // A manifest-authorized lane's declaration and its body must describe
+      // the same immutable HEAD bytes. Propagate that source through nested
+      // npm-script delegation, rather than switching back to a dirty worktree
+      // body on the first `npm run` segment.
+      const pkg = committedScriptPackage ?? (manifestDeclared ? committedPackage : loadJson(path.join(projectRoot, "package.json")));
       const scriptCommand = pkg.scripts && typeof pkg.scripts === "object" ? pkg.scripts[script] : undefined;
       if (typeof scriptCommand !== "string") return null;
       seenScripts.add(script);
-      return testExecutionProof(scriptCommand, projectRoot, seenScripts, true);
+      return testExecutionProof(scriptCommand, projectRoot, seenScripts, true, committedScriptPackage ?? (manifestDeclared ? committedPackage : null));
     } catch { return null; }
   }
   if (["vitest", "jest", "mocha", "ava", "pytest", "rspec", "phpunit"].includes(executableName)
@@ -3710,16 +3741,16 @@ export function isMeaningfulTestCommand(command: string, projectRoot: string, se
 export function observedExecutedTestCount(output: string): number {
   const counts: number[] = [];
   for (const pattern of [
-    /^\s*(?:#|ℹ)\s*tests\s+(\d+)\s*$/gim,
-    /^\s*1\.\.(\d+)(?:\s|$)/gim,
+    /^\s*#\s*pass\s+(\d+)\s*$/gim,
     /\b(\d+)\s+passed\b/gim,
   ]) {
     for (const match of output.matchAll(pattern)) counts.push(Number(match[1]));
   }
-  const explicitPasses = output.match(/^\s*(?:---\s+PASS:|ok\s+\d+\s+-)/gm)?.length ?? 0;
+  // TAP's plan and `# tests N` count declarations, including skipped tests.
+  // Count individual successful cases only, excluding explicit TODO/SKIP
+  // records, so a filtering invocation that ran no test body is null proof.
+  const explicitPasses = output.match(/^\s*(?:---\s+PASS:|ok\s+\d+(?:\s+-\s+(?!.*#\s*(?:SKIP|TODO)\b).*)?)\s*$/gim)?.length ?? 0;
   if (explicitPasses > 0) counts.push(explicitPasses);
-  const goPackages = output.match(/^ok\s+\S+(?:\s|$)/gm)?.length ?? 0;
-  if (goPackages > 0) counts.push(goPackages);
   return Math.max(0, ...counts.filter((count) => Number.isSafeInteger(count) && count > 0));
 }
 
