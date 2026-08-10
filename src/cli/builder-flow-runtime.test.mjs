@@ -2253,7 +2253,7 @@ test("shell output cannot spoof an executed-test count", () => {
   fs.writeFileSync(path.join(root, "checks", "fake-test.sh"), "#!/bin/sh\nset -e\nprintf '1 passed\\n'\n");
   fs.writeFileSync(path.join(root, "checks", "real-test.sh"), "#!/bin/sh\nset -e\ntest -f checks/real-test.sh\n");
   assert.equal(inferExecutedTestCount("sh checks/fake-test.sh", root, "1 passed\n"), 0);
-  assert.equal(inferExecutedTestCount("sh checks/real-test.sh", root, "1..1\nok 1 - file exists\n"), 1);
+  assert.equal(inferExecutedTestCount("sh checks/real-test.sh", root, "1..1\nok 1 - file exists\n"), 1, "a project-local TAP case is an executed-test contract");
 });
 
 test("public workflow evidence retains an explicit non-pass verdict while reporting a successful command observation", async () => {
@@ -4712,8 +4712,8 @@ test("record-gate-claim emits one canonical execution evidence item for each pas
   });
   const first = "writer-first.test.sh";
   const second = "writer-second.test.sh";
-  fs.writeFileSync(path.join(session.projectRoot, first), "set -e\ntest 1 -eq 1\nprintf '1..1\\n'\n");
-  fs.writeFileSync(path.join(session.projectRoot, second), "set -e\ntest 2 -eq 2\nprintf '1..1\\n'\n");
+  fs.writeFileSync(path.join(session.projectRoot, first), "set -e\ntest 1 -eq 1\nprintf '1..1\\nok 1 - first command\\n'\n");
+  fs.writeFileSync(path.join(session.projectRoot, second), "set -e\ntest 2 -eq 2\nprintf '1..1\\nok 1 - second command\\n'\n");
   fixtureGit(session, ["add", first, second]);
   fixtureGit(session, ["commit", "-m", "writer multi-command test fixtures"]);
   await advanceSessionToVerify(session);

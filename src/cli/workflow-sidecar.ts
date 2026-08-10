@@ -18,7 +18,7 @@ import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
-import { assertTrustedGitAncestor, isExactLowercaseCommitSha } from "../lib/trusted-git.js";
+import { assertTrustedGitAncestor, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
@@ -3542,6 +3542,49 @@ type LocalTestExecutionProof = {
 };
 type TestExecutionProof = LocalTestExecutionProof | CoordinatedCommandReceiptProof;
 
+/**
+ * A host may name an otherwise-unconventional CI lane in its committed
+ * reconcile manifest. This is shape authorization only: callers still need a
+ * locally-derived non-vacuous test proof, and the writer still executes and
+ * records the command before accepting a passing claim.
+ */
+function committedManifestDeclaresExactCommand(command: string, pkg: Record<string, unknown> | null): boolean {
+  const manifest = pkg?.["trust-reconcile-manifest"];
+  return Array.isArray(manifest) && manifest.some((entry) => entry
+    && typeof entry === "object"
+    && !Array.isArray(entry)
+    && typeof entry.id === "string"
+    && entry.command === command);
+}
+
+/**
+ * A manifest declaration can name a host-specific lane, but it cannot grant an
+ * alternate process-resolution environment. In particular, a leading
+ * assignment such as `PATH=./shim` can replace a bare runner with a tracked
+ * lookalike before the shell reaches the declared command. Keep this check on
+ * the raw command: normalizing or stripping its prefix first would re-open
+ * that substitution channel for an exact manifest entry.
+ */
+function rawCommandCanUseManifestMembership(command: string): boolean {
+  const tokens = command.trim().split(/\s+/).filter(Boolean);
+  const first = tokens[0] ?? "";
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return false;
+  // A path-qualified executable is likewise chosen by the command text rather
+  // than the trusted host runner resolution. The supported runners below use
+  // their bare executable forms.
+  return first !== "" && !first.includes("/");
+}
+
+function committedPackageJson(projectRoot: string): Record<string, unknown> | null {
+  try {
+    const head = resolveTrustedLocalGitCommit(projectRoot, "HEAD");
+    const pkg = JSON.parse(readTrustedGitBlobSync(projectRoot, head, "package.json").toString("utf8"));
+    return pkg && typeof pkg === "object" && !Array.isArray(pkg) ? pkg as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
 function staticTestUnits(file: string, executable: string): number {
   try {
     const content = fs.readFileSync(file, "utf8").slice(0, 256 * 1024);
@@ -3565,13 +3608,19 @@ function staticTestUnits(file: string, executable: string): number {
  * a Vitest/Jest-looking success summary, but it cannot turn a non-test script
  * into a supported test workflow or supply this locally-created proof.
  */
-export function testExecutionProof(command: string, projectRoot: string, seenScripts = new Set<string>(), packageScriptBody = false): TestExecutionProof | null {
+export function testExecutionProof(command: string, projectRoot: string, seenScripts = new Set<string>(), packageScriptBody = false, committedScriptPackage: Record<string, unknown> | null = null): TestExecutionProof | null {
+  // Membership is an exception for an unconventional script *name*, never for
+  // a command whose raw process resolution can be redirected.
+  const committedPackage = committedScriptPackage ?? committedPackageJson(projectRoot);
+  const manifestDeclared = rawCommandCanUseManifestMembership(command)
+    && committedPackage !== null
+    && committedManifestDeclaresExactCommand(command, committedPackage);
   const normalized = command.trim().replace(/\s+/g, " ");
   if (!normalized || /[`$()]/.test(normalized)) return null;
   if (/[;&|]/.test(normalized)) {
     if (!packageScriptBody || normalized.includes("||") || /[;|]/.test(normalized)) return null;
     const segments = normalized.split(/\s*&&\s*/).filter(Boolean);
-    return segments.length > 1 ? segments.map((segment) => testExecutionProof(segment, projectRoot, new Set(seenScripts), false)).find(Boolean) ?? null : null;
+    return segments.length > 1 ? segments.map((segment) => testExecutionProof(segment, projectRoot, new Set(seenScripts), false, committedScriptPackage)).find(Boolean) ?? null : null;
   }
   if (/^(?:true|:|\/usr\/bin\/true)$/i.test(normalized)) return null;
   if (/^(?:echo|printf)(?:\s|$)/i.test(normalized)) return null;
@@ -3600,13 +3649,21 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
       };
     }
     const script = tokens[1] === "run" || tokens[1] === "run-script" ? tokens[2] : tokens[1];
-    if (!script || !hasTestIntent(script) || seenScripts.has(script)) return null;
+    // A host's exact, committed reconcile-manifest entry authorizes an
+    // unconventional *script name*, not its body. The body must still resolve
+    // to a substantive local test workflow below; `echo ok` and `true` remain
+    // null proof and cannot become tests-evidence.
+    if (!script || (!manifestDeclared && !hasTestIntent(script)) || seenScripts.has(script)) return null;
     try {
-      const pkg = loadJson(path.join(projectRoot, "package.json"));
+      // A manifest-authorized lane's declaration and its body must describe
+      // the same immutable HEAD bytes. Propagate that source through nested
+      // npm-script delegation, rather than switching back to a dirty worktree
+      // body on the first `npm run` segment.
+      const pkg = committedScriptPackage ?? (manifestDeclared ? committedPackage : loadJson(path.join(projectRoot, "package.json")));
       const scriptCommand = pkg.scripts && typeof pkg.scripts === "object" ? pkg.scripts[script] : undefined;
       if (typeof scriptCommand !== "string") return null;
       seenScripts.add(script);
-      return testExecutionProof(scriptCommand, projectRoot, seenScripts, true);
+      return testExecutionProof(scriptCommand, projectRoot, seenScripts, true, committedScriptPackage ?? (manifestDeclared ? committedPackage : null));
     } catch { return null; }
   }
   if (["vitest", "jest", "mocha", "ava", "pytest", "rspec", "phpunit"].includes(executableName)
@@ -3681,26 +3738,61 @@ export function isMeaningfulTestCommand(command: string, projectRoot: string, se
   return testExecutionProof(command, projectRoot, seenScripts, packageScriptBody) !== null;
 }
 
-export function observedExecutedTestCount(output: string): number {
-  const counts: number[] = [];
-  for (const pattern of [
-    /^\s*(?:#|ℹ)\s*tests\s+(\d+)\s*$/gim,
-    /^\s*1\.\.(\d+)(?:\s|$)/gim,
-    /\b(\d+)\s+passed\b/gim,
-  ]) {
-    for (const match of output.matchAll(pattern)) counts.push(Number(match[1]));
+export function observedExecutedTestCount(output: string, runner?: string): number {
+  if (runner === "node --test") {
+    // Node prints its summary after every test's stdout.  Take only the last
+    // pass line that is followed by the rest of that canonical terminal block;
+    // source code cannot place a lookalike after the runner has finished.
+    const summaries = [...output.matchAll(/^(?:#|ℹ)\s*pass\s+(\d+)\s*$/gim)];
+    const terminal = summaries.at(-1);
+    if (!terminal || !/(?:^|\n)(?:#|ℹ)\s*fail\s+\d+\s*$[\s\S]*(?:^|\n)(?:#|ℹ)\s*skipped\s+\d+\s*$[\s\S]*(?:^|\n)(?:#|ℹ)\s*duration_ms\s+[\d.]+\s*$/im.test(output.slice((terminal.index ?? 0) + terminal[0].length))) return 0;
+    return Number(terminal[1]);
   }
-  const explicitPasses = output.match(/^\s*(?:---\s+PASS:|ok\s+\d+\s+-)/gm)?.length ?? 0;
-  if (explicitPasses > 0) counts.push(explicitPasses);
-  const goPackages = output.match(/^ok\s+\S+(?:\s|$)/gm)?.length ?? 0;
-  if (goPackages > 0) counts.push(goPackages);
-  return Math.max(0, ...counts.filter((count) => Number.isSafeInteger(count) && count > 0));
+  if (runner === "go test") {
+    // Go's package `ok` line says only that a package succeeded.  The runner's
+    // per-case PASS records are the usable execution signal.
+    return output.match(/^---\s+PASS:\s+\S+(?:\s+\([\d.]+s\))?\s*$/gm)?.length ?? 0;
+  }
+  if (runner === "cargo test") {
+    const summaries = [...output.matchAll(/^test result: ok\.\s+(\d+) passed;.*$/gim)];
+    return Number(summaries.at(-1)?.[1] ?? 0);
+  }
+  // Project-local test commands commonly use TAP as their result contract. A
+  // plan merely declares what should run and aggregate `# tests` totals can
+  // include skipped work, so accept individual completed case records only.
+  // Do not accept SKIP/TODO cases. For a nested TAP subtest whose children are
+  // all SKIP/TODO, its unqualified outer `ok` is a suite marker, not evidence
+  // that a case ran.
+  const lines = output.split(/\r?\n/);
+  const candidates: { index: number; name: string }[] = [];
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^ok\s+\d+(?:\s+-\s+(.*?))?\s*$/i);
+    if (match && !/#\s*(?:SKIP|TODO)\b/i.test(line)) candidates.push({ index, name: (match[1] ?? "").trim() });
+  }
+  return candidates.filter(({ index, name }) => {
+    // TAP subtests print an indented child block followed by an unindented
+    // `ok N - <subtest name>`. Treat that record as a suite marker only when
+    // every completed child case in its immediately preceding subtest block
+    // was explicitly skipped or todo.
+    let marker = -1;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const subtest = lines[cursor]!.match(/^#\s+Subtest:\s+(.+?)\s*$/i);
+      if (subtest) {
+        if (subtest[1]!.trim() === name) marker = cursor;
+        break;
+      }
+      if (/^ok\s+\d+/.test(lines[cursor]!)) break;
+    }
+    if (marker < 0) return true;
+    const childCases = lines.slice(marker + 1, index).filter((line) => /^\s+ok\s+\d+/i.test(line));
+    return childCases.length === 0 || childCases.some((line) => !/#\s*(?:SKIP|TODO)\b/i.test(line));
+  }).length;
 }
 
 export function inferExecutedTestCount(command: string, projectRoot: string, output: string, seenScripts = new Set<string>()): number {
   const proof = testExecutionProof(command, projectRoot, seenScripts);
   if (!proof || proof.kind !== "local-process-exit") return 0;
-  const observed = observedExecutedTestCount(output);
+  const observed = observedExecutedTestCount(output, proof.runner);
   return observed > 0 ? Math.min(proof.static_test_units, observed) : 0;
 }
 
@@ -5449,7 +5541,15 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   if (opts(p, "observed-command-json").length > 0) {
     die("record-gate-claim does not accept --observed-command-json; the canonical writer executes and records every --command");
   }
-  if (mustRunTests && gateCommands.length === 0) die("record-gate-claim requires at least one --command for a passing tests-evidence claim");
+  if (mustRunTests) {
+    const missing: string[] = [];
+    if (gateCommands.length === 0) missing.push("at least one --command");
+    if (opts(p, "evidence-ref-json").length === 0) missing.push('a kind:"command" --evidence-ref-json whose excerpt exactly equals a writer-observed --command');
+    if (opts(p, "criterion-json").length === 0) missing.push("one --criterion-json for every declared acceptance criterion");
+    if (missing.length > 0) {
+      die(`record-gate-claim passing tests-evidence requires ${missing.join("; ")}. Do not supply --observed-command-json: the canonical writer executes each --command and records its exit code and output digest.`);
+    }
+  }
   // #619: the narrative evidence-ref guards (validateEvidenceRef / normalizeCheck /
   // completePassingCriteria) need a non-null, location-independent project root that never
   // dies on a non-canonical session. normalizeObservedCommands still requires the strict

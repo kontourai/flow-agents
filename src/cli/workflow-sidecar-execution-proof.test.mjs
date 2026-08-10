@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 
-import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
+import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, observedExecutedTestCount, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 import * as workflowSidecar from "../../build/src/cli/workflow-sidecar.js";
 import { lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
 
@@ -295,6 +295,86 @@ test("package-script output cannot manufacture a positive test count", () => {
   assert.equal(inferExecutedTestCount("npm test", root, "# tests 999\n"), 0);
 });
 
+test("#1048: a committed host-declared ordinary CI lane is substantive tests evidence", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({
+      scripts: {
+        "verify:static": "node --check checks/static-check.mjs",
+        "test:full": "node --test test/contract.test.mjs",
+        "ci:fast": "npm run verify:static && npm run test:full",
+      },
+      "trust-reconcile-manifest": [{ id: "ci-fast", command: "npm run ci:fast" }],
+    }),
+    "checks/static-check.mjs": "export {};\n",
+    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+  });
+
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "fixture"], { cwd: root });
+
+  assert.equal(isMeaningfulTestCommand("npm run ci:fast", root), true);
+  assert.deepEqual(testExecutionProof("npm run ci:fast", root), {
+    kind: "local-process-exit",
+    runner: "node --test",
+    static_test_units: 1,
+  });
+  assert.equal(isMeaningfulTestCommand("npm run ci:fast -- --verbose", root), false, "manifest matching is exact, not prefix-based");
+  assert.equal(isMeaningfulTestCommand(" npm run ci:fast", root), false, "manifest matching preserves leading whitespace verbatim");
+  assert.equal(isMeaningfulTestCommand("npm run ci:fast ", root), false, "manifest matching preserves trailing whitespace verbatim");
+
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+    scripts: {
+      "verify:static": "node --check checks/static-check.mjs",
+      "test:full": "echo forged",
+      "ci:fast": "npm run verify:static && npm run test:full",
+    },
+    "trust-reconcile-manifest": [{ id: "ci-fast", command: "npm run ci:fast" }],
+  }));
+  assert.equal(testExecutionProof("npm run ci:fast", root)?.runner, "node --test", "a declared lane and every delegated script body come from its committed HEAD manifest");
+
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+    scripts: { "ci:uncommitted": "node --test test/contract.test.mjs" },
+    "trust-reconcile-manifest": [{ id: "ci-uncommitted", command: "npm run ci:uncommitted" }],
+  }));
+  assert.equal(isMeaningfulTestCommand("npm run ci:uncommitted", root), false, "an uncommitted manifest cannot authorize a command");
+
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+    scripts: { "ci:empty": "echo ok", "ci:true": "true", "ci:blank": "" },
+    "trust-reconcile-manifest": [
+      { id: "ci-empty", command: "npm run ci:empty" },
+      { id: "ci-true", command: "npm run ci:true" },
+      { id: "ci-blank", command: "npm run ci:blank" },
+    ],
+  }));
+  execFileSync("git", ["add", "package.json"], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "vacuous lanes"], { cwd: root });
+  for (const command of ["npm run ci:empty", "npm run ci:true", "npm run ci:blank"]) {
+    assert.equal(isMeaningfulTestCommand(command, root), false, `${command} remains vacuous despite manifest membership`);
+    assert.equal(testExecutionProof(command, root), null);
+  }
+});
+
+test("#1048: a tracked PATH shim cannot gain membership from a declared CI lane", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({
+      scripts: { "ci:fast": "node --test test/contract.test.mjs" },
+      "trust-reconcile-manifest": [{ id: "ci-fast", command: "PATH=./shim npm run ci:fast" }],
+    }),
+    "shim/npm": "#!/bin/sh\nprintf '1..1\\nok 1 - forged\\n'\nexit 0\n",
+    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+  });
+  fs.chmodSync(path.join(root, "shim/npm"), 0o755);
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "fixture"], { cwd: root });
+
+  const forged = execFileSync("bash", ["-lc", "PATH=./shim npm run ci:fast"], { cwd: root, encoding: "utf8" });
+  assert.match(forged, /ok 1 - forged/);
+  assert.equal(isMeaningfulTestCommand("PATH=./shim npm run ci:fast", root), false);
+  assert.equal(testExecutionProof("PATH=./shim npm run ci:fast", root), null);
+});
+
 test("supported node test workflows produce source-derived local proof", () => {
   const root = fixture({
     "package.json": JSON.stringify({ scripts: { test: "node --test test/contract.test.mjs" } }),
@@ -304,8 +384,37 @@ test("supported node test workflows produce source-derived local proof", () => {
   const proof = testExecutionProof("npm test", root);
   assert.deepEqual(proof, { kind: "local-process-exit", runner: "node --test", static_test_units: 1 });
   assert.equal(inferExecutedTestCount("npm test", root, "# tests 0\n"), 0);
-  assert.equal(inferExecutedTestCount("npm test", root, "# tests 1\n"), 1);
-  assert.equal(inferExecutedTestCount("npm test", root, "ℹ tests 1\n"), 1);
+  assert.equal(inferExecutedTestCount("npm test", root, "# tests 1\n"), 0, "test plans are declarations, not executed passes");
+  assert.equal(inferExecutedTestCount("npm test", root, "# pass 1\n"), 0, "a detached summary line is not runner-owned proof");
+  assert.equal(inferExecutedTestCount("npm test", root, "ℹ tests 1\n"), 0);
+  assert.equal(observedExecutedTestCount("ok example.test/package\n"), 0, "a passing package is not an executed test count");
+  assert.equal(observedExecutedTestCount("1..2\nok 1 - ran\nok 2 - deferred # SKIP later\n"), 1, "TAP plans and skipped records do not count");
+  assert.equal(observedExecutedTestCount("# Subtest: skipped suite\n    ok 1 - deferred # SKIP later\n    1..1\nok 1 - skipped suite\n1..1\n"), 0, "an all-skipped TAP subtest does not make its outer suite marker a pass");
+});
+
+test("#1048: a name-filtered, skipped-only Node suite with printed pass-shaped stdout is null proof", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({ scripts: { test: "node --test --test-name-pattern=contract test/contract.test.mjs" } }),
+    "test/contract.test.mjs": 'import { describe, it } from "node:test";\nconsole.log("1 passed");\ndescribe("suite", () => { it("contract", { skip: true }, () => {}); });\n',
+  });
+  const command = "node --test --test-name-pattern=contract test/contract.test.mjs";
+  const result = spawnSync(process.execPath, ["--test", "--test-name-pattern=contract", "test/contract.test.mjs"], { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH ?? "" } });
+  assert.equal(result.status, 0, result.stderr);
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.match(output, /1 passed/);
+  assert.match(output, /(?:#|ℹ)\s*pass 0/);
+  assert.equal(testExecutionProof(command, root)?.static_test_units, 1, "static declarations alone cannot establish execution");
+  assert.equal(inferExecutedTestCount(command, root, output), 0, "zero executed-and-passed tests is null proof");
+});
+
+test("#1048: Go PASS records count real cases but never package success or zero Rust summaries", () => {
+  const root = fixture({
+    "contract_test.go": "package contract\nimport \"testing\"\nfunc TestContract(t *testing.T) {}\n",
+  });
+  assert.equal(inferExecutedTestCount("go test ./...", root, "=== RUN   TestContract\n--- PASS: TestContract (0.00s)\nPASS\nok   example/contract 0.003s\n"), 1);
+  assert.equal(inferExecutedTestCount("go test ./...", root, "ok   example/contract 0.003s\n"), 0, "a successful package is not a test count");
+  assert.equal(observedExecutedTestCount("test result: ok. 0 passed; 0 failed; 0 ignored\n", "cargo test"), 0);
 });
 
 test("empty suite declarations are not counted as executed test cases", () => {
