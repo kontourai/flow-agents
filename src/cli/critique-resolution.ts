@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
+import { assertTrustedGitAncestorOrEquivalentTree } from "../lib/trusted-git.js";
 
 type AnyRecord = Record<string, any>;
 
@@ -304,7 +304,7 @@ function validateResolutionSnapshots(prior: AnyRecord, resolving: AnyRecord, sta
   const first = prior.review_target?.workspace_snapshot; const second = resolving.review_target?.workspace_snapshot;
   if (first?.kind !== "git-worktree" && second?.kind !== "git-worktree") return;
   if (!state.projectRoot || first?.kind !== "git-worktree" || second?.kind !== "git-worktree") { state.errors.push("critique resolution Git snapshots require one trusted project context"); return; }
-  try { assertTrustedGitAncestor(state.projectRoot, String(first.head_sha), String(second.head_sha)); } catch { state.errors.push("critique resolver Git ancestry is invalid"); }
+  try { assertTrustedGitAncestorOrEquivalentTree(state.projectRoot, String(first.head_sha), String(second.head_sha)); } catch { state.errors.push("critique resolver Git ancestry is invalid; re-attest the current workspace from a descendant or a squash-equivalent reviewed tree"); }
 }
 
 function validateResolutionEvent(prior: AnyRecord, resolving: AnyRecord, resolution: AnyRecord, state: GraphState): void {

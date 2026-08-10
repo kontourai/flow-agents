@@ -91,6 +91,28 @@ export function assertTrustedGitAncestor(cwd: string, ancestor: string, descenda
   execTrustedGitSync(cwd, ["merge-base", "--is-ancestor", ancestor, descendant]);
 }
 
+/**
+ * Prove that a commit remains reachable after a squash merge without trusting
+ * branch names or replacement objects. A direct ancestor is always accepted.
+ * Otherwise, a reachable commit with the exact same Git tree is the narrow
+ * squash bridge: the reviewed bytes survived under a new commit identity.
+ */
+export function assertTrustedGitAncestorOrEquivalentTree(cwd: string, ancestor: string, descendant: string): void {
+  if (!isExactLowercaseCommitSha(ancestor) || !isExactLowercaseCommitSha(descendant)) throw new Error("invalid immutable Git commit");
+  try {
+    assertTrustedGitAncestor(cwd, ancestor, descendant);
+    return;
+  } catch { /* A squash merge deliberately breaks commit ancestry. */ }
+  const tree = String(execTrustedGitSync(cwd, ["rev-parse", "--verify", `${ancestor}^{tree}`])).trim().toLowerCase();
+  if (!isExactLowercaseCommitSha(tree)) throw new Error("could not resolve immutable Git tree");
+  // A bounded traversal prevents a malformed fixture/repository from turning
+  // validation into an unbounded history scan. The 1 MiB output cap is also
+  // enforced by execTrustedGitSync.
+  const reachableTrees = String(execTrustedGitSync(cwd, ["log", "--format=%T", "--max-count=10000", descendant]));
+  if (reachableTrees.split(/\r?\n/u).some((candidate) => candidate === tree)) return;
+  throw new Error("commit is neither an ancestor nor an equivalent-tree squash predecessor");
+}
+
 function trustedGitEnvironment(): NodeJS.ProcessEnv {
   return {
     GIT_CONFIG_NOSYSTEM: "1",

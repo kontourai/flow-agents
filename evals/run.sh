@@ -324,6 +324,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_critique_supersession_roundtrip.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_wedge_830_squash_critique.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_flowdef_session_activation.sh" || result=1
   bash "$EVAL_DIR/integration/test_builder_entry_enforcement.sh" || result=1
   echo ""
