@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 
 import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, observedExecutedTestCount, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
@@ -385,26 +385,36 @@ test("supported node test workflows produce source-derived local proof", () => {
   assert.deepEqual(proof, { kind: "local-process-exit", runner: "node --test", static_test_units: 1 });
   assert.equal(inferExecutedTestCount("npm test", root, "# tests 0\n"), 0);
   assert.equal(inferExecutedTestCount("npm test", root, "# tests 1\n"), 0, "test plans are declarations, not executed passes");
-  assert.equal(inferExecutedTestCount("npm test", root, "# pass 1\n"), 1);
+  assert.equal(inferExecutedTestCount("npm test", root, "# pass 1\n"), 0, "a detached summary line is not runner-owned proof");
   assert.equal(inferExecutedTestCount("npm test", root, "ℹ tests 1\n"), 0);
   assert.equal(observedExecutedTestCount("ok example.test/package\n"), 0, "a passing package is not an executed test count");
+  assert.equal(observedExecutedTestCount("1..2\nok 1 - ran\nok 2 - deferred # SKIP later\n"), 1, "TAP plans and skipped records do not count");
+  assert.equal(observedExecutedTestCount("# Subtest: skipped suite\n    ok 1 - deferred # SKIP later\n    1..1\nok 1 - skipped suite\n1..1\n"), 0, "an all-skipped TAP subtest does not make its outer suite marker a pass");
 });
 
-test("#1048: a name-filtered Node suite with no executed test is null proof", () => {
+test("#1048: a name-filtered, skipped-only Node suite with printed pass-shaped stdout is null proof", () => {
   const root = fixture({
-    "package.json": JSON.stringify({ scripts: { test: "node --test --test-name-pattern=NEVER test/contract.test.mjs" } }),
-    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+    "package.json": JSON.stringify({ scripts: { test: "node --test --test-name-pattern=contract test/contract.test.mjs" } }),
+    "test/contract.test.mjs": 'import { describe, it } from "node:test";\nconsole.log("1 passed");\ndescribe("suite", () => { it("contract", { skip: true }, () => {}); });\n',
   });
-  const command = "node --test --test-name-pattern=NEVER test/contract.test.mjs";
-  // Node TAP reports a plan and one discovered test, but no pass when its
-  // name filter excludes that test body. The plan is deliberately present to
-  // prove it cannot manufacture a confirming count.
-  const output = "TAP version 13\n1..1\n# tests 1\n# pass 0\n# skipped 1\n";
+  const command = "node --test --test-name-pattern=contract test/contract.test.mjs";
+  const result = spawnSync(process.execPath, ["--test", "--test-name-pattern=contract", "test/contract.test.mjs"], { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH ?? "" } });
+  assert.equal(result.status, 0, result.stderr);
+  const output = `${result.stdout}${result.stderr}`;
 
-  assert.match(output, /# tests 1/);
-  assert.match(output, /# pass 0/);
+  assert.match(output, /1 passed/);
+  assert.match(output, /(?:#|ℹ)\s*pass 0/);
   assert.equal(testExecutionProof(command, root)?.static_test_units, 1, "static declarations alone cannot establish execution");
   assert.equal(inferExecutedTestCount(command, root, output), 0, "zero executed-and-passed tests is null proof");
+});
+
+test("#1048: Go PASS records count real cases but never package success or zero Rust summaries", () => {
+  const root = fixture({
+    "contract_test.go": "package contract\nimport \"testing\"\nfunc TestContract(t *testing.T) {}\n",
+  });
+  assert.equal(inferExecutedTestCount("go test ./...", root, "=== RUN   TestContract\n--- PASS: TestContract (0.00s)\nPASS\nok   example/contract 0.003s\n"), 1);
+  assert.equal(inferExecutedTestCount("go test ./...", root, "ok   example/contract 0.003s\n"), 0, "a successful package is not a test count");
+  assert.equal(observedExecutedTestCount("test result: ok. 0 passed; 0 failed; 0 ignored\n", "cargo test"), 0);
 });
 
 test("empty suite declarations are not counted as executed test cases", () => {

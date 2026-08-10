@@ -3738,26 +3738,61 @@ export function isMeaningfulTestCommand(command: string, projectRoot: string, se
   return testExecutionProof(command, projectRoot, seenScripts, packageScriptBody) !== null;
 }
 
-export function observedExecutedTestCount(output: string): number {
-  const counts: number[] = [];
-  for (const pattern of [
-    /^\s*#\s*pass\s+(\d+)\s*$/gim,
-    /\b(\d+)\s+passed\b/gim,
-  ]) {
-    for (const match of output.matchAll(pattern)) counts.push(Number(match[1]));
+export function observedExecutedTestCount(output: string, runner?: string): number {
+  if (runner === "node --test") {
+    // Node prints its summary after every test's stdout.  Take only the last
+    // pass line that is followed by the rest of that canonical terminal block;
+    // source code cannot place a lookalike after the runner has finished.
+    const summaries = [...output.matchAll(/^(?:#|ℹ)\s*pass\s+(\d+)\s*$/gim)];
+    const terminal = summaries.at(-1);
+    if (!terminal || !/(?:^|\n)(?:#|ℹ)\s*fail\s+\d+\s*$[\s\S]*(?:^|\n)(?:#|ℹ)\s*skipped\s+\d+\s*$[\s\S]*(?:^|\n)(?:#|ℹ)\s*duration_ms\s+[\d.]+\s*$/im.test(output.slice((terminal.index ?? 0) + terminal[0].length))) return 0;
+    return Number(terminal[1]);
   }
-  // TAP's plan and `# tests N` count declarations, including skipped tests.
-  // Count individual successful cases only, excluding explicit TODO/SKIP
-  // records, so a filtering invocation that ran no test body is null proof.
-  const explicitPasses = output.match(/^\s*(?:---\s+PASS:|ok\s+\d+(?:\s+-\s+(?!.*#\s*(?:SKIP|TODO)\b).*)?)\s*$/gim)?.length ?? 0;
-  if (explicitPasses > 0) counts.push(explicitPasses);
-  return Math.max(0, ...counts.filter((count) => Number.isSafeInteger(count) && count > 0));
+  if (runner === "go test") {
+    // Go's package `ok` line says only that a package succeeded.  The runner's
+    // per-case PASS records are the usable execution signal.
+    return output.match(/^---\s+PASS:\s+\S+(?:\s+\([\d.]+s\))?\s*$/gm)?.length ?? 0;
+  }
+  if (runner === "cargo test") {
+    const summaries = [...output.matchAll(/^test result: ok\.\s+(\d+) passed;.*$/gim)];
+    return Number(summaries.at(-1)?.[1] ?? 0);
+  }
+  // Project-local test commands commonly use TAP as their result contract. A
+  // plan merely declares what should run and aggregate `# tests` totals can
+  // include skipped work, so accept individual completed case records only.
+  // Do not accept SKIP/TODO cases. For a nested TAP subtest whose children are
+  // all SKIP/TODO, its unqualified outer `ok` is a suite marker, not evidence
+  // that a case ran.
+  const lines = output.split(/\r?\n/);
+  const candidates: { index: number; name: string }[] = [];
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^ok\s+\d+(?:\s+-\s+(.*?))?\s*$/i);
+    if (match && !/#\s*(?:SKIP|TODO)\b/i.test(line)) candidates.push({ index, name: (match[1] ?? "").trim() });
+  }
+  return candidates.filter(({ index, name }) => {
+    // TAP subtests print an indented child block followed by an unindented
+    // `ok N - <subtest name>`. Treat that record as a suite marker only when
+    // every completed child case in its immediately preceding subtest block
+    // was explicitly skipped or todo.
+    let marker = -1;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const subtest = lines[cursor]!.match(/^#\s+Subtest:\s+(.+?)\s*$/i);
+      if (subtest) {
+        if (subtest[1]!.trim() === name) marker = cursor;
+        break;
+      }
+      if (/^ok\s+\d+/.test(lines[cursor]!)) break;
+    }
+    if (marker < 0) return true;
+    const childCases = lines.slice(marker + 1, index).filter((line) => /^\s+ok\s+\d+/i.test(line));
+    return childCases.length === 0 || childCases.some((line) => !/#\s*(?:SKIP|TODO)\b/i.test(line));
+  }).length;
 }
 
 export function inferExecutedTestCount(command: string, projectRoot: string, output: string, seenScripts = new Set<string>()): number {
   const proof = testExecutionProof(command, projectRoot, seenScripts);
   if (!proof || proof.kind !== "local-process-exit") return 0;
-  const observed = observedExecutedTestCount(output);
+  const observed = observedExecutedTestCount(output, proof.runner);
   return observed > 0 ? Math.min(proof.static_test_units, observed) : 0;
 }
 
