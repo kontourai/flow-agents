@@ -121,6 +121,38 @@ else
   _fail "validator refused changed workspace without remediation: $(cat "$TMP/launder.out" "$TMP/launder.err")"
 fi
 
+# NEGATIVE CASE (sol review): the bridge must reject a prior review whose tree does NOT occur in
+# the resolving commit's history. Without this, a mutation like `if (reachableTrees.trim()) return;`
+# -- accept any prior review whenever the resolving commit has ANY history -- survives every other
+# assertion here, because the squash case stays green and live-snapshot equality catches only the
+# later worktree mutation. This is the only regression protection for the newly widened predicate.
+UNREL="$TMP/unrelated"
+git init -q "$UNREL"
+git -C "$UNREL" config user.email fixture@example.com
+git -C "$UNREL" config user.name Fixture
+printf 'content that exists in no reviewed tree\n' > "$UNREL/only-here.txt"
+git -C "$UNREL" add only-here.txt
+git -C "$UNREL" commit -qm "unrelated reviewed commit"
+UNREL_SHA="$(git -C "$UNREL" rev-parse HEAD)"
+UNREL_TREE="$(git -C "$UNREL" rev-parse "HEAD^{tree}")"
+# Import the unrelated objects into the project so the SHA resolves but its tree is not reachable
+# from the resolving commit (this is the exact "equal-tree ancestor absent" condition).
+git -C "$UNREL" bundle create "$TMP/unrelated.bundle" --all >/dev/null 2>&1
+git -C "$PROJECT" fetch -q "$TMP/unrelated.bundle" "refs/heads/*:refs/unrelated/*" 2>/dev/null || true
+RESOLVING="$(git -C "$PROJECT" rev-parse HEAD)"
+if git -C "$PROJECT" log --format=%T --max-count=10000 "$RESOLVING" | grep -qx "$UNREL_TREE"; then
+  _fail "negative fixture is invalid: the unrelated tree is reachable from the resolving commit"
+elif node -e '
+const { assertTrustedGitAncestorOrEquivalentTree } = require(process.argv[1] + "/build/src/lib/trusted-git.js");
+try { assertTrustedGitAncestorOrEquivalentTree(process.argv[2], process.argv[3], process.argv[4]); }
+catch { process.exit(0); }
+process.exit(1);
+' "$ROOT" "$PROJECT" "$UNREL_SHA" "$RESOLVING" 2>/dev/null; then
+  _pass "NEGATIVE: a prior review whose tree is absent from resolving history is refused"
+else
+  _fail "NEGATIVE: bridge accepted a prior review with no ancestry and no equal-tree ancestor"
+fi
+
 if [ "$errors" -gt 0 ]; then
   echo "test_wedge_830_squash_critique: $errors check(s) FAILED."
   exit 1
