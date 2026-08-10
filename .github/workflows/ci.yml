@@ -633,6 +633,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check evidence-capture-hook-integration
 
+      - name: Hook certification matrix integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check hook-certification-matrix-integration
+
       - name: FlowDefinition session history preservation integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check flowdefinition-session-history-preservation-integration
