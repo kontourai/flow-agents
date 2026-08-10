@@ -326,6 +326,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_golden_run_e2e.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_effectiveness_loop_demo.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_flowdef_session_history_preservation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_critique_supersession_roundtrip.sh" || result=1
