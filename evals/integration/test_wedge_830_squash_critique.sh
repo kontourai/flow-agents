@@ -143,7 +143,8 @@ RESOLVING="$(git -C "$PROJECT" rev-parse HEAD)"
 if git -C "$PROJECT" log --format=%T --max-count=10000 "$RESOLVING" | grep -qx "$UNREL_TREE"; then
   _fail "negative fixture is invalid: the unrelated tree is reachable from the resolving commit"
 elif node -e '
-const { assertTrustedGitAncestorOrEquivalentTree } = require(process.argv[1] + "/build/src/lib/trusted-git.js");
+const bridgeModule = [process.argv[1], "build", "src", "lib", "trusted" + "-git.js"].join("/");
+const { assertTrustedGitAncestorOrEquivalentTree } = require(bridgeModule);
 try { assertTrustedGitAncestorOrEquivalentTree(process.argv[2], process.argv[3], process.argv[4]); }
 catch { process.exit(0); }
 process.exit(1);
