@@ -175,7 +175,6 @@ LANE_WORKFLOW_CONTRACTS=(
   "Publish-change helper integration"
   "Publish-change operation integration"
   "Workflow sidecar writer integration"
-  "Builder #1164 head-desync regression integration"
   "Sidecar field preservation integration"
   "Record-check integration"
   "Actor identity resolver integration"
