@@ -312,8 +312,14 @@ for expectation in shaped-problem shaped-outcome shaped-constraints shaped-non-g
 done
 cp "$ROOT/evals/fixtures/telemetry/usage-transcript-sample.jsonl" "$TERMINAL_TRANSCRIPT"
 invoke_claude_lifecycle Stop "$TERMINAL_RUNTIME_SESSION" "$TERMINAL_WORKSPACE" "$TERMINAL_PREFIX" "$TERMINAL_TRANSCRIPT"
+# Wait for the LEGACY producer's record specifically. A Builder Stop appends two economics records
+# from two independent detached writers, so a merely non-empty file means "one of them won the
+# race", not "the one this fixture asserts about has arrived" — waiting on -s alone samples an
+# empty selection and reports it as a broken producer path.
 for _ in $(seq 1 50); do
-  [[ -s "$TERMINAL_PREFIX.economics.jsonl" ]] && break
+  [[ -s "$TERMINAL_PREFIX.economics.jsonl" ]] \
+    && [[ -n "$(jq -c 'select(.producer_authority != "flow_run_record")' "$TERMINAL_PREFIX.economics.jsonl" 2>/dev/null | tail -1)" ]] \
+    && break
   sleep 0.1
 done
 
