@@ -940,6 +940,28 @@ add_stop_data_and_emit_usage() {
       fi
       (bash "$econ_script" "$usage_event") </dev/null >/dev/null 2>&1 &
       disown 2>/dev/null || true
+
+      # Canonical Flow-run economics is a separate, local-only record from the legacy
+      # session.usage-derived record above: it has producer_authority flow_run_record and derives
+      # honest phases/route-backs/terminal status from the run store. Its slug may come ONLY from
+      # the authenticated snapshot, guarded against this usage event's exact correlation; current
+      # pointers or a directly-read state file would not be an authenticated runtime join.
+      local flow_run_slug flow_run_workspace flow_run_dir
+      flow_run_slug=$(printf '%s' "$sidecar_snapshot" | jq -r \
+        --argjson correlation "$(printf '%s' "$usage_event" | jq -c '.run_correlation')" '
+          select(.run_correlation == $correlation) | .task_slug // empty
+        ' 2>/dev/null)
+      if [[ "$flow_run_slug" =~ ^[A-Za-z0-9._-]+$ && "$flow_run_slug" != "." && "$flow_run_slug" != ".." ]]; then
+        # TELEMETRY_DIR can be a global install location. Like board sync below, resolve the real
+        # session workspace from the usage event rather than accidentally using that install root.
+        flow_run_workspace=$(echo "$usage_event" | jq -r '.context.cwd // ""' 2>/dev/null)
+        [[ -z "$flow_run_workspace" || ! -d "$flow_run_workspace" ]] && flow_run_workspace="$PWD"
+        flow_run_dir="$flow_run_workspace/.kontourai/flow/runs/$flow_run_slug"
+        if [[ -f "$flow_run_dir/state.json" ]]; then
+          (bash "$econ_script" --flow-run-dir "$flow_run_dir" --task-slug "$flow_run_slug") </dev/null >/dev/null 2>&1 &
+          disown 2>/dev/null || true
+        fi
+      fi
     fi
 
     # Hook-native console board sync (#919): detached, cwd-scoped projection+bridge of this
