@@ -122,13 +122,21 @@ For each economics record with a non-null `task_slug`, the analyzer looks for
   gets `kit_id = "unattributed"` directly, with zero gate rows contributed — no lookup is
   attempted.
 
-**Honest current-data gap (stated, not hidden):** real `economics.jsonl` records emitted today
-all carry `"task_slug":null` (fa#349 slice-1; `task_slug` plumbing was never wired end-to-end
-for the emitter's live invocation path). Until that separate, out-of-scope plumbing gap is
+**Honest current-data gap (stated, not hidden):** every record in this analyzer's population
+carries `"task_slug":null` (fa#349 slice-1; `task_slug` plumbing was never wired end-to-end for
+the legacy emitter's live invocation path). Until that separate, out-of-scope plumbing gap is
 fixed, every real run's `kit_id` degrades to `"unattributed"` and it contributes zero gate
 rows — per-kit/per-gate attribution is genuinely vacuous on live data today. This analyzer does
 not fabricate an identity to paper over that gap; fixtures (not live data) are what exercise
 the attributed path until `task_slug` is populated on real runs.
+
+Live `economics.jsonl` files DO now contain records carrying a real non-null `task_slug`: the
+Stop hook's canonical Flow-run-derived producer (`producer_authority: "flow_run_record"`). Those
+records are **excluded from this analyzer's population** and so do not close the gap above — they
+describe the same run from an incompatible vantage point (unknown cost, pause-subtracted active
+duration), and admitting them would double-count runs and depress cost trends rather than improve
+attribution. Consuming them is a redesign of these aggregates, gated on token attribution existing;
+see `docs/specs/economics-record-contract.md` "flow-run-record mode".
 
 **Trusted-as-is inputs (consume-never-fork):** `cost.estimated_cost_usd` and every other numeric
 field read from an `economics.jsonl` record is trusted exactly as fa#349 emitted it, including a

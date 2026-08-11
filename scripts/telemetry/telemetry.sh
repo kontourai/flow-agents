@@ -952,15 +952,20 @@ add_stop_data_and_emit_usage() {
           select(.run_correlation == $correlation) | .task_slug // empty
         ' 2>/dev/null)
       if [[ "$flow_run_slug" =~ ^[A-Za-z0-9._-]+$ && "$flow_run_slug" != "." && "$flow_run_slug" != ".." ]]; then
-        # TELEMETRY_DIR can be a global install location. Like board sync below, resolve the real
-        # session workspace from the usage event rather than accidentally using that install root.
+        # Every filesystem lookup happens INSIDE the detached subshell. Review MEDIUM: a foreground
+        # `-d`/`-f` on the session's cwd blocks the Stop hook when that path is a stalled network or
+        # FUSE mount, and the emitter's own detachment protects nothing that runs before it. The
+        # candidate workspace is passed in unresolved; the subshell decides. TELEMETRY_DIR can be a
+        # global install location, so the workspace comes from the usage event -- like board sync
+        # below -- rather than from that install root.
         flow_run_workspace=$(echo "$usage_event" | jq -r '.context.cwd // ""' 2>/dev/null)
-        [[ -z "$flow_run_workspace" || ! -d "$flow_run_workspace" ]] && flow_run_workspace="$PWD"
-        flow_run_dir="$flow_run_workspace/.kontourai/flow/runs/$flow_run_slug"
-        if [[ -f "$flow_run_dir/state.json" ]]; then
-          (bash "$econ_script" --flow-run-dir "$flow_run_dir" --task-slug "$flow_run_slug") </dev/null >/dev/null 2>&1 &
-          disown 2>/dev/null || true
-        fi
+        (
+          [[ -z "$flow_run_workspace" || ! -d "$flow_run_workspace" ]] && flow_run_workspace="$PWD"
+          flow_run_dir="$flow_run_workspace/.kontourai/flow/runs/$flow_run_slug"
+          [[ -f "$flow_run_dir/state.json" ]] || exit 0
+          bash "$econ_script" --flow-run-dir "$flow_run_dir" --task-slug "$flow_run_slug"
+        ) </dev/null >/dev/null 2>&1 &
+        disown 2>/dev/null || true
       fi
     fi
 
