@@ -426,7 +426,15 @@ process.stdin.on('end', () => {
   process.stdout.write(JSON.stringify({ run_correlation: correlation, task_slug: '../../../../escape-run' }));
 });
 NODE
-mkdir -p "$TRAVERSAL_WS" "$TRAVERSAL_OUTSIDE"
+# The intermediate .kontourai/flow/runs/ chain MUST exist for this assertion to have any power.
+# A `..` sequence is resolved component-by-component by the kernel, so `<ws>/.kontourai/flow/runs/
+# ../../../../escape-run` fails with ENOENT — and the `-f <dir>/state.json` guard therefore reads
+# false — whenever `.kontourai` is absent, regardless of whether the slug containment check exists
+# at all. Without these directories the assertion below passes because the fixture is unreachable
+# rather than because the hook refused it: removing the containment regex left it green
+# (orchestrator fault injection, 2026-08-10). With them present, the same injection writes a real
+# record derived from a state.json OUTSIDE the workspace, which is the escape this asserts against.
+mkdir -p "$TRAVERSAL_WS" "$TRAVERSAL_OUTSIDE" "$TRAVERSAL_WS/.kontourai/flow/runs"
 printf '%s\n' '{"name":"traversal-stop-fixture","private":true}' > "$TRAVERSAL_WS/package.json"
 jq '.run_id = "escape-run"' "$FIX/routeback-completed/state.json" > "$TRAVERSAL_OUTSIDE/state.json"
 invoke_stop "$TRAVERSAL_TELEMETRY" "$TRAVERSAL_WS" "stop-traversal" "$TRAVERSAL_LOG" "$TMP/traversal-stop.full.jsonl"
