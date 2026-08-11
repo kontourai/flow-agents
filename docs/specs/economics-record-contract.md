@@ -123,6 +123,35 @@ the `session.usage` event.
 | `terminal_status` | enum\|absent | honest run-termination taxonomy (#925) — see below. Present only on `flow_run_record`-produced records today; optional/additive on `0.2`. |
 | `tokens_unattributed` | boolean\|absent | `true` when one or more `phases[]` entries carry `null` token fields (no attribution source available for them). Optional/additive on `0.2`. |
 
+## The economics log is a MULTI-PRODUCER stream — select by producer, never by position
+
+**Hard requirement for every consumer.** A single Builder Stop appends **two** records to the same
+`economics.jsonl`: the legacy session.usage-derived record and the canonical Flow-run-derived one.
+They are written by two independent detached processes, so **their append order is a race** — there
+is no "the last record" to read.
+
+A consumer MUST select the record family it means by `producer_authority` before reading any field:
+
+```sh
+# the legacy authenticated-session record
+jq -c 'select(.producer_authority != "flow_run_record")' economics.jsonl | tail -1
+# the canonical Flow-run-derived record
+jq -c 'select(.producer_authority == "flow_run_record")' economics.jsonl | tail -1
+```
+
+`tail -1` / `.at(-1)` on the raw file was only ever correct while exactly one producer wrote here.
+This was not hypothetical: enabling the second producer turned three positional consumers red at
+once (two integration evals and the effectiveness-loop demo report), each silently reading the
+wrong record family — a `run_correlation.correlation_id` that reads `null` because the record it
+landed on never carried one. The `producer_authority` field exists precisely to make this
+selection explicit; a consumer that ignores it is reading whichever process happened to finish
+first.
+
+Aggregating consumers have a second obligation: the two records describe the SAME run from
+incompatible vantage points (unknown vs attributed cost; pause-subtracted active duration vs
+session duration). Counting both inflates run counts and corrupts every average. See
+`docs/specs/learning-review-proposals-contract.md` for how that analyzer scopes its population.
+
 ## `flow_run_record` mode — deriving from the canonical Flow run store (#922/#925 phase A)
 
 **Problem this repairs.** Every historical record before this change carried `run_id: "unknown"`

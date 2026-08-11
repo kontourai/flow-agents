@@ -185,7 +185,12 @@ const fs = require('node:fs');
 const [stateFile, bundleFile, economicsFile, verbsFile, fixtureHome, project, notReachable, refusal] = process.argv.slice(2);
 const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
 const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
-const record = JSON.parse(fs.readFileSync(economicsFile, 'utf8').trim().split('\n').at(-1));
+// Select by producer, never by position: the economics log is a multi-producer stream and
+// this report is about the canonical Flow-run-derived record specifically.
+const record = JSON.parse(fs.readFileSync(economicsFile, 'utf8').trim().split('\n')
+  .filter(Boolean)
+  .filter((line) => { try { return JSON.parse(line).producer_authority === 'flow_run_record'; } catch { return false; } })
+  .at(-1));
 const claims = Array.isArray(bundle.claims) ? bundle.claims : [];
 const byExpectation = new Map(claims.map((claim) => [claim.metadata?.gate_claim?.expectation_id, claim]));
 byExpectation.set('clean-critique', byExpectation.get('clean-critique') || claims.find((claim) => claim.claimType === 'workflow.critique.review'));
