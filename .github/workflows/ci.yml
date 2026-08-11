@@ -312,7 +312,17 @@ jobs:
   runtime-and-kit:
     name: Runtime and Kit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 20 -> 30, measured rather than nudged. This lane is the longest in the matrix and was already
+    # running 19m25s against a 20-minute ceiling on main (6f90c663) -- 35 seconds of headroom. A job
+    # that exceeds timeout-minutes is CANCELLED, and `gh pr checks` renders cancelled as "fail", so
+    # the breach reads as a broken test rather than an exhausted budget: the run that exposed this
+    # had all 61 steps green and still reported red. Per-step diff against main attributed the whole
+    # overrun to one step (+66s, economics run binding: 7s -> 73s) for new Stop-hook coverage that
+    # independent review required. Raising the ceiling is not masking a failure here -- every
+    # assertion passes -- but the underlying problem is capacity, not this number: the lane has no
+    # headroom and keeps growing, so it wants splitting. Tracked separately; do not treat this bump
+    # as the fix.
+    timeout-minutes: 30
     env:
       FLOW_AGENTS_CI_LANE: runtime-and-kit
       FLOW_AGENTS_CI_RESULTS_DIR: evals/results/ci-baseline/runtime-and-kit
