@@ -262,6 +262,279 @@ TELEMETRY_ECONOMICS_LOG_FILE="$LOG3" bash "$EMITTER" --flow-run-dir "$TMP/does-n
 [[ ! -e "$LOG3" ]] && pass "a missing flow-run-dir writes nothing (no-op, never a guessed/incomplete record)" \
   || fail "a missing flow-run-dir unexpectedly wrote a record"
 
+# ── Stop-hook integration: authenticated Builder binding -> detached local Flow snapshot ---------
+# This drives telemetry.sh directly from this worktree (rather than the packed-install path): the
+# installed-runtime correlation eval separately proves packed hook wiring, while this keeps the
+# producer and its bounded dedupe proof together with the canonical run-economics fixtures.
+echo "--- Stop hook: authenticated Flow snapshots are emitted, bounded-deduped, and contained ---"
+STOP_CLI="$ROOT/build/src/cli.js"
+if [[ ! -f "$STOP_CLI" ]]; then
+  npm run build --silent >/dev/null 2>&1 || true
+fi
+
+setup_stop_binding() { # <workspace> <slug>
+  local workspace="$1" slug="$2" actor="economics-stop-actor"
+  mkdir -p "$workspace"
+  printf '%s\n' '{"name":"economics-stop-hook-fixture","private":true}' > "$workspace/package.json"
+  (
+    cd "$workspace" || exit 1
+    FLOW_AGENTS_ACTOR="$actor" node "$STOP_CLI" workflow start \
+      --artifact-root "$workspace/.kontourai/flow-agents" --flow builder.shape \
+      --task-slug "$slug" --summary "Economics Stop-hook fixture." >/dev/null
+  ) || return 1
+}
+
+complete_stop_binding() { # <workspace> <slug>
+  local workspace="$1" slug="$2" session artifact ref expectation
+  session="$workspace/.kontourai/flow-agents/$slug"
+  artifact="$session/$slug--idea-to-backlog.md"
+  printf '%s\n' '# Terminal Stop economics fixture' > "$artifact"
+  ref="$(jq -nc --arg file "$artifact" '{kind:"artifact",file:$file,summary:"Terminal Stop economics fixture."}')"
+  for expectation in shaped-problem shaped-outcome shaped-constraints shaped-non-goals shaped-success shaped-risk slices-defined work-items-filed; do
+    (
+      cd "$workspace" || exit 1
+      FLOW_AGENTS_ACTOR="economics-stop-actor" node "$STOP_CLI" workflow evidence \
+        --session-dir "$session" --expectation "$expectation" --status pass \
+        --summary "Terminal Stop fixture records $expectation." --evidence-ref-json "$ref" >/dev/null
+    ) || return 1
+  done
+}
+
+invoke_stop() { # <telemetry-dir> <workspace> <session> <economics-log> <full-log> [exec-cwd]
+  # exec-cwd defaults to <workspace>. Passing a DIFFERENT directory is what separates a hook that
+  # honours the usage event's .context.cwd from one that just uses $PWD: run-correlation-binding
+  # resolves the workspace from the event (run-correlation-binding.js:360-362), never from
+  # process.cwd(), so the authenticated binding still resolves when the two differ.
+  local telemetry_dir workspace session economics_log full_log exec_cwd input start_input
+  telemetry_dir="$1"
+  workspace="$2"
+  session="$3"
+  economics_log="$4"
+  full_log="$5"
+  exec_cwd="${6:-$2}"
+  input="$(jq -nc --arg cwd "$workspace" --arg session "$session" '{
+    session_id: $session, turn_id: "economics-stop-turn", cwd: $cwd,
+    hook_event_name: "Stop", transcript_path: ""
+  }')"
+  start_input="$(jq -nc --arg cwd "$workspace" --arg session "$session" '{
+    session_id: $session, turn_id: "economics-start-turn", cwd: $cwd,
+    hook_event_name: "SessionStart"
+  }')"
+  printf '%s' "$start_input" | (
+    cd "$exec_cwd" || exit 1
+    FLOW_AGENTS_ACTOR="economics-stop-actor" \
+    FLOW_AGENTS_TELEMETRY_FOREGROUND=true \
+    TELEMETRY_ENABLED=true TELEMETRY_USAGE_TRACKING=true \
+    TELEMETRY_DATA_DIR="$TMP/stop-telemetry" TELEMETRY_SESSION_DIR="$TMP/stop-telemetry/sessions" \
+    TELEMETRY_CHANNEL_FULL_LOG_FILE="$full_log" TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE="$TMP/stop.analytics.jsonl" \
+    TELEMETRY_ECONOMICS_LOG_FILE="$economics_log" \
+    bash "$telemetry_dir/telemetry.sh" SessionStart dev
+  ) >/dev/null 2>&1
+  printf '%s' "$input" | (
+    cd "$exec_cwd" || exit 1
+    FLOW_AGENTS_ACTOR="economics-stop-actor" \
+    FLOW_AGENTS_TELEMETRY_FOREGROUND=true \
+    TELEMETRY_ENABLED=true TELEMETRY_USAGE_TRACKING=true \
+    TELEMETRY_DATA_DIR="$TMP/stop-telemetry" TELEMETRY_SESSION_DIR="$TMP/stop-telemetry/sessions" \
+    TELEMETRY_CHANNEL_FULL_LOG_FILE="$full_log" TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE="$TMP/stop.analytics.jsonl" \
+    TELEMETRY_ECONOMICS_LOG_FILE="$economics_log" \
+    bash "$telemetry_dir/telemetry.sh" Stop dev
+  ) >/dev/null 2>&1
+  for _ in $(seq 1 50); do
+    [[ -e "$economics_log" ]] && break
+    sleep 0.1
+  done
+  # Both emitters are detached by contract; give this fixture a bounded interval for both local
+  # single-line writes before the following assertion counts their records.
+  sleep 0.5
+}
+
+STOP_WS="$TMP/stop-workspace"
+STOP_SLUG="terminal-stop-run"
+STOP_LOG="$TMP/stop.economics.jsonl"
+STOP_FULL="$TMP/stop.full.jsonl"
+if [[ -f "$STOP_CLI" ]] && setup_stop_binding "$STOP_WS" "$STOP_SLUG" \
+  && complete_stop_binding "$STOP_WS" "$STOP_SLUG" \
+  && invoke_stop "$TELEMETRY" "$STOP_WS" "stop-terminal-one" "$STOP_LOG" "$STOP_FULL"; then
+  terminal_count="$(jq -s --arg slug "$STOP_SLUG" '[.[] | select(.producer_authority == "flow_run_record" and .run_id == $slug)] | length' "$STOP_LOG" 2>/dev/null)"
+  legacy_count="$(jq -s '[.[] | select(.producer_authority != "flow_run_record")] | length' "$STOP_LOG" 2>/dev/null)"
+  [[ "$terminal_count" == "1" && "$legacy_count" -ge 1 ]] \
+    && pass "authenticated Stop appends one local flow_run_record alongside the legacy session.usage record" \
+    || fail "authenticated Stop record mix wrong: flow_run_record=$terminal_count legacy=$legacy_count"
+
+  invoke_stop "$TELEMETRY" "$STOP_WS" "stop-terminal-two" "$STOP_LOG" "$STOP_FULL"
+  terminal_after_second="$(jq -s --arg slug "$STOP_SLUG" '[.[] | select(.producer_authority == "flow_run_record" and .run_id == $slug)] | length' "$STOP_LOG" 2>/dev/null)"
+  [[ "$terminal_after_second" == "1" ]] \
+    && pass "second Stop on the same terminal run appends no further flow_run_record (bounded dedupe)" \
+    || fail "terminal Stop dedupe failed: flow_run_record count=$terminal_after_second want 1"
+else
+  fail "could not construct or invoke authenticated terminal Stop fixture"
+fi
+
+ACTIVE_WS="$TMP/active-stop-workspace"
+ACTIVE_SLUG="active-stop-run"
+ACTIVE_LOG="$TMP/active-stop.economics.jsonl"
+ACTIVE_FULL="$TMP/active-stop.full.jsonl"
+if setup_stop_binding "$ACTIVE_WS" "$ACTIVE_SLUG" \
+  && invoke_stop "$TELEMETRY" "$ACTIVE_WS" "stop-active-one" "$ACTIVE_LOG" "$ACTIVE_FULL"; then
+  sleep 1.1
+  invoke_stop "$TELEMETRY" "$ACTIVE_WS" "stop-active-two" "$ACTIVE_LOG" "$ACTIVE_FULL"
+  active_count="$(jq -s --arg slug "$ACTIVE_SLUG" '[.[] | select(.producer_authority == "flow_run_record" and .run_id == $slug)] | length' "$ACTIVE_LOG" 2>/dev/null)"
+  active_unique="$(jq -s --arg slug "$ACTIVE_SLUG" '[.[] | select(.producer_authority == "flow_run_record" and .run_id == $slug)] | unique | length' "$ACTIVE_LOG" 2>/dev/null)"
+  [[ "$active_count" == "2" && "$active_unique" == "2" ]] \
+    && pass "an active run's changed second snapshot is appended (dedupe suppresses only identical records)" \
+    || fail "active Stop snapshots wrong: count=$active_count distinct=$active_unique want 2/2"
+else
+  fail "could not construct or invoke authenticated active Stop fixture"
+fi
+
+UNBOUND_WS="$TMP/unbound-stop-workspace"
+UNBOUND_LOG="$TMP/unbound-stop.economics.jsonl"
+UNBOUND_DECOY_SLUG="unbound-decoy-run"
+mkdir -p "$UNBOUND_WS"
+printf '%s\n' '{"name":"unbound-stop-fixture","private":true}' > "$UNBOUND_WS/package.json"
+# Review MEDIUM: an empty workspace makes this assertion unfalsifiable — an illicit slug fallback
+# (current.json, an env var, a workspace scan, a hardcoded default) would find nothing to emit
+# from, so the downstream `-f state.json` precondition would refuse it and the assertion would stay
+# green anyway. Plant a fully valid, REACHABLE Flow run plus the pointer/state a fallback would
+# most plausibly read, while leaving the authenticated correlation snapshot absent. Now the only
+# thing standing between this fixture and a record is the authenticated-slug requirement itself.
+mkdir -p "$UNBOUND_WS/.kontourai/flow/runs/$UNBOUND_DECOY_SLUG" "$UNBOUND_WS/.kontourai/flow-agents/$UNBOUND_DECOY_SLUG"
+jq --arg slug "$UNBOUND_DECOY_SLUG" '.run_id = $slug' "$FIX/routeback-completed/state.json" \
+  > "$UNBOUND_WS/.kontourai/flow/runs/$UNBOUND_DECOY_SLUG/state.json"
+[[ -f "$FIX/routeback-completed/evidence/manifest.json" ]] \
+  && mkdir -p "$UNBOUND_WS/.kontourai/flow/runs/$UNBOUND_DECOY_SLUG/evidence" \
+  && cp "$FIX/routeback-completed/evidence/manifest.json" \
+        "$UNBOUND_WS/.kontourai/flow/runs/$UNBOUND_DECOY_SLUG/evidence/manifest.json"
+jq -nc --arg slug "$UNBOUND_DECOY_SLUG" --arg dir ".kontourai/flow-agents/$UNBOUND_DECOY_SLUG" \
+  '{binding_id: "unbound-decoy-binding", active_slug: $slug, artifact_dir: $dir}' \
+  > "$UNBOUND_WS/.kontourai/flow-agents/current.json"
+jq -nc --arg slug "$UNBOUND_DECOY_SLUG" \
+  '{schema_version: "1.0", task_slug: $slug, status: "planned", phase: "planning"}' \
+  > "$UNBOUND_WS/.kontourai/flow-agents/$UNBOUND_DECOY_SLUG/state.json"
+invoke_stop "$TELEMETRY" "$UNBOUND_WS" "stop-unbound" "$UNBOUND_LOG" "$TMP/unbound-stop.full.jsonl"
+unbound_count="$(jq -s '[.[] | select(.producer_authority == "flow_run_record")] | length' "$UNBOUND_LOG" 2>/dev/null)"
+[[ "$unbound_count" == "0" ]] \
+  && pass "no authenticated binding emits no flow_run_record" \
+  || fail "unbound Stop unexpectedly emitted flow_run_record count=$unbound_count"
+
+MISSING_WS="$TMP/missing-stop-workspace"
+MISSING_SLUG="missing-stop-run"
+MISSING_LOG="$TMP/missing-stop.economics.jsonl"
+MISSING_FULL="$TMP/missing-stop.full.jsonl"
+if setup_stop_binding "$MISSING_WS" "$MISSING_SLUG"; then
+  rm -f "$MISSING_WS/.kontourai/flow/runs/$MISSING_SLUG/state.json"
+  invoke_stop "$TELEMETRY" "$MISSING_WS" "stop-missing" "$MISSING_LOG" "$MISSING_FULL"
+  missing_count="$(jq -s '[.[] | select(.producer_authority == "flow_run_record")] | length' "$MISSING_LOG" 2>/dev/null)"
+  normal_telemetry="$(wc -l < "$MISSING_FULL" 2>/dev/null | tr -d ' ')"
+  [[ "$missing_count" == "0" && "${normal_telemetry:-0}" -ge 1 ]] \
+    && pass "authenticated binding without a Flow state file no-ops while normal Stop telemetry still emits" \
+    || fail "missing Flow state path wrong: flow_run_record=$missing_count normal_telemetry=${normal_telemetry:-0}"
+else
+  fail "could not construct authenticated missing-state Stop fixture"
+fi
+
+# This controlled telemetry copy returns a correlation-matching but hostile snapshot. It proves the
+# hook's own containment boundary rather than relying on run-correlation-binding's upstream guards.
+TRAVERSAL_TELEMETRY="$TMP/telemetry-traversal"
+TRAVERSAL_WS="$TMP/traversal-stop-workspace"
+TRAVERSAL_LOG="$TMP/traversal-stop.economics.jsonl"
+TRAVERSAL_OUTSIDE="$TMP/escape-run"
+cp -R "$TELEMETRY" "$TRAVERSAL_TELEMETRY"
+cat > "$TRAVERSAL_TELEMETRY/run-correlation-binding.js" <<'NODE'
+#!/usr/bin/env node
+let input = '';
+process.stdin.on('data', (chunk) => { input += chunk; });
+process.stdin.on('end', () => {
+  const event = JSON.parse(input || '{}');
+  const correlation = event.run_correlation || { status: 'incomplete', reason: 'fixture correlation' };
+  process.stdout.write(JSON.stringify({ run_correlation: correlation, task_slug: '../../../../escape-run' }));
+});
+NODE
+# The intermediate .kontourai/flow/runs/ chain MUST exist for this assertion to have any power.
+# A `..` sequence is resolved component-by-component by the kernel, so `<ws>/.kontourai/flow/runs/
+# ../../../../escape-run` fails with ENOENT — and the `-f <dir>/state.json` guard therefore reads
+# false — whenever `.kontourai` is absent, regardless of whether the slug containment check exists
+# at all. Without these directories the assertion below passes because the fixture is unreachable
+# rather than because the hook refused it: removing the containment regex left it green
+# (orchestrator fault injection, 2026-08-10). With them present, the same injection writes a real
+# record derived from a state.json OUTSIDE the workspace, which is the escape this asserts against.
+mkdir -p "$TRAVERSAL_WS" "$TRAVERSAL_OUTSIDE" "$TRAVERSAL_WS/.kontourai/flow/runs"
+printf '%s\n' '{"name":"traversal-stop-fixture","private":true}' > "$TRAVERSAL_WS/package.json"
+jq '.run_id = "escape-run"' "$FIX/routeback-completed/state.json" > "$TRAVERSAL_OUTSIDE/state.json"
+invoke_stop "$TRAVERSAL_TELEMETRY" "$TRAVERSAL_WS" "stop-traversal" "$TRAVERSAL_LOG" "$TMP/traversal-stop.full.jsonl"
+traversal_count="$(jq -s '[.[] | select(.producer_authority == "flow_run_record")] | length' "$TRAVERSAL_LOG" 2>/dev/null)"
+[[ "$traversal_count" == "0" ]] \
+  && pass "a traversal slug writes no record and cannot use a state file outside the fixture workspace" \
+  || fail "traversal slug containment failed: flow_run_record=$traversal_count want 0"
+
+# Review MEDIUM: no fixture supplied a VALID snapshot whose run_correlation disagrees with the
+# event's, so deleting the `select(.run_correlation == $correlation)` guard left every assertion
+# green. This one supplies exactly that — a well-formed snapshot naming a real, reachable, fully
+# valid Flow run, with a correlation that does not match the event. The slug is otherwise perfect;
+# the equality guard is the only thing that may refuse it.
+MISMATCH_TELEMETRY="$TMP/telemetry-mismatch"
+MISMATCH_WS="$TMP/mismatch-stop-workspace"
+MISMATCH_SLUG="mismatch-stop-run"
+MISMATCH_LOG="$TMP/mismatch-stop.economics.jsonl"
+cp -R "$TELEMETRY" "$MISMATCH_TELEMETRY"
+cat > "$MISMATCH_TELEMETRY/run-correlation-binding.js" <<'NODE'
+#!/usr/bin/env node
+// Hostile ONLY on the sidecar-snapshot call: every other call behaves like the event expects, so
+// the surrounding telemetry pipeline still produces a normal Stop and a legacy economics record.
+// That isolation is what makes the assertion specific — the ONLY thing wrong is that the snapshot's
+// run_correlation disagrees with the event's, which is precisely what the equality guard exists for.
+let input = '';
+process.stdin.on('data', (chunk) => { input += chunk; });
+process.stdin.on('end', () => {
+  const event = JSON.parse(input || '{}');
+  const slug = process.env.MISMATCH_SLUG || 'mismatch-stop-run';
+  if (process.argv.slice(2).includes('--sidecar-snapshot')) {
+    process.stdout.write(JSON.stringify({
+      run_correlation: { status: 'present', correlation_id: 'a-correlation-this-event-does-not-carry' },
+      task_slug: slug,
+    }));
+    return;
+  }
+  const correlation = event.run_correlation || { status: 'incomplete', reason: 'fixture correlation' };
+  process.stdout.write(JSON.stringify({ run_correlation: correlation, task_slug: slug }));
+});
+NODE
+mkdir -p "$MISMATCH_WS/.kontourai/flow/runs/$MISMATCH_SLUG"
+printf '%s\n' '{"name":"mismatch-stop-fixture","private":true}' > "$MISMATCH_WS/package.json"
+jq --arg slug "$MISMATCH_SLUG" '.run_id = $slug' "$FIX/routeback-completed/state.json" \
+  > "$MISMATCH_WS/.kontourai/flow/runs/$MISMATCH_SLUG/state.json"
+if [[ -f "$FIX/routeback-completed/evidence/manifest.json" ]]; then
+  mkdir -p "$MISMATCH_WS/.kontourai/flow/runs/$MISMATCH_SLUG/evidence"
+  cp "$FIX/routeback-completed/evidence/manifest.json" \
+     "$MISMATCH_WS/.kontourai/flow/runs/$MISMATCH_SLUG/evidence/manifest.json"
+fi
+MISMATCH_SLUG="$MISMATCH_SLUG" invoke_stop "$MISMATCH_TELEMETRY" "$MISMATCH_WS" "stop-mismatch" "$MISMATCH_LOG" "$TMP/mismatch-stop.full.jsonl"
+mismatch_count="$(jq -s '[.[] | select(.producer_authority == "flow_run_record")] | length' "$MISMATCH_LOG" 2>/dev/null)"
+[[ "$mismatch_count" == "0" ]] \
+  && pass "a snapshot whose run_correlation disagrees with the event emits no record (the authenticated join is what binds, not the slug's validity)" \
+  || fail "correlation-mismatch guard failed: flow_run_record=$mismatch_count want 0"
+
+# Review MEDIUM: every other fixture runs the hook with process cwd == .context.cwd, so an
+# implementation that ignored the event and used $PWD would pass all of them. Here the two differ:
+# the run lives under the event's .context.cwd workspace, and the process runs somewhere else
+# entirely (the pattern of a globally installed hook, where TELEMETRY_DIR/$PWD is the install
+# location rather than the project). A record must still appear, derived from the event's workspace.
+CWD_WS="$TMP/cwd-precedence-workspace"
+CWD_ELSEWHERE="$TMP/cwd-precedence-elsewhere"
+CWD_SLUG="cwd-precedence-run"
+CWD_LOG="$TMP/cwd-precedence.economics.jsonl"
+mkdir -p "$CWD_ELSEWHERE"
+if setup_stop_binding "$CWD_WS" "$CWD_SLUG" && complete_stop_binding "$CWD_WS" "$CWD_SLUG"; then
+  invoke_stop "$TELEMETRY" "$CWD_WS" "stop-cwd-precedence" "$CWD_LOG" "$TMP/cwd-precedence.full.jsonl" "$CWD_ELSEWHERE"
+  cwd_count="$(jq -s --arg slug "$CWD_SLUG" '[.[] | select(.producer_authority == "flow_run_record" and .run_id == $slug)] | length' "$CWD_LOG" 2>/dev/null)"
+  [[ "$cwd_count" == "1" ]] \
+    && pass "the workspace comes from the event's .context.cwd, not process \$PWD (record still lands when the two differ)" \
+    || fail "cwd precedence failed: flow_run_record=$cwd_count want 1 (a \$PWD-only implementation reads 0)"
+else
+  fail "could not construct authenticated cwd-precedence Stop fixture"
+fi
+
 # ── AC8: bash-3.2 portability (review finding 1) — macOS's stock /bin/bash treats a
 # zero-element array as unbound under `set -u`, silently crashing the --flow-run-dir path (no
 # --now is EVER passed on a real invocation, only by this eval's own determinism flag) and

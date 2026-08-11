@@ -205,6 +205,21 @@ if [[ -n "$flow_run_dir" ]]; then
     economics_log="${TELEMETRY_DIR}/../../.kontourai/telemetry/economics.jsonl"
   fi
   mkdir -p "$(dirname "$economics_log")" 2>/dev/null || true
+  # Terminal Flow snapshots are byte-identical on every later Stop. Scan only the bounded recent
+  # tail for this producer/run pair so an old terminal record is not appended forever; beyond 1000
+  # lines a duplicate snapshot is benign, while an unbounded scan of a growing local log is not.
+  if [[ -f "$economics_log" ]]; then
+    flow_run_id="$(printf '%s' "$record" | jq -r '.run_id // empty' 2>/dev/null)"
+    # -R + fromjson? so ONE corrupt line does not abort the scan: jq halts a JSON stream at the
+    # first parse error, which would hide every matching record after it and re-append a duplicate.
+    # Degradation was already benign (duplicate, never a suppressed observation) -- this just makes
+    # the common case correct too.
+    recent_flow_run_record="$(tail -n 1000 "$economics_log" 2>/dev/null | jq -R -c \
+      --arg run_id "$flow_run_id" '
+        fromjson? | select(type == "object" and .producer_authority == "flow_run_record" and .run_id == $run_id)
+      ' 2>/dev/null | tail -n 1)"
+    [[ -n "$recent_flow_run_record" && "$recent_flow_run_record" == "$record" ]] && exit 0
+  fi
   printf '%s\n' "$record" >> "$economics_log" 2>/dev/null || true
   exit 0
 fi

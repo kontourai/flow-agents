@@ -324,6 +324,47 @@ for f in "$ANALYZER" "$DECIDER"; do
   fi
 done
 
+# ── flow_run_record producers are excluded from this analyzer's population ────────────────────────
+# The Stop hook emits TWO economics records per Builder Stop: the legacy session.usage-derived
+# record these aggregates were built on, and the canonical Flow-run-derived record. They describe
+# the same run from incompatible vantage points. Admitting both would report one run as two
+# (`records_considered` is surfaced as `runs`), coalesce the run-derived record's honest null cost
+# into a real $0, and average a session duration together with a pause-subtracted active duration.
+#
+# This asserts the population is IDENTICAL with and without those records present — i.e. dual
+# emission cannot move a single number this analyzer reports.
+echo "--- dual-emission isolation: flow_run_record records never enter the analyzed population ---"
+DUAL_LOG="$TMP/dual-emission-economics.jsonl"
+DUAL_LEDGER="$TMP/ledger-dual-emission.jsonl"
+cp "$PP/economics.jsonl" "$DUAL_LOG"
+# One flow_run_record per legacy record, mirroring exactly what a Stop now writes alongside it:
+# same run_id, honest null cost, pause-subtracted wall clock, real terminal status.
+while IFS= read -r legacy_line; do
+  [[ -n "$legacy_line" ]] || continue
+  printf '%s' "$legacy_line" | jq -c '
+    .producer_authority = "flow_run_record"
+    | .terminal_status = "completed"
+    | .tokens_unattributed = true
+    | .cost.input_tokens = null | .cost.output_tokens = null | .cost.estimated_cost_usd = null
+    | .time.wall_clock_s = 999999
+    | .iterations.count = 99 | .iterations.route_backs = 99
+  ' >> "$DUAL_LOG" 2>/dev/null
+done < "$PP/economics.jsonl"
+DUAL_ADDED="$(( $(wc -l < "$DUAL_LOG") - $(wc -l < "$PP/economics.jsonl") ))"
+[[ "$DUAL_ADDED" -ge 1 ]] \
+  && pass "dual-emission fixture actually planted $DUAL_ADDED flow_run_record row(s) (the assertion below is reachable)" \
+  || fail "dual-emission fixture planted no flow_run_record rows — the assertion below would be vacuous"
+OUT_DUAL="$(bash "$ANALYZER" --sessions-root "$PP/sessions" --ledger "$DUAL_LEDGER" "$DUAL_LOG")"
+aeq "$OUT_DUAL" "records_considered unchanged by dual emission" '.records_considered' '6'
+GOT_DUAL_BYKIT="$(printf '%s' "$OUT_DUAL" | jq -c '.aggregates.by_kit')"
+[[ "$GOT_DUAL_BYKIT" == "$GOT_BYKIT" ]] \
+  && pass "by_kit[] is byte-identical with flow_run_record rows present (no double-count, no \$0 cost drag, no mixed wall clock)" \
+  || fail "by_kit[] moved when flow_run_record rows were added: got=$GOT_DUAL_BYKIT want=$GOT_BYKIT"
+GOT_DUAL_BYGATE="$(printf '%s' "$OUT_DUAL" | jq -c '.aggregates.by_gate')"
+[[ "$GOT_DUAL_BYGATE" == "$GOT_BYGATE" ]] \
+  && pass "by_gate[] is byte-identical with flow_run_record rows present" \
+  || fail "by_gate[] moved when flow_run_record rows were added: got=$GOT_DUAL_BYGATE want=$GOT_BYGATE"
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then echo "test_learning_review_proposals: all checks passed."; exit 0
 else echo "test_learning_review_proposals: $errors check(s) failed."; exit 1; fi

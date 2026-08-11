@@ -123,6 +123,35 @@ the `session.usage` event.
 | `terminal_status` | enum\|absent | honest run-termination taxonomy (#925) — see below. Present only on `flow_run_record`-produced records today; optional/additive on `0.2`. |
 | `tokens_unattributed` | boolean\|absent | `true` when one or more `phases[]` entries carry `null` token fields (no attribution source available for them). Optional/additive on `0.2`. |
 
+## The economics log is a MULTI-PRODUCER stream — select by producer, never by position
+
+**Hard requirement for every consumer.** A single Builder Stop appends **two** records to the same
+`economics.jsonl`: the legacy session.usage-derived record and the canonical Flow-run-derived one.
+They are written by two independent detached processes, so **their append order is a race** — there
+is no "the last record" to read.
+
+A consumer MUST select the record family it means by `producer_authority` before reading any field:
+
+```sh
+# the legacy authenticated-session record
+jq -c 'select(.producer_authority != "flow_run_record")' economics.jsonl | tail -1
+# the canonical Flow-run-derived record
+jq -c 'select(.producer_authority == "flow_run_record")' economics.jsonl | tail -1
+```
+
+`tail -1` / `.at(-1)` on the raw file was only ever correct while exactly one producer wrote here.
+This was not hypothetical: enabling the second producer turned three positional consumers red at
+once (two integration evals and the effectiveness-loop demo report), each silently reading the
+wrong record family — a `run_correlation.correlation_id` that reads `null` because the record it
+landed on never carried one. The `producer_authority` field exists precisely to make this
+selection explicit; a consumer that ignores it is reading whichever process happened to finish
+first.
+
+Aggregating consumers have a second obligation: the two records describe the SAME run from
+incompatible vantage points (unknown vs attributed cost; pause-subtracted active duration vs
+session duration). Counting both inflates run counts and corrupts every average. See
+`docs/specs/learning-review-proposals-contract.md` for how that analyzer scopes its population.
+
 ## `flow_run_record` mode — deriving from the canonical Flow run store (#922/#925 phase A)
 
 **Problem this repairs.** Every historical record before this change carried `run_id: "unknown"`
@@ -211,8 +240,12 @@ this emitter), never a guessed one.
   `FLOW_AGENTS_ECONOMICS_FIXTURE_MODE`; it is, however, **local-only** — `economics-record.sh` never
   attempts a console relay for a `flow_run_record` producer regardless of
   `FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY`, since that authority level is not (yet) an authenticated
-  runtime binding console can trust as a de-duplicable per-run fact. Wiring an authenticated,
-  relayable version of this path is #922's broader runtime-binding scope.
+  runtime binding console can trust as a de-duplicable per-run fact. The production Stop hook
+  automatically emits this local-only record when its authenticated Builder snapshot identifies a
+  matching canonical Flow run; it remains separate from the legacy session.usage record and is not
+  relayable. To avoid appending a terminal run forever on later Stops, the emitter suppresses an
+  identical matching `flow_run_record` for the same `run_id` found in the log's last 1000 lines;
+  records outside that bounded tail may duplicate benignly rather than causing an unbounded scan.
 - **Top-level `cost.*` preserves `null`, never coalesces to a fabricated `0` (#925 review finding
   3).** Scope honesty: this holds at the EMITTER. At least one downstream aggregate
   (`learning-review-proposals.sh`) still coalesces `null // 0` when consuming `economics.jsonl` —
@@ -273,11 +306,13 @@ still carry no per-delegation cost (`signals.per_delegation_tokens`).
 **What phase A does NOT do (deferred to #922/#925 phase B).** `economics-record.sh`'s
 `--flow-run-dir` mode does not itself invoke `economics-enrich-tokens.mjs` or merge its output in —
 the two tools are independently runnable and independently tested; gluing them together
-automatically (and doing so from the live `Stop` hook, replacing today's session.usage-event path
-with a Flow-run-derived one end-to-end) is explicit phase-B follow-up. Phase A also does not bind a
-real runtime session identity into this mode's `run_correlation` (it stays `incomplete`), and does
-not attempt cost pricing for flow-run-record-mode tokens (`cost.estimated_cost_usd` stays `null` —
-see "Top-level `cost.*` preserves `null`" above — not a fabricated `0`).
+automatically (and replacing today's session.usage-event path with a Flow-run-derived one
+end-to-end) is explicit phase-B follow-up. The Stop hook now emits both records when authenticated:
+the legacy record remains session.usage-derived, while this local-only Flow snapshot stays separate.
+Phase A also does not bind a real runtime session identity into this mode's `run_correlation` (it
+stays `incomplete`), and does not attempt cost pricing for flow-run-record-mode tokens
+(`cost.estimated_cost_usd` stays `null` — see "Top-level `cost.*` preserves `null`" above — not a
+fabricated `0`).
 
 **Schema additivity is one-directional, not bidirectional (#925 review finding 7).** "Additive on
 v0.2" in this contract means: an **old-shape record still validates under the NEW schema** (forward
