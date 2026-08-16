@@ -659,6 +659,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check gate-certification-matrix-integration
 
+      - name: CLI diagnostic quality integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check cli-diagnostic-quality-integration
+
       - name: FlowDefinition session history preservation integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check flowdefinition-session-history-preservation-integration

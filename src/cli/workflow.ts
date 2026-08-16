@@ -3017,7 +3017,20 @@ function readJsonFile(file: string, label: string): JsonRecord {
   try {
     const stat = fs.fstatSync(descriptor);
     if (!stat.isFile() || stat.size > 1024 * 1024) throw new Error(`${label} must be a regular file no larger than 1 MiB`);
-    const value = JSON.parse(fs.readFileSync(descriptor, "utf8")) as unknown;
+    // Same shape as the lstat case above: the label is in hand and a bare SyntaxError
+    // discarded it, so a corrupt state file reported the parser's position and not which
+    // file of the run was unreadable.
+    //
+    // The read is deliberately OUTSIDE the parser's catch. Wrapping both would report a
+    // mid-read I/O fault (EIO on a failing disk, say) as "not valid JSON" and send the
+    // operator off to repair content that was never the problem.
+    const contents = fs.readFileSync(descriptor, "utf8");
+    let value: unknown;
+    try {
+      value = JSON.parse(contents) as unknown;
+    } catch (error) {
+      throw new Error(`${label} is not valid JSON (${file}): ${error instanceof Error ? error.message : String(error)}`);
+    }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be a JSON object`);
     return value as JsonRecord;
   } finally {
@@ -3421,7 +3434,12 @@ function validateCanonicalSessionDir(candidate: string): string {
     ["session directory", sessionDir, "directory"],
     ["workflow state", path.join(sessionDir, "state.json"), "file"],
   ] as const) {
-    const stat = fs.lstatSync(entry);
+    // lstatSync throws ENOENT for a missing entry, which discarded the label this loop
+    // already knows and surfaced a raw Node error instead. Absence is the common case —
+    // a mistyped slug, or a verb called before `workflow start` — so it gets the clearest
+    // message of the three, naming which component is missing and where it was looked for.
+    const stat = fs.lstatSync(entry, { throwIfNoEntry: false });
+    if (!stat) throw new Error(`${label} not found at ${entry}`);
     if (stat.isSymbolicLink() || (kind === "directory" ? !stat.isDirectory() : !stat.isFile())) throw new Error(`${label} must be a non-symlink ${kind}`);
   }
   const bundle = path.join(sessionDir, "trust.bundle");
