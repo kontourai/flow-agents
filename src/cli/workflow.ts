@@ -3020,9 +3020,14 @@ function readJsonFile(file: string, label: string): JsonRecord {
     // Same shape as the lstat case above: the label is in hand and a bare SyntaxError
     // discarded it, so a corrupt state file reported the parser's position and not which
     // file of the run was unreadable.
+    //
+    // The read is deliberately OUTSIDE the parser's catch. Wrapping both would report a
+    // mid-read I/O fault (EIO on a failing disk, say) as "not valid JSON" and send the
+    // operator off to repair content that was never the problem.
+    const contents = fs.readFileSync(descriptor, "utf8");
     let value: unknown;
     try {
-      value = JSON.parse(fs.readFileSync(descriptor, "utf8")) as unknown;
+      value = JSON.parse(contents) as unknown;
     } catch (error) {
       throw new Error(`${label} is not valid JSON (${file}): ${error instanceof Error ? error.message : String(error)}`);
     }

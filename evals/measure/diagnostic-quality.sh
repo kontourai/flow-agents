@@ -62,24 +62,45 @@ for probe in "${PROBES[@]}"; do
   out="$( (cd "$PROJECT" && node "$CLI" "${argv[@]}") 2>&1 || true )"
   code="$( (cd "$PROJECT" && node "$CLI" "${argv[@]}" >/dev/null 2>&1; echo $?) )"
 
-  # Three-way, deliberately. A top-level catch that prints err.message would turn every
-  # STACK into a stackless line without the operator learning anything more — so a raw
-  # runtime message is scored separately from an authored diagnostic. Without this the
-  # instrument rewards catching the error rather than explaining it.
-  frames="$(printf '%s\n' "$out" | grep -cE '^\s+at |node:internal|node:fs' || true)"
-  first="$(printf '%s\n' "$out" | head -1 | cut -c1-72)"
-  # Anchored deliberately: the check is whether the message BEGINS as a raw runtime error,
-  # after any `flow-agents <verb>: ` prefix. An authored sentence that quotes the underlying
-  # parser error is good practice and must not score as RAW; a message that IS the runtime
-  # error must, even when a top-level catch has stripped its stack.
-  body="$(printf '%s\n' "$first" | sed -E 's/^flow-agents( [a-z-]+)*: //')"
-  raw="$(printf '%s\n' "$body" | grep -cE '^([A-Za-z]*Error: )?(ENOENT|EACCES|EISDIR|ENOTDIR)[,:]|^(SyntaxError|TypeError|ReferenceError):|^Unexpected token|^Cannot read propert' || true)"
+  # FOUR-way. The first version of this scored CLEAN as "not STACK and not on a short
+  # denylist" — a verdict derived from ABSENCE, which an independent review refuted by
+  # exhibiting `flow-agents workflow: Operation failed`: no stack, not on the denylist,
+  # scored CLEAN, and tells the operator nothing. CLEAN now requires POSITIVE evidence
+  # that the message names something to act on, and VAGUE catches everything that
+  # merely avoids looking like a crash.
+  frames="$(printf '%s\n' "$out" | grep -cE '^[[:space:]]+at |node:internal|node:fs' || true)"
+
+  # Classify on the FULL first line; truncate only for display. The earlier version
+  # classified on `cut -c1-72`, so a raw error beyond column 72 scored CLEAN.
+  first_full="$(printf '%s\n' "$out" | head -1)"
+  first="$(printf '%s' "$first_full" | cut -c1-72)"
+
+  # Anchored after any `flow-agents <verb>: ` prefix: an authored sentence that QUOTES a
+  # parser error is good practice and must not score RAW; a message that IS the runtime
+  # error must, even once a top-level catch has stripped its stack. The error-name pattern
+  # is general (any `SomethingError:`, any `EUPPERCASE`) rather than a hand-listed few,
+  # because the denylist could never keep up with Node's error surface.
+  body="$(printf '%s' "$first_full" | sed -E 's/^flow-agents([ ][a-z][a-z-]*|[ ]--[a-z][a-z-]*)*: //')"
+  raw="$(printf '%s\n' "$body" | grep -cE '^([A-Za-z][A-Za-z]*Error: )?E[A-Z]{2,}[,:]|^[A-Za-z][A-Za-z]*Error:|^Unexpected token|^Cannot read propert' || true)"
+
+  # POSITIVE requirement for CLEAN: somewhere in the output, name a referent the operator
+  # can act on — an absolute path, a flag, or a usage line. This is what makes the verdict
+  # a derivation rather than a label. An empty-suffix message ("... not found at ") has no
+  # path and now scores VAGUE, which is the whole point.
+  #
+  # The path pattern is NOT anchored to whitespace. It was, and that produced a false
+  # VAGUE on a message which named its file as `(/private/var/...` — the opening paren
+  # defeated the anchor. Matching a run containing two separators finds a path wherever
+  # it is punctuated, which is what "names a path" actually means.
+  actionable="$(printf '%s\n' "$out" | grep -cE '/[^[:space:]]+/|--[a-z][a-z-]+|[Uu]sage:' || true)"
 
   total=$((total + 1))
   if [ "$frames" -gt 0 ]; then
     verdict="STACK"; stacky=$((stacky + 1))
   elif [ "$raw" -gt 0 ]; then
     verdict="RAW"; stacky=$((stacky + 1))
+  elif [ "$actionable" -eq 0 ]; then
+    verdict="VAGUE"; stacky=$((stacky + 1))
   else
     verdict="CLEAN"; clean=$((clean + 1))
   fi
@@ -101,9 +122,10 @@ else
   printf '  When a verb refuses, does it explain the refusal or dump a stack trace?\n\n'
   printf '%s' "$rows"
   printf '\n  %s/%s probes answered with an authored diagnostic (%s%%)\n' "$clean" "$total" "$pct"
-  [ "$stacky" -gt 0 ] && printf '  %s probe(s) answered with a stack trace or a raw runtime error.\n' "$stacky"
-  printf '  STACK = internal frames leaked.  RAW = stackless but still an unauthored\n'
-  printf '  runtime message (ENOENT, SyntaxError); the operator still learns nothing.\n'
+  [ "$stacky" -gt 0 ] && printf '  %s probe(s) did not.\n' "$stacky"
+  printf '  STACK = internal frames leaked.\n'
+  printf '  RAW   = stackless, but the message IS a runtime error (ENOENT, SyntaxError).\n'
+  printf '  VAGUE = neither, but names no path, flag or usage — nothing to act on.\n'
   printf '\n'
 fi
 
