@@ -1,5 +1,38 @@
 # Changelog
 
+## [6.0.0](https://github.com/kontourai/flow-agents/compare/v5.10.0...v6.0.0) (2026-08-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** the operation-authority binding for publish-change evidence moves from a legacy `authority_trace` attachEvidence option (removed by Flow 5.0's option allowlist) to a claim-scoped `authorityRef` embedded in the attached TrustBundle's own `authorityTrace` array. Read-side authentication (hasCommittedPublishChangeRecoveryReceipt, merge-change.ts resultDigestClaimedByCanonicalRun) checks the new representation first and falls back to recognizing the legacy flat field for evidence attached by a long-running session before this upgrade. The flow-agents kit-config schema's `gate_overrides.*.expectations.*.authority_traces` field is renamed to `authority_refs` to match Flow 5.0's vocabulary; a committed Kit config still carrying the old name now fails closed with an actionable migration diagnostic instead of a bare schema rejection or a swallowed merge exception.
+
+### Features
+
+* **cli:** --authorize-backing-root for legacy Stow-shaped opencode uninstalls ([#1237](https://github.com/kontourai/flow-agents/issues/1237)) ([698db6a](https://github.com/kontourai/flow-agents/commit/698db6a19800b07de439a2165ad70412f4b6bd7b))
+* **cli:** extend init --uninstall to codex and opencode through one shared manifest engine ([#1231](https://github.com/kontourai/flow-agents/issues/1231)) ([b6129fa](https://github.com/kontourai/flow-agents/commit/b6129faf5e6bf895172b51a73c99b6f6575a9022))
+* **contract:** add monotonic delegation envelope ([#1112](https://github.com/kontourai/flow-agents/issues/1112)) ([#1241](https://github.com/kontourai/flow-agents/issues/1241)) ([b71e210](https://github.com/kontourai/flow-agents/commit/b71e2103c9441a551ebf7afe29230e5148a4a46c))
+* **demo:** effectiveness loop — one command that installs, runs, measures, and reports ([#1251](https://github.com/kontourai/flow-agents/issues/1251)) ([6f90c66](https://github.com/kontourai/flow-agents/commit/6f90c6637d251792a2a58141721fe82b4b519acf))
+* **economics:** production Stop hook emits the honest run-derived record ([#1254](https://github.com/kontourai/flow-agents/issues/1254)) ([389a8d9](https://github.com/kontourai/flow-agents/commit/389a8d9387e5e8640d8fd64b5377f83d83224b34))
+* **kit:** activation lifecycle for built-in kits (active_kits registry, activate/deactivate verbs, steering respect) ([#1224](https://github.com/kontourai/flow-agents/issues/1224)) ([0accf19](https://github.com/kontourai/flow-agents/commit/0accf19e1b72365f6bf07df617c0023b75198ca5))
+* **kit:** set-atomic multi-kit activate/deactivate with dependency ordering ([#1232](https://github.com/kontourai/flow-agents/issues/1232)) ([0177168](https://github.com/kontourai/flow-agents/commit/01771681fe27d5fff8471b937a0e8014a116d09d))
+* **knowledge:** edge-preserving provider-graph ingest with ownership-guarded upsert ([#1218](https://github.com/kontourai/flow-agents/issues/1218)) ([95f2d08](https://github.com/kontourai/flow-agents/commit/95f2d089cceb28b9c15dc6d9f11056b36ce68847))
+* **telemetry:** honest economics attribution derived from Flow run records ([#1227](https://github.com/kontourai/flow-agents/issues/1227)) ([553c634](https://github.com/kontourai/flow-agents/commit/553c634442b2328dd5b48c03b4e375268c8abaaf))
+
+
+### Fixes
+
+* bind command evidence to observed revisions ([#1230](https://github.com/kontourai/flow-agents/issues/1230)) ([20a9559](https://github.com/kontourai/flow-agents/commit/20a9559c2b79ca9b9730aa40c745d0ca17857192))
+* **builder:** let a squash-equivalent reviewed tree satisfy critique descent ([#830](https://github.com/kontourai/flow-agents/issues/830)) ([#1243](https://github.com/kontourai/flow-agents/issues/1243)) ([4a87f0a](https://github.com/kontourai/flow-agents/commit/4a87f0a598e25d77de3608492da3baad6dfce427))
+* **cli:** removal requires positive provenance ([#1238](https://github.com/kontourai/flow-agents/issues/1238)) ([#1240](https://github.com/kontourai/flow-agents/issues/1240)) ([85f29b4](https://github.com/kontourai/flow-agents/commit/85f29b4b0e8321425895269310f8fd3a8ab2ce27))
+* **deps:** upgrade @kontourai/flow to 5.0.0 (integrity-fixed persistence, hardened evidence surface) ([#1220](https://github.com/kontourai/flow-agents/issues/1220)) ([fbcb772](https://github.com/kontourai/flow-agents/commit/fbcb772d9b19ce75f575abae401f823718fe4f5a))
+* **sidecar:** let a committed manifest-declared CI command be claimable as tests-evidence ([#1048](https://github.com/kontourai/flow-agents/issues/1048)) ([#1245](https://github.com/kontourai/flow-agents/issues/1245)) ([05804b4](https://github.com/kontourai/flow-agents/commit/05804b47c66586861786c26ef72c7056830f0f84))
+
+
+### Documentation
+
+* **builder:** codify fault-injection sequencing and fix-round scope checking ([#1236](https://github.com/kontourai/flow-agents/issues/1236)) ([12d1749](https://github.com/kontourai/flow-agents/commit/12d17490590cad14c037f8a5aefc9e8bad4ae4f5))
+
 ## [5.10.0](https://github.com/kontourai/flow-agents/compare/v5.9.0...v5.10.0) (2026-08-08)
 
 
