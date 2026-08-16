@@ -135,4 +135,19 @@ async function run(): Promise<number> {
   return 64;
 }
 
-process.exit(await run());
+// A verb that throws used to reach Node's default handler, which prints the stack and the
+// internal frames that produced it. That is unreadable for an operator and useless for an
+// agent, which retries rather than learns. Report the message; keep the stack behind an
+// opt-in so debugging a CLI bug is still possible.
+try {
+  process.exit(await run());
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`flow-agents ${commandName ?? ""}`.trimEnd() + `: ${message}`);
+  if (process.env["FLOW_AGENTS_DEBUG"] === "1" && error instanceof Error && error.stack) {
+    console.error(error.stack);
+  } else {
+    console.error("Set FLOW_AGENTS_DEBUG=1 to print the stack trace.");
+  }
+  process.exit(70);
+}
