@@ -222,6 +222,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_cli_diagnostic_quality.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_measurement_trend.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_hook_category_behaviors.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_artifacts.sh" || result=1

@@ -663,6 +663,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check cli-diagnostic-quality-integration
 
+      - name: Measurement trend sink integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check measurement-trend-sink-integration
+
       - name: FlowDefinition session history preservation integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check flowdefinition-session-history-preservation-integration
