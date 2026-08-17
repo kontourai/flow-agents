@@ -271,7 +271,12 @@ test("sealed coordinator SIGTERM kills its descendant, seals interruption, and c
   child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
   child.stdin.end(`${JSON.stringify(envelope)}\n`);
   let descendant = null;
-  for (let attempt = 0; attempt < 200 && descendant === null; attempt += 1) {
+  // #1259: a fixed 200x10ms attempt count is a 2s budget for process startup, which a
+  // loaded host routinely exceeds (observed FAIL/PASS/PASS at load 51). Wait against a
+  // wall-clock deadline instead: a slow host waits longer, a fast host stays fast, and
+  // expiry distinguishes "too slow" from "never started".
+  const descendantDeadline = Date.now() + 30_000;
+  while (descendant === null && Date.now() < descendantDeadline) {
     const stages = fs.readdirSync(fixture.execution);
     if (stages.length === 1) {
       const pidFile = path.join(fixture.execution, stages[0], "descendant.pid");
@@ -279,7 +284,7 @@ test("sealed coordinator SIGTERM kills its descendant, seals interruption, and c
     }
     if (descendant === null) await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  assert.ok(Number.isSafeInteger(descendant), `controller descendant started before cancellation: exit=${child.exitCode} files=${JSON.stringify(fs.readdirSync(fixture.execution, { recursive: true }))} stdout=${Buffer.concat(stdout).toString("utf8")} stderr=${Buffer.concat(stderr).toString("utf8")}`);
+  assert.ok(Number.isSafeInteger(descendant), `controller descendant did not start within the 30s deadline: exit=${child.exitCode} files=${JSON.stringify(fs.readdirSync(fixture.execution, { recursive: true }))} stdout=${Buffer.concat(stdout).toString("utf8")} stderr=${Buffer.concat(stderr).toString("utf8")}`);
   child.kill("SIGTERM");
   child.kill("SIGTERM");
   const exit = await new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
