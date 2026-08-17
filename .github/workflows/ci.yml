@@ -659,6 +659,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check gate-certification-matrix-integration
 
+      - name: Artifact residue ignored integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check artifact-residue-ignored-integration
+
       - name: CLI diagnostic quality integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check cli-diagnostic-quality-integration

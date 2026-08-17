@@ -220,6 +220,75 @@ function computeActiveKits(runtime: Runtime, global: boolean | undefined, active
   return entries;
 }
 
+/**
+ * Ensure the workflow artifact root ignores the writer's own transient residue.
+ *
+ * #1264: `workflow evidence` with command evidence executes each `--command` itself and
+ * captures Git provenance AT EXECUTION TIME, from a session directory it has just written
+ * into. Every passing claim therefore requires a clean working tree at the moment the
+ * writer is busy dirtying it -- with transaction directories, lock files and its own
+ * append-only command log. In a repository that does not ignore those paths, the writer
+ * refuses its own observation, and the error names a precondition rather than the cause.
+ *
+ * This was invisible during development because THIS repository has `.kontourai/` in its
+ * own .gitignore; a fresh `init` never wrote one, so the path worked where it was built
+ * and was structurally broken everywhere else.
+ *
+ * The ignore is written INSIDE the artifact root rather than appended to the repository's
+ * .gitignore, deliberately: it needs no edit to a user-authored file, it cannot conflict
+ * with one, and it disappears with the directory it governs, so uninstall stays honest
+ * without special-casing a line it once added somewhere else. It is also deliberately
+ * NARROW -- only the transient residue is ignored, so a project that chooses to commit
+ * its durable run artifacts still can.
+ */
+function ensureArtifactResidueIgnored(dest: string): void {
+  // At `.kontourai/`, not `.kontourai/flow-agents/`. Scoping it to the flow-agents
+  // artifact root was measured and found insufficient: the Flow engine writes its own run
+  // records to the sibling `.kontourai/flow/`, which stayed untracked-and-visible and kept
+  // the tree dirty at capture time. One ignore at the shared root covers both, and matches
+  // what this repository does in its own .gitignore.
+  const artifactRoot = path.join(dest, ".kontourai");
+  const ignorePath = path.join(artifactRoot, ".gitignore");
+  // A first attempt at this ignored only the obviously transient residue (transaction
+  // directories and lock files) and left the durable artifacts tracked, so a project could
+  // still choose to commit them. Measured against a real run, that was not enough: the
+  // writer also creates state.json, the command log and the trust bundle while the command
+  // it is observing runs, so the tree is dirty at capture time regardless. The reference
+  // posture is this repository's own .gitignore, which ignores `.kontourai/` wholesale.
+  //
+  // The trade is explicit: run state is machine-regenerable local evidence, not source. A
+  // project that genuinely wants to commit artifacts can delete or edit this file, which is
+  // why it is never overwritten once present.
+  const desired = [
+    "# Written by flow-agents init (#1264).",
+    "#",
+    "# The evidence writer captures Git provenance AT COMMAND-EXECUTION TIME, from this",
+    "# directory, while it is writing state.json, the command log and lock files. Without",
+    "# this file it sees its own writes as a dirty working tree and refuses its own",
+    "# observation -- with an error naming the precondition, not the cause.",
+    "#",
+    "# Run state is regenerable local evidence, not source. To commit artifacts anyway,",
+    "# edit or delete this file; init will not recreate it.",
+    "*",
+    "!.gitignore",
+    "",
+  ].join("\n");
+  try {
+    fs.mkdirSync(artifactRoot, { recursive: true });
+    // `wx` creates EXCLUSIVELY: a project may have written its own rules here, and
+    // silently replacing them would be the user-data-loss class #1238 covered. Review
+    // flagged the original existsSync-then-write as a check/write race; open-exclusive
+    // closes it at the syscall.
+    fs.writeFileSync(ignorePath, desired, { mode: 0o644, flag: "wx" });
+  } catch (error) {
+    // An existing file is the expected, silent case. Anything ELSE is reported: review
+    // flagged the original bare catch as broad enough to swallow a real defect.
+    if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+      console.error(`init: could not write ${ignorePath} (${(error as Error)?.message ?? error}); the evidence writer may refuse command evidence in this repo (#1264)`);
+    }
+  }
+}
+
 function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = [], configPremerge?: unknown, authorizedBackingRoots: string[] = [], installedValues?: unknown): void {
   const recordPath = durableInstallRecordPath(dest);
   const installRecordDir = path.dirname(recordPath);
@@ -1358,6 +1427,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       configPremerge = generated["config_premerge"];
       installedValues = generated["installed_values"];
     } catch { /* runtimes without a merged config have no snapshot */ }
+    ensureArtifactResidueIgnored(options.dest);
     writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? [], configPremerge, [], installedValues);
     // Project-scoped claude-code: write the same ownership manifest the --global path writes
     // (see above), so `flow-agents init --uninstall --runtime claude-code <dest>` has a
