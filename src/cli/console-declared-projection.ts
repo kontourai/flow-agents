@@ -253,7 +253,7 @@ export function readDeclaredEntries(markerPath: string): ReadDeclaredEntriesResu
 }
 
 function gapRecordId(scope: string, gap: string): string {
-  const digest = crypto.createHash("sha256").update(`${scope} ${gap}`, "utf8").digest("hex").slice(0, 16);
+  const digest = crypto.createHash("sha256").update(JSON.stringify([scope, gap]), "utf8").digest("hex").slice(0, 16);
   return `gap.declared.${digest}`;
 }
 

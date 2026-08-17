@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kontourai.dev/schemas/flow-agents.stop-gate-summary/0.1.json",
   "title": "flow-agents.stop-gate-summary",
-  "description": "Machine-derived stop-gate cross-check summary (flow-agents #1266). One JSON line per Stop-gate evaluation, appended to .kontourai/telemetry/stop-gate-summary.jsonl by scripts/hooks/stop-goal-fit.js (best-effort local record, #1087 slice C class; the latest row per session slug is that session's close reading). Every number is observed from the gate's single truth source — captureCrossReference + capturedFailReconciliation — never recomputed. This is the machine-derived counterpart to the economics record's SELF-REPORTED defects.caught_false_completions; the two must not be conflated. Absent hooks/session ⇒ absent record: a session the gate never cross-referenced emits no row, never a fabricated zero row.",
+  "description": "Machine-derived stop-gate cross-check summary (flow-agents #1266). One JSON line per Stop-gate evaluation, appended to .kontourai/telemetry/stop-gate-summary.jsonl by scripts/hooks/stop-goal-fit.js (best-effort local record, #1087 slice C class; the latest row per session slug is that session's close reading). Every number is observed from the gate's single truth source \u2014 captureCrossReference + capturedFailReconciliation \u2014 never recomputed. This is the machine-derived counterpart to the economics record's SELF-REPORTED defects.caught_false_completions; the two must not be conflated. Absent hooks/session \u21d2 absent record: a session the gate never cross-referenced emits no row, never a fabricated zero row.",
   "type": "object",
   "additionalProperties": true,
   "required": [
@@ -20,10 +20,22 @@
     "chain"
   ],
   "properties": {
-    "schema": { "const": "flow-agents.stop-gate-summary" },
-    "version": { "enum": ["0.1"] },
-    "at": { "type": "string", "description": "ISO 8601 timestamp of this Stop-gate evaluation." },
-    "session": { "type": "string", "description": "Session artifact directory basename (slug) the gate scoped to." },
+    "schema": {
+      "const": "flow-agents.stop-gate-summary"
+    },
+    "version": {
+      "enum": [
+        "0.1"
+      ]
+    },
+    "at": {
+      "type": "string",
+      "description": "ISO 8601 timestamp of this Stop-gate evaluation."
+    },
+    "session": {
+      "type": "string",
+      "description": "Session artifact directory basename (slug) the gate scoped to."
+    },
     "blocking": {
       "type": "boolean",
       "description": "Whether this evaluation blocked the stop. Counts report what was OBSERVED regardless of enforcement mode; this field reports enforcement. A row with claims_contradicted > 0 and blocking:false means the gate was in warn mode or the block released."
@@ -31,7 +43,7 @@
     "commands_captured": {
       "type": "integer",
       "minimum": 0,
-      "description": "DISTINCT NORMALIZED COMMANDS in the capture log — the size of readLatestCommandLog's latest-wins map — NOT raw command-log.jsonl entries. A command re-run five times counts once."
+      "description": "DISTINCT NORMALIZED COMMANDS in the capture log \u2014 the size of readLatestCommandLog's latest-wins map \u2014 NOT raw command-log.jsonl entries. A command re-run five times counts once."
     },
     "claims_total": {
       "type": "integer",
@@ -42,7 +54,7 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 8,
-      "description": "Claimed-pass checks the cross-reference actually examined. The gate caps at 8 (claimedPass.slice(0, 8) in stop-goal-fit.js) — claims_total vs claims_checked is mandatory so zero-contradicted is NEVER readable as full coverage. The maximum here is deliberately pinned to the code's cap; if the cap changes, this schema must change with it."
+      "description": "Claimed-pass checks the cross-reference actually examined. The gate caps at 8 (claimedPass.slice(0, 8) in stop-goal-fit.js) \u2014 claims_total vs claims_checked is mandatory so zero-contradicted is NEVER readable as full coverage. The maximum here is deliberately pinned to the code's cap; if the cap changes, this schema must change with it."
     },
     "claims_confirmed_from_capture": {
       "type": "integer",
@@ -52,7 +64,7 @@
     "claims_contradicted": {
       "type": "integer",
       "minimum": 0,
-      "description": "Contradictions merged from BOTH sources — captureCrossReference (capture-log FAIL contradicting a claimed pass, or a trusted-backstop re-run FAIL) and capturedFailReconciliation (namespace-agnostic Case A) — deduplicated by normalized command so one contradiction is one count, mirroring analyze()'s bundleEnforcement warning dedup. Laundered-pass and ambiguous captures are NOT_VERIFIED classes and never counted here."
+      "description": "Contradictions merged from BOTH sources \u2014 captureCrossReference (capture-log FAIL contradicting a claimed pass, or a trusted-backstop re-run FAIL) and capturedFailReconciliation (namespace-agnostic Case A) \u2014 deduplicated by normalized command so one contradiction is one count, mirroring analyze()'s bundleEnforcement warning dedup. Laundered-pass and ambiguous captures are NOT_VERIFIED classes and never counted here. Counts contradictions from captureCrossReference and capturedFailReconciliation only; bundleEnforcement's tampered/disputed catches are deliberately excluded, so a blocking stop can carry claims_contradicted: 0 when the catch was a bundle-tamper rather than a command contradiction."
     },
     "backstop_reruns": {
       "type": "integer",
@@ -60,7 +72,12 @@
       "description": "Trusted backstop re-runs that actually executed this evaluation (a backstop that failed to start is not counted)."
     },
     "chain": {
-      "enum": ["ok", "legacy", "forked", "broken"],
+      "enum": [
+        "ok",
+        "legacy",
+        "forked",
+        "broken"
+      ],
       "description": "verifyCommandLogChain's REAL enum, unmapped. `legacy` means NO hash chain exists (pre-B2 log or no log) and must never be rendered as verified; `forked` is a benign concurrent-append race; `broken` means the capture truth source appears tampered and pass signals were not trusted."
     }
   }
