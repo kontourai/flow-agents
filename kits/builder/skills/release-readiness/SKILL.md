@@ -22,9 +22,7 @@ not fix code, publish a change, or deploy without explicit authorization.
 
 For an active run, confirm the binding before making the Flow claim:
 
-```bash
-flow-agents workflow status --session-dir <session-dir> --json
-```
+The steering hook has already injected the run state and exact next command into your context this turn. Run `flow-agents workflow status --session-dir <session-dir> --json` only if you have recorded evidence or a critique since that injection, or if no steering state block is present; the write itself refuses a wrong or inactive binding either way.
 
 Public status reports the parent definition as `builder.build`. Only that parent
 run at `merge-ready-ci`, whose Flow Definition composes the step from

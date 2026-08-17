@@ -56,8 +56,9 @@ Record:
 
 Only for the active `builder.build` `design-probe` step, confirm the run and then record both expectations through the public interface:
 
+The steering hook has already injected the run state and exact next command into your context this turn. Run `flow-agents workflow status --session-dir <session-dir> --json` only if you have recorded evidence or a critique since that injection, or if no steering state block is present; the write itself refuses a wrong or inactive binding either way.
+
 ```bash
-flow-agents workflow status --session-dir <session-dir>
 flow-agents workflow evidence --session-dir <session-dir> \
   --expectation pickup-probe-readiness --status pass \
   --summary "Pickup probe records goal fit, scope, dependencies, risks, and planning readiness." \

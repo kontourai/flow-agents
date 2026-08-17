@@ -24,9 +24,7 @@ Critique belongs to `review-work`; behavior proof belongs here.
 
 For an active run, verify the binding first:
 
-```bash
-flow-agents workflow status --session-dir <session-dir> --json
-```
+The steering hook has already injected the run state and exact next command into your context this turn. Run `flow-agents workflow status --session-dir <session-dir> --json` only if you have recorded evidence or a critique since that injection, or if no steering state block is present; the write itself refuses a wrong or inactive binding either way.
 
 Only a matching active `builder.build` run at `verify` may receive workflow
 evidence. Otherwise, return the verification report and unresolved gaps without

@@ -24,9 +24,7 @@ It does not prove accepted behavior and it does not fix source files.
 
 For an active run, inspect the binding before work:
 
-```bash
-flow-agents workflow status --session-dir <session-dir> --json
-```
+The steering hook has already injected the run state and exact next command into your context this turn. Run `flow-agents workflow status --session-dir <session-dir> --json` only if you have recorded evidence or a critique since that injection, or if no steering state block is present; the write itself refuses a wrong or inactive binding either way.
 
 Run this skill only when the reported run is `builder.build` at `verify`.
 If there is no matching active run, operate standalone. Do not publish a gate

@@ -55,8 +55,12 @@ contract.
 flow-agents workflow start --flow builder.shape \
   --task-slug <safe-shape-slug> \
   --summary "Shape the selected work into independently actionable slices."
-flow-agents workflow status --session-dir .kontourai/flow-agents/<safe-shape-slug> --json
 ```
+
+The steering hook injects the run state and exact next command each turn. Run
+`flow-agents workflow status --session-dir .kontourai/flow-agents/<safe-shape-slug> --json`
+only if you have written since that injection (a fresh `workflow start` counts) or no
+steering state block is present; the write itself refuses a wrong binding either way.
 
 3. State that this entrypoint selects `builder.shape` and delegates to
    `idea-to-backlog`.

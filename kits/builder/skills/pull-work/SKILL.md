@@ -190,8 +190,9 @@ flow-agents workflow start --flow builder.build \
   --work-item kontourai/flow-agents#123 \
   --assignment-provider github \
   --effective-state-json <github-assignment-status.json>
-flow-agents workflow status --session-dir <session-dir>
 ```
+
+The steering hook has already injected the run state and exact next command into your context this turn. Run `flow-agents workflow status --session-dir <session-dir> --json` only if you have recorded evidence or a critique since that injection (a fresh `workflow start` counts), or if no steering state block is present; the write itself refuses a wrong or inactive binding either way.
 
 For `local-file`, pass `--assignment-provider local-file` and omit
 `--effective-state-json`. `workflow start` atomically binds the selected Work Item, records the canonical

@@ -22,9 +22,7 @@ release, or deploy.
 
 For an active run, confirm the binding before evaluation:
 
-```bash
-flow-agents workflow status --session-dir <session-dir> --json
-```
+The steering hook has already injected the run state and exact next command into your context this turn. Run `flow-agents workflow status --session-dir <session-dir> --json` only if you have recorded evidence or a critique since that injection, or if no steering state block is present; the write itself refuses a wrong or inactive binding either way.
 
 Only a matching run may publish `merge-readiness`. A standalone confidence
 report is local and must not call `workflow evidence`.

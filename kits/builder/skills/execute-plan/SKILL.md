@@ -57,8 +57,9 @@ The execution record must identify:
 
 For an active `builder.build` `execute` step, record `implementation-scope` only after the changed-file scope and acceptance mapping are complete:
 
+The steering hook has already injected the run state and exact next command into your context this turn. Run `flow-agents workflow status --session-dir <session-dir> --json` only if you have recorded evidence or a critique since that injection, or if no steering state block is present; the write itself refuses a wrong or inactive binding either way.
+
 ```bash
-flow-agents workflow status --session-dir <session-dir>
 flow-agents workflow evidence --session-dir <session-dir> \
   --expectation implementation-scope --status pass \
   --summary "Implementation stayed within recorded scope; changed files and supported acceptance criteria are documented." \
