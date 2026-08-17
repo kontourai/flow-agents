@@ -1828,7 +1828,7 @@ function observeBackstopWorkspaceProvenance(workspaceRoot, check) {
  * where captureCrossReference was the only capture consumer not threaded with
  * the FlowDefinition. Mirrors the pattern in bundleEnforcement / sidecarGuidance.
  */
-function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot = root) {
+function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot = root, summary = null) {
   // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
   // Null when no FlowDefinition is active (fallback: bundleClaimedPassCommandChecks
   // uses workflow.check.* prefix only — no regression for non-FlowDefinition sessions).
@@ -1836,6 +1836,14 @@ function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot 
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
   const log = readLatestCommandLog(artifactDir); // Fix C: latest-wins; genuine fix-then-rerun-to-pass clears the block
+  // #1266: the cross-check summary collector observes THIS derivation rather than recomputing
+  // it anywhere else (one truth source). commands_captured is DISTINCT NORMALIZED COMMANDS —
+  // the size of readLatestCommandLog's latest-wins map — NOT raw command-log.jsonl lines; a
+  // command re-run five times counts once.
+  if (summary) {
+    summary.computed = true;
+    summary.commands_captured = log.size;
+  }
   const base = relative(root, artifactDir);
   const backstopMode = resolveBackstopMode(root);
   const warnings = [];
@@ -1909,6 +1917,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot 
   let chainBroken = false;
   {
     const chainResult = verifyCommandLogChain(artifactDir);
+    // #1266: carry verifyCommandLogChain's REAL enum (ok | legacy | forked | broken) into the
+    // summary unmapped. `legacy` means NO chain exists — a consumer must never render it as
+    // verified/ok; collapsing the enum here would be exactly that lie.
+    if (summary) summary.chain = chainResult.status;
     if (chainResult.status === 'broken') {
       chainBroken = true;
       const brokenIdx = chainResult.brokenAt !== null ? ` (entry ${chainResult.brokenAt})` : '';
@@ -1954,9 +1966,15 @@ function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot 
     }
   }
 
+  // #1266: claims_total vs claims_checked is mandatory in the summary — the loop below caps
+  // at 8 claimed-pass commands (slice(0, 8)), so zero-contradicted must never be readable as
+  // full coverage. claims_total is every claimed-pass check; claims_checked counts only the
+  // ones this loop actually cross-referenced (capped, and skipping empty-command checks).
+  if (summary) summary.claims_total = claimedPass.length;
   for (const check of claimedPass.slice(0, 8)) {
     const cmd = normalizeCommand(check.command);
     if (!cmd) continue;
+    if (summary) summary.claims_checked += 1;
     const id = safeOneLine(check.id || cmd, 80);
     const logged = log.get(cmd);
     // #1171: emitted ONLY on the two paths that accept the claimed pass — a narrowed-but-
@@ -1971,6 +1989,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot 
       // shortcut and fall through to the backstop/NOT_VERIFIED path below.
       if (logged.failed) {
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
+        // #1266: one contradiction identity per normalized command — capturedFailReconciliation
+        // can flag the SAME contradiction namespace-agnostically; the shared Set dedups them
+        // (one contradiction, one count), mirroring the bundleEnforcement warning dedup in analyze().
+        if (summary) summary.contradicted.add(cmd);
         warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
       } else if (logged.ambiguous && logged.absenceAmbiguous) {
         // #362: a bare grep/diff logged exit 1 — ambiguous (zero matches/no diff), not a
@@ -2009,6 +2031,13 @@ function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot 
       // A bundle claim can be confirmed by its intact capture record. A
       // sidecar-only claim must continue to the trusted backstop and remains
       // nonconfirming even when that backstop passes.
+      // #1266: claims_confirmed_from_capture counts ONLY this deterministic confirmation path —
+      // a bundle claim whose intact (chain-not-broken) capture record shows a clean pass with no
+      // failure, no ambiguity, no laundering, no undisclosed narrowing, and no provenance issue.
+      // A narrowed-but-passing or provenance-flagged claim is deliberately NOT "confirmed".
+      if (summary && !sidecarOnlyClaims && !logged.failed && !logged.ambiguous && !hasLaunderingOperator(cmd) && !scopeNote && !provenanceIssue) {
+        summary.claims_confirmed_from_capture += 1;
+      }
       if (!sidecarOnlyClaims || logged.failed || logged.ambiguous || hasLaunderingOperator(cmd) || scopeNote || provenanceIssue) continue;
     }
 
@@ -2043,6 +2072,9 @@ function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot 
     // command itself must run in the observed worktree that the provenance
     // snapshot describes, including when it is a linked worktree.
     const outcome = runBackstop({ ...trusted, cwd: workspaceRoot });
+    // #1266: backstop_reruns counts trusted backstop re-runs that actually EXECUTED
+    // (outcome.ran); a backstop that could not start is not a re-run.
+    if (summary && outcome.ran) summary.backstop_reruns += 1;
     if (!outcome.ran) {
       warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — trusted backstop (${trusted.source}) could not run (${safeOneLine(outcome.error, 80)}).`);
       continue;
@@ -2054,6 +2086,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot 
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" exited 1 — for grep/diff this may mean zero matches/no differences (PASS for an absence check) or an unintended miss (FAIL for a presence check); NOT_VERIFIED (ambiguous): ${AMBIGUOUS_REMEDIATION} to remove the ambiguity.`;
       warnings.push(note);
     } else if (outcome.classification === 'fail') {
+      // #1266: a backstop FAIL contradicting a claimed pass is a contradiction from the SAME
+      // source (captureCrossReference) — same per-command dedup Set, counted even in warn mode
+      // (the count reports what was observed; `blocking` on the record reports enforcement).
+      if (summary) summary.contradicted.add(cmd);
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" FAILED with exit ${outcome.exitCode}, contradicting the claimed pass. This is a caught false-completion.`;
       if (backstopMode === 'off') warnings.push(`${note} [backstop in warn mode — not blocking]`);
       else warnings.push(note);
@@ -2110,7 +2146,7 @@ function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot 
  *   - No-command session: no log → latestLog empty → no warning.
  *   - Incidental fail (grep/diff/find) with no pass-claim → no warning (Case B removed).
  */
-function capturedFailReconciliation(root, artifactDir, taskStatus) {
+function capturedFailReconciliation(root, artifactDir, taskStatus, summary = null) {
   // Fix A: removed the `completing` guard. Run on EVERY stop — status-independent.
   // A claim contradicting the capture is a false-completion whether or not the agent
   // has set state.json.status to a terminal value. (taskStatus param kept for compat.)
@@ -2210,6 +2246,12 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     if (acc && acc.passClaims.length > 0) {
       // Any-namespace claim asserts pass for a command whose latest capture is FAIL.
       // This is the namespace-agnostic false-completion signal.
+      // #1266: same contradiction identity (normalized command) as captureCrossReference's
+      // capture-log contradiction — the shared Set merges both sources into ONE count when
+      // they flag the same command, mirroring analyze()'s bundleEnforcement warning dedup.
+      // Only this Case-A bucket is a contradiction; the laundered-pass and ambiguous buckets
+      // below are NOT_VERIFIED classes, never counted as contradicted.
+      if (summary) summary.contradicted.add(cmd);
       const claim = acc.passClaims[0];
       warnings.push(
         `${base} captured command '${safeOneLine(cmd, 120)}' last ran FAIL${exitStr} ` +
@@ -2940,7 +2982,25 @@ async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot
 
   warnings.push(...sidecarValidation(root, latestArtifactDir));
   warnings.push(...sidecarGuidance(root, latestArtifactDir, activeFlowStep));
-  const captureWarnings = captureCrossReference(root, latestArtifactDir, activeFlowStep, workspaceRoot);
+  // #1266: stop-gate cross-check summary collector. Populated ONLY by observing the two
+  // existing truth sources (captureCrossReference + capturedFailReconciliation) as they run —
+  // never recomputed elsewhere. `computed` flips true only when captureCrossReference actually
+  // executed for a scoped session, so absent hooks/session ⇒ absent record downstream (a
+  // fabricated zero row would be this record committing the defect it exists to kill).
+  // `contradicted` is a Set of normalized commands: both sources can flag the same
+  // contradiction; one contradiction, one count (same dedup posture as the bundleEnforcement
+  // warning suppression just below).
+  const stopGateStats = {
+    computed: false,
+    commands_captured: 0,
+    claims_total: 0,
+    claims_checked: 0,
+    claims_confirmed_from_capture: 0,
+    backstop_reruns: 0,
+    chain: 'legacy',
+    contradicted: new Set(),
+  };
+  const captureWarnings = captureCrossReference(root, latestArtifactDir, activeFlowStep, workspaceRoot, stopGateStats);
   warnings.push(...captureWarnings);
   // Dedup: bundleEnforcement and captureCrossReference can both fire "caught false-completion"
   // for the same disputed claim. Suppress the bundleEnforcement warning ONLY when
@@ -2986,7 +3046,7 @@ async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot
   // Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
   // Fix A: status-independent — runs on EVERY stop. A claim contradicting the capture
   // is a false-completion whether or not the agent says the task is 'done'.
-  warnings.push(...capturedFailReconciliation(root, latestArtifactDir, taskStatus));
+  warnings.push(...capturedFailReconciliation(root, latestArtifactDir, taskStatus, stopGateStats));
 
   // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
   // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
@@ -3043,6 +3103,19 @@ async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot
     gatePrefix: gateLabel(activeFlowStep),
     warningRelPath: relPath,
     latestArtifactDir,
+    // #1266: null (never a zero-filled object) when the cross-reference did not run —
+    // recordStopGateSummary() treats null as "emit nothing".
+    stopGateSummary: stopGateStats.computed
+      ? {
+        commands_captured: stopGateStats.commands_captured,
+        claims_total: stopGateStats.claims_total,
+        claims_checked: stopGateStats.claims_checked,
+        claims_confirmed_from_capture: stopGateStats.claims_confirmed_from_capture,
+        claims_contradicted: stopGateStats.contradicted.size,
+        backstop_reruns: stopGateStats.backstop_reruns,
+        chain: stopGateStats.chain,
+      }
+      : null,
   };
 }
 
@@ -3476,6 +3549,47 @@ function releaseOnNonTerminalStop(root, artifactDir) {
   }
 }
 
+// ─── #1266: stop-gate cross-check summary record (the computed heartbeat) ─────
+//
+// One machine-readable JSON line appended to .kontourai/telemetry/stop-gate-summary.jsonl
+// per Stop-gate EVALUATION, emitted alongside the economics record (which the telemetry Stop
+// flow also emits per Stop). The latest row for a session slug is that session's close
+// reading; earlier rows are the gate's honest readings at blocked stops — in block mode a
+// caught contradiction blocks the stop, so ONLY the per-evaluation rows ever carry
+// claims_contradicted > 0 (a close-only record would hide exactly the catches this record
+// exists to surface, and the economics record's self-reported defects.caught_false_completions
+// would keep having no machine-derived counterpart). `blocking` discloses whether this
+// evaluation allowed the stop.
+//
+// Delivery class: best-effort local record (#1087 slice C / economics pattern at
+// telemetry.sh:907–946). The economics emitter detaches a subshell because it runs jq/node
+// subprocesses and an opt-in network relay; this emitter is a local sub-millisecond append
+// with no subprocess and no network, so the fail-open try/catch alone provides the class
+// guarantee (can never alter the hook's verdict, output, or exit code) while keeping the
+// write deterministic for evals. Nothing is recomputed here: every number comes from the
+// analyze() collector fed by captureCrossReference + capturedFailReconciliation.
+//
+// Absent hooks ⇒ absent record: stopGateSummary is null whenever the cross-reference did not
+// run (no scoped session, mode off, analyze early-return), and null emits NOTHING — never a
+// fabricated zero row.
+function recordStopGateSummary(root, result) {
+  try {
+    const summary = result && result.stopGateSummary;
+    if (!summary) return;
+    const record = {
+      schema: 'flow-agents.stop-gate-summary',
+      version: '0.1',
+      at: new Date().toISOString(),
+      session: path.basename(result.latestArtifactDir || ''),
+      blocking: Boolean(result.blocking),
+      ...summary,
+    };
+    const file = path.join(root, '.kontourai', 'telemetry', 'stop-gate-summary.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
+  } catch { /* best-effort: the summary record must never fail or delay the Stop hook */ }
+}
+
 async function run(rawInput) {
   const input = parseJson(rawInput);
   const inputCwd = input.cwd || process.cwd();
@@ -3487,6 +3601,9 @@ async function run(rawInput) {
   const mode = resolveGoalFitMode(root);
   if (mode === 'off') return rawInput;
   const result = await analyze(root, Date.now(), null, workspaceRoot);
+  // #1266: additive side effect only — never changes analyze()'s contract or this function's
+  // return value (same discipline as releaseOnNonTerminalStop below).
+  recordStopGateSummary(root, result);
   // #292 Wave 2: additive side effect only — never changes analyze()'s warnings/blocking
   // contract or this function's return value. Reuses analyze()'s already-resolved
   // latestArtifactDir rather than re-deriving a second "what is the active session" path.
