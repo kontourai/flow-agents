@@ -220,6 +220,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_gate_certification_matrix.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_artifact_residue_ignored.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_cli_diagnostic_quality.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_hook_category_behaviors.sh" || result=1
