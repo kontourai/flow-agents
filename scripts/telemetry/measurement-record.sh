@@ -14,10 +14,11 @@
 # network path at all". Independent review refuted it: inherited NODE_OPTIONS can preload
 # arbitrary JavaScript into the `node` below, and BASH_ENV can inject arbitrary shell into
 # any non-interactive bash — neither of which a stubbed `curl` can observe. That is true of
-# every script in this repo and is not a property this one can promise. Both variables are
-# therefore scrubbed below, which closes the cheap vector; a hostile PATH or a wrapped
-# interpreter remains outside what this script can defend, and the test asserts the scrubbing
-# rather than the unachievable absence.
+# every script in this repo and is not a property this one can promise. NODE_OPTIONS is
+# unset below before node runs; BASH_ENV CANNOT be defended from inside the script it
+# affects (bash honors it before line one) and is disclosed rather than claimed. A hostile
+# PATH or wrapped interpreter also remains outside what this script can defend. The test
+# asserts what is done, not the unachievable absence.
 #
 # Usage:
 #   <producer> --json | measurement-record.sh
@@ -37,9 +38,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Scrub the two inherited-environment preload vectors before any interpreter runs. This
-# does not make the script hermetic (see header) — it removes the two that cost nothing.
-unset NODE_OPTIONS BASH_ENV
+# NODE_OPTIONS is unset so the embedded node validator below runs without inherited
+# preloads. Two honest limits, both from review: (a) BASH_ENV cannot be defended from
+# inside the script it affects — bash honors it BEFORE the first line here runs, so it is
+# a disclosed limit, not a scrubbed vector; (b) clearing NODE_OPTIONS is not free — an
+# environment that legitimately needs a Node policy preload loses it for this validator.
+# That trade is accepted because the validator runs no user code, only JSON.parse.
+unset NODE_OPTIONS
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [ -n "$LOG" ] || LOG="${MEASUREMENT_TREND_LOG:-$ROOT/.kontourai/telemetry/measurements.jsonl}"
@@ -104,6 +109,10 @@ recorded="$(printf '%s' "$payload" | node -e '
         // Duplicates were silently collapsed by the Map in the reporter, quietly shrinking
         // the corpus — the exact absence-reads-as-stability failure this tool exists to
         // prevent, occurring inside the tool.
+        if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(probe.id)) {
+          process.stderr.write(`measurement-record.sh: probe id ${JSON.stringify(probe.id)} must be 1-64 chars of [A-Za-z0-9._:-] starting alphanumeric\n`);
+          process.exit(65);
+        }
         if (ids.includes(probe.id)) {
           process.stderr.write(`measurement-record.sh: duplicate probe id "${probe.id}"\n`);
           process.exit(65);
@@ -130,25 +139,25 @@ umask 077
 mkdir -p "$(dirname "$LOG")"
 # umask only governs files this script CREATES. Review noted a pre-existing 0644 log stays
 # 0644, so an operator who once created it loosely keeps leaking every future reading.
+# The mode is read through node's statSync rather than stat(1): the two stat spellings are
+# dangerously different per platform (GNU -f reports FILESYSTEM status and exits 0), and a
+# security check that fails open on an unparseable answer is not a check. node is already a
+# hard dependency of this script, and statSync either answers or throws.
 if [ -e "$LOG" ]; then
-  # `stat` is not portable and the two spellings are not merely different, they are
-  # DANGEROUSLY different: BSD `-f` selects a format string, GNU `-f` reports FILESYSTEM
-  # status and exits 0 having printed something that is not a mode. Chaining them with ||
-  # therefore succeeded on Linux with garbage, which this guard read as "not 600" and
-  # refused every append — green on macOS, broken in CI. So each result is validated as
-  # octal digits before it is believed, rather than trusting the exit code.
-  mode=""
-  for candidate in "$(stat -c '%a' "$LOG" 2>/dev/null || true)" "$(stat -f '%Lp' "$LOG" 2>/dev/null || true)"; do
-    case "$candidate" in
-      ""|*[!0-7]*) : ;;
-      *) mode="$candidate"; break ;;
-    esac
-  done
+  mode="$(node -e 'try{process.stdout.write(((require("node:fs").statSync(process.argv[1]).mode)&0o777).toString(8))}catch{process.exit(1)}' "$LOG")" || {
+    printf 'measurement-record.sh: cannot determine mode of %s; refusing to append\n' "$LOG" >&2; exit 77; }
   case "$mode" in
-    ""|600|400) : ;;
-    *) printf 'measurement-record.sh: refusing to append: %s is mode %s, expected 600\n' "$LOG" "$mode" >&2
-       printf 'measurement-record.sh: readings retain producer output (paths, command text). Run: chmod 600 %s\n' "$LOG" >&2
-       exit 77 ;;
+    600|400) : ;;
+    *)
+      # The reading arrived on stdin and has already been validated; refusing must not
+      # destroy it (review: exit 77 lost an ephemeral piped reading). Preserve it in an
+      # owner-only sidecar and name it, so fixing the mode costs a re-append, not a re-run
+      # of the producer.
+      side="$LOG.refused.$$"
+      printf '%s\n' "$recorded" > "$side" 2>/dev/null && preserved=" reading preserved at $side;" || preserved=""
+      printf 'measurement-record.sh: refusing to append: %s is mode %s, expected 600 or 400.%s\n' "$LOG" "$mode" "$preserved" >&2
+      printf 'measurement-record.sh: readings retain producer output (paths, command text). Run: chmod 600 %s\n' "$LOG" >&2
+      exit 77 ;;
   esac
 fi
 # Single-line append. Same idiom, and same reasoning, as transport.sh's outbox append:

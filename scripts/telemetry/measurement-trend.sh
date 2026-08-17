@@ -38,8 +38,19 @@ fi
 if [ "$LIST" -eq 1 ]; then
   node -e '
     const fs = require("node:fs");
-    const rows = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean)
-      .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    // Corrupt rows are COUNTED here too. Review showed --list silently discarding
+    // unreadable rows ("no readings recorded", exit 0, from a wholly unreadable file)
+    // and crashing on a parseable non-object row. Same rule as the main report: this
+    // tool must not manufacture calm out of missing data.
+    const lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean);
+    let corrupt = 0;
+    const rows = [];
+    for (const l of lines) {
+      let v; try { v = JSON.parse(l); } catch { corrupt += 1; continue; }
+      if (!v || typeof v !== "object" || Array.isArray(v) || typeof v.measurement !== "string") { corrupt += 1; continue; }
+      rows.push(v);
+    }
+    if (corrupt > 0) console.log(`WARNING: ${corrupt} unreadable row(s) not listed below.`);
     const byId = new Map();
     for (const r of rows) byId.set(r.measurement, (byId.get(r.measurement) ?? 0) + 1);
     if (byId.size === 0) { console.log("no readings recorded"); process.exit(0); }
@@ -53,6 +64,16 @@ if [ "$LIST" -eq 1 ]; then
 fi
 
 [ -n "$MEASUREMENT" ] || { printf 'measurement-trend.sh: --measurement <id> is required (or --list)\n' >&2; exit 64; }
+# Same charset the writer enforces. Review found the reader accepting ids the writer
+# refuses ("has space"), which made the write-side test assert a false premise about what
+# is addressable. One contract, stated twice, checked in both places.
+case "$MEASUREMENT" in
+  ([A-Za-z0-9]*) : ;;
+  (*) printf 'measurement-trend.sh: --measurement must be 1-64 chars of [A-Za-z0-9._-] starting alphanumeric\n' >&2; exit 64 ;;
+esac
+if ! printf '%s' "$MEASUREMENT" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'; then
+  printf 'measurement-trend.sh: --measurement must be 1-64 chars of [A-Za-z0-9._-] starting alphanumeric\n' >&2; exit 64
+fi
 
 node -e '
 const fs = require("node:fs");
@@ -105,7 +126,14 @@ const index = (r) => {
     console.log(`  WARNING: reading at ${r.recorded_at ?? "unknown time"} has a non-array "probes"; treated as empty.`);
     return new Map();
   }
-  return new Map((r.probes ?? []).map((p) => [p.id, p]));
+  const probes = r.probes ?? [];
+  const map = new Map(probes.map((p) => [p.id, p]));
+  // Legacy rows predate the writer-side duplicate check; a collapsed duplicate is corpus
+  // shrinkage and must be said, not absorbed.
+  if (map.size < probes.length) {
+    console.log(`  WARNING: reading at ${r.recorded_at ?? "unknown time"} has duplicate probe ids; later entries win.`);
+  }
+  return map;
 };
 const before = index(previous);
 const after = index(current);

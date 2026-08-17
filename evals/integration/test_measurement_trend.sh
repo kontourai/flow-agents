@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# #1258: the measurement trend sink records locally, reports CHANGES, and never phones home.
+# #1258: the measurement trend sink records locally and reports CHANGES, not scores.
 #
-# The load-bearing assertion is the last one. Every other property here is visible in the
-# output; "did this record leave the machine" is not, so it is proven by stubbing curl and
-# showing the stub was never invoked even with an endpoint configured. A silent outbound
-# side effect cannot be caught by reading stdout, which is exactly why it needs a test.
+# Scope of the network assertion, stated precisely because an earlier version overclaimed:
+# the curl-stub test proves the sink does not invoke curl, even with channel endpoints
+# configured. It cannot prove the absence of every outbound path (BASH_ENV preloads run
+# before any script line; a hostile PATH or wrapped interpreter is out of scope) — those
+# are disclosed limits of the whole repo, not properties any single test can grant.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -150,11 +151,18 @@ fi
 
 # 8. Review round 1 returned BLOCK. Every assertion below covers a claim it REFUTED.
 
-# 8a. The id is the join key and is passed back through argv — it must survive that trip.
+# 8a. Writer and reader enforce ONE id contract. The first version of this comment claimed
+# a spaced id "could never match" — false, argv passes spaces fine; the real defect was the
+# two sides disagreeing about what is valid. Both directions are pinned.
 if printf '{"measurement":"has space","probes":[]}' | bash "$RECORD" --log "$TMP/r.jsonl" >/dev/null 2>&1; then
-  fail "an unaddressable measurement id was accepted (--measurement could never match it)"
+  fail "the writer accepted an id outside the shared charset"
 else
-  pass "an unaddressable measurement id is refused"
+  pass "the writer refuses an id outside the shared charset"
+fi
+if bash "$TREND" --measurement "has space" --log "$LOG" >/dev/null 2>&1; then
+  fail "the reader accepted an id the writer refuses — split contract"
+else
+  pass "the reader refuses the same ids the writer refuses"
 fi
 
 # 8b. A shape the reader cannot process must be refused by the writer, not found a day later.
@@ -181,6 +189,14 @@ else
   pass "a percentage verdict is refused"
 fi
 
+# 8d2. Percent can also arrive through a probe ID, which the report prints verbatim.
+pctid='{"measurement":"demo","probes":[{"id":"80%","verdict":"CLEAN"}]}'
+if printf '%s' "$pctid" | bash "$RECORD" --log "$TMP/r.jsonl" >/dev/null 2>&1; then
+  fail "a percent-bearing probe id was accepted; the no-score property is defeatable via ids"
+else
+  pass "a percent-bearing probe id is refused"
+fi
+
 # 8e. A corrupt newest row must not render as reassurance.
 CORRUPT="$TMP/corrupt.jsonl"
 reading corr a:CLEAN b:CLEAN | bash "$RECORD" --log "$CORRUPT" >/dev/null 2>&1
@@ -192,12 +208,38 @@ case "$out" in
   *) fail "a corrupt newest row was silently discarded: $out" ;;
 esac
 
+# 8e2. --list was the remaining silent-discard route: an unreadable file listed
+# "no readings recorded" at exit 0, and a parseable scalar row crashed it.
+printf 'not json at all\n42\n' > "$TMP/listcorrupt.jsonl"
+out="$(bash "$TREND" --list --log "$TMP/listcorrupt.jsonl" 2>&1)"
+case "$out" in
+  *WARNING*unreadable*) pass "--list reports unreadable rows instead of discarding them" ;;
+  *) fail "--list silently discarded unreadable rows: $out" ;;
+esac
+
 # 8f. umask governs only files this script creates; a pre-existing loose log kept leaking.
 LOOSE="$TMP/loose.jsonl"; : > "$LOOSE"; chmod 644 "$LOOSE"
 if reading demo a:CLEAN | bash "$RECORD" --log "$LOOSE" >/dev/null 2>&1; then
   fail "appended to a world-readable log without complaint"
 else
   pass "refuses to append to an over-permissive existing log"
+fi
+
+# 8f2. The positive half, without which 8f has no power: a broken mode probe that refused
+# EVERYTHING would pass 8f. An existing 0600 log must still take appends, and a refused
+# append must preserve the reading in an owner-only sidecar.
+chmod 600 "$LOOSE"
+if reading demo a:CLEAN | bash "$RECORD" --log "$LOOSE" >/dev/null 2>&1; then
+  pass "an existing 0600 log still accepts appends"
+else
+  fail "a 0600 log was refused — the mode check refuses everything"
+fi
+chmod 644 "$LOOSE"
+reading demo a:CLEAN | bash "$RECORD" --log "$LOOSE" >/dev/null 2>&1
+if ls "$LOOSE".refused.* >/dev/null 2>&1; then
+  pass "a refused reading is preserved in a sidecar, not destroyed"
+else
+  fail "the refusal destroyed the piped reading"
 fi
 
 # 8g. The inherited-preload vector a stubbed curl can never observe. Asserted behaviourally:
