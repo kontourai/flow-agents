@@ -64,6 +64,7 @@
     "flow-agents": "build/src/cli.js",
     "flow-agents-build-bundles": "build/src/cli.js",
     "flow-agents-capability-matrix": "build/src/cli.js",
+    "flow-agents-console-declared-projection": "build/src/cli.js",
     "flow-agents-console-learning-projection": "build/src/cli.js",
     "flow-agents-console-process-projection": "build/src/cli.js",
     "flow-agents-console-trust-projection": "build/src/cli.js",

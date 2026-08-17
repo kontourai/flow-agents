@@ -276,6 +276,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_console_board_sync.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_console_declared_projection.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_learning_review_proposals.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_heartbeat.sh" || result=1

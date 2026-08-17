@@ -317,6 +317,39 @@ else
   _fail "ref-match: expected the canonical command '$DECLARED_CMD' to appear in output (Step 1 must still run) — output: $out7d"
 fi
 
+# 7d-gaps. ADR 0022 addendum part 6 (#1267): an entry carrying the optional structured
+#     `gaps: []` field (array of strings) is still well-formed — the four required fields
+#     remain the complete validity contract and extra fields are tolerated — so it matches,
+#     exempts Step 2, and emits the exact same DECLARED line. The projection reads gaps[];
+#     the reconciler must neither reject nor interpret it.
+CASE7DG="$DECLARED_TMPROOT/ref-match-gaps"
+mkdir -p "$CASE7DG"
+write_declared "$CASE7DG" '{"scope":"ref:feature/foo","reason":"human maintainer PR","approved_by":"alice","declared_at":"2026-07-01T00:00:00Z","gaps":["trend readings have no automatic reader"]}'
+out7dg="$(TRUST_RECONCILE_REF="feature/foo" TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7DG" 2>&1)"
+code7dg=$?
+if [[ $code7dg -eq 0 ]]; then
+  _pass "gaps-field: entry with structured gaps[] still exempts Step 2 (exit 0; extras tolerated)"
+else
+  _fail "gaps-field: expected exit 0 for an in-scope entry carrying gaps[], got $code7dg — output: $out7dg"
+fi
+if echo "$out7dg" | grep -qF "DECLARED (no-agent-delivery): ref:feature/foo — human maintainer PR (approved by alice, declared 2026-07-01T00:00:00Z)"; then
+  _pass "gaps-field: DECLARED line unchanged by the extra gaps[] field"
+else
+  _fail "gaps-field: expected the exact DECLARED line — output: $out7dg"
+fi
+# A malformed gaps value must not change exemption matching either (the field is
+# projection-only; the reconciler never reads it).
+write_declared "$CASE7DG" '{"scope":"ref:feature/foo","reason":"human maintainer PR","approved_by":"alice","declared_at":"2026-07-01T00:00:00Z","gaps":"not-an-array"}'
+out7dg2="$(TRUST_RECONCILE_REF="feature/foo" TRUST_RECONCILE_COMMANDS="$DECLARED_CMD" \
+  node "$RECONCILE" --repo-root "$CASE7DG" 2>&1)"
+code7dg2=$?
+if [[ $code7dg2 -eq 0 ]]; then
+  _pass "gaps-field: a malformed gaps value never affects exemption matching (projection-only field)"
+else
+  _fail "gaps-field: malformed gaps value changed the reconcile verdict (exit $code7dg2) — output: $out7dg2"
+fi
+
 # 7e. Well-formed author: marker NOT matching TRUST_RECONCILE_ACTOR (near-miss) → out of
 #     scope, proves no accidental wildcard match.
 CASE7E="$DECLARED_TMPROOT/author-near-miss"

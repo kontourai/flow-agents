@@ -6,6 +6,7 @@ import { main as effectiveChangeProviderSettings } from "./cli/effective-change-
 import { main as effectiveFlowAgentsConfig } from "./cli/effective-flow-agents-config.js";
 import { main as assignmentProvider } from "./cli/assignment-provider.js";
 import { main as builderRun } from "./cli/builder-run.js";
+import { main as consoleDeclaredProjection } from "./cli/console-declared-projection.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
 import { main as consoleProcessProjection } from "./cli/console-process-projection.js";
 import { main as livenessFleet } from "./cli/liveness-fleet.js";
@@ -40,6 +41,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["build-bundles", () => buildBundles()],
   ["builder-run", builderRun],
   ["capability-matrix", capabilityMatrix],
+  ["console-declared-projection", consoleDeclaredProjection],
   ["console-learning-projection", consoleLearningProjection],
   ["console-process-projection", consoleProcessProjection],
   ["console-trust-projection", consoleTrustProjection],
@@ -77,6 +79,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
 const aliases = new Map<string, string>([
   ["flow-agents-build-bundles", "build-bundles"],
   ["flow-agents-capability-matrix", "capability-matrix"],
+  ["flow-agents-console-declared-projection", "console-declared-projection"],
   ["flow-agents-console-learning-projection", "console-learning-projection"],
   ["flow-agents-console-process-projection", "console-process-projection"],
   ["flow-agents-console-trust-projection", "console-trust-projection"],

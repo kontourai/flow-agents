@@ -459,6 +459,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-process-projection-integration
 
+      - name: Console declared projection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-declared-projection-integration
+
       - name: Context map integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check context-map-integration
