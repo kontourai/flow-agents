@@ -57,10 +57,11 @@ flow-agents workflow start --flow builder.shape \
   --summary "Shape the selected work into independently actionable slices."
 ```
 
-The steering hook injects the run state and exact next command each turn. Run
-`flow-agents workflow status --session-dir .kontourai/flow-agents/<safe-shape-slug> --json`
-only if you have written since that injection (a fresh `workflow start` counts) or no
-steering state block is present; the write itself refuses a wrong binding either way.
+After `workflow start`, inspect the new run:
+`flow-agents workflow status --session-dir .kontourai/flow-agents/<safe-shape-slug> --json`.
+Thereafter the steering hook re-injects the run state whenever it changes; a steering state
+block in your context is current unless you have written since it appeared, and the write
+itself refuses an unbound, stale, or wrong-step binding either way.
 
 3. State that this entrypoint selects `builder.shape` and delegates to
    `idea-to-backlog`.

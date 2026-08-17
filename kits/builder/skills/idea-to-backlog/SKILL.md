@@ -81,7 +81,7 @@ its current state with the public workflow status command. Record each completed
 expectation with the public workflow evidence command; use reviewable shaping
 references and never an internal writer:
 
-The steering hook has already injected the run state and exact next command into your context this turn. Run `flow-agents workflow status` for this session only if you have recorded evidence or a critique since that injection (a fresh `workflow start` counts), or if no steering state block is present; the write itself refuses a wrong or inactive binding either way.
+The steering hook injects the run state at session start and re-injects it whenever it changes; if a steering state block appears anywhere in your context and you have not recorded evidence or a critique since it appeared, it is current. Run `flow-agents workflow status --session-dir <session-dir> --json` only after such a write (a fresh `workflow start` counts) or when no steering state block appears in your context at all; the write itself refuses an unbound, stale, or wrong-step binding either way.
 
 ```bash
 flow-agents workflow evidence --session-dir <session-dir> \
