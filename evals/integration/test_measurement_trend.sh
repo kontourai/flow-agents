@@ -148,6 +148,68 @@ else
   fail "control: the curl stub never fires — the no-network assertion has no power"
 fi
 
+# 8. Review round 1 returned BLOCK. Every assertion below covers a claim it REFUTED.
+
+# 8a. The id is the join key and is passed back through argv — it must survive that trip.
+if printf '{"measurement":"has space","probes":[]}' | bash "$RECORD" --log "$TMP/r.jsonl" >/dev/null 2>&1; then
+  fail "an unaddressable measurement id was accepted (--measurement could never match it)"
+else
+  pass "an unaddressable measurement id is refused"
+fi
+
+# 8b. A shape the reader cannot process must be refused by the writer, not found a day later.
+if printf '{"measurement":"demo","probes":{}}' | bash "$RECORD" --log "$TMP/r.jsonl" >/dev/null 2>&1; then
+  fail "non-array probes accepted (this crashed the reporter with .map is not a function)"
+else
+  pass "non-array probes refused at write time"
+fi
+
+# 8c. Duplicates were collapsed by the reporter's index — corpus shrinkage, silently.
+dup='{"measurement":"demo","probes":[{"id":"a","verdict":"CLEAN"},{"id":"a","verdict":"VAGUE"}]}'
+if printf '%s' "$dup" | bash "$RECORD" --log "$TMP/r.jsonl" >/dev/null 2>&1; then
+  fail "duplicate probe ids accepted (silently collapsed on read)"
+else
+  pass "duplicate probe ids refused"
+fi
+
+# 8d. THE ONE THAT DEFEATED THE NO-SCORE TEST. Verdicts were printed verbatim, so verdicts
+#     of 80%/70% produced "80% -> 70%" out of a report whose whole purpose is to avoid a score.
+pct='{"measurement":"demo","probes":[{"id":"a","verdict":"80%"}]}'
+if printf '%s' "$pct" | bash "$RECORD" --log "$TMP/r.jsonl" >/dev/null 2>&1; then
+  fail "a percentage verdict was accepted; the no-score property is defeatable"
+else
+  pass "a percentage verdict is refused"
+fi
+
+# 8e. A corrupt newest row must not render as reassurance.
+CORRUPT="$TMP/corrupt.jsonl"
+reading corr a:CLEAN b:CLEAN | bash "$RECORD" --log "$CORRUPT" >/dev/null 2>&1
+reading corr a:CLEAN b:CLEAN | bash "$RECORD" --log "$CORRUPT" >/dev/null 2>&1
+printf '{"measurement":"corr","probes":[{"id":"a","verdi\n' >> "$CORRUPT"
+out="$(bash "$TREND" --measurement corr --log "$CORRUPT" 2>&1)"
+case "$out" in
+  *"unreadable row"*) pass "a corrupt row is reported, not silently dropped" ;;
+  *) fail "a corrupt newest row was silently discarded: $out" ;;
+esac
+
+# 8f. umask governs only files this script creates; a pre-existing loose log kept leaking.
+LOOSE="$TMP/loose.jsonl"; : > "$LOOSE"; chmod 644 "$LOOSE"
+if reading demo a:CLEAN | bash "$RECORD" --log "$LOOSE" >/dev/null 2>&1; then
+  fail "appended to a world-readable log without complaint"
+else
+  pass "refuses to append to an over-permissive existing log"
+fi
+
+# 8g. The inherited-preload vector a stubbed curl can never observe. Asserted behaviourally:
+#     an unusable NODE_OPTIONS preload would break the run if it still reached node.
+reading demo a:CLEAN | NODE_OPTIONS="--require /nonexistent-preload-should-be-scrubbed" \
+  bash "$RECORD" --log "$TMP/scrub.jsonl" >/dev/null 2>&1
+if [ -s "$TMP/scrub.jsonl" ]; then
+  pass "NODE_OPTIONS is scrubbed (a broken preload did not reach node)"
+else
+  fail "NODE_OPTIONS reached node — a preload can run code the curl stub cannot see"
+fi
+
 printf '\n  %s failure(s)\n\n' "$errors"
 [ "$errors" -eq 0 ] || exit 1
 exit 0

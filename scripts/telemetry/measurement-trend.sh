@@ -57,9 +57,28 @@ fi
 node -e '
 const fs = require("node:fs");
 const [logPath, measurement] = process.argv.slice(1);
-const rows = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean)
-  .map((l) => { try { return JSON.parse(l); } catch { return null; } })
-  .filter((r) => r && r.measurement === measurement);
+const lines = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean);
+// Unparseable rows are REPORTED, never silently dropped. Review demonstrated the old
+// behaviour: with two stable readings followed by a corrupt newest row, the report printed
+// "No probe changed verdict" from the older pair and exited 0 — a truncated or interrupted
+// append rendering as reassurance. Whatever else this tool does, it must not manufacture
+// calm out of missing data.
+const corrupt = [];
+const rows = [];
+lines.forEach((line, index) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    corrupt.push(index + 1);
+    return;
+  }
+  if (parsed && parsed.measurement === measurement) rows.push(parsed);
+});
+if (corrupt.length > 0) {
+  console.log(`\n  WARNING: ${corrupt.length} unreadable row(s) in ${logPath} at line(s) ${corrupt.join(", ")}.`);
+  console.log("  Those readings are NOT included below. A corrupt newest row can hide a change.");
+}
 
 if (rows.length === 0) {
   console.log(`No readings for "${measurement}".`);
@@ -78,7 +97,16 @@ const current = rows.at(-1);
 // Compare per-probe verdicts by id. Probes that appear or disappear are reported as such
 // rather than silently ignored: a probe removed from the set is a coverage change, and
 // treating it as "nothing to report" is how a shrinking corpus reads as a stable one.
-const index = (r) => new Map((r.probes ?? []).map((p) => [p.id, p]));
+const index = (r) => {
+  // Defensive at READ time as well as write time: rows recorded before the writer-side
+  // shape check exists are still in the log, and a non-array here used to surface as
+  // `.map is not a function` — an internal crash where a diagnosis belonged.
+  if (r.probes !== undefined && !Array.isArray(r.probes)) {
+    console.log(`  WARNING: reading at ${r.recorded_at ?? "unknown time"} has a non-array "probes"; treated as empty.`);
+    return new Map();
+  }
+  return new Map((r.probes ?? []).map((p) => [p.id, p]));
+};
 const before = index(previous);
 const after = index(current);
 const ids = [...new Set([...before.keys(), ...after.keys()])].sort();
