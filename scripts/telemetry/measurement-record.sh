@@ -131,7 +131,19 @@ mkdir -p "$(dirname "$LOG")"
 # umask only governs files this script CREATES. Review noted a pre-existing 0644 log stays
 # 0644, so an operator who once created it loosely keeps leaking every future reading.
 if [ -e "$LOG" ]; then
-  mode="$(/usr/bin/stat -f '%Lp' "$LOG" 2>/dev/null || /usr/bin/stat -c '%a' "$LOG" 2>/dev/null || echo "")"
+  # `stat` is not portable and the two spellings are not merely different, they are
+  # DANGEROUSLY different: BSD `-f` selects a format string, GNU `-f` reports FILESYSTEM
+  # status and exits 0 having printed something that is not a mode. Chaining them with ||
+  # therefore succeeded on Linux with garbage, which this guard read as "not 600" and
+  # refused every append — green on macOS, broken in CI. So each result is validated as
+  # octal digits before it is believed, rather than trusting the exit code.
+  mode=""
+  for candidate in "$(stat -c '%a' "$LOG" 2>/dev/null || true)" "$(stat -f '%Lp' "$LOG" 2>/dev/null || true)"; do
+    case "$candidate" in
+      ""|*[!0-7]*) : ;;
+      *) mode="$candidate"; break ;;
+    esac
+  done
   case "$mode" in
     ""|600|400) : ;;
     *) printf 'measurement-record.sh: refusing to append: %s is mode %s, expected 600\n' "$LOG" "$mode" >&2
