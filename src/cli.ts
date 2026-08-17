@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { basename } from "node:path";
+import { appendTransitionRecord, buildTransitionRecord } from "./transition-log.js";
 import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settings.js";
 import { main as effectiveAssignmentProviderSettings } from "./cli/effective-assignment-provider-settings.js";
 import { main as effectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
@@ -142,8 +143,32 @@ async function run(): Promise<number> {
 // internal frames that produced it. That is unreadable for an operator and useless for an
 // agent, which retries rather than learns. Report the message; keep the stack behind an
 // opt-in so debugging a CLI bug is still possible.
+// Every invocation ends here, so this is where the CLI records what it did. Best
+// effort in both senses: it never throws, and it never changes the exit code the
+// command earned. See src/transition-log.ts for why neither the capture hook nor the
+// host transcript can stand in for this.
+const startedAt = new Date();
+function witness(exitCode: number, errorMessage?: string): void {
+  try {
+    appendTransitionRecord(
+      buildTransitionRecord({
+        command: commandName ?? null,
+        argv: forwardedArgs,
+        exitCode,
+        startedAt,
+        endedAt: new Date(),
+        errorMessage: errorMessage ?? null,
+      }),
+    );
+  } catch {
+    // A telemetry failure is not a command failure.
+  }
+}
+
 try {
-  process.exit(await run());
+  const exitCode = await run();
+  witness(exitCode);
+  process.exit(exitCode);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`flow-agents ${commandName ?? ""}`.trimEnd() + `: ${message}`);
@@ -152,5 +177,6 @@ try {
   } else {
     console.error("Set FLOW_AGENTS_DEBUG=1 to print the stack trace.");
   }
+  witness(70, message);
   process.exit(70);
 }
