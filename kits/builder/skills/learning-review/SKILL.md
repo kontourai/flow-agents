@@ -22,9 +22,7 @@ failed outcome successful.
 
 For an active run, inspect the binding first:
 
-```bash
-flow-agents workflow status --session-dir <session-dir> --json
-```
+The steering hook injects the run state at session start and re-injects it whenever it changes; if a steering state block appears anywhere in your context and you have not recorded evidence or a critique since it appeared, it is current. Run `flow-agents workflow status --session-dir <session-dir> --json` only after such a write or when no steering state block appears in your context at all; the write itself refuses an unbound, stale, or wrong-step binding either way.
 
 Public status reports the parent definition as `builder.build`. Only that parent
 run at `learn`, whose Flow Definition composes the step from
