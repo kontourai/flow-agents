@@ -275,13 +275,17 @@ function ensureArtifactResidueIgnored(dest: string): void {
   ].join("\n");
   try {
     fs.mkdirSync(artifactRoot, { recursive: true });
-    // Never clobber an existing file: a project may have written its own rules here, and
-    // silently replacing them would be exactly the class of user-data loss #1238 covered.
-    if (fs.existsSync(ignorePath)) return;
-    fs.writeFileSync(ignorePath, desired, { mode: 0o644 });
-  } catch {
-    // Best effort. A repository that cannot take this file still installs; it simply
-    // inherits the pre-#1264 behaviour rather than failing the whole install.
+    // `wx` creates EXCLUSIVELY: a project may have written its own rules here, and
+    // silently replacing them would be the user-data-loss class #1238 covered. Review
+    // flagged the original existsSync-then-write as a check/write race; open-exclusive
+    // closes it at the syscall.
+    fs.writeFileSync(ignorePath, desired, { mode: 0o644, flag: "wx" });
+  } catch (error) {
+    // An existing file is the expected, silent case. Anything ELSE is reported: review
+    // flagged the original bare catch as broad enough to swallow a real defect.
+    if ((error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+      console.error(`init: could not write ${ignorePath} (${(error as Error)?.message ?? error}); the evidence writer may refuse command evidence in this repo (#1264)`);
+    }
   }
 }
 

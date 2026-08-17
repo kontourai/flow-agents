@@ -50,13 +50,14 @@ git -C "$REPO" commit -q -m "install" >/dev/null 2>&1
 
 SLUG="wedge-run-cost"
 D=".kontourai/flow-agents/$SLUG"
+# Only the pull-work report exists before start — the sequencing is load-bearing, not
+# style: pre-creating the later artifacts changes what `workflow start` derives (observed:
+# acceptance.json gains a goal_fit block and its criteria arrive EMPTY when plan/deliver
+# artifacts already exist, so the criterion id the tests-evidence claim must name never
+# exists). A real operator writes each artifact when its step asks for it; so does this.
+# No commit needed: with the #1264 fix the artifact root is ignored.
 mkdir -p "$REPO/$D"
 printf 'Selected Work Item: wedge:run-cost\n' > "$REPO/$D/$SLUG--pull-work.md"
-printf '# Plan\n' > "$REPO/$D/$SLUG--plan-work.md"
-printf '# Delivery\n' > "$REPO/$D/$SLUG--deliver.md"
-printf '# Evidence gate\n' > "$REPO/$D/$SLUG--evidence-gate.md"
-git -C "$REPO" add -A >/dev/null 2>&1
-git -C "$REPO" commit -q -m "run artifacts" >/dev/null 2>&1
 
 TALLY="$TMP/tally.tsv"; : > "$TALLY"
 fa() { # key, then argv
@@ -79,7 +80,28 @@ fa() { # key, then argv
   return $code
 }
 
-fa start workflow start --flow builder.build --work-item 'wedge:run-cost' --assignment-provider local-file
+fa start workflow start --flow builder.build --work-item 'wedge:run-cost' --assignment-provider local-file || {
+  # Review: without this, a failed start produced a full report and exit 0 — an invalid
+  # measurement presented as a valid one. Refusals DURING the run are data; a run that
+  # never started is not a run.
+  printf 'run-cost.sh: workflow start failed; no measurement taken\n' >&2
+  exit 70
+}
+
+# The declared criterion ids are read from acceptance.json, where `workflow start`
+# writes them. Read EARLY: the criteria array was observed emptied by mid-run writes
+# (length 1 immediately after start, 0 by the verify step), so a late read finds nothing.
+# An earlier version of this script instead claimed the id was "only discoverable via a
+# refusal" and probed with a knowingly wrong id - review refuted the claim and correctly
+# called the probe manufactured cost.
+CRIT_ID="$(node -e '
+  const fs = require("node:fs");
+  try {
+    const a = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const c = Array.isArray(a.criteria) ? a.criteria.find((x) => x && typeof x.id === "string") : null;
+    process.stdout.write(c ? c.id : "");
+  } catch { process.stdout.write(""); }
+' "$REPO/$D/acceptance.json")"
 
 A="$D/$SLUG--pull-work.md"
 ev() { # expectation, artifact
@@ -89,7 +111,9 @@ ev() { # expectation, artifact
 }
 ev pickup-probe-readiness "$A"
 ev probe-decisions-or-accepted-gaps "$A"
+printf '# Plan\n' > "$REPO/$D/$SLUG--plan-work.md"
 ev implementation-plan "$D/$SLUG--plan-work.md"
+printf '# Delivery\n' > "$REPO/$D/$SLUG--deliver.md"
 ev implementation-scope "$D/$SLUG--deliver.md"
 
 crit() {
@@ -104,38 +128,20 @@ crit
 ev clean-critique "$D/$SLUG--deliver.md"
 ev acceptance-criteria "$D/$SLUG--plan-work.md"
 
-# The declared criterion id is DERIVED from the run, never guessed: guessing it was one of
-# the ten discovery failures this instrument exists to count.
 crit  # a current clean critique is required AFTER the other verify evidence
 
-# The declared acceptance-criterion id is NOT readable from `workflow status` or state.json.
-# The only channel that names it is the refusal itself, so the honest way to model the cost
-# is to take the refusal and count it. This probe deliberately fails first.
-# Probing with a KNOWINGLY WRONG id, because omitting the flag yields only a generic
-# "supply one for every declared criterion" while supplying a wrong one yields
-# "expected: <the actual id>; received: <yours>". The id is discoverable only by being
-# wrong about it first. That is the cost being measured, not a trick of this script.
-first_out="$( (cd "$REPO" && node "$CLI" workflow evidence --session-dir "$D" --status pass \
-  --expectation tests-evidence --summary "Observed the declared test command." --command 'npm test' \
-  --criterion-json '{"id":"probe-for-the-declared-id","status":"pass","evidence_refs":[]}' \
-  --evidence-ref-json '{"kind":"command","excerpt":"npm test","summary":"Declared test command"}' 2>&1) )"
-first_code=$?
-if [ "$first_code" -eq 0 ]; then
-  printf 'tests-evidence\t0\t\n' >> "$TALLY"
+if [ -n "$CRIT_ID" ]; then
+  fa tests-evidence workflow evidence --session-dir "$D" --status pass --expectation tests-evidence \
+    --summary "Observed the declared test command." --command 'npm test' \
+    --criterion-json "{\"id\":\"$CRIT_ID\",\"status\":\"pass\",\"evidence_refs\":[{\"kind\":\"command\",\"excerpt\":\"npm test\",\"summary\":\"Declared test command\"}]}" \
+    --evidence-ref-json '{"kind":"command","excerpt":"npm test","summary":"Declared test command"}'
 else
-  printf 'tests-evidence-discovery\t%s\t%s\n' "$first_code" \
-    "$(printf '%s\n' "$first_out" | sed -n 's/^flow-agents[^:]*: //p' | head -1 | cut -c1-150)" >> "$TALLY"
-  CRIT_ID="$(printf '%s\n' "$first_out" | sed -n 's/.*expected: \([a-z0-9-]*\).*/\1/p' | head -1)"
-  if [ -n "$CRIT_ID" ] && [ "$CRIT_ID" != "none" ]; then
-    fa tests-evidence workflow evidence --session-dir "$D" --status pass --expectation tests-evidence \
-      --summary "Observed the declared test command." --command 'npm test' \
-      --criterion-json "{\"id\":\"$CRIT_ID\",\"status\":\"pass\",\"evidence_refs\":[{\"kind\":\"command\",\"excerpt\":\"npm test\",\"summary\":\"Declared test command\"}]}" \
-      --evidence-ref-json '{"kind":"command","excerpt":"npm test","summary":"Declared test command"}'
-  else
-    printf 'tests-evidence\t%s\t%s\n' "$first_code" "criterion id not discoverable from the refusal" >> "$TALLY"
-  fi
+  fa tests-evidence workflow evidence --session-dir "$D" --status pass --expectation tests-evidence \
+    --summary "Observed the declared test command." --command 'npm test' \
+    --evidence-ref-json '{"kind":"command","excerpt":"npm test","summary":"Declared test command"}'
 fi
 
+printf '# Evidence gate\n' > "$REPO/$D/$SLUG--evidence-gate.md"
 ev merge-readiness "$D/$SLUG--evidence-gate.md"
 
 STEP="$( (cd "$REPO" && node "$CLI" workflow status --session-dir "$D" --json 2>/dev/null) \

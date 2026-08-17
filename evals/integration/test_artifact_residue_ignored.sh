@@ -62,6 +62,24 @@ else
   git -C "$R" status --short | head -5 | sed 's/^/          /'
 fi
 
+# 2b. The assertion review demanded, and rightly: a clean tree after START does not prove
+#     the evidence-time path — locks and transaction dirs appear when the WRITER runs, and
+#     an ignore that covered start-time state but missed writer residue would pass check 2
+#     while #1264 persisted. run-cost.sh drives a real init through every local expectation
+#     including a command-evidence tests-evidence write; with the fix in, nothing may
+#     refuse on Git provenance and the run must clear verify.
+cost="$(bash "$ROOT/evals/measure/run-cost.sh" --json 2>/dev/null)"
+if printf '%s' "$cost" | grep -q 'clean Git provenance'; then
+  fail "the evidence writer still refuses its own provenance mid-run"
+else
+  pass "no provenance refusal at evidence time (the #1264 symptom)"
+fi
+reached="$(printf '%s' "$cost" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).reached_step))}catch{process.stdout.write("unparsed")}})')"
+case "$reached" in
+  pr-open|merge-ready-ci|learn|done) pass "the measured run clears verify (reached $reached)" ;;
+  *) fail "the measured run stalled at '$reached' — evidence-time writes are failing" ;;
+esac
+
 # 3. Never clobber. A project may have written its own rules here, and silently replacing
 #    them is the user-data-loss class #1238 covered.
 printf '# mine\n' > "$R/.kontourai/.gitignore"
