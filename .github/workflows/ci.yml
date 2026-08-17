@@ -111,6 +111,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check public-api-unit-tests
 
+      - name: Sealed execution authority unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check sealed-execution-authority-unit-tests
+
       - name: Liveness fleet unit tests
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check liveness-fleet-unit-tests
