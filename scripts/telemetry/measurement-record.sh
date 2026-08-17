@@ -144,18 +144,26 @@ mkdir -p "$(dirname "$LOG")"
 # security check that fails open on an unparseable answer is not a check. node is already a
 # hard dependency of this script, and statSync either answers or throws.
 if [ -e "$LOG" ]; then
+  preserve_reading() {
+    # Best-effort by design and SAID to be: noclobber + $RANDOM avoid PID-reuse collisions
+    # truncating an earlier preserved reading, and a failure to write is reported, not
+    # silently absorbed. umask 077 above makes a NEW sidecar owner-only; a pre-existing
+    # file at the name is never followed thanks to noclobber.
+    side="$LOG.refused.$$.$RANDOM"
+    if (set -C; printf '%s\n' "$recorded" > "$side") 2>/dev/null; then
+      printf 'measurement-record.sh: reading preserved at %s\n' "$side" >&2
+    else
+      printf 'measurement-record.sh: WARNING: the piped reading could NOT be preserved; re-run the producer after fixing\n' >&2
+    fi
+  }
   mode="$(node -e 'try{process.stdout.write(((require("node:fs").statSync(process.argv[1]).mode)&0o777).toString(8))}catch{process.exit(1)}' "$LOG")" || {
-    printf 'measurement-record.sh: cannot determine mode of %s; refusing to append\n' "$LOG" >&2; exit 77; }
+    printf 'measurement-record.sh: cannot determine mode of %s; refusing to append\n' "$LOG" >&2
+    preserve_reading; exit 77; }
   case "$mode" in
     600|400) : ;;
     *)
-      # The reading arrived on stdin and has already been validated; refusing must not
-      # destroy it (review: exit 77 lost an ephemeral piped reading). Preserve it in an
-      # owner-only sidecar and name it, so fixing the mode costs a re-append, not a re-run
-      # of the producer.
-      side="$LOG.refused.$$"
-      printf '%s\n' "$recorded" > "$side" 2>/dev/null && preserved=" reading preserved at $side;" || preserved=""
-      printf 'measurement-record.sh: refusing to append: %s is mode %s, expected 600 or 400.%s\n' "$LOG" "$mode" "$preserved" >&2
+      printf 'measurement-record.sh: refusing to append: %s is mode %s, expected 600 or 400.\n' "$LOG" "$mode" >&2
+      preserve_reading
       printf 'measurement-record.sh: readings retain producer output (paths, command text). Run: chmod 600 %s\n' "$LOG" >&2
       exit 77 ;;
   esac

@@ -29,6 +29,16 @@ done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [ -n "$LOG" ] || LOG="${MEASUREMENT_TREND_LOG:-$ROOT/.kontourai/telemetry/measurements.jsonl}"
 
+# Validated BEFORE the missing-log early return (review: an invalid id bypassed validation
+# entirely when no log existed), with bash's whole-string =~ rather than line-oriented
+# grep (review: an embedded newline passed grep because its first line matched).
+if [ "$LIST" -eq 0 ]; then
+  [ -n "$MEASUREMENT" ] || { printf 'measurement-trend.sh: --measurement <id> is required (or --list)\n' >&2; exit 64; }
+  if ! [[ "$MEASUREMENT" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+    printf 'measurement-trend.sh: --measurement must be 1-64 chars of [A-Za-z0-9._-] starting alphanumeric\n' >&2; exit 64
+  fi
+fi
+
 if [ ! -f "$LOG" ]; then
   printf 'No trend log yet at %s\n' "$LOG"
   printf 'Record a reading first:  <producer> --json | scripts/telemetry/measurement-record.sh\n'
@@ -63,17 +73,7 @@ if [ "$LIST" -eq 1 ]; then
   exit 0
 fi
 
-[ -n "$MEASUREMENT" ] || { printf 'measurement-trend.sh: --measurement <id> is required (or --list)\n' >&2; exit 64; }
-# Same charset the writer enforces. Review found the reader accepting ids the writer
-# refuses ("has space"), which made the write-side test assert a false premise about what
-# is addressable. One contract, stated twice, checked in both places.
-case "$MEASUREMENT" in
-  ([A-Za-z0-9]*) : ;;
-  (*) printf 'measurement-trend.sh: --measurement must be 1-64 chars of [A-Za-z0-9._-] starting alphanumeric\n' >&2; exit 64 ;;
-esac
-if ! printf '%s' "$MEASUREMENT" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'; then
-  printf 'measurement-trend.sh: --measurement must be 1-64 chars of [A-Za-z0-9._-] starting alphanumeric\n' >&2; exit 64
-fi
+
 
 node -e '
 const fs = require("node:fs");
@@ -94,7 +94,13 @@ lines.forEach((line, index) => {
     corrupt.push(index + 1);
     return;
   }
-  if (parsed && parsed.measurement === measurement) rows.push(parsed);
+  // Same corruption definition as --list (review: the two paths disagreed): a parseable
+  // scalar, array, or object without a string measurement is unkeyable, hence corrupt.
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || typeof parsed.measurement !== "string") {
+    corrupt.push(index + 1);
+    return;
+  }
+  if (parsed.measurement === measurement) rows.push(parsed);
 });
 if (corrupt.length > 0) {
   console.log(`\n  WARNING: ${corrupt.length} unreadable row(s) in ${logPath} at line(s) ${corrupt.join(", ")}.`);
