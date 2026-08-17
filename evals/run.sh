@@ -208,6 +208,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_hook.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_stop_gate_summary_record.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_config.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_escape_hatch.sh" || result=1
@@ -273,6 +275,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_economics_run_binding.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_console_board_sync.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_console_declared_projection.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_learning_review_proposals.sh" || result=1
   echo ""

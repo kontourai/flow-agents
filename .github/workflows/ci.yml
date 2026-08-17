@@ -371,6 +371,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check stop-gate-actor-scoped-completion-integration
 
+      - name: Stop gate summary record integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check stop-gate-summary-record-integration
+
       - name: Goal Fit narrative exclusion integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-narrative-exclusion-integration
@@ -454,6 +458,10 @@ jobs:
       - name: Console process projection integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-process-projection-integration
+
+      - name: Console declared projection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-declared-projection-integration
 
       - name: Context map integration
         continue-on-error: true
