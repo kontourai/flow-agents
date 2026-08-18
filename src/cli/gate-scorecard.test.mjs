@@ -71,6 +71,47 @@ test("the expectation index is derived from the kit's flow definitions", () => {
   assert.deepEqual([...gates.keys()].sort(), ["plan-gate", "shape-gate", "verify-gate"]);
 });
 
+// Last-write-wins on directory order would merge two distinct gates' tallies under
+// one heading — silently, and reading as clean coverage rather than as a gap.
+test("a gate name declared by two flows is reported as a collision", () => {
+  const kitDir = kitFixture();
+  fs.writeFileSync(
+    path.join(kitDir, "flows", "rival.flow.json"),
+    JSON.stringify({
+      id: "demo.rival",
+      gates: { "verify-gate": { step: "verify", expects: [{ id: "rival-evidence" }] } },
+    }),
+    "utf8",
+  );
+  const { collisions } = buildExpectationIndex(kitDir);
+  const gateCollision = collisions.find((entry) => entry.kind === "gate" && entry.name === "verify-gate");
+  assert.ok(gateCollision, "the duplicate gate name must be reported");
+  assert.deepEqual(gateCollision.flows.sort(), ["demo.build", "demo.rival"]);
+});
+
+test("the same expectation id under two gates is reported as a collision", () => {
+  const kitDir = kitFixture();
+  fs.writeFileSync(
+    path.join(kitDir, "flows", "overlap.flow.json"),
+    JSON.stringify({
+      id: "demo.overlap",
+      gates: { "audit-gate": { step: "audit", expects: [{ id: "tests-evidence" }] } },
+    }),
+    "utf8",
+  );
+  const { collisions } = buildExpectationIndex(kitDir);
+  const expectationCollision = collisions.find((entry) => entry.kind === "expectation");
+  assert.ok(expectationCollision, "the duplicate expectation id must be reported");
+  assert.equal(expectationCollision.name, "tests-evidence");
+});
+
+test("the real kit declares no colliding gate names or expectation ids", () => {
+  const { collisions } = buildExpectationIndex(
+    path.resolve(import.meta.dirname, "../../kits/builder"),
+  );
+  assert.deepEqual(collisions, []);
+});
+
 test("scoping to a flow excludes another flow's gates entirely", () => {
   const kitDir = kitFixture();
   const { gates } = buildExpectationIndex(kitDir, ["demo.build"]);

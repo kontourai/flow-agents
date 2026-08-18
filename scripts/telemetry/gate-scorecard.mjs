@@ -68,7 +68,12 @@ export function buildExpectationIndex(kitDir, flowIds = null) {
   const flowsDir = path.join(kitDir, "flows");
   const index = new Map();
   const gates = new Map();
-  if (!fs.existsSync(flowsDir)) return { index, gates };
+  // Two flows declaring the same gate name, or the same expectation id under two
+  // gates, would last-write-win on directory order and merge two distinct gates'
+  // tallies under one heading. That reads as clean coverage rather than as a gap,
+  // which is the failure this tool exists to catch — so collisions are reported.
+  const collisions = [];
+  if (!fs.existsSync(flowsDir)) return { index, gates, collisions };
   for (const entry of fs.readdirSync(flowsDir)) {
     if (!entry.endsWith(".flow.json")) continue;
     let flow;
@@ -82,11 +87,19 @@ export function buildExpectationIndex(kitDir, flowIds = null) {
     if (flowIds && !flowIds.includes(flow.id)) continue;
     for (const [gateName, gate] of Object.entries(flow.gates ?? {})) {
       const expectations = (gate.expects ?? []).map((expectation) => expectation.id);
+      const priorGate = gates.get(gateName);
+      if (priorGate) collisions.push({ kind: "gate", name: gateName, flows: [priorGate.flow, flow.id ?? entry] });
       gates.set(gateName, { gate: gateName, step: gate.step ?? null, flow: flow.id ?? entry, expectations });
-      for (const id of expectations) index.set(id, { gate: gateName, step: gate.step ?? null });
+      for (const id of expectations) {
+        const priorExpectation = index.get(id);
+        if (priorExpectation && priorExpectation.gate !== gateName) {
+          collisions.push({ kind: "expectation", name: id, gates: [priorExpectation.gate, gateName] });
+        }
+        index.set(id, { gate: gateName, step: gate.step ?? null });
+      }
     }
   }
-  return { index, gates };
+  return { index, gates, collisions };
 }
 
 function emptyTally() {
@@ -162,7 +175,7 @@ export function attributeTokens(transitions, transcriptFiles) {
   };
 }
 
-export function buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution }) {
+export function buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution, collisions = [] }) {
   const gates = new Map();
   const verbs = new Map();
   const unattributed = [];
@@ -217,6 +230,7 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
       gate_attributed: [...gates.values()].reduce((sum, bucket) => sum + bucket.calls, 0),
       verb_attributed: [...verbs.values()].reduce((sum, bucket) => sum + bucket.calls, 0),
       expectations_naming_no_declared_gate: unattributed.length,
+      declaration_collisions: collisions.length,
       tokens: tokenAttribution
         ? {
             matched_turns: tokenAttribution.matchedTurns,
@@ -227,6 +241,7 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
           }
         : null,
     },
+    collisions,
     gates: [...gates.values()].sort((a, b) => b.calls - a.calls || a.gate.localeCompare(b.gate)),
     verbs: [...verbs.values()].sort((a, b) => b.calls - a.calls),
     unattributed,
@@ -243,7 +258,7 @@ function main(argv) {
   const transitionsFile = options.transitions ?? path.join(process.cwd(), ".kontourai", "telemetry", "transitions.jsonl");
   const kitDir = options.kit ?? path.join(process.cwd(), "kits", "builder");
   const transitions = readJsonl(transitionsFile).filter((record) => record?.kind === "kontour.flow-agents.transition");
-  const { index: expectationIndex, gates: gateIndex } = buildExpectationIndex(kitDir, options.flows ?? null);
+  const { index: expectationIndex, gates: gateIndex, collisions } = buildExpectationIndex(kitDir, options.flows ?? null);
 
   if (!gateIndex.size) {
     const scope = options.flows ? ` for flow(s) ${options.flows.join(", ")}` : "";
@@ -252,7 +267,7 @@ function main(argv) {
   }
 
   const tokenAttribution = options.transcripts.length ? attributeTokens(transitions, options.transcripts) : null;
-  const scorecard = buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution });
+  const scorecard = buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution, collisions });
 
   if (options.out) {
     fs.mkdirSync(path.dirname(options.out), { recursive: true });
@@ -281,6 +296,10 @@ function main(argv) {
       const cost = verb.output_tokens ? `  ${verb.output_tokens} tok` : "";
       console.log(`  ${verb.verb.padEnd(36)} calls ${String(verb.calls).padStart(3)}  refused/error ${String(verb.refused_or_error).padStart(3)}${cost}`);
     }
+  }
+  for (const collision of scorecard.collisions) {
+    const where = collision.kind === "gate" ? `flows ${collision.flows.join(" and ")}` : `gates ${collision.gates.join(" and ")}`;
+    console.log(`collision: ${collision.kind} "${collision.name}" is declared by ${where} — tallies are merged under one heading`);
   }
   if (scorecard.unattributed.length) {
     const ids = [...new Set(scorecard.unattributed.map((entry) => entry.expectation))];

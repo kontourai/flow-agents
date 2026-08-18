@@ -32,7 +32,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { telemetryDataDir } from "./lib/local-artifact-root.js";
+import { resolveSharedRepoRoot, telemetryDataDir } from "./lib/local-artifact-root.js";
 
 export const TRANSITION_LOG_FILENAME = "transitions.jsonl";
 export const TRANSITION_RECORD_KIND = "kontour.flow-agents.transition";
@@ -47,12 +47,10 @@ export const TRANSITION_RECORD_SCHEMA_VERSION = "1.0";
 const IDENTIFIER_FLAGS = new Set([
   "--expectation",
   "--gate",
-  "--step",
   "--flow",
   "--kit",
   "--provider",
   "--assignment-provider",
-  "--change-provider",
   "--decision",
   "--status",
   "--outcome",
@@ -60,6 +58,14 @@ const IDENTIFIER_FLAGS = new Set([
   "--work-item",
   "--subject-id",
 ]);
+
+/**
+ * Recorded when a command name is not one this CLI registers. The first positional
+ * argument is argv, and argv is not something to write down: a misplaced shell
+ * variable or a pasted clipboard line arrives here verbatim. The exit code already
+ * says the invocation was rejected, so the name itself carries nothing worth the risk.
+ */
+export const UNKNOWN_COMMAND = "«unknown»";
 
 /** A value is only recorded if it looks like an identifier, never free text. */
 const IDENTIFIER_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,127}$/;
@@ -76,24 +82,29 @@ export interface TransitionRecord {
   exit_code: number;
   outcome: TransitionOutcome;
   /**
-   * Present only for the unhandled-error path, where the CLI has the thrown message in
-   * hand. Truncated. This exists because a contract refusal and an internal crash both
-   * exit 70 today (every refusal in `workflow` throws), so the code alone cannot tell
-   * "the gate correctly rejected my malformed claim" from "the CLI broke". Until that
-   * is fixed upstream, the message head is the only discriminator an analyzer has.
+   * The thrown error's CLASS name on the unhandled-error path — never its message.
+   *
+   * The message was the obvious discriminator between "the gate correctly rejected a
+   * malformed claim" and "the CLI broke", since both exit 70. It is also a channel
+   * straight through this module's redaction: several throw sites interpolate raw
+   * operator input into the text (`--route-reason`, `--scope`, provider names), and
+   * `workflow` — the most-used surface — has no local catch, so those reach the top
+   * level verbatim. A class name is derived from the code rather than from what
+   * somebody typed, so it cannot carry content.
+   *
+   * It is a WEAK discriminator: most throws are a bare `Error`. That is the honest
+   * state of things, and the real fix is a typed refusal with its own exit code
+   * (kontourai/flow-agents#1273) rather than reading tea leaves from prose.
    */
-  message_head?: string;
+  error_name?: string;
   started_at: string;
   duration_ms: number;
   cwd_repo: string | null;
   actor: { runtime: string | null; session_id: string | null };
 }
 
-const MAX_MESSAGE_HEAD = 160;
-
-function truncate(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
-}
+/** A class name is developer-authored, but it is still bounded before recording. */
+const MAX_ERROR_NAME = 80;
 
 /**
  * Split argv into the semantic fields worth keeping. Deliberately dumb: it does not
@@ -154,7 +165,7 @@ export function buildTransitionRecord(input: {
   exitCode: number;
   startedAt: Date;
   endedAt: Date;
-  errorMessage?: string | null;
+  errorName?: string | null;
   repoRoot?: string | null;
   env?: NodeJS.ProcessEnv;
 }): TransitionRecord {
@@ -177,7 +188,7 @@ export function buildTransitionRecord(input: {
       session_id: env["CLAUDE_CODE_SESSION_ID"] ?? env["FLOW_AGENTS_SESSION_ID"] ?? null,
     },
   };
-  if (input.errorMessage) record.message_head = truncate(input.errorMessage, MAX_MESSAGE_HEAD);
+  if (input.errorName) record.error_name = input.errorName.slice(0, MAX_ERROR_NAME);
   return record;
 }
 
@@ -190,11 +201,50 @@ export function buildTransitionRecord(input: {
 export function appendTransitionRecord(record: TransitionRecord, cwd = process.cwd()): boolean {
   if (process.env["FLOW_AGENTS_TRANSITION_LOG"] === "0") return false;
   try {
-    const dir = telemetryDataDir(cwd);
+    const dir = telemetryDataDir(transitionLogRoot(cwd));
     fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, TRANSITION_LOG_FILENAME), `${JSON.stringify(record)}\n`, "utf8");
+    const file = path.join(dir, TRANSITION_LOG_FILENAME);
+    // Appending through a symlink writes to whatever it points at. The rest of this
+    // codebase guards its writes the same way; a telemetry file is no place to make
+    // an exception.
+    if (fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) return false;
+    fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf8");
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * One repository, one log. `telemetryDataDir` resolves against the working directory,
+ * so invoking the CLI from a subdirectory would start a second, independent
+ * transitions.jsonl — and an analyzer reading either one would silently report a
+ * fragment of the run as the whole of it. Anchor on the shared repository root, and
+ * fall back to the working directory only outside a repository.
+ */
+export function transitionLogRoot(cwd = process.cwd()): string {
+  try {
+    return resolveSharedRepoRoot(cwd) ?? cwd;
+  } catch {
+    return cwd;
+  }
+}
+
+/**
+ * Build and append in one call, so callers cannot accidentally record a root that
+ * disagrees with the one written to.
+ */
+export function recordTransition(input: {
+  command: string | null;
+  argv: readonly string[];
+  exitCode: number;
+  startedAt: Date;
+  endedAt: Date;
+  errorName?: string | null;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  const cwd = input.cwd ?? process.cwd();
+  const repoRoot = transitionLogRoot(cwd);
+  return appendTransitionRecord(buildTransitionRecord({ ...input, repoRoot }), cwd);
 }

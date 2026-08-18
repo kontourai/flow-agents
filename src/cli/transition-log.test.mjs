@@ -13,10 +13,34 @@ import {
   appendTransitionRecord,
   buildTransitionRecord,
   classifyOutcome,
+  recordTransition,
   summarizeArgv,
   TRANSITION_LOG_FILENAME,
   TRANSITION_RECORD_KIND,
+  transitionLogRoot,
+  UNKNOWN_COMMAND,
 } from "../../build/src/transition-log.js";
+
+const CLI = path.resolve(import.meta.dirname, "../../build/src/cli.js");
+
+function runCli(args, cwd) {
+  return execFileSync(process.execPath, [CLI, ...args], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function readLog(root) {
+  const file = path.join(root, ".kontourai", "telemetry", TRANSITION_LOG_FILENAME);
+  if (!fs.existsSync(file)) return [];
+  return fs
+    .readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
 
 function fixtureRepo() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "transition-log-"));
@@ -73,7 +97,7 @@ test("outcome names what the code observably is, not what it is assumed to mean"
   assert.equal(classifyOutcome(127), "nonzero");
 });
 
-test("a record carries the message head only on the error path", () => {
+test("a record carries the error class name only on the error path", () => {
   const startedAt = new Date("2026-08-17T12:00:00.000Z");
   const endedAt = new Date("2026-08-17T12:00:02.500Z");
   const ok = buildTransitionRecord({
@@ -87,7 +111,7 @@ test("a record carries the message head only on the error path", () => {
   assert.equal(ok.kind, TRANSITION_RECORD_KIND);
   assert.equal(ok.duration_ms, 2500);
   assert.equal(ok.outcome, "ok");
-  assert.ok(!("message_head" in ok));
+  assert.ok(!("error_name" in ok));
 
   const failed = buildTransitionRecord({
     command: "workflow",
@@ -95,25 +119,24 @@ test("a record carries the message head only on the error path", () => {
     exitCode: 70,
     startedAt,
     endedAt,
-    errorMessage: "gate claim has no captured command observation",
+    errorName: "SignalValidationError",
     env: {},
   });
   assert.equal(failed.outcome, "unhandled-error");
-  assert.equal(failed.message_head, "gate claim has no captured command observation");
+  assert.equal(failed.error_name, "SignalValidationError");
 });
 
-test("the message head is truncated so a long throw cannot bloat the log", () => {
+test("the error name is bounded so a pathological class name cannot bloat the log", () => {
   const record = buildTransitionRecord({
     command: "workflow",
     argv: [],
     exitCode: 70,
     startedAt: new Date(),
     endedAt: new Date(),
-    errorMessage: "x".repeat(500),
+    errorName: "E".repeat(500),
     env: {},
   });
-  assert.ok(record.message_head.length <= 160);
-  assert.ok(record.message_head.endsWith("…"));
+  assert.equal(record.error_name.length, 80);
 });
 
 test("append writes one JSON line per invocation under the repo's telemetry dir", () => {
@@ -171,4 +194,112 @@ test("FLOW_AGENTS_TRANSITION_LOG=0 opts a run out entirely", () => {
     if (previous === undefined) delete process.env["FLOW_AGENTS_TRANSITION_LOG"];
     else process.env["FLOW_AGENTS_TRANSITION_LOG"] = previous;
   }
+});
+
+test("a symlinked log file is refused rather than written through", () => {
+  const root = fixtureRepo();
+  const target = path.join(root, "elsewhere.txt");
+  fs.writeFileSync(target, "pre-existing\n", "utf8");
+  const dir = path.join(root, ".kontourai", "telemetry");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.symlinkSync(target, path.join(dir, TRANSITION_LOG_FILENAME));
+
+  const record = buildTransitionRecord({
+    command: "workflow",
+    argv: [],
+    exitCode: 0,
+    startedAt: new Date(),
+    endedAt: new Date(),
+    env: {},
+  });
+  assert.equal(appendTransitionRecord(record, root), false);
+  assert.equal(fs.readFileSync(target, "utf8"), "pre-existing\n");
+});
+
+// --- Integration: the real binary. -----------------------------------------
+// Both HIGH findings from review (an unfiltered command name, and a log that
+// fragmented per working directory) were invisible to every unit test above,
+// because none of them ran the CLI. These do.
+
+test("the real CLI records a successful invocation with its command and outcome", () => {
+  const root = fixtureRepo();
+  runCli(["commands"], root);
+  const records = readLog(root);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].kind, TRANSITION_RECORD_KIND);
+  assert.equal(records[0].command, "commands");
+  assert.equal(records[0].outcome, "ok");
+  assert.equal(records[0].exit_code, 0);
+});
+
+// H1: `commandName` is `process.argv[2]` verbatim for the ordinary invocation form.
+// A misplaced shell variable lands there, and an unbounded copy used to be written.
+test("an unregistered command name is never written to the log", () => {
+  const root = fixtureRepo();
+  const leak = "ghp_NOTAREALTOKENbutshapedlikeone1234567890";
+  assert.throws(() => runCli([leak], root));
+
+  const records = readLog(root);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].command, UNKNOWN_COMMAND);
+  assert.equal(records[0].exit_code, 64);
+  assert.ok(
+    !fs
+      .readFileSync(path.join(root, ".kontourai", "telemetry", TRANSITION_LOG_FILENAME), "utf8")
+      .includes(leak),
+    "the rejected argument must not appear anywhere in the log",
+  );
+});
+
+// H2: several verbs interpolate raw operator input into the messages they throw, and
+// `workflow` has no local catch, so those messages reach the top-level handler.
+test("a throw records the error class, never the thrown message", () => {
+  const root = fixtureRepo();
+  const secret = "s3cret-deploy-key-do-not-log";
+  assert.throws(() => runCli(["workflow", "evidence", "--route-reason", secret], root));
+
+  const raw = fs.readFileSync(path.join(root, ".kontourai", "telemetry", TRANSITION_LOG_FILENAME), "utf8");
+  assert.ok(!raw.includes(secret), "operator-supplied text must not reach the log");
+  assert.ok(!raw.includes("message_head"), "the message channel must be gone, not merely truncated");
+  const record = readLog(root).at(-1);
+  assert.equal(record.exit_code, 70);
+  assert.equal(record.outcome, "unhandled-error");
+  assert.equal(typeof record.error_name, "string");
+});
+
+// M2: telemetryDataDir resolves against cwd, so invoking from a subdirectory used to
+// start a second, independent log — and an analyzer reading either reported a
+// fragment of the run as the whole of it.
+test("one repository keeps one log, whatever directory the CLI runs from", () => {
+  const root = fixtureRepo();
+  const nested = path.join(root, "packages", "deep");
+  fs.mkdirSync(nested, { recursive: true });
+
+  runCli(["commands"], root);
+  runCli(["commands"], nested);
+
+  assert.equal(readLog(root).length, 2, "both invocations belong to the same log");
+  assert.equal(
+    fs.existsSync(path.join(nested, ".kontourai")),
+    false,
+    "a subdirectory must not start a log of its own",
+  );
+});
+
+test("outside a repository the log falls back to the working directory", () => {
+  const loose = fs.mkdtempSync(path.join(os.tmpdir(), "transition-log-bare-"));
+  assert.equal(transitionLogRoot(loose), loose);
+  assert.equal(
+    recordTransition({
+      command: "commands",
+      argv: [],
+      exitCode: 0,
+      startedAt: new Date(),
+      endedAt: new Date(),
+      cwd: loose,
+      env: {},
+    }),
+    true,
+  );
+  assert.equal(readLog(loose).length, 1);
 });
