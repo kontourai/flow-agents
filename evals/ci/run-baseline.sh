@@ -22,6 +22,9 @@ CHECKS=(
   "Public API unit tests|node --test src/cli/public-api.test.mjs"
   "Sealed execution authority unit tests|node --test src/cli/sealed-execution-authority.test.mjs"
   "Liveness fleet unit tests|node --test src/cli/liveness-fleet.test.mjs"
+  "Transition log unit tests|node --test src/cli/transition-log.test.mjs"
+  "Gate scorecard unit tests|node --test src/cli/gate-scorecard.test.mjs"
+  "Run pulse unit tests|node --test src/cli/run-pulse.test.mjs"
   "Knowledge integration suites|node --test kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
@@ -166,6 +169,9 @@ LANE_SOURCE_AND_STATIC=(
   "Public API unit tests"
   "Sealed execution authority unit tests"
   "Liveness fleet unit tests"
+  "Transition log unit tests"
+  "Gate scorecard unit tests"
+  "Run pulse unit tests"
   "Knowledge integration suites"
 )
 

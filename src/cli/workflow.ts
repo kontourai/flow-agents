@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { noteActiveFlow, noteGateOutcome } from "../transition-log.js";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
@@ -1190,6 +1191,10 @@ async function status(sessionDir: string, json: boolean): Promise<number> {
 
 const EVIDENCE_FLAGS = new Set([
   "artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason",
+  // Accepted but not required: run state is the authority for which flow an evidence
+  // write belongs to (see noteActiveFlow). Present so an operator can disambiguate a
+  // shared expectation id by hand, and so the flag is not silently rejected.
+  "flow",
   "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "authorization-file",
 ]);
 
@@ -1386,6 +1391,12 @@ function reportEvidenceOutcome(
   else console.log(report.attached
     ? `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is ${report.status} at ${report.current_step}.`
     : `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
+  // Both branches exit 0, so the exit code cannot distinguish a gate that advanced from
+  // one still refusing to. Record the verdict itself.
+  // The report carries `awaiting_evidence` as a boolean, not the missing ids: which
+  // expectations remain is known to the gate evaluator and dropped before here. The
+  // verdict is recorded; the missing set stays absent rather than invented.
+  noteGateOutcome({ attached: report.attached === true });
   return 0;
 }
 
@@ -1400,6 +1411,9 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   // Check before recovery, locking, or actor resolution so a locally authored
   // operation result cannot cause any canonical or projection mutation.
   const inspected = await inspectBuilderFlowSession({ sessionDir });
+  // The scorer cannot attribute a shared expectation id without knowing the flow, and
+  // this is where the flow is actually known.
+  noteActiveFlow(inspected.run.definitionId);
   const operation = builderOperationForExpectation(inspected.run.definitionId, expectation);
   if (operation) {
     throw new Error(`workflow evidence cannot satisfy operation-bound expectation ${expectation}; ${operation} requires authenticated external ChangeProvider completion`);

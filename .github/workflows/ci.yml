@@ -119,6 +119,18 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check liveness-fleet-unit-tests
 
+      - name: Transition log unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check transition-log-unit-tests
+
+      - name: Gate scorecard unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check gate-scorecard-unit-tests
+
+      - name: Run pulse unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check run-pulse-unit-tests
+
       - name: Knowledge integration suites
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check knowledge-integration-suites

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { basename } from "node:path";
+import { recordTransition, UNKNOWN_COMMAND } from "./transition-log.js";
 import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settings.js";
 import { main as effectiveAssignmentProviderSettings } from "./cli/effective-assignment-provider-settings.js";
 import { main as effectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
@@ -115,6 +116,9 @@ function printHelp(): void {
   for (const name of availableCommands.keys()) console.log(`  ${name}`);
 }
 
+/** Names `run()` handles itself, before the command registry is consulted. */
+const BUILT_IN_COMMANDS = new Set(["--help", "-h", "help", "commands", "list"]);
+
 const invokedAs = basename(process.argv[1] ?? "flow-agents");
 const commandName = aliases.get(invokedAs) ?? process.argv[2];
 const forwardedArgs = aliases.has(invokedAs) ? process.argv.slice(2) : process.argv.slice(3);
@@ -142,8 +146,37 @@ async function run(): Promise<number> {
 // internal frames that produced it. That is unreadable for an operator and useless for an
 // agent, which retries rather than learns. Report the message; keep the stack behind an
 // opt-in so debugging a CLI bug is still possible.
+// Every invocation ends here, so this is where the CLI records what it did. Best
+// effort in both senses: it never throws, and it never changes the exit code the
+// command earned. See src/transition-log.ts for why neither the capture hook nor the
+// host transcript can stand in for this.
+const startedAt = new Date();
+function witness(exitCode: number, errorName?: string): void {
+  try {
+    // The command is recorded only when it is one we register. Anything else is the
+    // caller's first argument verbatim — a mistyped shell variable, a pasted line —
+    // and there is no version of writing that down that is worth its risk.
+    // `run()` answers the built-ins before it consults the registry, so the registry
+    // alone is not the set of names this CLI accepts.
+    const known =
+      commandName !== undefined && (availableCommands.has(commandName) || BUILT_IN_COMMANDS.has(commandName));
+    recordTransition({
+      command: commandName === undefined ? null : known ? commandName : UNKNOWN_COMMAND,
+      argv: forwardedArgs,
+      exitCode,
+      startedAt,
+      endedAt: new Date(),
+      errorName: errorName ?? null,
+    });
+  } catch {
+    // A telemetry failure is not a command failure.
+  }
+}
+
 try {
-  process.exit(await run());
+  const exitCode = await run();
+  witness(exitCode);
+  process.exit(exitCode);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`flow-agents ${commandName ?? ""}`.trimEnd() + `: ${message}`);
@@ -152,5 +185,8 @@ try {
   } else {
     console.error("Set FLOW_AGENTS_DEBUG=1 to print the stack trace.");
   }
+  // The class name, not the message: several verbs interpolate raw operator input
+  // into the text they throw.
+  witness(70, error instanceof Error ? error.constructor.name : "unknown");
   process.exit(70);
 }
