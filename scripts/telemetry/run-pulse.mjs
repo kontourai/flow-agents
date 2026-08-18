@@ -53,10 +53,20 @@ export function readTransitions(file) {
 export function subjectOf(record) {
   const target =
     record?.targets?.expectation ?? record?.targets?.gate ?? record?.targets?.decision ?? null;
-  return [record?.command ?? "?", record?.verb ?? "", target ?? ""].filter(Boolean).join(" ");
+  // Expectation ids are not globally unique — the shipped kits share one across two
+  // flows — so the flow, when the record names it, is part of the subject. Without it
+  // two unrelated gates merge into one fabricated retry storm.
+  const flow = record?.targets?.flow ?? null;
+  return [record?.command ?? "?", record?.verb ?? "", flow ?? "", target ?? ""].filter(Boolean).join(" ");
 }
 
 const isOk = (record) => record?.outcome === "ok";
+/**
+ * A refusal is a contract rejection. `usage` (exit 64) is a malformed invocation and is
+ * excluded from the headline count, so it must be excluded here too — otherwise a panel
+ * can read "0 refused (0%)" beside "refused 3x in a row" about the same transitions.
+ */
+const isRefusal = (record) => !isOk(record) && record?.outcome !== "usage";
 
 /**
  * Consecutive refusals of the same subject. This is the dominant failure signature in
@@ -84,7 +94,7 @@ export function detectRetryStorms(transitions, threshold = RETRY_STORM_THRESHOLD
     run = [];
   };
   for (const record of transitions) {
-    if (isOk(record)) {
+    if (!isRefusal(record)) {
       flush();
       continue;
     }
@@ -176,7 +186,7 @@ export function buildPulse(transitions, { now = Date.now(), stallMinutes = DEFAU
   const stall = detectStall(ordered, now, stallMinutes);
   if (stall) anomalies.unshift(stall);
 
-  const refused = ordered.filter((record) => !isOk(record) && record.outcome !== "usage").length;
+  const refused = ordered.filter(isRefusal).length;
   const first = ordered[0];
   const last = ordered[ordered.length - 1];
   return {

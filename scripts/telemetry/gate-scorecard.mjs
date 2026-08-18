@@ -26,6 +26,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
+/** How far before a transition its invoking turn may sit before the link is a guess. */
+const TURN_GRACE_MS = 10 * 60_000;
+
 function parseArgs(argv) {
   const options = { transcripts: [], json: false };
   for (let index = 0; index < argv.length; index += 1) {
@@ -67,25 +70,41 @@ function readJsonl(file) {
  * Falls back to scanning for `kits/*​/kit.json` when no catalog is present, so a repo
  * that has kits but has not published a catalog is still measurable.
  */
+/**
+ * A catalog listing the same kit twice would register its gates twice, turning one
+ * unambiguous expectation into two claimants — reporting a phantom collision AND
+ * refusing to credit the gate that actually fired. Deduplicate by resolved directory,
+ * and take the id from the first entry so the identifier stays stable.
+ */
+function dedupeKits(kits) {
+  const seen = new Map();
+  for (const kit of kits) if (!seen.has(kit.dir)) seen.set(kit.dir, kit);
+  return [...seen.values()];
+}
+
 export function discoverKitDirs(root = process.cwd()) {
   const kitsRoot = path.join(root, "kits");
   const catalogPath = path.join(kitsRoot, "catalog.json");
   if (fs.existsSync(catalogPath)) {
     try {
       const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
-      const dirs = (catalog.kits ?? [])
-        .map((kit) => ({ id: kit.id ?? null, dir: path.resolve(root, kit.path ?? "") }))
-        .filter((kit) => fs.existsSync(kit.dir));
+      const dirs = dedupeKits(
+        (catalog.kits ?? [])
+          .map((kit) => ({ id: kit.id ?? null, dir: path.resolve(root, kit.path ?? "") }))
+          .filter((kit) => fs.existsSync(kit.dir)),
+      );
       if (dirs.length) return dirs;
     } catch {
       // A malformed catalog is not a reason to report zero kits; fall through to a scan.
     }
   }
   if (!fs.existsSync(kitsRoot)) return [];
-  return fs
-    .readdirSync(kitsRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(kitsRoot, entry.name, "kit.json")))
-    .map((entry) => ({ id: entry.name, dir: path.join(kitsRoot, entry.name) }));
+  return dedupeKits(
+    fs
+      .readdirSync(kitsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(kitsRoot, entry.name, "kit.json")))
+      .map((entry) => ({ id: entry.name, dir: path.join(kitsRoot, entry.name) })),
+  );
 }
 
 /**
@@ -98,12 +117,14 @@ function flowFilesForKit(kitDir) {
   if (fs.existsSync(manifest)) {
     try {
       const kit = JSON.parse(fs.readFileSync(manifest, "utf8"));
-      const declared = (kit.flows ?? [])
+      // Authoritative even when it resolves to nothing: a kit that declares a flow
+      // whose file was renamed has a broken manifest, and quietly globbing the
+      // directory would hide that behind whatever strays happen to sit there.
+      return (kit.flows ?? [])
         .map((flow) => path.resolve(kitDir, flow.path ?? ""))
         .filter((file) => fs.existsSync(file));
-      if (declared.length) return declared;
     } catch {
-      // Fall through to the glob.
+      // An unreadable manifest is not a declaration; fall through to the glob.
     }
   }
   const flowsDir = path.join(kitDir, "flows");
@@ -159,7 +180,9 @@ export function buildExpectationIndex(kitDirs, flowIds = null) {
         });
         for (const id of expectations) {
           const claimants = index.get(id) ?? [];
-          claimants.push({ key, gate: gateName, step: gate.step ?? null, flow: flowId, kit: kit.id });
+          if (!claimants.some((claimant) => claimant.key === key)) {
+            claimants.push({ key, gate: gateName, step: gate.step ?? null, flow: flowId, kit: kit.id });
+          }
           index.set(id, claimants);
         }
       }
@@ -200,6 +223,7 @@ function tally(bucket, record) {
 export function attributeTokens(transitions, transcriptFiles) {
   const turns = [];
   for (const file of transcriptFiles) {
+    const fallbackSession = path.basename(file).replace(/\.jsonl$/, "");
     for (const record of readJsonl(file)) {
       const usage = record?.message?.usage;
       const at = Date.parse(record?.timestamp ?? "");
@@ -207,7 +231,12 @@ export function attributeTokens(transitions, transcriptFiles) {
       const id = record?.message?.id ?? `${file}:${at}`;
       // One API response is logged as several lines sharing a message id and identical
       // usage totals; counting each line triples the tokens.
-      turns.push({ id, at, output: Number(usage.output_tokens) || 0 });
+      turns.push({
+        id,
+        at,
+        output: Number(usage.output_tokens) || 0,
+        session: record?.sessionId ?? record?.session_id ?? fallbackSession,
+      });
     }
   }
   const deduped = new Map();
@@ -218,27 +247,37 @@ export function attributeTokens(transitions, transcriptFiles) {
   const consumed = new Set();
   let matchedTurns = 0;
 
-  // A turn is CONSUMED by the first transition it can pay for. One turn routinely
-  // invokes several transitions, and letting each of them claim the same turn inflates
-  // the total: two transitions sharing one 500-token turn would report 1000 tokens
-  // spent. Under-attributing is recoverable — a reader sees `transitions_without_turn`
-  // and knows the cost axis is a floor. Over-attributing is not: it manufactures spend
-  // that never happened, which is the defect this whole scorecard exists to find.
+  // A turn's timestamp is when the model EMITTED the tool call, which precedes the
+  // command running — verified live: a transition at 00:45:32 was invoked by a turn
+  // stamped 00:45:21. Searching forward from the transition therefore matches nothing,
+  // or worse matches the NEXT turn. The invoking turn is the most recent one before it.
+  //
+  // A turn is consumed once. One turn routinely invokes several transitions, and if
+  // each claimed it the total would inflate; and a transition whose turn is already
+  // consumed must NOT reach further back, because that older turn belongs to earlier
+  // work. Those transitions are disclosed as `transitions_without_turn` instead, so
+  // every per-gate cost is a floor rather than an invention.
   const chronological = [...transitions].sort(
     (a, b) => (Date.parse(a.started_at ?? "") || 0) - (Date.parse(b.started_at ?? "") || 0),
   );
   for (const transition of chronological) {
     const start = Date.parse(transition.started_at ?? "");
     if (Number.isNaN(start)) continue;
-    // The invoking turn records its usage when the turn ends, i.e. at or after the
-    // transition completes — allow a grace window for the rest of the turn's work.
-    const end = start + (Number(transition.duration_ms) || 0) + 120_000;
-    const turn = ordered.find(
-      (candidate) => candidate.at >= start && candidate.at <= end && !consumed.has(candidate.id),
-    );
-    if (!turn) continue;
-    consumed.add(turn.id);
-    attributed.set(transition, turn);
+    // Sibling sessions write their transcripts into the same directory, so matching on
+    // time alone imports another run's spend. When the transition names its session,
+    // only that session's turns may pay for it.
+    const session = transition?.actor?.session_id ?? null;
+    let candidate = null;
+    for (const turn of ordered) {
+      if (turn.at > start) break;
+      if (session && turn.session && turn.session !== session) continue;
+      candidate = turn;
+    }
+    if (!candidate) continue;
+    if (start - candidate.at > TURN_GRACE_MS) continue;
+    if (consumed.has(candidate.id)) continue;
+    consumed.add(candidate.id);
+    attributed.set(transition, candidate);
     matchedTurns += 1;
   }
   return {
@@ -255,8 +294,17 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
   const unattributed = [];
   const ambiguous = [];
 
+  // Only gate names that are unique across every declared flow can identify a gate on
+  // their own. A name reused by two flows says as little as a shared expectation id
+  // does, so it resolves nothing rather than resolving to whichever flow was read
+  // first — the file order that would decide it is not even contractually stable.
   const byGateName = new Map();
-  for (const declared of gateIndex.values()) if (!byGateName.has(declared.gate)) byGateName.set(declared.gate, declared);
+  const gateNameCounts = new Map();
+  for (const declared of gateIndex.values()) {
+    gateNameCounts.set(declared.gate, (gateNameCounts.get(declared.gate) ?? 0) + 1);
+    if (!byGateName.has(declared.gate)) byGateName.set(declared.gate, declared);
+  }
+  const uniqueGateName = (name) => (gateNameCounts.get(name) === 1 ? byGateName.get(name) : null);
 
   for (const record of transitions) {
     const expectation = record?.targets?.expectation;
@@ -266,10 +314,15 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
     // --flow is the only thing that can break the tie; without it the write is recorded
     // as ambiguous rather than assigned to a gate that may not have seen it.
     let mapped = claimants.length === 1 ? claimants[0] : null;
+    let unresolved = false;
     if (!mapped && claimants.length > 1) {
       const declaredFlow = record?.targets?.flow;
-      mapped = claimants.find((claimant) => claimant.flow === declaredFlow) ?? null;
+      const withinFlow = claimants.filter((claimant) => claimant.flow === declaredFlow);
+      // One match inside the named flow resolves it. Two means the flow declares the
+      // same id on two gates, and naming the flow has not actually narrowed anything.
+      mapped = withinFlow.length === 1 ? withinFlow[0] : null;
       if (!mapped) {
+        unresolved = true;
         ambiguous.push({
           expectation,
           claimed_by: claimants.map((claimant) => `${claimant.flow}::${claimant.gate}`),
@@ -277,7 +330,10 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
         });
       }
     }
-    if (!mapped && declaredGate) mapped = byGateName.get(declaredGate) ?? null;
+    // A write already recorded as unattributable must not then be posted to a gate by
+    // its --gate flag: it would be reported as ambiguous AND counted in some gate's
+    // tally, cost and tokens, which is worse than either alone.
+    if (!mapped && !unresolved && declaredGate) mapped = uniqueGateName(declaredGate);
 
     if (mapped) {
       if (!gates.has(mapped.key)) {

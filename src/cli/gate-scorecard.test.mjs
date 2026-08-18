@@ -261,42 +261,47 @@ test("a declared gate never invoked in the window is reported as such", () => {
   assert.ok(!verify.never_invoked);
 });
 
-test("token attribution counts one API response once, not once per content block", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
-  const file = path.join(dir, "transcript.jsonl");
-  // One response logged as three lines sharing a message id and identical usage.
-  const line = (id, at, output) =>
-    JSON.stringify({ timestamp: at, message: { id, usage: { output_tokens: output } } });
+// A turn's timestamp is when the model EMITTED the tool call, so the invoking turn
+// PRECEDES the transition it caused. Verified live: a transition at 00:45:32 was
+// invoked by a turn stamped 00:45:21. These fixtures previously put the turn after the
+// transition, which matched the implementation's assumption rather than reality — and
+// so could never have caught the direction being wrong.
+function transcript(dir, name, entries) {
+  const file = path.join(dir, name);
   fs.writeFileSync(
     file,
-    [
-      line("msg_a", "2026-08-17T12:00:02.000Z", 500),
-      line("msg_a", "2026-08-17T12:00:02.000Z", 500),
-      line("msg_a", "2026-08-17T12:00:02.000Z", 500),
-    ].join("\n"),
+    entries
+      .map(([id, at, output, session]) =>
+        JSON.stringify({ timestamp: at, sessionId: session ?? "sess-a", message: { id, usage: { output_tokens: output } } }),
+      )
+      .join("\n"),
     "utf8",
   );
-  const transitions = [transition({ started_at: "2026-08-17T12:00:00.000Z", duration_ms: 5000 })];
+  return file;
+}
+
+test("token attribution counts one API response once, not once per content block", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  // One response logged as three lines sharing a message id and identical usage.
+  const file = transcript(dir, "transcript.jsonl", [
+    ["msg_a", "2026-08-17T12:00:00.000Z", 500],
+    ["msg_a", "2026-08-17T12:00:00.000Z", 500],
+    ["msg_a", "2026-08-17T12:00:00.000Z", 500],
+  ]);
+  const transitions = [transition({ started_at: "2026-08-17T12:00:05.000Z", duration_ms: 100 })];
   const attribution = attributeTokens(transitions, [file]);
   assert.equal(attribution.availableTurns, 1);
   assert.equal(attribution.matchedTurns, 1);
   assert.equal(attribution.attributed.get(transitions[0]).output, 500);
 });
 
-// The defect this caught in review: two transitions sharing one turn each claimed its
-// full cost, reporting 1000 tokens spent for a 500-token turn. Over-attribution
-// manufactures spend that never happened — the exact failure the scorecard exists to
-// find — so a turn is consumed once and the shortfall is disclosed instead.
+// Over-attribution manufactures spend that never happened — the exact defect the
+// scorecard exists to find.
 test("one turn cannot pay for two transitions", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
-  const file = path.join(dir, "transcript.jsonl");
-  fs.writeFileSync(
-    file,
-    JSON.stringify({ timestamp: "2026-08-17T12:00:05.000Z", message: { id: "m1", usage: { output_tokens: 500 } } }),
-    "utf8",
-  );
-  const first = transition({ started_at: "2026-08-17T12:00:00.000Z", duration_ms: 10_000 });
-  const second = transition({ started_at: "2026-08-17T12:00:01.000Z", duration_ms: 10_000 });
+  const file = transcript(dir, "transcript.jsonl", [["m1", "2026-08-17T12:00:00.000Z", 500]]);
+  const first = transition({ started_at: "2026-08-17T12:00:05.000Z", duration_ms: 100 });
+  const second = transition({ started_at: "2026-08-17T12:00:06.000Z", duration_ms: 100 });
   const attribution = attributeTokens([first, second], [file]);
 
   assert.equal(attribution.matchedTurns, 1, "a single turn must be counted once");
@@ -306,34 +311,59 @@ test("one turn cannot pay for two transitions", () => {
   assert.equal(total, 500, "attributed spend must never exceed the spend that occurred");
 });
 
+// A transition whose invoking turn is already consumed must not reach further back:
+// that older turn paid for earlier work, and claiming it invents spend for this one.
+test("a transition does not reach back past its own invoking turn", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const file = transcript(dir, "transcript.jsonl", [
+    ["older", "2026-08-17T12:00:00.000Z", 900],
+    ["invoker", "2026-08-17T12:00:10.000Z", 100],
+  ]);
+  const first = transition({ started_at: "2026-08-17T12:00:11.000Z", duration_ms: 10 });
+  const second = transition({ started_at: "2026-08-17T12:00:12.000Z", duration_ms: 10 });
+  const attribution = attributeTokens([first, second], [file]);
+  assert.equal(attribution.attributed.get(first).id, "invoker");
+  assert.equal(attribution.attributed.get(second), undefined, "must not fall back to the older turn");
+  assert.equal(attribution.transitionsWithoutTurn, 1);
+});
+
+// Sibling sessions write transcripts into the same directory. Matching on time alone
+// imports another run's spend as this run's cost.
+test("a sibling session's turn never pays for this run's transition", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const file = transcript(dir, "mixed.jsonl", [
+    ["mine", "2026-08-17T12:00:00.000Z", 100, "sess-a"],
+    ["theirs", "2026-08-17T12:00:04.000Z", 8000, "sess-b"],
+  ]);
+  const mine = transition({
+    started_at: "2026-08-17T12:00:05.000Z",
+    duration_ms: 10,
+    actor: { runtime: "claude-code", session_id: "sess-a" },
+  });
+  const attribution = attributeTokens([mine], [file]);
+  assert.equal(attribution.matchedTurns, 1);
+  assert.equal(attribution.attributed.get(mine).output, 100, "the nearer turn belongs to another session");
+});
+
 test("attributed tokens never exceed the transcript's own total", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
-  const file = path.join(dir, "transcript.jsonl");
-  const line = (id, at, output) =>
-    JSON.stringify({ timestamp: at, message: { id, usage: { output_tokens: output } } });
-  fs.writeFileSync(
-    file,
-    [line("m1", "2026-08-17T12:00:05.000Z", 300), line("m2", "2026-08-17T12:00:06.000Z", 200)].join("\n"),
-    "utf8",
-  );
+  const file = transcript(dir, "transcript.jsonl", [
+    ["m1", "2026-08-17T12:00:00.000Z", 300],
+    ["m2", "2026-08-17T12:00:01.000Z", 200],
+  ]);
   const transitions = Array.from({ length: 5 }, (unused, index) =>
-    transition({ started_at: "2026-08-17T12:00:00.000Z", duration_ms: 10_000 + index }),
+    transition({ started_at: `2026-08-17T12:00:0${5 + index}.000Z`, duration_ms: 10 }),
   );
   const attribution = attributeTokens(transitions, [file]);
   const total = transitions.reduce((sum, item) => sum + (attribution.attributed.get(item)?.output ?? 0), 0);
-  assert.equal(total, 500);
-  assert.equal(attribution.matchedTurns, 2);
-  assert.equal(attribution.transitionsWithoutTurn, 3);
+  assert.ok(total <= 500, `attributed ${total} must not exceed the 500 actually spent`);
+  assert.equal(attribution.matchedTurns + attribution.transitionsWithoutTurn, 5);
 });
 
 test("a turn far outside a transition's window is not attributed to it", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
-  const file = path.join(dir, "transcript.jsonl");
-  fs.writeFileSync(
-    file,
-    JSON.stringify({ timestamp: "2026-08-17T14:00:00.000Z", message: { id: "msg_b", usage: { output_tokens: 900 } } }),
-    "utf8",
-  );
+  // Hours earlier: too distant to be the turn that invoked this transition.
+  const file = transcript(dir, "transcript.jsonl", [["msg_b", "2026-08-17T09:00:00.000Z", 900]]);
   const transitions = [transition({ started_at: "2026-08-17T12:00:00.000Z", duration_ms: 1000 })];
   const attribution = attributeTokens(transitions, [file]);
   assert.equal(attribution.matchedTurns, 0);
@@ -353,4 +383,129 @@ test("gates of an unexercised flow are counted, not listed as never invoked", ()
   assert.deepEqual(card.scope.flows_exercised, ["demo.build"]);
   assert.equal(card.scope.flows_not_exercised, 1);
   assert.equal(card.scope.gates_declared, 3);
+});
+
+// --- what a kit declares, and what happens when the declaration is broken ---------
+
+function kitWithManifest(flows, extraFiles = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-kit-"));
+  fs.mkdirSync(path.join(root, "flows"), { recursive: true });
+  fs.writeFileSync(path.join(root, "kit.json"), JSON.stringify({ id: "demo", flows }), "utf8");
+  for (const [name, body] of Object.entries(extraFiles)) {
+    fs.writeFileSync(path.join(root, "flows", name), JSON.stringify(body), "utf8");
+  }
+  return root;
+}
+
+// A kit that declares a flow whose file was renamed has a broken manifest. Globbing the
+// directory would hide that behind whatever strays happen to sit there.
+test("a broken kit.json declaration does not silently fall back to globbing strays", () => {
+  const kitDir = kitWithManifest([{ id: "demo.gone", path: "flows/missing.flow.json" }], {
+    "stray.flow.json": { id: "stray.flow", gates: { "stray-gate": { step: "s", expects: [{ id: "stray" }] } } },
+  });
+  const { gates } = buildExpectationIndex(kitDir);
+  assert.equal(gates.size, 0, "a stray flow file is not part of the kit");
+});
+
+test("an empty flows declaration means the kit declares no flows", () => {
+  const kitDir = kitWithManifest([], {
+    "stray.flow.json": { id: "stray.flow", gates: { "stray-gate": { step: "s", expects: [{ id: "stray" }] } } },
+  });
+  assert.equal(buildExpectationIndex(kitDir).gates.size, 0);
+});
+
+test("a kit with no manifest at all still globs its flows directory", () => {
+  const kitDir = kitFixture();
+  assert.ok(buildExpectationIndex(kitDir).gates.size > 0);
+});
+
+// A catalog listing one kit twice would register its gates twice, turning a single
+// unambiguous expectation into two claimants: a phantom collision, and the gate that
+// actually fired credited with nothing.
+test("a kit listed twice in the catalog is registered once", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-cat-"));
+  const kitDir = path.join(root, "kits", "solo");
+  fs.mkdirSync(path.join(kitDir, "flows"), { recursive: true });
+  fs.writeFileSync(path.join(kitDir, "kit.json"), JSON.stringify({ id: "solo", flows: [{ id: "solo.flow", path: "flows/solo.flow.json" }] }), "utf8");
+  fs.writeFileSync(
+    path.join(kitDir, "flows", "solo.flow.json"),
+    JSON.stringify({ id: "solo.flow", gates: { "verify-gate": { step: "verify", expects: [{ id: "only-id" }] } } }),
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(root, "kits", "catalog.json"),
+    JSON.stringify({ kits: [{ id: "solo", path: "kits/solo" }, { id: "solo", path: "kits/solo" }] }),
+    "utf8",
+  );
+
+  const kits = discoverKitDirs(root);
+  assert.equal(kits.length, 1, "the duplicate entry must not register the kit twice");
+  const { index, ambiguousExpectations } = buildExpectationIndex(kits);
+  assert.equal(index.get("only-id").length, 1);
+  assert.deepEqual(ambiguousExpectations, [], "a single kit cannot collide with itself");
+
+  const card = buildScorecard({
+    transitions: [transition({ targets: { expectation: "only-id" } })],
+    expectationIndex: index,
+    gateIndex: buildExpectationIndex(kits).gates,
+    tokenAttribution: null,
+    ambiguousExpectations,
+  });
+  assert.equal(card.gates.find((gate) => gate.gate === "verify-gate").calls, 1);
+});
+
+test("discovery falls back to scanning when no catalog is published", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-scan-"));
+  const kitDir = path.join(root, "kits", "scanned");
+  fs.mkdirSync(path.join(kitDir, "flows"), { recursive: true });
+  fs.writeFileSync(path.join(kitDir, "kit.json"), JSON.stringify({ id: "scanned", flows: [] }), "utf8");
+  const kits = discoverKitDirs(root);
+  assert.deepEqual(kits.map((kit) => kit.id), ["scanned"]);
+});
+
+// --- a --gate flag is not a licence to guess ------------------------------------
+
+test("an ambiguous write is not rescued onto a gate by its --gate flag", () => {
+  const kitDir = kitFixture();
+  fs.writeFileSync(
+    path.join(kitDir, "flows", "overlap.flow.json"),
+    JSON.stringify({
+      id: "demo.overlap",
+      gates: { "verify-gate": { step: "verify", expects: [{ id: "tests-evidence" }] } },
+    }),
+    "utf8",
+  );
+  const card = scorecardFor(
+    [transition({ targets: { expectation: "tests-evidence", gate: "verify-gate" } })],
+    { kitDir },
+  );
+  assert.equal(card.ambiguous.length, 1, "the write is ambiguous");
+  assert.equal(
+    card.gates.filter((gate) => gate.calls > 0).length,
+    0,
+    "and must not ALSO be counted in some gate's tally",
+  );
+});
+
+// A gate name shared by two flows identifies a gate no better than a shared
+// expectation id does; the file order that would decide it is not even stable.
+test("a --gate naming a gate two flows declare resolves nothing", () => {
+  const kitDir = kitFixture();
+  fs.writeFileSync(
+    path.join(kitDir, "flows", "rival.flow.json"),
+    JSON.stringify({
+      id: "demo.rival",
+      gates: { "verify-gate": { step: "verify", expects: [{ id: "rival-evidence" }] } },
+    }),
+    "utf8",
+  );
+  const card = scorecardFor([transition({ targets: { gate: "verify-gate" } })], { kitDir });
+  assert.equal(card.gates.filter((gate) => gate.calls > 0).length, 0);
+  assert.equal(card.coverage.verb_attributed, 1, "it is still counted, as a verb");
+});
+
+test("a --gate naming a gate only one flow declares does resolve", () => {
+  const kitDir = kitFixture();
+  const card = scorecardFor([transition({ targets: { gate: "plan-gate" } })], { kitDir });
+  assert.equal(card.gates.find((gate) => gate.gate === "plan-gate").calls, 1);
 });

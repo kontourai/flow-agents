@@ -161,3 +161,37 @@ test("transitions are ordered before analysis, whatever order the log holds", ()
   assert.equal(storm.count, 3);
   assert.equal(storm.from, new Date(BASE).toISOString());
 });
+
+// A usage error (exit 64) is a malformed invocation, not a contract refusal. The
+// headline count excludes it, so the storm detector must too — otherwise one panel
+// reads "0 refused (0%)" beside "refused 3x in a row" about the same transitions.
+test("repeated usage errors are not a retry storm", () => {
+  const usage = (offset) => transition(offset, { outcome: "usage", exit_code: 64, verb: "bogus" });
+  assert.deepEqual(detectRetryStorms([usage(0), usage(30), usage(60)]), []);
+  const pulse = buildPulse([usage(0), usage(30), usage(60)], { now: BASE + 90_000 });
+  assert.equal(pulse.totals.refused_or_error, 0);
+  assert.deepEqual(pulse.anomalies, [], "the header and the anomalies must agree");
+});
+
+test("a usage error breaks a storm rather than extending it", () => {
+  const storms = detectRetryStorms([
+    refused(0, { verb: "render-claim" }),
+    transition(30, { outcome: "usage", exit_code: 64, verb: "render-claim" }),
+    refused(60, { verb: "render-claim" }),
+  ]);
+  assert.deepEqual(storms, []);
+});
+
+// Expectation ids are not globally unique — the shipped kits share one across two
+// flows — so two unrelated gates must not merge into one fabricated storm.
+test("the same expectation id in two flows is two subjects, not one", () => {
+  const a = refused(0, { targets: { expectation: "proposal-carries-source-refs", flow: "knowledge.synthesize" } });
+  const b = refused(30, { targets: { expectation: "proposal-carries-source-refs", flow: "knowledge.consolidate" } });
+  assert.notEqual(subjectOf(a), subjectOf(b));
+  assert.deepEqual(detectRetryStorms([a, a, b]), [], "two flows' gates do not form one storm");
+});
+
+test("a shared expectation id within one flow is still one subject", () => {
+  const one = refused(0, { targets: { expectation: "tests-evidence", flow: "builder.build" } });
+  assert.equal(detectRetryStorms([one, one, one]).length, 1);
+});
