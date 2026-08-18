@@ -275,3 +275,35 @@ test("agent event staging is skipped when no current pointer authorizes the targ
   assert.equal(writes, 0);
   assert.equal(staged, false);
 });
+
+// #1276: an ABSENT binding_id and a MALFORMED one are different conditions and were
+// reported with one message. The pointer writer only emits binding_id when a host
+// workflow binding exists, so a run started without one produces a well-formed pointer
+// that the check called "invalid" — 1,968 of 236,775 local telemetry events, every one
+// naming a corruption that was not there. Both still fail closed; only the diagnostic
+// changes, and a diagnostic that names the wrong condition is the defect.
+test("an absent host binding is reported as absent, not as an invalid binding", async (t) => {
+  const fixture = workspaceFixture(t);
+  const env = { FLOW_AGENTS_ACTOR: "runtime-one" };
+  const bound = await bindRun(fixture, env, "run-one");
+  const pointerFile = currentPointer.perActorCurrentFile(fixture.artifactRoot, bound.actorKey);
+
+  // Exactly what the writer produces without a host binding: everything else valid.
+  const pointer = JSON.parse(fs.readFileSync(pointerFile, "utf8"));
+  delete pointer.binding_id;
+  fs.writeFileSync(pointerFile, `${JSON.stringify(pointer, null, 2)}\n`);
+
+  const absent = (await resolveTelemetryRunBinding({ cwd: fixture.workspace, env })).run_correlation;
+  assert.equal(absent.status, "incomplete", "an unbound run still fails closed");
+  assert.match(absent.reason, /no host workflow binding/i);
+  assert.doesNotMatch(absent.reason, /invalid/i, "absent must not be reported as invalid");
+
+  // A binding that is present but the wrong TYPE is still invalid, and must stay so —
+  // otherwise the fix would have traded one wrong label for another.
+  const malformed = JSON.parse(fs.readFileSync(pointerFile, "utf8"));
+  malformed.binding_id = 7;
+  fs.writeFileSync(pointerFile, `${JSON.stringify(malformed, null, 2)}\n`);
+  const bad = (await resolveTelemetryRunBinding({ cwd: fixture.workspace, env })).run_correlation;
+  assert.equal(bad.status, "incomplete");
+  assert.match(bad.reason, /invalid/i, "a malformed binding is still invalid");
+});
