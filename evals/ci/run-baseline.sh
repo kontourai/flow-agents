@@ -27,6 +27,7 @@ CHECKS=(
   "Run pulse unit tests|node --test src/cli/run-pulse.test.mjs"
   "Knowledge integration suites|node --test kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
+  "Transcript usage dedupe integration|bash evals/integration/test_transcript_usage_dedupe.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
   "Evidence command serialization integration|bash evals/integration/test_evidence_command_serialization.sh"
   "Fixture retirement audit integration|bash evals/integration/test_fixture_retirement_audit.sh"
@@ -271,6 +272,7 @@ LANE_RUNTIME_AND_KIT=(
 )
 
 LANE_INTEGRATION_COVERAGE=(
+  "Transcript usage dedupe integration"
   "Builder step producers integration"
   "Builder canonical Flow run integration"
   "Builder execute plan-gap integration"

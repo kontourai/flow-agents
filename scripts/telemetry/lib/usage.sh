@@ -242,15 +242,27 @@ usage_parse_transcript() {
     | (if $has_reg then (if $version == "" then $registry.current_version else $version end) else null end) as $ver
     | (if $has_reg and ($ver != null) then ($registry.versions[$ver]) else null end) as $p
     | ($p != null) as $priced
+    # One API response is written as SEVERAL lines -- one per content block (thinking,
+    # text, each tool_use) -- all sharing message.id and carrying IDENTICAL usage
+    # totals. Summing per line counts a response once per block: measured 2.14x and
+    # 2.72x inflation on two real transcripts, with the multiplier tracking how many
+    # blocks a turn emitted, so it cannot be corrected after the fact (#1275).
+    #
+    # `_seen` tracks which response ids have already been counted; first occurrence
+    # wins. A line with no message.id is counted (it cannot be a duplicate of anything
+    # identifiable), which keeps this fail-open for any future shape.
     | (reduce inputs as $l ({};
         ($l.message.usage) as $u
-        | if $u then
+        | (($l.message.id) // null) as $rid
+        | if $u and (($rid == null) or ((._seen // {}) | has($rid) | not)) then
             (($l.message.model) // "unknown") as $m
+            | (if $rid == null then . else ._seen = ((._seen // {}) + {($rid): true}) end)
             | .[$m].input          = ((.[$m].input // 0)          + (($u.input_tokens) // 0))
             | .[$m].output         = ((.[$m].output // 0)         + (($u.output_tokens) // 0))
             | .[$m].cache_creation = ((.[$m].cache_creation // 0) + (($u.cache_creation_input_tokens) // 0))
             | .[$m].cache_read     = ((.[$m].cache_read // 0)     + (($u.cache_read_input_tokens) // 0))
-          else . end)) as $agg
+          else . end)
+       | del(._seen)) as $agg
     | ($agg | to_entries
         | map(
             .key as $m | .value as $u

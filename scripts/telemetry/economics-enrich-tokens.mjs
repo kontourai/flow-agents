@@ -91,6 +91,8 @@ async function sliceTranscript(transcriptPath, windows) {
   let linesRead = 0;
   let malformedLinesSkipped = 0;
   let assistantUsageLinesMatched = 0;
+  let duplicateUsageLinesSkipped = 0;
+  const countedResponseIds = new Set();
   let linesOutsideWindows = 0;
   let sidechainUsageLinesIncluded = 0;
 
@@ -118,6 +120,20 @@ async function sliceTranscript(transcriptPath, windows) {
       linesOutsideWindows += 1;
       continue;
     }
+    // One API response is written as SEVERAL lines — one per content block (thinking,
+    // text, each tool_use) — all sharing `message.id` and carrying the IDENTICAL usage
+    // totals. Summing per line therefore counts a response once per block. Measured
+    // over two real transcripts: 2.14x and 2.72x inflation, and the multiplier tracks
+    // how many blocks a turn happened to emit, so it cannot be corrected afterwards.
+    // First occurrence wins; later copies of the same id contribute nothing (#1275).
+    const responseId = obj.message && typeof obj.message.id === 'string' ? obj.message.id : null;
+    if (responseId !== null) {
+      if (countedResponseIds.has(responseId)) {
+        duplicateUsageLinesSkipped += 1;
+        continue;
+      }
+      countedResponseIds.add(responseId);
+    }
     assistantUsageLinesMatched += 1;
     if (obj.isSidechain === true) sidechainUsageLinesIncluded += 1;
     if (!byPhase.has(win.phase)) {
@@ -142,7 +158,7 @@ async function sliceTranscript(transcriptPath, windows) {
   }));
 
   return {
-    phases, linesRead, malformedLinesSkipped, assistantUsageLinesMatched, linesOutsideWindows,
+    phases, linesRead, malformedLinesSkipped, assistantUsageLinesMatched, duplicateUsageLinesSkipped, linesOutsideWindows,
     sidechainUsageLinesIncluded,
   };
 }
@@ -190,6 +206,9 @@ async function main() {
     lines_read: sliced.linesRead,
     malformed_lines_skipped: sliced.malformedLinesSkipped,
     assistant_usage_lines_matched: sliced.assistantUsageLinesMatched,
+    // Disclosed rather than silent: a reader comparing this against a raw line count
+    // needs to see that the difference is deliberate de-duplication, not lost data.
+    duplicate_usage_lines_skipped: sliced.duplicateUsageLinesSkipped,
     lines_outside_windows: sliced.linesOutsideWindows,
     sidechain_usage_lines_included: sliced.sidechainUsageLinesIncluded,
   })}\n`);
