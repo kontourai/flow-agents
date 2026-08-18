@@ -4,7 +4,7 @@
  *
  * The first scorecard over these gates was assembled by hand from a TSV an operator
  * appended to after every call. This replaces that with a derivation over
- * `.kontourai/telemetry/transitions.jsonl` (written by the CLI itself; see
+ * `.flow-agents/telemetry/transitions.jsonl` (written by the CLI itself; see
  * src/transition-log.ts) plus the kit's own flow definitions.
  *
  * Two rules this tool holds itself to, because the defects it exists to find are the
@@ -515,7 +515,7 @@ function main(argv) {
   // The writer anchors on the shared repository root, so a linked worktree appends to
   // the primary checkout's log. Defaulting the reader to cwd made it read a file that
   // will never exist there.
-  const transitionsFile = options.transitions ?? path.join(sharedRepoRoot(process.cwd()), ".kontourai", "telemetry", "transitions.jsonl");
+  const transitionsFile = options.transitions ?? path.join(sharedRepoRoot(process.cwd()), ".flow-agents", "telemetry", "transitions.jsonl");
   // No kit is privileged: with no --kit, every kit the repo publishes is scored.
   const kitDirs = options.kit ? [{ id: path.basename(options.kit), dir: options.kit }] : discoverKitDirs(process.cwd());
   const read = readJsonl(transitionsFile);

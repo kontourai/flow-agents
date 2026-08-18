@@ -316,7 +316,7 @@ function main(argv) {
     console.log("Usage: run-pulse.mjs [--transitions <file>] [--watch] [--interval <s>] [--json] [--stall-minutes <n>]");
     return 0;
   }
-  const file = options.transitions ?? path.join(sharedRepoRoot(process.cwd()), ".kontourai", "telemetry", "transitions.jsonl");
+  const file = options.transitions ?? path.join(sharedRepoRoot(process.cwd()), ".flow-agents", "telemetry", "transitions.jsonl");
   // Default to this session so a lane sees its own run, not the whole machine's.
   const session = options.allSessions ? null : options.session ?? process.env["CLAUDE_CODE_SESSION_ID"] ?? null;
   const render = () => {

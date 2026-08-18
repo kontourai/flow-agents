@@ -43,8 +43,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { ensureArtifactResidueIgnored } from "./lib/artifact-residue-ignore.js";
-import { resolveSharedRepoRoot, telemetryDataDir } from "./lib/local-artifact-root.js";
+import { durableFlowAgentsRoot, resolveSharedRepoRoot } from "./lib/local-artifact-root.js";
 
 export const TRANSITION_LOG_FILENAME = "transitions.jsonl";
 export const TRANSITION_RECORD_KIND = "kontour.flow-agents.transition";
@@ -315,13 +314,15 @@ export function appendTransitionRecord(record: TransitionRecord, cwd = process.c
   try {
     const root = transitionLogRoot(cwd);
     if (root === null) return false;
-    const dir = telemetryDataDir(root);
+    // NOT under `.kontourai/`. That tree is the run's artifact state, and this repo
+    // asserts in two independent evals that a read-only or rejected command leaves it
+    // byte-identical (`workflow status mutated durable artifacts`, `... did not reject
+    // before every durable write`). A per-invocation record inside it breaks both, and
+    // narrowing those assertions to accommodate a writer would erode the invariant they
+    // exist to hold. Tool-state belongs in the durable tool directory.
+    const dir = path.join(durableFlowAgentsRoot(root), "telemetry");
     fs.mkdirSync(dir, { recursive: true });
-    // Every invocation writes here, including `--help`, and including repos where this
-    // kit was never installed. Without an ignore rule that turns a read-only command
-    // into untracked residue a developer can commit — carrying their filesystem layout
-    // and session ids into whatever repository they happened to be standing in.
-    ensureArtifactResidueIgnored(root);
+    ensureTelemetryResidueIgnored(dir);
     const file = path.join(dir, TRANSITION_LOG_FILENAME);
     // Appending through a symlink writes to whatever it points at, so every component
     // this writer creates is checked, not just the leaf — a symlinked `.kontourai` or
@@ -344,6 +345,22 @@ export function appendTransitionRecord(record: TransitionRecord, cwd = process.c
  * fragment of the run as the whole of it. Anchor on the shared repository root, and
  * fall back to the working directory only outside a repository.
  */
+/**
+ * Keep the log out of a developer's commits. Scoped to the telemetry directory rather
+ * than the whole durable root, which carries tracked config in this repo.
+ */
+function ensureTelemetryResidueIgnored(dir: string): void {
+  try {
+    fs.writeFileSync(
+      path.join(dir, ".gitignore"),
+      ["# Written by flow-agents: per-invocation transition records are local telemetry,", "# not source. Delete this file to track them.", "*", "!.gitignore", ""].join("\n"),
+      { mode: 0o644, flag: "wx" },
+    );
+  } catch {
+    // An existing file is the expected case; anything else is not worth failing a write.
+  }
+}
+
 export function transitionLogDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env["FLOW_AGENTS_TRANSITION_LOG"] === "0";
 }

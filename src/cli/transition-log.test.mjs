@@ -37,7 +37,7 @@ function runCli(args, cwd) {
 }
 
 function readLog(root) {
-  const file = path.join(root, ".kontourai", "telemetry", TRANSITION_LOG_FILENAME);
+  const file = path.join(root, ".flow-agents", "telemetry", TRANSITION_LOG_FILENAME);
   if (!fs.existsSync(file)) return [];
   return fs
     .readFileSync(file, "utf8")
@@ -157,7 +157,7 @@ test("append writes one JSON line per invocation under the repo's telemetry dir"
   assert.equal(appendTransitionRecord(record, root), true);
   assert.equal(appendTransitionRecord(record, root), true);
 
-  const file = path.join(root, ".kontourai", "telemetry", TRANSITION_LOG_FILENAME);
+  const file = path.join(root, ".flow-agents", "telemetry", TRANSITION_LOG_FILENAME);
   const lines = fs.readFileSync(file, "utf8").trim().split("\n");
   assert.equal(lines.length, 2);
   assert.equal(JSON.parse(lines[0]).targets.expectation, "tests-evidence");
@@ -167,8 +167,8 @@ test("append writes one JSON line per invocation under the repo's telemetry dir"
 test("an unwritable telemetry destination degrades to no record, not a throw", () => {
   const root = fixtureRepo();
   // Occupy the telemetry directory path with a FILE so mkdir cannot succeed.
-  fs.mkdirSync(path.join(root, ".kontourai"), { recursive: true });
-  fs.writeFileSync(path.join(root, ".kontourai", "telemetry"), "not a directory", "utf8");
+  fs.mkdirSync(path.join(root, ".flow-agents"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".flow-agents", "telemetry"), "not a directory", "utf8");
   const record = buildTransitionRecord({
     command: "workflow",
     argv: [],
@@ -194,7 +194,7 @@ test("FLOW_AGENTS_TRANSITION_LOG=0 opts a run out entirely", () => {
       env: {},
     });
     assert.equal(appendTransitionRecord(record, root), false);
-    assert.equal(fs.existsSync(path.join(root, ".kontourai", "telemetry")), false);
+    assert.equal(fs.existsSync(path.join(root, ".flow-agents", "telemetry")), false);
   } finally {
     if (previous === undefined) delete process.env["FLOW_AGENTS_TRANSITION_LOG"];
     else process.env["FLOW_AGENTS_TRANSITION_LOG"] = previous;
@@ -205,7 +205,7 @@ test("a symlinked log file is refused rather than written through", () => {
   const root = fixtureRepo();
   const target = path.join(root, "elsewhere.txt");
   fs.writeFileSync(target, "pre-existing\n", "utf8");
-  const dir = path.join(root, ".kontourai", "telemetry");
+  const dir = path.join(root, ".flow-agents", "telemetry");
   fs.mkdirSync(dir, { recursive: true });
   fs.symlinkSync(target, path.join(dir, TRANSITION_LOG_FILENAME));
 
@@ -250,7 +250,7 @@ test("an unregistered command name is never written to the log", () => {
   assert.equal(records[0].exit_code, 64);
   assert.ok(
     !fs
-      .readFileSync(path.join(root, ".kontourai", "telemetry", TRANSITION_LOG_FILENAME), "utf8")
+      .readFileSync(path.join(root, ".flow-agents", "telemetry", TRANSITION_LOG_FILENAME), "utf8")
       .includes(leak),
     "the rejected argument must not appear anywhere in the log",
   );
@@ -263,7 +263,7 @@ test("a throw records the error class, never the thrown message", () => {
   const secret = "operator-prose-that-must-not-be-logged";
   assert.throws(() => runCli(["workflow", "evidence", "--route-reason", secret], root));
 
-  const raw = fs.readFileSync(path.join(root, ".kontourai", "telemetry", TRANSITION_LOG_FILENAME), "utf8");
+  const raw = fs.readFileSync(path.join(root, ".flow-agents", "telemetry", TRANSITION_LOG_FILENAME), "utf8");
   assert.ok(!raw.includes(secret), "operator-supplied text must not reach the log");
   assert.ok(!raw.includes("message_head"), "the message channel must be gone, not merely truncated");
   const record = readLog(root).at(-1);
@@ -356,7 +356,7 @@ test("the active flow noted from run state lands on the record", () => {
 test("the log directory carries its own ignore rule wherever it is created", () => {
   const root = fixtureRepo();
   runCli(["commands"], root);
-  const ignore = path.join(root, ".kontourai", ".gitignore");
+  const ignore = path.join(root, ".flow-agents", "telemetry", ".gitignore");
   assert.ok(fs.existsSync(ignore), "an ignore rule is written beside the log");
   assert.match(fs.readFileSync(ignore, "utf8"), /^\*$/m);
   const tracked = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: root, encoding: "utf8" });
@@ -368,8 +368,8 @@ test("the log directory carries its own ignore rule wherever it is created", () 
 test("a symlinked parent directory is refused, not written through", () => {
   const root = fixtureRepo();
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "transition-log-outside-"));
-  fs.mkdirSync(path.join(root, ".kontourai"), { recursive: true });
-  fs.symlinkSync(outside, path.join(root, ".kontourai", "telemetry"));
+  fs.mkdirSync(path.join(root, ".flow-agents"), { recursive: true });
+  fs.symlinkSync(outside, path.join(root, ".flow-agents", "telemetry"));
   const record = buildTransitionRecord({
     command: "workflow", argv: [], exitCode: 0, startedAt: new Date(), endedAt: new Date(), env: {},
   });
