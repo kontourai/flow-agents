@@ -314,6 +314,7 @@ export function appendTransitionRecord(record: TransitionRecord, cwd = process.c
   if (transitionLogDisabled()) return false;
   try {
     const root = transitionLogRoot(cwd);
+    if (root === null) return false;
     const dir = telemetryDataDir(root);
     fs.mkdirSync(dir, { recursive: true });
     // Every invocation writes here, including `--help`, and including repos where this
@@ -347,11 +348,17 @@ export function transitionLogDisabled(env: NodeJS.ProcessEnv = process.env): boo
   return env["FLOW_AGENTS_TRANSITION_LOG"] === "0";
 }
 
-export function transitionLogRoot(cwd = process.cwd()): string {
+export function transitionLogRoot(cwd = process.cwd()): string | null {
   try {
-    return resolveSharedRepoRoot(cwd) ?? cwd;
+    // NULL outside a repository, and the write is skipped. Falling back to the working
+    // directory meant that running the CLI from anywhere — a home directory, a temp
+    // dir, a caller's cwd during a delegated retry — created a `.kontourai/` there.
+    // That is litter in someone else's directory, and this repo tests against it
+    // (evals/integration/test_public_workflow_cli.sh asserts the caller's cwd is
+    // untouched). An invocation with no project to attribute to is not worth a record.
+    return resolveSharedRepoRoot(cwd);
   } catch {
-    return cwd;
+    return null;
   }
 }
 
@@ -374,5 +381,6 @@ export function recordTransition(input: {
   if (transitionLogDisabled(input.env ?? process.env)) return false;
   const cwd = input.cwd ?? process.cwd();
   const repoRoot = transitionLogRoot(cwd);
+  if (repoRoot === null) return false;
   return appendTransitionRecord(buildTransitionRecord({ ...input, repoRoot }), cwd);
 }

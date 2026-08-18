@@ -291,9 +291,13 @@ test("one repository keeps one log, whatever directory the CLI runs from", () =>
   );
 });
 
-test("outside a repository the log falls back to the working directory", () => {
+// Litter in someone else's directory. A caller running the CLI from a temp dir, a home
+// directory, or their own cwd during a delegated retry must not find a .kontourai/
+// there afterwards — the repo asserts this in test_public_workflow_cli.sh, and the
+// first version of this writer failed it.
+test("outside a repository nothing is written at all", () => {
   const loose = fs.mkdtempSync(path.join(os.tmpdir(), "transition-log-bare-"));
-  assert.equal(transitionLogRoot(loose), loose);
+  assert.equal(transitionLogRoot(loose), null);
   assert.equal(
     recordTransition({
       command: "commands",
@@ -304,9 +308,9 @@ test("outside a repository the log falls back to the working directory", () => {
       cwd: loose,
       env: {},
     }),
-    true,
+    false,
   );
-  assert.equal(readLog(loose).length, 1);
+  assert.equal(fs.existsSync(path.join(loose, ".kontourai")), false, "the caller's directory is untouched");
 });
 
 // --- redaction holes found by review, each reproduced before it was closed ---------
