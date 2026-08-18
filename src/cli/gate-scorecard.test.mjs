@@ -169,6 +169,49 @@ test("token attribution counts one API response once, not once per content block
   assert.equal(attribution.attributed.get(transitions[0]).output, 500);
 });
 
+// The defect this caught in review: two transitions sharing one turn each claimed its
+// full cost, reporting 1000 tokens spent for a 500-token turn. Over-attribution
+// manufactures spend that never happened — the exact failure the scorecard exists to
+// find — so a turn is consumed once and the shortfall is disclosed instead.
+test("one turn cannot pay for two transitions", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const file = path.join(dir, "transcript.jsonl");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ timestamp: "2026-08-17T12:00:05.000Z", message: { id: "m1", usage: { output_tokens: 500 } } }),
+    "utf8",
+  );
+  const first = transition({ started_at: "2026-08-17T12:00:00.000Z", duration_ms: 10_000 });
+  const second = transition({ started_at: "2026-08-17T12:00:01.000Z", duration_ms: 10_000 });
+  const attribution = attributeTokens([first, second], [file]);
+
+  assert.equal(attribution.matchedTurns, 1, "a single turn must be counted once");
+  assert.equal(attribution.transitionsWithoutTurn, 1, "the unpaid transition must be disclosed");
+  const total =
+    (attribution.attributed.get(first)?.output ?? 0) + (attribution.attributed.get(second)?.output ?? 0);
+  assert.equal(total, 500, "attributed spend must never exceed the spend that occurred");
+});
+
+test("attributed tokens never exceed the transcript's own total", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const file = path.join(dir, "transcript.jsonl");
+  const line = (id, at, output) =>
+    JSON.stringify({ timestamp: at, message: { id, usage: { output_tokens: output } } });
+  fs.writeFileSync(
+    file,
+    [line("m1", "2026-08-17T12:00:05.000Z", 300), line("m2", "2026-08-17T12:00:06.000Z", 200)].join("\n"),
+    "utf8",
+  );
+  const transitions = Array.from({ length: 5 }, (unused, index) =>
+    transition({ started_at: "2026-08-17T12:00:00.000Z", duration_ms: 10_000 + index }),
+  );
+  const attribution = attributeTokens(transitions, [file]);
+  const total = transitions.reduce((sum, item) => sum + (attribution.attributed.get(item)?.output ?? 0), 0);
+  assert.equal(total, 500);
+  assert.equal(attribution.matchedTurns, 2);
+  assert.equal(attribution.transitionsWithoutTurn, 3);
+});
+
 test("a turn far outside a transition's window is not attributed to it", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
   const file = path.join(dir, "transcript.jsonl");

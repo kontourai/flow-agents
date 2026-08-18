@@ -128,19 +128,38 @@ export function attributeTokens(transitions, transcriptFiles) {
   const ordered = [...deduped.values()].sort((a, b) => a.at - b.at);
 
   const attributed = new Map();
+  const consumed = new Set();
   let matchedTurns = 0;
-  for (const transition of transitions) {
+
+  // A turn is CONSUMED by the first transition it can pay for. One turn routinely
+  // invokes several transitions, and letting each of them claim the same turn inflates
+  // the total: two transitions sharing one 500-token turn would report 1000 tokens
+  // spent. Under-attributing is recoverable — a reader sees `transitions_without_turn`
+  // and knows the cost axis is a floor. Over-attributing is not: it manufactures spend
+  // that never happened, which is the defect this whole scorecard exists to find.
+  const chronological = [...transitions].sort(
+    (a, b) => (Date.parse(a.started_at ?? "") || 0) - (Date.parse(b.started_at ?? "") || 0),
+  );
+  for (const transition of chronological) {
     const start = Date.parse(transition.started_at ?? "");
     if (Number.isNaN(start)) continue;
-    const end = start + (Number(transition.duration_ms) || 0);
-    // The turn that invoked a transition records its usage when the turn ends, i.e.
-    // at or after the transition completes. Take the first turn ending at/after it.
-    const turn = ordered.find((candidate) => candidate.at >= start);
-    if (!turn || turn.at > end + 120_000) continue;
+    // The invoking turn records its usage when the turn ends, i.e. at or after the
+    // transition completes — allow a grace window for the rest of the turn's work.
+    const end = start + (Number(transition.duration_ms) || 0) + 120_000;
+    const turn = ordered.find(
+      (candidate) => candidate.at >= start && candidate.at <= end && !consumed.has(candidate.id),
+    );
+    if (!turn) continue;
+    consumed.add(turn.id);
     attributed.set(transition, turn);
     matchedTurns += 1;
   }
-  return { attributed, matchedTurns, availableTurns: ordered.length };
+  return {
+    attributed,
+    matchedTurns,
+    availableTurns: ordered.length,
+    transitionsWithoutTurn: transitions.length - matchedTurns,
+  };
 }
 
 export function buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution }) {
@@ -199,7 +218,13 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
       verb_attributed: [...verbs.values()].reduce((sum, bucket) => sum + bucket.calls, 0),
       expectations_naming_no_declared_gate: unattributed.length,
       tokens: tokenAttribution
-        ? { matched_turns: tokenAttribution.matchedTurns, available_turns: tokenAttribution.availableTurns }
+        ? {
+            matched_turns: tokenAttribution.matchedTurns,
+            available_turns: tokenAttribution.availableTurns,
+            // Transitions that share a turn with an earlier one get no tokens of their
+            // own, so every per-gate cost here is a FLOOR. Stated, not smoothed over.
+            transitions_without_turn: tokenAttribution.transitionsWithoutTurn,
+          }
         : null,
     },
     gates: [...gates.values()].sort((a, b) => b.calls - a.calls || a.gate.localeCompare(b.gate)),
