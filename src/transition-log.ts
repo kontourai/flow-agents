@@ -97,6 +97,35 @@ export const UNPARSED = "«unparsed»";
  */
 let activeFlow: string | null = null;
 
+/**
+ * The gate's own verdict, which the exit code does not carry.
+ *
+ * `workflow evidence` returns 0 on BOTH branches: when the gate advanced, and when it
+ * recorded the evidence but is still awaiting the rest of its expectations. So exit 0
+ * covers "the gate passed" and "the gate is still refusing", and exit 70 is dominated
+ * by operator friction — a mistyped flag and a genuine contract refusal share it. An
+ * outcome axis built on the exit code alone measures roughly the inverse of gate
+ * behaviour, and the partial-satisfaction case — likely the largest class — is
+ * invisible in it.
+ *
+ * The command knows the truth (`report.attached`) and used to discard it. It says so
+ * here instead.
+ */
+let activeGateOutcome: { attached: boolean; missing: string[] } | null = null;
+
+export function noteGateOutcome(outcome: { attached: boolean; missing?: readonly string[] } | null): void {
+  activeGateOutcome = outcome
+    ? {
+        attached: outcome.attached === true,
+        missing: (outcome.missing ?? []).filter((id): id is string => typeof id === "string" && IDENTIFIER_VALUE.test(id)),
+      }
+    : null;
+}
+
+export function resetGateOutcome(): void {
+  activeGateOutcome = null;
+}
+
 export function noteActiveFlow(flowId: string | null | undefined): void {
   activeFlow = typeof flowId === "string" && IDENTIFIER_VALUE.test(flowId) ? flowId : null;
 }
@@ -156,6 +185,14 @@ export interface TransitionRecord {
    * (kontourai/flow-agents#1273) rather than reading tea leaves from prose.
    */
   error_name?: string;
+  /**
+   * "advanced" | "awaiting" — present only when the invocation resolved a gate. This,
+   * not `outcome`, is what a gate did: `outcome` is the process exit code, and the two
+   * disagree precisely where it matters (see noteGateOutcome).
+   */
+  gate_outcome?: "advanced" | "awaiting";
+  /** Expectations the gate is still missing, when it is awaiting them. */
+  gate_missing?: string[];
   started_at: string;
   duration_ms: number;
   cwd_repo: string | null;
@@ -232,6 +269,7 @@ export function buildTransitionRecord(input: {
   errorName?: string | null;
   repoRoot?: string | null;
   flow?: string | null;
+  gateOutcome?: { attached: boolean; missing: string[] } | null;
   env?: NodeJS.ProcessEnv;
 }): TransitionRecord {
   const env = input.env ?? process.env;
@@ -258,6 +296,11 @@ export function buildTransitionRecord(input: {
     },
   };
   if (input.errorName) record.error_name = input.errorName.slice(0, MAX_ERROR_NAME);
+  const gate = input.gateOutcome ?? activeGateOutcome;
+  if (gate) {
+    record.gate_outcome = gate.attached ? "advanced" : "awaiting";
+    if (!gate.attached && gate.missing.length) record.gate_missing = gate.missing;
+  }
   return record;
 }
 

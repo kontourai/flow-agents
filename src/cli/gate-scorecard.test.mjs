@@ -563,3 +563,21 @@ test("a response copied into two transcripts is not collapsed across sessions", 
   assert.equal(attribution.matchedTurns, 1, "sess-b's own copy is still reachable");
   assert.equal(attribution.attributed.get(mine).session, "sess-b");
 });
+
+// Exit 0 covers both "the gate advanced" and "the gate is still awaiting" — so a
+// scorecard that counts exit codes reports a refusing gate as a pass.
+test("the gate verdict is counted, not the process exit code", () => {
+  const kitDir = kitFixture();
+  const card = scorecardFor(
+    [
+      transition({ targets: { expectation: "tests-evidence" }, exit_code: 0, outcome: "ok", gate_outcome: "awaiting" }),
+      transition({ targets: { expectation: "tests-evidence" }, exit_code: 0, outcome: "ok", gate_outcome: "awaiting" }),
+      transition({ targets: { expectation: "tests-evidence" }, exit_code: 0, outcome: "ok", gate_outcome: "advanced" }),
+    ],
+    { kitDir, flows: ["demo.build"] },
+  );
+  const verify = card.gates.find((gate) => gate.gate === "verify-gate");
+  assert.equal(verify.ok, 3, "all three processes exited 0");
+  assert.equal(verify.awaiting, 2, "but the gate refused to advance twice");
+  assert.equal(verify.advanced, 1);
+});

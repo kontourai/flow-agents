@@ -242,7 +242,7 @@ export function buildExpectationIndex(kitDirs, flowIds = null) {
 }
 
 function emptyTally() {
-  return { calls: 0, ok: 0, refused_or_error: 0, usage: 0, duration_ms: 0, exit_codes: {} };
+  return { calls: 0, ok: 0, advanced: 0, awaiting: 0, refused_or_error: 0, usage: 0, duration_ms: 0, exit_codes: {} };
 }
 
 function tally(bucket, record) {
@@ -250,6 +250,13 @@ function tally(bucket, record) {
   bucket.duration_ms += Number(record.duration_ms) || 0;
   const code = String(record.exit_code);
   bucket.exit_codes[code] = (bucket.exit_codes[code] ?? 0) + 1;
+  // The gate's own verdict wins over the process exit code, because `workflow evidence`
+  // returns 0 whether the gate advanced or is still awaiting the rest of its
+  // expectations. Counting exit codes alone reports a refusing gate as a pass — and
+  // partial satisfaction is the ordinary path, not an edge case.
+  if (record.gate_outcome === "advanced") bucket.advanced = (bucket.advanced ?? 0) + 1;
+  else if (record.gate_outcome === "awaiting") bucket.awaiting = (bucket.awaiting ?? 0) + 1;
+
   if (record.outcome === "ok") bucket.ok += 1;
   else if (record.outcome === "usage") bucket.usage += 1;
   else bucket.refused_or_error += 1;
@@ -563,7 +570,8 @@ function main(argv) {
   );
   for (const gate of scorecard.gates) {
     const cost = gate.output_tokens ? `  ${gate.output_tokens} out-tok` : "";
-    const note = gate.never_invoked ? "  never invoked in window" : "";
+    const verdicts = gate.advanced || gate.awaiting ? `  advanced ${gate.advanced}/awaiting ${gate.awaiting}` : "";
+    const note = gate.never_invoked ? "  never invoked in window" : verdicts;
     const label = `${gate.flow ?? "?"}/${gate.gate}`;
     console.log(`  ${label.padEnd(42)} calls ${String(gate.calls).padStart(3)}  refused/error ${String(gate.refused_or_error).padStart(3)}${cost}${note}`);
   }

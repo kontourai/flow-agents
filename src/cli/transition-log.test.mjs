@@ -18,7 +18,9 @@ import {
   TRANSITION_LOG_FILENAME,
   TRANSITION_RECORD_KIND,
   noteActiveFlow,
+  noteGateOutcome,
   resetActiveFlow,
+  resetGateOutcome,
   transitionLogRoot,
   UNKNOWN_COMMAND,
   UNPARSED,
@@ -425,5 +427,29 @@ test("every allowlisted identifier flag is a flag this CLI actually defines", ()
     .join("\n");
   for (const flag of listed) {
     assert.ok(haystack.includes(`"${flag}"`), `--${flag} is allowlisted but no command defines it`);
+  }
+});
+
+// `workflow evidence` returns 0 whether the gate advanced or is still awaiting the
+// rest of its expectations, so the exit code cannot tell those apart — and the second
+// case is the ordinary partial-satisfaction path, not an edge case.
+test("the gate verdict is recorded separately from the process exit code", () => {
+  resetGateOutcome();
+  const base = { command: "workflow", argv: ["evidence"], exitCode: 0, startedAt: new Date(), endedAt: new Date(), env: {} };
+  assert.ok(!("gate_outcome" in buildTransitionRecord(base)), "absent when no gate was resolved");
+
+  noteGateOutcome({ attached: false, missing: ["clean-critique"] });
+  try {
+    const awaiting = buildTransitionRecord(base);
+    assert.equal(awaiting.outcome, "ok", "the process exited 0");
+    assert.equal(awaiting.gate_outcome, "awaiting", "and the gate did not advance");
+    assert.deepEqual(awaiting.gate_missing, ["clean-critique"]);
+
+    noteGateOutcome({ attached: true });
+    const advanced = buildTransitionRecord(base);
+    assert.equal(advanced.gate_outcome, "advanced");
+    assert.ok(!("gate_missing" in advanced));
+  } finally {
+    resetGateOutcome();
   }
 });

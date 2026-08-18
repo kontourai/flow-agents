@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { noteActiveFlow } from "../transition-log.js";
+import { noteActiveFlow, noteGateOutcome } from "../transition-log.js";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
@@ -1391,6 +1391,12 @@ function reportEvidenceOutcome(
   else console.log(report.attached
     ? `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is ${report.status} at ${report.current_step}.`
     : `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
+  // Both branches exit 0, so the exit code cannot distinguish a gate that advanced from
+  // one still refusing to. Record the verdict itself.
+  // The report carries `awaiting_evidence` as a boolean, not the missing ids: which
+  // expectations remain is known to the gate evaluator and dropped before here. The
+  // verdict is recorded; the missing set stays absent rather than invented.
+  noteGateOutcome({ attached: report.attached === true });
   return 0;
 }
 
