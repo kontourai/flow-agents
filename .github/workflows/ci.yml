@@ -119,6 +119,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check liveness-fleet-unit-tests
 
+      - name: Telemetry run binding unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-run-binding-unit-tests
+
       - name: Transition log unit tests
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check transition-log-unit-tests

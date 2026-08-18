@@ -22,6 +22,7 @@ CHECKS=(
   "Public API unit tests|node --test src/cli/public-api.test.mjs"
   "Sealed execution authority unit tests|node --test src/cli/sealed-execution-authority.test.mjs"
   "Liveness fleet unit tests|node --test src/cli/liveness-fleet.test.mjs"
+  "Telemetry run binding unit tests|node --test src/cli/telemetry-run-binding.test.mjs"
   "Transition log unit tests|node --test src/cli/transition-log.test.mjs"
   "Gate scorecard unit tests|node --test src/cli/gate-scorecard.test.mjs"
   "Run pulse unit tests|node --test src/cli/run-pulse.test.mjs"
@@ -158,6 +159,7 @@ CHECKS=(
 )
 
 LANE_SOURCE_AND_STATIC=(
+  "Telemetry run binding unit tests"
   "Content boundary"
   "Layer boundary"
   "Hachure boundary"
