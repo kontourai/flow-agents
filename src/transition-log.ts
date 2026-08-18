@@ -346,14 +346,26 @@ export function appendTransitionRecord(record: TransitionRecord, cwd = process.c
  * fall back to the working directory only outside a repository.
  */
 /**
- * Keep the log out of a developer's commits. Scoped to the telemetry directory rather
- * than the whole durable root, which carries tracked config in this repo.
+ * Keep the log out of a developer's commits AND out of `git status`.
+ *
+ * The rule ignores itself — no `!.gitignore` exception. The sibling helper for
+ * `.kontourai/` keeps its own ignore file visible, which is safe there because the
+ * repository root already ignores that whole tree. Here it is not: an exempted
+ * `.gitignore` leaves the directory untracked, the working tree dirty, and the evidence
+ * writer refusing its own provenance mid-run — the #1264 failure, reintroduced one
+ * directory over.
  */
 function ensureTelemetryResidueIgnored(dir: string): void {
   try {
     fs.writeFileSync(
       path.join(dir, ".gitignore"),
-      ["# Written by flow-agents: per-invocation transition records are local telemetry,", "# not source. Delete this file to track them.", "*", "!.gitignore", ""].join("\n"),
+      [
+        "# Written by flow-agents: per-invocation transition records are local telemetry,",
+        "# not source. This rule ignores itself so the directory never dirties the working",
+        "# tree — a dirty tree makes the evidence writer refuse its own provenance (#1264).",
+        "*",
+        "",
+      ].join("\n"),
       { mode: 0o644, flag: "wx" },
     );
   } catch {
