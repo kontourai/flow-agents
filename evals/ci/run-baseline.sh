@@ -169,6 +169,9 @@ LANE_SOURCE_AND_STATIC=(
   "Public API unit tests"
   "Sealed execution authority unit tests"
   "Liveness fleet unit tests"
+  "Transition log unit tests"
+  "Gate scorecard unit tests"
+  "Run pulse unit tests"
   "Knowledge integration suites"
 )
 
