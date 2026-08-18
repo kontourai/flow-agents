@@ -17,8 +17,11 @@ import {
   summarizeArgv,
   TRANSITION_LOG_FILENAME,
   TRANSITION_RECORD_KIND,
+  noteActiveFlow,
+  resetActiveFlow,
   transitionLogRoot,
   UNKNOWN_COMMAND,
+  UNPARSED,
 } from "../../build/src/transition-log.js";
 
 const CLI = path.resolve(import.meta.dirname, "../../build/src/cli.js");
@@ -302,4 +305,83 @@ test("outside a repository the log falls back to the working directory", () => {
     true,
   );
   assert.equal(readLog(loose).length, 1);
+});
+
+// --- redaction holes found by review, each reproduced before it was closed ---------
+
+// A value beginning with "-" was not consumed as a value, so the next iteration treated
+// the whole string as a flag NAME and recorded it verbatim and unbounded.
+test("a flag value beginning with a dash is never recorded as a flag name", () => {
+  const prose = "-> rotated token sk-ant-FAKE on prod-db-7";
+  const { flags, targets } = summarizeArgv(["evidence", "--summary", prose]);
+  assert.ok(!flags.includes(prose), "operator prose must not become a flag name");
+  assert.ok(!JSON.stringify({ flags, targets }).includes("sk-ant-FAKE"));
+  assert.deepEqual(flags, ["--summary", UNPARSED]);
+});
+
+test("a pathologically long dash-prefixed token cannot bloat the log", () => {
+  const { flags } = summarizeArgv([`--${"A".repeat(300)} with spaces`]);
+  assert.deepEqual(flags, [UNPARSED]);
+});
+
+// The verb is argv[3] — the same class of operator-controlled input as the command.
+test("a verb that is not a word is not recorded", () => {
+  assert.equal(summarizeArgv(["https://internal.example.com/secret#frag"]).verb, UNPARSED);
+  assert.equal(summarizeArgv(["ghp_NOTAREALTOKENbutshapedlikeone1234"]).verb, UNPARSED);
+  assert.equal(summarizeArgv(["evidence"]).verb, "evidence");
+});
+
+// Run state, not a flag: `workflow evidence` cannot be relied on to carry --flow.
+test("the active flow noted from run state lands on the record", () => {
+  resetActiveFlow();
+  const base = { command: "workflow", argv: ["evidence", "--expectation", "tests-evidence"], exitCode: 0, startedAt: new Date(), endedAt: new Date(), env: {} };
+  assert.equal(buildTransitionRecord(base).targets.flow, undefined);
+  noteActiveFlow("builder.build");
+  try {
+    assert.equal(buildTransitionRecord(base).targets.flow, "builder.build");
+    noteActiveFlow("not a flow id");
+    assert.equal(buildTransitionRecord(base).targets.flow, undefined, "a non-identifier is refused");
+  } finally {
+    resetActiveFlow();
+  }
+});
+
+// A read-only command must not leave committable residue in a repo that never opted in.
+test("the log directory carries its own ignore rule wherever it is created", () => {
+  const root = fixtureRepo();
+  runCli(["commands"], root);
+  const ignore = path.join(root, ".kontourai", ".gitignore");
+  assert.ok(fs.existsSync(ignore), "an ignore rule is written beside the log");
+  assert.match(fs.readFileSync(ignore, "utf8"), /^\*$/m);
+  const tracked = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: root, encoding: "utf8" });
+  assert.ok(!tracked.includes("transitions.jsonl"), `the log must not show as untracked: ${tracked}`);
+});
+
+// The first guard checked only the leaf, so a symlinked parent redirected the write and
+// still returned success.
+test("a symlinked parent directory is refused, not written through", () => {
+  const root = fixtureRepo();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "transition-log-outside-"));
+  fs.mkdirSync(path.join(root, ".kontourai"), { recursive: true });
+  fs.symlinkSync(outside, path.join(root, ".kontourai", "telemetry"));
+  const record = buildTransitionRecord({
+    command: "workflow", argv: [], exitCode: 0, startedAt: new Date(), endedAt: new Date(), env: {},
+  });
+  assert.equal(appendTransitionRecord(record, root), false);
+  assert.equal(fs.existsSync(path.join(outside, TRANSITION_LOG_FILENAME)), false);
+});
+
+// The opt-out must not still pay for a git subprocess to be told it is off.
+test("opting out short-circuits before the repo root is resolved", () => {
+  const previous = process.env["FLOW_AGENTS_TRANSITION_LOG"];
+  process.env["FLOW_AGENTS_TRANSITION_LOG"] = "0";
+  try {
+    assert.equal(
+      recordTransition({ command: "commands", argv: [], exitCode: 0, startedAt: new Date(), endedAt: new Date(), env: process.env }),
+      false,
+    );
+  } finally {
+    if (previous === undefined) delete process.env["FLOW_AGENTS_TRANSITION_LOG"];
+    else process.env["FLOW_AGENTS_TRANSITION_LOG"] = previous;
+  }
 });

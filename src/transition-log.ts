@@ -13,25 +13,37 @@
  *     that fires hooks — so it is structurally blind to any period when the kit is
  *     deactivated, which is precisely when "is this worth reinstalling?" is asked.
  *     An instrument that cannot measure its own absence reports silence as health.
+ *     (It reads the exit code from the same host payload the transcript does, so it
+ *     shares the wrapper blindness below; installation alone would not have helped.)
  *
  *   - The host transcript records the command text and the tool's exit status. A
  *     transition invoked inside a wrapper that captures `$?` and continues exits 0 at
  *     the tool boundary, so the refusal is invisible there. Every transition in the
  *     first measured run was wrapped that way.
  *
- * So the tool records its own outcome, at the one place every invocation passes
- * through. This is provider-independent, wrapper-immune, and carries the semantic
- * fields (verb, expectation id) that a generic command log cannot recover from argv
- * without re-implementing this CLI's parser.
+ * So the tool records its own outcome, at the point where `src/cli.ts` exits. That is
+ * provider-independent, wrapper-immune, and carries the semantic fields (verb,
+ * expectation id) a generic command log cannot recover from argv without
+ * re-implementing this CLI's parser.
  *
- * Redaction: argv is NOT recorded. Only the command, the verb, flag NAMES, and the
- * values of an explicit allowlist of flags whose values are kit-defined identifiers.
- * Free-text flags (--summary, --body, --reason) carry operator prose and stay out.
+ * It is NOT every invocation of every binary: `flow-agents-workflow-sidecar` and
+ * `flow-agents-validate-artifacts` have their own entry points, and `init` exits
+ * directly when an operator interrupts a prompt. Those produce no record. Naming the
+ * gap rather than asserting completeness, because a log that quietly omits a path has
+ * the same defect this module opens by indicting.
+ *
+ * Redaction: argv is not recorded as such. Only the command (validated against the
+ * registry), the verb, flag NAMES (validated as flag names), and the values of an
+ * explicit allowlist of flags whose values are kit-defined identifiers and which match
+ * an identifier pattern. Free-text flags (--summary, --body, --reason) contribute their
+ * name only. Anything this module declines to parse is recorded as a placeholder that
+ * carries no content, never verbatim.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 
+import { ensureArtifactResidueIgnored } from "./lib/artifact-residue-ignore.js";
 import { resolveSharedRepoRoot, telemetryDataDir } from "./lib/local-artifact-root.js";
 
 export const TRANSITION_LOG_FILENAME = "transitions.jsonl";
@@ -67,8 +79,48 @@ const IDENTIFIER_FLAGS = new Set([
  */
 export const UNKNOWN_COMMAND = "«unknown»";
 
+/** Stands in for any token this module declines to record. Carries no content. */
+export const UNPARSED = "«unparsed»";
+
+/**
+ * The flow a command is operating on, when the command resolves one.
+ *
+ * Expectation ids are unique within a flow but not across flows — the shipped kits
+ * share one — so a record naming only its expectation cannot always be attributed to a
+ * gate. The flow is the discriminator, and asking the operator to repeat it on every
+ * write would be both redundant and unreachable: `workflow evidence` validates against
+ * a fixed flag set. The command already knows it from run state, so it says so here.
+ */
+let activeFlow: string | null = null;
+
+export function noteActiveFlow(flowId: string | null | undefined): void {
+  activeFlow = typeof flowId === "string" && IDENTIFIER_VALUE.test(flowId) ? flowId : null;
+}
+
+/** Test seam: the module-level note persists for the life of the process. */
+export function resetActiveFlow(): void {
+  activeFlow = null;
+}
+
 /** A value is only recorded if it looks like an identifier, never free text. */
 const IDENTIFIER_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,127}$/;
+
+/**
+ * A well-formed flag name. Without this, any VALUE beginning with `-` was treated as
+ * the next flag and recorded verbatim and unbounded — so `--summary "-> rotated token
+ * ..."` put the whole sentence in the log under the redaction this module advertises.
+ * Diff text, negative numbers and a bare `--` all take that path.
+ */
+const FLAG_NAME = /^--?[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
+
+/**
+ * A verb is a word. Every verb this CLI defines is lowercase letters and hyphens; the
+ * wider identifier charset admits URLs, paths and token-shaped strings, and argv[3] is
+ * the same class of operator-controlled input as argv[2] — which is redacted three
+ * lines up for exactly that reason. Underscores are excluded deliberately: they are
+ * not used by any verb here and they are used by API-key prefixes.
+ */
+const VERB = /^[a-z][a-z0-9-]{0,31}$/i;
 
 export type TransitionOutcome = "ok" | "nonzero" | "unhandled-error" | "usage";
 
@@ -92,8 +144,8 @@ export interface TransitionRecord {
    * level verbatim. A class name is derived from the code rather than from what
    * somebody typed, so it cannot carry content.
    *
-   * It is a WEAK discriminator: most throws are a bare `Error`. That is the honest
-   * state of things, and the real fix is a typed refusal with its own exit code
+   * It is a WEAK discriminator: most throws are a bare `Error`. The real fix is a
+   * typed refusal with its own exit code
    * (kontourai/flow-agents#1273) rather than reading tea leaves from prose.
    */
   error_name?: string;
@@ -124,7 +176,7 @@ export function summarizeArgv(argv: readonly string[]): {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index] ?? "";
     if (!token.startsWith("-")) {
-      if (verb === null) verb = IDENTIFIER_VALUE.test(token) ? token : "«unparsed»";
+      if (verb === null) verb = VERB.test(token) ? token : UNPARSED;
       continue;
     }
 
@@ -132,6 +184,11 @@ export function summarizeArgv(argv: readonly string[]): {
     const equalsAt = token.indexOf("=");
     const name = equalsAt === -1 ? token : token.slice(0, equalsAt);
     const inlineValue = equalsAt === -1 ? null : token.slice(equalsAt + 1);
+    if (!FLAG_NAME.test(name)) {
+      // Not a flag: an operator-supplied value that merely starts with a dash.
+      if (!flags.includes(UNPARSED)) flags.push(UNPARSED);
+      continue;
+    }
     if (!flags.includes(name)) flags.push(name);
     if (!IDENTIFIER_FLAGS.has(name)) continue;
 
@@ -167,10 +224,15 @@ export function buildTransitionRecord(input: {
   endedAt: Date;
   errorName?: string | null;
   repoRoot?: string | null;
+  flow?: string | null;
   env?: NodeJS.ProcessEnv;
 }): TransitionRecord {
   const env = input.env ?? process.env;
   const { verb, targets, flags } = summarizeArgv(input.argv);
+  // Run state wins over a flag: it is derived, and the flag is not accepted by every
+  // verb that writes evidence.
+  const resolvedFlow = input.flow ?? activeFlow;
+  if (resolvedFlow && !targets["flow"]) targets["flow"] = resolvedFlow;
   const record: TransitionRecord = {
     schema_version: TRANSITION_RECORD_SCHEMA_VERSION,
     kind: TRANSITION_RECORD_KIND,
@@ -199,15 +261,24 @@ export function buildTransitionRecord(input: {
  * to a failed transition. Returns whether the write happened, for tests.
  */
 export function appendTransitionRecord(record: TransitionRecord, cwd = process.cwd()): boolean {
-  if (process.env["FLOW_AGENTS_TRANSITION_LOG"] === "0") return false;
+  if (transitionLogDisabled()) return false;
   try {
-    const dir = telemetryDataDir(transitionLogRoot(cwd));
+    const root = transitionLogRoot(cwd);
+    const dir = telemetryDataDir(root);
     fs.mkdirSync(dir, { recursive: true });
+    // Every invocation writes here, including `--help`, and including repos where this
+    // kit was never installed. Without an ignore rule that turns a read-only command
+    // into untracked residue a developer can commit — carrying their filesystem layout
+    // and session ids into whatever repository they happened to be standing in.
+    ensureArtifactResidueIgnored(root);
     const file = path.join(dir, TRANSITION_LOG_FILENAME);
-    // Appending through a symlink writes to whatever it points at. The rest of this
-    // codebase guards its writes the same way; a telemetry file is no place to make
-    // an exception.
-    if (fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) return false;
+    // Appending through a symlink writes to whatever it points at, so every component
+    // this writer creates is checked, not just the leaf — a symlinked `.kontourai` or
+    // `telemetry` redirects the write just as effectively as a symlinked file, and the
+    // first version of this guard checked only the file and returned success.
+    for (const candidate of [path.dirname(dir), dir, file]) {
+      if (fs.lstatSync(candidate, { throwIfNoEntry: false })?.isSymbolicLink()) return false;
+    }
     fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf8");
     return true;
   } catch {
@@ -222,6 +293,10 @@ export function appendTransitionRecord(record: TransitionRecord, cwd = process.c
  * fragment of the run as the whole of it. Anchor on the shared repository root, and
  * fall back to the working directory only outside a repository.
  */
+export function transitionLogDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env["FLOW_AGENTS_TRANSITION_LOG"] === "0";
+}
+
 export function transitionLogRoot(cwd = process.cwd()): string {
   try {
     return resolveSharedRepoRoot(cwd) ?? cwd;
@@ -244,6 +319,9 @@ export function recordTransition(input: {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
 }): boolean {
+  // Checked before resolving the root: that resolution shells out to git, and an
+  // opted-out operator should not pay a subprocess on every invocation to be told so.
+  if (transitionLogDisabled(input.env ?? process.env)) return false;
   const cwd = input.cwd ?? process.cwd();
   const repoRoot = transitionLogRoot(cwd);
   return appendTransitionRecord(buildTransitionRecord({ ...input, repoRoot }), cwd);

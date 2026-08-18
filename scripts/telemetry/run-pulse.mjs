@@ -28,10 +28,24 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { sharedRepoRoot } from "./gate-scorecard.mjs";
+
 const DEFAULT_STALL_MINUTES = 8;
 const RETRY_STORM_THRESHOLD = 3;
 const CHURN_THRESHOLD = 2;
 const STRIP_CELLS = 40;
+
+/**
+ * Every linked worktree appends to the primary checkout's log, so one file holds every
+ * lane's transitions. Without a filter the storm/churn/stall detectors report a sibling
+ * lane's pathology as this run's — the same contamination the token attributor was
+ * fixed to prevent, and a worse version of it, because a storm has no session id
+ * printed beside it to give the reader a clue.
+ */
+export function filterToSession(transitions, session) {
+  if (!session) return transitions;
+  return transitions.filter((record) => (record?.actor?.session_id ?? null) === session);
+}
 
 export function readTransitions(file) {
   if (!fs.existsSync(file)) return [];
@@ -287,6 +301,8 @@ function parseArgs(argv) {
     else if (token === "--stall-minutes") options.stallMinutes = Number(value());
     else if (token === "--watch") options.watch = true;
     else if (token === "--json") options.json = true;
+    else if (token === "--session") options.session = value();
+    else if (token === "--all-sessions") options.allSessions = true;
     else if (token === "--interval") options.intervalMs = Number(value()) * 1000;
     else if (token === "--help" || token === "-h") options.help = true;
     else throw new Error(`unknown option: ${token}`);
@@ -300,9 +316,16 @@ function main(argv) {
     console.log("Usage: run-pulse.mjs [--transitions <file>] [--watch] [--interval <s>] [--json] [--stall-minutes <n>]");
     return 0;
   }
-  const file = options.transitions ?? path.join(process.cwd(), ".kontourai", "telemetry", "transitions.jsonl");
+  const file = options.transitions ?? path.join(sharedRepoRoot(process.cwd()), ".kontourai", "telemetry", "transitions.jsonl");
+  // Default to this session so a lane sees its own run, not the whole machine's.
+  const session = options.allSessions ? null : options.session ?? process.env["CLAUDE_CODE_SESSION_ID"] ?? null;
   const render = () => {
-    const pulse = buildPulse(readTransitions(file), { stallMinutes: options.stallMinutes ?? DEFAULT_STALL_MINUTES });
+    const all = readTransitions(file);
+    const scoped = filterToSession(all, session);
+    if (session && !scoped.length && all.length) {
+      console.log(`no transitions for session ${session} in ${file} (${all.length} from other sessions) — pass --all-sessions to include them`);
+    }
+    const pulse = buildPulse(scoped, { stallMinutes: options.stallMinutes ?? DEFAULT_STALL_MINUTES });
     if (options.json) console.log(JSON.stringify(pulse, null, 2));
     else console.log(renderPulse(pulse));
     return pulse;

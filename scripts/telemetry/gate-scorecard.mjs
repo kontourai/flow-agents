@@ -23,8 +23,21 @@
  *        [--transcript <jsonl>]... [--out <file>] [--trend <file>] [--json]
  */
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
+/** Mirrors the writer's root resolution so reader and writer cannot disagree. */
+export function sharedRepoRoot(cwd) {
+  try {
+    const env = { ...process.env };
+    for (const key of ["GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE", "GIT_CEILING_DIRECTORIES"]) delete env[key];
+    const out = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return out ? path.dirname(path.resolve(cwd, out)) : cwd;
+  } catch {
+    return cwd;
+  }
+}
 
 /** How far before a transition its invoking turn may sit before the link is a guess. */
 const TURN_GRACE_MS = 10 * 60_000;
@@ -48,18 +61,22 @@ function parseArgs(argv) {
 }
 
 function readJsonl(file) {
-  if (!fs.existsSync(file)) return [];
   const records = [];
+  let unparseable = 0;
+  if (!fs.existsSync(file)) return { records, unparseable, missing: true };
   for (const line of fs.readFileSync(file, "utf8").split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
       records.push(JSON.parse(trimmed));
     } catch {
-      // A truncated final line is normal for a log being appended to live.
+      // A truncated final line is normal for a log being appended to live — but the
+      // count is reported, because "dropped silently" is the defect this tool exists
+      // to find and it should not be committed at the parse layer.
+      unparseable += 1;
     }
   }
-  return records;
+  return { records, unparseable, missing: false };
 }
 
 /**
@@ -155,6 +172,7 @@ export function buildExpectationIndex(kitDirs, flowIds = null) {
   // that id alone cannot say which gate a write belongs to. Those are recorded as
   // ambiguous rather than silently attributed to whichever flow was read last.
   const ambiguousExpectations = [];
+  const composed = [];
   for (const kit of kits) {
     for (const file of flowFilesForKit(kit.dir)) {
       let flow;
@@ -165,6 +183,13 @@ export function buildExpectationIndex(kitDirs, flowIds = null) {
       }
       const flowId = flow.id ?? path.basename(file);
       if (flowIds && !flowIds.includes(flowId)) continue;
+      // A step may delegate to another flow (`uses_flow`). Its gates are declared over
+      // there but they run as part of THIS flow, so a run of this flow must be able to
+      // attribute them — otherwise a builder.build run reports a third of its gates as
+      // belonging to a flow it never started, and its own scope reads as unexercised.
+      for (const step of flow.steps ?? []) {
+        if (typeof step?.uses_flow === "string") composed.push({ host: flowId, guest: step.uses_flow, kit: kit.id });
+      }
       for (const [gateName, gate] of Object.entries(flow.gates ?? {})) {
         const expectations = (gate.expects ?? []).map((expectation) => expectation.id);
         // Gate names are only unique within a flow, so key the registry by both. The
@@ -188,6 +213,23 @@ export function buildExpectationIndex(kitDirs, flowIds = null) {
       }
     }
   }
+  // Re-home composed gates: declared by the guest flow, exercised by the host.
+  for (const { host, guest, kit } of composed) {
+    for (const declared of [...gates.values()]) {
+      if (declared.flow !== guest) continue;
+      const key = `${host}::${declared.gate}`;
+      if (gates.has(key)) continue;
+      gates.set(key, { ...declared, key, flow: host, kit: kit ?? declared.kit, composed_from: guest });
+      for (const id of declared.expectations) {
+        const claimants = index.get(id) ?? [];
+        if (!claimants.some((claimant) => claimant.key === key)) {
+          claimants.push({ key, gate: declared.gate, step: declared.step, flow: host, kit: kit ?? declared.kit });
+        }
+        index.set(id, claimants);
+      }
+    }
+  }
+
   for (const [id, claimants] of index) {
     if (claimants.length > 1) {
       ambiguousExpectations.push({
@@ -214,21 +256,39 @@ function tally(bucket, record) {
 }
 
 /**
- * Attribute per-turn output tokens from a host transcript to transitions by wall-clock
- * containment: a turn whose usage was recorded while a transition was in flight paid
- * for that transition. Approximate by construction — a turn that also did other work
- * is counted whole — so the result is reported as an attribution with its own turn
- * count rather than as a measurement.
+ * Attribute per-turn OUTPUT TOKENS from a host transcript to transitions.
+ *
+ * This is not cost, and nothing here may call it that. Priced against this repo's own
+ * pricing table over a 164-transcript corpus, output tokens are **6.6% of spend**;
+ * cache READ is 80%. Worse, output is not proportional to cost — a transition late in a
+ * long session pays enormous cache-read for a terse output and would rank as cheap. The
+ * field is named for what it holds.
+ *
+ * Two further limits, both disclosed in `coverage.tokens` rather than smoothed over:
+ *
+ *   - The transcript format is INTERNAL to Claude Code and documented as changing
+ *     between releases (code.claude.com/docs/en/sessions.md explicitly warns against
+ *     parsing it). The supported source is the OTel `claude_code.token.usage` metric,
+ *     which carries the token class and a `query_source` discriminator; migrating to it
+ *     is the real fix (#1276).
+ *   - Subagent turns are logged with the PARENT's session id, so a session filter does
+ *     not exclude them, and "the nearest preceding turn" picks a subagent's turn
+ *     instead of the orchestrator's between 8% and 42% of the time on delegation-heavy
+ *     sessions. Sidechain turns are excluded here and counted, so the reader can see
+ *     which regime they are in rather than silently getting another agent's tokens.
  */
 export function attributeTokens(transitions, transcriptFiles) {
   const turns = [];
   for (const file of transcriptFiles) {
     const fallbackSession = path.basename(file).replace(/\.jsonl$/, "");
-    for (const record of readJsonl(file)) {
+    for (const record of readJsonl(file).records) {
       const usage = record?.message?.usage;
       const at = Date.parse(record?.timestamp ?? "");
       if (!usage || Number.isNaN(at)) continue;
-      const id = record?.message?.id ?? `${file}:${at}`;
+      // Keyed by file AND id: `/branch` and `--fork-session` copy a transcript, so the
+      // same response appears in two files, and first-seen-wins would attribute it to
+      // whichever session was read first.
+      const id = `${file}::${record?.message?.id ?? at}`;
       // One API response is logged as several lines sharing a message id and identical
       // usage totals; counting each line triples the tokens.
       turns.push({
@@ -236,12 +296,15 @@ export function attributeTokens(transitions, transcriptFiles) {
         at,
         output: Number(usage.output_tokens) || 0,
         session: record?.sessionId ?? record?.session_id ?? fallbackSession,
+        sidechain: record?.isSidechain === true,
       });
     }
   }
   const deduped = new Map();
   for (const turn of turns) if (!deduped.has(turn.id)) deduped.set(turn.id, turn);
-  const ordered = [...deduped.values()].sort((a, b) => a.at - b.at);
+  const all = [...deduped.values()].sort((a, b) => a.at - b.at);
+  const sidechainTurns = all.filter((turn) => turn.sidechain).length;
+  const ordered = all.filter((turn) => !turn.sidechain);
 
   const attributed = new Map();
   const consumed = new Set();
@@ -284,6 +347,7 @@ export function attributeTokens(transitions, transcriptFiles) {
     attributed,
     matchedTurns,
     availableTurns: ordered.length,
+    sidechainTurnsExcluded: sidechainTurns,
     transitionsWithoutTurn: transitions.length - matchedTurns,
   };
 }
@@ -410,13 +474,16 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
     coverage: {
       gate_attributed: [...gates.values()].reduce((sum, bucket) => sum + bucket.calls, 0),
       verb_attributed: [...verbs.values()].reduce((sum, bucket) => sum + bucket.calls, 0),
+      unparseable_lines: 0,
       expectations_naming_no_declared_gate: unattributed.length,
       ambiguous_writes: ambiguous.length,
       shared_expectation_ids: ambiguousExpectations.length,
       tokens: tokenAttribution
         ? {
+            note: "output tokens only — roughly 6.6% of spend, and not proportional to it. Not cost.",
             matched_turns: tokenAttribution.matchedTurns,
             available_turns: tokenAttribution.availableTurns,
+            sidechain_turns_excluded: tokenAttribution.sidechainTurnsExcluded,
             // Transitions that share a turn with an earlier one get no tokens of their
             // own, so every per-gate cost here is a FLOOR. Stated, not smoothed over.
             transitions_without_turn: tokenAttribution.transitionsWithoutTurn,
@@ -438,10 +505,24 @@ function main(argv) {
     return 0;
   }
 
-  const transitionsFile = options.transitions ?? path.join(process.cwd(), ".kontourai", "telemetry", "transitions.jsonl");
+  // The writer anchors on the shared repository root, so a linked worktree appends to
+  // the primary checkout's log. Defaulting the reader to cwd made it read a file that
+  // will never exist there.
+  const transitionsFile = options.transitions ?? path.join(sharedRepoRoot(process.cwd()), ".kontourai", "telemetry", "transitions.jsonl");
   // No kit is privileged: with no --kit, every kit the repo publishes is scored.
   const kitDirs = options.kit ? [{ id: path.basename(options.kit), dir: options.kit }] : discoverKitDirs(process.cwd());
-  const transitions = readJsonl(transitionsFile).filter((record) => record?.kind === "kontour.flow-agents.transition");
+  const read = readJsonl(transitionsFile);
+  const transitions = read.records.filter((record) => record?.kind === "kontour.flow-agents.transition");
+  // Absence is not health. A missing or empty log used to render as a tidy scorecard of
+  // zeroes — the exact failure this tool opens by indicting the capture hook for.
+  if (read.missing) {
+    console.error(`gate-scorecard: no transition log at ${transitionsFile}. Nothing has been measured — this is not a clean result.`);
+    return 3;
+  }
+  if (!transitions.length) {
+    console.error(`gate-scorecard: ${transitionsFile} holds no transition records${read.unparseable ? ` (${read.unparseable} unparseable line(s))` : ""}. Nothing has been measured.`);
+    return 3;
+  }
   const { index: expectationIndex, gates: gateIndex, ambiguousExpectations } = buildExpectationIndex(kitDirs, options.flows ?? null);
 
   if (!gateIndex.size) {
@@ -452,6 +533,14 @@ function main(argv) {
   }
 
   const tokenAttribution = options.transcripts.length ? attributeTokens(transitions, options.transcripts) : null;
+  // A renamed field, a moved path or a typo'd --transcript all converge on "no turns",
+  // which used to render as a scorecard that simply omits the token column. That is the
+  // format-break-looks-like-a-quiet-run failure this tool exists to refuse.
+  if (tokenAttribution && tokenAttribution.availableTurns === 0) {
+    console.error(
+      `gate-scorecard: --transcript was given but yielded no usable turns. The transcript format is internal to Claude Code and changes between releases; token figures are omitted rather than guessed.`,
+    );
+  }
   const scorecard = buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution, ambiguousExpectations });
 
   if (options.out) {
@@ -473,7 +562,7 @@ function main(argv) {
       (scorecard.scope.flows_not_exercised ? ` (${scorecard.scope.flows_not_exercised} not exercised)` : ""),
   );
   for (const gate of scorecard.gates) {
-    const cost = gate.output_tokens ? `  ${gate.output_tokens} tok` : "";
+    const cost = gate.output_tokens ? `  ${gate.output_tokens} out-tok` : "";
     const note = gate.never_invoked ? "  never invoked in window" : "";
     const label = `${gate.flow ?? "?"}/${gate.gate}`;
     console.log(`  ${label.padEnd(42)} calls ${String(gate.calls).padStart(3)}  refused/error ${String(gate.refused_or_error).padStart(3)}${cost}${note}`);
@@ -483,7 +572,7 @@ function main(argv) {
   if (scorecard.verbs.length) {
     console.log(`non-gate transitions (${scorecard.coverage.verb_attributed} calls):`);
     for (const verb of scorecard.verbs) {
-      const cost = verb.output_tokens ? `  ${verb.output_tokens} tok` : "";
+      const cost = verb.output_tokens ? `  ${verb.output_tokens} out-tok` : "";
       console.log(`  ${verb.verb.padEnd(36)} calls ${String(verb.calls).padStart(3)}  refused/error ${String(verb.refused_or_error).padStart(3)}${cost}`);
     }
   }

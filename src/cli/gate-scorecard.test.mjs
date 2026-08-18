@@ -231,15 +231,27 @@ test("an expectation no declared gate expects is reported, never dropped", () =>
 // The invariant that makes the card trustworthy: every transition is somewhere.
 test("no transition is lost — gate and verb attribution partition the window", () => {
   const kitDir = kitFixture();
+  // Includes an AMBIGUOUS write: without one, silently discarding every ambiguous
+  // transition passes this test, which is how that defect survived a full round.
+  fs.writeFileSync(
+    path.join(kitDir, "flows", "overlap.flow.json"),
+    JSON.stringify({
+      id: "demo.overlap",
+      gates: { "audit-gate": { step: "audit", expects: [{ id: "acceptance-criteria" }] } },
+    }),
+    "utf8",
+  );
   const transitions = [
+    transition({ targets: { expectation: "acceptance-criteria" } }),
     transition({ targets: { expectation: "tests-evidence" } }),
     transition({ targets: { expectation: "unknown-id" } }),
     transition({ command: "workflow", verb: "start", targets: {} }),
     transition({ command: "assignment-provider", verb: "render-claim", targets: {} }),
     transition({ command: "publish-change", verb: "execute", targets: {} }),
   ];
-  const card = scorecardFor(transitions, { kitDir, flows: ["demo.build"] });
+  const card = scorecardFor(transitions, { kitDir });
   assert.equal(card.window.transitions, transitions.length);
+  assert.ok(card.ambiguous.length >= 1, "the fixture must actually produce an ambiguous write");
   assert.equal(
     card.coverage.gate_attributed + card.coverage.verb_attributed,
     transitions.length,
@@ -322,7 +334,7 @@ test("a transition does not reach back past its own invoking turn", () => {
   const first = transition({ started_at: "2026-08-17T12:00:11.000Z", duration_ms: 10 });
   const second = transition({ started_at: "2026-08-17T12:00:12.000Z", duration_ms: 10 });
   const attribution = attributeTokens([first, second], [file]);
-  assert.equal(attribution.attributed.get(first).id, "invoker");
+  assert.ok(attribution.attributed.get(first).id.endsWith("::invoker"), "the nearest preceding turn pays");
   assert.equal(attribution.attributed.get(second), undefined, "must not fall back to the older turn");
   assert.equal(attribution.transitionsWithoutTurn, 1);
 });
@@ -356,8 +368,12 @@ test("attributed tokens never exceed the transcript's own total", () => {
   );
   const attribution = attributeTokens(transitions, [file]);
   const total = transitions.reduce((sum, item) => sum + (attribution.attributed.get(item)?.output ?? 0), 0);
-  assert.ok(total <= 500, `attributed ${total} must not exceed the 500 actually spent`);
-  assert.equal(attribution.matchedTurns + attribution.transitionsWithoutTurn, 5);
+  // Exact, not an upper bound: only the transition whose invoking turn is m2 is paid,
+  // and the rest do NOT reach back to the older m1. A `<= 500` assertion here survives
+  // both over-attribution and reach-back, so it proves nothing.
+  assert.equal(attribution.matchedTurns, 1);
+  assert.equal(attribution.transitionsWithoutTurn, 4);
+  assert.equal(total, 200, "the invoking turn pays; older turns belong to earlier work");
 });
 
 test("a turn far outside a transition's window is not attributed to it", () => {
@@ -471,12 +487,15 @@ test("an ambiguous write is not rescued onto a gate by its --gate flag", () => {
     path.join(kitDir, "flows", "overlap.flow.json"),
     JSON.stringify({
       id: "demo.overlap",
-      gates: { "verify-gate": { step: "verify", expects: [{ id: "tests-evidence" }] } },
+      // Uniquely named on purpose: with both rivals called "verify-gate" the gate-name
+      // lookup short-circuits for an unrelated reason and the test passes even with the
+      // guard removed. Proven by injection.
+      gates: { "audit-gate": { step: "audit", expects: [{ id: "tests-evidence" }] } },
     }),
     "utf8",
   );
   const card = scorecardFor(
-    [transition({ targets: { expectation: "tests-evidence", gate: "verify-gate" } })],
+    [transition({ targets: { expectation: "tests-evidence", gate: "audit-gate" } })],
     { kitDir },
   );
   assert.equal(card.ambiguous.length, 1, "the write is ambiguous");
@@ -508,4 +527,39 @@ test("a --gate naming a gate only one flow declares does resolve", () => {
   const kitDir = kitFixture();
   const card = scorecardFor([transition({ targets: { gate: "plan-gate" } })], { kitDir });
   assert.equal(card.gates.find((gate) => gate.gate === "plan-gate").calls, 1);
+});
+
+// Subagent turns carry the PARENT's session id, so a session filter does not exclude
+// them — and "the nearest preceding turn" then picks a subagent's turn instead of the
+// orchestrator's between 8% and 42% of the time on delegation-heavy sessions.
+test("a subagent turn never pays for the orchestrator's transition", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const file = path.join(dir, "t.jsonl");
+  fs.writeFileSync(
+    file,
+    [
+      JSON.stringify({ timestamp: "2026-08-17T12:00:00.000Z", sessionId: "s", message: { id: "orchestrator", usage: { output_tokens: 120 } } }),
+      JSON.stringify({ timestamp: "2026-08-17T12:00:04.000Z", sessionId: "s", isSidechain: true, message: { id: "subagent", usage: { output_tokens: 9000 } } }),
+    ].join("\n"),
+    "utf8",
+  );
+  const mine = transition({ started_at: "2026-08-17T12:00:05.000Z", duration_ms: 10, actor: { runtime: "claude-code", session_id: "s" } });
+  const attribution = attributeTokens([mine], [file]);
+  assert.equal(attribution.sidechainTurnsExcluded, 1);
+  assert.equal(attribution.attributed.get(mine).output, 120, "the nearer turn is a subagent's");
+});
+
+// The same response appears in two files after /branch or --fork-session.
+test("a response copied into two transcripts is not collapsed across sessions", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const line = (session) =>
+    JSON.stringify({ timestamp: "2026-08-17T12:00:00.000Z", sessionId: session, message: { id: "shared", usage: { output_tokens: 50 } } });
+  const a = path.join(dir, "a.jsonl");
+  const b = path.join(dir, "b.jsonl");
+  fs.writeFileSync(a, line("sess-a"), "utf8");
+  fs.writeFileSync(b, line("sess-b"), "utf8");
+  const mine = transition({ started_at: "2026-08-17T12:00:05.000Z", duration_ms: 10, actor: { runtime: "claude-code", session_id: "sess-b" } });
+  const attribution = attributeTokens([mine], [a, b]);
+  assert.equal(attribution.matchedTurns, 1, "sess-b's own copy is still reachable");
+  assert.equal(attribution.attributed.get(mine).session, "sess-b");
 });
