@@ -9,3 +9,11 @@ useDefault = true
 description = "inert Ed25519 completion-verification fixture in key-VALIDATION tests (lifecycle-authority branch); flagged by generic-api-key"
 commits = ["093dcffe26edd51b29cee9413950c061aed1c120"]
 paths = ['''src/cli/external-lifecycle-authority\.test\.mjs''']
+
+[[allowlists]]
+description = "credential-SHAPED strings in redaction tests: fixtures asserting that operator prose never reaches the transition log (#1274). Never live credentials — the tree now uses non-credential-shaped values; these two commits are the historical occurrences the history scan still sees."
+commits = [
+  "b379087a40fe28cab22b58426ec1f99db9c461d0",
+  "8573d90d628388912eb689fe085761e74431be3e",
+]
+paths = ['''src/cli/transition-log\.test\.mjs''']
