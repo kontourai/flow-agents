@@ -73,11 +73,11 @@ test("--flag=value is normalized to the same shape as --flag value", () => {
 
 // The whole point of the allowlist: operator prose must not reach a telemetry file.
 test("free-text flags contribute their name but never their value", () => {
-  const secret = "the reviewer said the auth token was rotated on prod-db-7";
+  const secret = "the reviewer said the credential was rotated on host-7";
   const { targets, flags } = summarizeArgv(["evidence", "--summary", secret, "--body", secret]);
   assert.deepEqual(targets, {});
   assert.deepEqual(flags, ["--summary", "--body"]);
-  assert.ok(!JSON.stringify({ targets, flags }).includes("auth token"));
+  assert.ok(!JSON.stringify({ targets, flags }).includes("was rotated"));
 });
 
 // An allowlisted flag is not a licence to record anything: a value that does not look
@@ -241,7 +241,7 @@ test("the real CLI records a successful invocation with its command and outcome"
 // A misplaced shell variable lands there, and an unbounded copy used to be written.
 test("an unregistered command name is never written to the log", () => {
   const root = fixtureRepo();
-  const leak = "ghp_NOTAREALTOKENbutshapedlikeone1234567890";
+  const leak = "opaque-value-that-must-not-be-recorded-1234567890";
   assert.throws(() => runCli([leak], root));
 
   const records = readLog(root);
@@ -260,7 +260,7 @@ test("an unregistered command name is never written to the log", () => {
 // `workflow` has no local catch, so those messages reach the top-level handler.
 test("a throw records the error class, never the thrown message", () => {
   const root = fixtureRepo();
-  const secret = "s3cret-deploy-key-do-not-log";
+  const secret = "operator-prose-that-must-not-be-logged";
   assert.throws(() => runCli(["workflow", "evidence", "--route-reason", secret], root));
 
   const raw = fs.readFileSync(path.join(root, ".kontourai", "telemetry", TRANSITION_LOG_FILENAME), "utf8");
@@ -314,10 +314,10 @@ test("outside a repository the log falls back to the working directory", () => {
 // A value beginning with "-" was not consumed as a value, so the next iteration treated
 // the whole string as a flag NAME and recorded it verbatim and unbounded.
 test("a flag value beginning with a dash is never recorded as a flag name", () => {
-  const prose = "-> rotated token sk-ant-FAKE on prod-db-7";
+  const prose = "-> rotated the credential on host-7";
   const { flags, targets } = summarizeArgv(["evidence", "--summary", prose]);
   assert.ok(!flags.includes(prose), "operator prose must not become a flag name");
-  assert.ok(!JSON.stringify({ flags, targets }).includes("sk-ant-FAKE"));
+  assert.ok(!JSON.stringify({ flags, targets }).includes("rotated the credential"));
   assert.deepEqual(flags, ["--summary", UNPARSED]);
 });
 
@@ -329,7 +329,7 @@ test("a pathologically long dash-prefixed token cannot bloat the log", () => {
 // The verb is argv[3] — the same class of operator-controlled input as the command.
 test("a verb that is not a word is not recorded", () => {
   assert.equal(summarizeArgv(["https://internal.example.com/secret#frag"]).verb, UNPARSED);
-  assert.equal(summarizeArgv(["ghp_NOTAREALTOKENbutshapedlikeone1234"]).verb, UNPARSED);
+  assert.equal(summarizeArgv(["opaque_TOKENSHAPEDVALUEwithunderscore1234"]).verb, UNPARSED);
   assert.equal(summarizeArgv(["evidence"]).verb, "evidence");
 });
 
