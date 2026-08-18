@@ -18,8 +18,22 @@ workflow() {
   (cd "$PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=execute-plan-gap node "$ROOT/build/src/cli.js" workflow "$@")
 }
 
+# The invariant under test is that a REJECTED write leaves the run's artifact state
+# untouched. `.kontourai/telemetry/` is the sibling telemetry plane, not run state: the
+# CLI records one observation per invocation there (#1274), so including it would make
+# every invocation — including a correctly rejected one — look like a mutation, and the
+# test would be asserting "the CLI does not observe itself" rather than what it means.
+#
+# Narrowed rather than loosened: everything the run actually writes is still hashed, and
+# the telemetry plane is asserted separately below to be the ONLY thing that moved.
 snapshot() {
-  find "$PROJECT/.kontourai" -type f -print0 | sort -z | xargs -0 shasum -a 256
+  find "$PROJECT/.kontourai" -type f -not -path "*/.kontourai/telemetry/*" -print0 | sort -z | xargs -0 shasum -a 256
+}
+
+# Guards the narrowing above: if a rejected write ever starts mutating run state through
+# a path that happens to live under telemetry/, this catches it.
+snapshot_telemetry_only() {
+  find "$PROJECT/.kontourai/telemetry" -type f -print0 2>/dev/null | sort -z | xargs -0 shasum -a 256
 }
 
 mkdir -p "$SESSION"
@@ -63,6 +77,14 @@ set -e
 AFTER_MISSING="$(snapshot)"
 [[ "$MISSING_RC" -ne 0 && "$BEFORE_REJECT" == "$AFTER_MISSING" ]] || fail "failed evidence without a route reason did not reject before every durable write: $MISSING"
 pass 'unsupported and absent reasons reject before every durable write'
+
+# The narrowing is only honest if the excluded plane holds nothing but telemetry. A
+# rejected write may append an observation there; it may not put run state there.
+TELEMETRY_FILES="$(find "$PROJECT/.kontourai/telemetry" -type f 2>/dev/null | sed "s|.*/||" | sort | tr '\n' ' ')"
+case "${TELEMETRY_FILES// /}" in
+  ""|"transitions.jsonl") pass 'the excluded telemetry plane holds only the transition log' ;;
+  *) fail "unexpected files in the excluded telemetry plane: $TELEMETRY_FILES" ;;
+esac
 
 BEFORE_STATUS="$(snapshot)"
 STATUS="$(workflow status --session-dir "$SESSION" --json)"
