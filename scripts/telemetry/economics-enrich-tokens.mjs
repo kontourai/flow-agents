@@ -125,7 +125,17 @@ async function sliceTranscript(transcriptPath, windows) {
     // totals. Summing per line therefore counts a response once per block. Measured
     // over two real transcripts: 2.14x and 2.72x inflation, and the multiplier tracks
     // how many blocks a turn happened to emit, so it cannot be corrected afterwards.
-    // First occurrence wins; later copies of the same id contribute nothing (#1275).
+    // First IN-WINDOW occurrence wins — the window filter runs above, so a response
+    // whose first block fell outside every window is still attributed to the window its
+    // next block lands in, rather than being dropped. A response whose blocks straddle a
+    // phase boundary is charged wholly to the earlier phase; the later phase may then
+    // have no transcript slice at all, which its consumer reads as unattributed rather
+    // than as zero. That is the honest outcome: pre-fix it was charged to both.
+    //
+    // Note the two counters below now count RESPONSES, not lines, though their names
+    // still say lines: `assistant_usage_lines_matched` and
+    // `sidechain_usage_lines_included` both drop by roughly the duplication factor.
+    // Renaming them is a consumer-visible change and is deliberately not bundled here.
     const responseId = obj.message && typeof obj.message.id === 'string' ? obj.message.id : null;
     if (responseId !== null) {
       if (countedResponseIds.has(responseId)) {
