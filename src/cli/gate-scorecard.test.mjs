@@ -15,7 +15,10 @@ import {
   attributeTokens,
   buildExpectationIndex,
   buildScorecard,
+  discoverKitDirs,
 } from "../../scripts/telemetry/gate-scorecard.mjs";
+
+const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 
 function kitFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-"));
@@ -59,21 +62,29 @@ function transition(overrides) {
 }
 
 function scorecardFor(transitions, { kitDir, flows = null }) {
-  const { index, gates } = buildExpectationIndex(kitDir, flows);
-  return buildScorecard({ transitions, expectationIndex: index, gateIndex: gates, tokenAttribution: null });
+  const { index, gates, ambiguousExpectations } = buildExpectationIndex(kitDir, flows);
+  return buildScorecard({
+    transitions,
+    expectationIndex: index,
+    gateIndex: gates,
+    tokenAttribution: null,
+    ambiguousExpectations,
+  });
 }
 
 test("the expectation index is derived from the kit's flow definitions", () => {
   const kitDir = kitFixture();
   const { index, gates } = buildExpectationIndex(kitDir);
-  assert.equal(index.get("tests-evidence").gate, "verify-gate");
-  assert.equal(index.get("implementation-plan").gate, "plan-gate");
-  assert.deepEqual([...gates.keys()].sort(), ["plan-gate", "shape-gate", "verify-gate"]);
+  assert.equal(index.get("tests-evidence")[0].gate, "verify-gate");
+  assert.equal(index.get("implementation-plan")[0].gate, "plan-gate");
+  assert.deepEqual([...gates.values()].map((gate) => gate.gate).sort(), ["plan-gate", "shape-gate", "verify-gate"]);
+  assert.equal(index.get("tests-evidence")[0].flow, "demo.build");
 });
 
-// Last-write-wins on directory order would merge two distinct gates' tallies under
-// one heading — silently, and reading as clean coverage rather than as a gap.
-test("a gate name declared by two flows is reported as a collision", () => {
+// Gate names repeat across flows by design — the same word means a different gate in
+// a different flow — so sharing one is not a collision and must not be reported as
+// noise that buries the real finding below.
+test("a gate name reused by two flows yields two distinct gates, not a collision", () => {
   const kitDir = kitFixture();
   fs.writeFileSync(
     path.join(kitDir, "flows", "rival.flow.json"),
@@ -83,13 +94,17 @@ test("a gate name declared by two flows is reported as a collision", () => {
     }),
     "utf8",
   );
-  const { collisions } = buildExpectationIndex(kitDir);
-  const gateCollision = collisions.find((entry) => entry.kind === "gate" && entry.name === "verify-gate");
-  assert.ok(gateCollision, "the duplicate gate name must be reported");
-  assert.deepEqual(gateCollision.flows.sort(), ["demo.build", "demo.rival"]);
+  const { gates, ambiguousExpectations } = buildExpectationIndex(kitDir);
+  assert.deepEqual(ambiguousExpectations, []);
+  const verifyGates = [...gates.values()].filter((gate) => gate.gate === "verify-gate");
+  assert.equal(verifyGates.length, 2, "each flow keeps its own verify-gate");
+  assert.deepEqual(verifyGates.map((gate) => gate.flow).sort(), ["demo.build", "demo.rival"]);
 });
 
-test("the same expectation id under two gates is reported as a collision", () => {
+// A transition names its expectation and nothing else, so a shared id genuinely cannot
+// be attributed — that IS ambiguous, and guessing would put a write on a gate that
+// never saw it.
+test("an expectation id claimed by two flows is reported as ambiguous", () => {
   const kitDir = kitFixture();
   fs.writeFileSync(
     path.join(kitDir, "flows", "overlap.flow.json"),
@@ -99,24 +114,82 @@ test("the same expectation id under two gates is reported as a collision", () =>
     }),
     "utf8",
   );
-  const { collisions } = buildExpectationIndex(kitDir);
-  const expectationCollision = collisions.find((entry) => entry.kind === "expectation");
-  assert.ok(expectationCollision, "the duplicate expectation id must be reported");
-  assert.equal(expectationCollision.name, "tests-evidence");
+  const { index, ambiguousExpectations } = buildExpectationIndex(kitDir);
+  assert.equal(index.get("tests-evidence").length, 2);
+  const shared = ambiguousExpectations.find((entry) => entry.expectation === "tests-evidence");
+  assert.ok(shared, "the shared id must be reported");
+  assert.deepEqual(shared.claimed_by.sort(), ["demo.build::verify-gate", "demo.overlap::audit-gate"]);
 });
 
-test("the real kit declares no colliding gate names or expectation ids", () => {
-  const { collisions } = buildExpectationIndex(
-    path.resolve(import.meta.dirname, "../../kits/builder"),
+test("a write naming a shared id is held as ambiguous, not assigned to a guess", () => {
+  const kitDir = kitFixture();
+  fs.writeFileSync(
+    path.join(kitDir, "flows", "overlap.flow.json"),
+    JSON.stringify({
+      id: "demo.overlap",
+      gates: { "audit-gate": { step: "audit", expects: [{ id: "tests-evidence" }] } },
+    }),
+    "utf8",
   );
-  assert.deepEqual(collisions, []);
+  const card = scorecardFor([transition({ targets: { expectation: "tests-evidence" } })], { kitDir });
+  assert.equal(card.ambiguous.length, 1);
+  assert.equal(card.coverage.ambiguous_writes, 1);
+  assert.equal(
+    card.gates.filter((gate) => gate.calls > 0).length,
+    0,
+    "no gate may be credited with a write that cannot be attributed to it",
+  );
+});
+
+test("--flow on the record breaks the tie for a shared expectation id", () => {
+  const kitDir = kitFixture();
+  fs.writeFileSync(
+    path.join(kitDir, "flows", "overlap.flow.json"),
+    JSON.stringify({
+      id: "demo.overlap",
+      gates: { "audit-gate": { step: "audit", expects: [{ id: "tests-evidence" }] } },
+    }),
+    "utf8",
+  );
+  const card = scorecardFor(
+    [transition({ targets: { expectation: "tests-evidence", flow: "demo.overlap" } })],
+    { kitDir },
+  );
+  assert.equal(card.ambiguous.length, 0);
+  const audit = card.gates.find((gate) => gate.gate === "audit-gate");
+  assert.equal(audit.calls, 1);
+});
+
+// Real data, not a fixture: the knowledge kit genuinely shares one expectation id
+// across two flows. If that is ever resolved upstream this test should be updated,
+// not deleted — it is the only case proving the detector fires on real definitions.
+test("the shipped kits' one shared expectation id is detected", () => {
+  const { ambiguousExpectations } = buildExpectationIndex(discoverKitDirs(REPO_ROOT));
+  const shared = ambiguousExpectations.find(
+    (entry) => entry.expectation === "proposal-carries-source-refs",
+  );
+  assert.ok(shared, "knowledge.synthesize and knowledge.consolidate both expect this id");
+  assert.equal(shared.claimed_by.length, 2);
+});
+
+// Nothing in the scorer knows what a builder kit is.
+test("kit discovery finds every kit the repo publishes, not a privileged one", () => {
+  const kits = discoverKitDirs(REPO_ROOT);
+  const ids = kits.map((kit) => kit.id).sort();
+  assert.ok(ids.includes("builder"), ids.join(","));
+  assert.ok(ids.includes("knowledge"), ids.join(","));
+  assert.ok(kits.length >= 3, "the catalog declares at least three kits");
+  const { gates } = buildExpectationIndex(kits);
+  const kitsWithGates = new Set([...gates.values()].map((gate) => gate.kit));
+  assert.ok(kitsWithGates.size >= 2, "gates are scored for more than one kit");
 });
 
 test("scoping to a flow excludes another flow's gates entirely", () => {
   const kitDir = kitFixture();
   const { gates } = buildExpectationIndex(kitDir, ["demo.build"]);
-  assert.deepEqual([...gates.keys()].sort(), ["plan-gate", "verify-gate"]);
-  assert.ok(!gates.has("shape-gate"));
+  const names = [...gates.values()].map((gate) => gate.gate).sort();
+  assert.deepEqual(names, ["plan-gate", "verify-gate"]);
+  assert.ok(!names.includes("shape-gate"));
 });
 
 test("evidence writes land on the gate their expectation belongs to", () => {
@@ -264,4 +337,20 @@ test("a turn far outside a transition's window is not attributed to it", () => {
   const transitions = [transition({ started_at: "2026-08-17T12:00:00.000Z", duration_ms: 1000 })];
   const attribution = attributeTokens(transitions, [file]);
   assert.equal(attribution.matchedTurns, 0);
+});
+
+// Scope is derived from the window, not declared by a flag. A flow the run never
+// touched was never in scope to fire, and listing its gates as "never invoked" would
+// bury the finding that matters: a gate idle inside a flow the run actually ran.
+test("gates of an unexercised flow are counted, not listed as never invoked", () => {
+  const kitDir = kitFixture();
+  const card = scorecardFor([transition({ targets: { expectation: "tests-evidence" } })], { kitDir });
+
+  const reported = card.gates.map((gate) => gate.gate);
+  assert.ok(reported.includes("verify-gate"), "the exercised gate is reported");
+  assert.ok(reported.includes("plan-gate"), "an idle gate in the SAME flow is reported");
+  assert.ok(!reported.includes("shape-gate"), "a gate in an untouched flow is not listed");
+  assert.deepEqual(card.scope.flows_exercised, ["demo.build"]);
+  assert.equal(card.scope.flows_not_exercised, 1);
+  assert.equal(card.scope.gates_declared, 3);
 });

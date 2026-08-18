@@ -60,46 +60,120 @@ function readJsonl(file) {
 }
 
 /**
- * Build expectation-id → {gate, step} from every flow definition in the kit. This is
- * the derivation the whole tool rests on: the gates it reports are the gates the kit
- * actually declares.
+ * Every kit installed under `root`, from the catalog it publishes. Nothing here knows
+ * what a builder kit is: a kit declares its flows, a flow declares its gates, and a
+ * gate declares what it expects. Scoring is the same operation for all of them.
+ *
+ * Falls back to scanning for `kits/*​/kit.json` when no catalog is present, so a repo
+ * that has kits but has not published a catalog is still measurable.
  */
-export function buildExpectationIndex(kitDir, flowIds = null) {
+export function discoverKitDirs(root = process.cwd()) {
+  const kitsRoot = path.join(root, "kits");
+  const catalogPath = path.join(kitsRoot, "catalog.json");
+  if (fs.existsSync(catalogPath)) {
+    try {
+      const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+      const dirs = (catalog.kits ?? [])
+        .map((kit) => ({ id: kit.id ?? null, dir: path.resolve(root, kit.path ?? "") }))
+        .filter((kit) => fs.existsSync(kit.dir));
+      if (dirs.length) return dirs;
+    } catch {
+      // A malformed catalog is not a reason to report zero kits; fall through to a scan.
+    }
+  }
+  if (!fs.existsSync(kitsRoot)) return [];
+  return fs
+    .readdirSync(kitsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(kitsRoot, entry.name, "kit.json")))
+    .map((entry) => ({ id: entry.name, dir: path.join(kitsRoot, entry.name) }));
+}
+
+/**
+ * The flow definition files a kit declares. A kit.json names its flows explicitly, and
+ * that declaration is authoritative — a stray .flow.json in the directory is not part
+ * of the kit. Only when there is no kit.json does this fall back to globbing.
+ */
+function flowFilesForKit(kitDir) {
+  const manifest = path.join(kitDir, "kit.json");
+  if (fs.existsSync(manifest)) {
+    try {
+      const kit = JSON.parse(fs.readFileSync(manifest, "utf8"));
+      const declared = (kit.flows ?? [])
+        .map((flow) => path.resolve(kitDir, flow.path ?? ""))
+        .filter((file) => fs.existsSync(file));
+      if (declared.length) return declared;
+    } catch {
+      // Fall through to the glob.
+    }
+  }
   const flowsDir = path.join(kitDir, "flows");
+  if (!fs.existsSync(flowsDir)) return [];
+  return fs
+    .readdirSync(flowsDir)
+    .filter((entry) => entry.endsWith(".flow.json"))
+    .map((entry) => path.join(flowsDir, entry));
+}
+
+/**
+ * Build expectation-id → {gate, step, flow, kit} across one or more kits. This is the
+ * derivation the whole tool rests on: the gates it reports are the gates the kits
+ * actually declare.
+ */
+export function buildExpectationIndex(kitDirs, flowIds = null) {
+  const kits = (Array.isArray(kitDirs) ? kitDirs : [kitDirs]).map((entry) =>
+    typeof entry === "string" ? { id: path.basename(entry), dir: entry } : entry,
+  );
   const index = new Map();
   const gates = new Map();
-  // Two flows declaring the same gate name, or the same expectation id under two
-  // gates, would last-write-win on directory order and merge two distinct gates'
-  // tallies under one heading. That reads as clean coverage rather than as a gap,
-  // which is the failure this tool exists to catch — so collisions are reported.
-  const collisions = [];
-  if (!fs.existsSync(flowsDir)) return { index, gates, collisions };
-  for (const entry of fs.readdirSync(flowsDir)) {
-    if (!entry.endsWith(".flow.json")) continue;
-    let flow;
-    try {
-      flow = JSON.parse(fs.readFileSync(path.join(flowsDir, entry), "utf8"));
-    } catch {
-      continue;
-    }
-    // A kit declares several flows; a scorecard for one of them must not list another
-    // flow's gates as "never invoked" — they were never in scope to invoke.
-    if (flowIds && !flowIds.includes(flow.id)) continue;
-    for (const [gateName, gate] of Object.entries(flow.gates ?? {})) {
-      const expectations = (gate.expects ?? []).map((expectation) => expectation.id);
-      const priorGate = gates.get(gateName);
-      if (priorGate) collisions.push({ kind: "gate", name: gateName, flows: [priorGate.flow, flow.id ?? entry] });
-      gates.set(gateName, { gate: gateName, step: gate.step ?? null, flow: flow.id ?? entry, expectations });
-      for (const id of expectations) {
-        const priorExpectation = index.get(id);
-        if (priorExpectation && priorExpectation.gate !== gateName) {
-          collisions.push({ kind: "expectation", name: id, gates: [priorExpectation.gate, gateName] });
+  // Gate names repeat across flows by design — `propose-gate` means something
+  // different in `knowledge.synthesize` than in `knowledge.consolidate` — so the
+  // registry is keyed by flow AND gate, and a shared name is not a collision.
+  //
+  // A shared EXPECTATION id is, because a transition names its expectation and
+  // nothing else: if two flows' gates both expect `proposal-carries-source-refs`,
+  // that id alone cannot say which gate a write belongs to. Those are recorded as
+  // ambiguous rather than silently attributed to whichever flow was read last.
+  const ambiguousExpectations = [];
+  for (const kit of kits) {
+    for (const file of flowFilesForKit(kit.dir)) {
+      let flow;
+      try {
+        flow = JSON.parse(fs.readFileSync(file, "utf8"));
+      } catch {
+        continue;
+      }
+      const flowId = flow.id ?? path.basename(file);
+      if (flowIds && !flowIds.includes(flowId)) continue;
+      for (const [gateName, gate] of Object.entries(flow.gates ?? {})) {
+        const expectations = (gate.expects ?? []).map((expectation) => expectation.id);
+        // Gate names are only unique within a flow, so key the registry by both. The
+        // collision report below is about names that genuinely clash.
+        const key = `${flowId}::${gateName}`;
+        gates.set(key, {
+          key,
+          gate: gateName,
+          step: gate.step ?? null,
+          flow: flowId,
+          kit: kit.id,
+          expectations,
+        });
+        for (const id of expectations) {
+          const claimants = index.get(id) ?? [];
+          claimants.push({ key, gate: gateName, step: gate.step ?? null, flow: flowId, kit: kit.id });
+          index.set(id, claimants);
         }
-        index.set(id, { gate: gateName, step: gate.step ?? null });
       }
     }
   }
-  return { index, gates, collisions };
+  for (const [id, claimants] of index) {
+    if (claimants.length > 1) {
+      ambiguousExpectations.push({
+        expectation: id,
+        claimed_by: claimants.map((claimant) => `${claimant.flow}::${claimant.gate}`),
+      });
+    }
+  }
+  return { index, gates, ambiguousExpectations };
 }
 
 function emptyTally() {
@@ -175,20 +249,48 @@ export function attributeTokens(transitions, transcriptFiles) {
   };
 }
 
-export function buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution, collisions = [] }) {
+export function buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution, ambiguousExpectations = [] }) {
   const gates = new Map();
   const verbs = new Map();
   const unattributed = [];
+  const ambiguous = [];
+
+  const byGateName = new Map();
+  for (const declared of gateIndex.values()) if (!byGateName.has(declared.gate)) byGateName.set(declared.gate, declared);
 
   for (const record of transitions) {
     const expectation = record?.targets?.expectation;
     const declaredGate = record?.targets?.gate;
-    const mapped = (expectation && expectationIndex.get(expectation)) ?? null;
-    const gateName = mapped?.gate ?? (gateIndex.has(declaredGate) ? declaredGate : null);
+    const claimants = (expectation && expectationIndex.get(expectation)) ?? [];
+    // One claimant is unambiguous. Several means the id is shared, and the record's own
+    // --flow is the only thing that can break the tie; without it the write is recorded
+    // as ambiguous rather than assigned to a gate that may not have seen it.
+    let mapped = claimants.length === 1 ? claimants[0] : null;
+    if (!mapped && claimants.length > 1) {
+      const declaredFlow = record?.targets?.flow;
+      mapped = claimants.find((claimant) => claimant.flow === declaredFlow) ?? null;
+      if (!mapped) {
+        ambiguous.push({
+          expectation,
+          claimed_by: claimants.map((claimant) => `${claimant.flow}::${claimant.gate}`),
+          exit_code: record.exit_code,
+        });
+      }
+    }
+    if (!mapped && declaredGate) mapped = byGateName.get(declaredGate) ?? null;
 
-    if (gateName) {
-      if (!gates.has(gateName)) gates.set(gateName, { ...emptyTally(), gate: gateName, step: gateIndex.get(gateName)?.step ?? null, expectations: {} });
-      const bucket = gates.get(gateName);
+    if (mapped) {
+      if (!gates.has(mapped.key)) {
+        gates.set(mapped.key, {
+          ...emptyTally(),
+          gate: mapped.gate,
+          step: mapped.step ?? null,
+          flow: mapped.flow ?? null,
+          kit: mapped.kit ?? null,
+          expectations: {},
+        });
+      }
+      const bucket = gates.get(mapped.key);
       tally(bucket, record);
       if (expectation) bucket.expectations[expectation] = (bucket.expectations[expectation] ?? 0) + 1;
     } else {
@@ -203,17 +305,34 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
     if (tokenAttribution) {
       const turn = tokenAttribution.attributed.get(record);
       if (turn) {
-        const target = gateName ? gates.get(gateName) : verbs.get(`${record.command ?? "?"} ${record.verb ?? ""}`.trim());
+        const target = mapped ? gates.get(mapped.key) : verbs.get(`${record.command ?? "?"} ${record.verb ?? ""}`.trim());
         target.output_tokens = (target.output_tokens ?? 0) + turn.output;
         target.token_turns = (target.token_turns ?? 0) + 1;
       }
     }
   }
 
-  // Declared-but-never-invoked is the most interesting cell on the card: a gate that
-  // never fired in the window costs nothing and proves nothing.
-  for (const [gateName, declared] of gateIndex) {
-    if (!gates.has(gateName)) gates.set(gateName, { ...emptyTally(), gate: gateName, step: declared.step, expectations: {}, never_invoked: true });
+  // Scope is DERIVED, not declared. A flow the window never touched was never in scope
+  // to fire, so listing its gates as "never invoked" would bury the one finding that
+  // matters — a gate that sat idle inside a flow the run actually ran. Those are
+  // reported; the untouched flows are counted.
+  const exercisedFlows = new Set([...gates.values()].map((bucket) => bucket.flow));
+  const flowsNotExercised = new Set();
+  for (const [key, declared] of gateIndex) {
+    if (gates.has(key)) continue;
+    if (!exercisedFlows.has(declared.flow)) {
+      flowsNotExercised.add(declared.flow);
+      continue;
+    }
+    gates.set(key, {
+      ...emptyTally(),
+      gate: declared.gate,
+      step: declared.step,
+      flow: declared.flow,
+      kit: declared.kit,
+      expectations: {},
+      never_invoked: true,
+    });
   }
 
   const times = transitions.map((record) => Date.parse(record.started_at ?? "")).filter((value) => !Number.isNaN(value));
@@ -226,11 +345,18 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
       from: times.length ? new Date(Math.min(...times)).toISOString() : null,
       to: times.length ? new Date(Math.max(...times)).toISOString() : null,
     },
+    scope: {
+      kits: [...new Set([...gateIndex.values()].map((declared) => declared.kit))].filter(Boolean),
+      gates_declared: gateIndex.size,
+      flows_exercised: [...exercisedFlows].filter(Boolean).sort(),
+      flows_not_exercised: flowsNotExercised.size,
+    },
     coverage: {
       gate_attributed: [...gates.values()].reduce((sum, bucket) => sum + bucket.calls, 0),
       verb_attributed: [...verbs.values()].reduce((sum, bucket) => sum + bucket.calls, 0),
       expectations_naming_no_declared_gate: unattributed.length,
-      declaration_collisions: collisions.length,
+      ambiguous_writes: ambiguous.length,
+      shared_expectation_ids: ambiguousExpectations.length,
       tokens: tokenAttribution
         ? {
             matched_turns: tokenAttribution.matchedTurns,
@@ -241,7 +367,8 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
           }
         : null,
     },
-    collisions,
+    ambiguous_expectations: ambiguousExpectations,
+    ambiguous,
     gates: [...gates.values()].sort((a, b) => b.calls - a.calls || a.gate.localeCompare(b.gate)),
     verbs: [...verbs.values()].sort((a, b) => b.calls - a.calls),
     unattributed,
@@ -256,18 +383,20 @@ function main(argv) {
   }
 
   const transitionsFile = options.transitions ?? path.join(process.cwd(), ".kontourai", "telemetry", "transitions.jsonl");
-  const kitDir = options.kit ?? path.join(process.cwd(), "kits", "builder");
+  // No kit is privileged: with no --kit, every kit the repo publishes is scored.
+  const kitDirs = options.kit ? [{ id: path.basename(options.kit), dir: options.kit }] : discoverKitDirs(process.cwd());
   const transitions = readJsonl(transitionsFile).filter((record) => record?.kind === "kontour.flow-agents.transition");
-  const { index: expectationIndex, gates: gateIndex, collisions } = buildExpectationIndex(kitDir, options.flows ?? null);
+  const { index: expectationIndex, gates: gateIndex, ambiguousExpectations } = buildExpectationIndex(kitDirs, options.flows ?? null);
 
   if (!gateIndex.size) {
+    const where = options.kit ? options.kit : `${path.join(process.cwd(), "kits")} (no --kit given)`;
     const scope = options.flows ? ` for flow(s) ${options.flows.join(", ")}` : "";
-    console.error(`gate-scorecard: no gate definitions found under ${path.join(kitDir, "flows")}${scope} — check --kit/--flow`);
+    console.error(`gate-scorecard: no kit declared any gate under ${where}${scope}`);
     return 2;
   }
 
   const tokenAttribution = options.transcripts.length ? attributeTokens(transitions, options.transcripts) : null;
-  const scorecard = buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution, collisions });
+  const scorecard = buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution, ambiguousExpectations });
 
   if (options.out) {
     fs.mkdirSync(path.dirname(options.out), { recursive: true });
@@ -282,11 +411,16 @@ function main(argv) {
     return 0;
   }
 
-  console.log(`transitions: ${scorecard.window.transitions}  gates declared: ${gateIndex.size}`);
+  console.log(
+    `transitions: ${scorecard.window.transitions}  kits: ${scorecard.scope.kits.join(", ") || "—"}  ` +
+      `gates declared: ${scorecard.scope.gates_declared}  flows exercised: ${scorecard.scope.flows_exercised.length}` +
+      (scorecard.scope.flows_not_exercised ? ` (${scorecard.scope.flows_not_exercised} not exercised)` : ""),
+  );
   for (const gate of scorecard.gates) {
     const cost = gate.output_tokens ? `  ${gate.output_tokens} tok` : "";
     const note = gate.never_invoked ? "  never invoked in window" : "";
-    console.log(`  ${gate.gate.padEnd(24)} calls ${String(gate.calls).padStart(3)}  refused/error ${String(gate.refused_or_error).padStart(3)}${cost}${note}`);
+    const label = `${gate.flow ?? "?"}/${gate.gate}`;
+    console.log(`  ${label.padEnd(42)} calls ${String(gate.calls).padStart(3)}  refused/error ${String(gate.refused_or_error).padStart(3)}${cost}${note}`);
   }
   // Verbs are not gates, but they are where the run's cost actually went in the one
   // window measured so far. Printing gates alone would report a third of the work.
@@ -297,9 +431,11 @@ function main(argv) {
       console.log(`  ${verb.verb.padEnd(36)} calls ${String(verb.calls).padStart(3)}  refused/error ${String(verb.refused_or_error).padStart(3)}${cost}`);
     }
   }
-  for (const collision of scorecard.collisions) {
-    const where = collision.kind === "gate" ? `flows ${collision.flows.join(" and ")}` : `gates ${collision.gates.join(" and ")}`;
-    console.log(`collision: ${collision.kind} "${collision.name}" is declared by ${where} — tallies are merged under one heading`);
+  for (const shared of scorecard.ambiguous_expectations) {
+    console.log(`shared id: "${shared.expectation}" is expected by ${shared.claimed_by.join(" and ")} — a write naming it needs --flow to attribute`);
+  }
+  if (scorecard.ambiguous.length) {
+    console.log(`ambiguous: ${scorecard.ambiguous.length} write(s) named a shared expectation id with no --flow to disambiguate`);
   }
   if (scorecard.unattributed.length) {
     const ids = [...new Set(scorecard.unattributed.map((entry) => entry.expectation))];
