@@ -45,8 +45,8 @@ function kitFixture() {
 
 function transition(overrides) {
   return {
-    schema_version: "1.0",
-    kind: "kontour.flow-agents.transition",
+    version: "1.0",
+    schema: "kontour.flow-agents.transition",
     command: "workflow",
     verb: "evidence",
     targets: {},

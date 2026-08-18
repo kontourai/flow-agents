@@ -512,7 +512,7 @@ function main(argv) {
   // No kit is privileged: with no --kit, every kit the repo publishes is scored.
   const kitDirs = options.kit ? [{ id: path.basename(options.kit), dir: options.kit }] : discoverKitDirs(process.cwd());
   const read = readJsonl(transitionsFile);
-  const transitions = read.records.filter((record) => record?.kind === "kontour.flow-agents.transition");
+  const transitions = read.records.filter((record) => record?.schema === "kontour.flow-agents.transition");
   // Absence is not health. A missing or empty log used to render as a tidy scorecard of
   // zeroes — the exact failure this tool opens by indicting the capture hook for.
   if (read.missing) {

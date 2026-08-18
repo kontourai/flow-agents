@@ -19,7 +19,7 @@ const BASE = Date.parse("2026-08-17T12:00:00.000Z");
 
 function transition(offsetSeconds, overrides = {}) {
   return {
-    kind: "kontour.flow-agents.transition",
+    schema: "kontour.flow-agents.transition",
     command: "workflow",
     verb: "evidence",
     targets: {},

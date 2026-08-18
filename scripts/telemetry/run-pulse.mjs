@@ -55,7 +55,7 @@ export function readTransitions(file) {
     if (!trimmed) continue;
     try {
       const record = JSON.parse(trimmed);
-      if (record?.kind === "kontour.flow-agents.transition") records.push(record);
+      if (record?.schema === "kontour.flow-agents.transition") records.push(record);
     } catch {
       // A partial trailing line is normal while the log is being appended to.
     }

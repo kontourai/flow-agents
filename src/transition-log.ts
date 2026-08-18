@@ -49,18 +49,22 @@ import { resolveSharedRepoRoot, telemetryDataDir } from "./lib/local-artifact-ro
 export const TRANSITION_LOG_FILENAME = "transitions.jsonl";
 export const TRANSITION_RECORD_KIND = "kontour.flow-agents.transition";
 export const TRANSITION_RECORD_SCHEMA_VERSION = "1.0";
+/** Envelope field names, matching the sibling records in scripts/telemetry/. */
 
 /**
  * Flags whose values are identifiers defined by a kit or flow definition — safe to
  * record because they are drawn from a fixed vocabulary, and necessary to record
  * because they are what distinguishes one gate from another. Anything not listed
  * contributes its NAME only.
+ *
+ * Every entry is a flag this CLI actually defines. An earlier version listed four that
+ * did not exist (`--gate`, `--kit`, and two since removed): harmless, since a flag
+ * nobody passes never matches, but it made the list read as checked when it was not.
+ * A test pins the invariant so the next addition has to be real.
  */
 const IDENTIFIER_FLAGS = new Set([
   "--expectation",
-  "--gate",
   "--flow",
-  "--kit",
   "--provider",
   "--assignment-provider",
   "--decision",
@@ -125,8 +129,11 @@ const VERB = /^[a-z][a-z0-9-]{0,31}$/i;
 export type TransitionOutcome = "ok" | "nonzero" | "unhandled-error" | "usage";
 
 export interface TransitionRecord {
-  schema_version: string;
-  kind: string;
+  /** `schema` + `version`, as economics-record and stop-gate-summary use. `kind` is
+   * already taken in this repo for a WITHIN-type discriminator (workflow-outcome's
+   * "terminal"), so carrying a type id there would make `.kind` mean two things. */
+  schema: string;
+  version: string;
   command: string | null;
   verb: string | null;
   targets: Record<string, string>;
@@ -234,8 +241,8 @@ export function buildTransitionRecord(input: {
   const resolvedFlow = input.flow ?? activeFlow;
   if (resolvedFlow && !targets["flow"]) targets["flow"] = resolvedFlow;
   const record: TransitionRecord = {
-    schema_version: TRANSITION_RECORD_SCHEMA_VERSION,
-    kind: TRANSITION_RECORD_KIND,
+    schema: TRANSITION_RECORD_KIND,
+    version: TRANSITION_RECORD_SCHEMA_VERSION,
     command: input.command ?? null,
     verb,
     targets,

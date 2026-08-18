@@ -56,12 +56,12 @@ test("identifier flags are recorded with their values", () => {
     "evidence",
     "--expectation",
     "tests-evidence",
-    "--gate",
-    "verify-gate",
+    "--flow",
+    "builder.build",
   ]);
   assert.equal(verb, "evidence");
-  assert.deepEqual(targets, { expectation: "tests-evidence", gate: "verify-gate" });
-  assert.deepEqual(flags, ["--expectation", "--gate"]);
+  assert.deepEqual(targets, { expectation: "tests-evidence", flow: "builder.build" });
+  assert.deepEqual(flags, ["--expectation", "--flow"]);
 });
 
 test("--flag=value is normalized to the same shape as --flag value", () => {
@@ -87,9 +87,9 @@ test("an allowlisted flag holding non-identifier text drops the value", () => {
 });
 
 test("a flag at end of argv with no value does not consume the next flag", () => {
-  const { targets, flags } = summarizeArgv(["evidence", "--gate", "--json"]);
+  const { targets, flags } = summarizeArgv(["evidence", "--flow", "--json"]);
   assert.deepEqual(targets, {});
-  assert.deepEqual(flags, ["--gate", "--json"]);
+  assert.deepEqual(flags, ["--flow", "--json"]);
 });
 
 test("outcome names what the code observably is, not what it is assumed to mean", () => {
@@ -111,7 +111,7 @@ test("a record carries the error class name only on the error path", () => {
     endedAt,
     env: {},
   });
-  assert.equal(ok.kind, TRANSITION_RECORD_KIND);
+  assert.equal(ok.schema, TRANSITION_RECORD_KIND);
   assert.equal(ok.duration_ms, 2500);
   assert.equal(ok.outcome, "ok");
   assert.ok(!("error_name" in ok));
@@ -229,7 +229,7 @@ test("the real CLI records a successful invocation with its command and outcome"
   runCli(["commands"], root);
   const records = readLog(root);
   assert.equal(records.length, 1);
-  assert.equal(records[0].kind, TRANSITION_RECORD_KIND);
+  assert.equal(records[0].schema, TRANSITION_RECORD_KIND);
   assert.equal(records[0].command, "commands");
   assert.equal(records[0].outcome, "ok");
   assert.equal(records[0].exit_code, 0);
@@ -383,5 +383,47 @@ test("opting out short-circuits before the repo root is resolved", () => {
   } finally {
     if (previous === undefined) delete process.env["FLOW_AGENTS_TRANSITION_LOG"];
     else process.env["FLOW_AGENTS_TRANSITION_LOG"] = previous;
+  }
+});
+
+// The schema file is the only thing binding the typed producer to its two untyped
+// consumers; without a test it drifts the first time a field is renamed.
+test("an emitted record satisfies the published schema", () => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.resolve(import.meta.dirname, "../../scripts/telemetry/transition-record.schema.json"), "utf8"),
+  );
+  const root = fixtureRepo();
+  try { runCli(["workflow", "evidence", "--expectation", "tests-evidence"], root); } catch { /* refusal is expected; the record is the subject */ }
+  const records = readLog(root);
+  assert.ok(records.length >= 1);
+  for (const record of records) {
+    for (const required of schema.required) {
+      assert.ok(required in record, `emitted record is missing required field ${required}`);
+    }
+    assert.equal(record.schema, schema.properties.schema.const);
+    assert.equal(record.version, schema.properties.version.const);
+    assert.ok(schema.properties.outcome.enum.includes(record.outcome));
+    if (record.error_name) assert.ok(record.error_name.length <= schema.properties.error_name.maxLength);
+    assert.ok(Array.isArray(record.flags));
+    assert.equal(typeof record.actor, "object");
+  }
+});
+
+// An allowlist of flags nobody passes reads as checked when it is not. An earlier
+// version listed four flags this CLI never defines.
+test("every allowlisted identifier flag is a flag this CLI actually defines", () => {
+  const source = fs.readFileSync(path.resolve(import.meta.dirname, "../transition-log.ts"), "utf8");
+  const block = source.slice(source.indexOf("const IDENTIFIER_FLAGS"), source.indexOf("]);", source.indexOf("const IDENTIFIER_FLAGS")));
+  const listed = [...block.matchAll(/"--([a-z-]+)"/g)].map((match) => match[1]);
+  assert.ok(listed.length > 0);
+
+  const cliDir = path.resolve(import.meta.dirname);
+  const haystack = fs
+    .readdirSync(cliDir)
+    .filter((entry) => entry.endsWith(".ts"))
+    .map((entry) => fs.readFileSync(path.join(cliDir, entry), "utf8"))
+    .join("\n");
+  for (const flag of listed) {
+    assert.ok(haystack.includes(`"${flag}"`), `--${flag} is allowlisted but no command defines it`);
   }
 });

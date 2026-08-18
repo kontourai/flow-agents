@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/kontour.flow-agents.transition/1.0.json",
+  "title": "kontour.flow-agents.transition",
+  "description": "One record per flow-agents CLI invocation, appended to .kontourai/telemetry/transitions.jsonl by src/transition-log.ts at the point src/cli.ts exits (flow-agents #1274). It exists because neither existing mechanism can answer 'what did this CLI do': scripts/hooks/evidence-capture.js only runs where the kit is installed into a hook-firing provider, and both it and the host transcript read the exit status from the host tool payload, which reports 0 for any transition wrapped in a script that captures $? and continues. SCOPE, stated rather than assumed: this covers src/cli.ts only. The flow-agents-workflow-sidecar and flow-agents-validate-artifacts binaries have their own entry points, and init exits directly when an operator interrupts a prompt; those invocations emit no record. REDACTION: argv is not recorded. Only the command (validated against the registry), the verb (lowercase letters and hyphens), flag NAMES (validated as flag names), and the values of an allowlist of flags whose values are kit-defined identifiers matching an identifier pattern. Anything declined is recorded as a placeholder carrying no content. error_name is the thrown error's CLASS, never its message, because several verbs interpolate raw operator input into what they throw. The log is written at the SHARED repository root, so every linked worktree appends to one file; consumers must filter by actor.session_id or they will read another lane's run.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "version", "command", "verb", "targets", "flags", "exit_code", "outcome", "started_at", "duration_ms", "actor"],
+  "properties": {
+    "schema": { "const": "kontour.flow-agents.transition" },
+    "version": { "const": "1.0" },
+    "command": {
+      "type": ["string", "null"],
+      "description": "The registered command name, «unknown» when the first argument names no registered command, or null when none was given. Never the raw argument: a misplaced shell variable arrives there verbatim."
+    },
+    "verb": { "type": ["string", "null"], "description": "The first positional after the command, or «unparsed» when it is not verb-shaped." },
+    "targets": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Values of allowlisted identifier flags. `flow` is derived from run state where the command resolves one (noteActiveFlow), because workflow evidence does not require the operator to pass it and expectation ids are unique only within a flow."
+    },
+    "flags": { "type": "array", "items": { "type": "string" }, "description": "Flag NAMES only. Never values." },
+    "exit_code": { "type": "integer" },
+    "outcome": {
+      "enum": ["ok", "nonzero", "unhandled-error", "usage"],
+      "description": "Named for what the exit code observably is, not what it is assumed to mean. 70 is this CLI's top-level catch and mixes contract refusals with genuine faults, because every refusal in the workflow verb throws; it is 'unhandled-error', not 'crashed'. A typed refusal with its own code is the real fix (#1273)."
+    },
+    "error_name": { "type": "string", "maxLength": 80, "description": "The thrown error's constructor name. A weak discriminator: most throws are a bare Error." },
+    "started_at": { "type": "string", "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0, "description": "Times run() only; the record's own write is not included." },
+    "cwd_repo": { "type": ["string", "null"], "description": "The shared repository root the log is anchored on." },
+    "actor": {
+      "type": "object",
+      "required": ["runtime", "session_id"],
+      "properties": {
+        "runtime": { "type": ["string", "null"] },
+        "session_id": { "type": ["string", "null"], "description": "Absent on runtimes that do not publish one, in which case consumers cannot separate this lane from a sibling's." }
+      }
+    }
+  }
+}
