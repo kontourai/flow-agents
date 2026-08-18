@@ -247,22 +247,30 @@ usage_parse_transcript() {
     # totals. Summing per line counts a response once per block: measured 2.14x and
     # 2.72x inflation on two real transcripts, with the multiplier tracking how many
     # blocks a turn emitted, so it cannot be corrected after the fact (#1275).
+    # Verified across 164 transcripts: 42,535 duplicated ids, zero whose usage differs
+    # between lines, so first-occurrence-wins discards nothing.
     #
-    # `_seen` tracks which response ids have already been counted; first occurrence
-    # wins. A line with no message.id is counted (it cannot be a duplicate of anything
-    # identifiable), which keeps this fail-open for any future shape.
-    | (reduce inputs as $l ({};
+    # `$rid` is null unless message.id is a STRING. `has()` raises on a non-string key
+    # and jq aborts the WHOLE program, which would discard the cost data for a whole
+    # session over one malformed line -- and this transcript format is documented as
+    # changing between releases. A line with no usable id is counted: it cannot be
+    # proven a duplicate of anything, so the failure mode is a small over-count rather
+    # than total loss.
+    #
+    # Models and bookkeeping live in separate branches. Sharing one object would let a
+    # model literally named `_seen` collide with the accumulator and vanish.
+    | (reduce inputs as $l ({ m: {}, seen: {} };
         ($l.message.usage) as $u
-        | (($l.message.id) // null) as $rid
-        | if $u and (($rid == null) or ((._seen // {}) | has($rid) | not)) then
-            (($l.message.model) // "unknown") as $m
-            | (if $rid == null then . else ._seen = ((._seen // {}) + {($rid): true}) end)
-            | .[$m].input          = ((.[$m].input // 0)          + (($u.input_tokens) // 0))
-            | .[$m].output         = ((.[$m].output // 0)         + (($u.output_tokens) // 0))
-            | .[$m].cache_creation = ((.[$m].cache_creation // 0) + (($u.cache_creation_input_tokens) // 0))
-            | .[$m].cache_read     = ((.[$m].cache_read // 0)     + (($u.cache_read_input_tokens) // 0))
+        | ((($l.message.id) // null) | if type == "string" then . else null end) as $rid
+        | if $u and (($rid == null) or (.seen | has($rid) | not)) then
+            (($l.message.model) // "unknown") as $mo
+            | (if $rid == null then . else .seen[$rid] = true end)
+            | .m[$mo].input          = ((.m[$mo].input // 0)          + (($u.input_tokens) // 0))
+            | .m[$mo].output         = ((.m[$mo].output // 0)         + (($u.output_tokens) // 0))
+            | .m[$mo].cache_creation = ((.m[$mo].cache_creation // 0) + (($u.cache_creation_input_tokens) // 0))
+            | .m[$mo].cache_read     = ((.m[$mo].cache_read // 0)     + (($u.cache_read_input_tokens) // 0))
           else . end)
-       | del(._seen)) as $agg
+       | .m) as $agg
     | ($agg | to_entries
         | map(
             .key as $m | .value as $u
