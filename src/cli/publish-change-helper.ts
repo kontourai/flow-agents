@@ -335,9 +335,34 @@ function resolveImmutableHeadSha(projectRoot: string, headRef: string): string {
   }
 }
 
+const PUBLISH_CHANGE_USAGE: Record<string, string> = {
+  execute: "usage: publish-change execute --session-dir <dir> --title <text> --head-ref <ref> --base-ref <ref> [--body <text>] [--draft]",
+  render: "usage: publish-change render --input-json <path|-> [--body-out <path>]",
+  "validate-closing-refs": "usage: publish-change validate-closing-refs --input-json <path|->",
+  "evaluate-provider-checks": "usage: publish-change evaluate-provider-checks --change-files-json <path|-> [--provider-checks-json <path>]",
+  "reconcile-final-state": "usage: publish-change reconcile-final-state <artifact_root>",
+};
+
+function hasHelp(argv: string[]): boolean {
+  return argv.includes("--help") || argv.includes("-h");
+}
+
+function printPublishChangeUsage(): void {
+  console.log("usage: publish-change <execute|render|validate-closing-refs|evaluate-provider-checks|reconcile-final-state> [flags]");
+  console.log("Run `publish-change <command> --help` for command-specific flags.");
+}
+
 export function main(argv = process.argv.slice(2)): number | Promise<number> {
   try {
     const [command, ...rest] = argv;
+    if (command === "--help" || command === "-h") {
+      printPublishChangeUsage();
+      return 0;
+    }
+    if (typeof command === "string" && hasHelp(rest) && Object.prototype.hasOwnProperty.call(PUBLISH_CHANGE_USAGE, command)) {
+      console.log(PUBLISH_CHANGE_USAGE[command]);
+      return 0;
+    }
     if (command === "execute") return execute(rest);
     if (command === "render") return render(rest);
     if (command === "validate-closing-refs") return validateClosingRefs(rest);
