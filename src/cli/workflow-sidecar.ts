@@ -5580,8 +5580,11 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
         "record-gate-claim passing command evidence requires captured clean Git provenance; " +
           `${withoutProvenance.length} of ${observedCommands.length} observed command(s) carry none ` +
           `(first: ${String(withoutProvenance[0]?.command ?? "<unnamed>").slice(0, 80)}). ` +
-          "A command run outside the workflow captures no provenance: re-run it through the workflow " +
-          "against a clean tree, then retry this claim.",
+          "This verb executes every --command itself, so the command did run through the workflow; " +
+          "provenance is absent because the workspace state could not be captured as clean at the moment " +
+          "the command finished. Either the project root is not a Git workspace this verb can snapshot, " +
+          "or the tree was dirty when the command exited (a command that writes untracked output does this " +
+          "to itself). Commit or clean the tree, then retry this claim.",
       );
     }
     die(
@@ -5712,9 +5715,11 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     }
     if (liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique))) {
       die(
-        "a passing tests-evidence claim requires a current clean critique first, and this run's latest critique is " +
-          "not a substantive pass. Address the critique's open findings, then re-record it with `workflow critique` " +
-          "(re-recording under the same critique id supersedes the previous verdict).",
+        "a passing tests-evidence claim requires a current clean critique first, and this gate visit has a live " +
+          "critique that is not a substantive pass. It is not necessarily the newest one: supersession is " +
+          "per reviewer, so an earlier reviewer's open critique stays live even after a different reviewer " +
+          "records a clean one. Address that critique's open findings and re-record it with `workflow critique` " +
+          "under the SAME critique id and the same reviewer identity, which is what supersedes it.",
       );
     }
     if (!hasCurrentCritique) {

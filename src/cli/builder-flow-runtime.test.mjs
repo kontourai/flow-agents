@@ -7863,10 +7863,20 @@ test("stale open critique remains blocking even when a different reviewer suppli
       // the same run (kontourai/flow-agents#1281). The three critique preconditions have three
       // different remedies, so the message must identify WHICH cause and what to do about it.
       assert.match(error.message, /workflow critique/, "the refusal must name the verb that fixes it");
+      // Bound to the ONE cause this fixture creates -- a live open critique from another reviewer --
+      // not an alternation over all three. An alternation cannot tell a correct message from one
+      // whose branch texts were swapped: every branch still matches one of the alternatives, so a
+      // refusal naming the WRONG cause passes. Naming the wrong cause is worse than naming none,
+      // because the caller confidently fixes something that was never broken.
       assert.match(
         error.message,
-        /has no critique yet|not a substantive pass|predates the current workspace state/,
-        "the refusal must identify which of the three preconditions failed",
+        /not a substantive pass/,
+        "the refusal must name THIS cause: a live critique that is not a substantive pass",
+      );
+      assert.doesNotMatch(
+        error.message,
+        /has no critique yet/,
+        "this run HAS a critique; claiming otherwise sends the caller to record a second one",
       );
       return true;
     },
