@@ -7856,7 +7856,20 @@ test("stale open critique remains blocking even when a different reviewer suppli
       current,
       criterion,
     ]),
-    /requires a current clean critique/,
+    (error) => {
+      assert.match(error.message, /requires a current clean critique/);
+      // A refusal that names a state but not a transition leaves a correct caller with retry as its
+      // only move. Measured across 12 eval arms: 81 refusals, 32% repeats of a reason already hit in
+      // the same run (kontourai/flow-agents#1281). The three critique preconditions have three
+      // different remedies, so the message must identify WHICH cause and what to do about it.
+      assert.match(error.message, /workflow critique/, "the refusal must name the verb that fixes it");
+      assert.match(
+        error.message,
+        /has no critique yet|not a substantive pass|predates the current workspace state/,
+        "the refusal must identify which of the three preconditions failed",
+      );
+      return true;
+    },
   );
 });
 

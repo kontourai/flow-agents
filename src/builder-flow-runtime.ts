@@ -2061,8 +2061,26 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
     && isRecord(claim.metadata)
     && claim.metadata.origin === "critique"
     && liveRecordIds.has(claim.metadata.critique_record_id));
-  if (liveCritiques.length === 0 || liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
-    throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a current clean critique");
+  // Two distinguishable causes, two different remedies. Naming the unmet state without the
+  // transition leaves a correct caller with retry as its only move — measured across 12 eval arms:
+  // 81 refusals, 32% of them repeats of a reason already hit in the same run (#1281).
+  if (liveCritiques.length === 0) {
+    throw new BuilderBuildRunInputError(
+      "evidence.critique",
+      "a passing tests-evidence claim requires a current clean critique, and this gate visit has none. "
+        + "Record one with `workflow critique` under a reviewer identity distinct from the implementation "
+        + "actor (set FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process). Note that a route-back "
+        + "starts a new gate visit: critiques from a previous visit remain as audit history but do not "
+        + "satisfy this one.",
+    );
+  }
+  if (liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
+    throw new BuilderBuildRunInputError(
+      "evidence.critique",
+      "a passing tests-evidence claim requires a current clean critique, and this gate visit has one that "
+        + "is not a substantive pass. Address its open findings, then re-record with `workflow critique` "
+        + "(re-recording under the same critique id supersedes the previous verdict).",
+    );
   }
   const critiqueCandidates = await Promise.all(liveCritiques.map(async (claim) => {
     const artifacts = reviewedArtifacts(claim);
