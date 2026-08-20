@@ -1,0 +1,54 @@
+{
+  "id": "probe.measure",
+  "version": "1.0",
+  "steps": [
+    {
+      "id": "plan",
+      "next": "implement"
+    },
+    {
+      "id": "implement",
+      "next": "verify"
+    },
+    {
+      "id": "verify",
+      "next": "probe-done"
+    },
+    {
+      "id": "probe-done",
+      "next": null
+    }
+  ],
+  "gates": {
+    "plan-gate": {
+      "step": "plan",
+      "expects": [
+        {
+          "id": "stated-criteria",
+          "kind": "artifact",
+          "required": true,
+          "description": "The acceptance criteria the work will be judged against, enumerated BEFORE implementation. This is the context-injection surface: whether an apparatus makes the agent state what done means is measurable exactly here, by whether this artifact exists and what it contains.",
+          "artifact": {
+            "path": "criteria.json",
+            "must_be_json": true,
+            "must_have_array": "criteria"
+          }
+        }
+      ]
+    },
+    "verify-gate": {
+      "step": "verify",
+      "expects": [
+        {
+          "id": "command-evidence",
+          "kind": "command",
+          "required": true,
+          "description": "A command that was actually executed, with its exit code. The evidence-gathering surface: whether the apparatus makes the agent run something before claiming done.",
+          "command": {
+            "must_have_exit_code": true
+          }
+        }
+      ]
+    }
+  }
+}

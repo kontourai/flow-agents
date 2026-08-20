@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "probe",
+  "name": "Probe Kit",
+  "description": "The smallest kit that exercises real flow mechanics: context injection at a plan gate, evidence gathering at a verify gate, and a terminal step. It exists to be MEASURED, not to do useful work — a full builder.build run takes tens of minutes and cannot be a unit of experimental iteration. This runs in seconds against a scripted agent, so the harness that measures kits can itself be proven end to end, and so a change to a flow definition can be A/B'd against its predecessor in the time it takes to read the diff.",
+  "flows": [
+    {
+      "id": "probe.measure",
+      "path": "flows/measure.flow.json",
+      "description": "plan -> implement -> verify, with a gate on the plan and a gate on the evidence."
+    }
+  ]
+}
