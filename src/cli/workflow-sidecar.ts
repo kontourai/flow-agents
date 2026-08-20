@@ -5567,7 +5567,32 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     ? passingObservationSnapshot(observedCommands)
     : null;
   if (statusVal === "pass" && observedCommands.length > 0 && !observedWorkspaceSnapshot) {
-    die("record-gate-claim passing command evidence requires captured clean Git provenance with one exact shared workspace snapshot");
+    // Fired 15x across 12 eval arms (8 as in-run repeats). The old message named the missing state
+    // but no transition. `passingObservationSnapshot` returns null for two distinct reasons; report
+    // which one, with its own remedy (#1281).
+    const withoutProvenance = observedCommands.filter((observation) => !commandLogPassProvenance({
+      observed_at_commit: observation.observed_at_commit,
+      worktree_clean: observation.worktree_clean,
+      verification_workspace_snapshot: observation.verification_workspace_snapshot,
+    })?.verificationWorkspaceSnapshot);
+    if (withoutProvenance.length > 0) {
+      die(
+        "record-gate-claim passing command evidence requires captured clean Git provenance; " +
+          `${withoutProvenance.length} of ${observedCommands.length} observed command(s) carry none ` +
+          `(first: ${String(withoutProvenance[0]?.command ?? "<unnamed>").slice(0, 80)}). ` +
+          "This verb executes every --command itself, so the command did run through the workflow; " +
+          "provenance is absent because the workspace state could not be captured as clean at the moment " +
+          "the command finished. Either the project root is not a Git workspace this verb can snapshot, " +
+          "or the tree was dirty when the command exited (a command that writes untracked output does this " +
+          "to itself). Commit or clean the tree, then retry this claim.",
+      );
+    }
+    die(
+      "record-gate-claim passing command evidence requires ONE exact shared workspace snapshot; the observed " +
+        `commands carry provenance from more than one tree state across ${observedCommands.length} command(s). ` +
+        "Re-run every confirming command against the same clean tree, without editing or committing between " +
+        "them, so they share a single snapshot.",
+    );
   }
   // #634: persist the writer's real executions into the hash-chained command-log so the
   // capture fold has a deterministic observation even on exit-code-blind hosts.
@@ -5677,8 +5702,32 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   if (mustRunTests) {
     const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
     const hasCurrentCritique = liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique));
-    if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique)) || !hasCurrentCritique) {
-      die("a passing tests-evidence claim requires a current clean critique first");
+    // Three distinguishable causes were collapsed into one message that named none of them, and the
+    // remedy differs per cause. Measured across 12 eval arms: this refusal fired 13x, 6 of those as
+    // repeats within a single run — a caller told only "requires a current clean critique" has no
+    // transition to act on, so retrying is its only move (kontourai/flow-agents#1281).
+    if (liveCritiques.length === 0) {
+      die(
+        "a passing tests-evidence claim requires a current clean critique first, and this run has no critique yet. " +
+          "Record one with `workflow critique` under a reviewer identity distinct from the implementation actor: " +
+          "set FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process.",
+      );
+    }
+    if (liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique))) {
+      die(
+        "a passing tests-evidence claim requires a current clean critique first, and this gate visit has a live " +
+          "critique that is not a substantive pass. It is not necessarily the newest one: supersession is " +
+          "per reviewer, so an earlier reviewer's open critique stays live even after a different reviewer " +
+          "records a clean one. Address that critique's open findings and re-record it with `workflow critique` " +
+          "under the SAME critique id and the same reviewer identity, which is what supersedes it.",
+      );
+    }
+    if (!hasCurrentCritique) {
+      die(
+        "a passing tests-evidence claim requires a current clean critique first, and this run's critique predates " +
+          "the current workspace state. Re-record the critique with `workflow critique` against the tree as it " +
+          "stands now, then retry this claim.",
+      );
     }
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
   }
