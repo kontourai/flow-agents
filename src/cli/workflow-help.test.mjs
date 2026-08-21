@@ -166,6 +166,26 @@ test("tailored sidecar commands honour ALL help forms without executing", () => 
   }
 });
 
+test("builderRun enforces each action's OWN allowlist — no representative sibling", () => {
+  // Round 2's MEDIUM: enforcement briefly consulted pause's set for resume/release-assignment and
+  // cancel's for archive. With all sibling sets identical, that divergence is BEHAVIOURALLY
+  // undetectable — an injection restoring it passes every runtime test — so this is asserted at
+  // the source level, the same way the drift tests bind tables to dispatchers. If a future edit
+  // reintroduces a representative key, this fails on the edit, not on the first asymmetric set
+  // change months later.
+  const builderRunSource = fs.readFileSync(path.join(__dirname, "builder-run.ts"), "utf8");
+  assert.match(
+    builderRunSource,
+    /allowedLifecycleFlag = \(name: string\) => actionFlagSet\(action as string\)\.has\(name\)/,
+    "lifecycle enforcement must consult actionFlagSet(action) — each action its own set",
+  );
+  assert.doesNotMatch(
+    builderRunSource,
+    /actionFlagSet\(\s*agentLifecycle\s*\?/,
+    "representative-key enforcement reintroduced — help and enforcement can diverge on the first asymmetric set edit",
+  );
+});
+
 test("positional -h on the public dispatcher is a help request", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
   try {
