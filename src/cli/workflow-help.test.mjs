@@ -18,7 +18,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Absolute paths: the no-mutation tests spawn with a different cwd on purpose.
 const CLI = path.resolve(__dirname, "../../build/src/cli.js");
 const SOURCE = path.join(__dirname, "workflow.ts");
-const { verbSpecs } = await import(path.resolve(__dirname, "../../build/src/cli/workflow.js"));
+const { verbSpecsSnapshot } = await import(path.resolve(__dirname, "../../build/src/cli/workflow.js"));
+const { BUILDER_RUN_ACTION_FLAGS } = await import(path.resolve(__dirname, "../../build/src/cli/builder-run.js"));
+const specs = new Map(verbSpecsSnapshot().map((entry) => [entry.verb, entry]));
 
 function runWorkflow(args, cwd) {
   return spawnSync(process.execPath, [CLI, "workflow", ...args], { cwd, encoding: "utf8" });
@@ -33,7 +35,7 @@ test("every public verb has a spec entry, and every spec entry is a public verb"
   const match = source.match(/const PUBLIC_VERBS = \[([^\]]+)\] as const/);
   assert.ok(match, "PUBLIC_VERBS const not found in workflow.ts — the dispatcher anchor moved");
   const dispatcherVerbs = [...match[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
-  const specVerbs = [...verbSpecs().keys()];
+  const specVerbs = [...specs.keys()];
   assert.deepEqual(
     [...dispatcherVerbs].sort(),
     [...specVerbs].sort(),
@@ -55,15 +57,15 @@ test("every verb enforcing an allowlist draws it from the spec table, and the ta
   // equality fails on the change that weakens it.
   const source = sourceText();
   const labelled = [...source.matchAll(/assertOnlyFlags\((.*?),\s*"workflow ([a-z-]+)"\)/g)];
-  const enforcedVerbs = new Set(labelled.map(([, , verb]) => verb).filter((verb) => verbSpecs().has(verb)));
-  const declaredVerbs = new Set([...verbSpecs().entries()].filter(([, spec]) => spec.options !== null).map(([verb]) => verb));
+  const enforcedVerbs = new Set(labelled.map(([, , verb]) => verb).filter((verb) => specs.has(verb)));
+  const declaredVerbs = new Set([...specs.values()].filter((spec) => spec.options !== null && spec.enforcement === "workflow").map((spec) => spec.verb));
   assert.deepEqual(
     [...enforcedVerbs].sort(),
     [...declaredVerbs].sort(),
     "the set of verbs with enforcement sites must equal the set of verbs the table declares options for",
   );
   for (const [, argsExpr, verb] of labelled) {
-    if (!verbSpecs().has(verb)) continue;
+    if (!specs.has(verb)) continue;
     assert.ok(
       argsExpr.includes(`verbSpecOptions("${verb}")`),
       `workflow ${verb} enforcement does not reference verbSpecOptions("${verb}") — help and enforcement can now disagree`,
@@ -72,8 +74,8 @@ test("every verb enforcing an allowlist draws it from the spec table, and the ta
       !argsExpr.includes("new Set("),
       `workflow ${verb} enforcement carries an inline option set — the table is no longer the single source`,
     );
-    const spec = verbSpecs().get(verb);
-    assert.ok(spec?.options instanceof Set && spec.options.size > 0, `spec table has no options for enforced verb ${verb}`);
+    const spec = specs.get(verb);
+    assert.ok(Array.isArray(spec?.options) && spec.options.length > 0, `spec table has no options for enforced verb ${verb}`);
   }
 });
 
@@ -103,7 +105,7 @@ test("the `help <verb>` form and `--help --json` agree with the table", () => {
     assert.equal(json.status, 0);
     const parsed = JSON.parse(json.stdout);
     assert.equal(parsed.verb, "evidence");
-    const tableOptions = [...verbSpecs().get("evidence").options].sort();
+    const tableOptions = [...specs.get("evidence").options].sort();
     assert.deepEqual(parsed.options, tableOptions, "--help --json options diverge from the spec table");
     for (const option of tableOptions) {
       assert.ok(prose.stdout.includes(`--${option}`), `prose help omits --${option}`);
@@ -113,16 +115,63 @@ test("the `help <verb>` form and `--help --json` agree with the table", () => {
   }
 });
 
-test("a verb with no declared allowlist gets summary-only help, not an invented option list", () => {
-  // Slice 1 deliberately declines to mint allowlists for verbs that never had one: a new
-  // allowlist is a new refusal, and inventing option docs from flag reads would be a label
-  // nothing derives. The help says so instead of guessing.
+test("forwarded verbs derive their options from builderRun's enforcing sets", () => {
+  // Round 1 of independent review refuted this file's original premise: six "no allowlist" verbs
+  // were always constrained one layer down, in builderRun. Their help now derives from the SAME
+  // exported sets builderRun enforces, plus the public passthrough flags the dispatcher strips.
+  const passthrough = ["artifact-root", "session-dir", "json"];
+  for (const [verb, action] of [["pause", "pause"], ["resume", "resume"], ["release", "release-assignment"], ["cancel", "cancel"], ["archive", "archive"], ["reclaim", "reclaim"]]) {
+    const spec = specs.get(verb);
+    assert.equal(spec.enforcement, "builder-run", `${verb} must be marked builder-run enforced`);
+    const expected = [...new Set([...passthrough, ...BUILDER_RUN_ACTION_FLAGS[action]])].sort();
+    assert.deepEqual(spec.options, expected, `${verb} help diverges from builderRun's enforcing set`);
+  }
+  // status/doctor genuinely have no allowlist at either layer; they alone stay summary-only.
+  for (const verb of ["status", "doctor"]) {
+    assert.equal(specs.get(verb).options, null, `${verb} should remain summary-only until an allowlist exists`);
+  }
+});
+
+test("a verb with no declared allowlist at any layer gets summary-only help", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
   try {
-    const result = runWorkflow(["pause", "--help"], dir);
+    const result = runWorkflow(["status", "--help"], dir);
     assert.equal(result.status, 0);
     assert.match(result.stdout, /not yet declared/);
     assert.ok(!/^\s+--/m.test(result.stdout), "summary-only help must not list options it cannot derive");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tailored sidecar commands honour ALL help forms without executing", () => {
+  // The round-1 HIGH: these three were excluded from the generic intercept, and their own
+  // handlers recognised only a bare trailing --help — `verify-hold -h` executed domain logic on
+  // a documentation request. All three forms must now render the TAILORED usage (richer than the
+  // generic one-liner) and touch nothing.
+  const SIDECAR = path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js");
+  for (const command of ["reconcile-preflight", "verify-hold", "takeover-preflight"]) {
+    for (const args of [[command, "--help"], [command, "--help", "extra"], [command, "-h"]]) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
+      try {
+        const result = spawnSync(process.execPath, [SIDECAR, ...args], { cwd: dir, encoding: "utf8" });
+        assert.equal(result.status, 0, `${args.join(" ")} exited ${result.status}: ${result.stderr}`);
+        assert.match(result.stdout, /<artifactDir>/, `${args.join(" ")} did not render the tailored usage`);
+        assert.deepEqual(fs.readdirSync(dir), [], `${args.join(" ")} wrote into the working directory`);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }
+});
+
+test("positional -h on the public dispatcher is a help request", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
+  try {
+    const result = runWorkflow(["evidence", "-h"], dir);
+    assert.equal(result.status, 0, `evidence -h executed the verb: ${result.stderr}`);
+    assert.match(result.stdout, /workflow evidence/);
+    assert.deepEqual(fs.readdirSync(dir), []);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

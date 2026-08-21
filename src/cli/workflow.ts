@@ -19,7 +19,7 @@ import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthori
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
-import { main as builderRun } from "./builder-run.js";
+import { BUILDER_RUN_ACTION_FLAGS, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
@@ -102,40 +102,61 @@ Use the isolated exact-package command emitted by workflow status and doctor in 
 //
 // A drift test (workflow-help.test.mjs) binds this table to the dispatcher the same way
 // workflow-sidecar-help.test.mjs binds COMMAND_DESCRIPTIONS to the sidecar's switch.
-type VerbSpec = { summary: string; options: Set<string> | null };
+type VerbSpec = { summary: string; options: Set<string> | null; enforcement: "workflow" | "builder-run" | null };
+// The public dispatcher strips these before forwarding to builderRun, so they are accepted
+// end-to-end on every forwarded verb in addition to the action's own builderRun allowlist.
+const FORWARDED_PUBLIC_FLAGS = ["artifact-root", "session-dir", "json"] as const;
+function forwardedVerbOptions(action: keyof typeof BUILDER_RUN_ACTION_FLAGS | string): Set<string> {
+  return new Set<string>([...FORWARDED_PUBLIC_FLAGS, ...BUILDER_RUN_ACTION_FLAGS[action]]);
+}
 let _verbSpecsCache: Map<string, VerbSpec> | null = null;
-export function verbSpecs(): Map<string, VerbSpec> {
+function verbSpecs(): Map<string, VerbSpec> {
   if (_verbSpecsCache === null) {
     _verbSpecsCache = new Map<string, VerbSpec>([
-    ["start", { summary: 'Start or resume a workflow for a Work Item.', options: new Set<string>(["flow", "work-item", "task-slug", "artifact-root", "source-request", "summary", "title", "criterion", "assignment-provider", "effective-state-json"]) }],
-    ["status", { summary: 'Show the current canonical run and projected next action.', options: null }],
-    ["evidence-request", { summary: 'Emit an exact host-recovery evidence authorization for external signing.', options: EVIDENCE_FLAGS }],
-    ["evidence", { summary: 'Record evidence for the current Flow gate and synchronize it.', options: EVIDENCE_FLAGS }],
-    ["reseal-verification-evidence-request", { summary: 'Build the exact staged verification-evidence authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "expires-in-hours"]) }],
-    ["reseal-verification-evidence", { summary: 'Atomically publish a signed staged verification-evidence candidate.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]) }],
-    ["recover-exact-current-completion-request", { summary: 'Build the exact completion-recovery authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "expires-in-hours"]) }],
-    ["recover-exact-current-completion", { summary: 'Refresh stale same-run lifecycle authority without changing evidence or history.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]) }],
-    ["critique", { summary: 'Record review critique directly into the current trust bundle.', options: new Set<string>(["artifact-root", "session-dir", "json", "id", "verdict", "summary", "artifact-ref", "finding-json", "lane-json"]) }],
-    ["resolve-critique-request", { summary: 'Build the exact critique-resolution authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]) }],
-    ["resolve-critique", { summary: 'Resolve a repaired historical critique through a later review record.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]) }],
-    ["repair-critique-resolution-history-request", { summary: 'Build the exact resolution-history repair authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]) }],
-    ["repair-critique-resolution-history", { summary: 'Attest a missing historical authority event through a new signed repair.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]) }],
-    ["drive", { summary: 'Continue the canonical run through an explicit runtime adapter.', options: new Set<string>(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "evidence-checkpoint-dir", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms", "context-policy"]) }],
-    ["publish-provisional-delivery-request", { summary: 'Build the exact provisional-delivery authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "expires-in-hours"]) }],
-    ["publish-provisional-delivery", { summary: 'Publish a checkpoint-bound bundle for required PR CI reconciliation.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]) }],
-    ["publish-delivery", { summary: 'Publish the terminal, learning-inclusive delivery bundle for CI reconciliation.', options: new Set<string>(["artifact-root", "session-dir", "json"]) }],
-    ["execute-sealed-workload-request", { summary: 'Emit the exact canonical authorization payload for external signing.', options: new Set<string>(["artifact-root", "session-dir", "sealed-workload-file", "subject", "nonce", "expires-in-minutes", "max-staged-bytes", "max-runtime-ms", "max-output-bytes", "max-provider-calls", "max-cost-microusd", "max-tokens"]) }],
-    ["execute-sealed-workload", { summary: 'Execute one externally signed, staged provider workload.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file", "sealed-workload-file"]) }],
-    ["pause", { summary: 'Pause the current run as its assignment actor.', options: null }],
-    ["resume", { summary: 'Resume the current paused run as its assignment actor.', options: null }],
-    ["release", { summary: 'Release the current assignment without canceling the run.', options: null }],
-    ["cancel", { summary: 'Cancel through a signed user/operator authorization record.', options: null }],
-    ["archive", { summary: 'Archive a terminal session through a signed authorization record.', options: null }],
-    ["reclaim", { summary: 'Remove a clean linked worktree after learning and confirmed merge.', options: null }],
-    ["doctor", { summary: 'Report CLI, install, Kit, Flow, and artifact compatibility.', options: null }],
+    ["start", { summary: 'Start or resume a workflow for a Work Item.', options: new Set<string>(["flow", "work-item", "task-slug", "artifact-root", "source-request", "summary", "title", "criterion", "assignment-provider", "effective-state-json"]), enforcement: "workflow" }],
+    ["status", { summary: 'Show the current canonical run and projected next action.', options: null, enforcement: null }],
+    ["evidence-request", { summary: 'Emit an exact host-recovery evidence authorization for external signing.', options: EVIDENCE_FLAGS, enforcement: "workflow" }],
+    ["evidence", { summary: 'Record evidence for the current Flow gate and synchronize it.', options: EVIDENCE_FLAGS, enforcement: "workflow" }],
+    ["reseal-verification-evidence-request", { summary: 'Build the exact staged verification-evidence authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "expires-in-hours"]), enforcement: "workflow" }],
+    ["reseal-verification-evidence", { summary: 'Atomically publish a signed staged verification-evidence candidate.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]), enforcement: "workflow" }],
+    ["recover-exact-current-completion-request", { summary: 'Build the exact completion-recovery authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "expires-in-hours"]), enforcement: "workflow" }],
+    ["recover-exact-current-completion", { summary: 'Refresh stale same-run lifecycle authority without changing evidence or history.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]), enforcement: "workflow" }],
+    ["critique", { summary: 'Record review critique directly into the current trust bundle.', options: new Set<string>(["artifact-root", "session-dir", "json", "id", "verdict", "summary", "artifact-ref", "finding-json", "lane-json"]), enforcement: "workflow" }],
+    ["resolve-critique-request", { summary: 'Build the exact critique-resolution authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]), enforcement: "workflow" }],
+    ["resolve-critique", { summary: 'Resolve a repaired historical critique through a later review record.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), enforcement: "workflow" }],
+    ["repair-critique-resolution-history-request", { summary: 'Build the exact resolution-history repair authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]), enforcement: "workflow" }],
+    ["repair-critique-resolution-history", { summary: 'Attest a missing historical authority event through a new signed repair.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), enforcement: "workflow" }],
+    ["drive", { summary: 'Continue the canonical run through an explicit runtime adapter.', options: new Set<string>(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "evidence-checkpoint-dir", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms", "context-policy"]), enforcement: "workflow" }],
+    ["publish-provisional-delivery-request", { summary: 'Build the exact provisional-delivery authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "expires-in-hours"]), enforcement: "workflow" }],
+    ["publish-provisional-delivery", { summary: 'Publish a checkpoint-bound bundle for required PR CI reconciliation.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]), enforcement: "workflow" }],
+    ["publish-delivery", { summary: 'Publish the terminal, learning-inclusive delivery bundle for CI reconciliation.', options: new Set<string>(["artifact-root", "session-dir", "json"]), enforcement: "workflow" }],
+    ["execute-sealed-workload-request", { summary: 'Emit the exact canonical authorization payload for external signing.', options: new Set<string>(["artifact-root", "session-dir", "sealed-workload-file", "subject", "nonce", "expires-in-minutes", "max-staged-bytes", "max-runtime-ms", "max-output-bytes", "max-provider-calls", "max-cost-microusd", "max-tokens"]), enforcement: "workflow" }],
+    ["execute-sealed-workload", { summary: 'Execute one externally signed, staged provider workload.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file", "sealed-workload-file"]), enforcement: "workflow" }],
+    ["pause", { summary: 'Pause the current run as its assignment actor.', options: forwardedVerbOptions("pause"), enforcement: "builder-run" }],
+    ["resume", { summary: 'Resume the current paused run as its assignment actor.', options: forwardedVerbOptions("resume"), enforcement: "builder-run" }],
+    ["release", { summary: 'Release the current assignment without canceling the run.', options: forwardedVerbOptions("release-assignment"), enforcement: "builder-run" }],
+    ["cancel", { summary: 'Cancel through a signed user/operator authorization record.', options: forwardedVerbOptions("cancel"), enforcement: "builder-run" }],
+    ["archive", { summary: 'Archive a terminal session through a signed authorization record.', options: forwardedVerbOptions("archive"), enforcement: "builder-run" }],
+    ["reclaim", { summary: 'Remove a clean linked worktree after learning and confirmed merge.', options: forwardedVerbOptions("reclaim"), enforcement: "builder-run" }],
+    ["doctor", { summary: 'Report CLI, install, Kit, Flow, and artifact compatibility.', options: null, enforcement: null }],
     ]);
   }
   return _verbSpecsCache;
+}
+/**
+ * Read-only projection for tests and tooling. The live map is deliberately NOT exported: its
+ * Sets are the very objects assertOnlyFlags enforces, so an exported reference would let any
+ * same-process importer widen an allowlist and silently weaken enforcement (independent review
+ * probed exactly that and watched the injected option survive into the next enforcement call).
+ * Copies out, never references.
+ */
+export function verbSpecsSnapshot(): ReadonlyArray<{ verb: string; summary: string; options: string[] | null; enforcement: "workflow" | "builder-run" | null }> {
+  return [...verbSpecs().entries()].map(([verb, spec]) => ({
+    verb,
+    summary: spec.summary,
+    options: spec.options ? [...spec.options].sort() : null,
+    enforcement: spec.enforcement,
+  }));
 }
 function verbSpecOptions(verb: string): Set<string> {
   const spec = verbSpecs().get(verb);

@@ -12,6 +12,22 @@ import {
 import { reclaimBuilderWorktree } from "./worktree-reclaim.js";
 
 const USAGE = "Usage: flow-agents builder-run <recover|pause|resume|cancel|cancel-request|release-assignment|archive|reclaim> --session-dir <path> [--reason <text> | --authorization-file <path>]";
+/**
+ * The flag allowlists builderRun enforces per forwarded action. Exported so the public workflow
+ * CLI's help table can DERIVE these verbs' options from the same objects that enforce them —
+ * the "no pre-existing allowlist" premise these verbs briefly carried was false: the allowlist
+ * was always here, one layer down, and help that cannot see it reports a contract that does not
+ * exist (independent review, #1292 round 1).
+ */
+export const BUILDER_RUN_ACTION_FLAGS: Record<string, Set<string>> = {
+  reclaim: new Set(["session-dir"]),
+  pause: new Set(["session-dir", "reason"]),
+  resume: new Set(["session-dir", "reason"]),
+  "release-assignment": new Set(["session-dir", "reason"]),
+  cancel: new Set(["session-dir", "authorization-file"]),
+  archive: new Set(["session-dir", "authorization-file"]),
+};
+
 const CANCEL_REQUEST_USAGE = "Usage: flow-agents builder-run cancel-request --session-dir <path> [--out <file>] [--reason <text>] [--actor <name>] [--expires-in-hours <n>]";
 
 /**
@@ -99,7 +115,7 @@ export async function main(argv: string[]): Promise<number> {
     return await runCancelRequest(sessionDir, parsed.flags);
   }
   if (action === "reclaim") {
-    if (parsed.positionals.length !== 1 || Object.keys(parsed.flags).some((name) => name !== "session-dir")) {
+    if (parsed.positionals.length !== 1 || Object.keys(parsed.flags).some((name) => !BUILDER_RUN_ACTION_FLAGS.reclaim.has(name))) {
       console.error(USAGE);
       return 64;
     }
@@ -113,7 +129,7 @@ export async function main(argv: string[]): Promise<number> {
   const agentLifecycle = action === "pause" || action === "resume" || action === "release-assignment";
   const authorizedLifecycle = action === "cancel" || action === "archive";
   const lifecycle = agentLifecycle || authorizedLifecycle;
-  const allowedLifecycleFlag = (name: string) => name === "session-dir" || (agentLifecycle ? name === "reason" : name === "authorization-file");
+  const allowedLifecycleFlag = (name: string) => BUILDER_RUN_ACTION_FLAGS[agentLifecycle ? "pause" : "cancel"].has(name);
   if (lifecycle && (parsed.positionals.length !== 1 || Object.keys(parsed.flags).some((name) => !allowedLifecycleFlag(name)))) {
     console.error(USAGE);
     return 64;
