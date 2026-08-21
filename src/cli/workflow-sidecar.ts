@@ -2570,6 +2570,12 @@ function enforceEnsureSessionOwnership(
       const clause = (ok: boolean, name: string, detail?: string): void => {
         if (!ok) clauseFailures.push(detail ? `${name} (${detail})` : name);
       };
+      // Canonical actor keys are runtime:session:host[:human] and can reach ~260 characters —
+      // far past the 64-char id-like tier. Truncating an expected-vs-got pair at 64 can render
+      // two UNEQUAL keys as byte-identical text, making the diagnostic assert a mismatch while
+      // displaying none (independent review reproduced exactly that with 109/110-char keys).
+      // 260 matches the actor-key display cap already used by assignment-provider.ts.
+      const sanitizeActorKey = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 260);
       clause(parsed.role === "AssignmentStatus", "role must be \"AssignmentStatus\"", `got ${sanitize(parsed.role)}`);
       clause(parsed.provider === assignmentProviderKind, "top-level provider must match --assignment-provider", `got ${sanitize(parsed.provider)}, expected ${sanitize(assignmentProviderKind)}`);
       clause(assignment?.provider === assignmentProviderKind, "assignment.provider must match --assignment-provider", `got ${sanitize(assignment?.provider)}`);
@@ -2590,18 +2596,18 @@ function enforceEnsureSessionOwnership(
       if (assignmentProviderKind !== "local-file") {
         clause(typeof record?.branch === "string" && record.branch.length > 0, "record.branch must be a non-empty branch name for a provider-backed claim");
       }
-      clause(record?.actor_key === resolution.branchActorKey, "record.actor_key must equal the runtime's canonical actor key", `got ${sanitize(record?.actor_key)}, expected ${sanitize(resolution.branchActorKey)}`);
+      clause(record?.actor_key === resolution.branchActorKey, "record.actor_key must equal the runtime's canonical actor key", `got ${sanitizeActorKey(record?.actor_key)}, expected ${sanitizeActorKey(resolution.branchActorKey)}`);
       const recordActor = record && typeof record.actor === "object" && record.actor !== null ? record.actor as AnyObj : undefined;
       clause(recordActor !== undefined, "record.actor must be an object");
       if (recordActor) {
         clause(recordActor.runtime === resolution.actorStruct.runtime, "record.actor.runtime must match the current runtime", `got ${sanitize(recordActor.runtime)}, expected ${sanitize(resolution.actorStruct.runtime)}`);
         clause(recordActor.session_id === resolution.actorStruct.session_id, "record.actor.session_id must match the current session", `got ${sanitize(recordActor.session_id)}`);
         clause(recordActor.host === resolution.actorStruct.host, "record.actor.host must match the current host", `got ${sanitize(recordActor.host)}, expected ${sanitize(resolution.actorStruct.host)}`);
-        clause((recordActor.human ?? null) === (resolution.actorStruct.human ?? null), "record.actor.human must match the current runtime's human identity", `got ${sanitize(recordActor.human ?? null)}, expected ${sanitize(resolution.actorStruct.human ?? null)}`);
+        clause((recordActor.human ?? null) === (resolution.actorStruct.human ?? null), "record.actor.human must match the current runtime's human identity", `got ${sanitizeActorKey(recordActor.human ?? null)}, expected ${sanitizeActorKey(resolution.actorStruct.human ?? null)}`);
       }
       clause(candidate.effective_state === "held", "effective.effective_state must be \"held\"", `got ${sanitize(candidate.effective_state)}`);
       clause(candidate.reason === "self_is_holder", "effective.reason must be \"self_is_holder\"", `got ${sanitize(candidate.reason)}`);
-      clause(candidate.holder?.actor === resolution.branchActorKey, "effective.holder.actor must equal the runtime's canonical actor key", `got ${sanitize(candidate.holder?.actor)}`);
+      clause(candidate.holder?.actor === resolution.branchActorKey, "effective.holder.actor must equal the runtime's canonical actor key", `got ${sanitizeActorKey(candidate.holder?.actor)}`);
       if (clauseFailures.length > 0) {
         die("ensure-session --effective-state-json must be the configured provider's AssignmentStatus for this Work Item, with a claimed record and self_is_holder actor matching the current runtime"
           + `; ${clauseFailures.length} failing condition(s): `
