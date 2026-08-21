@@ -19,7 +19,7 @@ import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthori
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
-import { BUILDER_RUN_ACTION_FLAGS, main as builderRun } from "./builder-run.js";
+import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
@@ -105,9 +105,14 @@ Use the isolated exact-package command emitted by workflow status and doctor in 
 type VerbSpec = { summary: string; options: Set<string> | null; enforcement: "workflow" | "builder-run" | null };
 // The public dispatcher strips these before forwarding to builderRun, so they are accepted
 // end-to-end on every forwarded verb in addition to the action's own builderRun allowlist.
-const FORWARDED_PUBLIC_FLAGS = ["artifact-root", "session-dir", "json"] as const;
-function forwardedVerbOptions(action: keyof typeof BUILDER_RUN_ACTION_FLAGS | string): Set<string> {
-  return new Set<string>([...FORWARDED_PUBLIC_FLAGS, ...BUILDER_RUN_ACTION_FLAGS[action]]);
+// `json` is deliberately NOT advertised here although the dispatcher accepts and strips it:
+// builderRun emits JSON unconditionally, so the flag has no effect on these verbs, and help
+// that lists a no-op option overstates the contract (review round 2).
+const FORWARDED_PUBLIC_FLAGS = ["artifact-root", "session-dir"] as const;
+function forwardedVerbOptions(action: string): Set<string> {
+  const flags = builderRunActionFlags()[action];
+  if (!flags) throw new Error(`no builderRun allowlist for forwarded action ${action}`);
+  return new Set<string>([...FORWARDED_PUBLIC_FLAGS, ...flags]);
 }
 let _verbSpecsCache: Map<string, VerbSpec> | null = null;
 function verbSpecs(): Map<string, VerbSpec> {

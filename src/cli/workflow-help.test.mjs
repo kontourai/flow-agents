@@ -19,7 +19,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, "../../build/src/cli.js");
 const SOURCE = path.join(__dirname, "workflow.ts");
 const { verbSpecsSnapshot } = await import(path.resolve(__dirname, "../../build/src/cli/workflow.js"));
-const { BUILDER_RUN_ACTION_FLAGS } = await import(path.resolve(__dirname, "../../build/src/cli/builder-run.js"));
+const { builderRunActionFlags } = await import(path.resolve(__dirname, "../../build/src/cli/builder-run.js"));
 const specs = new Map(verbSpecsSnapshot().map((entry) => [entry.verb, entry]));
 
 function runWorkflow(args, cwd) {
@@ -119,11 +119,12 @@ test("forwarded verbs derive their options from builderRun's enforcing sets", ()
   // Round 1 of independent review refuted this file's original premise: six "no allowlist" verbs
   // were always constrained one layer down, in builderRun. Their help now derives from the SAME
   // exported sets builderRun enforces, plus the public passthrough flags the dispatcher strips.
-  const passthrough = ["artifact-root", "session-dir", "json"];
+  const passthrough = ["artifact-root", "session-dir"];
+  const actionFlags = builderRunActionFlags();
   for (const [verb, action] of [["pause", "pause"], ["resume", "resume"], ["release", "release-assignment"], ["cancel", "cancel"], ["archive", "archive"], ["reclaim", "reclaim"]]) {
     const spec = specs.get(verb);
     assert.equal(spec.enforcement, "builder-run", `${verb} must be marked builder-run enforced`);
-    const expected = [...new Set([...passthrough, ...BUILDER_RUN_ACTION_FLAGS[action]])].sort();
+    const expected = [...new Set([...passthrough, ...actionFlags[action]])].sort();
     assert.deepEqual(spec.options, expected, `${verb} help diverges from builderRun's enforcing set`);
   }
   // status/doctor genuinely have no allowlist at either layer; they alone stay summary-only.
