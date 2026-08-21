@@ -43,17 +43,34 @@ test("every public verb has a spec entry, and every spec entry is a public verb"
 
 test("every verb enforcing an allowlist draws it from the spec table, and the table has it", () => {
   // The one-source guarantee: an assertOnlyFlags call labelled "workflow X" must reference
-  // verbSpecOptions("X") — never a fresh inline set, which would let help and enforcement drift —
-  // and the table must carry non-null options for X. Checked in BOTH directions.
+  // verbSpecOptions("X") — never a fresh inline set, which would let help and enforcement drift.
+  //
+  // Two lessons are encoded in HOW this asserts. First, sites are found by their LABEL (the one
+  // part every call carries) rather than by a regex over the options expression: an earlier
+  // version captured the expression with [^,]+, which cannot span an inline set's own commas, so
+  // a violating site became INVISIBLE to the test instead of failing it — fault injection proved
+  // that a re-introduced inline set survived. Second, the expected site count is DERIVED from the
+  // spec table (verbs with non-null options) rather than a hand-written floor, which absorbed the
+  // loss of one site without complaint. A count-floor fails on whoever weakens it next; a derived
+  // equality fails on the change that weakens it.
   const source = sourceText();
-  const enforcementSites = [...source.matchAll(/assertOnlyFlags\([^,]+,\s*([^,]+),\s*"workflow ([a-z-]+)"\)/g)]
-    .filter(([, , verb]) => verbSpecs().has(verb));
-  assert.ok(enforcementSites.length >= 17, `expected at least 17 enforcement sites, found ${enforcementSites.length}`);
-  for (const [, optionsExpr, verb] of enforcementSites) {
-    assert.match(
-      optionsExpr.trim(),
-      new RegExp(`^verbSpecOptions\\("${verb}"\\)$`),
-      `workflow ${verb} enforces options from '${optionsExpr.trim()}' instead of the spec table — help and enforcement can now disagree`,
+  const labelled = [...source.matchAll(/assertOnlyFlags\((.*?),\s*"workflow ([a-z-]+)"\)/g)];
+  const enforcedVerbs = new Set(labelled.map(([, , verb]) => verb).filter((verb) => verbSpecs().has(verb)));
+  const declaredVerbs = new Set([...verbSpecs().entries()].filter(([, spec]) => spec.options !== null).map(([verb]) => verb));
+  assert.deepEqual(
+    [...enforcedVerbs].sort(),
+    [...declaredVerbs].sort(),
+    "the set of verbs with enforcement sites must equal the set of verbs the table declares options for",
+  );
+  for (const [, argsExpr, verb] of labelled) {
+    if (!verbSpecs().has(verb)) continue;
+    assert.ok(
+      argsExpr.includes(`verbSpecOptions("${verb}")`),
+      `workflow ${verb} enforcement does not reference verbSpecOptions("${verb}") — help and enforcement can now disagree`,
+    );
+    assert.ok(
+      !argsExpr.includes("new Set("),
+      `workflow ${verb} enforcement carries an inline option set — the table is no longer the single source`,
     );
     const spec = verbSpecs().get(verb);
     assert.ok(spec?.options instanceof Set && spec.options.size > 0, `spec table has no options for enforced verb ${verb}`);
