@@ -9091,6 +9091,22 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
     return 0;
   }
   if (!p.command) die("workflow-sidecar command is required");
+  // `<command> --help` on any dispatched subcommand: print that command's description line and
+  // return BEFORE any lock, artifact-dir resolution, or preflight — a documentation request must
+  // never begin a verb's action (#1290, #1292; the top-level `help` interception above already
+  // states the same rule for the command position). Presence is the signal: the local parser
+  // records a trailing `--help` in `flags` but `--help <word>` in `opts`, and both are requests
+  // for help, not inputs. Commands with their own tailored `--help` handling (they render richer
+  // usage than a description line) are excluded so their existing output is unchanged.
+  const SELF_HANDLED_HELP = new Set(["reconcile-preflight", "verify-hold", "takeover-preflight"]);
+  if (!SELF_HANDLED_HELP.has(p.command)
+    && (p.flags.has("help") || "help" in p.opts || p.positional.includes("-h"))) {
+    const described = COMMAND_DESCRIPTIONS.find(([name]) => name === p.command);
+    if (described) {
+      console.log(`Usage: workflow-sidecar ${described[0]} [options]\n\n${described[1]}\n\nOption-level help for sidecar commands arrives with kontourai/flow-agents#1294; run \`workflow-sidecar help\` for the command list.`);
+      return 0;
+    }
+  }
   if (p.command === "ensure-session") preflightEnsureSession(p);
   // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
   // surface (see the `action === "whoami"` branch inside `liveness()` above) — it must never
