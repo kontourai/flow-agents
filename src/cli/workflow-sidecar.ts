@@ -2564,34 +2564,66 @@ function enforceEnsureSessionOwnership(
     if (!candidate || typeof candidate.effective_state !== "string" || !validStates.has(candidate.effective_state)) {
       die(`ensure-session --effective-state-json must contain an .effective object with a recognized effective_state (held|reclaimable|human-held|free); got ${JSON.stringify(candidate ? candidate.effective_state : candidate)}`);
     }
-    if (workItemRef && (parsed.role !== "AssignmentStatus"
-      || parsed.provider !== assignmentProviderKind
-      || assignment?.provider !== assignmentProviderKind
-      || assignment?.subject_id !== slug
-      || (assignmentProviderKind === "github" && (assignment?.has_claim_label !== true
-        || typeof assignment?.assignee !== "string"
-        || assignment.assignee.length === 0
-        || typeof assignment?.claim_comment_author !== "string"
-        || assignment.claim_comment_author.length === 0
-        || assignment.claim_comment_author !== assignment.assignee
-        || assignment?.repository?.owner !== githubWorkItem?.owner
-        || assignment?.repository?.name !== githubWorkItem?.name
-        || assignment?.issue_number !== githubWorkItem?.issueNumber))
-      || record?.role !== "AssignmentClaimRecord"
-      || record?.status !== "claimed"
-      || record?.subject_id !== slug
-      || record?.work_item_ref !== workItemRef
-      || (assignmentProviderKind !== "local-file" && (typeof record?.branch !== "string" || record.branch.length === 0))
-      || record?.actor_key !== resolution.branchActorKey
-      || !record.actor || typeof record.actor !== "object"
-      || record.actor.runtime !== resolution.actorStruct.runtime
-      || record.actor.session_id !== resolution.actorStruct.session_id
-      || record.actor.host !== resolution.actorStruct.host
-      || (record.actor.human ?? null) !== (resolution.actorStruct.human ?? null)
-      || candidate.effective_state !== "held"
-      || candidate.reason !== "self_is_holder"
-      || candidate.holder?.actor !== resolution.branchActorKey)) {
-      die("ensure-session --effective-state-json must be the configured provider's AssignmentStatus for this Work Item, with a claimed record and self_is_holder actor matching the current runtime");
+    if (workItemRef) {
+      // Every condition of the ownership check, individually named. This was one ~15-clause
+      // boolean whose die() named none of them, so a caller with a single wrong field got the
+      // same sentence as a caller with nothing — and the only way to find the failing clause
+      // was to re-derive the conjunction from source (measured live: ~15 invocations burned on
+      // exactly that; #1293). Same per-condition-breakdown shape as trust-reconcile's
+      // delivery/DECLARED reporting, which is this repo's proven form for "a conjunction
+      // failed: say which conjunct".
+      //
+      // The leading sentence of the die() below is byte-identical to the single message this
+      // block emitted before the breakdown existed; the per-clause list is appended after it,
+      // so any external consumer matching on the original prefix keeps matching. Every
+      // interpolated value goes through sanitize() (id-like tier) per the cap rationale above.
+      const clauseFailures: string[] = [];
+      const clause = (ok: boolean, name: string, detail?: string): void => {
+        if (!ok) clauseFailures.push(detail ? `${name} (${detail})` : name);
+      };
+      // Canonical actor keys are runtime:session:host[:human] and can reach ~260 characters —
+      // far past the 64-char id-like tier. Truncating an expected-vs-got pair at 64 can render
+      // two UNEQUAL keys as byte-identical text, making the diagnostic assert a mismatch while
+      // displaying none (independent review reproduced exactly that with 109/110-char keys).
+      // 260 matches the actor-key display cap already used by assignment-provider.ts.
+      const sanitizeActorKey = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 260);
+      clause(parsed.role === "AssignmentStatus", "role must be \"AssignmentStatus\"", `got ${sanitize(parsed.role)}`);
+      clause(parsed.provider === assignmentProviderKind, "top-level provider must match --assignment-provider", `got ${sanitize(parsed.provider)}, expected ${sanitize(assignmentProviderKind)}`);
+      clause(assignment?.provider === assignmentProviderKind, "assignment.provider must match --assignment-provider", `got ${sanitize(assignment?.provider)}`);
+      clause(assignment?.subject_id === slug, "assignment.subject_id must equal the session slug", `got ${sanitize(assignment?.subject_id)}, expected ${sanitize(slug)}`);
+      if (assignmentProviderKind === "github") {
+        clause(assignment?.has_claim_label === true, "assignment.has_claim_label must be true");
+        clause(typeof assignment?.assignee === "string" && assignment.assignee.length > 0, "assignment.assignee must be a non-empty string");
+        clause(typeof assignment?.claim_comment_author === "string" && assignment.claim_comment_author.length > 0, "assignment.claim_comment_author must be a non-empty string");
+        clause(assignment?.claim_comment_author === assignment?.assignee, "claim_comment_author must equal assignee", `got ${sanitize(assignment?.claim_comment_author)} vs ${sanitize(assignment?.assignee)}`);
+        clause(assignment?.repository?.owner === githubWorkItem?.owner, "assignment.repository.owner must match the Work Item repo", `got ${sanitize(assignment?.repository?.owner)}, expected ${sanitize(githubWorkItem?.owner)}; assignment-provider status derives repository from --repo <owner>/<name>`);
+        clause(assignment?.repository?.name === githubWorkItem?.name, "assignment.repository.name must match the Work Item repo", `got ${sanitize(assignment?.repository?.name)}, expected ${sanitize(githubWorkItem?.name)}; assignment-provider status derives repository from --repo <owner>/<name>`);
+        clause(assignment?.issue_number === githubWorkItem?.issueNumber, "assignment.issue_number must match the Work Item", `got ${sanitize(assignment?.issue_number)}, expected ${sanitize(githubWorkItem?.issueNumber)}`);
+      }
+      clause(record?.role === "AssignmentClaimRecord", "record.role must be \"AssignmentClaimRecord\"", `got ${sanitize(record?.role)}`);
+      clause(record?.status === "claimed", "record.status must be \"claimed\"", `got ${sanitize(record?.status)}`);
+      clause(record?.subject_id === slug, "record.subject_id must equal the session slug", `got ${sanitize(record?.subject_id)}`);
+      clause(record?.work_item_ref === workItemRef, "record.work_item_ref must equal --work-item", `got ${sanitize(record?.work_item_ref)}, expected ${sanitize(workItemRef)}`);
+      if (assignmentProviderKind !== "local-file") {
+        clause(typeof record?.branch === "string" && record.branch.length > 0, "record.branch must be a non-empty branch name for a provider-backed claim");
+      }
+      clause(record?.actor_key === resolution.branchActorKey, "record.actor_key must equal the runtime's canonical actor key", `got ${sanitizeActorKey(record?.actor_key)}, expected ${sanitizeActorKey(resolution.branchActorKey)}`);
+      const recordActor = record && typeof record.actor === "object" && record.actor !== null ? record.actor as AnyObj : undefined;
+      clause(recordActor !== undefined, "record.actor must be an object");
+      if (recordActor) {
+        clause(recordActor.runtime === resolution.actorStruct.runtime, "record.actor.runtime must match the current runtime", `got ${sanitize(recordActor.runtime)}, expected ${sanitize(resolution.actorStruct.runtime)}`);
+        clause(recordActor.session_id === resolution.actorStruct.session_id, "record.actor.session_id must match the current session", `got ${sanitize(recordActor.session_id)}`);
+        clause(recordActor.host === resolution.actorStruct.host, "record.actor.host must match the current host", `got ${sanitize(recordActor.host)}, expected ${sanitize(resolution.actorStruct.host)}`);
+        clause((recordActor.human ?? null) === (resolution.actorStruct.human ?? null), "record.actor.human must match the current runtime's human identity", `got ${sanitizeActorKey(recordActor.human ?? null)}, expected ${sanitizeActorKey(resolution.actorStruct.human ?? null)}`);
+      }
+      clause(candidate.effective_state === "held", "effective.effective_state must be \"held\"", `got ${sanitize(candidate.effective_state)}`);
+      clause(candidate.reason === "self_is_holder", "effective.reason must be \"self_is_holder\"", `got ${sanitize(candidate.reason)}`);
+      clause(candidate.holder?.actor === resolution.branchActorKey, "effective.holder.actor must equal the runtime's canonical actor key", `got ${sanitizeActorKey(candidate.holder?.actor)}`);
+      if (clauseFailures.length > 0) {
+        die("ensure-session --effective-state-json must be the configured provider's AssignmentStatus for this Work Item, with a claimed record and self_is_holder actor matching the current runtime"
+          + `; ${clauseFailures.length} failing condition(s): `
+          + clauseFailures.map((failure, index) => `[${index + 1}] ${failure}`).join("; "));
+      }
     }
     if (assignmentProviderKind !== "local-file" && workItemRef) {
       providerBranch = record!.branch as string;
