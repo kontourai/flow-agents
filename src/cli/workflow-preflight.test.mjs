@@ -104,6 +104,27 @@ test("shape-flow issues stay scoped to shape and never render the provider templ
   }
 });
 
+test("shape flow still enforces the provider-combination rules (fail-open guard)", () => {
+  // Review round 1's most serious finding: an early return for shape skipped the provider checks
+  // that always applied to it, silently ACCEPTING a previously-refused invocation — and the
+  // downstream ownership guard logs 'not evaluated' and proceeds, so the widening was fail-open.
+  // The fault injection that restores the early return must fail HERE, not in production.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  try {
+    const githubNoState = runStart(["--flow", "builder.shape", "--task-slug", "shape-x", "--assignment-provider", "github"], dir);
+    assert.notEqual(githubNoState.status, 0, "shape + github provider without effective state must be refused");
+    assert.match(githubNoState.stderr, /requires --effective-state-json/);
+
+    const state = path.join(dir, "es.json");
+    fs.writeFileSync(state, "{}");
+    const localWithState = runStart(["--flow", "builder.shape", "--task-slug", "shape-x", "--effective-state-json", state], dir);
+    assert.notEqual(localWithState.status, 0, "shape + effective state under the local default must be refused");
+    assert.match(localWithState.stderr, /only valid for a non-local assignment provider/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("gate-evidence refusals name every unmet requirement and the expected artifact path in one pass", () => {
   // A real synthetic session (git repo + ensure-session with a bound flow), then a passing gate
   // claim with NO evidence: run 1 paid three sequential refusals (refs -> producer artifact ->
