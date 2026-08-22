@@ -3536,8 +3536,19 @@ function expectedGateProducer(flowId: string, stepId: string, expectationId: str
 }
 
 function validateReviewableGateEvidence(dir: string, slug: string, refs: AnyObj[], producer: GateProducer, label: string): void {
-  if (refs.length === 0) die(`${label} requires at least one reviewable --evidence-ref-json`);
   const projectRoot = canonicalProjectRootForSession(dir);
+  // Expanded once: both the match loop and the refusal text need the same concrete paths. Run 1
+  // of the instrumented dogfood (#1293) paid one full refusal per gate to learn each producer
+  // artifact's filename, although the binding was always derivable — so the refusal now NAMES the
+  // expected path(s), and every issue this function can diagnose is reported in ONE pass rather
+  // than as a ladder. Derived from the kit's own bindings via GateProducer; no artifact name is
+  // hardcoded here (core stays kit-generic).
+  const expandedPatterns = producer.artifactPatterns.map((pattern) => {
+    const expanded = pattern.replaceAll("<slug>", slug);
+    return expanded.startsWith(".kontourai/") ? expanded : `.kontourai/flow-agents/${slug}/${expanded}`;
+  });
+  const issues: string[] = [];
+  if (refs.length === 0) issues.push(`${label} requires at least one reviewable --evidence-ref-json`);
   let declaredProducerArtifactFound = producer.artifactPatterns.length === 0;
   let localOrCommandEvidenceFound = false;
   for (const [index, ref] of refs.entries()) {
@@ -3547,17 +3558,19 @@ function validateReviewableGateEvidence(dir: string, slug: string, refs: AnyObj[
     ref.file = relative;
     localOrCommandEvidenceFound = true;
     if (ref.kind === "artifact" && producer.artifactPatterns.length > 0) {
-      const patterns = producer.artifactPatterns.map((pattern) => {
-        const expanded = pattern.replaceAll("<slug>", slug);
-        return expanded.startsWith(".kontourai/") ? expanded : `.kontourai/flow-agents/${slug}/${expanded}`;
-      });
-      if (patterns.some((pattern) => globMatches(pattern, relative))) declaredProducerArtifactFound = true;
+      if (expandedPatterns.some((pattern) => globMatches(pattern, relative))) declaredProducerArtifactFound = true;
     }
   }
-  if (!declaredProducerArtifactFound) die(`${label} requires a declared durable artifact from producer ${producer.id}`);
-  if (producer.selfProducedTrustSlices.length > 0 && !localOrCommandEvidenceFound) {
-    die(`${label} is produced as trust.bundle fragment(s) ${producer.selfProducedTrustSlices.join(", ")} and requires local artifact or command evidence; external-only references cannot prove a passing claim`);
+  if (!declaredProducerArtifactFound) {
+    // Prefix-preserving extension of the original sentence (no consumer greps it — swept), now
+    // naming the concrete expected path(s) so the fix is one write, not one more refusal.
+    issues.push(`${label} requires a declared durable artifact from producer ${producer.id}; expected artifact matching: ${expandedPatterns.join(" or ")} — write it, then reference it with an evidence-ref-json of kind "artifact"`);
   }
+  if (producer.selfProducedTrustSlices.length > 0 && !localOrCommandEvidenceFound) {
+    issues.push(`${label} is produced as trust.bundle fragment(s) ${producer.selfProducedTrustSlices.join(", ")} and requires local artifact or command evidence; external-only references cannot prove a passing claim`);
+  }
+  if (issues.length === 1) die(issues[0]!);
+  if (issues.length > 1) die(`${label}: ${issues.length} evidence requirement(s) unmet:\n${issues.map((issue, index) => `  [${index + 1}] ${issue}`).join("\n")}`);
 }
 
 function commandFromEvidenceRef(ref: AnyObj): string {

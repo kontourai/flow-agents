@@ -17,7 +17,7 @@ import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthorization, invokeExternalLifecycleAuthority, invokeExternalSealedLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion, verifySealedExecutionCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
-import { workItemSlug } from "../lib/work-item-identity.js";
+import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
@@ -1199,6 +1199,104 @@ function loadContinuationTurnAuthority(): {
   };
 }
 
+/**
+ * One-pass contract report for `workflow start` (#1293).
+ *
+ * The prior shape validated one input per invocation, so a cold-start agent discovered the
+ * contract as a ladder of single-fact refusals — measured live at 4+ invocations before the first
+ * run ever started, each costing a full context read. This collects every diagnosable issue and,
+ * when TWO OR MORE exist, reports them together with a complete runnable template naming the
+ * producing verbs for derived inputs.
+ *
+ * When exactly ONE issue exists, the original single-fact error is thrown byte-identical: those
+ * strings are matched by consumers (test_public_workflow_cli.sh substring-matches two of them),
+ * and a lone missing input needs no template. The combined report embeds each original line
+ * verbatim for the same reason — a consumer matching the substring keeps matching.
+ *
+ * Honesty rule for the template: provider-conditional requirements are labelled with their
+ * condition. The template never claims completeness for providers not yet selected — a
+ * complete-looking template that is incomplete would recreate the defect this exists to fix.
+ */
+function collectStartContractIssues(input: {
+  flow: string; workItem: string | undefined; taskSlug: string | undefined;
+  assignmentProvider: string | undefined; effectiveStateJson: string | undefined;
+}): string[] {
+  const issues: string[] = [];
+  const { flow, workItem, taskSlug, assignmentProvider, effectiveStateJson } = input;
+  if (flow === "builder.shape") {
+    if (!taskSlug || !isSafeSlug(taskSlug)) issues.push("workflow start --flow builder.shape requires an explicit safe --task-slug");
+    if (workItem) issues.push("workflow start --flow builder.shape creates a local Work Item; omit --work-item");
+    // NO early return: the provider-combination checks below applied to shape before this
+    // collector existed, and skipping them silently ACCEPTED previously-refused invocations
+    // (review round 1, HIGH: shape + --assignment-provider github without effective state
+    // passed preflight and downstream treated the ownership guard as "not evaluated" —
+    // a fail-open widening, exactly the class a preflight must never introduce).
+  }
+  if (flow !== "builder.shape" && !workItem) issues.push("workflow start requires --work-item <provider-ref>");
+  if (flow !== "builder.shape" && workItem && !workItem.startsWith("local:")) {
+    // An unparseable reference must be a NUMBERED issue, not silently downgraded to template
+    // placeholders (round-2 review: owner/repo#0 reported only the provider issues while the
+    // actually-broken input went unmentioned).
+    // The invalid-ref issue carries the CANONICAL parser's own diagnostic rather than a locally
+    // authored paraphrase: the shared-reference-corpus conformance test (provider-bootstrap.test)
+    // asserts bootstrap, start, and the sidecar judge refs with ONE vocabulary, and a third
+    // spelling of the contract is exactly the divergence it exists to block (it caught this
+    // line's first version in CI).
+    try { workItemSlug(workItem); } catch (error) { issues.push(`workflow start --work-item ${JSON.stringify(workItem)} is not a valid provider reference: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  if (workItem && !workItem.startsWith("local:") && !assignmentProvider) {
+    issues.push("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
+  }
+  if (assignmentProvider !== "local-file" && !effectiveStateJson) {
+    issues.push(`workflow start requires --effective-state-json <path> for assignment provider ${assignmentProvider ?? "<kind>"}`);
+  }
+  if (assignmentProvider === "local-file" && effectiveStateJson) {
+    issues.push("workflow start --effective-state-json is only valid for a non-local assignment provider");
+  }
+  return issues;
+}
+
+function startContractReport(issues: string[], workItem: string | undefined): string {
+  // The template is github-scoped, so the caller's ref is bound into it ONLY when the real
+  // GitHub identity parser accepts it. Anything else — including refs the provider-neutral
+  // parser accepts (round-2 review: `jira:ABC` rendered as `gh issue view jira:ABC --repo
+  // jira:AB`) — gets placeholders. The report path never throws while formatting a diagnostic
+  // (round 1: a loose regex let workItemSlug() throw mid-report for owner/repo#0).
+  let ownerRepo = "<owner>/<repo>"; let issueNumber = "<n>"; let ref = "<owner>/<repo>#<n>"; let slug = "<owner>-<repo>-<n>";
+  if (workItem) {
+    try {
+      const identity = githubWorkItemIdentity(workItem);
+      ownerRepo = `${identity.owner}/${identity.name}`; issueNumber = String(identity.issueNumber);
+      ref = workItem; slug = workItemSlug(workItem);
+    } catch { /* placeholders stand; the collector numbers the invalid ref as its own issue */ }
+  }
+  return [
+    `workflow start: ${issues.length} missing or invalid input(s):`,
+    ...issues.map((issue, index) => `  [${index + 1}] ${issue}`),
+    "",
+    "Known-required inputs and their producing chain for --assignment-provider github (steps",
+    "marked (github) apply only to that provider; other providers differ, and requirements the",
+    "runtime discovers at execution are not listed here):",
+    "  0. hold the assignment: the status in step 2 must show a CLAIMED record for your identity.",
+    "     If unclaimed, claim first: flow-agents assignment-provider render-claim --provider github \\",
+    `       --subject-id ${slug} --actor-json <file: {runtime,session_id,host}> \\`,
+    "       --input-json <file: {repo:{owner,name}, issue_number, work_item_ref, actor_key, branch, artifact_dir[, ttl_seconds]}>",
+    "     then execute its gh_commands verbatim, under the SAME identity you will run start with   (github)",
+    `  1. gh issue view ${issueNumber} --repo ${ownerRepo} --json number,state,assignees,labels,comments,body,url > issue.json`,
+    `  2. flow-agents assignment-provider status --provider github --repo ${ownerRepo} \\`,
+    `       --issue-json issue.json --subject-id ${slug} \\`,
+    "       --liveness-events-json <path-or-'[]'-file> \\",
+    "       --self-actor \"$(flow-agents-workflow-sidecar liveness whoami --json | jq -r .actor)\" > effective-state.json   (github)",
+    `  3. author .kontourai/flow-agents/${slug}/${slug}--pull-work.md naming ${ref} and the selection rationale (a file you write, not a command)`,
+    `  4. flow-agents workflow start --work-item ${ref} --assignment-provider github --effective-state-json effective-state.json   (github)`,
+    "",
+    "Identity rule: run start under the SAME canonical identity the claim was created with — if",
+    "the claim was made under FLOW_AGENTS_ACTOR, set the identical value; if it was made with",
+    "ambient session identity, do not set FLOW_AGENTS_ACTOR. The checkout must be on the claim's",
+    "branch.",
+  ].join("\n");
+}
+
 async function start(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("start"), "workflow start");
@@ -1207,22 +1305,17 @@ async function start(argv: string[]): Promise<number> {
   const workItem = flagString(parsed.flags, "work-item");
   const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
   const taskSlug = flagString(parsed.flags, "task-slug");
-  if (flow === "builder.shape") {
-    if (!taskSlug || !isSafeSlug(taskSlug)) throw new Error("workflow start --flow builder.shape requires an explicit safe --task-slug");
-    if (workItem) throw new Error("workflow start --flow builder.shape creates a local Work Item; omit --work-item");
-  } else if (!workItem) {
-    throw new Error("workflow start requires --work-item <provider-ref>");
-  }
   const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
   const effectiveStateJson = flagString(parsed.flags, "effective-state-json");
-  if (flow === "builder.build" && workItem && !workItem.startsWith("local:") && !assignmentProvider) {
-    throw new Error("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
-  }
-  if (assignmentProvider !== "local-file" && !effectiveStateJson) {
-    throw new Error(`workflow start requires --effective-state-json <path> for assignment provider ${assignmentProvider}`);
-  }
-  if (assignmentProvider === "local-file" && effectiveStateJson) {
-    throw new Error("workflow start --effective-state-json is only valid for a non-local assignment provider");
+  const contractIssues = collectStartContractIssues({ flow, workItem, taskSlug, assignmentProvider, effectiveStateJson });
+  if (contractIssues.length === 1) throw new Error(contractIssues[0]);
+  if (contractIssues.length > 1) {
+    // The provider chain template only makes sense for the provider-backed build flow; rendering
+    // it under shape-flow issues would hand the caller a recipe for a different contract (caught
+    // by this slice's own test before it shipped).
+    throw new Error(flow === "builder.shape"
+      ? [`workflow start: ${contractIssues.length} missing or invalid input(s):`, ...contractIssues.map((issue, index) => `  [${index + 1}] ${issue}`)].join("\n")
+      : startContractReport(contractIssues, workItem));
   }
   if (workItem?.startsWith("local:")) {
     const localSlug = workItem.slice("local:".length);
