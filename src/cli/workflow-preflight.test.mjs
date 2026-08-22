@@ -104,6 +104,43 @@ test("shape-flow issues stay scoped to shape and never render the provider templ
   }
 });
 
+test("an invalid work-item is a NUMBERED issue and non-github refs never bind the template", () => {
+  // Round-2 review: owner/repo#0 (rejected by the real parser) fell back to placeholders while
+  // the numbered list omitted the actually-broken input; and jira:ABC (valid provider-neutral,
+  // not github) rendered nonsense runnable text `gh issue view jira:ABC --repo jira:AB`.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  try {
+    const invalid = runStart(["--work-item", "acme/widgets#0"], dir);
+    assert.notEqual(invalid.status, 0);
+    assert.match(invalid.stderr, /is not a valid provider reference/);
+    assert.match(invalid.stderr, /gh issue view <n> --repo <owner>\/<repo>/);
+
+    const jira = runStart(["--work-item", "jira:ABC-1#2"], dir);
+    assert.notEqual(jira.status, 0);
+    assert.ok(!/gh issue view jira/.test(jira.stderr), "a non-github ref must never be bound into gh commands");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the template's derivations are real: whoami field and claim-verb contract", () => {
+  // Round-2 review: the template piped `jq -r .actor_key` but whoami emits {actor, source} — a
+  // runnable-looking command yielding null. The template's own derivations must name fields that
+  // exist and flags the named verb actually requires.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  try {
+    const result = runStart([], dir);
+    assert.match(result.stderr, /jq -r \.actor\b/);
+    assert.ok(!/actor_key\)/.test(result.stderr), "whoami derivation must not reference a nonexistent field");
+    assert.match(result.stderr, /render-claim --provider github/);
+    assert.match(result.stderr, /--subject-id/);
+    assert.match(result.stderr, /--input-json/);
+    assert.match(result.stderr, /--actor-json/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("shape flow still enforces the provider-combination rules (fail-open guard)", () => {
   // Review round 1's most serious finding: an early return for shape skipped the provider checks
   // that always applied to it, silently ACCEPTING a previously-refused invocation — and the

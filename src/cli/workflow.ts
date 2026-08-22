@@ -17,7 +17,7 @@ import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthorization, invokeExternalLifecycleAuthority, invokeExternalSealedLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion, verifySealedExecutionCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
-import { workItemSlug } from "../lib/work-item-identity.js";
+import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
@@ -1233,6 +1233,12 @@ function collectStartContractIssues(input: {
     // a fail-open widening, exactly the class a preflight must never introduce).
   }
   if (flow !== "builder.shape" && !workItem) issues.push("workflow start requires --work-item <provider-ref>");
+  if (flow !== "builder.shape" && workItem && !workItem.startsWith("local:")) {
+    // An unparseable reference must be a NUMBERED issue, not silently downgraded to template
+    // placeholders (round-2 review: owner/repo#0 reported only the provider issues while the
+    // actually-broken input went unmentioned).
+    try { workItemSlug(workItem); } catch { issues.push(`workflow start --work-item ${JSON.stringify(workItem)} is not a valid provider reference (expected owner/repo#<positive-issue-number> or local:<slug>)`); }
+  }
   if (workItem && !workItem.startsWith("local:") && !assignmentProvider) {
     issues.push("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
   }
@@ -1246,15 +1252,19 @@ function collectStartContractIssues(input: {
 }
 
 function startContractReport(issues: string[], workItem: string | undefined): string {
-  // Render the caller's ref only when the REAL parser accepts it; the report path must never
-  // throw a different error class while formatting a diagnostic (review round 1, MEDIUM: a loose
-  // regex let workItemSlug() throw mid-report for refs like owner/repo#0).
-  let ref = "<owner>/<repo>#<n>"; let slug = "<owner>-<repo>-<n>";
+  // The template is github-scoped, so the caller's ref is bound into it ONLY when the real
+  // GitHub identity parser accepts it. Anything else — including refs the provider-neutral
+  // parser accepts (round-2 review: `jira:ABC` rendered as `gh issue view jira:ABC --repo
+  // jira:AB`) — gets placeholders. The report path never throws while formatting a diagnostic
+  // (round 1: a loose regex let workItemSlug() throw mid-report for owner/repo#0).
+  let ownerRepo = "<owner>/<repo>"; let issueNumber = "<n>"; let ref = "<owner>/<repo>#<n>"; let slug = "<owner>-<repo>-<n>";
   if (workItem) {
-    try { slug = workItemSlug(workItem); ref = workItem; } catch { /* placeholders stand */ }
+    try {
+      const identity = githubWorkItemIdentity(workItem);
+      ownerRepo = `${identity.owner}/${identity.name}`; issueNumber = String(identity.issueNumber);
+      ref = workItem; slug = workItemSlug(workItem);
+    } catch { /* placeholders stand; the collector numbers the invalid ref as its own issue */ }
   }
-  const ownerRepo = ref === "<owner>/<repo>#<n>" ? "<owner>/<repo>" : ref.slice(0, ref.indexOf("#"));
-  const issueNumber = ref === "<owner>/<repo>#<n>" ? "<n>" : ref.slice(ref.indexOf("#") + 1);
   return [
     `workflow start: ${issues.length} missing or invalid input(s):`,
     ...issues.map((issue, index) => `  [${index + 1}] ${issue}`),
@@ -1262,14 +1272,16 @@ function startContractReport(issues: string[], workItem: string | undefined): st
     "Known-required inputs and their producing chain for --assignment-provider github (steps",
     "marked (github) apply only to that provider; other providers differ, and requirements the",
     "runtime discovers at execution are not listed here):",
-    "  0. hold the assignment: the status in step 2 must show a CLAIMED record for your identity —",
-    `     if unclaimed, claim first via flow-agents assignment-provider render-claim (then execute`,
-    "     its gh_commands) under the SAME identity you will run start with   (github)",
+    "  0. hold the assignment: the status in step 2 must show a CLAIMED record for your identity.",
+    "     If unclaimed, claim first: flow-agents assignment-provider render-claim --provider github \\",
+    `       --subject-id ${slug} --actor-json <file: {runtime,session_id,host}> \\`,
+    "       --input-json <file: {repo:{owner,name}, issue_number, actor_key, branch, artifact_dir, ttl_seconds}>",
+    "     then execute its gh_commands verbatim, under the SAME identity you will run start with   (github)",
     `  1. gh issue view ${issueNumber} --repo ${ownerRepo} --json number,state,assignees,labels,comments,body,url > issue.json`,
     `  2. flow-agents assignment-provider status --provider github --repo ${ownerRepo} \\`,
     `       --issue-json issue.json --subject-id ${slug} \\`,
     "       --liveness-events-json <path-or-'[]'-file> \\",
-    "       --self-actor \"$(flow-agents-workflow-sidecar liveness whoami --json | jq -r .actor_key)\" > effective-state.json   (github)",
+    "       --self-actor \"$(flow-agents-workflow-sidecar liveness whoami --json | jq -r .actor)\" > effective-state.json   (github)",
     `  3. author .kontourai/flow-agents/${slug}/${slug}--pull-work.md naming ${ref} and the selection rationale (a file you write, not a command)`,
     `  4. flow-agents workflow start --work-item ${ref} --assignment-provider github --effective-state-json effective-state.json   (github)`,
     "",
