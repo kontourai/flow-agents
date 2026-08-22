@@ -115,7 +115,7 @@ test("an invalid work-item is a NUMBERED issue and non-github refs never bind th
     assert.match(invalid.stderr, /is not a valid provider reference/);
     assert.match(invalid.stderr, /gh issue view <n> --repo <owner>\/<repo>/);
 
-    const jira = runStart(["--work-item", "jira:ABC-1#2"], dir);
+    const jira = runStart(["--work-item", "jira:ABC-1"], dir);
     assert.notEqual(jira.status, 0);
     assert.ok(!/gh issue view jira/.test(jira.stderr), "a non-github ref must never be bound into gh commands");
   } finally {
@@ -135,6 +135,11 @@ test("the template's derivations are real: whoami field and claim-verb contract"
     assert.match(result.stderr, /render-claim --provider github/);
     assert.match(result.stderr, /--subject-id/);
     assert.match(result.stderr, /--input-json/);
+    // round-3 review: the field list must include work_item_ref — render-claim rejects every
+    // payload without it (run 1 paid a refusal to learn exactly this) — and ttl_seconds is
+    // optional, so it must be bracketed rather than presented as required.
+    assert.match(result.stderr, /work_item_ref/);
+    assert.match(result.stderr, /\[, ttl_seconds\]/);
     assert.match(result.stderr, /--actor-json/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

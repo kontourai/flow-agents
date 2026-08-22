@@ -1237,7 +1237,7 @@ function collectStartContractIssues(input: {
     // An unparseable reference must be a NUMBERED issue, not silently downgraded to template
     // placeholders (round-2 review: owner/repo#0 reported only the provider issues while the
     // actually-broken input went unmentioned).
-    try { workItemSlug(workItem); } catch { issues.push(`workflow start --work-item ${JSON.stringify(workItem)} is not a valid provider reference (expected owner/repo#<positive-issue-number> or local:<slug>)`); }
+    try { workItemSlug(workItem); } catch { issues.push(`workflow start --work-item ${JSON.stringify(workItem)} is not a valid provider reference (expected owner/repo#<positive-issue-number>, provider:<id>, or local:<slug>)`); }
   }
   if (workItem && !workItem.startsWith("local:") && !assignmentProvider) {
     issues.push("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
@@ -1275,7 +1275,7 @@ function startContractReport(issues: string[], workItem: string | undefined): st
     "  0. hold the assignment: the status in step 2 must show a CLAIMED record for your identity.",
     "     If unclaimed, claim first: flow-agents assignment-provider render-claim --provider github \\",
     `       --subject-id ${slug} --actor-json <file: {runtime,session_id,host}> \\`,
-    "       --input-json <file: {repo:{owner,name}, issue_number, actor_key, branch, artifact_dir, ttl_seconds}>",
+    "       --input-json <file: {repo:{owner,name}, issue_number, work_item_ref, actor_key, branch, artifact_dir[, ttl_seconds]}>",
     "     then execute its gh_commands verbatim, under the SAME identity you will run start with   (github)",
     `  1. gh issue view ${issueNumber} --repo ${ownerRepo} --json number,state,assignees,labels,comments,body,url > issue.json`,
     `  2. flow-agents assignment-provider status --provider github --repo ${ownerRepo} \\`,
