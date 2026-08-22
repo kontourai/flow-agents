@@ -1783,6 +1783,17 @@ function parseArgs(argv: string[]): { command: string; positional: string[]; opt
   }
   return { command: command ?? "", positional, opts, flags };
 }
+/**
+ * Every form an agent uses to ask for help: bare trailing `--help` (lands in flags), valued
+ * `--help <word>` (the local parser consumes the word as a value, landing in opts — still a help
+ * request, never an input), and positional `-h` (single-dash never parses as a flag). The three
+ * tailored-help commands and the generic dispatcher intercept share THIS predicate; round 1 of
+ * independent review found the tailored handlers checking only `flags.has("help")`, which left
+ * `verify-hold -h` executing domain logic on a documentation request.
+ */
+function wantsSidecarHelp(p: ReturnType<typeof parseArgs>): boolean {
+  return p.flags.has("help") || "help" in p.opts || p.positional.includes("-h");
+}
 function opt(parsed: ReturnType<typeof parseArgs>, key: string, fallback = ""): string { return parsed.opts[key]?.at(-1) ?? fallback; }
 function opts(parsed: ReturnType<typeof parseArgs>, key: string): string[] { return parsed.opts[key] ?? []; }
 
@@ -2553,34 +2564,66 @@ function enforceEnsureSessionOwnership(
     if (!candidate || typeof candidate.effective_state !== "string" || !validStates.has(candidate.effective_state)) {
       die(`ensure-session --effective-state-json must contain an .effective object with a recognized effective_state (held|reclaimable|human-held|free); got ${JSON.stringify(candidate ? candidate.effective_state : candidate)}`);
     }
-    if (workItemRef && (parsed.role !== "AssignmentStatus"
-      || parsed.provider !== assignmentProviderKind
-      || assignment?.provider !== assignmentProviderKind
-      || assignment?.subject_id !== slug
-      || (assignmentProviderKind === "github" && (assignment?.has_claim_label !== true
-        || typeof assignment?.assignee !== "string"
-        || assignment.assignee.length === 0
-        || typeof assignment?.claim_comment_author !== "string"
-        || assignment.claim_comment_author.length === 0
-        || assignment.claim_comment_author !== assignment.assignee
-        || assignment?.repository?.owner !== githubWorkItem?.owner
-        || assignment?.repository?.name !== githubWorkItem?.name
-        || assignment?.issue_number !== githubWorkItem?.issueNumber))
-      || record?.role !== "AssignmentClaimRecord"
-      || record?.status !== "claimed"
-      || record?.subject_id !== slug
-      || record?.work_item_ref !== workItemRef
-      || (assignmentProviderKind !== "local-file" && (typeof record?.branch !== "string" || record.branch.length === 0))
-      || record?.actor_key !== resolution.branchActorKey
-      || !record.actor || typeof record.actor !== "object"
-      || record.actor.runtime !== resolution.actorStruct.runtime
-      || record.actor.session_id !== resolution.actorStruct.session_id
-      || record.actor.host !== resolution.actorStruct.host
-      || (record.actor.human ?? null) !== (resolution.actorStruct.human ?? null)
-      || candidate.effective_state !== "held"
-      || candidate.reason !== "self_is_holder"
-      || candidate.holder?.actor !== resolution.branchActorKey)) {
-      die("ensure-session --effective-state-json must be the configured provider's AssignmentStatus for this Work Item, with a claimed record and self_is_holder actor matching the current runtime");
+    if (workItemRef) {
+      // Every condition of the ownership check, individually named. This was one ~15-clause
+      // boolean whose die() named none of them, so a caller with a single wrong field got the
+      // same sentence as a caller with nothing — and the only way to find the failing clause
+      // was to re-derive the conjunction from source (measured live: ~15 invocations burned on
+      // exactly that; #1293). Same per-condition-breakdown shape as trust-reconcile's
+      // delivery/DECLARED reporting, which is this repo's proven form for "a conjunction
+      // failed: say which conjunct".
+      //
+      // The leading sentence of the die() below is byte-identical to the single message this
+      // block emitted before the breakdown existed; the per-clause list is appended after it,
+      // so any external consumer matching on the original prefix keeps matching. Every
+      // interpolated value goes through sanitize() (id-like tier) per the cap rationale above.
+      const clauseFailures: string[] = [];
+      const clause = (ok: boolean, name: string, detail?: string): void => {
+        if (!ok) clauseFailures.push(detail ? `${name} (${detail})` : name);
+      };
+      // Canonical actor keys are runtime:session:host[:human] and can reach ~260 characters —
+      // far past the 64-char id-like tier. Truncating an expected-vs-got pair at 64 can render
+      // two UNEQUAL keys as byte-identical text, making the diagnostic assert a mismatch while
+      // displaying none (independent review reproduced exactly that with 109/110-char keys).
+      // 260 matches the actor-key display cap already used by assignment-provider.ts.
+      const sanitizeActorKey = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 260);
+      clause(parsed.role === "AssignmentStatus", "role must be \"AssignmentStatus\"", `got ${sanitize(parsed.role)}`);
+      clause(parsed.provider === assignmentProviderKind, "top-level provider must match --assignment-provider", `got ${sanitize(parsed.provider)}, expected ${sanitize(assignmentProviderKind)}`);
+      clause(assignment?.provider === assignmentProviderKind, "assignment.provider must match --assignment-provider", `got ${sanitize(assignment?.provider)}`);
+      clause(assignment?.subject_id === slug, "assignment.subject_id must equal the session slug", `got ${sanitize(assignment?.subject_id)}, expected ${sanitize(slug)}`);
+      if (assignmentProviderKind === "github") {
+        clause(assignment?.has_claim_label === true, "assignment.has_claim_label must be true");
+        clause(typeof assignment?.assignee === "string" && assignment.assignee.length > 0, "assignment.assignee must be a non-empty string");
+        clause(typeof assignment?.claim_comment_author === "string" && assignment.claim_comment_author.length > 0, "assignment.claim_comment_author must be a non-empty string");
+        clause(assignment?.claim_comment_author === assignment?.assignee, "claim_comment_author must equal assignee", `got ${sanitize(assignment?.claim_comment_author)} vs ${sanitize(assignment?.assignee)}`);
+        clause(assignment?.repository?.owner === githubWorkItem?.owner, "assignment.repository.owner must match the Work Item repo", `got ${sanitize(assignment?.repository?.owner)}, expected ${sanitize(githubWorkItem?.owner)}; assignment-provider status derives repository from --repo <owner>/<name>`);
+        clause(assignment?.repository?.name === githubWorkItem?.name, "assignment.repository.name must match the Work Item repo", `got ${sanitize(assignment?.repository?.name)}, expected ${sanitize(githubWorkItem?.name)}; assignment-provider status derives repository from --repo <owner>/<name>`);
+        clause(assignment?.issue_number === githubWorkItem?.issueNumber, "assignment.issue_number must match the Work Item", `got ${sanitize(assignment?.issue_number)}, expected ${sanitize(githubWorkItem?.issueNumber)}`);
+      }
+      clause(record?.role === "AssignmentClaimRecord", "record.role must be \"AssignmentClaimRecord\"", `got ${sanitize(record?.role)}`);
+      clause(record?.status === "claimed", "record.status must be \"claimed\"", `got ${sanitize(record?.status)}`);
+      clause(record?.subject_id === slug, "record.subject_id must equal the session slug", `got ${sanitize(record?.subject_id)}`);
+      clause(record?.work_item_ref === workItemRef, "record.work_item_ref must equal --work-item", `got ${sanitize(record?.work_item_ref)}, expected ${sanitize(workItemRef)}`);
+      if (assignmentProviderKind !== "local-file") {
+        clause(typeof record?.branch === "string" && record.branch.length > 0, "record.branch must be a non-empty branch name for a provider-backed claim");
+      }
+      clause(record?.actor_key === resolution.branchActorKey, "record.actor_key must equal the runtime's canonical actor key", `got ${sanitizeActorKey(record?.actor_key)}, expected ${sanitizeActorKey(resolution.branchActorKey)}`);
+      const recordActor = record && typeof record.actor === "object" && record.actor !== null ? record.actor as AnyObj : undefined;
+      clause(recordActor !== undefined, "record.actor must be an object");
+      if (recordActor) {
+        clause(recordActor.runtime === resolution.actorStruct.runtime, "record.actor.runtime must match the current runtime", `got ${sanitize(recordActor.runtime)}, expected ${sanitize(resolution.actorStruct.runtime)}`);
+        clause(recordActor.session_id === resolution.actorStruct.session_id, "record.actor.session_id must match the current session", `got ${sanitize(recordActor.session_id)}`);
+        clause(recordActor.host === resolution.actorStruct.host, "record.actor.host must match the current host", `got ${sanitize(recordActor.host)}, expected ${sanitize(resolution.actorStruct.host)}`);
+        clause((recordActor.human ?? null) === (resolution.actorStruct.human ?? null), "record.actor.human must match the current runtime's human identity", `got ${sanitizeActorKey(recordActor.human ?? null)}, expected ${sanitizeActorKey(resolution.actorStruct.human ?? null)}`);
+      }
+      clause(candidate.effective_state === "held", "effective.effective_state must be \"held\"", `got ${sanitize(candidate.effective_state)}`);
+      clause(candidate.reason === "self_is_holder", "effective.reason must be \"self_is_holder\"", `got ${sanitize(candidate.reason)}`);
+      clause(candidate.holder?.actor === resolution.branchActorKey, "effective.holder.actor must equal the runtime's canonical actor key", `got ${sanitizeActorKey(candidate.holder?.actor)}`);
+      if (clauseFailures.length > 0) {
+        die("ensure-session --effective-state-json must be the configured provider's AssignmentStatus for this Work Item, with a claimed record and self_is_holder actor matching the current runtime"
+          + `; ${clauseFailures.length} failing condition(s): `
+          + clauseFailures.map((failure, index) => `[${index + 1}] ${failure}`).join("; "));
+      }
     }
     if (assignmentProviderKind !== "local-file" && workItemRef) {
       providerBranch = record!.branch as string;
@@ -3493,8 +3536,19 @@ function expectedGateProducer(flowId: string, stepId: string, expectationId: str
 }
 
 function validateReviewableGateEvidence(dir: string, slug: string, refs: AnyObj[], producer: GateProducer, label: string): void {
-  if (refs.length === 0) die(`${label} requires at least one reviewable --evidence-ref-json`);
   const projectRoot = canonicalProjectRootForSession(dir);
+  // Expanded once: both the match loop and the refusal text need the same concrete paths. Run 1
+  // of the instrumented dogfood (#1293) paid one full refusal per gate to learn each producer
+  // artifact's filename, although the binding was always derivable — so the refusal now NAMES the
+  // expected path(s), and every issue this function can diagnose is reported in ONE pass rather
+  // than as a ladder. Derived from the kit's own bindings via GateProducer; no artifact name is
+  // hardcoded here (core stays kit-generic).
+  const expandedPatterns = producer.artifactPatterns.map((pattern) => {
+    const expanded = pattern.replaceAll("<slug>", slug);
+    return expanded.startsWith(".kontourai/") ? expanded : `.kontourai/flow-agents/${slug}/${expanded}`;
+  });
+  const issues: string[] = [];
+  if (refs.length === 0) issues.push(`${label} requires at least one reviewable --evidence-ref-json`);
   let declaredProducerArtifactFound = producer.artifactPatterns.length === 0;
   let localOrCommandEvidenceFound = false;
   for (const [index, ref] of refs.entries()) {
@@ -3504,17 +3558,19 @@ function validateReviewableGateEvidence(dir: string, slug: string, refs: AnyObj[
     ref.file = relative;
     localOrCommandEvidenceFound = true;
     if (ref.kind === "artifact" && producer.artifactPatterns.length > 0) {
-      const patterns = producer.artifactPatterns.map((pattern) => {
-        const expanded = pattern.replaceAll("<slug>", slug);
-        return expanded.startsWith(".kontourai/") ? expanded : `.kontourai/flow-agents/${slug}/${expanded}`;
-      });
-      if (patterns.some((pattern) => globMatches(pattern, relative))) declaredProducerArtifactFound = true;
+      if (expandedPatterns.some((pattern) => globMatches(pattern, relative))) declaredProducerArtifactFound = true;
     }
   }
-  if (!declaredProducerArtifactFound) die(`${label} requires a declared durable artifact from producer ${producer.id}`);
-  if (producer.selfProducedTrustSlices.length > 0 && !localOrCommandEvidenceFound) {
-    die(`${label} is produced as trust.bundle fragment(s) ${producer.selfProducedTrustSlices.join(", ")} and requires local artifact or command evidence; external-only references cannot prove a passing claim`);
+  if (!declaredProducerArtifactFound) {
+    // Prefix-preserving extension of the original sentence (no consumer greps it — swept), now
+    // naming the concrete expected path(s) so the fix is one write, not one more refusal.
+    issues.push(`${label} requires a declared durable artifact from producer ${producer.id}; expected artifact matching: ${expandedPatterns.join(" or ")} — write it, then reference it with an evidence-ref-json of kind "artifact"`);
   }
+  if (producer.selfProducedTrustSlices.length > 0 && !localOrCommandEvidenceFound) {
+    issues.push(`${label} is produced as trust.bundle fragment(s) ${producer.selfProducedTrustSlices.join(", ")} and requires local artifact or command evidence; external-only references cannot prove a passing claim`);
+  }
+  if (issues.length === 1) die(issues[0]!);
+  if (issues.length > 1) die(`${label}: ${issues.length} evidence requirement(s) unmet:\n${issues.map((issue, index) => `  [${index + 1}] ${issue}`).join("\n")}`);
 }
 
 function commandFromEvidenceRef(ref: AnyObj): string {
@@ -6981,8 +7037,8 @@ export function runReconcilePreflight(
  * Usage: workflow-sidecar reconcile-preflight <artifactDir> [--manifest <json>] [--repo-root <path>]
  */
 async function reconcilePreflightCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  if (p.flags.has("help") || (!p.positional[0] && !p.opts["help"])) {
-    if (p.flags.has("help")) {
+  if (wantsSidecarHelp(p) || (!p.positional[0] && !p.opts["help"])) {
+    if (wantsSidecarHelp(p)) {
       console.log("Usage: workflow-sidecar reconcile-preflight <artifactDir> [--manifest <json>] [--repo-root <path>]");
       console.log("Local, pre-push shape-only check of <artifactDir>/trust.bundle. Exits 0 with no issues, 1 otherwise.");
       return 0;
@@ -7284,8 +7340,8 @@ export function runVerifyHold(
  *   [--assignment-provider <kind>] [--effective-state-json <path|->]
  */
 async function verifyHoldCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  if (p.flags.has("help") || (!p.positional[0] && !p.opts["help"])) {
-    if (p.flags.has("help")) {
+  if (wantsSidecarHelp(p) || (!p.positional[0] && !p.opts["help"])) {
+    if (wantsSidecarHelp(p)) {
       console.log("Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>] [--assignment-provider <kind>] [--effective-state-json <path|->]");
       console.log("Checks whether the calling actor is the fresh, non-superseded holder of <artifactDir>'s subject. Exits 0 if ok (including not_evaluated), 1 otherwise.");
       return 0;
@@ -7439,7 +7495,7 @@ export function runTakeoverPreflight(
 }
 
 async function takeoverPreflightCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  if (p.flags.has("help")) {
+  if (wantsSidecarHelp(p)) {
     console.log("Usage: workflow-sidecar takeover-preflight <artifactDir> [--actor <key>] [--now <iso>] [--grace-seconds <n>]");
     console.log("Renders the ADR 0021 §5 takeover protocol (grace-then-supersede | back-off | claim | ask-first | proceed) for a reclaimable candidate. Read-only; never mutates.");
     return 0;
@@ -9091,6 +9147,21 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
     return 0;
   }
   if (!p.command) die("workflow-sidecar command is required");
+  // `<command> --help` on any dispatched subcommand: print that command's description line and
+  // return BEFORE any lock, artifact-dir resolution, or preflight — a documentation request must
+  // never begin a verb's action (#1290, #1292; the top-level `help` interception above already
+  // states the same rule for the command position). Presence is the signal: the local parser
+  // records a trailing `--help` in `flags` but `--help <word>` in `opts`, and both are requests
+  // for help, not inputs. Commands with their own tailored `--help` handling (they render richer
+  // usage than a description line) are excluded so their existing output is unchanged.
+  const SELF_HANDLED_HELP = new Set(["reconcile-preflight", "verify-hold", "takeover-preflight"]);
+  if (!SELF_HANDLED_HELP.has(p.command) && wantsSidecarHelp(p)) {
+    const described = COMMAND_DESCRIPTIONS.find(([name]) => name === p.command);
+    if (described) {
+      console.log(`Usage: workflow-sidecar ${described[0]} [options]\n\n${described[1]}\n\nOption-level help for sidecar commands arrives with kontourai/flow-agents#1294; run \`workflow-sidecar help\` for the command list.`);
+      return 0;
+    }
+  }
   if (p.command === "ensure-session") preflightEnsureSession(p);
   // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
   // surface (see the `action === "whoami"` branch inside `liveness()` above) — it must never

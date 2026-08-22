@@ -642,10 +642,29 @@ for variant in actor work_item effective forged_author newer_forged_author missi
     fail "workflow start accepted mismatched GitHub $variant ownership evidence"
   elif [[ ! -f "$NEGATIVE_ROOT/$GITHUB_SLUG/state.json" ]]; then
     pass "workflow start rejects mismatched GitHub $variant evidence before session mutation"
+    # The refusal must NAME its failing clauses (#1293). Before this existed, every one of these
+    # eleven distinct defects produced the same single sentence, and the only way to find the
+    # failing clause was to re-derive a ~15-clause conjunction from source.
+    if grep -q "failing condition(s):" "$TMPDIR_EVAL/github-negative-$variant.err"; then
+      pass "the $variant refusal names its failing condition(s) instead of one opaque sentence"
+    else
+      fail "the $variant refusal does not name any failing condition: $(head -c 300 "$TMPDIR_EVAL/github-negative-$variant.err")"
+    fi
   else
     fail "workflow start rejected mismatched GitHub $variant evidence only after mutating session state"
   fi
 done
+
+# One variant checked by name, not just by presence: the wrong_repository refusal must point at
+# the repository clause and carry the producing-verb hint, because "assignment.repository is null
+# since --repo was never passed to assignment-provider status" is the exact live trap this
+# diagnostic exists to kill.
+if grep -q "assignment.repository" "$TMPDIR_EVAL/github-negative-wrong_repository.err" \
+  && grep -q -- "--repo <owner>/<name>" "$TMPDIR_EVAL/github-negative-wrong_repository.err"; then
+  pass "the wrong_repository refusal names the repository clause and its producing verb"
+else
+  fail "the wrong_repository refusal does not name the repository clause with its producing-verb hint: $(head -c 300 "$TMPDIR_EVAL/github-negative-wrong_repository.err")"
+fi
 
 if [[ "$errors" -eq 0 ]]; then
   echo "test_ensure_session_ownership_guard: all checks passed."
