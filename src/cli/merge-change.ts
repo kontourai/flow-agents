@@ -284,19 +284,29 @@ function validateCanonicalRunDefinitions(inspected: Awaited<ReturnType<typeof in
   return { startDefinition: validatedStartDefinition, effectiveDefinition };
 }
 
+/**
+ * #1300: this was a deep-equal against a two-key route-map literal, which refused the kit's own
+ * shipped three-key map (implementation_defect -> execute) — a second component re-encoding a
+ * contract the flow definition owns. The semantic requirement is that stale evidence is
+ * refreshable: the refresh entries must be PRESENT with the bounded blocking policy; additional
+ * repair routes never weaken that and are the flow definition's business. Exported so a test can
+ * bind this predicate to the REAL resolved builder.build definition — zero coverage on the
+ * literal is exactly how #1300 shipped.
+ */
+export function evidenceRefreshRoutesSatisfied(gate: Record<string, unknown>): boolean {
+  const routes = gate.on_route_back;
+  if (!routes || typeof routes !== "object" || Array.isArray(routes)) return false;
+  return (routes as Record<string, unknown>).missing_evidence === "verify"
+    && (routes as Record<string, unknown>).default === "verify"
+    && isDeepStrictEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" });
+}
+
 function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, definitions: CanonicalRunDefinitions): void {
   const manifestFile = path.join(inspected.run.dir, "evidence", "manifest.json");
   const definition = definitions.effectiveDefinition;
   const gates = record(definition.gates, "canonical Flow definition gates");
   const gate = record(gates["builder.publish-learn:merge-ready-ci-gate"], "canonical merge-ready-ci gate");
-  // #1300: this was a deep-equal against a two-key route-map literal, which refused the kit's own
-  // shipped three-key map (implementation_defect -> execute) — a second component re-encoding a
-  // contract the flow definition owns. The semantic requirement is that stale evidence is
-  // refreshable: the refresh entries must be PRESENT with bounded blocking policy; additional
-  // repair routes never weaken that and are the flow definition's business.
-  const routes = record(gate.on_route_back, "canonical merge-ready-ci gate route-back map");
-  if (routes.missing_evidence !== "verify" || routes.default !== "verify"
-    || !isDeepStrictEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" })) {
+  if (!evidenceRefreshRoutesSatisfied(gate)) {
     throw new Error("merge-change requires the completed run to semantically adopt merge-ready-ci evidence refresh (missing_evidence/default -> verify with bounded block policy)");
   }
   assertEvidenceRefreshVerificationProvenance(inspected.run.state, inspected.run.definitionId, inspected.run.definitionVersion, inspected.run.definitionDigest);

@@ -316,3 +316,22 @@ test("public merge-change request accepts effective amended bindings while retai
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("evidence-refresh route predicate accepts the SHIPPED builder definition and refuses missing refresh entries (#1300)", async () => {
+  // #1300 shipped because the old two-key deep-equal literal had zero coverage against the real
+  // kit map — a fixture-vs-reality gap. Bind the predicate to the RESOLVED effective definition
+  // so any future divergence between merge-change and the flow definition reds here first.
+  const { evidenceRefreshRoutesSatisfied } = await import("../../build/src/cli/merge-change.js");
+  const repoRoot = path.resolve(import.meta.dirname, "../..");
+  const definition = resolveEffectiveFlowDefinition("builder.build", repoRoot);
+  assert.ok(definition);
+  const shipped = definition.gates["builder.publish-learn:merge-ready-ci-gate"];
+  assert.equal(evidenceRefreshRoutesSatisfied(shipped), true, "the kit's own shipped three-key map must satisfy merge-change");
+  // additional repair routes are the flow definition's business
+  assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), true);
+  // but the refresh entries themselves are non-negotiable
+  assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "execute" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "warn" } }), false);
+  assert.equal(evidenceRefreshRoutesSatisfied({}), false);
+});
