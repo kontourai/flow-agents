@@ -1237,7 +1237,12 @@ function collectStartContractIssues(input: {
     // An unparseable reference must be a NUMBERED issue, not silently downgraded to template
     // placeholders (round-2 review: owner/repo#0 reported only the provider issues while the
     // actually-broken input went unmentioned).
-    try { workItemSlug(workItem); } catch { issues.push(`workflow start --work-item ${JSON.stringify(workItem)} is not a valid provider reference (expected owner/repo#<positive-issue-number>, provider:<id>, or local:<slug>)`); }
+    // The invalid-ref issue carries the CANONICAL parser's own diagnostic rather than a locally
+    // authored paraphrase: the shared-reference-corpus conformance test (provider-bootstrap.test)
+    // asserts bootstrap, start, and the sidecar judge refs with ONE vocabulary, and a third
+    // spelling of the contract is exactly the divergence it exists to block (it caught this
+    // line's first version in CI).
+    try { workItemSlug(workItem); } catch (error) { issues.push(`workflow start --work-item ${JSON.stringify(workItem)} is not a valid provider reference: ${error instanceof Error ? error.message : String(error)}`); }
   }
   if (workItem && !workItem.startsWith("local:") && !assignmentProvider) {
     issues.push("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");

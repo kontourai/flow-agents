@@ -113,6 +113,8 @@ test("an invalid work-item is a NUMBERED issue and non-github refs never bind th
     const invalid = runStart(["--work-item", "acme/widgets#0"], dir);
     assert.notEqual(invalid.status, 0);
     assert.match(invalid.stderr, /is not a valid provider reference/);
+    // the diagnostic must be the canonical parser's, not a local paraphrase (corpus conformance)
+    assert.match(invalid.stderr, /positive-numeric-id|safe integer range/);
     assert.match(invalid.stderr, /gh issue view <n> --repo <owner>\/<repo>/);
 
     const jira = runStart(["--work-item", "jira:ABC-1"], dir);
