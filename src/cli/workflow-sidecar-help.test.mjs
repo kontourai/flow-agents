@@ -182,6 +182,17 @@ test("unadopted commands keep current behaviour verbatim: unknown flags still pa
   assert.match(result.stdout, /kontourai-flow-agents-1294/);
 });
 
+test("publish-delivery keeps its disabled-stub redirect for every invocation, flags included (review round 1)", () => {
+  // The repo's own evals call `publish-delivery <dir> --repo-root <dir>` and assert the redirect
+  // message. Adopting an allowlist for a hard-die stub shadowed that message with an unknown-flag
+  // refusal — this pins the stub's contract: the redirect always wins, whatever flags arrive.
+  const scratch = tempDir("workflow-sidecar-publish-delivery-");
+  const result = runSidecar(["publish-delivery", scratch, "--repo-root", scratch], { cwd: scratch });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /publish-delivery is disabled; use `flow-agents workflow publish-delivery`/);
+  assert.doesNotMatch(result.stderr, /unknown flag/);
+});
+
 test("--key=value parses identically in the shared parser and the sidecar parser (parity, #1294)", async () => {
   const { parseArgs: sharedParse } = await import(path.resolve(__dirname, "../../build/src/lib/args.js"));
   const { parseSidecarArgs } = await import(path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js"));

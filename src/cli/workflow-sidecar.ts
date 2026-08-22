@@ -9136,8 +9136,11 @@ const COMMAND_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> = [
 const COMMAND_OPTION_SPECS: ReadonlyMap<string, readonly string[]> = new Map([
   ["claim", ["json"]],
   ["seal-checkpoint", ["task-slug", "timestamp"]],
-  // publish-delivery is a hard-die stub pointing at the public verb; it takes no options.
-  ["publish-delivery", []],
+  // publish-delivery is deliberately NOT adopted: it is a hard-die stub whose one job is printing
+  // the "disabled; use `flow-agents workflow publish-delivery`" redirect for EVERY invocation.
+  // An allowlist in front of it shadows that message with an unknown-flag refusal for real
+  // callers (the repo's own evals invoke it with --repo-root) — round 1 of independent review
+  // reproduced exactly that. Enforcement is meaningless for a command that dies unconditionally.
   ["reconcile-preflight", ["manifest", "repo-root"]],
   ["verify-hold", ["actor", "now", "assignment-provider", "effective-state-json", "repo-root"]],
   ["takeover-preflight", ["actor", "now", "grace-seconds"]],
