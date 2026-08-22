@@ -15,6 +15,7 @@ import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { buildOwnedFilesManifest, writeOwnedFilesManifest } from "../lib/owned-files-manifest.js";
+import { bundleInstallExcludeRel, computeInstallPlan, formatDryRunLines, formatInstallSummaryLines, rsyncExcludeLiteral } from "./install-plan.js";
 import { copyDirMerge } from "../lib/fs.js";
 import {
   catalogKitIds as registryCatalogKitIds,
@@ -147,6 +148,11 @@ Options:
   --provider-repo-path PATH
   --provider-project NUMBER
   --online               Verify GitHub auth/project and create the claim label if missing.
+  --dry-run              List every path the install would create, replace, or preserve;
+                         write nothing. Implies --headless. Project (bundle) installs only.
+  --force                Overwrite existing destination files that are NOT known
+                         bundle-owned content. Without --force such files are always
+                         preserved and reported. Project (bundle) installs only.
   --yes, --headless
   --uninstall             Remove a prior install instead of installing.
                           Usage: flow-agents init --uninstall --runtime claude-code [--global | --dest PATH]
@@ -682,11 +688,16 @@ function configureWorkflowProviders(options: InitOptions): number {
 
 export function ensureBundle(runtime: Runtime): string {
   const bundle = path.join(root, "dist", runtimeBundles[runtime]);
-  if (!fs.existsSync(path.join(bundle, "install.sh"))) {
+  const installSh = path.join(bundle, "install.sh");
+  // Rebuild when the installer is missing OR predates the overwrite guard's
+  // `--exclude-path` option (kontourai/flow-agents#1288): a stale dist/ from an older
+  // build would reject the exclude flags init now passes, so the guard requires a
+  // generator-current installer, not merely an existing one.
+  if (!fs.existsSync(installSh) || !fs.readFileSync(installSh, "utf8").includes("--exclude-path")) {
     const rc = buildBundles();
     if (rc !== 0) throw new Error(`bundle build failed with exit code ${rc}`);
   }
-  if (!fs.existsSync(path.join(bundle, "install.sh"))) throw new Error(`bundle installer missing: ${bundle}`);
+  if (!fs.existsSync(installSh)) throw new Error(`bundle installer missing: ${bundle}`);
   return bundle;
 }
 
@@ -701,20 +712,10 @@ export function ensureBundle(runtime: Runtime): string {
 const GLOBAL_INSTALL_PROJECT_DIR_PREFIX = /root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g;
 const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$root\//g;
 
-// Relative paths install.sh's claude-code rsync excludes (see installScript()'s
-// claude-code call: capability.instructionPath="CLAUDE.md", the three provider-settings
-// files, and mergeConfig.configRelPath=".claude/settings.json"). Mirrored here (not
-// imported -- installScript() builds a bash script, not a reusable list) so the
-// project-scoped ownership manifest walk skips exactly what the rsync itself never
-// unconditionally overwrites/owns as a plain file.
-const CLAUDE_CODE_PROJECT_INSTALL_EXCLUDE_REL = new Set([
-  "AGENTS.md",
-  "CLAUDE.md",
-  "context/settings/backlog-provider-settings.json",
-  "context/settings/assignment-provider-settings.json",
-  "context/settings/change-provider-settings.json",
-  ".claude/settings.json",
-]);
+// Relative paths install.sh's rsync excludes per runtime now live in install-plan.ts
+// (bundleInstallExcludeRel), shared between the overwrite guard's plan walk and the
+// project-scoped ownership manifest walk so both skip exactly what the rsync itself
+// never unconditionally overwrites/owns as a plain file.
 
 type InstallMergeConflict = {
   path: string;
@@ -1018,8 +1019,11 @@ async function installOpencodeGlobalAssets(dest: string, bundle: string, runtime
   }
 }
 
-function installBundle(bundle: string, options: InitOptions): number {
+function installBundle(bundle: string, options: InitOptions, preservedRelPaths: string[] = []): number {
   const args = ["install.sh", options.dest];
+  // Overwrite guard (#1288): paths the install plan classified as "preserve" are
+  // excluded from install.sh's rsync entirely, so the copy never touches them.
+  for (const rel of preservedRelPaths) args.push("--exclude-path", rsyncExcludeLiteral(rel));
   for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
   if (options.consoleUrl) args.push("--console-url", options.consoleUrl);
   if (options.consoleEndpoint) args.push("--console-endpoint", options.consoleEndpoint);
@@ -1163,11 +1167,24 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     usage();
     return 0;
   }
-  const headless = argv.includes("--yes") || argv.includes("--headless") || !process.stdin.isTTY;
+  // Read as bare argv membership (not parseArgs) so a following positional can never be
+  // swallowed as the flag's value: `--dry-run` and `--force` are always boolean.
+  const dryRun = argv.includes("--dry-run");
+  const force = argv.includes("--force");
+  // --dry-run implies headless: a preview must never prompt.
+  const headless = argv.includes("--yes") || argv.includes("--headless") || dryRun || !process.stdin.isTTY;
   try {
     const options = headless
       ? { ...headlessOptions(argv), runtimeAutoDetected: headlessRuntimeAutoDetected(argv) }
       : await interactiveOptions(argv);
+    // The overwrite guard covers project (bundle rsync) installs -- the destructive path
+    // #1288 reported. The --global branches are config merges with their own additive
+    // semantics; refusing the flags there is honest, silently ignoring them is not.
+    // (pi --global is exempt: it warns and falls through to a workspace install.)
+    if ((dryRun || force) && options.global && options.runtime !== "pi") {
+      console.error("flow-agents init: --dry-run and --force are not supported with --global (global installs merge configs; they do not rsync a bundle)");
+      return 2;
+    }
     // Scope-collision check for claude-code: Claude Code merges user-level
     // (~/.claude/settings.json) and project-level (.claude/settings.json) settings
     // and runs ALL matching hooks from both files. If a user-level settings file
@@ -1370,7 +1387,17 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       );
     }
     const bundle = ensureBundle(options.runtime);
-    const installed = installBundle(bundle, options);
+    // Overwrite guard (#1288): classify every bundle path against the destination BEFORE
+    // any write. Existing files that are not known bundle-owned content (no hash match
+    // against the incoming bundle or the previous install's ownership manifest) are
+    // preserved -- excluded from the rsync -- unless --force explicitly overrides.
+    const excludeRel = bundleInstallExcludeRel(options.runtime);
+    const plan = computeInstallPlan({ bundleDir: bundle, dest: options.dest, excludeRel, force });
+    if (dryRun) {
+      for (const line of formatDryRunLines(plan, options.runtime, options.dest)) console.log(line);
+      return 0;
+    }
+    const installed = installBundle(bundle, options, plan.preserved);
     if (installed !== 0) return installed;
     // Project bundle installers create the merge snapshot themselves. Forward it
     // into the richer outer record instead of erasing provenance on return.
@@ -1383,22 +1410,29 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     } catch { /* runtimes without a merged config have no snapshot */ }
     ensureArtifactResidueIgnored(options.dest);
     writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? [], configPremerge, [], installedValues);
-    // Project-scoped claude-code: write the same ownership manifest the --global path writes
-    // (see above), so `flow-agents init --uninstall --runtime claude-code <dest>` has a
-    // manifest-backed removal path here too, not just for --global. The source tree is the
-    // whole bundle root, matching exactly what install.sh's rsync copies into dest (see
-    // CLAUDE_CODE_PROJECT_INSTALL_EXCLUDE_REL / installScript()'s claude-code exclude list) --
-    // settings.json is excluded because it is merge-owned, not file-owned.
-    if (options.runtime === "claude-code" && !options.global) {
+    // Every project bundle install writes the ownership manifest `flow-agents init
+    // --uninstall` (claude-code) reads back -- and, since #1288, the manifest is ALSO what
+    // lets the NEXT init recognize stale bundle-owned files and update them without
+    // --force (the upgrade path). Historically only claude-code wrote it; base/codex/
+    // opencode/kiro/pi project installs write it too now, or their upgrade path would
+    // preserve every stale bundle file forever. The source tree is the whole bundle root,
+    // matching exactly what install.sh's rsync copies into dest (bundleInstallExcludeRel
+    // mirrors installScript()'s exclude list -- merge-owned configs are merge-owned, not
+    // file-owned). Paths the guard PRESERVED are excluded too: their on-disk content is
+    // the user's, and recording it as bundle-owned would authorize the next init to
+    // overwrite it.
+    {
       const projectManifestPkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
       writeOwnedFilesManifest(options.dest, buildOwnedFilesManifest({
         mappings: [{ sourceDir: bundle, destDir: options.dest, prefix: "" }],
-        excludeRel: CLAUDE_CODE_PROJECT_INSTALL_EXCLUDE_REL,
-        runtime: "claude-code",
+        excludeRel: new Set([...excludeRel, ...plan.preserved]),
+        runtime: options.runtime,
         version: projectManifestPkgJson["version"] ?? "0.0.0",
         global: false,
       }));
     }
+    // #1288: a silent no-op and a 191-file overwrite must not both read as a bare success.
+    for (const line of formatInstallSummaryLines(plan, options.dest)) console.log(line);
     const activated = await activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or
