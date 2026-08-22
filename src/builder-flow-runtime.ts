@@ -76,6 +76,13 @@ export interface BuilderFlowSessionInput {
     identity: { dev: number; ino: number };
     expectedSha256: string;
   };
+  /**
+   * Per-call authority verifier for the #1302 freshness turnstile's delivery-tolerant fallback.
+   * Defaults to the production lifecycle-authority verifier; hermetic tests pass their test
+   * authority's verifier here. Deliberately NOT module state — see
+   * gateAdvancementFreshnessSatisfied.
+   */
+  gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier;
 }
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
@@ -499,7 +506,7 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
     runId: context.slug,
   });
   assertRunSubjectBinding(run, subject);
-  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead, input.stagedTrustBundle);
+  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead, input.stagedTrustBundle, undefined, input.gateFreshnessCompletionVerifier);
 }
 
 /**
@@ -1074,6 +1081,7 @@ async function syncAndProject(
   expectedRunHead?: string,
   stagedTrustBundle?: BuilderFlowSessionInput["stagedTrustBundle"],
   binding?: BuilderActorBinding,
+  gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
   assertLifecycleResolutionAttestation(context, run);
@@ -1115,6 +1123,7 @@ async function syncAndProject(
         context.sessionDir,
         manifestEvidence(run.manifest),
         run.config,
+        gateFreshnessCompletionVerifier,
       );
       if (gateEvidence) {
         const alreadyAttached = manifestEvidence(run.manifest).some((entry) =>
@@ -1154,7 +1163,7 @@ async function syncAndProject(
   if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)
     // #1302: the no-new-evidence path is the route-back RE-ENTRY trap — a prior visit's passing
     // claim must not advance a requires_current_verification gate while verification is stale.
-    && gateAdvancementFreshnessSatisfied(gates[0]!, context.sessionDir, context.projectRoot)) {
+    && gateAdvancementFreshnessSatisfied(gates[0]!, context.sessionDir, context.projectRoot, gateFreshnessCompletionVerifier)) {
     run = await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   }
   assertLifecycleResolutionAttestation(context, run);
@@ -1565,15 +1574,21 @@ function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: s
  * failure shape. The cursor simply stays at the declaring gate until verification is re-recorded;
  * the public wrapper's pre-flight check remains for a loud early refusal.
  */
-type GateFreshnessCompletionVerifier = typeof verifyProvisionalDeliveryLifecycleCompletion;
-let gateFreshnessCompletionVerifierForTest: GateFreshnessCompletionVerifier | null = null;
-/** Test-only: hermetic fixtures sign provisional completions with a test authority the pinned
- * production key rejects. Mirrors the delivery path's own authority injection seam. */
-export function setGateFreshnessCompletionVerifierForTest(verifier: GateFreshnessCompletionVerifier | null): void {
-  gateFreshnessCompletionVerifierForTest = verifier;
-}
+export type GateFreshnessCompletionVerifier = typeof verifyProvisionalDeliveryLifecycleCompletion;
 
-export function gateAdvancementFreshnessSatisfied(gate: unknown, sessionDir: string, projectRoot: string): boolean {
+/**
+ * The verifier is a PER-CALL parameter defaulting to production, never module state: an earlier
+ * revision exposed a setter here and independent review correctly flagged it as a shipped ambient
+ * enforcement kill-switch (one preloaded call would disable the authority boundary for every
+ * subsequent synchronization in the process). Hermetic tests pass their authority's verifier
+ * explicitly at their own call sites, mirroring how the delivery path itself injects authority.
+ */
+export function gateAdvancementFreshnessSatisfied(
+  gate: unknown,
+  sessionDir: string,
+  projectRoot: string,
+  verifyCompletion: GateFreshnessCompletionVerifier = verifyProvisionalDeliveryLifecycleCompletion,
+): boolean {
   if (!isRecord(gate) || gate.requires_current_verification !== true) return true;
   try {
     // The delivery-tolerant form, not the raw predicate: provisional publication necessarily
@@ -1582,8 +1597,7 @@ export function gateAdvancementFreshnessSatisfied(gate: unknown, sessionDir: str
     // exactly one hash-bound provisional delivery atop the verified base and nothing else —
     // the same narrow continuation terminal publication uses.
     assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(
-      sessionDir, projectRoot, path.basename(sessionDir),
-      gateFreshnessCompletionVerifierForTest ?? verifyProvisionalDeliveryLifecycleCompletion,
+      sessionDir, projectRoot, path.basename(sessionDir), verifyCompletion,
     );
     return true;
   } catch (error) {
@@ -1601,6 +1615,7 @@ export async function bundleGateEvidence(
   sessionDir: string,
   manifest: AnyRecord[],
   config: JsonObject,
+  gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier,
 ): Promise<{ failed: boolean; routeReason: string | null; expectationIds: string[]; visitEnteredAt: number } | null> {
   if (!isRecord(bundle) || !Array.isArray(bundle.claims)) return null;
   const expectations = expectationsForGate(gate, config) as FlowExpectation[];
@@ -1690,7 +1705,7 @@ export async function bundleGateEvidence(
   // #1302: a PASSING claim at a gate declaring requires_current_verification may not advance the
   // cursor while review/verification evidence is stale — evaluated here, at the seam, after any
   // evidence commands ran. Failing claims stay attachable: they are the route-back repair path.
-  if (!failed && !gateAdvancementFreshnessSatisfied(gate, sessionDir, projectRoot)) return null;
+  if (!failed && !gateAdvancementFreshnessSatisfied(gate, sessionDir, projectRoot, gateFreshnessCompletionVerifier)) return null;
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
     const selector = expectation.bundle_claim;
     return selector.claimType === claim.claimType && (!selector.subjectType || selector.subjectType === claim.subjectType);

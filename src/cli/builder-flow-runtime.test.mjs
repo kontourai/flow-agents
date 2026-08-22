@@ -756,18 +756,16 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   // #1302: the merge-ready-ci turnstile reads the CURRENT bundle for verification evidence, and
   // these fixtures REPLACE the bundle on every write (real writers accumulate) — carry the
   // repaired verification entries alongside the CI claim or the predicate finds no critique.
-  // The turnstile authenticates the recorded provisional delivery, so the hermetic authority's
-  // completion verifier must be injected exactly as the delivery path itself injects it.
-  builderFlowRuntime.setGateFreshnessCompletionVerifierForTest(authority.verifyCompletion);
-  let learning;
-  try {
-    learning = await writeAndSync(session, [
-      ...repairedVerification,
-      repairedCiReadiness,
-    ]);
-  } finally {
-    builderFlowRuntime.setGateFreshnessCompletionVerifierForTest(null);
-  }
+  // The turnstile authenticates the recorded provisional delivery; the hermetic authority's
+  // completion verifier is injected PER-CALL (no module state — an earlier setter here was
+  // review-flagged as a shipped ambient enforcement kill-switch).
+  const learningEntriesForTurnstile = [...repairedVerification, repairedCiReadiness];
+  bindFixturePassingObservations(session, learningEntriesForTurnstile);
+  writeBundle(session.sessionDir, learningEntriesForTurnstile);
+  const learning = await syncBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    gateFreshnessCompletionVerifier: authority.verifyCompletion,
+  });
   assert.equal(learning.run.state.current_step, "learn");
   const learningEntries = [
     bundleClaim({ expectation: "decision-evidence", claimType: "builder.learn.decisions", subjectType: "decision" }),
