@@ -216,8 +216,8 @@ const publishLearn = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 if (publishLearn.version !== "1.4") throw new Error("publish-learn route-back behavior requires Flow Definition version 1.4");
 // #1302: the cursor-advancing gate after verify must declare the freshness turnstile, and
 // learn-gate must have an escape route so stale verification is repairable past merge-ready-ci.
-const mergeReadyCiGate = publishLearn.gates?.["merge-ready-ci-gate"] || {};
-if (mergeReadyCiGate.requires_current_verification !== true) throw new Error("merge-ready-ci-gate must declare requires_current_verification (#1302)");
+const freshnessTurnstileGate = publishLearn.gates?.["merge-ready-ci-gate"] || {};
+if (freshnessTurnstileGate.requires_current_verification !== true) throw new Error("merge-ready-ci-gate must declare requires_current_verification (#1302)");
 const learnGate = publishLearn.gates?.["learn-gate"] || {};
 if (learnGate.on_route_back?.missing_evidence !== "verify") throw new Error("learn-gate missing_evidence should route to verify (#1302)");
 if (learnGate.on_route_back?.default !== "verify") throw new Error("learn-gate default route-back should target verify (#1302)");
