@@ -613,10 +613,19 @@ node "$CLI" assignment-provider status --provider github \
 #
 # `github-status.json` is the valid, unmutated status this file already builds above and asserts
 # is held/self_is_holder. If `workflow start` will ever accept anything, it must accept this.
+#
+# The well-formed environment has TWO requirements beyond the status file, learned from this
+# test's own first red run (the refusals below are the guard's, verbatim):
+#   1. a Git worktree on the claim's named agent branch — "ensure-session requires a named Git
+#      worktree branch for a provider-backed AssignmentStatus record";
+#   2. the caller's identity must be the SAME canonical identity the claim was rendered with
+#      (here: the explicit-override actor the render-claim actor-json declared).
 POSITIVE_PROJECT="$TMPDIR_EVAL/github-positive"
 POSITIVE_ROOT="$POSITIVE_PROJECT/.kontourai/flow-agents"
 mkdir -p "$POSITIVE_ROOT/$GITHUB_SLUG"
 printf '# Pull Work\n\nSelected Work Item: %s\n' "$GITHUB_WORK_ITEM" > "$POSITIVE_ROOT/$GITHUB_SLUG/$GITHUB_SLUG--pull-work.md"
+git -C "$POSITIVE_PROJECT" init -q
+git -C "$POSITIVE_PROJECT" symbolic-ref HEAD "refs/heads/agent/$GITHUB_ACTOR_KEY/$GITHUB_SLUG"
 if FLOW_AGENTS_ACTOR="$GITHUB_ACTOR_KEY" node "$CLI" workflow start \
   --artifact-root "$POSITIVE_ROOT" --flow builder.build --work-item "$GITHUB_WORK_ITEM" \
   --assignment-provider github --effective-state-json "$TMPDIR_EVAL/github-status.json" \
