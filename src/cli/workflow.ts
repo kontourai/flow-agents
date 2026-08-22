@@ -1199,6 +1199,71 @@ function loadContinuationTurnAuthority(): {
   };
 }
 
+/**
+ * One-pass contract report for `workflow start` (#1293).
+ *
+ * The prior shape validated one input per invocation, so a cold-start agent discovered the
+ * contract as a ladder of single-fact refusals — measured live at 4+ invocations before the first
+ * run ever started, each costing a full context read. This collects every diagnosable issue and,
+ * when TWO OR MORE exist, reports them together with a complete runnable template naming the
+ * producing verbs for derived inputs.
+ *
+ * When exactly ONE issue exists, the original single-fact error is thrown byte-identical: those
+ * strings are matched by consumers (test_public_workflow_cli.sh substring-matches two of them),
+ * and a lone missing input needs no template. The combined report embeds each original line
+ * verbatim for the same reason — a consumer matching the substring keeps matching.
+ *
+ * Honesty rule for the template: provider-conditional requirements are labelled with their
+ * condition. The template never claims completeness for providers not yet selected — a
+ * complete-looking template that is incomplete would recreate the defect this exists to fix.
+ */
+function collectStartContractIssues(input: {
+  flow: string; workItem: string | undefined; taskSlug: string | undefined;
+  assignmentProvider: string | undefined; effectiveStateJson: string | undefined;
+}): string[] {
+  const issues: string[] = [];
+  const { flow, workItem, taskSlug, assignmentProvider, effectiveStateJson } = input;
+  if (flow === "builder.shape") {
+    if (!taskSlug || !isSafeSlug(taskSlug)) issues.push("workflow start --flow builder.shape requires an explicit safe --task-slug");
+    if (workItem) issues.push("workflow start --flow builder.shape creates a local Work Item; omit --work-item");
+    return issues;
+  }
+  if (!workItem) issues.push("workflow start requires --work-item <provider-ref>");
+  if (workItem && !workItem.startsWith("local:") && !assignmentProvider) {
+    issues.push("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
+  }
+  if (assignmentProvider !== "local-file" && !effectiveStateJson) {
+    issues.push(`workflow start requires --effective-state-json <path> for assignment provider ${assignmentProvider ?? "<kind>"}`);
+  }
+  if (assignmentProvider === "local-file" && effectiveStateJson) {
+    issues.push("workflow start --effective-state-json is only valid for a non-local assignment provider");
+  }
+  return issues;
+}
+
+function startContractReport(issues: string[], workItem: string | undefined): string {
+  const ref = workItem && /^[^/]+\/[^#]+#\d+$/.test(workItem) ? workItem : "<owner>/<repo>#<n>";
+  const [ownerRepo, issueNumber] = ref === "<owner>/<repo>#<n>" ? ["<owner>/<repo>", "<n>"] : [ref.slice(0, ref.indexOf("#")), ref.slice(ref.indexOf("#") + 1)];
+  const slug = ref === "<owner>/<repo>#<n>" ? "<owner>-<repo>-<n>" : workItemSlug(ref);
+  return [
+    `workflow start: ${issues.length} missing or invalid input(s):`,
+    ...issues.map((issue, index) => `  [${index + 1}] ${issue}`),
+    "",
+    "Complete invocation (github provider; other providers may require different inputs — the",
+    "requirements below marked (github) apply only when --assignment-provider github):",
+    `  1. gh issue view ${issueNumber} --repo ${ownerRepo} --json number,state,assignees,labels,comments,body,url > issue.json`,
+    `  2. flow-agents assignment-provider status --provider github --repo ${ownerRepo} \\`,
+    `       --issue-json issue.json --subject-id ${slug} \\`,
+    "       --liveness-events-json <path-or-'[]'-file> --self-actor <canonical-actor-key> > effective-state.json   (github)",
+    `  3. write .kontourai/flow-agents/${slug}/${slug}--pull-work.md naming ${ref} and the selection rationale`,
+    `  4. flow-agents workflow start --work-item ${ref} --assignment-provider github --effective-state-json effective-state.json   (github)`,
+    "",
+    "The status document must show effective_state \"held\" with reason \"self_is_holder\" for the",
+    "current runtime actor (do not set FLOW_AGENTS_ACTOR for the implementing session; ambient",
+    "session identity is the comparison basis), and the checkout must be on the claim's branch.",
+  ].join("\n");
+}
+
 async function start(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("start"), "workflow start");
@@ -1207,22 +1272,17 @@ async function start(argv: string[]): Promise<number> {
   const workItem = flagString(parsed.flags, "work-item");
   const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
   const taskSlug = flagString(parsed.flags, "task-slug");
-  if (flow === "builder.shape") {
-    if (!taskSlug || !isSafeSlug(taskSlug)) throw new Error("workflow start --flow builder.shape requires an explicit safe --task-slug");
-    if (workItem) throw new Error("workflow start --flow builder.shape creates a local Work Item; omit --work-item");
-  } else if (!workItem) {
-    throw new Error("workflow start requires --work-item <provider-ref>");
-  }
   const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
   const effectiveStateJson = flagString(parsed.flags, "effective-state-json");
-  if (flow === "builder.build" && workItem && !workItem.startsWith("local:") && !assignmentProvider) {
-    throw new Error("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
-  }
-  if (assignmentProvider !== "local-file" && !effectiveStateJson) {
-    throw new Error(`workflow start requires --effective-state-json <path> for assignment provider ${assignmentProvider}`);
-  }
-  if (assignmentProvider === "local-file" && effectiveStateJson) {
-    throw new Error("workflow start --effective-state-json is only valid for a non-local assignment provider");
+  const contractIssues = collectStartContractIssues({ flow, workItem, taskSlug, assignmentProvider, effectiveStateJson });
+  if (contractIssues.length === 1) throw new Error(contractIssues[0]);
+  if (contractIssues.length > 1) {
+    // The provider chain template only makes sense for the provider-backed build flow; rendering
+    // it under shape-flow issues would hand the caller a recipe for a different contract (caught
+    // by this slice's own test before it shipped).
+    throw new Error(flow === "builder.shape"
+      ? [`workflow start: ${contractIssues.length} missing or invalid input(s):`, ...contractIssues.map((issue, index) => `  [${index + 1}] ${issue}`)].join("\n")
+      : startContractReport(contractIssues, workItem));
   }
   if (workItem?.startsWith("local:")) {
     const localSlug = workItem.slice("local:".length);
