@@ -1776,6 +1776,14 @@ function parseArgs(argv: string[]): { command: string; positional: string[]; opt
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i]!;
     if (!arg.startsWith("--")) { positional.push(arg); continue; }
+    // #1294: `--key=value` binds exactly like the shared parser (src/lib/args.ts) — the value is
+    // everything after the first `=`, even when empty or `--`-prefixed. Before this, the whole
+    // token became a flag named `key=value`, so the syntax silently degraded in half the CLI.
+    const eq = arg.indexOf("=");
+    if (eq !== -1) {
+      (opts[arg.slice(2, eq)] ??= []).push(arg.slice(eq + 1));
+      continue;
+    }
     const key = arg.slice(2);
     const next = rest[i + 1];
     if (!next || next.startsWith("--")) flags.add(key);
@@ -1783,6 +1791,11 @@ function parseArgs(argv: string[]): { command: string; positional: string[]; opt
   }
   return { command: command ?? "", positional, opts, flags };
 }
+
+// Exported alias for the parity test only (workflow-sidecar-help.test.mjs): the local parser's
+// `--key=value` handling must match src/lib/args.ts's byte-for-byte semantics, and a test can only
+// assert that by driving both parsers directly.
+export { parseArgs as parseSidecarArgs };
 /**
  * Every form an agent uses to ask for help: bare trailing `--help` (lands in flags), valued
  * `--help <word>` (the local parser consumes the word as a value, landing in opts — still a help
@@ -7337,12 +7350,12 @@ export function runVerifyHold(
  * `publishDelivery()`.
  *
  * Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>]
- *   [--assignment-provider <kind>] [--effective-state-json <path|->]
+ *   [--assignment-provider <kind>] [--effective-state-json <path|->] [--repo-root <path>]
  */
 async function verifyHoldCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
   if (wantsSidecarHelp(p) || (!p.positional[0] && !p.opts["help"])) {
     if (wantsSidecarHelp(p)) {
-      console.log("Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>] [--assignment-provider <kind>] [--effective-state-json <path|->]");
+      console.log("Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>] [--assignment-provider <kind>] [--effective-state-json <path|->] [--repo-root <path>]");
       console.log("Checks whether the calling actor is the fresh, non-superseded holder of <artifactDir>'s subject. Exits 0 if ok (including not_evaluated), 1 otherwise.");
       return 0;
     }
@@ -9105,6 +9118,31 @@ const COMMAND_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> = [
   ["help", "Print this command list."],
 ];
 
+/**
+ * Option-level metadata, one level below COMMAND_DESCRIPTIONS (#1294): command → its complete
+ * option allowlist, in usage order. One table, two consumers — the SAME entry feeds a command's
+ * `--help` output and its unknown-flag rejection in main(), so help and enforcement cannot
+ * disagree (the workflow.ts verbSpecs rule from #1292 applied to the sidecar).
+ *
+ * Adoption is incremental and per command, exactly as #1294 specifies: a command listed here
+ * rejects flags outside its allowlist; a command absent from this map keeps its current
+ * behaviour verbatim (unknown flags still pass through). Only add a command after enumerating
+ * every flag its function body AND its helpers actually read — a missing entry here is a new
+ * refusal for a legitimate caller. `--help` is implicitly allowed everywhere and never listed.
+ *
+ * workflow-sidecar-help.test.mjs drift-tests this map against main()'s dispatcher and against
+ * each adopted command's `--help` output.
+ */
+const COMMAND_OPTION_SPECS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["claim", ["json"]],
+  ["seal-checkpoint", ["task-slug", "timestamp"]],
+  // publish-delivery is a hard-die stub pointing at the public verb; it takes no options.
+  ["publish-delivery", []],
+  ["reconcile-preflight", ["manifest", "repo-root"]],
+  ["verify-hold", ["actor", "now", "assignment-provider", "effective-state-json", "repo-root"]],
+  ["takeover-preflight", ["actor", "now", "grace-seconds"]],
+]);
+
 function printHelp(): void {
   const width = Math.max(...COMMAND_DESCRIPTIONS.map(([name]) => name.length));
   const lines = [
@@ -9158,8 +9196,26 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
   if (!SELF_HANDLED_HELP.has(p.command) && wantsSidecarHelp(p)) {
     const described = COMMAND_DESCRIPTIONS.find(([name]) => name === p.command);
     if (described) {
-      console.log(`Usage: workflow-sidecar ${described[0]} [options]\n\n${described[1]}\n\nOption-level help for sidecar commands arrives with kontourai/flow-agents#1294; run \`workflow-sidecar help\` for the command list.`);
+      const spec = COMMAND_OPTION_SPECS.get(p.command);
+      const optionsBlock = spec === undefined
+        ? "Options not yet declared for this command; run `workflow-sidecar help` for the command list."
+        : spec.length === 0
+          ? "Options: (none)"
+          : `Options:\n${spec.map((option) => `  --${option}`).join("\n")}`;
+      console.log(`Usage: workflow-sidecar ${described[0]} [options]\n\n${described[1]}\n\n${optionsBlock}`);
       return 0;
+    }
+  }
+  // #1294: adopted commands (COMMAND_OPTION_SPECS) reject unknown flags BEFORE any lock or
+  // artifact-dir resolution — an unrecognised flag is a usage error, not a degraded no-op. Help
+  // requests are exempt (already intercepted above for generic commands; SELF_HANDLED_HELP
+  // commands print their own tailored usage, and a documentation request must never be refused
+  // into a rejection). Unadopted commands keep their current behaviour verbatim.
+  const optionSpec = COMMAND_OPTION_SPECS.get(p.command);
+  if (optionSpec !== undefined && !wantsSidecarHelp(p)) {
+    const unknown = [...Object.keys(p.opts), ...p.flags].filter((key) => key !== "help" && !optionSpec.includes(key));
+    if (unknown.length > 0) {
+      die(`unknown flag --${unknown[0]} for ${p.command}; supported: ${optionSpec.length > 0 ? optionSpec.map((option) => `--${option}`).join(", ") : "(none)"}`);
     }
   }
   if (p.command === "ensure-session") preflightEnsureSession(p);
