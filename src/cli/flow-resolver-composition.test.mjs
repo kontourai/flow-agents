@@ -67,6 +67,77 @@ test("composed merge-ready-ci gate can refresh evidence after the reviewed diff 
   assert.deepEqual([...step.routeBackReasons].sort(), ["default", "implementation_defect", "missing_evidence"]);
 });
 
+test("composed merge-ready-ci gate carries the #1302 freshness turnstile and learn-gate its escape route", () => {
+  // Both instrumented dogfood runs stranded terminal because merge-ready-ci accepted stale
+  // verification and learn had no route back. The declaration must SURVIVE scalar uses_flow
+  // composition into the effective definition the runtime consults — a resolver that drops the
+  // field silently disarms the guard while the kit JSON still reads as protected.
+  const definition = resolveEffectiveFlowDefinition("builder.build", REPO_ROOT);
+  assert.ok(definition);
+  assert.equal(definition.gates["builder.publish-learn:merge-ready-ci-gate"].requires_current_verification, true);
+  const learnGate = definition.gates["builder.publish-learn:learn-gate"];
+  assert.ok(learnGate, "composed learn-gate must exist");
+  assert.equal(learnGate.requires_current_verification, undefined, "learn-gate itself must NOT arm the turnstile: it is the repair entrance, and arming it would refuse the very route-back cycle that repairs staleness");
+  assert.deepEqual(learnGate.on_route_back, { missing_evidence: "verify", default: "verify" });
+  assert.deepEqual(learnGate.route_back_policy, { max_attempts: 3, on_exceeded: "block" });
+  assert.doesNotThrow(() => validateDefinition(definition));
+  const step = resolveFlowStep("builder.build", "learn", REPO_ROOT);
+  assert.ok(step);
+  assert.deepEqual([...step.routeBackReasons].sort(), ["default", "missing_evidence"]);
+});
+
+test("aggregate (uses_flows) composition propagates requires_current_verification from any contributor", () => {
+  // The scalar path preserves the field by spreading the child gate; the aggregate path builds a
+  // fresh gate object and must propagate it explicitly, or list-composed kits silently lose the
+  // guard. Kit-neutral fixture flows (boundary rule: no builder content in core tests).
+  const defs = fs.mkdtempSync(path.join(os.tmpdir(), "flowdefs-turnstile-"));
+  try {
+    writeJson(path.join(defs, "acme.child-a.flow.json"), {
+      id: "acme.child-a", version: "1.0",
+      steps: [{ id: "closeout", next: null }],
+      exports: ["acme.closeout.readiness"],
+      gates: { "closeout-a": { step: "closeout", requires_current_verification: true, on_route_back: { missing_evidence: "closeout" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" }, expects: [{ id: "readiness-a", kind: "trust.bundle", required: true, description: "a", bundle_claim: { claimType: "acme.closeout.readiness", subjectType: "flow-step", accepted_statuses: ["verified"] } }] } },
+    });
+    writeJson(path.join(defs, "acme.child-b.flow.json"), {
+      id: "acme.child-b", version: "1.0",
+      steps: [{ id: "closeout", next: null }],
+      exports: ["acme.closeout.readiness"],
+      gates: { "closeout-b": { step: "closeout", on_route_back: { missing_evidence: "closeout" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" }, expects: [{ id: "readiness-b", kind: "trust.bundle", required: true, description: "b", bundle_claim: { claimType: "acme.closeout.readiness", subjectType: "flow-step", accepted_statuses: ["verified"] } }] } },
+    });
+    writeJson(path.join(defs, "acme.parent.flow.json"), {
+      id: "acme.parent", version: "1.0",
+      steps: [{ id: "closeout", next: null, uses_flows: ["acme.child-a", "acme.child-b"] }],
+      gates: {},
+    });
+    const prior = process.env.FLOW_AGENTS_FLOW_DEFS_DIR;
+    process.env.FLOW_AGENTS_FLOW_DEFS_DIR = defs;
+    try {
+      const definition = resolveEffectiveFlowDefinition("acme.parent", REPO_ROOT);
+      assert.ok(definition);
+      const aggregate = definition.gates["flow-agents.aggregate.closeout"];
+      assert.ok(aggregate, "aggregate gate must exist");
+      assert.equal(aggregate.requires_current_verification, true, "one declaring contributor must arm the whole aggregate");
+
+      // and with NO declaring contributor, the field must be ABSENT, not false — a gate that
+      // never declared the turnstile must stay byte-compatible with pre-#1302 definitions.
+      writeJson(path.join(defs, "acme.child-a.flow.json"), {
+        id: "acme.child-a", version: "1.0",
+        steps: [{ id: "closeout", next: null }],
+        exports: ["acme.closeout.readiness"],
+        gates: { "closeout-a": { step: "closeout", on_route_back: { missing_evidence: "closeout" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" }, expects: [{ id: "readiness-a", kind: "trust.bundle", required: true, description: "a", bundle_claim: { claimType: "acme.closeout.readiness", subjectType: "flow-step", accepted_statuses: ["verified"] } }] } },
+      });
+      const undeclared = resolveEffectiveFlowDefinition("acme.parent", REPO_ROOT);
+      assert.ok(undeclared);
+      assert.ok(!("requires_current_verification" in undeclared.gates["flow-agents.aggregate.closeout"]));
+    } finally {
+      if (prior === undefined) delete process.env.FLOW_AGENTS_FLOW_DEFS_DIR;
+      else process.env.FLOW_AGENTS_FLOW_DEFS_DIR = prior;
+    }
+  } finally {
+    fs.rmSync(defs, { recursive: true, force: true });
+  }
+});
+
 test("installed package definitions resolve when a consumer repo has no kits directory", () => {
   const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-consumer-"));
   const resolved = resolveFlowFilePath("builder", "build", "builder.build", consumer, false);

@@ -289,7 +289,13 @@ function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspe
   const definition = definitions.effectiveDefinition;
   const gates = record(definition.gates, "canonical Flow definition gates");
   const gate = record(gates["builder.publish-learn:merge-ready-ci-gate"], "canonical merge-ready-ci gate");
-  if (!isDeepStrictEqual(gate.on_route_back, { missing_evidence: "verify", default: "verify" })
+  // #1300: this was a deep-equal against a two-key route-map literal, which refused the kit's own
+  // shipped three-key map (implementation_defect -> execute) — a second component re-encoding a
+  // contract the flow definition owns. The semantic requirement is that stale evidence is
+  // refreshable: the refresh entries must be PRESENT with bounded blocking policy; additional
+  // repair routes never weaken that and are the flow definition's business.
+  const routes = record(gate.on_route_back, "canonical merge-ready-ci gate route-back map");
+  if (routes.missing_evidence !== "verify" || routes.default !== "verify"
     || !isDeepStrictEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" })) {
     throw new Error("merge-change requires the completed run to semantically adopt merge-ready-ci evidence refresh (missing_evidence/default -> verify with bounded block policy)");
   }

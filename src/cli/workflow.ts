@@ -1603,6 +1603,38 @@ function reportEvidenceOutcome(
   return 0;
 }
 
+/**
+ * #1302: the freshness turnstile. Both instrumented dogfood runs reached a terminal state whose
+ * honest delivery the publish preflight then refused, because the cursor-advancing gate after
+ * verify accepted while verification was stale — freshness guards existed at the exits but not at
+ * the turnstile that commits the run to the exit. Any gate that declares
+ * `requires_current_verification` now runs the SAME predicate the publish preflight runs before a
+ * passing claim may advance the cursor, and surfaces that predicate's exact vocabulary (one
+ * predicate, quoted everywhere — a paraphrase here would recreate the #1299/#1300 class). Failing
+ * claims are exempt: they are the repair path the route-back map exists for.
+ */
+export function assertGateFreshnessTurnstile(
+  sessionDir: string,
+  run: { definition: unknown; state: { current_step: string } },
+  expectation: string,
+  requestedStatus: string,
+): void {
+  if (requestedStatus !== "pass") return;
+  const gates = openGates(run.definition as never, run.state as never) as JsonRecord[];
+  const gate = gates.find((candidate) => Array.isArray(candidate.expects)
+    && (candidate.expects as JsonRecord[]).some((requirement) => (requirement as JsonRecord).id === expectation));
+  if (!gate || gate.requires_current_verification !== true) return;
+  try {
+    assertCurrentVerifiedWorkspaceEvidence(sessionDir);
+  } catch (error) {
+    const inner = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${String(gate.id ?? "gate")} declares requires_current_verification: a passing ${expectation} claim cannot advance the cursor past its last verification repair point while evidence is stale. ${inner}`,
+      { cause: error },
+    );
+  }
+}
+
 async function evidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("evidence"), "workflow evidence");
@@ -1633,6 +1665,7 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     // session state cannot change mid-invocation.
     const repaired = await recoverBuilderFlowSession({ sessionDir });
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
+    assertGateFreshnessTurnstile(sessionDir, repaired.run, expectation, requestedStatus);
     const run = (beforeCanonicalMutation?: () => void) => runEvidenceTransaction({
       sessionDir,
       slug,

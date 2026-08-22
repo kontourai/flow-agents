@@ -189,6 +189,13 @@ type FlowGate = {
   on_route_back?: Record<string, string>;
   /** Policy governing route-back attempt limits. */
   route_back_policy?: { max_attempts: number; on_exceeded: string };
+  /**
+   * #1302: a cursor-advancing gate that declares this refuses to accept a passing claim while
+   * canonical review/verification evidence is stale for the current workspace — enforced at the
+   * evidence writer by the SAME predicate the publish preflight runs (one predicate, quoted
+   * everywhere; a paraphrase here would recreate the #1299/#1300 divergence class).
+   */
+  requires_current_verification?: boolean;
 };
 
 type FlowStep = { id: string; next: string | null; uses_flow?: string; uses_flows?: string[] };
@@ -385,7 +392,7 @@ function resolveEffectiveFlowDefinitionInternal(flowId: string, repoRoot: string
       continue;
     }
 
-    const imports: Array<{ flowId: string; gateId: string; expects: GateExpectation[]; routeBack: RouteBackMetadata }> = [];
+    const imports: Array<{ flowId: string; gateId: string; expects: GateExpectation[]; routeBack: RouteBackMetadata; requiresCurrentVerification: boolean }> = [];
     const expectationIds = new Set<string>();
     for (const childFlowId of childFlowIds) {
       const child = resolveEffectiveFlowDefinitionInternal(childFlowId, repoRoot, nextSeen, allowOverride) as FlowDefinition | null;
@@ -399,7 +406,7 @@ function resolveEffectiveFlowDefinitionInternal(flowId: string, repoRoot: string
       const routeBack = routeBackMetadataForGate(childGate);
       if (!exported || !routeBack || exported.some((expectation) => expectationIds.has(expectation.id))) return null;
       for (const expectation of exported) expectationIds.add(expectation.id);
-      imports.push({ flowId: childFlowId, gateId: childGateId, expects: exported, routeBack });
+      imports.push({ flowId: childFlowId, gateId: childGateId, expects: exported, routeBack, requiresCurrentVerification: childGate.requires_current_verification === true });
     }
     const routeBack = mergeRouteBackMetadata(imports.map((entry) => entry.routeBack));
     const gateId = aggregateGateId(sourceStep.id);
@@ -408,6 +415,9 @@ function resolveEffectiveFlowDefinitionInternal(flowId: string, repoRoot: string
       step: sourceStep.id,
       expects: imports.flatMap((entry) => entry.expects),
       ...routeBackGateFields(routeBack),
+      // #1302: a freshness turnstile declared by ANY contributor governs the whole aggregate —
+      // dropping it here would silently disarm the guard for list-composed flows.
+      ...(imports.some((entry) => entry.requiresCurrentVerification) ? { requires_current_verification: true } : {}),
     };
     for (const imported of imports) contributions.push({ flow_id: imported.flowId, gate_id: imported.gateId, step_id: sourceStep.id, expectation_ids: imported.expects.map((expectation) => expectation.id) });
     const { uses_flows: _usesFlows, ...compiledStep } = effective.steps![index]!;
