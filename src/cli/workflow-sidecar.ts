@@ -1783,6 +1783,17 @@ function parseArgs(argv: string[]): { command: string; positional: string[]; opt
   }
   return { command: command ?? "", positional, opts, flags };
 }
+/**
+ * Every form an agent uses to ask for help: bare trailing `--help` (lands in flags), valued
+ * `--help <word>` (the local parser consumes the word as a value, landing in opts — still a help
+ * request, never an input), and positional `-h` (single-dash never parses as a flag). The three
+ * tailored-help commands and the generic dispatcher intercept share THIS predicate; round 1 of
+ * independent review found the tailored handlers checking only `flags.has("help")`, which left
+ * `verify-hold -h` executing domain logic on a documentation request.
+ */
+function wantsSidecarHelp(p: ReturnType<typeof parseArgs>): boolean {
+  return p.flags.has("help") || "help" in p.opts || p.positional.includes("-h");
+}
 function opt(parsed: ReturnType<typeof parseArgs>, key: string, fallback = ""): string { return parsed.opts[key]?.at(-1) ?? fallback; }
 function opts(parsed: ReturnType<typeof parseArgs>, key: string): string[] { return parsed.opts[key] ?? []; }
 
@@ -7013,8 +7024,8 @@ export function runReconcilePreflight(
  * Usage: workflow-sidecar reconcile-preflight <artifactDir> [--manifest <json>] [--repo-root <path>]
  */
 async function reconcilePreflightCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  if (p.flags.has("help") || (!p.positional[0] && !p.opts["help"])) {
-    if (p.flags.has("help")) {
+  if (wantsSidecarHelp(p) || (!p.positional[0] && !p.opts["help"])) {
+    if (wantsSidecarHelp(p)) {
       console.log("Usage: workflow-sidecar reconcile-preflight <artifactDir> [--manifest <json>] [--repo-root <path>]");
       console.log("Local, pre-push shape-only check of <artifactDir>/trust.bundle. Exits 0 with no issues, 1 otherwise.");
       return 0;
@@ -7316,8 +7327,8 @@ export function runVerifyHold(
  *   [--assignment-provider <kind>] [--effective-state-json <path|->]
  */
 async function verifyHoldCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  if (p.flags.has("help") || (!p.positional[0] && !p.opts["help"])) {
-    if (p.flags.has("help")) {
+  if (wantsSidecarHelp(p) || (!p.positional[0] && !p.opts["help"])) {
+    if (wantsSidecarHelp(p)) {
       console.log("Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>] [--assignment-provider <kind>] [--effective-state-json <path|->]");
       console.log("Checks whether the calling actor is the fresh, non-superseded holder of <artifactDir>'s subject. Exits 0 if ok (including not_evaluated), 1 otherwise.");
       return 0;
@@ -7471,7 +7482,7 @@ export function runTakeoverPreflight(
 }
 
 async function takeoverPreflightCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  if (p.flags.has("help")) {
+  if (wantsSidecarHelp(p)) {
     console.log("Usage: workflow-sidecar takeover-preflight <artifactDir> [--actor <key>] [--now <iso>] [--grace-seconds <n>]");
     console.log("Renders the ADR 0021 §5 takeover protocol (grace-then-supersede | back-off | claim | ask-first | proceed) for a reclaimable candidate. Read-only; never mutates.");
     return 0;
@@ -9123,6 +9134,21 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
     return 0;
   }
   if (!p.command) die("workflow-sidecar command is required");
+  // `<command> --help` on any dispatched subcommand: print that command's description line and
+  // return BEFORE any lock, artifact-dir resolution, or preflight — a documentation request must
+  // never begin a verb's action (#1290, #1292; the top-level `help` interception above already
+  // states the same rule for the command position). Presence is the signal: the local parser
+  // records a trailing `--help` in `flags` but `--help <word>` in `opts`, and both are requests
+  // for help, not inputs. Commands with their own tailored `--help` handling (they render richer
+  // usage than a description line) are excluded so their existing output is unchanged.
+  const SELF_HANDLED_HELP = new Set(["reconcile-preflight", "verify-hold", "takeover-preflight"]);
+  if (!SELF_HANDLED_HELP.has(p.command) && wantsSidecarHelp(p)) {
+    const described = COMMAND_DESCRIPTIONS.find(([name]) => name === p.command);
+    if (described) {
+      console.log(`Usage: workflow-sidecar ${described[0]} [options]\n\n${described[1]}\n\nOption-level help for sidecar commands arrives with kontourai/flow-agents#1294; run \`workflow-sidecar help\` for the command list.`);
+      return 0;
+    }
+  }
   if (p.command === "ensure-session") preflightEnsureSession(p);
   // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
   // surface (see the `action === "whoami"` branch inside `liveness()` above) — it must never
