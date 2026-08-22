@@ -1226,9 +1226,13 @@ function collectStartContractIssues(input: {
   if (flow === "builder.shape") {
     if (!taskSlug || !isSafeSlug(taskSlug)) issues.push("workflow start --flow builder.shape requires an explicit safe --task-slug");
     if (workItem) issues.push("workflow start --flow builder.shape creates a local Work Item; omit --work-item");
-    return issues;
+    // NO early return: the provider-combination checks below applied to shape before this
+    // collector existed, and skipping them silently ACCEPTED previously-refused invocations
+    // (review round 1, HIGH: shape + --assignment-provider github without effective state
+    // passed preflight and downstream treated the ownership guard as "not evaluated" —
+    // a fail-open widening, exactly the class a preflight must never introduce).
   }
-  if (!workItem) issues.push("workflow start requires --work-item <provider-ref>");
+  if (flow !== "builder.shape" && !workItem) issues.push("workflow start requires --work-item <provider-ref>");
   if (workItem && !workItem.startsWith("local:") && !assignmentProvider) {
     issues.push("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
   }
@@ -1242,25 +1246,37 @@ function collectStartContractIssues(input: {
 }
 
 function startContractReport(issues: string[], workItem: string | undefined): string {
-  const ref = workItem && /^[^/]+\/[^#]+#\d+$/.test(workItem) ? workItem : "<owner>/<repo>#<n>";
-  const [ownerRepo, issueNumber] = ref === "<owner>/<repo>#<n>" ? ["<owner>/<repo>", "<n>"] : [ref.slice(0, ref.indexOf("#")), ref.slice(ref.indexOf("#") + 1)];
-  const slug = ref === "<owner>/<repo>#<n>" ? "<owner>-<repo>-<n>" : workItemSlug(ref);
+  // Render the caller's ref only when the REAL parser accepts it; the report path must never
+  // throw a different error class while formatting a diagnostic (review round 1, MEDIUM: a loose
+  // regex let workItemSlug() throw mid-report for refs like owner/repo#0).
+  let ref = "<owner>/<repo>#<n>"; let slug = "<owner>-<repo>-<n>";
+  if (workItem) {
+    try { slug = workItemSlug(workItem); ref = workItem; } catch { /* placeholders stand */ }
+  }
+  const ownerRepo = ref === "<owner>/<repo>#<n>" ? "<owner>/<repo>" : ref.slice(0, ref.indexOf("#"));
+  const issueNumber = ref === "<owner>/<repo>#<n>" ? "<n>" : ref.slice(ref.indexOf("#") + 1);
   return [
     `workflow start: ${issues.length} missing or invalid input(s):`,
     ...issues.map((issue, index) => `  [${index + 1}] ${issue}`),
     "",
-    "Complete invocation (github provider; other providers may require different inputs — the",
-    "requirements below marked (github) apply only when --assignment-provider github):",
+    "Known-required inputs and their producing chain for --assignment-provider github (steps",
+    "marked (github) apply only to that provider; other providers differ, and requirements the",
+    "runtime discovers at execution are not listed here):",
+    "  0. hold the assignment: the status in step 2 must show a CLAIMED record for your identity —",
+    `     if unclaimed, claim first via flow-agents assignment-provider render-claim (then execute`,
+    "     its gh_commands) under the SAME identity you will run start with   (github)",
     `  1. gh issue view ${issueNumber} --repo ${ownerRepo} --json number,state,assignees,labels,comments,body,url > issue.json`,
     `  2. flow-agents assignment-provider status --provider github --repo ${ownerRepo} \\`,
     `       --issue-json issue.json --subject-id ${slug} \\`,
-    "       --liveness-events-json <path-or-'[]'-file> --self-actor <canonical-actor-key> > effective-state.json   (github)",
-    `  3. write .kontourai/flow-agents/${slug}/${slug}--pull-work.md naming ${ref} and the selection rationale`,
+    "       --liveness-events-json <path-or-'[]'-file> \\",
+    "       --self-actor \"$(flow-agents-workflow-sidecar liveness whoami --json | jq -r .actor_key)\" > effective-state.json   (github)",
+    `  3. author .kontourai/flow-agents/${slug}/${slug}--pull-work.md naming ${ref} and the selection rationale (a file you write, not a command)`,
     `  4. flow-agents workflow start --work-item ${ref} --assignment-provider github --effective-state-json effective-state.json   (github)`,
     "",
-    "The status document must show effective_state \"held\" with reason \"self_is_holder\" for the",
-    "current runtime actor (do not set FLOW_AGENTS_ACTOR for the implementing session; ambient",
-    "session identity is the comparison basis), and the checkout must be on the claim's branch.",
+    "Identity rule: run start under the SAME canonical identity the claim was created with — if",
+    "the claim was made under FLOW_AGENTS_ACTOR, set the identical value; if it was made with",
+    "ambient session identity, do not set FLOW_AGENTS_ACTOR. The checkout must be on the claim's",
+    "branch.",
   ].join("\n");
 }
 

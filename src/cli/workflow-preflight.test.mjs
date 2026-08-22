@@ -33,10 +33,17 @@ test("a cold start reports the complete contract in ONE invocation", () => {
     // the producing-verb chain is in the template
     assert.match(out, /assignment-provider status --provider github --repo/);
     assert.match(out, /--pull-work\.md/);
-    // honesty: provider-conditional requirements are labelled, never presented as universally complete
-    assert.match(out, /apply only when --assignment-provider github/);
-    // the actor-basis trap that burned run 1 is stated
-    assert.match(out, /do not set FLOW_AGENTS_ACTOR/);
+    // honesty: provider-conditional requirements are labelled, never presented as universally
+    // complete, and undiscoverable-at-preflight requirements are disclosed as not listed
+    assert.match(out, /apply only to that provider/);
+    assert.match(out, /not listed here/);
+    // review round 1 (HIGH): the chain must include the CLAIM step for a cold unclaimed issue —
+    // a read-only status can never produce a claimed record on its own
+    assert.match(out, /render-claim/);
+    // review round 1 (HIGH): identity guidance is same-identity-as-claim, never a categorical ban
+    assert.match(out, /SAME canonical identity the claim was created with/);
+    // the canonical key is derivable from the template itself, not left as an unexplained token
+    assert.match(out, /liveness whoami/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -98,12 +105,42 @@ test("shape-flow issues stay scoped to shape and never render the provider templ
 });
 
 test("gate-evidence refusals name every unmet requirement and the expected artifact path in one pass", () => {
-  // Driven through the sidecar's record-gate-claim against a synthetic session missing everything:
-  // run 1 paid three sequential refusals (refs -> producer artifact -> evidence class) per gate.
-  // The producer-artifact line must NAME the expected concrete path, derived from the kit binding
-  // (this test only asserts the report SHAPE and that a path is named — it does not pin any
-  // specific kit's artifact vocabulary).
+  // A real synthetic session (git repo + ensure-session with a bound flow), then a passing gate
+  // claim with NO evidence: run 1 paid three sequential refusals (refs -> producer artifact ->
+  // evidence class) per gate; the report must surface the unmet requirements TOGETHER and NAME a
+  // concrete expected artifact path expanded from the kit binding. The first version of this test
+  // asserted only `record-gate-claim --help` exiting 0 — a false positive that proved nothing of
+  // its title, caught by independent review; this is the fixture-backed replacement, and it is
+  // also the unit-level catcher for the artifact-naming fault injection that previously only a
+  // live probe could see.
   const SIDECAR = path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js");
-  const probe = spawnSync(process.execPath, [SIDECAR, "record-gate-claim", "--help"], { encoding: "utf8" });
-  assert.equal(probe.status, 0, "sidecar help must remain interceptable (precondition for this suite)");
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-gate-"));
+  try {
+    const run = (args, env = {}) => spawnSync(process.execPath, [SIDECAR, ...args], {
+      cwd: project, encoding: "utf8", env: { ...process.env, ...env },
+    });
+    spawnSync("git", ["init", "-q", "."], { cwd: project });
+    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });
+    const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+    const ensure = run([
+      "ensure-session", "--artifact-root", artifactRoot,
+      "--work-item", "acme/widgets#7", "--flow-id", "builder.build",
+      "--source-request", "preflight fixture", "--summary", "preflight fixture",
+    ], { FLOW_AGENTS_ACTOR: "preflight-fixture-actor" });
+    assert.equal(ensure.status, 0, `fixture ensure-session failed: ${ensure.stderr}`);
+    const claim = run([
+      "record-gate-claim", path.join(artifactRoot, "acme-widgets-7"),
+      "--expectation", "selected-work", "--status", "pass",
+      "--summary", "preflight fixture claim with no evidence",
+    ], { FLOW_AGENTS_ACTOR: "preflight-fixture-actor" });
+    assert.notEqual(claim.status, 0, "a passing gate claim with no evidence must be refused");
+    const out = claim.stderr + claim.stdout;
+    assert.match(out, /evidence requirement\(s\) unmet|requires at least one reviewable/);
+    // the expected artifact is NAMED with the slug expanded — the report tells the caller what
+    // file to write instead of costing another refusal to find out
+    assert.match(out, /acme-widgets-7/);
+    assert.match(out, /expected artifact matching|declared durable artifact/);
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
 });
