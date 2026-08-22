@@ -108,10 +108,10 @@ test("a FAILING claim at a declaring gate stays attachable: route-back repair is
 
 test("gateAdvancementFreshnessSatisfied: undeclared gates never consult the predicate; declared gates do", () => {
   // nonexistent session: if the predicate ran for the undeclared gate, it would throw/false.
-  assert.equal(gateAdvancementFreshnessSatisfied({ id: "g", step: "s" }, "/nonexistent/session"), true);
+  assert.equal(gateAdvancementFreshnessSatisfied({ id: "g", step: "s" }, "/nonexistent/session", "/nonexistent"), true);
   const { project, sessionDir } = makeUnverifiedSession();
   try {
-    assert.equal(gateAdvancementFreshnessSatisfied({ id: "g", step: "s", requires_current_verification: true }, sessionDir), false);
+    assert.equal(gateAdvancementFreshnessSatisfied({ id: "g", step: "s", requires_current_verification: true }, sessionDir, project), false);
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
   }

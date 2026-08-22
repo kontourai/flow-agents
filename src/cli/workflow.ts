@@ -1625,7 +1625,10 @@ export function assertGateFreshnessTurnstile(
     && (candidate.expects as JsonRecord[]).some((requirement) => (requirement as JsonRecord).id === expectation));
   if (!gate || gate.requires_current_verification !== true) return;
   try {
-    assertCurrentVerifiedWorkspaceEvidence(sessionDir);
+    // Delivery-tolerant form: the session's own hash-bound provisional delivery commit is the
+    // one legitimate post-verification revision at this gate (see assertTerminalDeliveryWorkspaceEvidence).
+    const { projectRoot, slug } = readBoundSession(sessionDir);
+    assertTerminalDeliveryWorkspaceEvidence(sessionDir, projectRoot, slug);
   } catch (error) {
     const inner = error instanceof Error ? error.message : String(error);
     throw new Error(

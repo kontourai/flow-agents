@@ -29,7 +29,11 @@ import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cl
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
 import type { ChangeProviderSettings } from "./cli/public-contracts.js";
 import { assertTrustedGitAncestor, isExactLowercaseCommitSha, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
-import { assertCurrentVerifiedWorkspaceEvidence, buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
+import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
+// Circular at module level (workflow.ts imports this file) — safe: the binding is only
+// dereferenced inside function bodies, the same tolerated shape as the sidecar import above.
+import { assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier } from "./cli/workflow.js";
+import { verifyProvisionalDeliveryLifecycleCompletion } from "./external-lifecycle-authority.js";
 import {
   assertAuthenticatedPublishChangeObservation,
   assertIssuedPublishChangeAction,
@@ -1150,7 +1154,7 @@ async function syncAndProject(
   if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)
     // #1302: the no-new-evidence path is the route-back RE-ENTRY trap — a prior visit's passing
     // claim must not advance a requires_current_verification gate while verification is stale.
-    && gateAdvancementFreshnessSatisfied(gates[0]!, context.sessionDir)) {
+    && gateAdvancementFreshnessSatisfied(gates[0]!, context.sessionDir, context.projectRoot)) {
     run = await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   }
   assertLifecycleResolutionAttestation(context, run);
@@ -1561,10 +1565,26 @@ function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: s
  * failure shape. The cursor simply stays at the declaring gate until verification is re-recorded;
  * the public wrapper's pre-flight check remains for a loud early refusal.
  */
-export function gateAdvancementFreshnessSatisfied(gate: unknown, sessionDir: string): boolean {
+type GateFreshnessCompletionVerifier = typeof verifyProvisionalDeliveryLifecycleCompletion;
+let gateFreshnessCompletionVerifierForTest: GateFreshnessCompletionVerifier | null = null;
+/** Test-only: hermetic fixtures sign provisional completions with a test authority the pinned
+ * production key rejects. Mirrors the delivery path's own authority injection seam. */
+export function setGateFreshnessCompletionVerifierForTest(verifier: GateFreshnessCompletionVerifier | null): void {
+  gateFreshnessCompletionVerifierForTest = verifier;
+}
+
+export function gateAdvancementFreshnessSatisfied(gate: unknown, sessionDir: string, projectRoot: string): boolean {
   if (!isRecord(gate) || gate.requires_current_verification !== true) return true;
   try {
-    assertCurrentVerifiedWorkspaceEvidence(sessionDir);
+    // The delivery-tolerant form, not the raw predicate: provisional publication necessarily
+    // adds the session's own delivery/<slug>/ commit BEFORE CI readiness can be recorded, and
+    // the raw snapshot-equality predicate would deadlock that legitimate ordering. This accepts
+    // exactly one hash-bound provisional delivery atop the verified base and nothing else —
+    // the same narrow continuation terminal publication uses.
+    assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(
+      sessionDir, projectRoot, path.basename(sessionDir),
+      gateFreshnessCompletionVerifierForTest ?? verifyProvisionalDeliveryLifecycleCompletion,
+    );
     return true;
   } catch (error) {
     process.stderr.write(`[flow-agents] NOTICE: ${String(gate.id ?? "gate")} advancement withheld (requires_current_verification): ${error instanceof Error ? error.message : String(error)}\n`);
@@ -1670,7 +1690,7 @@ export async function bundleGateEvidence(
   // #1302: a PASSING claim at a gate declaring requires_current_verification may not advance the
   // cursor while review/verification evidence is stale — evaluated here, at the seam, after any
   // evidence commands ran. Failing claims stay attachable: they are the route-back repair path.
-  if (!failed && !gateAdvancementFreshnessSatisfied(gate, sessionDir)) return null;
+  if (!failed && !gateAdvancementFreshnessSatisfied(gate, sessionDir, projectRoot)) return null;
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
     const selector = expectation.bundle_claim;
     return selector.claimType === claim.claimType && (!selector.subjectType || selector.subjectType === claim.subjectType);
