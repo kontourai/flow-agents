@@ -6,10 +6,14 @@
 # named regression test goes RED with the expected assertion, restores, and proves
 # it goes GREEN again.
 #
-#   A) init.ts stops passing the plan's preserved paths to install.sh
-#      (the original silent-overwrite: rsync clobbers the user README).
-#   B) the install.sh generator drops the ${EXCLUDE_ARGS[@]+...} expansion from the
-#      rsync line while still PARSING --exclude-path (review MEDIUM-1's scenario).
+#   A) init.ts stops passing BOTH guard layers to install.sh (--only-absent and the
+#      preserved excludes) — the original silent-overwrite: rsync clobbers the user
+#      README. (Dropping only one layer is absorbed by the other BY DESIGN — the
+#      rsync leg is guarded redundantly — so a single-layer injection staying green
+#      is expected redundancy, not test power; this suite injects the full seam.)
+#   B) the install.sh generator drops BOTH the ${EXCLUDE_ARGS[@]+...} and the
+#      ${IGNORE_EXISTING_ARGS[@]+...} expansions from the rsync line while still
+#      PARSING the options (review MEDIUM-1's scenario).
 #   C) the generator re-adds the pre-fix `rsync --delete` (review BLOCKING-1):
 #      unclassified destination files are deleted.
 #   D) executePlanCopies copies "preserve" entries too — the --global claude-code
@@ -125,21 +129,27 @@ README_TEST="preserves a user-authored README.md byte-identical"
 KIRO_TEST="never deletes unclassified destination files"
 GLOBAL_TEST="global claude-code sync preserves"
 
-echo "--- A: init.ts drops the preserved excludes (original silent overwrite) ---"
+echo "--- A: init.ts drops both guard layers (original silent overwrite) ---"
 require_clean A
 apply_patch src/cli/init.ts \
   "const installed = installBundle(bundle, options, plan.preserved);" \
   "const installed = installBundle(bundle, options, []);" || exit 1
+apply_patch src/cli/init.ts \
+  'args.push("--only-absent");' \
+  '' || exit 1
 build || { _fail "A: build failed under injection"; exit 1; }
 expect_red "A" "$README_TEST" "# Base Bundle"
 restore_all
 build || { _fail "A: rebuild after restore failed"; exit 1; }
 expect_green "A" "$README_TEST"
 
-echo "--- B: generator drops the rsync exclude expansion (parses --exclude-path, ignores it) ---"
+echo "--- B: generator drops both rsync guard expansions (parses the options, ignores them) ---"
 require_clean B
 apply_patch src/tools/build-universal-bundles.ts \
   '\${EXCLUDE_ARGS[@]+"\${EXCLUDE_ARGS[@]}"} ' \
+  '' || exit 1
+apply_patch src/tools/build-universal-bundles.ts \
+  '\${IGNORE_EXISTING_ARGS[@]+"\${IGNORE_EXISTING_ARGS[@]}"} ' \
   '' || exit 1
 build || { _fail "B: build failed under injection"; exit 1; }
 rm -rf "$WT/dist"
