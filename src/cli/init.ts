@@ -15,8 +15,16 @@ import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { buildOwnedFilesManifest, writeOwnedFilesManifest } from "../lib/owned-files-manifest.js";
-import { bundleInstallExcludeRel, computeInstallPlan, formatDryRunLines, formatInstallSummaryLines, rsyncExcludeLiteral } from "./install-plan.js";
-import { copyDirMerge } from "../lib/fs.js";
+import {
+  bundleInstallExcludeRel,
+  computeInstallPlan,
+  executePlanCopies,
+  executePlanRemovals,
+  formatDryRunLines,
+  formatInstallSummaryLines,
+  installerSupportsPreserveExcludes,
+  verifyInstallPlanMatchesDisk,
+} from "./install-plan.js";
 import {
   catalogKitIds as registryCatalogKitIds,
   readPackageVersion,
@@ -148,11 +156,13 @@ Options:
   --provider-repo-path PATH
   --provider-project NUMBER
   --online               Verify GitHub auth/project and create the claim label if missing.
-  --dry-run              List every path the install would create, replace, or preserve;
-                         write nothing. Implies --headless. Project (bundle) installs only.
+  --dry-run              List every path the install would create, replace, remove, or
+                         preserve; write nothing. Implies --headless. Supported for
+                         project (bundle) installs and --global claude-code.
   --force                Overwrite existing destination files that are NOT known
                          bundle-owned content. Without --force such files are always
-                         preserved and reported. Project (bundle) installs only.
+                         preserved and reported. Supported for project (bundle)
+                         installs and --global claude-code.
   --yes, --headless
   --uninstall             Remove a prior install instead of installing.
                           Usage: flow-agents init --uninstall --runtime claude-code [--global | --dest PATH]
@@ -193,8 +203,8 @@ function selectedKitIdsFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): 
  * - When the caller made an explicit kit selection (`activeKitIds` non-empty, via
  *   `--activate-kit`/`--activate-kits`), that selection is what gets recorded, for every runtime.
  * - Otherwise (the common default-flags case), claude-code records EVERY catalog kit: that has
- *   always been the actual physical install behavior (installBundle's `.claude/skills` sync is
- *   unconditional, not filtered by kit selection -- see copyDirMerge's caller above), and this
+ *   always been the actual physical install behavior (the install's `.claude/skills` sync is
+ *   unconditional, not filtered by kit selection), and this
  *   makes that implicit "all built-ins active" behavior explicit and queryable rather than
  *   leaving `active_kit_ids` empty while the skills are, in fact, all present on disk. Other
  *   runtimes install no kit-specific assets by default (opencode/codex only provision kit
@@ -687,18 +697,31 @@ function configureWorkflowProviders(options: InitOptions): number {
 }
 
 export function ensureBundle(runtime: Runtime): string {
+  return ensureBundleReporting(runtime).bundle;
+}
+
+/**
+ * ensureBundle plus a `rebuilt` report so `init --dry-run` can disclose the one write it may
+ * perform outside the destination (regenerating the package's own dist/ bundle).
+ *
+ * Rebuild when the installer is missing OR predates the overwrite guard's `--exclude-path`
+ * support (kontourai/flow-agents#1288): a stale dist/ from an older build would reject the
+ * exclude flags init now passes. The check is SEMANTIC (the rsync line must carry the
+ * exclude-args expansion -- see installerSupportsPreserveExcludes), not a substring grep: an
+ * installer that merely parses the flag but drops it from the rsync would silently overwrite
+ * everything while accepting the arguments.
+ */
+export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebuilt: boolean } {
   const bundle = path.join(root, "dist", runtimeBundles[runtime]);
   const installSh = path.join(bundle, "install.sh");
-  // Rebuild when the installer is missing OR predates the overwrite guard's
-  // `--exclude-path` option (kontourai/flow-agents#1288): a stale dist/ from an older
-  // build would reject the exclude flags init now passes, so the guard requires a
-  // generator-current installer, not merely an existing one.
-  if (!fs.existsSync(installSh) || !fs.readFileSync(installSh, "utf8").includes("--exclude-path")) {
+  let rebuilt = false;
+  if (!fs.existsSync(installSh) || !installerSupportsPreserveExcludes(fs.readFileSync(installSh, "utf8"))) {
     const rc = buildBundles();
     if (rc !== 0) throw new Error(`bundle build failed with exit code ${rc}`);
+    rebuilt = true;
   }
   if (!fs.existsSync(installSh)) throw new Error(`bundle installer missing: ${bundle}`);
-  return bundle;
+  return { bundle, rebuilt };
 }
 
 // The bundle's hook commands resolve the flow-agents scripts directory via
@@ -1022,8 +1045,10 @@ async function installOpencodeGlobalAssets(dest: string, bundle: string, runtime
 function installBundle(bundle: string, options: InitOptions, preservedRelPaths: string[] = []): number {
   const args = ["install.sh", options.dest];
   // Overwrite guard (#1288): paths the install plan classified as "preserve" are
-  // excluded from install.sh's rsync entirely, so the copy never touches them.
-  for (const rel of preservedRelPaths) args.push("--exclude-path", rsyncExcludeLiteral(rel));
+  // excluded from install.sh's rsync entirely, so the copy never touches them. Raw
+  // relative paths -- install.sh itself escapes rsync wildcard characters, so the same
+  // literal value also scopes its token substitution and console-config guards.
+  for (const rel of preservedRelPaths) args.push("--exclude-path", rel);
   for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
   if (options.consoleUrl) args.push("--console-url", options.consoleUrl);
   if (options.consoleEndpoint) args.push("--console-endpoint", options.consoleEndpoint);
@@ -1177,12 +1202,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const options = headless
       ? { ...headlessOptions(argv), runtimeAutoDetected: headlessRuntimeAutoDetected(argv) }
       : await interactiveOptions(argv);
-    // The overwrite guard covers project (bundle rsync) installs -- the destructive path
-    // #1288 reported. The --global branches are config merges with their own additive
-    // semantics; refusing the flags there is honest, silently ignoring them is not.
-    // (pi --global is exempt: it warns and falls through to a workspace install.)
-    if ((dryRun || force) && options.global && options.runtime !== "pi") {
-      console.error("flow-agents init: --dry-run and --force are not supported with --global (global installs merge configs; they do not rsync a bundle)");
+    // The overwrite guard covers project (bundle rsync) installs and the --global
+    // claude-code skills/agents sync (#1288 review BLOCKING-2). The --global codex and
+    // opencode paths delegate to installers that already fail closed on unowned collisions
+    // (install-codex-home.sh / install-owned-files.js refuse rather than overwrite), so
+    // --dry-run/--force have no meaning there; refusing the flags is honest, silently
+    // ignoring them is not. (pi --global falls through to a workspace install and keeps
+    // full flag support.)
+    if ((dryRun || force) && options.global && (options.runtime === "codex" || options.runtime === "opencode")) {
+      console.error(`flow-agents init: --dry-run and --force are not supported with --global for ${options.runtime} (its installer already refuses unowned collisions instead of overwriting)`);
       return 2;
     }
     // Scope-collision check for claude-code: Claude Code merges user-level
@@ -1207,7 +1235,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // global settings dir is the claude config root, so the settings.json
     // lives directly in dest (not dest/.claude/).
     if (options.global && options.runtime === "claude-code") {
-      const bundle = ensureBundle(options.runtime);
+      const { bundle, rebuilt } = ensureBundleReporting(options.runtime);
       // For --global, dest is ~/.claude/ (the global settings dir).
       // dogfoodClaudeCode writes to dest/.claude/settings.json — but for global,
       // the settings.json lives at dest/settings.json (dest IS ~/.claude/).
@@ -1216,6 +1244,35 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       if (!fs.existsSync(sourcePath)) {
         console.error(`flow-agents init: bundle settings missing: ${sourcePath}`);
         return 1;
+      }
+      // #1288 review BLOCKING-2: the skills/agents sync used to be copyDirMerge, which
+      // overwrote every differing collision (a user-authored ~/.claude/agents file was
+      // replaced with no classification and no --force). It now runs through the same
+      // ownership plan as project installs: unowned differing files are preserved and
+      // reported, stale bundle-owned files (hash-matching the previous install's global
+      // ownership manifest) update without --force, and --force overrides preserves.
+      // Removals stay disabled here: the historical sync was additive-only and ~/.claude
+      // holds unrelated user content; deletion would be new destructive surface.
+      // Intermediate symlinks are tolerated (refuseSymlinkParents: false): the legacy
+      // skills chain (~/.claude/skills/<name> -> ~/.agents/skills/<name>) is a supported
+      // layout this writer has always updated through, and this path copies files itself
+      // (no rsync that would replace the link object).
+      const globalPlan = computeInstallPlan({
+        mappings: [
+          { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
+          { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
+        ],
+        manifestDest: options.dest,
+        excludeRel: new Set<string>(),
+        force,
+        removals: false,
+        refuseSymlinkParents: false,
+      });
+      if (dryRun) {
+        for (const line of formatDryRunLines(globalPlan, `${options.runtime} --global skills/agents`, options.dest)) console.log(line);
+        console.log("Note: settings.json is merge-owned (hooks merged into your existing settings; user keys preserved) and is not part of the file plan above.");
+        if (rebuilt) console.log("Note: rebuilt the claude-code bundle in the package dist/ to compute this plan (outside the destination).");
+        return 0;
       }
       const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
       // Remove permissive defaults (not appropriate for global user settings).
@@ -1239,14 +1296,23 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const tmp = `${destSettingsPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
       fs.renameSync(tmp, destSettingsPath);
-      // Additive skills/agents sync: adds new files and updates changed ones,
-      // never deletes — dest may hold unrelated content from other kits/tools.
-      const skillsSync = copyDirMerge(path.join(bundle, ".claude", "skills"), path.join(options.dest, "skills"));
-      const agentsSync = copyDirMerge(path.join(bundle, ".claude", "agents"), path.join(options.dest, "agents"));
+      // HIGH-3 posture: revalidate the plan's decisions immediately before applying them.
+      verifyInstallPlanMatchesDisk(globalPlan, {
+        mappings: [
+          { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
+          { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
+        ],
+        manifestDest: options.dest,
+        excludeRel: new Set<string>(),
+        force,
+        removals: false,
+        refuseSymlinkParents: false,
+      });
+      executePlanCopies(globalPlan);
       // Write version stamp.
       writeInstallRecord(options.dest, "claude-code", true, options.activeKitIds ?? [], { ...configPremerge, post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(destSettingsPath)).digest("hex") }, [], installedValues(destSettingsPath, merged, managed));
       console.log(`Flow Agents global hooks merged for claude-code in ${options.dest}`);
-      console.log(`Synced skills (+${skillsSync.added} new, ~${skillsSync.updated} updated) and agents (+${agentsSync.added} new, ~${agentsSync.updated} updated) in ${options.dest}`);
+      for (const line of formatInstallSummaryLines(globalPlan, options.dest)) console.log(line);
       // Write a per-skill-file sha256 content-hash manifest, sibling of install.json, so
       // `flow-agents skill-drift-check` and the SessionStart advisory can classify installed
       // skill files as in_sync/kit_updated/user_modified/unbaselined/missing_install/kit_removed
@@ -1274,12 +1340,15 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // pre-existing dest entry (e.g. a legacy skill symlink) that this install did not itself
       // write. settings.json is intentionally excluded -- it is merge-owned, not file-owned;
       // uninstall strips only the managed hook/statusLine entries from it (see uninstall.ts).
+      // Paths the guard PRESERVED are excluded too: their on-disk content is the user's, and
+      // recording it as bundle-owned would authorize the next init to overwrite it.
       const globalManifestPkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
       writeOwnedFilesManifest(options.dest, buildOwnedFilesManifest({
         mappings: [
           { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
           { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
         ],
+        excludeRel: new Set(globalPlan.preserved),
         runtime: "claude-code",
         version: globalManifestPkgJson["version"] ?? "0.0.0",
         global: true,
@@ -1386,19 +1455,39 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         `Falling back to workspace default destination: ${options.dest}`
       );
     }
-    const bundle = ensureBundle(options.runtime);
+    const { bundle, rebuilt } = ensureBundleReporting(options.runtime);
     // Overwrite guard (#1288): classify every bundle path against the destination BEFORE
     // any write. Existing files that are not known bundle-owned content (no hash match
     // against the incoming bundle or the previous install's ownership manifest) are
     // preserved -- excluded from the rsync -- unless --force explicitly overrides.
+    // Removals are manifest-driven only (previously-owned, absent from the bundle, bytes
+    // still matching -- replacing kiro's blanket `rsync --delete`), and any bundle path
+    // whose destination parent is a symlinked directory refuses the whole install
+    // (InstallPlanSymlinkParentError) before anything is written.
     const excludeRel = bundleInstallExcludeRel(options.runtime);
-    const plan = computeInstallPlan({ bundleDir: bundle, dest: options.dest, excludeRel, force });
+    const planParams = {
+      mappings: [{ sourceDir: bundle, destDir: options.dest, prefix: "" }],
+      manifestDest: options.dest,
+      excludeRel,
+      force,
+      removals: true,
+      refuseSymlinkParents: true,
+    };
+    const plan = computeInstallPlan(planParams);
     if (dryRun) {
       for (const line of formatDryRunLines(plan, options.runtime, options.dest)) console.log(line);
+      if (rebuilt) console.log(`Note: rebuilt the ${options.runtime} bundle in the package dist/ to compute this plan (outside the destination).`);
       return 0;
     }
+    // #1288 review HIGH-3: re-derive the plan immediately before the installer runs and
+    // refuse on any divergence, so a file created or modified in the classify->install
+    // window is never overwritten under a stale decision.
+    verifyInstallPlanMatchesDisk(plan, planParams);
     const installed = installBundle(bundle, options, plan.preserved);
     if (installed !== 0) return installed;
+    // Manifest-driven stale-owned cleanup (BLOCKING-1): each candidate is re-contained and
+    // re-hashed immediately before deletion; anything that changed is preserved instead.
+    const executedRemovals = executePlanRemovals(plan, options.dest);
     // Project bundle installers create the merge snapshot themselves. Forward it
     // into the richer outer record instead of erasing provenance on return.
     let configPremerge: unknown;
@@ -1432,7 +1521,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       }));
     }
     // #1288: a silent no-op and a 191-file overwrite must not both read as a bare success.
-    for (const line of formatInstallSummaryLines(plan, options.dest)) console.log(line);
+    for (const line of formatInstallSummaryLines(plan, options.dest, executedRemovals)) console.log(line);
     const activated = await activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or
