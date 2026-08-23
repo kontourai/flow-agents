@@ -145,8 +145,10 @@ An existing settings file that already carries the target configuration is left
 byte-identical: no reformatting, no re-serialization, and fields the generator
 does not model always survive. When an existing git-tracked settings file would
 actually change content, bootstrap refuses with a diff preview; pass
-`--rewrite-settings` to accept the update. Untracked or newly created files are
-written without the flag.
+`--rewrite-settings` (accepted by both `flow-agents provider-bootstrap` and
+`flow-agents init --configure-providers`) to accept the update. A git probe
+failure while checking tracking state also refuses — an unknown state never
+rewrites. Untracked or newly created files are written without the flag.
 
 For a headless offline setup, omit `--online` and provide
 `--provider-project NUMBER`. The command does not pretend remote state was

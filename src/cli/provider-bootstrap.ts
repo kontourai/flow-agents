@@ -505,19 +505,43 @@ function readDocument(file: string): { document: Record<string, unknown>; raw: s
   return { document: { ...parsed, projects: parsed.projects ?? [] }, raw };
 }
 
-function isGitTrackedFile(repoPath: string, file: string): boolean {
+// Distinguishes "cleanly not tracked" (git exits 1) from a failed probe. An
+// unknown tracking state must fail the consent gate closed, not bypass it.
+function gitTrackingState(repoPath: string, file: string): "tracked" | "untracked" {
   try {
-    execFileSync("git", ["-C", repoPath, "ls-files", "--error-unmatch", "--", file], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
+    execFileSync("git", ["-C", repoPath, "ls-files", "--error-unmatch", "--", file], { stdio: ["ignore", "ignore", "pipe"] });
+    return "tracked";
+  } catch (error) {
+    if ((error as { status?: unknown }).status === 1) return "untracked";
+    const stderr = (error as { stderr?: Buffer | string }).stderr?.toString().trim();
+    throw new Error(`${file}: cannot determine the git tracking state before a settings rewrite (${stderr || (error as Error).message}); fix the git failure, or pass --rewrite-settings to consent to the rewrite explicitly`);
   }
 }
 
 // Line-level LCS diff limited to removed/added lines; enough for a refusal preview.
+// A common prefix/suffix trim bounds the quadratic LCS to the changed region, and
+// inputs still larger than PREVIEW_LCS_MAX_LINES fall back to a plain truncated
+// listing so the refusal path cannot exhaust memory on a huge settings file.
+const PREVIEW_LCS_MAX_LINES = 500;
+
 function previewSettingsDiff(beforeText: string, afterText: string, limit = 40): string {
-  const before = beforeText.split("\n");
-  const after = afterText.split("\n");
+  const beforeAll = beforeText.split("\n");
+  const afterAll = afterText.split("\n");
+  let start = 0;
+  while (start < beforeAll.length && start < afterAll.length && beforeAll[start] === afterAll[start]) start += 1;
+  let beforeEnd = beforeAll.length;
+  let afterEnd = afterAll.length;
+  while (beforeEnd > start && afterEnd > start && beforeAll[beforeEnd - 1] === afterAll[afterEnd - 1]) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
+  const before = beforeAll.slice(start, beforeEnd);
+  const after = afterAll.slice(start, afterEnd);
+  if (before.length > PREVIEW_LCS_MAX_LINES || after.length > PREVIEW_LCS_MAX_LINES) {
+    const lines = [...before.map((line) => `- ${line}`), ...after.map((line) => `+ ${line}`)];
+    if (lines.length <= limit) return lines.join("\n");
+    return [...lines.slice(0, limit), `… ${lines.length - limit} more changed lines (diff truncated)`].join("\n");
+  }
   const lcs: Uint32Array[] = Array.from({ length: before.length + 1 }, () => new Uint32Array(after.length + 1));
   for (let i = before.length - 1; i >= 0; i -= 1) {
     for (let j = after.length - 1; j >= 0; j -= 1) {
@@ -880,14 +904,17 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
             unchanged.push(file);
             continue;
           }
-          // Bootstrap did not create this tracked file; rewriting it needs explicit consent.
-          if (!options.rewriteSettings && isGitTrackedFile(repoPath, file)) {
+          // Bootstrap did not create this tracked file; rewriting it needs explicit
+          // consent. The probe only applies to project scope: a global settings root
+          // lives outside the repository, where this repository's index cannot answer.
+          if (!options.rewriteSettings && options.scope === "project" && gitTrackingState(repoPath, file) === "tracked") {
             // Diff against normalized formatting so the preview shows the content
             // change instead of drowning it in whole-file reformatting noise.
             const normalized = `${JSON.stringify(JSON.parse(raw), null, 2)}\n`;
             const preview = previewSettingsDiff(normalized, `${JSON.stringify(document, null, 2)}\n`);
             const note = normalized === raw ? "" : "(content changes shown with normalized formatting; the rewrite would also reformat the file)\n";
-            throw new Error(`${file}: provider bootstrap would rewrite this tracked settings file; re-run with --rewrite-settings to accept the update:\n${note}${preview}`);
+            const consentCommand = `flow-agents provider-bootstrap --scope project --repo-path ${shellQuote(repoPath)} --provider-project ${project.number} --rewrite-settings`;
+            throw new Error(`${file}: provider bootstrap would rewrite this tracked settings file; re-run with --rewrite-settings (standalone: ${consentCommand}) to accept the update:\n${note}${preview}`);
           }
         }
         validateDocument(file, schema, document);

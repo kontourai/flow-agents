@@ -56,6 +56,7 @@ type InitOptions = {
   providerRepoPath?: string;
   providerProjectNumber?: number;
   providerOnline?: boolean;
+  providerRewriteSettings?: boolean;
 };
 
 const runtimeBundles: Record<Runtime, string> = {
@@ -147,6 +148,9 @@ Options:
   --provider-repo-path PATH
   --provider-project NUMBER
   --online               Verify GitHub auth/project and create the claim label if missing.
+  --rewrite-settings      Allow provider bootstrap to rewrite an existing git-tracked
+                          settings file whose content would change (otherwise it
+                          refuses with a diff preview).
   --yes, --headless
   --uninstall             Remove a prior install instead of installing.
                           Usage: flow-agents init --uninstall --runtime claude-code [--global | --dest PATH]
@@ -632,6 +636,7 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
       providerRepoPath: flagString(args.flags, "provider-repo-path"),
       providerProjectNumber: parseProviderProject(providerProjectAnswer?.trim() || undefined),
       providerOnline,
+      providerRewriteSettings: flagBool(args.flags, "rewrite-settings"),
     };
   } finally {
     rl.close();
@@ -659,6 +664,7 @@ function headlessOptions(argv: string[]): InitOptions {
     providerRepoPath: flagString(args.flags, "provider-repo-path"),
     providerProjectNumber: parseProviderProject(flagString(args.flags, "provider-project")),
     providerOnline: flagBool(args.flags, "online"),
+    providerRewriteSettings: flagBool(args.flags, "rewrite-settings"),
   };
 }
 
@@ -673,6 +679,7 @@ function configureWorkflowProviders(options: InitOptions): number {
       : undefined,
     projectNumber: options.providerProjectNumber,
     online: options.providerOnline,
+    rewriteSettings: options.providerRewriteSettings,
   });
   console.log(`Configured GitHub workflow providers for ${result.repo.owner}/${result.repo.name} (Project ${result.project.number})`);
   for (const file of result.files) console.log(`  ${file}`);

@@ -788,9 +788,83 @@ test("bootstrap refuses to rewrite tracked settings without consent and never si
   const result = bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 9, rewriteSettings: true });
   assert.deepEqual(result.files.map((file) => path.basename(file)), ["backlog-provider-settings.json"]);
   assert.deepEqual(result.unchanged.map((file) => path.basename(file)), ["assignment-provider-settings.json", "change-provider-settings.json"]);
-  assert.equal(read(backlogFile).projects[0].board_provider.board.number, 9);
+  const rewrittenBoard = read(backlogFile).projects[0].board_provider.board;
+  assert.equal(rewrittenBoard.number, 9);
+  // Deliberate design choice: a url recorded for board 7 is stale for board 9 and
+  // must NOT be carried over (it is preserved only for the same board identity).
+  assert.equal(rewrittenBoard.url, undefined, "a prior board url must not survive a board identity change");
   assert.deepEqual(fs.readFileSync(assignmentFile), assignmentBytes, "an authorized rewrite must not touch files without content changes");
   assert.deepEqual(fs.readFileSync(changeFile), changeBytes, "an authorized rewrite must not touch files without content changes");
+});
+
+test("a failed git tracking probe refuses the rewrite instead of bypassing consent", () => {
+  const repo = repoFixture();
+  const settings = path.join(repo, "context", "settings");
+  const backlogFile = path.join(settings, "backlog-provider-settings.json");
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  // A corrupt index makes `git ls-files` fail without touching the probes bootstrap
+  // runs earlier (remote lookup and branch resolution read no index).
+  fs.writeFileSync(path.join(repo, ".git", "index"), "corrupt");
+  const before = snapshotTree(settings);
+  assert.throws(
+    () => bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 9 }),
+    /cannot determine the git tracking state/,
+  );
+  assert.deepEqual(snapshotTree(settings), before, "an unknown tracking state must refuse, not rewrite");
+  // Explicit consent does not depend on the probe and still proceeds.
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 9, rewriteSettings: true });
+  assert.equal(read(backlogFile).projects[0].board_provider.board.number, 9);
+});
+
+test("the provider-bootstrap CLI exits 2 on a tracked-settings refusal and prescribes the consent command", () => {
+  const repo = repoFixture();
+  const settings = path.join(repo, "context", "settings");
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  const refused = spawnSync(process.execPath, [
+    "build/src/cli.js", "provider-bootstrap",
+    "--scope", "project",
+    "--repo-path", repo,
+    "--project-settings-root", settings,
+    "--provider-project", "9",
+  ], { encoding: "utf8" });
+  assert.equal(refused.status, 2, `${refused.stdout}\n${refused.stderr}`);
+  assert.match(refused.stderr, /re-run with --rewrite-settings/);
+  assert.match(refused.stderr, /standalone: flow-agents provider-bootstrap --scope project/);
+  const accepted = spawnSync(process.execPath, [
+    "build/src/cli.js", "provider-bootstrap",
+    "--scope", "project",
+    "--repo-path", repo,
+    "--project-settings-root", settings,
+    "--provider-project", "9",
+    "--rewrite-settings",
+  ], { encoding: "utf8" });
+  assert.equal(accepted.status, 0, `${accepted.stdout}\n${accepted.stderr}`);
+});
+
+test("init --configure-providers carries --rewrite-settings through to provider bootstrap", () => {
+  const repo = repoFixture();
+  const settings = path.join(repo, "context", "settings");
+  const backlogFile = path.join(settings, "backlog-provider-settings.json");
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 4 });
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  const common = [
+    "build/src/cli.js", "init",
+    "--runtime", "base",
+    "--dest", repo,
+    "--telemetry-sink", "local-files",
+    "--configure-providers",
+    "--provider-project", "5",
+    "--yes",
+  ];
+  const refused = spawnSync(process.execPath, common, { encoding: "utf8" });
+  assert.notEqual(refused.status, 0, `${refused.stdout}\n${refused.stderr}`);
+  assert.match(refused.stderr, /--rewrite-settings/);
+  assert.equal(read(backlogFile).projects[0].board_provider.board.number, 4, "a refused init must not rewrite settings");
+  const accepted = spawnSync(process.execPath, [...common, "--rewrite-settings"], { encoding: "utf8" });
+  assert.equal(accepted.status, 0, `${accepted.stdout}\n${accepted.stderr}`);
+  assert.equal(read(backlogFile).projects[0].board_provider.board.number, 5, "init --rewrite-settings must reach provider bootstrap");
 });
 
 test("online bootstrap verifies auth, discovers a sole project, and creates a missing claim label", () => {
