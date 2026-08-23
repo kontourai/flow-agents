@@ -17,6 +17,8 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const EXEMPTIONS = {
   'evals/integration/test_claim_lookup.sh':
     'Baseline-red in #297: stop-goal-fit fixture emits no disputed-claim gate hint.',
+  'evals/integration/test_init_overwrite_guard_power.sh':
+    'Fault-injection power meta-suite (#1288): mutates guard sources in a throwaway git worktree and rebuilds ~10 times (minutes) to prove each regression test reds under six injections. Developer/reviewer-run evidence tool; its subject tests (src/cli/init-overwrite-guard.test.mjs) are CI-covered by the unit-test corpus.',
 
 };
 
