@@ -78,6 +78,21 @@ test("the plan re-record IS the provenance-bearing amendment channel; every othe
     // after re-anchoring, writes against contract B are clean again
     const after = planRecord("pass");
     assert.equal(after.status, 0, `post-reanchor write failed: ${after.stderr}`);
+
+    // the amendment is AUDITABLE: the surviving plan claim carries contract A as its predecessor
+    // (digest + criteria + actor + timestamp), so a criteria swap can never look like a first
+    // anchor. The follow-up same-contract re-record must PRESERVE the history, not drop it.
+    const bundle = JSON.parse(fs.readFileSync(path.join(session, "trust.bundle"), "utf8"));
+    const planClaims = bundle.claims.filter((claim) =>
+      claim?.metadata?.gate_claim?.expectation_id === "implementation-plan");
+    assert.equal(planClaims.length, 1, "one live plan claim after supersession");
+    const history = planClaims[0].metadata?.acceptance_contract_history
+      ?? planClaims[0].metadata?._acceptance_contract_history;
+    assert.ok(Array.isArray(history) && history.length >= 1, `amendment history missing: ${JSON.stringify(Object.keys(planClaims[0].metadata ?? {}))}`);
+    const predecessor = history[0].predecessor;
+    assert.ok(predecessor?.criteria?.some((criterion) => String(criterion.description).includes("Contract A")),
+      "predecessor contract A must remain traceable");
+    assert.ok(history[0].superseded_by_actor, "amendment actor recorded");
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
   }
