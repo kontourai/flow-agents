@@ -5536,32 +5536,46 @@ export function routeBackDisclosureLines(
   // Per-identity history: Flow budgets attempts per route identity — normalized reason + exact
   // loop (from_step -> to_step) + retry epoch — so anything less granular would be a claim the
   // accounting does not make. Group persisted transitions by that identity (first-recorded
-  // order), name the CURRENT (highest) epoch's recorded count, and parenthesize closed epochs.
-  const identities = new Map<string, { reason: string; from: string; to: string; epochs: Map<number, number> }>();
-  for (const transition of transitions) {
-    if (!transition || typeof transition !== "object" || transition.type !== "route_back" || transition.gate_id !== gate.id) continue;
-    const attempt = Number(transition.attempt);
-    if (!Number.isInteger(attempt) || attempt <= 0) continue;
+  // order), name the CURRENT epoch's recorded count, and parenthesize closed epochs. The current
+  // epoch consults `retry_authorized` transitions, not just observed route_backs: Flow's own
+  // epoch derivation (routeBackEpoch) is keyed off the paired authorization, so an
+  // authorized-but-undebited epoch reports as "epoch N: 0 attempts (authorized)" — reading only
+  // route_backs would name a closed epoch as current.
+  const transitionIdentity = (transition: AnyObj): { key: string; reason: string; from: string; to: string; epoch: number } => {
     const reason = normalizeRouteReasonForBudget(gate, typeof transition.route_reason === "string" && transition.route_reason.length > 0
       ? transition.route_reason
       : typeof transition.reason === "string" && transition.reason.length > 0 ? transition.reason : null);
     const from = String(transition.from_step ?? "");
     const to = String(transition.to_step ?? "");
     const epoch = Number.isInteger(Number(transition.retry_epoch)) && Number(transition.retry_epoch) > 0 ? Number(transition.retry_epoch) : 1;
-    const key = `${reason}|${from}|${to}`;
-    const identity = identities.get(key) ?? { reason, from, to, epochs: new Map<number, number>() };
-    identity.epochs.set(epoch, Math.max(identity.epochs.get(epoch) ?? 0, attempt));
-    identities.set(key, identity);
+    return { key: `${reason}|${from}|${to}`, reason, from, to, epoch };
+  };
+  const identities = new Map<string, { reason: string; from: string; to: string; epochs: Map<number, number>; authorizedEpoch: number }>();
+  for (const transition of transitions) {
+    if (!transition || typeof transition !== "object" || transition.gate_id !== gate.id) continue;
+    if (transition.type === "route_back") {
+      const attempt = Number(transition.attempt);
+      if (!Number.isInteger(attempt) || attempt <= 0) continue;
+      const { key, reason, from, to, epoch } = transitionIdentity(transition);
+      const identity = identities.get(key) ?? { reason, from, to, epochs: new Map<number, number>(), authorizedEpoch: 0 };
+      identity.epochs.set(epoch, Math.max(identity.epochs.get(epoch) ?? 0, attempt));
+      identities.set(key, identity);
+    } else if (transition.type === "retry_authorized" && transition.status === "retry-authorized") {
+      const { key, reason, from, to, epoch } = transitionIdentity(transition);
+      const identity = identities.get(key) ?? { reason, from, to, epochs: new Map<number, number>(), authorizedEpoch: 0 };
+      identity.authorizedEpoch = Math.max(identity.authorizedEpoch, epoch);
+      identities.set(key, identity);
+    }
   }
   const history = identities.size === 0
     ? "none"
-    : [...identities.values()].map(({ reason, from, to, epochs }) => {
-      const currentEpoch = Math.max(...epochs.keys());
-      const current = epochs.get(currentEpoch)!;
+    : [...identities.values()].map(({ reason, from, to, epochs, authorizedEpoch }) => {
+      const currentEpoch = Math.max(authorizedEpoch, ...(epochs.size ? epochs.keys() : [1]));
+      const current = epochs.get(currentEpoch) ?? 0;
       const closed = [...epochs.entries()].filter(([epoch]) => epoch !== currentEpoch)
         .sort(([left], [right]) => left - right)
         .map(([epoch, attempt]) => `epoch ${epoch} closed at ${attempt}`);
-      return `${reason} ${from}->${to} epoch ${currentEpoch}: ${current} attempt${current === 1 ? "" : "s"}${closed.length ? ` (${closed.join(", ")})` : ""}`;
+      return `${reason} ${from}->${to} epoch ${currentEpoch}: ${current} attempt${current === 1 ? "" : "s"}${current === 0 ? " (authorized)" : ""}${closed.length ? ` (${closed.join(", ")})` : ""}`;
     }).join("; ");
   const policy = gate.route_back_policy as AnyObj | undefined;
   const maxAttempts = Number.isInteger(policy?.max_attempts) ? Number(policy!.max_attempts) : DEFAULT_ROUTE_BACK_MAX_ATTEMPTS;
@@ -5579,6 +5593,54 @@ export function routeBackDisclosureLines(
     }
   }
   return lines;
+}
+
+/**
+ * #1304: the direct-CLI record-gate-claim disclosure emission, extracted so its
+ * benign-vs-loud decision is directly testable through the production function.
+ *
+ * Only two states are PROVEN benign and stay silent: a non-canonical session layout (path
+ * shape alone — no gate can exist) and a canonical layout whose run state is ENOENT (no
+ * canonical Flow run). Every other failure — root stat errors, unreadable/corrupt run files,
+ * module load, disclosure computation — degrades LOUDLY: a silent skip would let a non-pass
+ * claim spend its route-back cost undisclosed, the exact contract failure #1304 exists to
+ * prevent. (`tryCanonicalProjectRootForSession` is deliberately NOT used here: it collapses
+ * stat failures and layout mismatches into one null.) Note the loud line is defense-in-depth:
+ * within `record-gate-claim` itself, the earlier signal-validation reader consumes the same
+ * canonical files more strictly and fails the whole command CLOSED before any write, so no
+ * currently-reachable corruption spends a cost undisclosed — the loud path guards the failure
+ * classes that skip that reader (root resolution, module load, computation).
+ */
+export async function emitRecordGateClaimRouteBackDisclosure(dir: string, slug: string, expectationId: string, statusVal: string): Promise<void> {
+  const artifactRootDir = path.dirname(dir);
+  const isCanonicalLayout = path.basename(artifactRootDir) === "flow-agents" && path.basename(path.dirname(artifactRootDir)) === ".kontourai";
+  if (!isCanonicalLayout) return;
+  try {
+    const disclosureRoot = canonicalProjectRootForSession(dir);
+    const flowDir = runDir(slug, disclosureRoot);
+    let runStatePresent = true;
+    try {
+      fs.statSync(path.join(flowDir, "state.json"));
+    } catch (statError) {
+      if ((statError as NodeJS.ErrnoException).code === "ENOENT") runStatePresent = false;
+      else throw statError;
+    }
+    if (runStatePresent) {
+      const disclosureRun = {
+        definition: JSON.parse(fs.readFileSync(path.join(flowDir, "definition.json"), "utf8")) as unknown,
+        state: JSON.parse(fs.readFileSync(path.join(flowDir, "state.json"), "utf8")) as { current_step: string; transitions?: unknown },
+      };
+      // Lazy import: the public workflow module statically imports this one, so the
+      // production provisional-delivery record verifier is reached dynamically (only on
+      // this direct-CLI, non-pass path) to keep the module graph acyclic at load time.
+      const { assertVerifiedProvisionalDeliveryRecord } = await import("./workflow.js");
+      const lines = routeBackDisclosureLines(disclosureRun, expectationId, statusVal,
+        () => assertVerifiedProvisionalDeliveryRecord(dir, disclosureRoot, slug));
+      for (const line of lines) process.stderr.write(`${line}\n`);
+    }
+  } catch {
+    process.stderr.write("[workflow] NOTICE: route-back disclosure unavailable (module load failed); a non-pass claim here may spend a route-back attempt and sit live.\n");
+  }
 }
 
 /**
@@ -5695,28 +5757,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // under the subject lock (fresher state), so suppress here to avoid a double disclosure.
   // Reseal (signed authority path, orchestrator-mediated) is a disclosed non-goal of #1304.
   if (!publicWorkflowAuthority && statusVal !== "pass") {
-    const disclosureRoot = tryCanonicalProjectRootForSession(dir);
-    // A session without a canonical Flow run has no gate to disclose — benign silence. Any
-    // failure past that point degrades LOUDLY: a silent skip would let a non-pass claim spend
-    // its route-back cost undisclosed, the exact contract failure #1304 exists to prevent.
-    if (disclosureRoot && fs.existsSync(path.join(runDir(slug, disclosureRoot), "state.json"))) {
-      try {
-        const flowDir = runDir(slug, disclosureRoot);
-        const disclosureRun = {
-          definition: loadJson(path.join(flowDir, "definition.json")),
-          state: loadJson(path.join(flowDir, "state.json")) as { current_step: string; transitions?: unknown },
-        };
-        // Lazy import: the public workflow module statically imports this one, so the
-        // production provisional-delivery record verifier is reached dynamically (only on this
-        // direct-CLI, non-pass path) to keep the module graph acyclic at load time.
-        const { assertVerifiedProvisionalDeliveryRecord } = await import("./workflow.js");
-        const lines = routeBackDisclosureLines(disclosureRun, targetExpectation.id, statusVal,
-          () => assertVerifiedProvisionalDeliveryRecord(dir, disclosureRoot, slug));
-        for (const line of lines) process.stderr.write(`${line}\n`);
-      } catch {
-        process.stderr.write("[workflow] NOTICE: route-back disclosure unavailable (module load failed); a non-pass claim here may spend a route-back attempt and sit live.\n");
-      }
-    }
+    await emitRecordGateClaimRouteBackDisclosure(dir, slug, targetExpectation.id, statusVal);
   }
 
   const { claimType, subjectType } = targetExpectation.bundle_claim;

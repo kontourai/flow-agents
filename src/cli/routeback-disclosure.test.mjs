@@ -29,7 +29,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 import { flowRunHead, runDir } from "@kontourai/flow";
-import { assertCurrentVerifiedWorkspaceEvidence, routeBackDisclosureLines } from "../../build/src/cli/workflow-sidecar.js";
+import { assertCurrentVerifiedWorkspaceEvidence, emitRecordGateClaimRouteBackDisclosure, routeBackDisclosureLines } from "../../build/src/cli/workflow-sidecar.js";
 import {
   assertExecuteFailureRouteBeforeMutation,
   assertTerminalDeliveryWorkspaceEvidence,
@@ -502,6 +502,23 @@ test("budget identity: the PRE half lists attempts per reason/loop/epoch verbati
   const undeclaredPre = routeBackDisclosureLines(undeclared, "closeout-readiness", "fail", undefined);
   assert.match(undeclaredPre[0], /route-back attempts recorded at this gate: default closeout->verify epoch 1: 1 attempt/);
 
+  // The CURRENT epoch consults retry_authorized, exactly as Flow's own epoch derivation does
+  // (routeBackEpoch keys off the paired authorization): after epoch 1 exhausts and a retry is
+  // authorized, Flow is at epoch 2 with nothing debited — a route_back-only scan would name the
+  // CLOSED epoch as current (this assertion is its own discrimination: it reds under that scan).
+  const authorized = handShapedRun({
+    transitions: [
+      routeBack({ reason: "missing_evidence", attempt: 1, toStep: "closeout", epoch: 1 }),
+      routeBack({ reason: "missing_evidence", attempt: 2, toStep: "closeout", epoch: 1 }),
+      routeBack({ reason: "missing_evidence", attempt: 3, toStep: "closeout", epoch: 1 }),
+      routeBack({ reason: "missing_evidence", attempt: 4, toStep: "closeout", epoch: 1, limitExceeded: true }),
+      { type: "retry_authorized", status: "retry-authorized", gate_id: "closeout-gate", route_reason: "missing_evidence", from_step: "closeout", to_step: "closeout", retry_epoch: 2, prior_retry_epoch: 1, at: new Date().toISOString() },
+    ],
+  });
+  const authorizedPre = routeBackDisclosureLines(authorized, "closeout-readiness", "fail", undefined);
+  assert.equal(authorizedPre.length, 1);
+  assert.match(authorizedPre[0], /route-back attempts recorded at this gate: missing_evidence closeout->closeout epoch 2: 0 attempts \(authorized\) \(epoch 1 closed at 4\)/);
+
   // POST, blocked: evaluation appended a limit_exceeded route_back and blocked the run.
   const blockedTransition = routeBack({ reason: "implementation_defect", attempt: 4, limitExceeded: true });
   const blockedLines = routeBackOutcomeLines(
@@ -523,6 +540,98 @@ test("budget identity: the PRE half lists attempts per reason/loop/epoch verbati
   );
   assert.equal(routedLines.length, 1);
   assert.match(routedLines[0], /routed the run back to 'execute' \(route-back attempt 1 of 3, reason implementation_defect\)/);
+});
+
+test("sidecar disclosure degrades loudly on real failures; only proven absence stays silent", async () => {
+  // Direct test of the production benign-vs-loud decision (the extracted emission function).
+  // Within record-gate-claim, the earlier signal-validation reader consumes the same canonical
+  // files more strictly and fails the whole command CLOSED before any write (probed live:
+  // EACCES/corrupt definition all die pre-disclosure with no claim written), so the loud line
+  // is defense-in-depth for the failure classes that skip that reader — proven here directly.
+  const capture = async (fn) => {
+    const captured = [];
+    const originalWrite = process.stderr.write;
+    process.stderr.write = (chunk) => { captured.push(String(chunk)); return true; };
+    try { await fn(); } finally { process.stderr.write = originalWrite; }
+    return captured.join("");
+  };
+
+  // LOUD: canonical layout, canonical run present, state.json unreadable (EACCES).
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "routeback-loud-"));
+  try {
+    const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", "routeback-loud");
+    const flowDir = path.join(projectRoot, ".kontourai", "flow", "runs", "routeback-loud");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.mkdirSync(flowDir, { recursive: true });
+    fs.writeFileSync(path.join(flowDir, "definition.json"), "{}");
+    fs.writeFileSync(path.join(flowDir, "state.json"), "{}");
+    fs.chmodSync(path.join(flowDir, "state.json"), 0o000);
+    const loud = await capture(() => emitRecordGateClaimRouteBackDisclosure(sessionDir, "routeback-loud", "implementation-scope", "fail"));
+    assert.match(loud, /route-back disclosure unavailable \(module load failed\); a non-pass claim here may spend a route-back attempt and sit live/,
+      "an unreadable canonical run state must degrade loudly, never read as benign absence");
+
+    // BENIGN 1: canonical layout, run state ENOENT — proven absence stays silent.
+    fs.rmSync(flowDir, { recursive: true, force: true });
+    const absent = await capture(() => emitRecordGateClaimRouteBackDisclosure(sessionDir, "routeback-loud", "implementation-scope", "fail"));
+    assert.equal(absent, "", "a proven-absent canonical run stays silent");
+  } finally {
+    try { fs.chmodSync(path.join(projectRoot, ".kontourai", "flow", "runs", "routeback-loud", "state.json"), 0o644); } catch { /* already removed */ }
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+
+  // BENIGN 2: a non-canonical session layout stays silent (no gate can exist).
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), "routeback-noncanonical-"));
+  try {
+    const silent = await capture(() => emitRecordGateClaimRouteBackDisclosure(path.join(plain, "session"), "x", "implementation-scope", "fail"));
+    assert.equal(silent, "", "a non-canonical layout stays silent");
+  } finally {
+    fs.rmSync(plain, { recursive: true, force: true });
+  }
+});
+
+test("a non-pass claim that never attaches ROLLS BACK: nothing is recorded, so nothing sits live undisclosed", async () => {
+  // Reconciliation of the round-6 review premise: "an ATTACHED claim with zero route
+  // transitions is the live-claim case and enters recovery". Reproduced live, it does not:
+  // recovery structurally requires canonical attachment of THIS invocation's receipt
+  // (classifyCanonicalEvidenceAttachment demands NEW manifest evidence entries), and for a
+  // non-pass status every attachment appends a route_back (route, replay, or block) — while an
+  // UNATTACHED live claim classifies "unattached" and the transaction rolls back. So the
+  // recovered+no-route sub-case cannot arise; the POST helper is state-independent anyway
+  // (recovered shares the exact code path — proven by the recovered routing test above). This
+  // test pins the rolled-back truth: an induced post-attachment failure on a live not_verified
+  // leaves NO canonical claim behind — nothing sits live, disclosed or otherwise.
+  const session = await buildFixture("routeback-nv-rollback", "verify");
+  const bundleBefore = fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8");
+  const stateFile = path.join(runDir(session.slug, session.projectRoot), "state.json");
+  const canonicalBefore = fs.readFileSync(stateFile, "utf8");
+  const captured = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => { captured.push(String(chunk)); return true; };
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    beforePostconditions: () => { throw new Error("induced post-attachment failure"); },
+  });
+  try {
+    await assert.rejects(
+      () => workflowMain(["evidence",
+        "--session-dir", session.sessionDir,
+        "--expectation", "tests-evidence", "--status", "not_verified",
+        "--summary", "routeback live nv rollback fixture",
+      ]),
+      /induced post-attachment failure/,
+      "an unattached live claim must roll back, not recover",
+    );
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    process.stderr.write = originalWrite;
+  }
+  try {
+    assert.equal(fs.readFileSync(stateFile, "utf8"), canonicalBefore, "the canonical run is untouched");
+    assert.equal(fs.readFileSync(path.join(session.sessionDir, "trust.bundle"), "utf8"), bundleBefore, "the claim was NOT recorded — nothing sits live");
+    // The PRE facts still printed before the refused mutation (disclosure precedes cost).
+    assert.ok(captured.join("").includes("route-back attempts recorded at this gate: none"), `PRE facts precede the rolled-back mutation: ${captured.join("")}`);
+  } finally {
+    fs.rmSync(session.projectRoot, { recursive: true, force: true });
+  }
 });
 
 test("a pass record, a fail at a gate without a route map, and an unknown expectation disclose nothing", () => {
