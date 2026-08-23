@@ -114,3 +114,128 @@ test("a genuinely unknown command still fails loudly and does not print the help
   assert.match(result.stderr, /unknown command: not-a-real-command/);
   assert.doesNotMatch(result.stdout, /Commands:/);
 });
+
+// ─── #1294: --key=value parser parity + option-level specs/allowlists ────────────────────────
+
+// Extract COMMAND_OPTION_SPECS entries from the source, the same way describedCommands() scrapes
+// COMMAND_DESCRIPTIONS: the map literal is the single source of truth for both help output and
+// unknown-flag enforcement, and this scrape binds it to the dispatcher and to the real CLI below.
+function optionSpecs() {
+  const source = fs.readFileSync(SOURCE, "utf8");
+  const start = source.indexOf("const COMMAND_OPTION_SPECS");
+  assert.ok(start >= 0, "expected to find the COMMAND_OPTION_SPECS declaration in workflow-sidecar.ts");
+  const end = source.indexOf("]);", start);
+  assert.ok(end >= 0, "expected to find COMMAND_OPTION_SPECS's closing `]);`");
+  const slice = source.slice(start, end);
+  const entries = [...slice.matchAll(/\["([a-z-]+)",\s*\[([^\]]*)\]\]/g)].map((m) => ({
+    name: m[1],
+    options: [...m[2].matchAll(/"([a-z-]+)"/g)].map((o) => o[1]),
+  }));
+  assert.ok(entries.length >= 5, "expected to extract multiple entries from COMMAND_OPTION_SPECS");
+  return entries;
+}
+
+test("every COMMAND_OPTION_SPECS command is dispatched and described (drift guard, one level down)", () => {
+  const dispatched = new Set(dispatchedCommands());
+  const described = new Set(describedCommands().map((e) => e.name));
+  for (const entry of optionSpecs()) {
+    assert.ok(dispatched.has(entry.name), `COMMAND_OPTION_SPECS names '${entry.name}', which main()'s switch does not dispatch`);
+    assert.ok(described.has(entry.name), `COMMAND_OPTION_SPECS names '${entry.name}', which COMMAND_DESCRIPTIONS does not describe`);
+    assert.deepEqual(entry.options, [...new Set(entry.options)], `command '${entry.name}' lists an option twice`);
+  }
+});
+
+test("each adopted command's --help names exactly its declared options — help and enforcement cannot disagree", () => {
+  for (const entry of optionSpecs()) {
+    const result = runSidecar([entry.name, "--help"]);
+    assert.equal(result.status, 0, `${entry.name} --help: status=${result.status} stderr=${result.stderr}`);
+    const advertised = [...new Set([...result.stdout.matchAll(/--([a-z-]+)/g)].map((m) => m[1]))].filter((o) => o !== "help");
+    assert.deepEqual(
+      advertised.sort(),
+      [...entry.options].sort(),
+      `${entry.name} --help advertises [${advertised}] but COMMAND_OPTION_SPECS declares [${entry.options}]`,
+    );
+  }
+});
+
+test("adopted commands reject an unknown flag before any action runs (space form and = form)", () => {
+  const scratch = tempDir("workflow-sidecar-allowlist-");
+  const before = tree(scratch);
+  // Space form.
+  const spaceForm = runSidecar(["claim", "some-claim-id", scratch, "--bogus", "x"], { cwd: scratch });
+  assert.notEqual(spaceForm.status, 0);
+  assert.match(spaceForm.stderr, /unknown flag --bogus for claim/);
+  assert.match(spaceForm.stderr, /--json/, "the rejection must name the supported options");
+  // = form: the key must be split off the value — pre-#1294 the whole token was one flag named
+  // 'bogus=x', so this assertion is the end-to-end proof the parser fix reached the real CLI.
+  const eqForm = runSidecar(["verify-hold", scratch, "--bogus=x"], { cwd: scratch });
+  assert.notEqual(eqForm.status, 0);
+  assert.match(eqForm.stderr, /unknown flag --bogus for verify-hold/);
+  assert.doesNotMatch(eqForm.stderr, /bogus=x/, "the = form must parse as key 'bogus', not a flag named 'bogus=x'");
+  assert.deepEqual(tree(scratch), before, "a rejected invocation must not write anything");
+});
+
+test("unadopted commands keep current behaviour verbatim: unknown flags still pass through", () => {
+  const result = runSidecar(["resolve-slug", "kontourai/flow-agents#1294", "--bogus", "x"]);
+  assert.equal(result.status, 0, `resolve-slug: status=${result.status} stderr=${result.stderr}`);
+  assert.doesNotMatch(result.stderr, /unknown flag/);
+  assert.match(result.stdout, /kontourai-flow-agents-1294/);
+});
+
+test("publish-delivery keeps its disabled-stub redirect for every invocation, flags included (review round 1)", () => {
+  // The repo's own evals call `publish-delivery <dir> --repo-root <dir>` and assert the redirect
+  // message. Adopting an allowlist for a hard-die stub shadowed that message with an unknown-flag
+  // refusal — this pins the stub's contract: the redirect always wins, whatever flags arrive.
+  const scratch = tempDir("workflow-sidecar-publish-delivery-");
+  const result = runSidecar(["publish-delivery", scratch, "--repo-root", scratch], { cwd: scratch });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /publish-delivery is disabled; use `flow-agents workflow publish-delivery`/);
+  assert.doesNotMatch(result.stderr, /unknown flag/);
+});
+
+test("--key=value parses identically in the shared parser and the sidecar parser (parity, #1294)", async () => {
+  const { parseArgs: sharedParse } = await import(path.resolve(__dirname, "../../build/src/lib/args.js"));
+  const { parseSidecarArgs } = await import(path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js"));
+
+  // Normalize each parser's output to a comparable key → [values] map plus positionals.
+  // Bare flags (no value) are represented as true.
+  const normalizeShared = (argv) => {
+    const parsed = sharedParse(argv);
+    const bindings = {};
+    for (const [key, value] of Object.entries(parsed.flags)) {
+      bindings[key] = value === true ? true : Array.isArray(value) ? value : [value];
+    }
+    return { positionals: parsed.positionals, bindings };
+  };
+  const normalizeSidecar = (argv) => {
+    const parsed = parseSidecarArgs(["some-command", ...argv]);
+    const bindings = {};
+    for (const key of parsed.flags) bindings[key] = true;
+    for (const [key, values] of Object.entries(parsed.opts)) bindings[key] = values;
+    return { positionals: parsed.positional, bindings };
+  };
+
+  const matrix = [
+    ["--key=value"],
+    ["--key=value", "pos"],
+    ["pos1", "--key=value", "pos2"],
+    ["--key="], // empty value binds as "", exactly like src/lib/args.ts's arg.slice(eq + 1)
+    ["--key=--dashed"], // a value that looks like a flag still binds in the = form
+    ["--key=a=b"], // only the FIRST = splits key from value
+    ["--key=1", "--key=2"], // repeats accumulate in order
+    ["--key=value", "--bare"],
+    ["--a=1", "--b", "2", "pos"], // = form and space form mix
+  ];
+  for (const argv of matrix) {
+    assert.deepEqual(
+      normalizeSidecar(argv),
+      normalizeShared(argv),
+      `parsers disagree on: ${JSON.stringify(argv)}`,
+    );
+  }
+
+  // Within each parser, the = form and the space form of the same binding agree (the syntax the
+  // issue says "silently degrades to a bare flag in half the CLI").
+  assert.deepEqual(normalizeShared(["--key=value"]), normalizeShared(["--key", "value"]));
+  assert.deepEqual(normalizeSidecar(["--key=value"]), normalizeSidecar(["--key", "value"]));
+});
