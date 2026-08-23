@@ -753,9 +753,19 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
     "after-route-back",
   );
   repairedCiReadiness.claim.status = "verified";
-  const learning = await writeAndSync(session, [
-    repairedCiReadiness,
-  ]);
+  // #1302: the merge-ready-ci turnstile reads the CURRENT bundle for verification evidence, and
+  // these fixtures REPLACE the bundle on every write (real writers accumulate) — carry the
+  // repaired verification entries alongside the CI claim or the predicate finds no critique.
+  // The turnstile authenticates the recorded provisional delivery; the hermetic authority's
+  // completion verifier is injected PER-CALL (no module state — an earlier setter here was
+  // review-flagged as a shipped ambient enforcement kill-switch).
+  const learningEntriesForTurnstile = [...repairedVerification, repairedCiReadiness];
+  bindFixturePassingObservations(session, learningEntriesForTurnstile);
+  writeBundle(session.sessionDir, learningEntriesForTurnstile);
+  const learning = await syncBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    gateFreshnessCompletionVerifier: authority.verifyCompletion,
+  });
   assert.equal(learning.run.state.current_step, "learn");
   const learningEntries = [
     bundleClaim({ expectation: "decision-evidence", claimType: "builder.learn.decisions", subjectType: "decision" }),
@@ -963,7 +973,15 @@ test("public terminal delivery refuses an active learn step even after a positiv
   await advanceSessionToPrOpen(session);
   const prOpened = await writeAndSync(session, [bundleClaim({ expectation: "pull-request-opened", claimType: "builder.pr-open.pull-request", subjectType: "pull-request" })]);
   assert.equal(prOpened.run.state.current_step, "merge-ready-ci");
-  const learning = await writeAndSync(session, [bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" })]);
+  // #1302: the turnstile demands current verification evidence IN the bundle at merge-ready-ci
+  // acceptance; these fixtures replace the bundle per write, so carry verify-grade entries.
+  const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  currentTests.claim.status = "verified";
+  const learning = await writeAndSync(session, [
+    currentTests,
+    ...verifiedTestsPrerequisites(session),
+    bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" }),
+  ]);
   assert.equal(learning.run.state.status, "active");
   assert.equal(learning.run.state.current_step, "learn");
   await assert.rejects(
@@ -7987,7 +8005,14 @@ test("publish-change reports an external capability gap and self-authored result
     ],
     () => [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
     () => [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
-    () => [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...verifiedTestsPrerequisites(session)],
+    // #1302: the merge-ready-ci freshness turnstile runs the publish predicate at gate
+    // acceptance, which demands a PASSING VERIFIED tests-evidence claim bound to the current
+    // workspace — the same grade the provisional-delivery test always built explicitly.
+    () => {
+      const tests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+      tests.claim.status = "verified";
+      return [tests, ...verifiedTestsPrerequisites(session)];
+    },
     () => [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
   ];
   for (const entries of steps) await writeAndSync(session, entries());
@@ -8098,7 +8123,14 @@ async function advanceSessionToPrOpen(session) {
     ],
     () => [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
     () => [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
-    () => [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...verifiedTestsPrerequisites(session)],
+    // #1302: the merge-ready-ci freshness turnstile runs the publish predicate at gate
+    // acceptance, which demands a PASSING VERIFIED tests-evidence claim bound to the current
+    // workspace — the same grade the provisional-delivery test always built explicitly.
+    () => {
+      const tests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+      tests.claim.status = "verified";
+      return [tests, ...verifiedTestsPrerequisites(session)];
+    },
     () => [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
   ];
   let latest = null;
