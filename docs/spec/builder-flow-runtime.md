@@ -149,6 +149,19 @@ definition bounds that correction to three Flow-owned attempts and blocks on exh
 there is no default execute route. Status and sync are read-only/reprojection operations,
 not implicit backtracking or definition amendment.
 
+A gate may declare `requires_current_verification: true` in its Flow Definition
+(the Builder Kit declares it on `merge-ready-ci-gate`). The evidence writer then
+refuses a **passing** claim for that gate's expectations while canonical review
+and test verification evidence is stale for the current workspace, running the
+same snapshot-freshness predicate the delivery publish preflight runs and
+surfacing its exact vocabulary. This closes the #1302 composition trap: freshness
+was previously guarded only at the exits (publish), so a cursor-advancing gate
+could commit the run past its last repair point on stale evidence. Failing
+claims are exempt — they are the repair path — and the Builder `learn-gate`
+declares `missing_evidence`/`default -> verify` so staleness discovered past
+`merge-ready-ci` remains repairable through the ordinary bounded route-back
+mechanism instead of stranding the run.
+
 ## Agent Projection
 
 While a run is active, `state.json` contains:

@@ -213,7 +213,15 @@ NODE
 const fs = require("node:fs");
 const flow = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const publishLearn = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
-if (publishLearn.version !== "1.3") throw new Error("publish-learn route-back behavior requires Flow Definition version 1.3");
+if (publishLearn.version !== "1.4") throw new Error("publish-learn route-back behavior requires Flow Definition version 1.4");
+// #1302: the cursor-advancing gate after verify must declare the freshness turnstile, and
+// learn-gate must have an escape route so stale verification is repairable past merge-ready-ci.
+const freshnessTurnstileGate = publishLearn.gates?.["merge-ready-ci-gate"] || {};
+if (freshnessTurnstileGate.requires_current_verification !== true) throw new Error("merge-ready-ci-gate must declare requires_current_verification (#1302)");
+const learnGate = publishLearn.gates?.["learn-gate"] || {};
+if (learnGate.on_route_back?.missing_evidence !== "verify") throw new Error("learn-gate missing_evidence should route to verify (#1302)");
+if (learnGate.on_route_back?.default !== "verify") throw new Error("learn-gate default route-back should target verify (#1302)");
+if (learnGate.route_back_policy?.on_exceeded !== "block") throw new Error("learn-gate route_back_policy should block on exceeded attempts");
 const steps = Object.fromEntries((flow.steps || []).map((step) => [step.id, step.next]));
 if (steps["pull-work"] !== "design-probe") throw new Error("pull-work should route to design-probe");
 if (steps["design-probe"] !== "plan") throw new Error("design-probe should route to plan");
