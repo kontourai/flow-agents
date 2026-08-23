@@ -5508,14 +5508,17 @@ function diagnostic(dir: string, code: string, summary: string): never {
  * `requires_current_verification` gate is WITHHELD by the freshness seam, not routed.
  *
  * The publish-first line is keyed off two facts, never a gate name (#1280 kit-generic
- * boundary): the gate's `requires_current_verification` declaration, and the absence of the
- * session's provisional delivery record on disk.
+ * boundary): the gate's `requires_current_verification` declaration, and the caller-supplied
+ * `publishFirstVerifier` — the PRODUCTION provisional-delivery predicate
+ * (`assertTerminalDeliveryWorkspaceEvidence`), whose throw means "no verifying provisional
+ * delivery exists" (absent, stale, or invalid record all mean publish-first is still the
+ * needed action). A record's mere existence must never suppress the guidance.
  */
 export function routeBackDisclosureLines(
   run: { definition: unknown; state: { current_step: string; transitions?: unknown } },
   expectation: string,
   requestedStatus: string,
-  sessionDir?: string,
+  publishFirstVerifier?: () => unknown,
 ): string[] {
   if (requestedStatus !== "fail" && requestedStatus !== "not_verified") return [];
   const gates = openGates(run.definition as never, run.state as never) as AnyObj[];
@@ -5527,19 +5530,36 @@ export function routeBackDisclosureLines(
   const gateName = String(gate.id ?? "the current gate");
   const declared = Object.entries(routes as Record<string, unknown>).map(([reason, step]) => `${reason} -> ${String(step)}`).join(", ");
   const transitions = Array.isArray(run.state.transitions) ? run.state.transitions as AnyObj[] : [];
-  const recordedAttempts = transitions
-    .filter((transition) => transition && typeof transition === "object" && transition.type === "route_back" && transition.gate_id === gate.id)
-    .map((transition) => Number(transition.attempt))
-    .filter((attempt) => Number.isInteger(attempt) && attempt > 0);
-  const attemptsUsed = recordedAttempts.length === 0 ? 0 : Math.max(...recordedAttempts);
+  // Per-reason history: Flow accounts attempts per route identity (reason/loop/epoch), so a
+  // single aggregated number would be a claim the accounting does not make. Report the highest
+  // attempt recorded per reason, in first-recorded order, verbatim from persisted transitions.
+  const perReason = new Map<string, number>();
+  for (const transition of transitions) {
+    if (!transition || typeof transition !== "object" || transition.type !== "route_back" || transition.gate_id !== gate.id) continue;
+    const reason = typeof transition.route_reason === "string" && transition.route_reason.length > 0
+      ? transition.route_reason
+      : typeof transition.reason === "string" && transition.reason.length > 0 ? transition.reason : "default";
+    const attempt = Number(transition.attempt);
+    if (!Number.isInteger(attempt) || attempt <= 0) continue;
+    perReason.set(reason, Math.max(perReason.get(reason) ?? 0, attempt));
+  }
+  const history = perReason.size === 0
+    ? "none"
+    : [...perReason.entries()].map(([reason, attempt]) => `${reason} ${attempt}`).join(", ");
   const policy = gate.route_back_policy as AnyObj | undefined;
   const maxAttempts = Number.isInteger(policy?.max_attempts) ? Number(policy!.max_attempts) : DEFAULT_ROUTE_BACK_MAX_ATTEMPTS;
   const lines = [
-    `[workflow] NOTICE: recording ${requestedStatus} for ${expectation} at ${gateName} can spend a bounded route-back attempt: this gate declares route-backs (${declared}); route-back attempts already recorded at this gate: ${attemptsUsed} of ${maxAttempts}; a route-back invalidates current-visit verification evidence (critique/tests must be re-recorded).`,
+    `[workflow] NOTICE: recording ${requestedStatus} for ${expectation} at ${gateName} can spend a bounded route-back attempt: this gate declares route-backs (${declared}); route-back attempts recorded at this gate: ${history} (budget max ${maxAttempts}; Flow accounts attempts per route identity — reason/loop/epoch); a route-back invalidates current-visit verification evidence (critique/tests must be re-recorded).`,
   ];
-  if (gate.requires_current_verification === true && sessionDir
-    && !fs.existsSync(path.join(sessionDir, "provisional-delivery.json"))) {
-    lines.push(`[workflow] NOTICE: ${gateName} declares requires_current_verification and no provisional delivery record exists for this session — publish the provisional delivery BEFORE recording this gate; a live non-pass claim here blocks the publish that would resolve it.`);
+  if (gate.requires_current_verification === true && publishFirstVerifier) {
+    let deliveryVerified = false;
+    try {
+      publishFirstVerifier();
+      deliveryVerified = true;
+    } catch { /* absent, stale, or invalid provisional delivery: publish-first still applies */ }
+    if (!deliveryVerified) {
+      lines.push(`[workflow] NOTICE: ${gateName} declares requires_current_verification and no verifying provisional delivery exists for this session — publish the provisional delivery BEFORE recording this gate; a live non-pass claim here blocks the publish that would resolve it.`);
+    }
   }
   return lines;
 }
@@ -5666,9 +5686,13 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
           definition: loadJson(path.join(flowDir, "definition.json")),
           state: loadJson(path.join(flowDir, "state.json")) as { current_step: string; transitions?: unknown },
         };
-        for (const line of routeBackDisclosureLines(disclosureRun, targetExpectation.id, statusVal, dir)) {
-          process.stderr.write(`${line}\n`);
-        }
+        // Lazy import: the public workflow module statically imports this one, so the
+        // production provisional-delivery predicate is reached dynamically (only on this
+        // direct-CLI, non-pass path) to keep the module graph acyclic at load time.
+        const { assertTerminalDeliveryWorkspaceEvidence } = await import("./workflow.js");
+        const lines = routeBackDisclosureLines(disclosureRun, targetExpectation.id, statusVal,
+          () => assertTerminalDeliveryWorkspaceEvidence(dir, disclosureRoot, slug));
+        for (const line of lines) process.stderr.write(`${line}\n`);
       }
     } catch { /* best-effort: a session without a readable canonical run discloses nothing */ }
   }
