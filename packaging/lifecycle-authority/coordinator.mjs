@@ -1444,7 +1444,11 @@ function assertMergeChangeVerificationRefreshProvenance(state, definition, defin
     && entry.successor_definition.version === definition.version
     && entry.successor_definition.digest === definitionDigest);
   if (amendments.length === 0) {
-    if (state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
+    // #1307: @kontourai/flow's writer has never stamped state.definition_digest; the identity the
+    // stamp would prove is already established by the caller's deep-equal of the persisted start
+    // definition against the resolved effective definition. Accept the derived proof when the
+    // stamp is absent; refuse only a PRESENT stamp that mismatches (same form as line ~858).
+    if (state.definition_digest !== undefined && state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
     return;
   }
   if (adopted.length !== 1) throw new Error("merge-change requires one authenticated definition amendment adopting the canonical evidence-refresh definition");
@@ -1497,8 +1501,13 @@ async function assertMergeChangeAuthorizationBinding(paths, authorization, reque
     throw new Error("merge-change authorization canonical Flow binding changed");
   }
   const mergeReadyCi = definition.gates?.["builder.publish-learn:merge-ready-ci-gate"];
-  if (!record(mergeReadyCi)
-      || canonicalJson(mergeReadyCi.on_route_back) !== canonicalJson({ missing_evidence: "verify", default: "verify" })
+  // #1307: this was the THIRD independent encoding of the route-map contract (after #1300's in
+  // merge-change and the static eval's). The semantic requirement is that the refresh entries are
+  // PRESENT with the bounded blocking policy; additional repair routes (implementation_defect)
+  // and the #1302 requires_current_verification declaration are the flow definition's business.
+  const mergeReadyCiRoutes = record(mergeReadyCi) ? mergeReadyCi.on_route_back : null;
+  if (!record(mergeReadyCi) || !record(mergeReadyCiRoutes)
+      || mergeReadyCiRoutes.missing_evidence !== "verify" || mergeReadyCiRoutes.default !== "verify"
       || canonicalJson(mergeReadyCi.route_back_policy) !== canonicalJson({ max_attempts: 3, on_exceeded: "block" })) {
     throw new Error("merge-change requires semantic merge-ready-ci evidence-refresh control");
   }
