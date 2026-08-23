@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { flagBool, flagString, parseArgs } from "../lib/args.js";
 import { validateSchemaValue, type Issue } from "../lib/mini-json-schema.js";
 import { githubWorkItemIdentity } from "../lib/work-item-identity.js";
@@ -23,6 +24,7 @@ export type ProviderBootstrapOptions = {
   providerLogin?: string;
   providerBranch?: string;
   artifactRoot?: string;
+  rewriteSettings?: boolean;
 };
 
 type Repo = { owner: string; name: string; url: string };
@@ -492,14 +494,53 @@ function changeEntry(repo: Repo): Record<string, unknown> {
   };
 }
 
-function readDocument(file: string): Record<string, unknown> {
-  if (!fs.existsSync(file)) return { schema_version: "1.0", projects: [] };
+function readDocument(file: string): { document: Record<string, unknown>; raw: string | null } {
+  if (!fs.existsSync(file)) return { document: { schema_version: "1.0", projects: [] }, raw: null };
   const stat = fs.lstatSync(file);
   if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${file}: settings target must be a regular file; refusing to follow or replace it`);
-  const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+  const raw = fs.readFileSync(file, "utf8");
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
   if (parsed.schema_version !== "1.0") throw new Error(`${file}: expected schema_version 1.0; refusing to overwrite`);
   if (parsed.projects !== undefined && !Array.isArray(parsed.projects)) throw new Error(`${file}: projects must be an array; refusing to overwrite`);
-  return { ...parsed, projects: parsed.projects ?? [] };
+  return { document: { ...parsed, projects: parsed.projects ?? [] }, raw };
+}
+
+function isGitTrackedFile(repoPath: string, file: string): boolean {
+  try {
+    execFileSync("git", ["-C", repoPath, "ls-files", "--error-unmatch", "--", file], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Line-level LCS diff limited to removed/added lines; enough for a refusal preview.
+function previewSettingsDiff(beforeText: string, afterText: string, limit = 40): string {
+  const before = beforeText.split("\n");
+  const after = afterText.split("\n");
+  const lcs: Uint32Array[] = Array.from({ length: before.length + 1 }, () => new Uint32Array(after.length + 1));
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    for (let j = after.length - 1; j >= 0; j -= 1) {
+      lcs[i]![j] = before[i] === after[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+    }
+  }
+  const lines: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < before.length || j < after.length) {
+    if (i < before.length && j < after.length && before[i] === after[j]) {
+      i += 1;
+      j += 1;
+    } else if (j >= after.length || (i < before.length && lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) {
+      lines.push(`- ${before[i]}`);
+      i += 1;
+    } else {
+      lines.push(`+ ${after[j]}`);
+      j += 1;
+    }
+  }
+  if (lines.length > limit) return [...lines.slice(0, limit), `… ${lines.length - limit} more changed lines`].join("\n");
+  return lines.join("\n");
 }
 
 function matchingRepo(candidate: unknown, repo: Repo): candidate is Record<string, unknown> {
@@ -515,42 +556,69 @@ function matchingRootRepo(candidate: unknown, repo: Repo): candidate is Record<s
   return !Array.isArray(project.paths) || project.paths.length === 0;
 }
 
+// Merges the generated entry over the prior matching entry, starting from the prior
+// object so fields the generator does not model survive the rewrite (#1305). The
+// generator only overwrites the fields it owns; consumer-owned fields (selection,
+// mutation_policy, policy, capabilities) keep their prior values.
+function mergeEntry(prior: Record<string, unknown>, entry: Record<string, unknown>, kind: typeof SETTINGS[number][0]): Record<string, unknown> {
+  const merged: Record<string, unknown> = {
+    ...prior,
+    ...entry,
+    project: { ...(prior.project as Record<string, unknown> | undefined), ...(entry.project as Record<string, unknown>) },
+  };
+  if (kind === "backlog-provider-settings.json") {
+    const priorWorkItem = prior.work_item_provider as Record<string, unknown> | undefined;
+    const priorBoard = prior.board_provider as Record<string, unknown> | undefined;
+    const entryBoard = entry.board_provider as Record<string, unknown>;
+    const priorBoardRef = priorBoard?.board as Record<string, unknown> | undefined;
+    const entryBoardRef = entryBoard.board as Record<string, unknown>;
+    // Prior board enrichments (like url) only remain valid for the same board identity.
+    const sameBoard = priorBoardRef !== undefined
+      && priorBoardRef.type === entryBoardRef.type
+      && priorBoardRef.owner === entryBoardRef.owner
+      && priorBoardRef.number === entryBoardRef.number;
+    merged.work_item_provider = {
+      ...priorWorkItem,
+      ...(entry.work_item_provider as Record<string, unknown>),
+      ...(priorWorkItem?.capabilities ? { capabilities: priorWorkItem.capabilities } : {}),
+    };
+    merged.board_provider = {
+      ...priorBoard,
+      ...entryBoard,
+      board: sameBoard ? { ...priorBoardRef, ...entryBoardRef } : entryBoardRef,
+      ...(priorBoard?.capabilities ? { capabilities: priorBoard.capabilities } : {}),
+    };
+    if (prior.selection) merged.selection = prior.selection;
+    if (prior.mutation_policy) merged.mutation_policy = prior.mutation_policy;
+  } else if (kind === "assignment-provider-settings.json") {
+    const priorProvider = prior.provider as Record<string, unknown> | undefined;
+    merged.provider = {
+      ...priorProvider,
+      ...(entry.provider as Record<string, unknown>),
+      ...(priorProvider?.capabilities ? { capabilities: priorProvider.capabilities } : {}),
+    };
+    if (prior.policy) merged.policy = prior.policy;
+  } else {
+    merged.provider = {
+      ...(prior.provider as Record<string, unknown> | undefined),
+      ...(entry.provider as Record<string, unknown>),
+    };
+  }
+  return merged;
+}
+
 function mergeProject(document: Record<string, unknown>, entry: Record<string, unknown>, repo: Repo, kind: typeof SETTINGS[number][0]): Record<string, unknown> {
   const projects = document.projects as unknown[];
   const existing = projects.find((candidate) => matchingRootRepo(candidate, repo));
-  let merged = entry;
-  if (existing) {
-    if (kind === "backlog-provider-settings.json") {
-      const prior = existing as Record<string, unknown>;
-      const priorWorkItem = prior.work_item_provider as Record<string, unknown> | undefined;
-      const priorBoard = prior.board_provider as Record<string, unknown> | undefined;
-      merged = {
-        ...entry,
-        ...(prior.selection ? { selection: prior.selection } : {}),
-        ...(prior.mutation_policy ? { mutation_policy: prior.mutation_policy } : {}),
-        work_item_provider: {
-          ...(entry.work_item_provider as Record<string, unknown>),
-          ...(priorWorkItem?.capabilities ? { capabilities: priorWorkItem.capabilities } : {}),
-        },
-        board_provider: {
-          ...(entry.board_provider as Record<string, unknown>),
-          ...(priorBoard?.capabilities ? { capabilities: priorBoard.capabilities } : {}),
-        },
-      };
-    } else if (kind === "assignment-provider-settings.json") {
-      const prior = existing as Record<string, unknown>;
-      const priorProvider = prior.provider as Record<string, unknown> | undefined;
-      merged = {
-        ...entry,
-        ...(prior.policy ? { policy: prior.policy } : {}),
-        provider: {
-          ...(entry.provider as Record<string, unknown>),
-          ...(priorProvider?.capabilities ? { capabilities: priorProvider.capabilities } : {}),
-        },
-      };
-    }
-  }
-  return { ...document, projects: [merged, ...projects.filter((candidate) => !matchingRootRepo(candidate, repo))] };
+  if (!existing) return { ...document, projects: [entry, ...projects] };
+  const merged = mergeEntry(existing, entry, kind);
+  // Replace the matched entry in place so an unchanged document round-trips exactly.
+  return {
+    ...document,
+    projects: projects.flatMap((candidate) => candidate === existing
+      ? [merged]
+      : matchingRootRepo(candidate, repo) ? [] : [candidate]),
+  };
 }
 
 function validateDocument(file: string, schemaFile: string, document: Record<string, unknown>): void {
@@ -743,7 +811,7 @@ function publishLocalTransaction(
   }
 }
 
-export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: Repo; project: Project; files: string[]; offlineRemediation?: string; pickup?: ProviderPickupPlan } {
+export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: Repo; project: Project; files: string[]; unchanged: string[]; offlineRemediation?: string; pickup?: ProviderPickupPlan } {
   const repoPath = path.resolve(options.repoPath);
   const repo = detectGitHubRepo(repoPath);
   const ghBin = options.ghBin ?? "gh";
@@ -797,16 +865,38 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
 
       const entries = [projectEntry(repo, project), assignmentEntry(repo), changeEntry(repo)];
       const pending: Array<{ file: string; document: Record<string, unknown> }> = [];
+      const unchanged: string[] = [];
+      const mergedDocuments = new Map<string, Record<string, unknown>>();
       for (let index = 0; index < SETTINGS.length; index += 1) {
         const [name, schema] = SETTINGS[index]!;
         const file = path.join(root, name);
-        const document = mergeProject(readDocument(file), entries[index]!, repo, name);
+        const { document: current, raw } = readDocument(file);
+        const document = mergeProject(current, entries[index]!, repo, name);
+        mergedDocuments.set(name, document);
+        if (raw !== null) {
+          // An existing file that already carries the target configuration is left
+          // byte-identical: no reformatting, no field-dropping rewrite (#1305).
+          if (isDeepStrictEqual(JSON.parse(raw) as unknown, document)) {
+            unchanged.push(file);
+            continue;
+          }
+          // Bootstrap did not create this tracked file; rewriting it needs explicit consent.
+          if (!options.rewriteSettings && isGitTrackedFile(repoPath, file)) {
+            // Diff against normalized formatting so the preview shows the content
+            // change instead of drowning it in whole-file reformatting noise.
+            const normalized = `${JSON.stringify(JSON.parse(raw), null, 2)}\n`;
+            const preview = previewSettingsDiff(normalized, `${JSON.stringify(document, null, 2)}\n`);
+            const note = normalized === raw ? "" : "(content changes shown with normalized formatting; the rewrite would also reformat the file)\n";
+            throw new Error(`${file}: provider bootstrap would rewrite this tracked settings file; re-run with --rewrite-settings to accept the update:\n${note}${preview}`);
+          }
+        }
         validateDocument(file, schema, document);
         pending.push({ file, document });
       }
-      // Validate every local document before the explicit online mutation so a
-      // malformed existing settings file cannot create remote state on a failed run.
-      const assignmentDocument = pending.find((item) => path.basename(item.file) === "assignment-provider-settings.json")!.document;
+      // Every document that will be written is validated before the explicit online
+      // mutation so a malformed existing settings file cannot create remote state on
+      // a failed run. Files left untouched are never re-validated or re-serialized.
+      const assignmentDocument = mergedDocuments.get("assignment-provider-settings.json")!;
       const assignmentProject = (assignmentDocument.projects as unknown[]).find((candidate) => matchingRootRepo(candidate, repo)) as Record<string, unknown>;
       const labelName = validateLabelName((assignmentProject.policy as Record<string, unknown>).label_name);
       const createRemoteLabel = options.online ? !claimLabelExists(ghBin, repo, labelName) : false;
@@ -830,7 +920,7 @@ export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: R
         assertCurrentBranch,
       );
       const files = pending.map((item) => item.file);
-      return { repo, project, files, offlineRemediation, ...(preparedPickup ? { pickup: preparedPickup.plan } : {}) };
+      return { repo, project, files, unchanged, offlineRemediation, ...(preparedPickup ? { pickup: preparedPickup.plan } : {}) };
   } finally {
     if (settingsGuard) releaseProviderLock(settingsGuard);
     if (sessionGuard) releaseProviderLock(sessionGuard);
@@ -851,6 +941,10 @@ Options:
   --provider-login LOGIN    Authenticated provider login (required offline with --work-item).
   --provider-branch BRANCH  Assert the provider branch equals the actual Git worktree branch.
   --artifact-root PATH      Runtime artifact root (default: <repo>/.kontourai/flow-agents).
+  --rewrite-settings        Allow rewriting an existing git-tracked settings file whose
+                            content would change. Without this flag bootstrap refuses
+                            with a diff preview; files already carrying the target
+                            configuration are always left byte-identical.
   --json
 `);
 }
@@ -875,11 +969,13 @@ export function main(argv = process.argv.slice(2)): number {
       providerLogin: flagString(args.flags, "provider-login"),
       providerBranch: flagString(args.flags, "provider-branch"),
       artifactRoot: flagString(args.flags, "artifact-root"),
+      rewriteSettings: flagBool(args.flags, "rewrite-settings"),
     });
     if (flagBool(args.flags, "json")) console.log(JSON.stringify(result, null, 2));
     else {
       console.log(`Configured GitHub workflow providers for ${result.repo.owner}/${result.repo.name} (Project ${result.project.number})`);
       for (const file of result.files) console.log(`  ${file}`);
+      for (const file of result.unchanged) console.log(`  ${file} (unchanged)`);
       if (result.offlineRemediation) console.warn(result.offlineRemediation);
     }
     return 0;

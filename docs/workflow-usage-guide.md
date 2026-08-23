@@ -134,11 +134,19 @@ flow-agents init --runtime codex --dest . \
 This detects the GitHub repository from its `origin`, verifies `gh` auth,
 selects the sole accessible GitHub Project (or validates
 `--provider-project NUMBER`), creates the `agent:claimed` label when missing,
-schema-validates all three documents before atomically replacing each file:
+schema-validates every document it will write before atomically replacing that
+file:
 
 - `context/settings/backlog-provider-settings.json`
 - `context/settings/assignment-provider-settings.json`
 - `context/settings/change-provider-settings.json`
+
+An existing settings file that already carries the target configuration is left
+byte-identical: no reformatting, no re-serialization, and fields the generator
+does not model always survive. When an existing git-tracked settings file would
+actually change content, bootstrap refuses with a diff preview; pass
+`--rewrite-settings` to accept the update. Untracked or newly created files are
+written without the flag.
 
 For a headless offline setup, omit `--online` and provide
 `--provider-project NUMBER`. The command does not pretend remote state was
