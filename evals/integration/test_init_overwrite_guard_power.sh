@@ -207,7 +207,7 @@ echo "--- F: single-layer — init drops only the --exclude-path args (argv unit
 require_clean F
 apply_patch src/cli/init.ts \
   'for (const rel of preservedRelPaths) args.push("--exclude-path", rel);' \
-  '' || exit 1
+  'void preservedRelPaths;' || exit 1
 build || { _fail "F: build failed under injection"; exit 1; }
 expect_red "F" "$EXCLUDE_ARGS_TEST" "AssertionError"
 restore_all
