@@ -827,6 +827,19 @@ type ProvisionalCompletionVerifier = (
   expected: { runId: string; requestSha256: string; resultCoreSha256: string },
 ) => JsonRecord;
 
+/**
+ * #1304: the publish-first suppression key. The whole delivery-evidence predicate
+ * (`assertTerminalDeliveryWorkspaceEvidence`) is the WRONG key for the route-back disclosure:
+ * its strict branch succeeds on fresh current verification WITHOUT examining the provisional
+ * record — exactly the pre-trap state where recording a non-pass claim would make that evidence
+ * stale and block the publish that would resolve it. Only a VERIFYING provisional delivery
+ * record — bindings validated by the production record verifier — may suppress the guidance.
+ * Throws whenever no such record exists (absent, stale, or invalid).
+ */
+export function assertVerifiedProvisionalDeliveryRecord(sessionDir: string, projectRoot: string, slug: string): void {
+  verifyRecordedProvisionalDelivery(sessionDir, projectRoot, slug, verifyProvisionalDeliveryLifecycleCompletion);
+}
+
 function verifyRecordedProvisionalDelivery(
   sessionDir: string,
   projectRoot: string,
@@ -1657,13 +1670,11 @@ export function routeBackOutcomeLines(
   preTransitionCount: number,
   expectation: string,
   requestedStatus: string,
-  { reportNoRoute = true }: { reportNoRoute?: boolean } = {},
 ): string[] {
   const transitions = Array.isArray(postState.transitions) ? postState.transitions as JsonRecord[] : [];
   const appended = transitions.slice(preTransitionCount)
     .filter((transition) => transition && typeof transition === "object" && (transition as JsonRecord).type === "route_back");
   if (appended.length === 0) {
-    if (!reportNoRoute) return [];
     return [`[workflow evidence] NOTICE: recorded ${requestedStatus} for ${expectation}; the run did not route — it remains at '${postState.current_step}', and a non-pass claim recorded here sits live until superseded.`];
   }
   const routeBack = appended[appended.length - 1]!;
@@ -1707,13 +1718,14 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     const repaired = await recoverBuilderFlowSession({ sessionDir });
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
     assertGateFreshnessTurnstile(sessionDir, repaired.run, expectation, requestedStatus);
-    // #1304 PRE: declared route map + persisted per-reason attempt history, emitted under the
+    // #1304 PRE: declared route map + persisted per-identity attempt history, emitted under the
     // lock after authorization and immediately before the mutation — facts only, never a
     // prediction of what evaluation will decide (an unauthorized or refused invocation
-    // discloses nothing). The publish-first guidance runs the PRODUCTION provisional-delivery
-    // predicate: any throw (absent, stale, or invalid record) means publish-first still applies.
+    // discloses nothing). The publish-first guidance is suppressed ONLY by a VERIFYING
+    // provisional delivery record (production record verifier) — never by fresh current
+    // verification evidence, which is the pre-trap state.
     const routeFacts = routeBackDisclosureLines(repaired.run, expectation, requestedStatus,
-      () => assertTerminalDeliveryWorkspaceEvidence(sessionDir, repaired.projectRoot, slug));
+      () => assertVerifiedProvisionalDeliveryRecord(sessionDir, repaired.projectRoot, slug));
     for (const line of routeFacts) process.stderr.write(`${line}\n`);
     const preTransitionCount = Array.isArray((repaired.run.state as JsonRecord).transitions)
       ? ((repaired.run.state as JsonRecord).transitions as unknown[]).length
@@ -1738,11 +1750,9 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
       result = await runHostAuthorizedEvidence({ sessionDir, slug, parsed, validated, repaired, caller, run });
     }
     // #1304 POST: report what evaluation actually did, derived from the canonical state this
-    // invocation just committed (still under the subject lock, so the read is race-free). A
-    // recovered outcome is a committed mutation too, but a recovered REPLAY appends no new
-    // transition — its no-route case is not this invocation's observation, so the live-claim
-    // line is reserved for the fresh-commit path (the recovered message already names the
-    // canonical step).
+    // invocation just committed (still under the subject lock, so the read is race-free).
+    // "recovered" means THIS invocation's candidate was canonically attached and only a later
+    // operation failed — its observed outcome is reported exactly like the fresh-commit path.
     if (routeFacts.length > 0 && (result.state === "attached" || result.state === "recovered")) {
       const post = await loadBuilderFlowRun({ cwd: repaired.projectRoot, runId: slug });
       const outcomeLines = routeBackOutcomeLines(
@@ -1750,7 +1760,6 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
         preTransitionCount,
         expectation,
         requestedStatus,
-        { reportNoRoute: result.state === "attached" },
       );
       for (const line of outcomeLines) process.stderr.write(`${line}\n`);
     }

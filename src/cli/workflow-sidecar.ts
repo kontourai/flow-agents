@@ -40,7 +40,7 @@ import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLo
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
-import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
+import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, normalizeRouteReasonForBudget, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
 
 type AnyObj = Record<string, any>;
 
@@ -5499,20 +5499,23 @@ function diagnostic(dir: string, code: string, summary: string): never {
  *
  * Emitted to stderr BEFORE a non-pass gate claim is recorded at a gate that declares an
  * `on_route_back` map. It states only facts that exist before the mutation: the DECLARED route
- * map, the route-back attempt history already PERSISTED at this gate (highest recorded attempt
- * number), and the declared budget. It never predicts what evaluation will decide — the actual
- * outcome (routed / blocked / live non-pass claim) is a separate post-mutation report derived
- * from the transitions evaluation actually recorded (`routeBackOutcomeLines` in workflow.ts).
- * Predicting `routeBackDecision` here was reviewed as a parallel encoding of route semantics
- * that lies in the live #1304 scenario: an unpublished `not_verified` at a
- * `requires_current_verification` gate is WITHHELD by the freshness seam, not routed.
+ * map, the attempt history already PERSISTED at this gate grouped by Flow's real budget
+ * identity (normalized reason + loop + retry epoch, read verbatim from the transitions), and
+ * the declared budget. It never predicts what evaluation will decide — the actual outcome
+ * (routed / blocked / live non-pass claim) is a separate post-mutation report derived from the
+ * transitions evaluation actually recorded (`routeBackOutcomeLines` in workflow.ts). Predicting
+ * `routeBackDecision` here was reviewed as a parallel encoding of route semantics that lies in
+ * the live #1304 scenario: an unpublished `not_verified` at a `requires_current_verification`
+ * gate is WITHHELD by the freshness seam, not routed.
  *
  * The publish-first line is keyed off two facts, never a gate name (#1280 kit-generic
  * boundary): the gate's `requires_current_verification` declaration, and the caller-supplied
- * `publishFirstVerifier` — the PRODUCTION provisional-delivery predicate
- * (`assertTerminalDeliveryWorkspaceEvidence`), whose throw means "no verifying provisional
- * delivery exists" (absent, stale, or invalid record all mean publish-first is still the
- * needed action). A record's mere existence must never suppress the guidance.
+ * `publishFirstVerifier` — the production provisional-delivery RECORD verifier
+ * (`assertVerifiedProvisionalDeliveryRecord`), whose throw means "no verifying provisional
+ * delivery record exists" (absent, stale, or invalid all mean publish-first is still the
+ * needed action). Fresh current verification evidence must never suppress the guidance: that
+ * is exactly the pre-trap state, where recording a non-pass claim makes the evidence stale and
+ * blocks the publish that would resolve it.
  */
 export function routeBackDisclosureLines(
   run: { definition: unknown; state: { current_step: string; transitions?: unknown } },
@@ -5530,26 +5533,40 @@ export function routeBackDisclosureLines(
   const gateName = String(gate.id ?? "the current gate");
   const declared = Object.entries(routes as Record<string, unknown>).map(([reason, step]) => `${reason} -> ${String(step)}`).join(", ");
   const transitions = Array.isArray(run.state.transitions) ? run.state.transitions as AnyObj[] : [];
-  // Per-reason history: Flow accounts attempts per route identity (reason/loop/epoch), so a
-  // single aggregated number would be a claim the accounting does not make. Report the highest
-  // attempt recorded per reason, in first-recorded order, verbatim from persisted transitions.
-  const perReason = new Map<string, number>();
+  // Per-identity history: Flow budgets attempts per route identity — normalized reason + exact
+  // loop (from_step -> to_step) + retry epoch — so anything less granular would be a claim the
+  // accounting does not make. Group persisted transitions by that identity (first-recorded
+  // order), name the CURRENT (highest) epoch's recorded count, and parenthesize closed epochs.
+  const identities = new Map<string, { reason: string; from: string; to: string; epochs: Map<number, number> }>();
   for (const transition of transitions) {
     if (!transition || typeof transition !== "object" || transition.type !== "route_back" || transition.gate_id !== gate.id) continue;
-    const reason = typeof transition.route_reason === "string" && transition.route_reason.length > 0
-      ? transition.route_reason
-      : typeof transition.reason === "string" && transition.reason.length > 0 ? transition.reason : "default";
     const attempt = Number(transition.attempt);
     if (!Number.isInteger(attempt) || attempt <= 0) continue;
-    perReason.set(reason, Math.max(perReason.get(reason) ?? 0, attempt));
+    const reason = normalizeRouteReasonForBudget(gate, typeof transition.route_reason === "string" && transition.route_reason.length > 0
+      ? transition.route_reason
+      : typeof transition.reason === "string" && transition.reason.length > 0 ? transition.reason : null);
+    const from = String(transition.from_step ?? "");
+    const to = String(transition.to_step ?? "");
+    const epoch = Number.isInteger(Number(transition.retry_epoch)) && Number(transition.retry_epoch) > 0 ? Number(transition.retry_epoch) : 1;
+    const key = `${reason}|${from}|${to}`;
+    const identity = identities.get(key) ?? { reason, from, to, epochs: new Map<number, number>() };
+    identity.epochs.set(epoch, Math.max(identity.epochs.get(epoch) ?? 0, attempt));
+    identities.set(key, identity);
   }
-  const history = perReason.size === 0
+  const history = identities.size === 0
     ? "none"
-    : [...perReason.entries()].map(([reason, attempt]) => `${reason} ${attempt}`).join(", ");
+    : [...identities.values()].map(({ reason, from, to, epochs }) => {
+      const currentEpoch = Math.max(...epochs.keys());
+      const current = epochs.get(currentEpoch)!;
+      const closed = [...epochs.entries()].filter(([epoch]) => epoch !== currentEpoch)
+        .sort(([left], [right]) => left - right)
+        .map(([epoch, attempt]) => `epoch ${epoch} closed at ${attempt}`);
+      return `${reason} ${from}->${to} epoch ${currentEpoch}: ${current} attempt${current === 1 ? "" : "s"}${closed.length ? ` (${closed.join(", ")})` : ""}`;
+    }).join("; ");
   const policy = gate.route_back_policy as AnyObj | undefined;
   const maxAttempts = Number.isInteger(policy?.max_attempts) ? Number(policy!.max_attempts) : DEFAULT_ROUTE_BACK_MAX_ATTEMPTS;
   const lines = [
-    `[workflow] NOTICE: recording ${requestedStatus} for ${expectation} at ${gateName} can spend a bounded route-back attempt: this gate declares route-backs (${declared}); route-back attempts recorded at this gate: ${history} (budget max ${maxAttempts}; Flow accounts attempts per route identity — reason/loop/epoch); a route-back invalidates current-visit verification evidence (critique/tests must be re-recorded).`,
+    `[workflow] NOTICE: recording ${requestedStatus} for ${expectation} at ${gateName} can spend a bounded route-back attempt: this gate declares route-backs (${declared}); route-back attempts recorded at this gate: ${history} (budget max ${maxAttempts} per route identity); a route-back invalidates current-visit verification evidence (critique/tests must be re-recorded).`,
   ];
   if (gate.requires_current_verification === true && publishFirstVerifier) {
     let deliveryVerified = false;
@@ -5678,23 +5695,28 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // under the subject lock (fresher state), so suppress here to avoid a double disclosure.
   // Reseal (signed authority path, orchestrator-mediated) is a disclosed non-goal of #1304.
   if (!publicWorkflowAuthority && statusVal !== "pass") {
-    try {
-      const disclosureRoot = tryCanonicalProjectRootForSession(dir);
-      if (disclosureRoot) {
+    const disclosureRoot = tryCanonicalProjectRootForSession(dir);
+    // A session without a canonical Flow run has no gate to disclose — benign silence. Any
+    // failure past that point degrades LOUDLY: a silent skip would let a non-pass claim spend
+    // its route-back cost undisclosed, the exact contract failure #1304 exists to prevent.
+    if (disclosureRoot && fs.existsSync(path.join(runDir(slug, disclosureRoot), "state.json"))) {
+      try {
         const flowDir = runDir(slug, disclosureRoot);
         const disclosureRun = {
           definition: loadJson(path.join(flowDir, "definition.json")),
           state: loadJson(path.join(flowDir, "state.json")) as { current_step: string; transitions?: unknown },
         };
         // Lazy import: the public workflow module statically imports this one, so the
-        // production provisional-delivery predicate is reached dynamically (only on this
+        // production provisional-delivery record verifier is reached dynamically (only on this
         // direct-CLI, non-pass path) to keep the module graph acyclic at load time.
-        const { assertTerminalDeliveryWorkspaceEvidence } = await import("./workflow.js");
+        const { assertVerifiedProvisionalDeliveryRecord } = await import("./workflow.js");
         const lines = routeBackDisclosureLines(disclosureRun, targetExpectation.id, statusVal,
-          () => assertTerminalDeliveryWorkspaceEvidence(dir, disclosureRoot, slug));
+          () => assertVerifiedProvisionalDeliveryRecord(dir, disclosureRoot, slug));
         for (const line of lines) process.stderr.write(`${line}\n`);
+      } catch {
+        process.stderr.write("[workflow] NOTICE: route-back disclosure unavailable (module load failed); a non-pass claim here may spend a route-back attempt and sit live.\n");
       }
-    } catch { /* best-effort: a session without a readable canonical run discloses nothing */ }
+    }
   }
 
   const { claimType, subjectType } = targetExpectation.bundle_claim;

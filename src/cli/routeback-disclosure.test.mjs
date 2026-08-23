@@ -2,16 +2,19 @@
 //
 // The disclosure has two halves split along declared-versus-observed lines. The PRE half
 // (routeBackDisclosureLines, shared with the sidecar writer) states only facts that exist before
-// the mutation: the DECLARED route map, the PERSISTED per-reason attempt history (Flow accounts
-// attempts per route identity — a single aggregated number would claim an accounting Flow does
-// not make), the invalidation rule, and — when a requires_current_verification gate has no
-// VERIFYING provisional delivery (production predicate; absent, stale, and invalid records all
-// throw) — the publish-first ordering rule. It never predicts what evaluation will decide: the
-// first design derived routeBackDecision pre-mutation and was blocked by independent review
-// because that prediction LIES in the live #1304 scenario (an unpublished not_verified at
-// merge-ready-ci is WITHHELD, not routed). The POST half (routeBackOutcomeLines) reports what
-// evaluation actually did, verbatim from the transitions the mutation appended. AC1 was amended
-// accordingly (explicitly, per the review's prescription — see the session pull-work Decisions).
+// the mutation: the DECLARED route map, the PERSISTED attempt history grouped by Flow's real
+// budget identity (normalized reason + loop + retry epoch — anything less granular claims an
+// accounting Flow does not make), the invalidation rule, and — at requires_current_verification
+// gates — the publish-first rule, suppressed ONLY by a VERIFYING provisional delivery record.
+// Fresh current verification evidence must never suppress it: that is exactly the pre-trap state
+// (recording a non-pass claim makes the evidence stale and blocks the publish that would resolve
+// it). The PRE half never predicts what evaluation will decide: the first design derived
+// routeBackDecision pre-mutation and was blocked by independent review because that prediction
+// LIES in the live #1304 scenario (an unpublished not_verified at merge-ready-ci is WITHHELD,
+// not routed). The POST half (routeBackOutcomeLines) reports what evaluation actually did,
+// verbatim from the transitions the committed mutation (fresh OR recovered) appended. AC1 was
+// amended accordingly (explicitly, per the review's prescription — see the session pull-work
+// Decisions).
 //
 // Layered proof note: reaching merge-ready-ci in a real run needs an authenticated
 // ChangeProvider (same gap as the freshness-turnstile tests); the live no-route truth is proven
@@ -22,12 +25,21 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { flowRunHead, runDir } from "@kontourai/flow";
-import { routeBackDisclosureLines } from "../../build/src/cli/workflow-sidecar.js";
-import { assertExecuteFailureRouteBeforeMutation, assertTerminalDeliveryWorkspaceEvidence, routeBackOutcomeLines } from "../../build/src/cli/workflow.js";
-import { startBuilderFlowSession, syncBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
+import { assertCurrentVerifiedWorkspaceEvidence, routeBackDisclosureLines } from "../../build/src/cli/workflow-sidecar.js";
+import {
+  assertExecuteFailureRouteBeforeMutation,
+  assertTerminalDeliveryWorkspaceEvidence,
+  assertVerifiedProvisionalDeliveryRecord,
+  main as workflowMain,
+  routeBackOutcomeLines,
+  setWorkflowEvidenceTransactionTestHooksForTest,
+} from "../../build/src/cli/workflow.js";
+import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
+import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash } from "../../build/src/cli/critique-resolution.js";
 import { performLocalClaim, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 
 // Each node:test file is its own process: pin the ambient actor before any claim resolution so
@@ -43,14 +55,14 @@ const KIT_PUBLISH_LEARN = path.resolve(__dirname, "../../kits/builder/flows/publ
 // invocation's outcome — that vocabulary belongs exclusively to the POST half.
 const PREDICTION_VOCABULARY = /routed|routes .* back to step|will route|BLOCKS the run/;
 
-const EXECUTE_PRE_FACTS = "[workflow] NOTICE: recording fail for implementation-scope at execute-gate can spend a bounded route-back attempt: this gate declares route-backs (plan_gap -> plan); route-back attempts recorded at this gate: none (budget max 3; Flow accounts attempts per route identity — reason/loop/epoch); a route-back invalidates current-visit verification evidence (critique/tests must be re-recorded).";
+const EXECUTE_PRE_FACTS = "[workflow] NOTICE: recording fail for implementation-scope at execute-gate can spend a bounded route-back attempt: this gate declares route-backs (plan_gap -> plan); route-back attempts recorded at this gate: none (budget max 3 per route identity); a route-back invalidates current-visit verification evidence (critique/tests must be re-recorded).";
 
 // ---------------------------------------------------------------------------
 // Real-run fixture: a builder.build session advanced to the execute (or
 // verify) step — the same claim shapes the builder-runtime suite uses.
 // ---------------------------------------------------------------------------
 
-function bundleClaim({ expectation, claimType, subjectType, stepId, subject, status = "pass" }) {
+function bundleClaim({ expectation, claimType, subjectType, stepId, subject }) {
   const timestamp = new Date().toISOString();
   const claimId = `claim.${expectation}`;
   return {
@@ -60,7 +72,7 @@ function bundleClaim({ expectation, claimType, subjectType, stepId, subject, sta
       subjectId: `routeback-disclosure/gate-claim-${expectation}`,
       claimType,
       fieldOrBehavior: `${expectation} fixture`,
-      value: status,
+      value: "pass",
       metadata: {
         workflow_subject_ref: subject,
         origin: "check",
@@ -76,7 +88,7 @@ function bundleClaim({ expectation, claimType, subjectType, stepId, subject, sta
       observedAt: timestamp, collectedBy: "flow-agents-test",
     },
     event: {
-      id: `event.${expectation}`, claimId, status: status === "pass" ? "verified" : "disputed", actor: "flow-agents-test", method: "attestation",
+      id: `event.${expectation}`, claimId, status: "verified", actor: "flow-agents-test", method: "attestation",
       evidenceIds: [`evidence.${expectation}`], createdAt: timestamp, verifiedAt: timestamp,
     },
   };
@@ -165,6 +177,44 @@ test("success path: a fail that actually routes reports the observed transition,
   }
 });
 
+test("a recovered commit reports its observed outcome exactly like a fresh one", async () => {
+  // "recovered" means THIS invocation's candidate was canonically attached and only a LATER
+  // operation failed — the observed outcome exists and must be reported. Induce a
+  // post-attachment failure (beforePostconditions) on a routing fail: evaluation commits the
+  // route, the transaction recovers, and the POST line still quotes the persisted transition.
+  const session = await buildFixture("routeback-recovered");
+  const captured = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => { captured.push(String(chunk)); return true; };
+  setWorkflowEvidenceTransactionTestHooksForTest({
+    beforePostconditions: () => { throw new Error("induced post-attachment failure"); },
+  });
+  let exitCode;
+  try {
+    exitCode = await workflowMain(["evidence",
+      "--session-dir", session.sessionDir,
+      "--expectation", "implementation-scope", "--status", "fail",
+      "--route-reason", "plan_gap",
+      "--summary", "routeback recovered fixture",
+    ]);
+  } finally {
+    setWorkflowEvidenceTransactionTestHooksForTest(undefined);
+    process.stderr.write = originalWrite;
+  }
+  try {
+    const stderrText = captured.join("");
+    assert.equal(exitCode, 0, `a recovered committed mutation must succeed: ${stderrText}`);
+    const state = JSON.parse(fs.readFileSync(path.join(runDir(session.slug, session.projectRoot), "state.json"), "utf8"));
+    const routeBacks = state.transitions.filter((transition) => transition.type === "route_back");
+    assert.equal(routeBacks.length, 1, "the induced failure fires AFTER canonical attachment: the route is committed");
+    const persisted = routeBacks[0];
+    assert.ok(stderrText.includes(`routed the run back to '${persisted.to_step}' (route-back attempt ${persisted.attempt} of ${persisted.max_attempts}, reason ${persisted.route_reason})`),
+      `a recovered commit must report the observed route: ${stderrText}`);
+  } finally {
+    fs.rmSync(session.projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("live not_verified through REAL evaluation at the shipped verify-gate: no route, live-claim truth from actual run state", async () => {
   // The exact #1304 failure shape, recorded via the writer + sync (not a manual helper call):
   // a not_verified claim at a route-mapped shipped gate. Evaluation must not route, and the POST
@@ -244,16 +294,16 @@ function kitMergeReadyRun() {
   };
 }
 
-test("not_verified at merge-ready-ci: no route is claimed, publish-first runs the PRODUCTION delivery predicate", () => {
+test("not_verified at merge-ready-ci: no route is claimed, publish-first keys off the provisional RECORD verifier", () => {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "routeback-mrci-"));
   const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", "routeback-mrci");
   fs.mkdirSync(sessionDir, { recursive: true });
   try {
     const run = kitMergeReadyRun();
-    const productionVerifier = () => assertTerminalDeliveryWorkspaceEvidence(sessionDir, projectRoot, "routeback-mrci");
+    const recordVerifier = () => assertVerifiedProvisionalDeliveryRecord(sessionDir, projectRoot, "routeback-mrci");
 
-    // No provisional delivery record: the predicate throws, the guidance shows.
-    const absent = routeBackDisclosureLines(run, "ci-merge-readiness", "not_verified", productionVerifier);
+    // No provisional delivery record: the verifier throws, the guidance shows.
+    const absent = routeBackDisclosureLines(run, "ci-merge-readiness", "not_verified", recordVerifier);
     assert.equal(absent.length, 2);
     assert.match(absent[0], /declares route-backs \(/);
     assert.match(absent[0], /missing_evidence -> verify/);
@@ -262,15 +312,14 @@ test("not_verified at merge-ready-ci: no route is claimed, publish-first runs th
     assert.match(absent[1], /declares requires_current_verification and no verifying provisional delivery exists/);
     assert.match(absent[1], /publish the provisional delivery BEFORE recording this gate; a live non-pass claim here blocks the publish that would resolve it/);
 
-    // An INVALID record on disk must KEEP the guidance — existence is not verification; the
-    // production predicate still throws (absent, stale, invalid all mean publish-first applies).
+    // An INVALID record on disk must KEEP the guidance — existence is not verification.
     fs.writeFileSync(path.join(sessionDir, "provisional-delivery.json"), "{}");
-    const invalidRecord = routeBackDisclosureLines(run, "ci-merge-readiness", "not_verified", productionVerifier);
+    const invalidRecord = routeBackDisclosureLines(run, "ci-merge-readiness", "not_verified", recordVerifier);
     assert.equal(invalidRecord.length, 2, "an invalid provisional delivery record must not suppress the publish-first guidance");
     assert.match(invalidRecord[1], /publish the provisional delivery BEFORE recording this gate/);
 
     // Suppressed side (unit seam: a verifying delivery is not fabricable in a fixture — a
-    // non-throwing verifier stands in for the production predicate's success).
+    // non-throwing verifier stands in for the record verifier's success).
     const verifying = routeBackDisclosureLines(run, "ci-merge-readiness", "not_verified", () => ({}));
     assert.equal(verifying.length, 1, "only a VERIFYING provisional delivery suppresses the guidance");
     assert.ok(!verifying.some((line) => /publish the provisional delivery/.test(line)));
@@ -281,10 +330,106 @@ test("not_verified at merge-ready-ci: no route is claimed, publish-first runs th
     assert.equal(outcome.length, 1);
     assert.match(outcome[0], /the run did not route — it remains at 'merge-ready-ci', and a non-pass claim recorded here sits live until superseded/);
     assert.ok(!/routed the run back/.test(outcome[0]));
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
 
-    // A recovered replay appends nothing this invocation: the no-route line is suppressed
-    // rather than asserted about a mutation this invocation did not perform.
-    assert.deepEqual(routeBackOutcomeLines(run.state, run.state.transitions.length, "ci-merge-readiness", "not_verified", { reportNoRoute: false }), []);
+test("publish-first suppression keys off the provisional RECORD, never the whole evidence predicate", () => {
+  // The discriminating fixture: FRESH current verification evidence and NO provisional record —
+  // the exact pre-trap state, where recording a non-pass claim would make that evidence stale
+  // and block the publish that would resolve it. The whole evidence predicate ACCEPTS this state
+  // (its strict branch never examines the record), so keying suppression to it would hide the
+  // guidance precisely when it is needed; the record verifier correctly throws.
+  const slug = "routeback-fresh";
+  const subject = `local:work-item/${slug}`;
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), `${slug}-`));
+  try {
+    const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", slug);
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, "review-target"), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, "review-target", "implementation.txt"), "reviewed implementation\n");
+    fs.writeFileSync(path.join(projectRoot, "review-target", "delivery.md"), "reviewed delivery artifact\n");
+    fs.writeFileSync(path.join(projectRoot, ".gitignore"), ".kontourai/\n");
+    fs.writeFileSync(path.join(sessionDir, "state.json"), JSON.stringify({
+      schema_version: "1.0", task_slug: slug, status: "verifying", phase: "verification",
+      updated_at: new Date().toISOString(), work_item_refs: [subject],
+      next_action: { status: "continue", summary: "fixture" },
+    }, null, 2));
+    execFileSync("git", ["init", "-q"], { cwd: projectRoot });
+    execFileSync("git", ["config", "user.email", "fixture@example.test"], { cwd: projectRoot });
+    execFileSync("git", ["config", "user.name", "Fixture"], { cwd: projectRoot });
+    execFileSync("git", ["add", "-A"], { cwd: projectRoot });
+    execFileSync("git", ["commit", "-q", "-m", "workspace fixture"], { cwd: projectRoot });
+
+    const timestamp = new Date().toISOString();
+    const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+    assert.equal(snapshot.worktree_clean, true, "the fresh-evidence fixture must capture a clean worktree");
+    const critiqueRecord = {
+      critique_sequence: 1,
+      critique_predecessor_hash: CRITIQUE_CHAIN_GENESIS,
+      reviewer: "reviewer-actor",
+      reviewed_at: timestamp,
+      verdict: "pass",
+      summary: "clean critique fixture",
+      lanes: [{ id: "code", status: "pass" }],
+      review_target: {
+        artifacts: [{ file: "review-target/delivery.md", sha256: createHash("sha256").update(fs.readFileSync(path.join(projectRoot, "review-target", "delivery.md"))).digest("hex") }],
+        workspace_snapshot: snapshot,
+      },
+      findings: [],
+      workflow_subject_ref: subject,
+    };
+    const critiqueHash = critiqueRecordHash(critiqueRecord);
+    const critique = {
+      id: "claim.clean-critique", subjectType: "workflow-critique", subjectId: `${slug}/gate-claim-clean-critique`,
+      claimType: "workflow.critique.review", fieldOrBehavior: "clean critique fixture", value: "pass", status: "verified",
+      metadata: {
+        workflow_subject_ref: subject, origin: "critique", reviewer: "reviewer-actor", findings: [],
+        lanes: critiqueRecord.lanes, review_target: critiqueRecord.review_target,
+        reviewed_at: timestamp, critique_sequence: 1, critique_predecessor_hash: CRITIQUE_CHAIN_GENESIS,
+        critique_record_hash: critiqueHash, critique_record_id: `critique:${critiqueHash}`,
+      },
+      createdAt: timestamp, updatedAt: timestamp,
+    };
+    const tests = {
+      id: "claim.tests-evidence", subjectType: "flow-step", subjectId: `${slug}/gate-claim-tests-evidence`,
+      claimType: "builder.verify.tests", fieldOrBehavior: "tests fixture", value: "pass", status: "verified",
+      metadata: {
+        workflow_subject_ref: subject, origin: "check", check_kind: "external",
+        gate_claim: { expectation_id: "tests-evidence", claim_type: "builder.verify.tests", subject_type: "flow-step", step_id: "verify", recorded_at: timestamp, identity_version: 2 },
+        verification_workspace_snapshot: snapshot,
+        observed_commands: [{ command: "node --test src/cli/routeback-disclosure.test.mjs", exit_code: 0, test_count: 1, output_sha256: "0".repeat(64), observed_at_commit: snapshot.head_sha, worktree_clean: true, verification_workspace_snapshot: structuredClone(snapshot) }],
+      },
+      createdAt: timestamp, updatedAt: timestamp,
+    };
+    fs.writeFileSync(path.join(sessionDir, "trust.bundle"), JSON.stringify({
+      schemaVersion: 5, source: "routeback-fresh-fixture",
+      claims: [critique, tests],
+      evidence: [
+        { id: "evidence.clean-critique", claimId: critique.id, evidenceType: "human_attestation", method: "attestation", sourceRef: "fixture", excerptOrSummary: "critique fixture", observedAt: timestamp, collectedBy: "flow-agents-test" },
+        { id: "evidence.tests-evidence", claimId: tests.id, evidenceType: "human_attestation", method: "attestation", sourceRef: "fixture", excerptOrSummary: "tests fixture", observedAt: timestamp, collectedBy: "flow-agents-test", passing: true, execution: { runner: "bash", label: tests.metadata.observed_commands[0].command, isError: false, exitCode: 0 } },
+      ],
+      policies: [],
+      events: [
+        { id: "event.clean-critique", claimId: critique.id, status: "verified", actor: "flow-agents-test", method: "attestation", evidenceIds: ["evidence.clean-critique"], createdAt: timestamp, verifiedAt: timestamp },
+        { id: "event.tests-evidence", claimId: tests.id, status: "verified", actor: "flow-agents-test", method: "attestation", evidenceIds: ["evidence.tests-evidence"], createdAt: timestamp, verifiedAt: timestamp },
+      ],
+    }, null, 2));
+
+    // Precondition A: the strict branch accepts this session (fresh current verification).
+    assert.doesNotThrow(() => assertCurrentVerifiedWorkspaceEvidence(sessionDir), "the fixture must present fresh current verification evidence");
+    // Precondition B — the discriminator: the WHOLE evidence predicate accepts this state
+    // without ever examining the (absent) provisional record.
+    assert.doesNotThrow(() => assertTerminalDeliveryWorkspaceEvidence(sessionDir, projectRoot, slug), "the whole evidence predicate accepts the pre-trap state — which is why it is the wrong suppression key");
+    // The RECORD verifier — the actual suppression key — throws: no verifying record exists.
+    assert.throws(() => assertVerifiedProvisionalDeliveryRecord(sessionDir, projectRoot, slug), "the record verifier must reject a session without a provisional delivery record");
+
+    // Therefore the guidance is KEPT in exactly the state that springs the trap.
+    const lines = routeBackDisclosureLines(kitMergeReadyRun(), "ci-merge-readiness", "not_verified",
+      () => assertVerifiedProvisionalDeliveryRecord(sessionDir, projectRoot, slug));
+    assert.equal(lines.length, 2, "fresh current verification evidence must NOT suppress the publish-first guidance");
+    assert.match(lines[1], /publish the provisional delivery BEFORE recording this gate/);
   } finally {
     fs.rmSync(projectRoot, { recursive: true, force: true });
   }
@@ -317,14 +462,14 @@ function handShapedRun({ transitions = [], gateExtras = {} } = {}) {
   };
 }
 
-function routeBack({ reason, attempt, toStep = "execute", limitExceeded = false }) {
-  return { type: "route_back", gate_id: "closeout-gate", route_reason: reason, from_step: "closeout", to_step: toStep, status: "blocked", attempt, retry_epoch: 1, max_attempts: 3, limit_exceeded: limitExceeded, at: new Date().toISOString() };
+function routeBack({ reason, attempt, toStep = "execute", epoch = 1, limitExceeded = false }) {
+  return { type: "route_back", gate_id: "closeout-gate", route_reason: reason, from_step: "closeout", to_step: toStep, status: "blocked", attempt, retry_epoch: epoch, max_attempts: 3, limit_exceeded: limitExceeded, at: new Date().toISOString() };
 }
 
-test("budget edges: the PRE half lists PER-REASON recorded attempts (no aggregate) and stays subjunctive; the POST half derives blocked/routed from the appended transition", () => {
+test("budget identity: the PRE half lists attempts per reason/loop/epoch verbatim and stays subjunctive; the POST half derives blocked/routed from the appended transition", () => {
   // Two distinct route identities at different attempt counts: Flow budgets them separately, so
-  // the disclosure must list them separately — a single aggregated number would be a claim the
-  // accounting does not make.
+  // the disclosure must list them separately — any aggregate would claim an accounting Flow
+  // does not make.
   const twoReasons = handShapedRun({
     transitions: [
       routeBack({ reason: "missing_evidence", attempt: 1, toStep: "closeout" }),
@@ -335,8 +480,27 @@ test("budget edges: the PRE half lists PER-REASON recorded attempts (no aggregat
   });
   const pre = routeBackDisclosureLines(twoReasons, "closeout-readiness", "fail", undefined);
   assert.equal(pre.length, 1);
-  assert.match(pre[0], /route-back attempts recorded at this gate: missing_evidence 3, implementation_defect 1 \(budget max 3; Flow accounts attempts per route identity — reason\/loop\/epoch\)/);
+  assert.match(pre[0], /route-back attempts recorded at this gate: missing_evidence closeout->closeout epoch 1: 3 attempts; implementation_defect closeout->execute epoch 1: 1 attempt \(budget max 3 per route identity\)/);
   assert.ok(!PREDICTION_VOCABULARY.test(pre[0]), `even at an exhausted budget the PRE line asserts no outcome: ${pre[0]}`);
+
+  // TWO retry epochs for ONE reason/loop: the CURRENT epoch's count is what is named as
+  // current; the closed epoch is history, parenthesized — never folded into one number.
+  const twoEpochs = handShapedRun({
+    transitions: [
+      routeBack({ reason: "missing_evidence", attempt: 1, toStep: "closeout", epoch: 1 }),
+      routeBack({ reason: "missing_evidence", attempt: 2, toStep: "closeout", epoch: 1 }),
+      routeBack({ reason: "missing_evidence", attempt: 3, toStep: "closeout", epoch: 1 }),
+      routeBack({ reason: "missing_evidence", attempt: 1, toStep: "closeout", epoch: 2 }),
+    ],
+  });
+  const epochPre = routeBackDisclosureLines(twoEpochs, "closeout-readiness", "fail", undefined);
+  assert.equal(epochPre.length, 1);
+  assert.match(epochPre[0], /route-back attempts recorded at this gate: missing_evidence closeout->closeout epoch 2: 1 attempt \(epoch 1 closed at 3\) \(budget max 3 per route identity\)/);
+
+  // An undeclared reason collapses to Flow's "default" budget key — never a fresh bucket.
+  const undeclared = handShapedRun({ transitions: [routeBack({ reason: "invented_reason", attempt: 1, toStep: "verify" })] });
+  const undeclaredPre = routeBackDisclosureLines(undeclared, "closeout-readiness", "fail", undefined);
+  assert.match(undeclaredPre[0], /route-back attempts recorded at this gate: default closeout->verify epoch 1: 1 attempt/);
 
   // POST, blocked: evaluation appended a limit_exceeded route_back and blocked the run.
   const blockedTransition = routeBack({ reason: "implementation_defect", attempt: 4, limitExceeded: true });
