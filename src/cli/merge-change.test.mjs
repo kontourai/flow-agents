@@ -353,15 +353,24 @@ test("start-definition provenance derives when the stamp is absent and refuses a
   );
 });
 
-test("the coordinator's route-map check accepts the SHIPPED definition (conformance with #1300's fix)", async () => {
-  // The coordinator carried the THIRD independent encoding of this contract (#1307). Bind its
-  // text to the semantic form: entry presence, not whole-map equality. This is a source-level
-  // conformance check pending the fuller shared-predicate unification tracked in #1307.
+test("the coordinator's route-map predicate accepts the SHIPPED definition semantically (#1307)", async () => {
+  // The coordinator carried the THIRD independent encoding of this contract. Its check is now an
+  // exported pure predicate driven here with the REAL resolved definition — semantic conformance,
+  // not text-grepping (review round: greps are refactor-fragile and regression-evadable).
+  const { mergeReadyCiRefreshRoutesSatisfied } = await import("../../packaging/lifecycle-authority/coordinator.mjs");
+  const definition = resolveEffectiveFlowDefinition("builder.build", path.resolve(import.meta.dirname, "../.."));
+  assert.ok(definition);
+  const shipped = definition.gates["builder.publish-learn:merge-ready-ci-gate"];
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied(shipped), true, "the kit's own shipped map must satisfy the coordinator");
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), true);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied({ on_route_back: null, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied({ on_route_back: ["verify"], route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied(null), false);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied(undefined), false);
+  // supplemental policy grep (kept per review guidance): no unconditional stamp demand remains
   const fs = await import("node:fs");
   const source = fs.readFileSync(new URL("../../packaging/lifecycle-authority/coordinator.mjs", import.meta.url), "utf8");
-  assert.ok(source.includes('mergeReadyCiRoutes.missing_evidence !== "verify"'), "coordinator must check entry presence");
-  assert.ok(!source.includes('canonicalJson(mergeReadyCi.on_route_back) !== canonicalJson({'), "coordinator must not deep-equal the whole route map");
-  // and the stamp check must be the tolerant form at every site
   const demanding = source.match(/if \(state\.definition_digest !== definitionDigest\)/g) ?? [];
   assert.equal(demanding.length, 0, "no coordinator site may demand the stamp unconditionally");
 });
