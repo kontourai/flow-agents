@@ -315,7 +315,7 @@ function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspe
   readRegularFile(manifestFile, "canonical Flow evidence manifest");
 }
 
-function assertEvidenceRefreshVerificationProvenance(state: Record<string, unknown>, definitionId: string, definitionVersion: string, definitionDigest: string): void {
+export function assertEvidenceRefreshVerificationProvenance(state: Record<string, unknown>, definitionId: string, definitionVersion: string, definitionDigest: string): void {
   const amendments = Array.isArray(state.definition_amendments) ? state.definition_amendments : [];
   const adopted = amendments.filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry)
     && (entry as Record<string, unknown>).type === "definition_amended"
@@ -327,7 +327,13 @@ function assertEvidenceRefreshVerificationProvenance(state: Record<string, unkno
         && (successor as Record<string, unknown>).digest === definitionDigest;
     })());
   if (amendments.length === 0) {
-    if (state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
+    // #1307: @kontourai/flow's writer has never stamped state.definition_digest (measured: absent
+    // in every run state; zero references in the flow dist) — demanding it fails EVERY unamended
+    // run, and was unreachable until #1306 removed the #1300 wedge in front of it. The identity
+    // it would prove is already established by validateCanonicalRunDefinitions' deep-equal of the
+    // persisted start definition against the resolved effective definition. Derive, don't demand:
+    // absent stamp accepted, present-but-mismatched stamp refused.
+    if (state.definition_digest !== undefined && state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
     return;
   }
   if (adopted.length !== 1) throw new Error("merge-change requires one authenticated definition amendment adopting the canonical evidence-refresh definition");
