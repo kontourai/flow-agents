@@ -173,9 +173,26 @@ function witness(exitCode: number, errorName?: string): void {
   }
 }
 
+/**
+ * process.exit discards stdout/stderr bytes still queued in the stream buffer. On POSIX,
+ * a piped stdout is asynchronous everywhere except Linux, so any verb whose output
+ * outruns the reader loses its tail -- observed on PR #1309's CI (macOS fleet runners):
+ * `init --dry-run`'s ~70KB plan was truncated mid-line at ~20KB, which read as a partial
+ * install plan and failed the plan-content assertion. An empty write's callback fires
+ * only after everything queued before it has drained, so awaiting one on each stream
+ * guarantees the exit code never outruns the output that explains it.
+ */
+async function flushStdio(): Promise<void> {
+  await Promise.all([
+    new Promise<void>((resolve) => process.stdout.write("", () => resolve())),
+    new Promise<void>((resolve) => process.stderr.write("", () => resolve())),
+  ]);
+}
+
 try {
   const exitCode = await run();
   witness(exitCode);
+  await flushStdio();
   process.exit(exitCode);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -188,5 +205,6 @@ try {
   // The class name, not the message: several verbs interpolate raw operator input
   // into the text they throw.
   witness(70, error instanceof Error ? error.constructor.name : "unknown");
+  await flushStdio();
   process.exit(70);
 }
