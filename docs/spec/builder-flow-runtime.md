@@ -162,19 +162,26 @@ declares `missing_evidence`/`default -> verify` so staleness discovered past
 `merge-ready-ci` remains repairable through the ordinary bounded route-back
 mechanism instead of stranding the run.
 
-Recording a route-triggering status is a disclosed cost, not a silent transition
-(#1304). When a `fail` or `not_verified` claim is about to be recorded at a gate
-with an `on_route_back` map, the evidence writer prints a stderr NOTICE **before**
-the canonical mutation is committed: the destination step, the position in the
-Flow-owned attempt budget (`attempt n of max`, or that an exhausted budget blocks
-instead of routing), and that every current-visit verification claim
-(critique/tests) is invalidated by the route and must be re-recorded for the
-revisit. A gate declaring `requires_current_verification` adds the point-of-use
-ordering rule the disclosure exists for: publish the provisional delivery BEFORE
-recording this gate; a live non-pass claim here blocks the publish that would
-resolve it. The rule is keyed off the declaration generically — never a gate
-name — so core stays kit-generic, and the disclosure is additive output: existing
-refusal strings are unchanged.
+Recording a non-pass status at a gate with an `on_route_back` map is a disclosed
+cost, not a silent transition (#1304). The disclosure has two halves, split along
+declared-versus-observed lines so it never predicts what evaluation will decide.
+Before the mutation, the evidence writer (and the direct sidecar gate-claim
+writer) prints a stderr NOTICE stating only pre-existing facts: the gate's
+declared route map (`reason -> step`, quoted from the definition), the route-back
+attempt history already persisted at this gate against its declared budget, and
+that a route-back invalidates current-visit verification evidence
+(critique/tests re-records). After the mutation commits, the evidence writer
+reports what evaluation actually did, derived verbatim from the transitions it
+appended to canonical state: routed to a step (with the transition's own
+attempt/max/reason), blocked on an exhausted budget, or — the #1304 live trap —
+no route at all, with the non-pass claim sitting live at the unchanged step. A
+gate declaring `requires_current_verification` adds the point-of-use ordering
+rule when no provisional delivery record exists for the session: publish the
+provisional delivery BEFORE recording this gate; a live non-pass claim here
+blocks the publish that would resolve it. Both keys are facts (the declaration
+and the record's absence), never a gate name, so core stays kit-generic; the
+disclosure is additive output and existing refusal strings are unchanged. The
+signed reseal path is orchestrator-mediated and out of this disclosure's scope.
 
 ## Agent Projection
 

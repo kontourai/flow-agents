@@ -40,7 +40,7 @@ import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLo
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
-import { definitionDigest, flowRunHead, runDir, validateRunStateConsistency } from "@kontourai/flow";
+import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
 
 type AnyObj = Record<string, any>;
 
@@ -5495,6 +5495,56 @@ function diagnostic(dir: string, code: string, summary: string): never {
 }
 
 /**
+ * #1304: route-back cost disclosure at the point of use — the subjunctive PRE half.
+ *
+ * Emitted to stderr BEFORE a non-pass gate claim is recorded at a gate that declares an
+ * `on_route_back` map. It states only facts that exist before the mutation: the DECLARED route
+ * map, the route-back attempt history already PERSISTED at this gate (highest recorded attempt
+ * number), and the declared budget. It never predicts what evaluation will decide — the actual
+ * outcome (routed / blocked / live non-pass claim) is a separate post-mutation report derived
+ * from the transitions evaluation actually recorded (`routeBackOutcomeLines` in workflow.ts).
+ * Predicting `routeBackDecision` here was reviewed as a parallel encoding of route semantics
+ * that lies in the live #1304 scenario: an unpublished `not_verified` at a
+ * `requires_current_verification` gate is WITHHELD by the freshness seam, not routed.
+ *
+ * The publish-first line is keyed off two facts, never a gate name (#1280 kit-generic
+ * boundary): the gate's `requires_current_verification` declaration, and the absence of the
+ * session's provisional delivery record on disk.
+ */
+export function routeBackDisclosureLines(
+  run: { definition: unknown; state: { current_step: string; transitions?: unknown } },
+  expectation: string,
+  requestedStatus: string,
+  sessionDir?: string,
+): string[] {
+  if (requestedStatus !== "fail" && requestedStatus !== "not_verified") return [];
+  const gates = openGates(run.definition as never, run.state as never) as AnyObj[];
+  const gate = gates.find((candidate) => Array.isArray(candidate.expects)
+    && (candidate.expects as AnyObj[]).some((requirement) => requirement && typeof requirement === "object" && requirement.id === expectation));
+  if (!gate) return [];
+  const routes = gate.on_route_back;
+  if (!routes || typeof routes !== "object" || Array.isArray(routes) || Object.keys(routes).length === 0) return [];
+  const gateName = String(gate.id ?? "the current gate");
+  const declared = Object.entries(routes as Record<string, unknown>).map(([reason, step]) => `${reason} -> ${String(step)}`).join(", ");
+  const transitions = Array.isArray(run.state.transitions) ? run.state.transitions as AnyObj[] : [];
+  const recordedAttempts = transitions
+    .filter((transition) => transition && typeof transition === "object" && transition.type === "route_back" && transition.gate_id === gate.id)
+    .map((transition) => Number(transition.attempt))
+    .filter((attempt) => Number.isInteger(attempt) && attempt > 0);
+  const attemptsUsed = recordedAttempts.length === 0 ? 0 : Math.max(...recordedAttempts);
+  const policy = gate.route_back_policy as AnyObj | undefined;
+  const maxAttempts = Number.isInteger(policy?.max_attempts) ? Number(policy!.max_attempts) : DEFAULT_ROUTE_BACK_MAX_ATTEMPTS;
+  const lines = [
+    `[workflow] NOTICE: recording ${requestedStatus} for ${expectation} at ${gateName} can spend a bounded route-back attempt: this gate declares route-backs (${declared}); route-back attempts already recorded at this gate: ${attemptsUsed} of ${maxAttempts}; a route-back invalidates current-visit verification evidence (critique/tests must be re-recorded).`,
+  ];
+  if (gate.requires_current_verification === true && sessionDir
+    && !fs.existsSync(path.join(sessionDir, "provisional-delivery.json"))) {
+    lines.push(`[workflow] NOTICE: ${gateName} declares requires_current_verification and no provisional delivery record exists for this session — publish the provisional delivery BEFORE recording this gate; a live non-pass claim here blocks the publish that would resolve it.`);
+  }
+  return lines;
+}
+
+/**
  * record-gate-claim — Generic gate-claim producer for skills (ADR 0016 P-d Increment 1).
  *
  * Allows a skill to record a claim that satisfies a SPECIFIC gate expectation at the
@@ -5601,6 +5651,26 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     targetExpectation = expects[0]!;
   } else {
     die(`record-gate-claim: gate "${activeStep.gateId}" has ${expects.length} expects[] entries; --expectation <id> is required. Available: ${expects.map((e) => e.id).join(", ")}`);
+  }
+
+  // #1304: direct sidecar writes spend route-back cost too — disclose the declared/persisted
+  // facts before the bundle write. The public `workflow evidence` wrapper emits this itself
+  // under the subject lock (fresher state), so suppress here to avoid a double disclosure.
+  // Reseal (signed authority path, orchestrator-mediated) is a disclosed non-goal of #1304.
+  if (!publicWorkflowAuthority && statusVal !== "pass") {
+    try {
+      const disclosureRoot = tryCanonicalProjectRootForSession(dir);
+      if (disclosureRoot) {
+        const flowDir = runDir(slug, disclosureRoot);
+        const disclosureRun = {
+          definition: loadJson(path.join(flowDir, "definition.json")),
+          state: loadJson(path.join(flowDir, "state.json")) as { current_step: string; transitions?: unknown },
+        };
+        for (const line of routeBackDisclosureLines(disclosureRun, targetExpectation.id, statusVal, dir)) {
+          process.stderr.write(`${line}\n`);
+        }
+      }
+    } catch { /* best-effort: a session without a readable canonical run discloses nothing */ }
   }
 
   const { claimType, subjectType } = targetExpectation.bundle_claim;

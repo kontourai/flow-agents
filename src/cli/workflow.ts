@@ -6,7 +6,7 @@ import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type 
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
-import { definitionDigest, expectationsForGate, flowRunHead, loadRun, openGates, routeBackDecision, validateDefinition } from "@kontourai/flow";
+import { definitionDigest, expectationsForGate, flowRunHead, loadRun, openGates, validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
@@ -21,7 +21,7 @@ import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
-import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
@@ -1639,44 +1639,39 @@ export function assertGateFreshnessTurnstile(
 }
 
 /**
- * #1304: route-back cost disclosure at the point of use. A route-triggering status (`fail` /
- * `not_verified`) recorded at a gate with an `on_route_back` map commits the run to a route whose
- * cost — destination step, position in the Flow-owned bounded attempt budget, and re-recording of
- * every current-visit verification claim — was previously visible only AFTER the mutation. These
- * lines are computed from the same derivation surface the Flow evaluation uses
- * (`routeBackDecision`) and are emitted to stderr BEFORE the canonical mutation is committed. A
- * pass record, or a gate without a route map, produces no lines. A gate declaring
- * `requires_current_verification` additionally carries the publish-first ordering rule (the run-4
- * trap, #1304) — keyed generically off that declaration, never a gate name, so core stays
- * kit-generic (#1280). The disclosure is ADDITIVE output: existing refusal strings are unchanged
- * because consumers substring-match them.
+ * #1304: route-back cost disclosure — the factual POST half. `routeBackDisclosureLines` (the
+ * subjunctive PRE half, shared with the sidecar writer) states only declared/persisted facts
+ * before the mutation; this half reports what evaluation ACTUALLY did, derived verbatim from the
+ * transitions the committed mutation appended to canonical state — never from a re-derivation of
+ * route semantics. Exactly one of three truths is reported:
+ *   - a `route_back` transition was appended and the run left/looped its step → routed, with the
+ *     transition's own attempt/max/reason;
+ *   - a `route_back` transition was appended with `limit_exceeded` and the run is blocked →
+ *     budget exhausted, the run did not route;
+ *   - no `route_back` transition was appended → the non-pass claim sits LIVE at the unchanged
+ *     step (the run-4 trap: an unpublished `not_verified` at a `requires_current_verification`
+ *     gate is withheld, not routed).
  */
-export function routeBackDisclosureLines(
-  run: { definition: unknown; state: { current_step: string } },
+export function routeBackOutcomeLines(
+  postState: { status?: unknown; current_step: string; transitions?: unknown },
+  preTransitionCount: number,
   expectation: string,
   requestedStatus: string,
-  routeReason: string | undefined,
 ): string[] {
-  if (requestedStatus !== "fail" && requestedStatus !== "not_verified") return [];
-  const gates = openGates(run.definition as never, run.state as never) as JsonRecord[];
-  const gate = gates.find((candidate) => Array.isArray(candidate.expects)
-    && (candidate.expects as JsonRecord[]).some((requirement) => (requirement as JsonRecord).id === expectation));
-  if (!gate) return [];
-  const routes = gate.on_route_back;
-  if (!routes || typeof routes !== "object" || Array.isArray(routes) || Object.keys(routes).length === 0) return [];
-  const decision = routeBackDecision(run.state as never, gate as never, routeReason ?? null) as JsonRecord;
-  const gateName = String(gate.id ?? "the current gate");
-  // The disclosure states the derived decision, never a label: an exhausted budget blocks
-  // instead of routing, and claiming "routes back" there would be false.
-  const lines = [
-    decision.status === "block"
-      ? `[workflow evidence] NOTICE: recording ${requestedStatus} for ${expectation} exceeds ${gateName}'s route-back budget (attempt ${String(decision.attempt)} of ${String(decision.max_attempts)}) and BLOCKS the run instead of routing.`
-      : `[workflow evidence] NOTICE: recording ${requestedStatus} for ${expectation} routes ${gateName} back to step '${String(decision.route_back_to)}' (route-back attempt ${String(decision.attempt)} of ${String(decision.max_attempts)}). Current-visit verification evidence (critique/tests) is invalidated by the route and must be re-recorded for the revisit.`,
-  ];
-  if (gate.requires_current_verification === true) {
-    lines.push(`[workflow evidence] NOTICE: ${gateName} declares requires_current_verification — publish the provisional delivery BEFORE recording this gate; a live non-pass claim here blocks the publish that would resolve it.`);
+  const transitions = Array.isArray(postState.transitions) ? postState.transitions as JsonRecord[] : [];
+  const appended = transitions.slice(preTransitionCount)
+    .filter((transition) => transition && typeof transition === "object" && (transition as JsonRecord).type === "route_back");
+  if (appended.length === 0) {
+    return [`[workflow evidence] NOTICE: recorded ${requestedStatus} for ${expectation}; the run did not route — it remains at '${postState.current_step}', and a non-pass claim recorded here sits live until superseded.`];
   }
-  return lines;
+  const routeBack = appended[appended.length - 1]!;
+  const attempt = String(routeBack.attempt);
+  const max = String(routeBack.max_attempts);
+  if (routeBack.limit_exceeded === true && postState.status === "blocked") {
+    return [`[workflow evidence] NOTICE: route-back budget exhausted (attempt ${attempt} of ${max}); the run did not route and is BLOCKED at '${postState.current_step}'.`];
+  }
+  const reason = typeof routeBack.route_reason === "string" && routeBack.route_reason.length > 0 ? `, reason ${routeBack.route_reason}` : "";
+  return [`[workflow evidence] NOTICE: recorded ${requestedStatus} for ${expectation} routed the run back to '${String(routeBack.to_step)}' (route-back attempt ${attempt} of ${max}${reason}); current-visit verification evidence (critique/tests) must be re-recorded.`];
 }
 
 async function evidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
@@ -1703,11 +1698,6 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     requestedStatus,
     flagString(parsed.flags, "route-reason"),
   );
-  // #1304: the route-back cost is disclosed here, before the subject lock and before any
-  // canonical mutation is attempted — a later refusal never suppresses the disclosure.
-  for (const line of routeBackDisclosureLines(inspected.run, expectation, requestedStatus, flagString(parsed.flags, "route-reason"))) {
-    process.stderr.write(`${line}\n`);
-  }
   const outcome = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     // Validate the owner after the lock is held, then keep the lock through command
     // execution, evidence recording, and postcondition capture so assignment and
@@ -1715,6 +1705,14 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     const repaired = await recoverBuilderFlowSession({ sessionDir });
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
     assertGateFreshnessTurnstile(sessionDir, repaired.run, expectation, requestedStatus);
+    // #1304 PRE: declared route map + persisted attempt history, emitted under the lock after
+    // authorization and immediately before the mutation — facts only, never a prediction of
+    // what evaluation will decide (an unauthorized or refused invocation discloses nothing).
+    const routeFacts = routeBackDisclosureLines(repaired.run, expectation, requestedStatus, sessionDir);
+    for (const line of routeFacts) process.stderr.write(`${line}\n`);
+    const preTransitionCount = Array.isArray((repaired.run.state as JsonRecord).transitions)
+      ? ((repaired.run.state as JsonRecord).transitions as unknown[]).length
+      : 0;
     const run = (beforeCanonicalMutation?: () => void) => runEvidenceTransaction({
       sessionDir,
       slug,
@@ -1727,11 +1725,22 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
       beforeRun: repaired.run,
       beforeCanonicalMutation,
     });
+    let result: Awaited<ReturnType<typeof runEvidenceTransaction>>;
     if (!caller.hostRecovery) {
       if (flagString(parsed.flags, "authorization-file")) throw new Error("workflow evidence --authorization-file is only valid for host recovery");
-      return run();
+      result = await run();
+    } else {
+      result = await runHostAuthorizedEvidence({ sessionDir, slug, parsed, validated, repaired, caller, run });
     }
-    return runHostAuthorizedEvidence({ sessionDir, slug, parsed, validated, repaired, caller, run });
+    // #1304 POST: report what evaluation actually did, derived from the canonical state this
+    // invocation just committed (still under the subject lock, so the read is race-free).
+    if (routeFacts.length > 0 && result.state === "attached") {
+      const post = await loadBuilderFlowRun({ cwd: repaired.projectRoot, runId: slug });
+      for (const line of routeBackOutcomeLines(post.state as { status?: unknown; current_step: string; transitions?: unknown }, preTransitionCount, expectation, requestedStatus)) {
+        process.stderr.write(`${line}\n`);
+      }
+    }
+    return result;
   });
   return reportEvidenceOutcome(outcome, json);
 }
