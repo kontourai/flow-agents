@@ -20,6 +20,11 @@ import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
 import { assertTrustedGitAncestor, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
+// #1280 review FIX-4: the canonical-run capability is DECLARED by the run adapter that owns it
+// (CANONICAL_RUN_FLOW_IDS). ensure-session and the public `workflow start` verb both consult
+// this one predicate, so the set of flows that get a pinned run record and the set the public
+// verb admits cannot drift apart into a half-start.
+import { isCanonicalRunFlowId } from "../builder-flow-run-adapter.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
@@ -2890,7 +2895,7 @@ function preflightEnsureSession(p: ReturnType<typeof parseArgs>): void {
   const dir = sessionDirFor(root, slug);
   assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
-  if (entry.flowId === "builder.build" || entry.flowId === "builder.shape") assertCanonicalBuilderArtifactRoot(root, entry.flowId);
+  if (isCanonicalRunFlowId(entry.flowId)) assertCanonicalBuilderArtifactRoot(root, entry.flowId);
   sessionWorkItem(p, slug, dir);
 }
 
@@ -2900,7 +2905,7 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
   const dir = sessionDirFor(root, slug);
   assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
-  if (entry.flowId === "builder.build" || entry.flowId === "builder.shape") assertCanonicalBuilderArtifactRoot(root, entry.flowId);
+  if (isCanonicalRunFlowId(entry.flowId)) assertCanonicalBuilderArtifactRoot(root, entry.flowId);
   const workItem = sessionWorkItem(p, slug, dir);
   // #291 Wave 2 Task 2.1 (§3, §4): resolve the actor ONCE, then run the ownership guard BEFORE
   // any directory/file is created — a refusal must never leave a stray empty session dir. Reused
@@ -3021,14 +3026,14 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     entry.flowId || undefined,
     resumedStep || undefined,
     actorResolution.unresolved ? undefined : actorResolution.branchActorKey,
-    entry.flowId === "builder.build" || entry.flowId === "builder.shape",
+    isCanonicalRunFlowId(entry.flowId),
   );
   if (selectedWorkEvidence?.providerBranch) {
     // current.json and the actor-scoped projection are both derived from state.json. Verify that
     // both projections retained the exact provider branch before the canonical Builder run starts.
     assertProviderBranchAgreement(root, slug, dir, selectedWorkEvidence.providerBranch, actorResolution.branchActorKey);
   }
-  if (allowCanonicalFlowMutation && (entry.flowId === "builder.build" || entry.flowId === "builder.shape")) {
+  if (allowCanonicalFlowMutation && isCanonicalRunFlowId(entry.flowId)) {
     try {
       const started = await startBuilderFlowSession({ sessionDir: dir, flowId: entry.flowId });
       if (started.run.state.current_step === "pull-work"

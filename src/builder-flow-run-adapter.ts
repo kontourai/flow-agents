@@ -38,6 +38,28 @@ export const BUILDER_SHAPE_FLOW_ID = "builder.shape";
 export const BUILDER_SHAPE_FLOW_RELATIVE_PATH = "kits/builder/flows/shape.flow.json";
 export type BuilderFlowId = typeof BUILDER_BUILD_FLOW_ID | typeof BUILDER_SHAPE_FLOW_ID;
 
+/**
+ * The flow ids the CANONICAL RUN RUNTIME can bind — i.e. the definitions this adapter ships,
+ * pins and can start a Flow run for (`flowRelativePath` resolves each against the packaged,
+ * digest-covered tree with no env override, and `startBuilderFlowRun` records definition
+ * id/version/digest into the run record).
+ *
+ * This is a CAPABILITY declaration by the module that owns the capability, not a vocabulary
+ * list in the public CLI (#1280): `workflow start` and `ensure-session` both consult THIS
+ * constant instead of re-spelling the same two literals, so a widening of the run adapter
+ * widens the public verb by construction and the two can never disagree about which flows have
+ * a canonical run. Widening it to any packaged kit-declared flow (so a kit can ship a variant
+ * with its own gate set and still get a pinned run record) is the follow-up #1280 actually
+ * asks for; it requires `flowRelativePath`, `assertCanonicalBuilderArtifactRoot` and
+ * `expectedGateProducer` to derive from each kit's own manifest rather than the builder kit's.
+ */
+export const CANONICAL_RUN_FLOW_IDS: readonly BuilderFlowId[] = [BUILDER_BUILD_FLOW_ID, BUILDER_SHAPE_FLOW_ID];
+
+/** True when the canonical run runtime can start and pin a Flow run for `value`. */
+export function isCanonicalRunFlowId(value: string): value is BuilderFlowId {
+  return (CANONICAL_RUN_FLOW_IDS as readonly string[]).includes(value);
+}
+
 export interface BuilderBuildTrustBundleEvidenceInput {
   gate: string;
   /**
@@ -362,7 +384,7 @@ async function assertCanonicalBuilderRunOrigin(
   }
   const definition = await loadShippedBuilderFlowDefinitionForRun(runId, run.definition);
   assertCanonicalDefinition(runId, definition, run.definition);
-  if (!isBuilderFlowId(run.definition.id)) {
+  if (!isCanonicalRunFlowId(run.definition.id)) {
     throw new BuilderBuildRunIdentityError(runId, definition, run.definition, "definition-id");
   }
 }
@@ -382,7 +404,7 @@ async function loadShippedBuilderFlowDefinition(flowId: BuilderFlowId, definitio
 
 async function loadShippedBuilderFlowDefinitionForRun(runId: string, actualDefinition: { id: string; version: string }): Promise<{ id: string; version: string }> {
   const flowId = actualDefinition.id;
-  if (!isBuilderFlowId(flowId)) {
+  if (!isCanonicalRunFlowId(flowId)) {
     throw new BuilderBuildRunIdentityError(runId, { id: BUILDER_BUILD_FLOW_ID, version: "unknown" }, actualDefinition, "definition-id");
   }
   return loadShippedBuilderFlowDefinition(flowId, resolveBuilderFlowDefinitionPath(flowId));
@@ -400,10 +422,6 @@ function materializeRuntimeDefinition(cwd: string, flowId: BuilderFlowId, defini
 
 function flowRelativePath(flowId: BuilderFlowId): string {
   return flowId === BUILDER_BUILD_FLOW_ID ? BUILDER_BUILD_FLOW_RELATIVE_PATH : BUILDER_SHAPE_FLOW_RELATIVE_PATH;
-}
-
-function isBuilderFlowId(value: string): value is BuilderFlowId {
-  return value === BUILDER_BUILD_FLOW_ID || value === BUILDER_SHAPE_FLOW_ID;
 }
 
 function assertExpectedFlow(runId: string, actual: BuilderFlowId, expected: BuilderFlowId): void {
