@@ -18,6 +18,12 @@
 #      unclassified destination files are deleted.
 #   D) executePlanCopies copies "preserve" entries too — the --global claude-code
 #      sync overwriting a user-authored agents file (review BLOCKING-2).
+#   E) SINGLE-LAYER: init drops only --only-absent from the installer argv. The
+#      e2e tests stay green (excludes still hold — redundancy by design); the
+#      argv-level unit test for that layer must go red (round-4 FIX-5).
+#   F) SINGLE-LAYER: init drops only the --exclude-path args. The e2e tests stay
+#      green (--only-absent still holds); the argv-level unit test for the
+#      exclude layer must go red (round-4 FIX-5).
 #
 # An injection that does NOT redden its SPECIFIC test (matched by test name in the
 # failing-tests section, not by exit code alone) is a hard failure of this eval
@@ -182,6 +188,31 @@ expect_red "D" "$GLOBAL_TEST" "AssertionError"
 restore_all
 build || { _fail "D: rebuild after restore failed"; exit 1; }
 expect_green "D" "$GLOBAL_TEST"
+
+ONLY_ABSENT_TEST="installBundleArgs always carries --only-absent"
+EXCLUDE_ARGS_TEST="installBundleArgs passes each preserved path as --exclude-path"
+
+echo "--- E: single-layer — init drops only --only-absent (argv unit test must catch it) ---"
+require_clean E
+apply_patch src/cli/init.ts \
+  'args.push("--only-absent");' \
+  '' || exit 1
+build || { _fail "E: build failed under injection"; exit 1; }
+expect_red "E" "$ONLY_ABSENT_TEST" "AssertionError"
+restore_all
+build || { _fail "E: rebuild after restore failed"; exit 1; }
+expect_green "E" "$ONLY_ABSENT_TEST"
+
+echo "--- F: single-layer — init drops only the --exclude-path args (argv unit test must catch it) ---"
+require_clean F
+apply_patch src/cli/init.ts \
+  'for (const rel of preservedRelPaths) args.push("--exclude-path", rel);' \
+  '' || exit 1
+build || { _fail "F: build failed under injection"; exit 1; }
+expect_red "F" "$EXCLUDE_ARGS_TEST" "AssertionError"
+restore_all
+build || { _fail "F: rebuild after restore failed"; exit 1; }
+expect_green "F" "$EXCLUDE_ARGS_TEST"
 
 echo ""
 echo "==========================="

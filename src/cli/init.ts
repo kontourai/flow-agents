@@ -11,7 +11,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
-import { acquireBundleBuildLock, buildAllBundles, refreshBundleBuildLock } from "../tools/build-universal-bundles.js";
+import { acquireBundleBuildLock, buildAllBundles, refreshBundleBuildLock, releaseBundleBuildLock, startBundleBuildLockRefresher } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { buildOwnedFilesManifest, hashFile as manifestHashFile, writeOwnedFilesManifest } from "../lib/owned-files-manifest.js";
@@ -21,6 +21,7 @@ import {
   executePlanCopies,
   formatDryRunLines,
   formatInstallSummaryLines,
+  InstallPlanDriftError,
   installerSupportsPreserveExcludes,
   verifyInstallPlanMatchesDisk,
 } from "./install-plan.js";
@@ -721,6 +722,7 @@ export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebui
     // processes finding dist/ stale at once used to race resetDir (ENOTEMPTY), and a waiter
     // that rebuilt anyway would delete the tree the winner's install had started reading.
     const lockDir = acquireBundleBuildLock();
+    const stopRefresher = startBundleBuildLockRefresher(lockDir);
     try {
       if (!current()) {
         const rc = buildAllBundles(() => refreshBundleBuildLock(lockDir));
@@ -728,7 +730,8 @@ export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebui
         rebuilt = true;
       }
     } finally {
-      fs.rmSync(lockDir, { recursive: true, force: true });
+      stopRefresher();
+      releaseBundleBuildLock(lockDir);
     }
   }
   if (!fs.existsSync(installSh)) throw new Error(`bundle installer missing: ${bundle}`);
@@ -1053,20 +1056,35 @@ async function installOpencodeGlobalAssets(dest: string, bundle: string, runtime
   }
 }
 
-function installBundle(bundle: string, options: InitOptions, preservedRelPaths: string[] = []): number {
+/**
+ * The static install.sh argv (#1288). Extracted so each guard layer is independently
+ * unit-testable (round-4 FIX-5): the rsync leg is guarded REDUNDANTLY by --only-absent
+ * (--ignore-existing: never overwrite ANY existing file) and by the per-path preserve
+ * excludes (which also scope install.sh's token substitution and console-config write) --
+ * an end-to-end test cannot see one layer disappear while the other still holds, so each
+ * layer gets its own argv-level assertion.
+ *
+ * Raw relative paths for --exclude-path: install.sh itself escapes rsync wildcard
+ * characters, so the same literal value also drives its EXCLUDE_RELS-scoped guards.
+ * Replaces are applied by the caller's Node executor BEFORE install.sh runs, so token
+ * substitution still covers them.
+ */
+export function installBundleArgs(
+  options: Pick<InitOptions, "dest" | "telemetrySinks" | "consoleUrl" | "consoleEndpoint" | "consoleTenant">,
+  preservedRelPaths: string[],
+): string[] {
   const args = ["install.sh", options.dest];
-  // Overwrite guard (#1288): paths the install plan classified as "preserve" are
-  // excluded from install.sh's rsync entirely, so the copy never touches them. Raw
-  // relative paths -- install.sh itself escapes rsync wildcard characters, so the same
-  // literal value also scopes its token substitution and console-config guards.
-  // --only-absent makes the rsync run with --ignore-existing: the copy layer can only
-  // write paths that do not exist (replaces are applied by the caller's Node executor
-  // BEFORE install.sh runs, so token substitution still covers them).
   args.push("--only-absent");
   for (const rel of preservedRelPaths) args.push("--exclude-path", rel);
   for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
   if (options.consoleUrl) args.push("--console-url", options.consoleUrl);
   if (options.consoleEndpoint) args.push("--console-endpoint", options.consoleEndpoint);
+  if (options.consoleTenant) args.push("--console-tenant", options.consoleTenant);
+  return args;
+}
+
+function installBundle(bundle: string, options: InitOptions, preservedRelPaths: string[] = []): number {
+  const args = installBundleArgs(options, preservedRelPaths);
   let tempTokenFile: string | undefined;
   const consoleTokenFile = options.consoleTokenFile ?? (() => {
     if (!options.consoleTokenValue) return undefined;
@@ -1076,7 +1094,6 @@ function installBundle(bundle: string, options: InitOptions, preservedRelPaths: 
     return file;
   })();
   if (consoleTokenFile) args.push("--console-token-file", consoleTokenFile);
-  if (options.consoleTenant) args.push("--console-tenant", options.consoleTenant);
   const env = { ...process.env };
   const result = spawnSync("bash", args, { cwd: bundle, env, encoding: "utf8", stdio: "inherit" });
   if (tempTokenFile) fs.rmSync(path.dirname(tempTokenFile), { recursive: true, force: true });
@@ -1327,6 +1344,19 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       fs.mkdirSync(options.dest, { recursive: true });
       const tmp = `${destSettingsPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+      // #1288 round-4 FIX-4: the merge was computed from the premerge snapshot's bytes; a
+      // VALID concurrent edit landing between capture and rename would be silently
+      // destroyed by the rename. Require byte-equality with the capture immediately
+      // before renaming into place; abort naming the file on any divergence.
+      {
+        const premergeSnapshot = configPremerge as { existed?: boolean; bytes_base64?: string };
+        const premergeBytes = premergeSnapshot.existed ? premergeSnapshot.bytes_base64 ?? "" : "";
+        const currentBytes = fs.existsSync(destSettingsPath) ? fs.readFileSync(destSettingsPath).toString("base64") : "";
+        if (currentBytes !== premergeBytes) {
+          fs.rmSync(tmp, { force: true });
+          throw new InstallPlanDriftError([destSettingsPath]);
+        }
+      }
       fs.renameSync(tmp, destSettingsPath);
       const globalCopies = executePlanCopies(globalPlan);
       // Write version stamp.

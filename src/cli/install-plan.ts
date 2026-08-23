@@ -163,21 +163,36 @@ function lstatIfPresent(target: string): fs.Stats | undefined {
   }
 }
 
-/** A manifest rel path safe to JOIN for a read-only existence/hash probe, or null. */
+/** A clean bundle-relative manifest path safe to JOIN under the destination, or null. */
 function safeManifestRelParts(rel: string): string[] | null {
-  if (typeof rel !== "string" || rel.length === 0 || rel.startsWith("/") || rel.startsWith("\\")) return null;
+  if (typeof rel !== "string" || rel.length === 0 || rel.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rel)) return null;
   const parts = rel.split("/");
-  if (parts.some((part) => part === "" || part === "." || part === "..")) return null;
+  // Backslashes are path separators on Windows: a POSIX-clean segment like "..\\x" must
+  // not be admitted anywhere.
+  if (parts.some((part) => part === "" || part === "." || part === ".." || part.includes("\\"))) return null;
   return parts;
 }
 
 export function computeInstallPlan(params: ComputeInstallPlanParams): InstallPlan {
   const manifest = readOwnedFilesManifest(params.manifestDest);
+  // #1288 round-4 FIX-3: the manifest grants OVERWRITE authority ("replace" without
+  // --force), so admission applies the same containment/shape filter as stale reporting:
+  // an entry only enters ownedHashes if it is a clean bundle-relative path (no absolute
+  // paths, no traversal segments) that resolves inside the destination. A valid-shaped
+  // but poisoned entry styled to point at anything else never becomes authority; it is
+  // skipped, not fatal. (An entry with an exact clean path and the correct hash of a
+  // colliding user file remains the manifest's designed authority -- that is the
+  // same-user adversarial class dispositioned in the accepted-gap note.)
+  const manifestDestResolved = path.resolve(params.manifestDest);
   const ownedHashes = new Map<string, string>();
   for (const entry of manifest?.files ?? []) {
-    if (typeof entry?.path === "string" && typeof entry?.sha256 === "string") {
-      ownedHashes.set(entry.path, entry.sha256.toLowerCase());
-    }
+    if (typeof entry?.path !== "string" || typeof entry?.sha256 !== "string") continue;
+    const parts = safeManifestRelParts(entry.path);
+    if (!parts) continue;
+    const resolved = path.resolve(manifestDestResolved, ...parts);
+    const relative = path.relative(manifestDestResolved, resolved);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) continue;
+    ownedHashes.set(entry.path, entry.sha256.toLowerCase());
   }
   const plan: InstallPlan = {
     entries: [], created: [], unchanged: [], replaced: [], preserved: [], forced: [],

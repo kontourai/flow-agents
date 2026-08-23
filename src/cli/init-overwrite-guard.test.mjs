@@ -496,3 +496,59 @@ test("install.sh --only-absent never overwrites an existing destination file", (
   assert.equal(fs.readFileSync(path.join(dest, "appeared.md"), "utf8"), "raced user content\n");
   assert.equal(fs.readFileSync(path.join(dest, "fresh.md"), "utf8"), "bundle fresh\n");
 });
+
+// Round-4 FIX-5: the rsync leg is guarded redundantly (--only-absent AND the preserve
+// excludes), so an end-to-end test cannot see one layer vanish while the other holds.
+// These two argv-level tests each pin ONE layer independently.
+test("installBundleArgs always carries --only-absent (never-overwrite layer, independent of excludes)", async () => {
+  const { installBundleArgs } = await import("../../build/src/cli/init.js");
+  const args = installBundleArgs({ dest: "/tmp/x", telemetrySinks: ["local-files"] }, []);
+  assert.ok(args.includes("--only-absent"), `argv must carry --only-absent: ${JSON.stringify(args)}`);
+});
+
+test("installBundleArgs passes each preserved path as --exclude-path (independent of --only-absent)", async () => {
+  const { installBundleArgs } = await import("../../build/src/cli/init.js");
+  const args = installBundleArgs({ dest: "/tmp/x", telemetrySinks: ["local-files"] }, ["README.md", "docs/user file.md"]);
+  const pairs = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--exclude-path") pairs.push(args[index + 1]);
+  }
+  assert.deepEqual(pairs, ["README.md", "docs/user file.md"]);
+});
+
+// Round-4 FIX-3: manifest entries are OVERWRITE authority ("replace" without --force), so
+// admission filters shape and containment. A valid-shaped but traversal-styled or
+// out-of-tree entry must never grant authority over a colliding user file. (Today a
+// non-normalized key also fails the exact-match lookup, so this test additionally pins the
+// contract against any future path normalization at the lookup site.)
+test("poisoned valid-shaped manifest entries never make a user file replaceable", async () => {
+  const { computeInstallPlan } = await import("../../build/src/cli/install-plan.js");
+  const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-poison-src-"));
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-poison-dest-"));
+  fs.writeFileSync(path.join(bundleDir, "README.md"), "bundle readme\n");
+  const userReadme = "user readme that must stay preserved\n";
+  fs.writeFileSync(path.join(dest, "README.md"), userReadme);
+  const userHash = crypto.createHash("sha256").update(userReadme).digest("hex");
+  fs.mkdirSync(path.join(dest, ".flow-agents"), { recursive: true });
+  fs.writeFileSync(path.join(dest, ".flow-agents", "owned-files.json"), JSON.stringify({
+    schema_version: "1.0",
+    files: [
+      // Valid-shaped, traversal-styled entries carrying the USER file's hash.
+      { path: "docs/../README.md", sha256: userHash },
+      { path: "./README.md", sha256: userHash },
+      { path: "/etc/README.md", sha256: userHash },
+      { path: "..\\README.md", sha256: userHash },
+    ],
+  }));
+  const plan = computeInstallPlan({
+    mappings: [{ sourceDir: bundleDir, destDir: dest, prefix: "" }],
+    manifestDest: dest,
+    excludeRel: new Set(),
+    force: false,
+    reportStaleOwned: true,
+    refuseSymlinkParents: true,
+  });
+  assert.deepEqual(plan.replaced, [], "no poisoned entry may grant replace authority");
+  assert.deepEqual(plan.preserved, ["README.md"]);
+  assert.deepEqual(plan.staleOwned, [], "poisoned entries must not surface as stale either");
+});

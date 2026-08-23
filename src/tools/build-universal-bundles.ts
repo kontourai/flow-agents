@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -737,11 +738,16 @@ export function validateRunStateConsistency(startDefinitionValue, stateValue, op
   writeText(path.join(targetRoot, "build/src/vendor/flow-validator.cjs"), outputText);
 }
 function installScript(label: string, capability: BundleCapability, defaultDestDisplay: string, token?: string, destFallbackShell?: string, mergeConfig?: { configRelPath: string; managedConfigRelPath: string; runtime: string; version: string }, stampConfig?: { runtime: string; version: string }): string {
-  // Token substitution is scoped to files THIS bundle ships (walked from $SRC) minus the
-  // instruction files and any --exclude-path preserved paths -- never a blanket walk of the
-  // whole destination, which would mutate preserved/user files that merely match an
-  // extension (kontourai/flow-agents#1288 review HIGH-1).
-  const replaceBlock = token ? `\nexport DEST\nREPLACE_FILES=()\nwhile IFS= read -r -d '' rel; do\n  rel="\${rel#./}"\n  case "$rel" in AGENTS.md|CLAUDE.md) continue ;; esac\n  for ex in \${EXCLUDE_RELS[@]+"\${EXCLUDE_RELS[@]}"}; do\n    if [[ "$rel" == "$ex" ]]; then continue 2; fi\n  done\n  if [[ -f "$DEST/$rel" && ! -L "$DEST/$rel" ]]; then\n    REPLACE_FILES+=("$DEST/$rel")\n  fi\ndone < <(cd "$SRC" && find . -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0)\nif [[ \${#REPLACE_FILES[@]} -gt 0 ]]; then\n  perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g' "\${REPLACE_FILES[@]}"\nfi` : "";
+  // Token substitution is scoped to files THIS rsync actually wrote: bundle-shipped
+  // (walked from $SRC), minus the instruction files and any --exclude-path preserved
+  // paths, AND byte-identical to the bundle source (cmp -s). The byte check is what makes
+  // the set exact (kontourai/flow-agents#1288 round-4 FIX-2): a file this rsync wrote is
+  // still raw bundle bytes at this point, while a raced user file that --ignore-existing
+  // skipped differs and is never substituted. (A byte-identical user file is
+  // indistinguishable from -- and identical to -- the bundle's own content, so
+  // substituting it produces exactly the installed form.) Never a blanket walk of the
+  // destination, which would mutate preserved/user files that merely match an extension.
+  const replaceBlock = token ? `\nexport DEST\nREPLACE_FILES=()\nwhile IFS= read -r -d '' rel; do\n  rel="\${rel#./}"\n  case "$rel" in AGENTS.md|CLAUDE.md) continue ;; esac\n  for ex in \${EXCLUDE_RELS[@]+"\${EXCLUDE_RELS[@]}"}; do\n    if [[ "$rel" == "$ex" ]]; then continue 2; fi\n  done\n  if [[ -f "$DEST/$rel" && ! -L "$DEST/$rel" ]] && cmp -s "$SRC/$rel" "$DEST/$rel"; then\n    REPLACE_FILES+=("$DEST/$rel")\n  fi\ndone < <(cd "$SRC" && find . -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0)\nif [[ \${#REPLACE_FILES[@]} -gt 0 ]]; then\n  perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g' "\${REPLACE_FILES[@]}"\nfi` : "";
   const destFallback = destFallbackShell ? `\nif [[ -z "$DEST" ]]; then\n  DEST="${destFallbackShell}"\nfi` : "";
   const destRequired = !destFallbackShell;
   const requiredCheck = `${destRequired ? `if [[ -z "$DEST" ]]; then\n  usage\n  exit 2\nfi\n` : ""}while [[ "$DEST" != "/" && "$DEST" == */ ]]; do\n  DEST="\${DEST%/}"\ndone\nif [[ -n "\${CONSOLE_TELEMETRY_URL:-}" && -z "\${CONSOLE_URL:-}" ]]; then\n  CONSOLE_URL="$CONSOLE_TELEMETRY_URL"\nfi\n`;
@@ -1215,12 +1221,57 @@ export function refreshBundleBuildLock(lockDir: string): void {
   } catch { /* best-effort: a failed refresh only risks a takeover after staleness */ }
 }
 
+/**
+ * Refresh the lock every ~20s for the WHOLE build duration (#1288 round-4 FIX-1a): a single
+ * build step longer than the staleness threshold must never read as a crashed holder. The
+ * build itself is synchronous, so a parent-process setInterval can physically never fire
+ * mid-build -- the interval runs in a tiny detached child instead. The child self-terminates
+ * when the holder dies (liveness probe) or the lock disappears, so a genuinely crashed
+ * holder's lock still goes stale and the atomic takeover path stays reachable.
+ */
+export function startBundleBuildLockRefresher(lockDir: string): () => void {
+  const script = [
+    'const fs = require("node:fs");',
+    "const lock = process.argv[1];",
+    "const holder = Number(process.argv[2]);",
+    "setInterval(() => {",
+    "  try { process.kill(holder, 0); } catch { process.exit(0); }",
+    "  try { const now = new Date(); fs.utimesSync(lock, now, now); } catch { process.exit(0); }",
+    "}, 20000);",
+  ].join("\n");
+  const child = spawn(process.execPath, ["-e", script, lockDir, String(process.pid)], { stdio: "ignore" });
+  child.unref();
+  return () => {
+    try {
+      child.kill();
+    } catch { /* already exited */ }
+  };
+}
+
+/**
+ * Identity-checked release (#1288 round-4 FIX-1b): after a stale takeover, the original
+ * (wedged-then-resumed) holder's finally-cleanup must not delete the SUCCESSOR's lock.
+ * Only the pid recorded inside the lock dir may remove it.
+ */
+export function releaseBundleBuildLock(lockDir: string): void {
+  let recorded: string;
+  try {
+    recorded = fs.readFileSync(path.join(lockDir, "pid"), "utf8").trim();
+  } catch {
+    return; // lock already gone (or unreadable): not ours to delete
+  }
+  if (recorded !== String(process.pid)) return; // a successor owns it now
+  fs.rmSync(lockDir, { recursive: true, force: true });
+}
+
 export function main(): number {
   const lockDir = acquireBundleBuildLock();
+  const stopRefresher = startBundleBuildLockRefresher(lockDir);
   try {
     return buildAllBundles(() => refreshBundleBuildLock(lockDir));
   } finally {
-    fs.rmSync(lockDir, { recursive: true, force: true });
+    stopRefresher();
+    releaseBundleBuildLock(lockDir);
   }
 }
 
