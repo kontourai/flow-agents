@@ -233,6 +233,89 @@ function flowIdParts(flowId: string): { kitId: string; flowName: string } | null
   return { kitId, flowName };
 }
 
+/**
+ * Enumerate the flow ids the installed kits DECLARE — the derivation the public
+ * `workflow start` verb consults instead of enumerating flow identifiers in core (#1280).
+ *
+ * Sources mirror resolveFlowFilePath's resolution order exactly, so the derived list never
+ * names a flow the resolver would look up somewhere else:
+ *   - FLOW_AGENTS_FLOW_DEFS_DIR override (when set and not agent-writable): every
+ *     `<flowId>.flow.json` file in that directory. The override replaces canonical kit
+ *     lookup wholesale, so it replaces discovery too. An agent-writable override yields an
+ *     empty list — the same fail-closed posture resolveFlowFilePath takes.
+ *   - Canonical: each kit directory under `<repoRoot>/kits/*`, plus the executing package's
+ *     own `kits/*` (the same package fallback canonical resolution applies). A kit's
+ *     declaration surface is its `kit.json` `flows[].id` list when the manifest declares
+ *     one — the packaged, digest-covered artifact — else its `flows/*.flow.json` directory.
+ *
+ * Ids without the `<kit>.<flow>` slug shape the resolver requires are excluded: a refusal
+ * that recommends an id the resolver can never resolve would be worse than none. This
+ * enumerates EXISTENCE only; conformance stays with resolveEffectiveFlowDefinition.
+ */
+export function declaredKitFlowIds(repoRoot: string): string[] {
+  const ids = new Set<string>();
+  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
+  if (override) {
+    const resolvedOverride = path.resolve(override);
+    if (isAgentWritableDir(resolvedOverride)) return [];
+    for (const entry of listDirents(resolvedOverride)) {
+      if (!entry.isFile() || !entry.name.endsWith(".flow.json")) continue;
+      const id = entry.name.slice(0, -".flow.json".length);
+      if (flowIdParts(id)) ids.add(id);
+    }
+    return [...ids].sort();
+  }
+  const kitsRoots = [path.resolve(repoRoot, "kits")];
+  const packageRoot = installedPackageRoot();
+  if (packageRoot && path.resolve(packageRoot) !== path.resolve(repoRoot)) {
+    kitsRoots.push(path.resolve(packageRoot, "kits"));
+  }
+  for (const kitsRoot of kitsRoots) {
+    for (const kitEntry of listDirents(kitsRoot)) {
+      if (!kitEntry.isDirectory() || !SLUG_RE.test(kitEntry.name)) continue;
+      const kitDir = path.join(kitsRoot, kitEntry.name);
+      const declared = kitManifestFlowIds(kitDir);
+      if (declared) {
+        for (const id of declared) if (flowIdParts(id)) ids.add(id);
+        continue;
+      }
+      for (const flowEntry of listDirents(path.join(kitDir, "flows"))) {
+        if (!flowEntry.isFile() || !flowEntry.name.endsWith(".flow.json")) continue;
+        const id = `${kitEntry.name}.${flowEntry.name.slice(0, -".flow.json".length)}`;
+        if (flowIdParts(id)) ids.add(id);
+      }
+    }
+  }
+  return [...ids].sort();
+}
+
+function listDirents(dir: string): fs.Dirent[] {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+/** kit.json `flows[].id` entries when the manifest declares a flow list; null when there is no
+ * readable manifest or no `flows` array (callers fall back to `flows/` enumeration). */
+function kitManifestFlowIds(kitDir: string): string[] | null {
+  let manifest: { flows?: unknown };
+  try {
+    manifest = JSON.parse(fs.readFileSync(path.join(kitDir, "kit.json"), "utf8")) as { flows?: unknown };
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(manifest.flows)) return null;
+  const ids: string[] = [];
+  for (const entry of manifest.flows) {
+    if (entry && typeof entry === "object" && typeof (entry as { id?: unknown }).id === "string") {
+      ids.push((entry as { id: string }).id);
+    }
+  }
+  return ids;
+}
+
 function readFlowDefinition(flowId: string, repoRoot: string, allowOverride = true): FlowDefinition | null {
   const parts = flowIdParts(flowId);
   if (!parts) return null;

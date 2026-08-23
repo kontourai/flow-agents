@@ -2081,7 +2081,7 @@ function findRepoRootFromDirStrict(startDir: string): string | null {
  * session dir with no repo ancestor fails closed (skips publish) rather than
  * silently trusting process.cwd(), which could be an unrelated real repo.
  */
-function findRepoRootFromDir(startDir: string): string {
+export function findRepoRootFromDir(startDir: string): string {
   const discovered = findRepoRootFromDirStrict(startDir);
   if (discovered) return discovered;
   if (path.basename(startDir) === ".kontourai") return path.dirname(startDir);

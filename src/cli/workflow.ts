@@ -21,7 +21,7 @@ import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
-import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
@@ -33,6 +33,7 @@ import {
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
+import { declaredKitFlowIds, resolveEffectiveFlowDefinition } from "../lib/flow-resolver.js";
 import {
   createContinuationEvidenceCheckpointWriter,
   validateContinuationEvidenceCheckpointDirectory,
@@ -1297,13 +1298,46 @@ function startContractReport(issues: string[], workItem: string | undefined): st
   ].join("\n");
 }
 
+/**
+ * #1280: `workflow start` validates that the requested flow EXISTS and CONFORMS, derived from
+ * what the installed kits actually declare (kit.json flow lists / flows/ directories, via
+ * declaredKitFlowIds) plus the flow resolver's own composition machinery — never from an
+ * identifier enumeration in core. Core knows no kit names here; a Kit that ships another
+ * `*.flow.json` in its packaged, digest-covered artifact makes it startable without a core
+ * change. An unknown flow fails closed naming the derived list.
+ *
+ * The canonical Builder RUNTIME keeps its own authority unchanged: ensure-session still starts
+ * a canonical Flow run only for the flows its run adapter supports (resolved with
+ * allowOverride:false against the shipped package), so this validation widens the public verb
+ * without weakening run provenance — the run record and canonical gate projection continue to
+ * pin definition id/version/digest at start.
+ */
+function assertKitDeclaredFlow(flow: string, repoRoot: string): void {
+  const declared = declaredKitFlowIds(repoRoot);
+  if (!declared.includes(flow)) {
+    throw new Error(`workflow start --flow ${JSON.stringify(flow)} is not a flow declared by the installed kits; declared flows: ${declared.length > 0 ? declared.join(", ") : "<none>"}`);
+  }
+  const definition = resolveEffectiveFlowDefinition(flow, repoRoot);
+  if (!definition) {
+    throw new Error(`workflow start --flow ${flow} is declared by an installed kit but does not resolve to a conforming flow composition`);
+  }
+  if (definition.id !== flow) {
+    throw new Error(`workflow start --flow ${flow} resolved a definition declaring id ${JSON.stringify(String(definition.id))}; a kit's declared flow id and its definition must agree`);
+  }
+  try {
+    validateDefinition(definition);
+  } catch (error) {
+    throw new Error(`workflow start --flow ${flow} does not conform to the Flow definition contract: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function start(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("start"), "workflow start");
   const flow = flagString(parsed.flags, "flow", "builder.build")!;
-  if (flow !== "builder.build" && flow !== "builder.shape") throw new Error("workflow start supports only --flow builder.build or builder.shape");
   const workItem = flagString(parsed.flags, "work-item");
   const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
+  assertKitDeclaredFlow(flow, findRepoRootFromDir(artifactRoot));
   const taskSlug = flagString(parsed.flags, "task-slug");
   const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
   const effectiveStateJson = flagString(parsed.flags, "effective-state-json");
