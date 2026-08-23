@@ -439,6 +439,28 @@ test("a declared flow that does not conform fails closed", () => {
   }
 });
 
+test("the resolver identifier contract is enforced for a CANONICALLY-RUNNABLE flow too", () => {
+  // Reachability proof, not a formality: for a flow with no canonical run the runnability
+  // refusal would catch a bad definition anyway, so the identifier contract could look
+  // load-bearing while being dead. Here the definition IS builder.build — the runnability
+  // check passes — and the only thing standing between a step id the resolver can never
+  // resolve and a published active_step_id is this contract.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flow-badstep-"));
+  const defs = path.join(dir, "defs");
+  try {
+    writeJson(path.join(defs, "builder.build.flow.json"), fixtureFlow("builder.build", [{ id: "bad step", next: "closeout" }, { id: "closeout", next: null }]));
+    const result = runStart(["--flow", "builder.build", "--work-item", "acme/widgets#7"], dir, { FLOW_AGENTS_FLOW_DEFS_DIR: defs });
+    assert.notEqual(result.status, 0);
+    assert.ok(
+      result.stderr.includes('workflow start --flow builder.build does not satisfy the flow resolver\'s identifier contract, so its steps would publish but never resolve: step id "bad step" must match'),
+      `unexpected diagnostic: ${result.stderr}`,
+    );
+    assert.ok(!result.stderr.includes("cannot bind it"), "this flow is canonically runnable; the contract is what refuses it");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("flowDefinitionResolverContractIssues names every clause it enforces", () => {
   // Direct coverage of each rejection branch, including the ones the base validator reaches
   // first at the CLI seam — an unexercised clause is an unproven clause.
