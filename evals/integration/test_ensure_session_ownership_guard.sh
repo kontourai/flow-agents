@@ -602,6 +602,43 @@ node "$CLI" assignment-provider status --provider github \
   && pass "wrong-repository status preserves the trusted provider repository mismatch" \
   || fail "wrong-repository status did not preserve the provider repository mismatch"
 
+# ---------------------------------------------------------------------------------------------
+# ACCEPT PATH. Everything below this point in the original file proves the guard REFUSES bad
+# ownership evidence -- 56 assertions, all negative. Nothing proved it ACCEPTS good evidence.
+#
+# A guard that fails closed and is only ever tested for firing is indistinguishable from a guard
+# that refuses everything: both produce a fully green suite. This is the inverse of the rule this
+# repo already knows (a rejection path that never executes is unproven), and it is harder to see
+# because the failure mode looks like safety.
+#
+# `github-status.json` is the valid, unmutated status this file already builds above and asserts
+# is held/self_is_holder. If `workflow start` will ever accept anything, it must accept this.
+#
+# The well-formed environment has TWO requirements beyond the status file, learned from this
+# test's own first red run (the refusals below are the guard's, verbatim):
+#   1. a Git worktree on the claim's named agent branch — "ensure-session requires a named Git
+#      worktree branch for a provider-backed AssignmentStatus record";
+#   2. the caller's identity must be the SAME canonical identity the claim was rendered with
+#      (here: the explicit-override actor the render-claim actor-json declared).
+POSITIVE_PROJECT="$TMPDIR_EVAL/github-positive"
+POSITIVE_ROOT="$POSITIVE_PROJECT/.kontourai/flow-agents"
+mkdir -p "$POSITIVE_ROOT/$GITHUB_SLUG"
+printf '# Pull Work\n\nSelected Work Item: %s\n' "$GITHUB_WORK_ITEM" > "$POSITIVE_ROOT/$GITHUB_SLUG/$GITHUB_SLUG--pull-work.md"
+git -C "$POSITIVE_PROJECT" init -q
+git -C "$POSITIVE_PROJECT" symbolic-ref HEAD "refs/heads/agent/$GITHUB_ACTOR_KEY/$GITHUB_SLUG"
+if FLOW_AGENTS_ACTOR="$GITHUB_ACTOR_KEY" node "$CLI" workflow start \
+  --artifact-root "$POSITIVE_ROOT" --flow builder.build --work-item "$GITHUB_WORK_ITEM" \
+  --assignment-provider github --effective-state-json "$TMPDIR_EVAL/github-status.json" \
+  > "$TMPDIR_EVAL/github-positive.out" 2> "$TMPDIR_EVAL/github-positive.err"; then
+  if [[ -f "$POSITIVE_ROOT/$GITHUB_SLUG/state.json" ]]; then
+    pass "workflow start ACCEPTS well-formed GitHub ownership evidence and creates the session"
+  else
+    fail "workflow start exited 0 on valid GitHub ownership evidence but created no session state"
+  fi
+else
+  fail "workflow start REJECTED well-formed GitHub ownership evidence -- the same status this file asserts is held/self_is_holder: $(cat "$TMPDIR_EVAL/github-positive.err")"
+fi
+
 for variant in actor work_item effective forged_author newer_forged_author missing_author missing_label missing_assignee other_assignee wrong_number wrong_repository; do
   NEGATIVE_PROJECT="$TMPDIR_EVAL/github-negative-$variant"
   NEGATIVE_ROOT="$NEGATIVE_PROJECT/.kontourai/flow-agents"

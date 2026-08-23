@@ -284,13 +284,29 @@ function validateCanonicalRunDefinitions(inspected: Awaited<ReturnType<typeof in
   return { startDefinition: validatedStartDefinition, effectiveDefinition };
 }
 
+/**
+ * #1300: this was a deep-equal against a two-key route-map literal, which refused the kit's own
+ * shipped three-key map (implementation_defect -> execute) — a second component re-encoding a
+ * contract the flow definition owns. The semantic requirement is that stale evidence is
+ * refreshable: the refresh entries must be PRESENT with the bounded blocking policy; additional
+ * repair routes never weaken that and are the flow definition's business. Exported so a test can
+ * bind this predicate to the REAL resolved builder.build definition — zero coverage on the
+ * literal is exactly how #1300 shipped.
+ */
+export function evidenceRefreshRoutesSatisfied(gate: Record<string, unknown>): boolean {
+  const routes = gate.on_route_back;
+  if (!routes || typeof routes !== "object" || Array.isArray(routes)) return false;
+  return (routes as Record<string, unknown>).missing_evidence === "verify"
+    && (routes as Record<string, unknown>).default === "verify"
+    && isDeepStrictEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" });
+}
+
 function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, definitions: CanonicalRunDefinitions): void {
   const manifestFile = path.join(inspected.run.dir, "evidence", "manifest.json");
   const definition = definitions.effectiveDefinition;
   const gates = record(definition.gates, "canonical Flow definition gates");
   const gate = record(gates["builder.publish-learn:merge-ready-ci-gate"], "canonical merge-ready-ci gate");
-  if (!isDeepStrictEqual(gate.on_route_back, { missing_evidence: "verify", default: "verify" })
-    || !isDeepStrictEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" })) {
+  if (!evidenceRefreshRoutesSatisfied(gate)) {
     throw new Error("merge-change requires the completed run to semantically adopt merge-ready-ci evidence refresh (missing_evidence/default -> verify with bounded block policy)");
   }
   assertEvidenceRefreshVerificationProvenance(inspected.run.state, inspected.run.definitionId, inspected.run.definitionVersion, inspected.run.definitionDigest);
@@ -299,7 +315,7 @@ function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspe
   readRegularFile(manifestFile, "canonical Flow evidence manifest");
 }
 
-function assertEvidenceRefreshVerificationProvenance(state: Record<string, unknown>, definitionId: string, definitionVersion: string, definitionDigest: string): void {
+export function assertEvidenceRefreshVerificationProvenance(state: Record<string, unknown>, definitionId: string, definitionVersion: string, definitionDigest: string): void {
   const amendments = Array.isArray(state.definition_amendments) ? state.definition_amendments : [];
   const adopted = amendments.filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry)
     && (entry as Record<string, unknown>).type === "definition_amended"
@@ -311,7 +327,13 @@ function assertEvidenceRefreshVerificationProvenance(state: Record<string, unkno
         && (successor as Record<string, unknown>).digest === definitionDigest;
     })());
   if (amendments.length === 0) {
-    if (state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
+    // #1307: @kontourai/flow's writer has never stamped state.definition_digest (measured: absent
+    // in every run state; zero references in the flow dist) — demanding it fails EVERY unamended
+    // run, and was unreachable until #1306 removed the #1300 wedge in front of it. The identity
+    // it would prove is already established by validateCanonicalRunDefinitions' deep-equal of the
+    // persisted start definition against the resolved effective definition. Derive, don't demand:
+    // absent stamp accepted, present-but-mismatched stamp refused.
+    if (state.definition_digest !== undefined && state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
     return;
   }
   if (adopted.length !== 1) throw new Error("merge-change requires one authenticated definition amendment adopting the canonical evidence-refresh definition");

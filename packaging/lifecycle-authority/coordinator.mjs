@@ -138,6 +138,22 @@ const MERGE_CHANGE_AUTHORIZATION_FIELDS = [
 ];
 
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * #1307: this was the THIRD independent encoding of the route-map contract (after #1300's in
+ * merge-change and the static eval's). The semantic requirement is that the refresh entries are
+ * PRESENT with the bounded blocking policy; additional repair routes (implementation_defect)
+ * and the #1302 requires_current_verification declaration are the flow definition's business.
+ * Exported as a pure predicate so conformance tests drive it with the real shipped definition
+ * rather than grepping this file's text.
+ */
+export function mergeReadyCiRefreshRoutesSatisfied(gate) {
+  if (!record(gate)) return false;
+  const routes = gate.on_route_back;
+  if (!record(routes)) return false;
+  return routes.missing_evidence === "verify" && routes.default === "verify"
+    && canonicalJson(gate.route_back_policy) === canonicalJson({ max_attempts: 3, on_exceeded: "block" });
+}
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (record(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
@@ -1444,7 +1460,12 @@ function assertMergeChangeVerificationRefreshProvenance(state, definition, defin
     && entry.successor_definition.version === definition.version
     && entry.successor_definition.digest === definitionDigest);
   if (amendments.length === 0) {
-    if (state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
+    // #1307: @kontourai/flow's writer has never stamped state.definition_digest; the identity the
+    // stamp would prove is already established by the caller's deep-equal of the persisted start
+    // definition against the resolved effective definition. Accept the derived proof when the
+    // stamp is absent (the validator-derived identity established upstream is the proof; this
+    // function does not itself perform that comparison); refuse only a PRESENT mismatched stamp.
+    if (state.definition_digest !== undefined && state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
     return;
   }
   if (adopted.length !== 1) throw new Error("merge-change requires one authenticated definition amendment adopting the canonical evidence-refresh definition");
@@ -1497,9 +1518,7 @@ async function assertMergeChangeAuthorizationBinding(paths, authorization, reque
     throw new Error("merge-change authorization canonical Flow binding changed");
   }
   const mergeReadyCi = definition.gates?.["builder.publish-learn:merge-ready-ci-gate"];
-  if (!record(mergeReadyCi)
-      || canonicalJson(mergeReadyCi.on_route_back) !== canonicalJson({ missing_evidence: "verify", default: "verify" })
-      || canonicalJson(mergeReadyCi.route_back_policy) !== canonicalJson({ max_attempts: 3, on_exceeded: "block" })) {
+  if (!mergeReadyCiRefreshRoutesSatisfied(mergeReadyCi)) {
     throw new Error("merge-change requires semantic merge-ready-ci evidence-refresh control");
   }
   assertMergeChangeVerificationRefreshProvenance(state, definition, flow.definitionDigest(definition));

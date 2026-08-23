@@ -169,6 +169,43 @@ else
   fail "restored tests-evidence was refused: $restored_log"
 fi
 assert_step merge-ready
+
+# #1302 FRESHNESS-PREDICATE PROBES: the same predicate the publish preflight and the
+# requires_current_verification turnstile run must DISCRIMINATE on this real verified bundle —
+# current at the verified head, stale after one fixture commit. A guard proven only against the
+# happy path is unproven; this is the fault-injection for the exact historical failure (run 2's
+# CI-demanded fix landed post-review and the cursor advanced anyway).
+predicate_probe() {
+  (cd "$PROJECT" && node --input-type=module -e "
+    import { assertCurrentVerifiedWorkspaceEvidence } from '$ROOT/build/src/cli/workflow-sidecar.js';
+    assertCurrentVerifiedWorkspaceEvidence(process.argv[1]);
+  " "$SESSION")
+}
+if predicate_probe >"$TMP/predicate-current.log" 2>&1; then
+  pass 'freshness predicate accepts the bundle at its verified head'
+else
+  fail "freshness predicate refused a current verified bundle: $(tail -c 400 "$TMP/predicate-current.log")"
+fi
+printf 'post-verification drift\n' > "$PROJECT/checks/drift.txt"
+git -C "$PROJECT" add checks/drift.txt
+git -C "$PROJECT" commit -qm 'fixture: source moved after verification'
+if predicate_probe >"$TMP/predicate-stale.log" 2>&1; then
+  fail 'freshness predicate accepted STALE verification after the fixture head moved'
+else
+  if grep -q 'bound to the exact same source snapshot' "$TMP/predicate-stale.log"; then
+    pass 'freshness predicate refuses stale verification with the canonical vocabulary'
+  else
+    fail "stale refusal lost the canonical vocabulary: $(tail -c 400 "$TMP/predicate-stale.log")"
+  fi
+fi
+# Restore the verified head so the remaining assertions run against the state they always did.
+git -C "$PROJECT" reset -q --hard HEAD~1
+if predicate_probe >"$TMP/predicate-restored.log" 2>&1; then
+  pass 'freshness predicate accepts again once the verified head is restored'
+else
+  fail "freshness predicate did not recover at the restored head: $(tail -c 400 "$TMP/predicate-restored.log")"
+fi
+
 record merge-readiness "$SESSION/$SLUG--evidence-gate.md" 'Local merge readiness is reviewable.'
 assert_step pr-open
 
