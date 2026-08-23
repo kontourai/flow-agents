@@ -225,10 +225,11 @@ test("kiro init never deletes unclassified destination files and never token-sub
   assert.doesNotMatch(rsyncLine, /--delete/);
 });
 
-// BLOCKING-1: stale-owned cleanup is manifest-driven -- a previously-owned file absent from
-// the bundle is removed only while its bytes still match the recorded hash; a modified
-// formerly-owned file is preserved and reported; both appear in the summary.
-test("kiro init removes only hash-matching manifest-owned stale files and preserves modified ones", () => {
+// Round-3 BLOCKING-1: stale-owned handling is REPORT-ONLY. The writable ownership manifest
+// is never deletion authority -- a previously-owned file absent from the bundle is named in
+// the summary with a removal suggestion, and NOTHING is deleted (a poisoned or stale
+// manifest entry, or a deliberately-restored file with old bytes, must not disappear).
+test("kiro init reports stale bundle-owned files without deleting anything", () => {
   const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-kiro-rm-"));
   const first = runKiroInit(dest);
   assert.equal(first.status, 0, first.output);
@@ -242,14 +243,19 @@ test("kiro init removes only hash-matching manifest-owned stale files and preser
     sha256: crypto.createHash("sha256").update(fs.readFileSync(path.join(dest, "obsolete", "gone.md"))).digest("hex"),
   });
   manifest.files.push({ path: "obsolete/edited.md", sha256: "0".repeat(64) });
+  // A poisoned traversal entry must be ignored, not honored and not fatal.
+  manifest.files.push({ path: "../outside-victim.txt", sha256: "0".repeat(64) });
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const second = runKiroInit(dest);
   assert.equal(second.status, 0, second.output);
-  assert.equal(fs.existsSync(path.join(dest, "obsolete", "gone.md")), false);
+  // Nothing deleted: the hash-matching stale file is still on disk, only reported.
+  assert.equal(fs.readFileSync(path.join(dest, "obsolete", "gone.md"), "utf8"), "old bundle file\n");
   assert.equal(fs.readFileSync(path.join(dest, "obsolete", "edited.md"), "utf8"), "old but user modified\n");
-  assert.match(second.output, /removed \(bundle-owned, stale\): obsolete\/gone\.md/);
-  assert.match(second.output, /preserved: obsolete\/edited\.md \(formerly bundle-owned, since modified; kept\)/);
-  assert.match(second.output, /1 removed \(bundle-owned, stale\)/);
+  assert.match(second.output, /stale bundle-owned \(from a previous install; NOT removed\): obsolete\/gone\.md/);
+  assert.match(second.output, /1 stale bundle-owned file\(s\) remain from a previous install; remove them with `flow-agents init --uninstall` or manually\./);
+  // The modified formerly-owned file is just a user file now: not stale, not touched.
+  assert.doesNotMatch(second.output, /obsolete\/edited\.md/);
+  assert.doesNotMatch(second.output, /outside-victim/);
 });
 
 // BLOCKING-2: --global claude-code sync preserves unowned differing files, reports them,
@@ -330,7 +336,7 @@ test("verifyInstallPlanMatchesDisk refuses when a planned file changes after cla
     manifestDest: dest,
     excludeRel: new Set(),
     force: false,
-    removals: true,
+    reportStaleOwned: true,
     refuseSymlinkParents: true,
   };
   const plan = computeInstallPlan(params);
@@ -368,6 +374,14 @@ test("installerSupportsPreserveExcludes requires the rsync line to enforce exclu
     .map((line) => (line.startsWith("rsync ") ? line.replace("rsync -a ", "rsync -a --delete ") : line))
     .join("\n");
   assert.equal(installerSupportsPreserveExcludes(withDelete), false);
+  // An installer without the --only-absent (--ignore-existing) expansion predates the
+  // never-overwrite copy layer and is stale.
+  const droppedIgnoreExisting = real
+    .split("\n")
+    .map((line) => (line.startsWith("rsync ") ? line.replace(' ${IGNORE_EXISTING_ARGS[@]+"${IGNORE_EXISTING_ARGS[@]}"}', "") : line))
+    .join("\n");
+  assert.notEqual(droppedIgnoreExisting, real, "fixture must actually strip the ignore-existing expansion");
+  assert.equal(installerSupportsPreserveExcludes(droppedIgnoreExisting), false);
 });
 
 // Special-character exclude paths: install.sh escapes rsync wildcard characters itself, so
@@ -389,4 +403,96 @@ test("install.sh --exclude-path treats rsync wildcard characters literally", () 
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.equal(fs.readFileSync(path.join(dest, "sp[1].md"), "utf8"), "user special file\n");
   assert.equal(fs.readFileSync(path.join(dest, "plain.md"), "utf8"), "plain bundle file\n");
+});
+
+// Round-3 HIGH-2: an unparseable existing settings.json refuses the --global install
+// (merging over it would replace possibly-recoverable user content with managed-only
+// settings). --force does not override a parse failure, and nothing is written.
+test("global claude-code refuses over invalid existing settings JSON, even with --force", () => {
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-badjson-"));
+  fs.writeFileSync(path.join(dest, "settings.json"), "{ this is not json\n");
+  const before = snapshotTree(dest);
+  for (const extra of [[], ["--force"]]) {
+    const result = spawnSync(
+      process.execPath,
+      [cli, "init", "--runtime", "claude-code", "--global", "--dest", dest, "--yes", ...extra],
+      { cwd: repoRoot, encoding: "utf8", env: { ...process.env, FLOW_AGENTS_USER_CLAUDE_SETTINGS: path.join(dest, "settings.json") } },
+    );
+    assert.equal(result.status, 2, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /not valid JSON/);
+    assert.match(result.stderr, /--force does not override a parse failure/);
+    assert.ok(result.stderr.includes(path.join(dest, "settings.json")), result.stderr);
+  }
+  assert.deepEqual(snapshotTree(dest), before);
+});
+
+// Round-3 HIGH-1: write-time enforcement in the Node executor. A planned "create" that
+// loses the exclusive-create race is left as found and reported; a planned "replace" whose
+// destination bytes changed after planning aborts naming the path.
+test("executePlanCopies enforces exclusive creates and re-hash-before-rename replaces", async () => {
+  const { computeInstallPlan, executePlanCopies, InstallPlanDriftError } =
+    await import("../../build/src/cli/install-plan.js");
+  const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-exec-src-"));
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-exec-dest-"));
+  fs.writeFileSync(path.join(bundleDir, "new.md"), "bundle new\n");
+  fs.writeFileSync(path.join(bundleDir, "owned.md"), "bundle owned v2\n");
+  // Seed a stale bundle-owned file recorded by a previous install's manifest.
+  fs.writeFileSync(path.join(dest, "owned.md"), "bundle owned v1\n");
+  fs.mkdirSync(path.join(dest, ".flow-agents"), { recursive: true });
+  fs.writeFileSync(path.join(dest, ".flow-agents", "owned-files.json"), JSON.stringify({
+    schema_version: "1.0",
+    files: [{ path: "owned.md", sha256: crypto.createHash("sha256").update("bundle owned v1\n").digest("hex") }],
+  }));
+  const params = {
+    mappings: [{ sourceDir: bundleDir, destDir: dest, prefix: "" }],
+    manifestDest: dest,
+    excludeRel: new Set(),
+    force: false,
+    reportStaleOwned: false,
+    refuseSymlinkParents: true,
+  };
+  const plan = computeInstallPlan(params);
+  assert.deepEqual(plan.created, ["new.md"]);
+  assert.deepEqual(plan.replaced, ["owned.md"]);
+
+  // Race 1: a file appears at the planned create path -> left as found, reported.
+  fs.writeFileSync(path.join(dest, "new.md"), "raced user content\n");
+  // Race 2: the replace target's bytes change after planning -> abort naming the path.
+  fs.writeFileSync(path.join(dest, "owned.md"), "user edited in the window\n");
+  assert.throws(
+    () => executePlanCopies(plan),
+    (error) => error instanceof InstallPlanDriftError && /owned\.md/.test(error.message),
+  );
+  assert.equal(fs.readFileSync(path.join(dest, "owned.md"), "utf8"), "user edited in the window\n");
+  assert.equal(fs.readFileSync(path.join(dest, "new.md"), "utf8"), "raced user content\n");
+
+  // With the replace target restored to its planned bytes, the create race alone is
+  // absorbed: reported in racedPaths, file untouched, replace applied.
+  fs.writeFileSync(path.join(dest, "owned.md"), "bundle owned v1\n");
+  const executed = executePlanCopies(plan);
+  assert.deepEqual(executed.racedPaths, ["new.md"]);
+  assert.equal(fs.readFileSync(path.join(dest, "new.md"), "utf8"), "raced user content\n");
+  assert.equal(fs.readFileSync(path.join(dest, "owned.md"), "utf8"), "bundle owned v2\n");
+});
+
+// Round-3 HIGH-1 (rsync leg): under --only-absent the generated installer's rsync runs with
+// --ignore-existing, so the copy layer cannot overwrite ANY existing destination file --
+// including one that appeared after planning (planned as "create").
+test("install.sh --only-absent never overwrites an existing destination file", () => {
+  const fixtureBundle = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-oa-bundle-"));
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-oa-dest-"));
+  fs.copyFileSync(path.join(repoRoot, "dist", "base", "install.sh"), path.join(fixtureBundle, "install.sh"));
+  fs.writeFileSync(path.join(fixtureBundle, "AGENTS.md"), "agents\n");
+  fs.writeFileSync(path.join(fixtureBundle, "CLAUDE.md"), "claude\n");
+  fs.writeFileSync(path.join(fixtureBundle, "appeared.md"), "bundle content\n");
+  fs.writeFileSync(path.join(fixtureBundle, "fresh.md"), "bundle fresh\n");
+  // Simulates the post-revalidation window: the file exists by the time rsync runs.
+  fs.writeFileSync(path.join(dest, "appeared.md"), "raced user content\n");
+  const result = spawnSync("bash", ["install.sh", dest, "--only-absent"], {
+    cwd: fixtureBundle,
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(fs.readFileSync(path.join(dest, "appeared.md"), "utf8"), "raced user content\n");
+  assert.equal(fs.readFileSync(path.join(dest, "fresh.md"), "utf8"), "bundle fresh\n");
 });

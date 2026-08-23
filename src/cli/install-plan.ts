@@ -6,11 +6,11 @@
 // path -- including a user-authored README.md or ~/.claude/agents file -- was silently
 // overwritten, and kiro's `--delete` sync could remove destination files the install never
 // classified at all. This module computes, BEFORE any write, what the install would do to
-// every bundle-shipped path (and, when removals are enabled, to every previously-owned path
-// the bundle no longer ships), and classifies each one:
+// every bundle-shipped path, and classifies each one:
 //
 //   - create:    no destination entry exists; the install writes a new file.
-//   - unchanged: the destination file is byte-identical to the incoming bundle file.
+//   - unchanged: the destination file is byte-identical to the incoming bundle file. It is
+//                not rewritten (the guarded installer only writes absent paths).
 //   - replace:   the destination file differs from the incoming bundle file but hash-matches
 //                the ownership manifest a PREVIOUS install recorded (`.flow-agents/
 //                owned-files.json`, the same contract `init --uninstall` consumes via
@@ -21,33 +21,35 @@
 //                symlink). The install must keep it and report it.
 //   - force-overwrite: a would-be "preserve" entry the caller explicitly opted to overwrite
 //                with --force.
-//   - remove:    (removals mode, replacing kiro's blanket `rsync --delete`) a path the
-//                ownership manifest records as installed by a previous run, absent from the
-//                incoming bundle, whose on-disk content still hash-matches the manifest.
-//                Only these are deleted; a modified formerly-owned file is preserved and
-//                reported, and unowned files are never deletion candidates at all.
 //
-// Preserved paths are passed to install.sh as `--exclude-path` rsync excludes, so the copy
-// itself never touches them. This deliberately REUSES the uninstall path's ownership
-// machinery (owned-files-manifest.ts: listOwnedTree/hashFile/readOwnedFilesManifest and the
-// manifest-entry containment checks) rather than inventing a second hashing convention --
-// "user-modified => keep + report" is the same rule uninstall already honours.
+// Separately, the plan REPORTS stale bundle-owned leftovers: paths the ownership manifest
+// records as installed by a previous run, absent from the incoming bundle, whose on-disk
+// content still hash-matches the manifest. The install never deletes them (a writable
+// manifest is not deletion authority -- a poisoned or stale entry must not be able to remove
+// an arbitrary path); the summary names them and points at `flow-agents init --uninstall`
+// or manual removal. Kiro's old blanket `rsync --delete` is gone entirely.
+//
+// Preserved paths are passed to install.sh as `--exclude-path` rsync excludes, and init
+// passes `--only-absent` so the rsync runs with --ignore-existing: the copy layer can only
+// ever write paths that did not exist, while replace/force-overwrite writes go through
+// executePlanCopies' temp-write -> re-hash -> rename sequence. This deliberately REUSES the
+// uninstall path's ownership machinery (owned-files-manifest.ts: listOwnedTree/hashFile/
+// readOwnedFilesManifest) rather than inventing a second hashing convention.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-  assertManifestEntryParentContained,
-  hashFile,
-  listOwnedTree,
-  readOwnedFilesManifest,
-  resolveManifestEntryPath,
-} from "../lib/owned-files-manifest.js";
+import * as crypto from "node:crypto";
+import { hashFile, listOwnedTree, readOwnedFilesManifest } from "../lib/owned-files-manifest.js";
 
 export type InstallPlanAction = "create" | "unchanged" | "replace" | "preserve" | "force-overwrite";
 
-export type InstallPlanEntry = { rel: string; action: InstallPlanAction; sourcePath: string; destPath: string };
-
-/** A manifest-driven removal candidate (see module doc: "remove"). */
-export type InstallPlanRemoval = { rel: string; destPath: string; sha256: string };
+export type InstallPlanEntry = {
+  rel: string;
+  action: InstallPlanAction;
+  sourcePath: string;
+  destPath: string;
+  /** Plan-time sha256 of the existing destination file (absent for "create"). */
+  destSha256?: string;
+};
 
 export type InstallPlanMapping = { sourceDir: string; destDir: string; prefix: string };
 
@@ -58,11 +60,12 @@ export type InstallPlan = {
   replaced: string[];
   preserved: string[];
   forced: string[];
-  /** Manifest-owned, absent from the bundle, still hash-matching: deleted by the install. */
-  removals: InstallPlanRemoval[];
-  /** Manifest-owned, absent from the bundle, since modified (or now a symlink): kept + reported. */
-  preservedFormerlyOwned: string[];
-  removalsEnabled: boolean;
+  /**
+   * Manifest-owned, absent from the incoming bundle, still hash-matching the recorded
+   * install: REPORTED, never deleted (see module doc).
+   */
+  staleOwned: string[];
+  staleOwnedReported: boolean;
 };
 
 /**
@@ -80,12 +83,12 @@ export class InstallPlanSymlinkParentError extends Error {
   }
 }
 
-/** Thrown by verifyInstallPlanMatchesDisk when the destination changed after planning. */
+/** Thrown when the destination diverged from the plan's decisions before/while applying them. */
 export class InstallPlanDriftError extends Error {
   constructor(public readonly driftedPaths: string[]) {
     super(
       `destination changed between planning and install for: ${driftedPaths.slice(0, 20).join(", ")}` +
-      `${driftedPaths.length > 20 ? ` (+${driftedPaths.length - 20} more)` : ""}; nothing was written -- re-run flow-agents init`
+      `${driftedPaths.length > 20 ? ` (+${driftedPaths.length - 20} more)` : ""} -- re-run flow-agents init`
     );
   }
 }
@@ -123,16 +126,18 @@ export function bundleInstallExcludeRel(runtime: string): Set<string> {
  * An installer that PARSES `--exclude-path` but whose rsync invocation dropped the
  * `${EXCLUDE_ARGS[@]+...}` expansion would accept the flags and still overwrite everything.
  * True only when the installer carries the guard contract's observable properties:
- *   - the rsync line itself expands the exclude args;
- *   - the rsync line no longer uses `--delete` (BLOCKING-1: deletion is manifest-driven in
+ *   - the rsync line itself expands the exclude args AND the `--only-absent` ignore-existing
+ *     args (the never-overwrite copy layer);
+ *   - the rsync line no longer hardcodes `--delete` (stale-owned handling is report-only in
  *     the caller now, never a blanket sync);
- *   - the raw `EXCLUDE_RELS` list exists (HIGH-1/HIGH-2: token substitution and the
- *     console-config write are scoped by it).
+ *   - the raw `EXCLUDE_RELS` list exists (token substitution and the console-config write
+ *     are scoped by it).
  */
 export function installerSupportsPreserveExcludes(installShText: string): boolean {
   const rsyncLine = installShText.split("\n").find((line) => line.trimStart().startsWith("rsync "));
   if (!rsyncLine) return false;
   if (!rsyncLine.includes('${EXCLUDE_ARGS[@]+')) return false;
+  if (!rsyncLine.includes('${IGNORE_EXISTING_ARGS[@]+')) return false;
   if (rsyncLine.includes("--delete")) return false;
   return installShText.includes("EXCLUDE_RELS=()");
 }
@@ -144,8 +149,8 @@ export type ComputeInstallPlanParams = {
   /** Matched against the prefixed relative path; these paths never enter the plan. */
   excludeRel: Set<string>;
   force: boolean;
-  /** Enable manifest-driven stale-owned removals (project rsync installs). */
-  removals: boolean;
+  /** Report (never delete) manifest-owned paths the incoming bundle no longer ships. */
+  reportStaleOwned: boolean;
   /** Refuse symlinked intermediate destination directories (project rsync installs). */
   refuseSymlinkParents: boolean;
 };
@@ -158,6 +163,14 @@ function lstatIfPresent(target: string): fs.Stats | undefined {
   }
 }
 
+/** A manifest rel path safe to JOIN for a read-only existence/hash probe, or null. */
+function safeManifestRelParts(rel: string): string[] | null {
+  if (typeof rel !== "string" || rel.length === 0 || rel.startsWith("/") || rel.startsWith("\\")) return null;
+  const parts = rel.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) return null;
+  return parts;
+}
+
 export function computeInstallPlan(params: ComputeInstallPlanParams): InstallPlan {
   const manifest = readOwnedFilesManifest(params.manifestDest);
   const ownedHashes = new Map<string, string>();
@@ -168,7 +181,7 @@ export function computeInstallPlan(params: ComputeInstallPlanParams): InstallPla
   }
   const plan: InstallPlan = {
     entries: [], created: [], unchanged: [], replaced: [], preserved: [], forced: [],
-    removals: [], preservedFormerlyOwned: [], removalsEnabled: params.removals,
+    staleOwned: [], staleOwnedReported: params.reportStaleOwned,
   };
   const record = (entry: InstallPlanEntry): void => {
     plan.entries.push(entry);
@@ -221,45 +234,41 @@ export function computeInstallPlan(params: ComputeInstallPlanParams): InstallPla
       }
       const currentHash = hashFile(target);
       const incomingHash = hashFile(sourcePath);
-      if (currentHash === incomingHash) record({ rel: combined, action: "unchanged", sourcePath, destPath: target });
-      else if (ownedHashes.get(combined) === currentHash) record({ rel: combined, action: "replace", sourcePath, destPath: target });
-      else if (params.force) record({ rel: combined, action: "force-overwrite", sourcePath, destPath: target });
-      else record({ rel: combined, action: "preserve", sourcePath, destPath: target });
+      if (currentHash === incomingHash) record({ rel: combined, action: "unchanged", sourcePath, destPath: target, destSha256: currentHash });
+      else if (ownedHashes.get(combined) === currentHash) record({ rel: combined, action: "replace", sourcePath, destPath: target, destSha256: currentHash });
+      else if (params.force) record({ rel: combined, action: "force-overwrite", sourcePath, destPath: target, destSha256: currentHash });
+      else record({ rel: combined, action: "preserve", sourcePath, destPath: target, destSha256: currentHash });
     }
   }
   if (symlinkParents.size > 0) throw new InstallPlanSymlinkParentError([...symlinkParents].sort());
-  if (params.removals) {
-    // BLOCKING-1 (#1288 review): replace kiro's blanket `rsync --delete` with manifest-driven
-    // removal, reusing the uninstall contract: only a previously-owned path, absent from the
-    // incoming bundle, whose bytes still match the recorded hash may be deleted. Entries go
-    // through the same lexical + filesystem containment checks the uninstaller mandates for
-    // any manifest-driven deletion (the manifest is not a trusted input).
+  if (params.reportStaleOwned) {
+    // Report-only (#1288 round-3 BLOCKING-1): the ownership manifest is a writable input,
+    // so it must never be deletion authority. A previously-owned path the bundle no longer
+    // ships, whose bytes still match the recorded hash, is NAMED in the summary with a
+    // removal suggestion; nothing is deleted. Malformed entries are skipped -- a poisoned
+    // manifest must not brick or steer the install.
     const prefixes = params.mappings.map((mapping) => mapping.prefix);
     for (const [rel, sha256] of ownedHashes) {
       if (incoming.has(rel) || params.excludeRel.has(rel)) continue;
       if (!prefixes.some((prefix) => prefix === "" || rel === prefix || rel.startsWith(`${prefix}/`))) continue;
-      const destPath = resolveManifestEntryPath(params.manifestDest, rel);
-      assertManifestEntryParentContained(params.manifestDest, destPath, rel);
+      const parts = safeManifestRelParts(rel);
+      if (!parts) continue;
+      const destPath = path.join(params.manifestDest, ...parts);
       const stat = lstatIfPresent(destPath);
-      if (!stat) continue;
-      if (!stat.isFile() || stat.isSymbolicLink()) {
-        plan.preservedFormerlyOwned.push(rel);
-        continue;
-      }
-      if (hashFile(destPath) === sha256) plan.removals.push({ rel, destPath, sha256 });
-      else plan.preservedFormerlyOwned.push(rel);
+      if (!stat || !stat.isFile() || stat.isSymbolicLink()) continue;
+      if (hashFile(destPath) === sha256) plan.staleOwned.push(rel);
     }
-    plan.removals.sort((a, b) => a.rel.localeCompare(b.rel));
-    plan.preservedFormerlyOwned.sort();
+    plan.staleOwned.sort();
   }
   return plan;
 }
 
 /**
  * HIGH-3 (#1288 review): re-derive the plan immediately before the install executes and
- * refuse -- naming the drifted paths -- if any classification changed. This shrinks the
- * classify->write race window to the moment before the installer is spawned; it cannot
- * eliminate it (nothing short of an FS transaction can), which is disclosed in the error.
+ * refuse -- naming the drifted paths -- if any classification changed. Write-time enforcement
+ * then closes what this cannot see: creates open exclusively (executePlanCopies /
+ * install.sh's --ignore-existing rsync) and replaces re-hash the destination immediately
+ * before renaming over it.
  */
 export function verifyInstallPlanMatchesDisk(plan: InstallPlan, params: ComputeInstallPlanParams): void {
   const fresh = computeInstallPlan(params);
@@ -270,62 +279,69 @@ export function verifyInstallPlanMatchesDisk(plan: InstallPlan, params: ComputeI
   const after = byRel(fresh.entries);
   for (const [rel, action] of before) if (after.get(rel) !== action) drifted.add(rel);
   for (const rel of after.keys()) if (!before.has(rel)) drifted.add(rel);
-  const removalKey = (removal: InstallPlanRemoval): string => `${removal.rel} ${removal.sha256}`;
-  const beforeRemovals = new Set(plan.removals.map(removalKey));
-  const afterRemovals = new Set(fresh.removals.map(removalKey));
-  for (const key of beforeRemovals) if (!afterRemovals.has(key)) drifted.add(key.split(" ")[0]);
-  for (const key of afterRemovals) if (!beforeRemovals.has(key)) drifted.add(key.split(" ")[0]);
   if (drifted.size > 0) throw new InstallPlanDriftError([...drifted].sort());
 }
 
-export type ExecutedRemovals = { removed: string[]; preservedAtRemoval: string[] };
+export type ExecutedCopies = {
+  copied: number;
+  /** Planned creates that lost the exclusive-create race: left as found, reported. */
+  racedPaths: string[];
+};
 
 /**
- * Execute the plan's removals with the uninstaller's TOCTOU posture: re-assert containment
- * and re-hash immediately before each deletion; anything that changed in the window is
- * preserved and reported, never deleted. Empty parent directories are pruned up to `dest`.
+ * Apply the plan's copies directly, with write-time race enforcement:
+ *   - "create" opens the destination with O_EXCL ('wx'): if a file appeared since planning,
+ *     the open FAILS and that failure IS the guard -- the path is left as found and
+ *     reported (racedPaths), never overwritten.
+ *   - "replace"/"force-overwrite" write a temp sibling, re-hash the destination immediately
+ *     before renaming over it, and throw InstallPlanDriftError if the bytes are no longer
+ *     the ones the plan decided to replace.
+ * `actions` limits which classifications this executor applies (the project path routes
+ * only replace/force-overwrite here; creates go through install.sh's --ignore-existing
+ * rsync, which carries the same only-write-absent-paths guarantee).
  */
-export function executePlanRemovals(plan: InstallPlan, dest: string): ExecutedRemovals {
-  const result: ExecutedRemovals = { removed: [], preservedAtRemoval: [] };
-  const staleParents = new Set<string>();
-  for (const removal of plan.removals) {
-    assertManifestEntryParentContained(dest, removal.destPath, removal.rel);
-    const stat = lstatIfPresent(removal.destPath);
-    if (!stat) continue;
-    if (!stat.isFile() || stat.isSymbolicLink() || hashFile(removal.destPath) !== removal.sha256) {
-      result.preservedAtRemoval.push(removal.rel);
+export function executePlanCopies(
+  plan: InstallPlan,
+  actions: ReadonlySet<InstallPlanAction> = new Set(["create", "replace", "force-overwrite"]),
+): ExecutedCopies {
+  const result: ExecutedCopies = { copied: 0, racedPaths: [] };
+  for (const entry of plan.entries) {
+    if (!actions.has(entry.action)) continue;
+    if (entry.action === "create") {
+      fs.mkdirSync(path.dirname(entry.destPath), { recursive: true });
+      try {
+        fs.writeFileSync(entry.destPath, fs.readFileSync(entry.sourcePath), { flag: "wx" });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        result.racedPaths.push(entry.rel);
+        continue;
+      }
+      fs.chmodSync(entry.destPath, fs.statSync(entry.sourcePath).mode & 0o777);
+      result.copied += 1;
       continue;
     }
-    fs.rmSync(removal.destPath);
-    result.removed.push(removal.rel);
-    staleParents.add(path.dirname(removal.destPath));
-  }
-  const destResolved = path.resolve(dest);
-  for (const start of [...staleParents].sort((a, b) => b.length - a.length)) {
-    let current = start;
-    while (current !== destResolved && current.startsWith(`${destResolved}${path.sep}`)) {
+    if (entry.action === "replace" || entry.action === "force-overwrite") {
+      const temp = path.join(
+        path.dirname(entry.destPath),
+        `.${path.basename(entry.destPath)}.flow-agents-${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`,
+      );
       try {
-        fs.rmdirSync(current);
-      } catch {
-        break;
+        fs.writeFileSync(temp, fs.readFileSync(entry.sourcePath), { flag: "wx" });
+        fs.chmodSync(temp, fs.statSync(entry.sourcePath).mode & 0o777);
+        // Re-hash the destination immediately before the rename: the plan decided to
+        // replace THESE bytes; anything else appearing here is not ours to destroy.
+        const current = lstatIfPresent(entry.destPath);
+        if (!current || !current.isFile() || current.isSymbolicLink() || hashFile(entry.destPath) !== entry.destSha256) {
+          throw new InstallPlanDriftError([entry.rel]);
+        }
+        fs.renameSync(temp, entry.destPath);
+        result.copied += 1;
+      } finally {
+        fs.rmSync(temp, { force: true });
       }
-      current = path.dirname(current);
     }
   }
   return result;
-}
-
-/** Apply the plan's create/replace/force-overwrite copies directly (the --global claude-code sync path). */
-export function executePlanCopies(plan: InstallPlan): number {
-  let copied = 0;
-  for (const entry of plan.entries) {
-    if (entry.action !== "create" && entry.action !== "replace" && entry.action !== "force-overwrite") continue;
-    fs.mkdirSync(path.dirname(entry.destPath), { recursive: true });
-    fs.copyFileSync(entry.sourcePath, entry.destPath);
-    fs.chmodSync(entry.destPath, fs.statSync(entry.sourcePath).mode & 0o777);
-    copied += 1;
-  }
-  return copied;
 }
 
 export function formatDryRunLines(plan: InstallPlan, runtime: string, dest: string): string[] {
@@ -339,43 +355,41 @@ export function formatDryRunLines(plan: InstallPlan, runtime: string, dest: stri
     else if (entry.action === "preserve") lines.push(`  preserve (existing content kept): ${entry.rel}`);
     else if (entry.action === "force-overwrite") lines.push(`  overwrite (--force): ${entry.rel}`);
   }
-  for (const removal of plan.removals) lines.push(`  remove (bundle-owned, stale): ${removal.rel}`);
-  for (const rel of plan.preservedFormerlyOwned) lines.push(`  preserve (formerly bundle-owned, since modified): ${rel}`);
+  for (const rel of plan.staleOwned) lines.push(`  stale bundle-owned (not removed): ${rel}`);
   lines.push(...formatInstallSummaryLines(plan, dest));
   lines.push("Re-run without --dry-run to apply. Preserved paths are only overwritten with --force.");
   return lines;
 }
 
-export function formatInstallSummaryLines(
-  plan: InstallPlan,
-  dest: string,
-  executedRemovals?: ExecutedRemovals,
-): string[] {
-  const removed = executedRemovals ? executedRemovals.removed : plan.removals.map((removal) => removal.rel);
-  const preservedAtRemoval = executedRemovals?.preservedAtRemoval ?? [];
+export function formatInstallSummaryLines(plan: InstallPlan, dest: string, racedPaths: string[] = []): string[] {
+  // A raced path was planned as "create" but lost the exclusive-create race; count it as
+  // preserved, not created.
+  const racedSet = new Set(racedPaths);
   const parts = [
-    `${plan.created.length} created`,
+    `${plan.created.filter((rel) => !racedSet.has(rel)).length} created`,
     `${plan.replaced.length} replaced (bundle-owned, stale)`,
     `${plan.unchanged.length} unchanged`,
-    `${plan.preserved.length + plan.preservedFormerlyOwned.length + preservedAtRemoval.length} preserved`,
+    `${plan.preserved.length + racedPaths.length} preserved`,
   ];
-  if (plan.removalsEnabled) parts.push(`${removed.length} removed (bundle-owned, stale)`);
   if (plan.forced.length > 0) parts.push(`${plan.forced.length} overwritten (--force)`);
+  if (plan.staleOwnedReported && plan.staleOwned.length > 0) {
+    parts.push(`${plan.staleOwned.length} stale bundle-owned (not removed)`);
+  }
   const lines = [`Install summary for ${dest}: ${parts.join(", ")}`];
   for (const rel of plan.preserved) {
     lines.push(`  preserved: ${rel} (existing content is not bundle-owned; kept)`);
   }
-  for (const rel of plan.preservedFormerlyOwned) {
-    lines.push(`  preserved: ${rel} (formerly bundle-owned, since modified; kept)`);
-  }
-  for (const rel of preservedAtRemoval) {
-    lines.push(`  preserved: ${rel} (changed while installing; kept)`);
-  }
-  for (const rel of removed) {
-    lines.push(`  removed (bundle-owned, stale): ${rel}`);
+  for (const rel of racedPaths) {
+    lines.push(`  preserved: ${rel} (appeared while installing; left as found)`);
   }
   for (const rel of plan.forced) {
     lines.push(`  overwrote (--force): ${rel}`);
+  }
+  for (const rel of plan.staleOwned) {
+    lines.push(`  stale bundle-owned (from a previous install; NOT removed): ${rel}`);
+  }
+  if (plan.staleOwnedReported && plan.staleOwned.length > 0) {
+    lines.push(`${plan.staleOwned.length} stale bundle-owned file(s) remain from a previous install; remove them with \`flow-agents init --uninstall\` or manually.`);
   }
   if (plan.preserved.length > 0) {
     lines.push("Preserved files were NOT overwritten. Preview with --dry-run; pass --force to overwrite them with bundle content.");

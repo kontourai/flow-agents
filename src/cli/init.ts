@@ -11,15 +11,14 @@ import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
-import { acquireBundleBuildLock, buildAllBundles } from "../tools/build-universal-bundles.js";
+import { acquireBundleBuildLock, buildAllBundles, refreshBundleBuildLock } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
-import { buildOwnedFilesManifest, writeOwnedFilesManifest } from "../lib/owned-files-manifest.js";
+import { buildOwnedFilesManifest, hashFile as manifestHashFile, writeOwnedFilesManifest } from "../lib/owned-files-manifest.js";
 import {
   bundleInstallExcludeRel,
   computeInstallPlan,
   executePlanCopies,
-  executePlanRemovals,
   formatDryRunLines,
   formatInstallSummaryLines,
   installerSupportsPreserveExcludes,
@@ -724,7 +723,7 @@ export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebui
     const lockDir = acquireBundleBuildLock();
     try {
       if (!current()) {
-        const rc = buildAllBundles();
+        const rc = buildAllBundles(() => refreshBundleBuildLock(lockDir));
         if (rc !== 0) throw new Error(`bundle build failed with exit code ${rc}`);
         rebuilt = true;
       }
@@ -1060,6 +1059,10 @@ function installBundle(bundle: string, options: InitOptions, preservedRelPaths: 
   // excluded from install.sh's rsync entirely, so the copy never touches them. Raw
   // relative paths -- install.sh itself escapes rsync wildcard characters, so the same
   // literal value also scopes its token substitution and console-config guards.
+  // --only-absent makes the rsync run with --ignore-existing: the copy layer can only
+  // write paths that do not exist (replaces are applied by the caller's Node executor
+  // BEFORE install.sh runs, so token substitution still covers them).
+  args.push("--only-absent");
   for (const rel of preservedRelPaths) args.push("--exclude-path", rel);
   for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
   if (options.consoleUrl) args.push("--console-url", options.consoleUrl);
@@ -1269,7 +1272,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // skills chain (~/.claude/skills/<name> -> ~/.agents/skills/<name>) is a supported
       // layout this writer has always updated through, and this path copies files itself
       // (no rsync that would replace the link object).
-      const globalPlan = computeInstallPlan({
+      const globalPlanParams = {
         mappings: [
           { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
           { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
@@ -1277,9 +1280,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         manifestDest: options.dest,
         excludeRel: new Set<string>(),
         force,
-        removals: false,
+        reportStaleOwned: false,
         refuseSymlinkParents: false,
-      });
+      };
+      const globalPlan = computeInstallPlan(globalPlanParams);
       if (dryRun) {
         for (const line of formatDryRunLines(globalPlan, `${options.runtime} --global skills/agents`, options.dest)) console.log(line);
         console.log("Note: settings.json is merge-owned (hooks merged into your existing settings; user keys preserved) and is not part of the file plan above.");
@@ -1294,37 +1298,41 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // CLAUDE_PROJECT_DIR points at this package; a global install must not
       // depend on which project is currently open, so pin to an absolute path.
       rewriteCommandsForGlobalInstall(managed, root);
-      fs.mkdirSync(options.dest, { recursive: true });
       const destSettingsPath = path.join(options.dest, "settings.json");
+      // #1288 round-3 HIGH-2: FAIL CLOSED before anything else reads or snapshots the
+      // file. Merging over an unparseable settings file would replace the user's
+      // (possibly recoverable) content with managed-only settings. --force deliberately
+      // does not apply: this is a parse failure, not an overwrite decision.
+      let existing: Record<string, unknown> = {};
+      if (fs.existsSync(destSettingsPath)) {
+        try {
+          existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>;
+        } catch (error) {
+          throw new Error(
+            `existing Claude settings at ${destSettingsPath} are not valid JSON (${error instanceof Error ? error.message : String(error)}); ` +
+            "fix or move the file and re-run (--force does not override a parse failure)"
+          );
+        }
+      }
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
       const { mergeSettings, captureConfigPremerge, installedValues } = _require(installMergePath) as { mergeSettings: MergeSettingsFn; captureConfigPremerge: (configPath: string) => unknown; installedValues: (configPath: string, merged: Record<string, unknown>, managed: Record<string, unknown>) => unknown };
       const configPremerge = { ...(captureConfigPremerge(destSettingsPath) as Record<string, unknown>), runtime: "claude-code" };
-      let existing: Record<string, unknown> = {};
-      if (fs.existsSync(destSettingsPath)) {
-        try { existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
-      }
       const merged = mergeInstallSettings(mergeSettings, existing, managed);
+      // HIGH-3/HIGH-2 posture: revalidate the plan BEFORE the first write (including the
+      // settings rename), so a drift refusal is always truthful about "nothing was
+      // written"; the copy executor then re-enforces per file (exclusive creates,
+      // re-hash-before-rename replaces).
+      verifyInstallPlanMatchesDisk(globalPlan, globalPlanParams);
+      fs.mkdirSync(options.dest, { recursive: true });
       const tmp = `${destSettingsPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
       fs.renameSync(tmp, destSettingsPath);
-      // HIGH-3 posture: revalidate the plan's decisions immediately before applying them.
-      verifyInstallPlanMatchesDisk(globalPlan, {
-        mappings: [
-          { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
-          { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
-        ],
-        manifestDest: options.dest,
-        excludeRel: new Set<string>(),
-        force,
-        removals: false,
-        refuseSymlinkParents: false,
-      });
-      executePlanCopies(globalPlan);
+      const globalCopies = executePlanCopies(globalPlan);
       // Write version stamp.
       writeInstallRecord(options.dest, "claude-code", true, options.activeKitIds ?? [], { ...configPremerge, post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(destSettingsPath)).digest("hex") }, [], installedValues(destSettingsPath, merged, managed));
       console.log(`Flow Agents global hooks merged for claude-code in ${options.dest}`);
-      for (const line of formatInstallSummaryLines(globalPlan, options.dest)) console.log(line);
+      for (const line of formatInstallSummaryLines(globalPlan, options.dest, globalCopies.racedPaths)) console.log(line);
       // Write a per-skill-file sha256 content-hash manifest, sibling of install.json, so
       // `flow-agents skill-drift-check` and the SessionStart advisory can classify installed
       // skill files as in_sync/kit_updated/user_modified/unbaselined/missing_install/kit_removed
@@ -1360,7 +1368,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
           { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
           { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
         ],
-        excludeRel: new Set(globalPlan.preserved),
+        excludeRel: new Set([...globalPlan.preserved, ...globalCopies.racedPaths]),
         runtime: "claude-code",
         version: globalManifestPkgJson["version"] ?? "0.0.0",
         global: true,
@@ -1472,17 +1480,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // any write. Existing files that are not known bundle-owned content (no hash match
     // against the incoming bundle or the previous install's ownership manifest) are
     // preserved -- excluded from the rsync -- unless --force explicitly overrides.
-    // Removals are manifest-driven only (previously-owned, absent from the bundle, bytes
-    // still matching -- replacing kiro's blanket `rsync --delete`), and any bundle path
-    // whose destination parent is a symlinked directory refuses the whole install
-    // (InstallPlanSymlinkParentError) before anything is written.
+    // Stale bundle-owned leftovers (manifest-owned, absent from the bundle) are REPORTED,
+    // never deleted, and any bundle path whose destination parent is a symlinked directory
+    // refuses the whole install (InstallPlanSymlinkParentError) before anything is written.
     const excludeRel = bundleInstallExcludeRel(options.runtime);
     const planParams = {
       mappings: [{ sourceDir: bundle, destDir: options.dest, prefix: "" }],
       manifestDest: options.dest,
       excludeRel,
       force,
-      removals: true,
+      reportStaleOwned: true,
       refuseSymlinkParents: true,
     };
     const plan = computeInstallPlan(planParams);
@@ -1491,15 +1498,43 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       if (rebuilt) console.log(`Note: rebuilt the ${options.runtime} bundle in the package dist/ to compute this plan (outside the destination).`);
       return 0;
     }
-    // #1288 review HIGH-3: re-derive the plan immediately before the installer runs and
-    // refuse on any divergence, so a file created or modified in the classify->install
-    // window is never overwritten under a stale decision.
+    // #1288 review HIGH-3: re-derive the plan immediately before any write and refuse on
+    // divergence; then enforce AT WRITE TIME what revalidation cannot see. Replaces and
+    // forced overwrites are applied by the Node executor (temp write -> re-hash the
+    // destination -> rename; abort naming the path on drift) BEFORE install.sh runs, so
+    // its token substitution and config steps still cover the updated files. The rsync
+    // itself then runs with --only-absent (--ignore-existing) plus the preserve excludes:
+    // the copy layer can only write paths that do not exist, so a file appearing in the
+    // final window is skipped, never overwritten.
+    //
     verifyInstallPlanMatchesDisk(plan, planParams);
+    executePlanCopies(plan, new Set(["replace", "force-overwrite"]));
     const installed = installBundle(bundle, options, plan.preserved);
     if (installed !== 0) return installed;
-    // Manifest-driven stale-owned cleanup (BLOCKING-1): each candidate is re-contained and
-    // re-hashed immediately before deletion; anything that changed is preserved instead.
-    const executedRemovals = executePlanRemovals(plan, options.dest);
+    // Post-install audit of planned creates: --ignore-existing guarantees a file that
+    // appeared in the final window was skipped (never overwritten). For every runtime
+    // except kiro the skipped file is also DETECTABLE (its bytes differ from the bundle's,
+    // and only scripts/telemetry/telemetry.conf is legitimately post-processed), so it is
+    // reported as preserved and kept OUT of the ownership manifest -- adopting the raced
+    // writer's bytes as bundle-owned would authorize the next init to overwrite them.
+    // Dispositioned residual (kiro only): token substitution rewrites created files, so a
+    // raced create is indistinguishable there; exposure is a summary-labeling inaccuracy
+    // and possible manifest adoption in the sub-second window between revalidation and the
+    // rsync reaching that path -- never a destroyed file in THIS run.
+    const racedCreates: string[] = [];
+    const missingCreates: string[] = [];
+    for (const entry of plan.entries) {
+      if (entry.action !== "create") continue;
+      if (!fs.existsSync(entry.destPath)) {
+        missingCreates.push(entry.rel);
+        continue;
+      }
+      if (options.runtime === "kiro" || entry.rel === "scripts/telemetry/telemetry.conf") continue;
+      if (manifestHashFile(entry.destPath) !== manifestHashFile(entry.sourcePath)) racedCreates.push(entry.rel);
+    }
+    if (missingCreates.length > 0) {
+      console.warn(`flow-agents init: WARNING: ${missingCreates.length} planned file(s) missing after install: ${missingCreates.slice(0, 5).join(", ")}${missingCreates.length > 5 ? ` (+${missingCreates.length - 5} more)` : ""}`);
+    }
     // Project bundle installers create the merge snapshot themselves. Forward it
     // into the richer outer record instead of erasing provenance on return.
     let configPremerge: unknown;
@@ -1526,14 +1561,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const projectManifestPkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
       writeOwnedFilesManifest(options.dest, buildOwnedFilesManifest({
         mappings: [{ sourceDir: bundle, destDir: options.dest, prefix: "" }],
-        excludeRel: new Set([...excludeRel, ...plan.preserved]),
+        excludeRel: new Set([...excludeRel, ...plan.preserved, ...racedCreates]),
         runtime: options.runtime,
         version: projectManifestPkgJson["version"] ?? "0.0.0",
         global: false,
       }));
     }
     // #1288: a silent no-op and a 191-file overwrite must not both read as a bare success.
-    for (const line of formatInstallSummaryLines(plan, options.dest, executedRemovals)) console.log(line);
+    for (const line of formatInstallSummaryLines(plan, options.dest, racedCreates)) console.log(line);
     const activated = await activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or

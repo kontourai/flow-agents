@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -756,7 +757,7 @@ function installScript(label: string, capability: BundleCapability, defaultDestD
   const instructionBlock = capability.instructionPath
     ? `\nif [[ ! -e "$DEST/${capability.instructionPath}" && ! -L "$DEST/${capability.instructionPath}" ]]; then\n  instruction_tmp="$(mktemp "$DEST/.flow-agents-instructions.XXXXXX")"\n  cp "$SRC/${capability.instructionPath}" "$instruction_tmp"\n  if ! ln "$instruction_tmp" "$DEST/${capability.instructionPath}" 2>/dev/null; then\n    if [[ ! -e "$DEST/${capability.instructionPath}" && ! -L "$DEST/${capability.instructionPath}" ]]; then\n      rm -f "$instruction_tmp"\n      echo "install.sh: could not safely install ${capability.instructionPath}" >&2\n      exit 1\n    fi\n  fi\n  rm -f "$instruction_tmp"\nfi`
     : "";
-  return `#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n  cat >&2 <<'EOF'\nusage: bash install.sh ${usageDest} [options]\n\nOptions:\n  --telemetry-sink NAME   local-files, local-kontour-console,\n                          kontour-hosted-console, user-hosted-console,\n                          or legacy aliases. May be repeated.\n  --console-url URL       Persist Console telemetry base URL.\n  --console-endpoint URL  Persist full Console telemetry records endpoint URL.\n  --console-token-file PATH\n                          Read Console telemetry bearer token from a file.\n  --console-tenant ID     Persist Console tenant identifier.\n  --exclude-path REL      Skip one bundle-relative path (never copied or\n                          deleted). May be repeated.\nEOF\n}\n\nDEST=""\nDEST_SET=0\nCONSOLE_CONFIG_ARGS=()\nEXCLUDE_ARGS=()\nEXCLUDE_RELS=()\nwhile [[ $# -gt 0 ]]; do\n  case "$1" in\n    --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      CONSOLE_CONFIG_ARGS+=("$1" "$2")\n      shift 2\n      ;;\n    --exclude-path)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      EXCLUDE_RELS+=("$2")\n      ex_esc="$2"\n      ex_esc="\${ex_esc//\\\\/\\\\\\\\}"\n      ex_esc="\${ex_esc//\\*/\\\\*}"\n      ex_esc="\${ex_esc//\\?/\\\\?}"\n      ex_esc="\${ex_esc//\\[/\\\\[}"\n      ex_esc="\${ex_esc//\\]/\\\\]}"\n      EXCLUDE_ARGS+=("--exclude=/$ex_esc")\n      shift 2\n      ;;\n    --help|-h)\n      usage\n      exit 0\n      ;;\n    -*)\n      echo "install.sh: unknown option: $1" >&2\n      usage\n      exit 2\n      ;;\n    *)\n      if [[ "$DEST_SET" -eq 1 ]]; then\n        echo "install.sh: unexpected argument: $1" >&2\n        usage\n        exit 2\n      fi\n      DEST="$1"\n      DEST_SET=1\n      shift\n      ;;\n  esac\ndone${destFallback}\n${requiredCheck}SRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a --exclude='/AGENTS.md' --exclude='/CLAUDE.md' --exclude='/context/settings/backlog-provider-settings.json' --exclude='/context/settings/assignment-provider-settings.json' --exclude='/context/settings/change-provider-settings.json' ${mergeConfig ? `--exclude="${mergeConfig.configRelPath}" ` : ""}\${EXCLUDE_ARGS[@]+"\${EXCLUDE_ARGS[@]}"} "$SRC"/ "$DEST"/${instructionBlock}${replaceBlock}${mergeBlock}\nif [[ \${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "\${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "\${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "\${FLOW_AGENTS_CONSOLE_URL:-}" || -n "\${CONSOLE_URL:-}" || -n "\${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "\${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then\n  CONSOLE_CONF_EXCLUDED=0\n  for ex in \${EXCLUDE_RELS[@]+"\${EXCLUDE_RELS[@]}"}; do\n    if [[ "$ex" == "scripts/telemetry/telemetry.conf" ]]; then CONSOLE_CONF_EXCLUDED=1; fi\n  done\n  if [[ "$CONSOLE_CONF_EXCLUDED" -eq 1 ]]; then\n    echo "install.sh: preserved scripts/telemetry/telemetry.conf (not bundle-owned); skipping Console telemetry configuration -- re-run flow-agents init with --force to overwrite it" >&2\n  else\n    bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "\${CONSOLE_CONFIG_ARGS[@]}"\n  fi\nfi\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
+  return `#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n  cat >&2 <<'EOF'\nusage: bash install.sh ${usageDest} [options]\n\nOptions:\n  --telemetry-sink NAME   local-files, local-kontour-console,\n                          kontour-hosted-console, user-hosted-console,\n                          or legacy aliases. May be repeated.\n  --console-url URL       Persist Console telemetry base URL.\n  --console-endpoint URL  Persist full Console telemetry records endpoint URL.\n  --console-token-file PATH\n                          Read Console telemetry bearer token from a file.\n  --console-tenant ID     Persist Console tenant identifier.\n  --exclude-path REL      Skip one bundle-relative path (never copied or\n                          deleted). May be repeated.\n  --only-absent           Never overwrite ANY existing destination file\n                          (rsync --ignore-existing). Passed by flow-agents\n                          init, whose plan handles updates separately.\nEOF\n}\n\nDEST=""\nDEST_SET=0\nCONSOLE_CONFIG_ARGS=()\nEXCLUDE_ARGS=()\nEXCLUDE_RELS=()\nIGNORE_EXISTING_ARGS=()\nwhile [[ $# -gt 0 ]]; do\n  case "$1" in\n    --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      CONSOLE_CONFIG_ARGS+=("$1" "$2")\n      shift 2\n      ;;\n    --exclude-path)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      EXCLUDE_RELS+=("$2")\n      ex_esc="$2"\n      ex_esc="\${ex_esc//\\\\/\\\\\\\\}"\n      ex_esc="\${ex_esc//\\*/\\\\*}"\n      ex_esc="\${ex_esc//\\?/\\\\?}"\n      ex_esc="\${ex_esc//\\[/\\\\[}"\n      ex_esc="\${ex_esc//\\]/\\\\]}"\n      EXCLUDE_ARGS+=("--exclude=/$ex_esc")\n      shift 2\n      ;;\n    --only-absent)\n      IGNORE_EXISTING_ARGS+=("--ignore-existing")\n      shift\n      ;;\n    --help|-h)\n      usage\n      exit 0\n      ;;\n    -*)\n      echo "install.sh: unknown option: $1" >&2\n      usage\n      exit 2\n      ;;\n    *)\n      if [[ "$DEST_SET" -eq 1 ]]; then\n        echo "install.sh: unexpected argument: $1" >&2\n        usage\n        exit 2\n      fi\n      DEST="$1"\n      DEST_SET=1\n      shift\n      ;;\n  esac\ndone${destFallback}\n${requiredCheck}SRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a --exclude='/AGENTS.md' --exclude='/CLAUDE.md' --exclude='/context/settings/backlog-provider-settings.json' --exclude='/context/settings/assignment-provider-settings.json' --exclude='/context/settings/change-provider-settings.json' ${mergeConfig ? `--exclude="${mergeConfig.configRelPath}" ` : ""}\${EXCLUDE_ARGS[@]+"\${EXCLUDE_ARGS[@]}"} \${IGNORE_EXISTING_ARGS[@]+"\${IGNORE_EXISTING_ARGS[@]}"} "$SRC"/ "$DEST"/${instructionBlock}${replaceBlock}${mergeBlock}\nif [[ \${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "\${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "\${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "\${FLOW_AGENTS_CONSOLE_URL:-}" || -n "\${CONSOLE_URL:-}" || -n "\${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "\${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then\n  CONSOLE_CONF_EXCLUDED=0\n  for ex in \${EXCLUDE_RELS[@]+"\${EXCLUDE_RELS[@]}"}; do\n    if [[ "$ex" == "scripts/telemetry/telemetry.conf" ]]; then CONSOLE_CONF_EXCLUDED=1; fi\n  done\n  if [[ "$CONSOLE_CONF_EXCLUDED" -eq 1 ]]; then\n    echo "install.sh: preserved scripts/telemetry/telemetry.conf (not bundle-owned); skipping Console telemetry configuration -- re-run flow-agents init with --force to overwrite it" >&2\n  else\n    bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "\${CONSOLE_CONFIG_ARGS[@]}"\n  fi\nfi\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
 }
 
 function buildBase(agents: Agent[]): void {
@@ -1147,38 +1148,77 @@ function sleepMs(ms: number): void {
  * concurrent builders race in resetDir (rmSync vs a sibling's writes -> ENOTEMPTY on
  * dist/<bundle>), which surfaces for real whenever multiple `flow-agents init` processes
  * find dist/ absent or stale at once (parallel test corpora, concurrent agents after an
- * upgrade widens ensureBundle's rebuild predicate). mkdir is the atomic primitive; a
- * crashed builder's stale lock is taken over by age; waiting callers rebuild serially
- * once the winner releases (redundant but safe -- correctness over elapsed time).
+ * upgrade widens ensureBundle's rebuild predicate).
+ *
+ * Protocol (#1288 round-3 BLOCKING-2 -- no takeover-by-theft):
+ *   - mkdir is the atomic acquire; the holder records its pid inside the lock dir and
+ *     REFRESHES the lock mtime between build steps (refreshBundleBuildLock, wired through
+ *     buildAllBundles' onStep callback), so a live build always presents a fresh lock.
+ *   - a lock whose mtime is older than BUILD_LOCK_STALE_MS means the holder crashed (a live
+ *     holder refreshes every few seconds); ONLY then may a waiter take over, ATOMICALLY, by
+ *     renaming the lock dir aside -- exactly one contender wins the rename, losers loop.
+ *   - a FRESH lock is never stolen: a waiter that exhausts BUILD_LOCK_WAIT_MS fails CLOSED
+ *     with the lock path, holder pid, and lock age. The wait bound exceeds the staleness
+ *     threshold so the crashed-holder takeover path is actually reachable.
  */
+const BUILD_LOCK_STALE_MS = 90_000;
+const BUILD_LOCK_WAIT_MS = 300_000;
+
 export function acquireBundleBuildLock(): string {
   const lockDir = path.join(dist, ".build-lock");
   fs.mkdirSync(dist, { recursive: true });
-  const deadline = Date.now() + 300_000;
+  const deadline = Date.now() + BUILD_LOCK_WAIT_MS;
   for (;;) {
     try {
       fs.mkdirSync(lockDir);
+      fs.writeFileSync(path.join(lockDir, "pid"), `${process.pid}\n`);
       return lockDir;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - fs.statSync(lockDir).mtimeMs > 600_000) {
-          fs.rmSync(lockDir, { recursive: true, force: true });
-          continue;
-        }
-      } catch { /* raced with the holder's release; retry */ }
-      if (Date.now() > deadline) {
-        throw new Error(`timed out waiting for a concurrent bundle build to release ${lockDir}`);
-      }
-      sleepMs(250);
     }
+    let ageMs: number | undefined;
+    let holderPid = "unknown";
+    try {
+      ageMs = Date.now() - fs.statSync(lockDir).mtimeMs;
+      holderPid = fs.readFileSync(path.join(lockDir, "pid"), "utf8").trim() || "unknown";
+    } catch {
+      // The holder released (or is mid-acquire) between our mkdir failure and the stat;
+      // loop and try to acquire again.
+      continue;
+    }
+    if (ageMs > BUILD_LOCK_STALE_MS) {
+      // Crashed holder (a live one refreshes far more often). Atomic takeover: exactly one
+      // contender wins the rename; losers hit ENOENT and re-enter the loop.
+      const graveyard = `${lockDir}.stale.${process.pid}.${crypto.randomBytes(4).toString("hex")}`;
+      try {
+        fs.renameSync(lockDir, graveyard);
+        fs.rmSync(graveyard, { recursive: true, force: true });
+      } catch { /* lost the takeover race; loop */ }
+      continue;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `timed out after ${BUILD_LOCK_WAIT_MS}ms waiting for a concurrent bundle build: ` +
+        `${lockDir} is held by pid ${holderPid} and was refreshed ${ageMs}ms ago; ` +
+        "if that process is gone, remove the lock directory and re-run"
+      );
+    }
+    sleepMs(250);
   }
+}
+
+/** Holder-side liveness: bump the lock dir's mtime so waiters never mistake a live build for a crash. */
+export function refreshBundleBuildLock(lockDir: string): void {
+  const now = new Date();
+  try {
+    fs.utimesSync(lockDir, now, now);
+  } catch { /* best-effort: a failed refresh only risks a takeover after staleness */ }
 }
 
 export function main(): number {
   const lockDir = acquireBundleBuildLock();
   try {
-    return buildAllBundles();
+    return buildAllBundles(() => refreshBundleBuildLock(lockDir));
   } finally {
     fs.rmSync(lockDir, { recursive: true, force: true });
   }
@@ -1191,7 +1231,7 @@ export function main(): number {
  * winning builder released would resetDir the very tree a sibling process had just started
  * rsyncing from.
  */
-export function buildAllBundles(): number {
+export function buildAllBundles(onStep?: () => void): number {
   fs.mkdirSync(dist, { recursive: true });
   // Populate (and, on collision, set) skillCollisionDiagnostic before any
   // build step writes output -- fail fast with a clear diagnostic instead of
@@ -1207,12 +1247,19 @@ export function buildAllBundles(): number {
     for (const error of routingErrors) console.error(`flow-agents: packaging/manifest.json: ${error}`);
     return 1;
   }
+  onStep?.();
   buildBase(agents);
+  onStep?.();
   buildKiro(agents);
+  onStep?.();
   buildClaudeCode(agents);
+  onStep?.();
   buildCodex(agents);
+  onStep?.();
   buildOpencode(agents);
+  onStep?.();
   buildPi(agents);
+  onStep?.();
   writeText(path.join(dist, "catalog.json"), `${JSON.stringify(buildCatalog(agents), null, 2)}\n`);
   writeText(path.join(dist, "README.md"), "# Universal Bundles\n\nRun `npm run build:bundles` from the repo root to regenerate these bundles.\n");
   console.log("Built bundles:");
