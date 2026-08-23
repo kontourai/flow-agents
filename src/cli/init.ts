@@ -1083,6 +1083,28 @@ export function installBundleArgs(
   return args;
 }
 
+/**
+ * Hold the bundle build lock across a bundle-READING span (#1288 CI fix, kontourai/
+ * flow-agents PR #1309): the planner walk, plan revalidation, the executor's source reads,
+ * install.sh's rsync from dist/, and the ownership-manifest source walk all read the bundle
+ * tree -- and `build-bundles` (a LOCKED writer; provider-bootstrap.test.mjs invokes it
+ * unconditionally in the parallel test corpus) resetDirs that same tree. An unlocked reader
+ * interleaving with a locked builder walked a half-built dist/base on CI (a partial plan
+ * enumerating only the alphabetically-early entries, no install.sh) or died on ENOENT mid
+ * resetDir. Builders and init's read span now mutually exclude; the refresher child keeps
+ * the lock fresh for however long the span runs.
+ */
+function withBundleReadLock<T>(fn: () => T): T {
+  const lockDir = acquireBundleBuildLock();
+  const stopRefresher = startBundleBuildLockRefresher(lockDir);
+  try {
+    return fn();
+  } finally {
+    stopRefresher();
+    releaseBundleBuildLock(lockDir);
+  }
+}
+
 function installBundle(bundle: string, options: InitOptions, preservedRelPaths: string[] = []): number {
   const args = installBundleArgs(options, preservedRelPaths);
   let tempTokenFile: string | undefined;
@@ -1300,6 +1322,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         reportStaleOwned: false,
         refuseSymlinkParents: false,
       };
+      // Same bundle-read lock as the project path: the plan walk, the copies' source
+      // reads, and both manifest builders below read the bundle tree a concurrent
+      // `build-bundles` may be resetting.
+      const globalExit = withBundleReadLock<number | null>(() => {
       const globalPlan = computeInstallPlan(globalPlanParams);
       if (dryRun) {
         for (const line of formatDryRunLines(globalPlan, `${options.runtime} --global skills/agents`, options.dest)) console.log(line);
@@ -1403,6 +1429,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         version: globalManifestPkgJson["version"] ?? "0.0.0",
         global: true,
       }));
+      return null;
+      });
+      if (globalExit !== null) return globalExit;
       return configureWorkflowProviders(options);
     }
     // --global for opencode: merge config and sync the runtime assets OpenCode discovers globally.
@@ -1522,6 +1551,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       reportStaleOwned: true,
       refuseSymlinkParents: true,
     };
+    const guardedExit = withBundleReadLock<number | null>(() => {
     const plan = computeInstallPlan(planParams);
     if (dryRun) {
       for (const line of formatDryRunLines(plan, options.runtime, options.dest)) console.log(line);
@@ -1599,6 +1629,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     }
     // #1288: a silent no-op and a 191-file overwrite must not both read as a bare success.
     for (const line of formatInstallSummaryLines(plan, options.dest, racedCreates)) console.log(line);
+    return null;
+    });
+    if (guardedExit !== null) return guardedExit;
     const activated = await activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or

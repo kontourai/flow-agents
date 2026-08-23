@@ -86,25 +86,25 @@ test("init without --force preserves a user-authored README.md byte-identical an
   assert.match(again.output, /preserved: README\.md/);
 });
 
-// (b) --dry-run lists the plan and writes nothing at all -- neither in the destination nor
-// (once dist/ is current) in the package's own dist/. When dist/ IS stale, the one write a
-// dry-run performs (regenerating dist/) is disclosed with an explicit "rebuilt the ...
-// bundle" note (#1288 review MEDIUM-2; the note path is exercised by ensureBundleReporting's
-// rebuilt flag and verified against a removed dist installer manually -- deleting shared
-// dist/ inside the corpus would race sibling test processes that spawn init concurrently).
-test("init --dry-run lists created/preserved paths and leaves destination AND dist byte-identical", () => {
+// (b) --dry-run lists the plan and writes nothing at all in the destination. When dist/ IS
+// stale, the one write a dry-run performs (regenerating the package's own dist/) is
+// disclosed with an explicit "rebuilt the ... bundle" note (#1288 review MEDIUM-2); the
+// note's ABSENCE is asserted here as the process-owned proof that this dry-run did not
+// rebuild. dist/ itself is deliberately NOT snapshotted: it is shared mutable state that a
+// sibling corpus test legitimately rebuilds in parallel (provider-bootstrap.test.mjs runs
+// `build-bundles` unconditionally), so mtime/listing assertions on it encode a
+// no-concurrent-builder assumption this corpus does not provide -- the exact class that
+// broke CI (PR #1309): the planner used to read dist/ unlocked and walked a half-built
+// tree; init now holds the bundle build lock across its whole bundle-reading span, which
+// is what `create: install.sh` below actually pins (a mid-rebuild walk enumerated the
+// alphabetically-early entries only, without install.sh).
+test("init --dry-run lists created/preserved paths and leaves the destination byte-identical", () => {
   const dest = fixtureDest("dry-run");
   fs.mkdirSync(path.join(dest, "docs"));
   fs.writeFileSync(path.join(dest, "docs", "my-design-doc.md"), "not a bundle path\n");
   // First dry-run may legitimately rebuild a stale dist/ (disclosed via the note).
   const warmup = runInit(dest, ["--dry-run"]);
   assert.equal(warmup.status, 0, warmup.output);
-  const distInstallSh = path.join(repoRoot, "dist", "base", "install.sh");
-  const distBefore = {
-    installSh: fs.readFileSync(distInstallSh, "utf8"),
-    mtimeMs: fs.statSync(distInstallSh).mtimeMs,
-    entries: fs.readdirSync(path.join(repoRoot, "dist")).sort(),
-  };
   const before = snapshotTree(dest);
   const result = runInit(dest, ["--dry-run"]);
   assert.equal(result.status, 0, result.output);
@@ -114,11 +114,8 @@ test("init --dry-run lists created/preserved paths and leaves destination AND di
   assert.match(result.output, /create: install\.sh/);
   assert.match(result.output, /preserve \(existing content kept\): README\.md/);
   assert.match(result.output, /Install summary for /);
-  // dist/ untouched by a dry-run against a current dist, and no rebuilt note claimed.
+  // No rebuilt note: this dry-run performed no dist/ write of its own.
   assert.doesNotMatch(result.output, /rebuilt the .* bundle in the package dist\//);
-  assert.equal(fs.readFileSync(distInstallSh, "utf8"), distBefore.installSh);
-  assert.equal(fs.statSync(distInstallSh).mtimeMs, distBefore.mtimeMs);
-  assert.deepEqual(fs.readdirSync(path.join(repoRoot, "dist")).sort(), distBefore.entries);
 });
 
 // (c) --force overwrites the collision and says so.
