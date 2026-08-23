@@ -6,7 +6,7 @@ import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type 
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
-import { definitionDigest, expectationsForGate, flowRunHead, loadRun, openGates, validateDefinition } from "@kontourai/flow";
+import { definitionDigest, expectationsForGate, flowRunHead, loadRun, openGates, routeBackDecision, validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
@@ -1638,6 +1638,47 @@ export function assertGateFreshnessTurnstile(
   }
 }
 
+/**
+ * #1304: route-back cost disclosure at the point of use. A route-triggering status (`fail` /
+ * `not_verified`) recorded at a gate with an `on_route_back` map commits the run to a route whose
+ * cost — destination step, position in the Flow-owned bounded attempt budget, and re-recording of
+ * every current-visit verification claim — was previously visible only AFTER the mutation. These
+ * lines are computed from the same derivation surface the Flow evaluation uses
+ * (`routeBackDecision`) and are emitted to stderr BEFORE the canonical mutation is committed. A
+ * pass record, or a gate without a route map, produces no lines. A gate declaring
+ * `requires_current_verification` additionally carries the publish-first ordering rule (the run-4
+ * trap, #1304) — keyed generically off that declaration, never a gate name, so core stays
+ * kit-generic (#1280). The disclosure is ADDITIVE output: existing refusal strings are unchanged
+ * because consumers substring-match them.
+ */
+export function routeBackDisclosureLines(
+  run: { definition: unknown; state: { current_step: string } },
+  expectation: string,
+  requestedStatus: string,
+  routeReason: string | undefined,
+): string[] {
+  if (requestedStatus !== "fail" && requestedStatus !== "not_verified") return [];
+  const gates = openGates(run.definition as never, run.state as never) as JsonRecord[];
+  const gate = gates.find((candidate) => Array.isArray(candidate.expects)
+    && (candidate.expects as JsonRecord[]).some((requirement) => (requirement as JsonRecord).id === expectation));
+  if (!gate) return [];
+  const routes = gate.on_route_back;
+  if (!routes || typeof routes !== "object" || Array.isArray(routes) || Object.keys(routes).length === 0) return [];
+  const decision = routeBackDecision(run.state as never, gate as never, routeReason ?? null) as JsonRecord;
+  const gateName = String(gate.id ?? "the current gate");
+  // The disclosure states the derived decision, never a label: an exhausted budget blocks
+  // instead of routing, and claiming "routes back" there would be false.
+  const lines = [
+    decision.status === "block"
+      ? `[workflow evidence] NOTICE: recording ${requestedStatus} for ${expectation} exceeds ${gateName}'s route-back budget (attempt ${String(decision.attempt)} of ${String(decision.max_attempts)}) and BLOCKS the run instead of routing.`
+      : `[workflow evidence] NOTICE: recording ${requestedStatus} for ${expectation} routes ${gateName} back to step '${String(decision.route_back_to)}' (route-back attempt ${String(decision.attempt)} of ${String(decision.max_attempts)}). Current-visit verification evidence (critique/tests) is invalidated by the route and must be re-recorded for the revisit.`,
+  ];
+  if (gate.requires_current_verification === true) {
+    lines.push(`[workflow evidence] NOTICE: ${gateName} declares requires_current_verification — publish the provisional delivery BEFORE recording this gate; a live non-pass claim here blocks the publish that would resolve it.`);
+  }
+  return lines;
+}
+
 async function evidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("evidence"), "workflow evidence");
@@ -1662,6 +1703,11 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     requestedStatus,
     flagString(parsed.flags, "route-reason"),
   );
+  // #1304: the route-back cost is disclosed here, before the subject lock and before any
+  // canonical mutation is attempted — a later refusal never suppresses the disclosure.
+  for (const line of routeBackDisclosureLines(inspected.run, expectation, requestedStatus, flagString(parsed.flags, "route-reason"))) {
+    process.stderr.write(`${line}\n`);
+  }
   const outcome = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     // Validate the owner after the lock is held, then keep the lock through command
     // execution, evidence recording, and postcondition capture so assignment and
@@ -2664,7 +2710,9 @@ function formatCommandOutcomes(observations: CommandObservationReport[]): string
   return observations.length === 0 ? "none" : observations.map((observation) => `${observation.outcome} (exit ${observation.exit_code})`).join(", ");
 }
 
-function assertExecuteFailureRouteBeforeMutation(
+// Exported for the #1304 byte-stability tests: these refusal strings predate the route-back
+// disclosure and consumers substring-match them, so they must stay byte-identical.
+export function assertExecuteFailureRouteBeforeMutation(
   definition: JsonRecord,
   currentStep: string,
   status: string,

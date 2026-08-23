@@ -162,6 +162,20 @@ declares `missing_evidence`/`default -> verify` so staleness discovered past
 `merge-ready-ci` remains repairable through the ordinary bounded route-back
 mechanism instead of stranding the run.
 
+Recording a route-triggering status is a disclosed cost, not a silent transition
+(#1304). When a `fail` or `not_verified` claim is about to be recorded at a gate
+with an `on_route_back` map, the evidence writer prints a stderr NOTICE **before**
+the canonical mutation is committed: the destination step, the position in the
+Flow-owned attempt budget (`attempt n of max`, or that an exhausted budget blocks
+instead of routing), and that every current-visit verification claim
+(critique/tests) is invalidated by the route and must be re-recorded for the
+revisit. A gate declaring `requires_current_verification` adds the point-of-use
+ordering rule the disclosure exists for: publish the provisional delivery BEFORE
+recording this gate; a live non-pass claim here blocks the publish that would
+resolve it. The rule is keyed off the declaration generically — never a gate
+name — so core stays kit-generic, and the disclosure is additive output: existing
+refusal strings are unchanged.
+
 ## Agent Projection
 
 While a run is active, `state.json` contains:
