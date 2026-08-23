@@ -1138,7 +1138,60 @@ function buildCatalog(agents: Agent[]): Record<string, unknown> {
     kits: fs.existsSync(kitsCatalog) ? loadJson<Record<string, unknown>>(kitsCatalog).kits ?? [] : [],
   };
 }
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Serialize bundle builds across PROCESSES (kontourai/flow-agents#1288 follow-up): two
+ * concurrent builders race in resetDir (rmSync vs a sibling's writes -> ENOTEMPTY on
+ * dist/<bundle>), which surfaces for real whenever multiple `flow-agents init` processes
+ * find dist/ absent or stale at once (parallel test corpora, concurrent agents after an
+ * upgrade widens ensureBundle's rebuild predicate). mkdir is the atomic primitive; a
+ * crashed builder's stale lock is taken over by age; waiting callers rebuild serially
+ * once the winner releases (redundant but safe -- correctness over elapsed time).
+ */
+export function acquireBundleBuildLock(): string {
+  const lockDir = path.join(dist, ".build-lock");
+  fs.mkdirSync(dist, { recursive: true });
+  const deadline = Date.now() + 300_000;
+  for (;;) {
+    try {
+      fs.mkdirSync(lockDir);
+      return lockDir;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - fs.statSync(lockDir).mtimeMs > 600_000) {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch { /* raced with the holder's release; retry */ }
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for a concurrent bundle build to release ${lockDir}`);
+      }
+      sleepMs(250);
+    }
+  }
+}
+
 export function main(): number {
+  const lockDir = acquireBundleBuildLock();
+  try {
+    return buildAllBundles();
+  } finally {
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The unlocked build body. Callers that need check-then-build semantics (ensureBundle's
+ * stale-installer rebuild) acquire acquireBundleBuildLock() themselves, RE-CHECK staleness
+ * under the lock, and only then call this -- a waiter that rebuilt unconditionally after the
+ * winning builder released would resetDir the very tree a sibling process had just started
+ * rsyncing from.
+ */
+export function buildAllBundles(): number {
   fs.mkdirSync(dist, { recursive: true });
   // Populate (and, on collision, set) skillCollisionDiagnostic before any
   // build step writes output -- fail fast with a clear diagnostic instead of

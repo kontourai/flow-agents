@@ -11,7 +11,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
-import { main as buildBundles } from "../tools/build-universal-bundles.js";
+import { acquireBundleBuildLock, buildAllBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { buildOwnedFilesManifest, writeOwnedFilesManifest } from "../lib/owned-files-manifest.js";
@@ -714,11 +714,23 @@ export function ensureBundle(runtime: Runtime): string {
 export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebuilt: boolean } {
   const bundle = path.join(root, "dist", runtimeBundles[runtime]);
   const installSh = path.join(bundle, "install.sh");
+  const current = (): boolean =>
+    fs.existsSync(installSh) && installerSupportsPreserveExcludes(fs.readFileSync(installSh, "utf8"));
   let rebuilt = false;
-  if (!fs.existsSync(installSh) || !installerSupportsPreserveExcludes(fs.readFileSync(installSh, "utf8"))) {
-    const rc = buildBundles();
-    if (rc !== 0) throw new Error(`bundle build failed with exit code ${rc}`);
-    rebuilt = true;
+  if (!current()) {
+    // Serialize the rebuild across processes and RE-CHECK under the lock: concurrent init
+    // processes finding dist/ stale at once used to race resetDir (ENOTEMPTY), and a waiter
+    // that rebuilt anyway would delete the tree the winner's install had started reading.
+    const lockDir = acquireBundleBuildLock();
+    try {
+      if (!current()) {
+        const rc = buildAllBundles();
+        if (rc !== 0) throw new Error(`bundle build failed with exit code ${rc}`);
+        rebuilt = true;
+      }
+    } finally {
+      fs.rmSync(lockDir, { recursive: true, force: true });
+    }
   }
   if (!fs.existsSync(installSh)) throw new Error(`bundle installer missing: ${bundle}`);
   return { bundle, rebuilt };
