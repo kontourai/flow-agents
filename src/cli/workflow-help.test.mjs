@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Absolute paths: the no-mutation tests spawn with a different cwd on purpose.
@@ -83,7 +84,7 @@ test("--help on a mutating verb performs no mutation and exits 0", () => {
   // Empty directory, no session state, no artifact root: exactly the environment where the old
   // fall-through produced "current workflow pointer does not resolve..." — proof the verb ran.
   for (const verb of ["pause", "evidence", "critique", "cancel", "publish-delivery"]) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
+    const dir = makeFixtureDir("wf-help-");
     try {
       const result = runWorkflow([verb, "--help"], dir);
       assert.equal(result.status, 0, `workflow ${verb} --help exited ${result.status}: ${result.stderr}`);
@@ -97,7 +98,7 @@ test("--help on a mutating verb performs no mutation and exits 0", () => {
 });
 
 test("the `help <verb>` form and `--help --json` agree with the table", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
+  const dir = makeFixtureDir("wf-help-");
   try {
     const prose = runWorkflow(["help", "evidence"], dir);
     assert.equal(prose.status, 0);
@@ -134,7 +135,7 @@ test("forwarded verbs derive their options from builderRun's enforcing sets", ()
 });
 
 test("a verb with no declared allowlist at any layer gets summary-only help", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
+  const dir = makeFixtureDir("wf-help-");
   try {
     const result = runWorkflow(["status", "--help"], dir);
     assert.equal(result.status, 0);
@@ -153,7 +154,7 @@ test("tailored sidecar commands honour ALL help forms without executing", () => 
   const SIDECAR = path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js");
   for (const command of ["reconcile-preflight", "verify-hold", "takeover-preflight"]) {
     for (const args of [[command, "--help"], [command, "--help", "extra"], [command, "-h"]]) {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
+      const dir = makeFixtureDir("wf-help-");
       try {
         const result = spawnSync(process.execPath, [SIDECAR, ...args], { cwd: dir, encoding: "utf8" });
         assert.equal(result.status, 0, `${args.join(" ")} exited ${result.status}: ${result.stderr}`);
@@ -187,7 +188,7 @@ test("builderRun enforces each action's OWN allowlist — no representative sibl
 });
 
 test("positional -h on the public dispatcher is a help request", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
+  const dir = makeFixtureDir("wf-help-");
   try {
     const result = runWorkflow(["evidence", "-h"], dir);
     assert.equal(result.status, 0, `evidence -h executed the verb: ${result.stderr}`);
@@ -201,7 +202,7 @@ test("positional -h on the public dispatcher is a help request", () => {
 test("--help followed by a value is still a help request, not an executed verb", () => {
   // parseArgs consumes `--help <word>` as a VALUED flag, so a naive flagBool check would fall
   // through to execution. Presence of the key is the contract.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
+  const dir = makeFixtureDir("wf-help-");
   try {
     const result = runWorkflow(["evidence", "--help", "extra"], dir);
     assert.equal(result.status, 0, `evidence --help extra executed the verb: ${result.stderr}`);
@@ -214,7 +215,7 @@ test("--help followed by a value is still a help request, not an executed verb",
 
 test("sidecar: --help on a dispatched command prints its description and touches nothing", () => {
   const SIDECAR = path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js");
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-help-"));
+  const dir = makeFixtureDir("wf-help-");
   try {
     const result = spawnSync(process.execPath, [SIDECAR, "record-gate-claim", "--help"], { cwd: dir, encoding: "utf8" });
     assert.equal(result.status, 0, `sidecar record-gate-claim --help exited ${result.status}: ${result.stderr}`);

@@ -19,6 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const CLI = "build/src/cli.js";
 
@@ -26,7 +27,7 @@ const CLI = "build/src/cli.js";
 // no-symlink-write guard (ensureNoSymlinkPath) doesn't reject an ordinary tmp
 // dir; mirrors src/cli/builder-flow-runtime.test.mjs's convention.
 function tempDir(prefix) {
-  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  return fs.realpathSync(makeFixtureDir(prefix));
 }
 
 function runCli(args) {

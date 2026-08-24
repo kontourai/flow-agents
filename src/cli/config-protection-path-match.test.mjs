@@ -25,6 +25,7 @@ import path from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(here, "..", "..");
@@ -40,7 +41,7 @@ const SETTINGS = [".claude/", "settings.json"].join("");
 const Q = String.fromCharCode(34);
 
 function tmpdir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "fa-682-"));
+  return makeFixtureDir("fa-682-");
 }
 
 function runBash(command, cwd = packageRoot) {

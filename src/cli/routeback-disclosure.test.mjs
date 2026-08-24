@@ -41,6 +41,7 @@ import {
 import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash } from "../../build/src/cli/critique-resolution.js";
 import { performLocalClaim, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 // Each node:test file is its own process: pin the ambient actor before any claim resolution so
 // the fixture's assignment holder is deterministic.
@@ -115,7 +116,7 @@ async function writeAndSync(session, entries) {
 
 async function buildFixture(slug, toStep = "execute") {
   const subject = `local:work-item/${slug}`;
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), `${slug}-`));
+  const projectRoot = makeFixtureDir(`${slug}-`);
   const artifactRoot = path.join(projectRoot, ".kontourai", "flow-agents");
   const sessionDir = path.join(artifactRoot, slug);
   fs.mkdirSync(sessionDir, { recursive: true });
@@ -295,7 +296,7 @@ function kitMergeReadyRun() {
 }
 
 test("not_verified at merge-ready-ci: no route is claimed, publish-first keys off the provisional RECORD verifier", () => {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "routeback-mrci-"));
+  const projectRoot = makeFixtureDir("routeback-mrci-");
   const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", "routeback-mrci");
   fs.mkdirSync(sessionDir, { recursive: true });
   try {
@@ -343,7 +344,7 @@ test("publish-first suppression keys off the provisional RECORD, never the whole
   // guidance precisely when it is needed; the record verifier correctly throws.
   const slug = "routeback-fresh";
   const subject = `local:work-item/${slug}`;
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), `${slug}-`));
+  const projectRoot = makeFixtureDir(`${slug}-`);
   try {
     const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", slug);
     fs.mkdirSync(sessionDir, { recursive: true });
@@ -557,7 +558,7 @@ test("sidecar disclosure degrades loudly on real failures; only proven absence s
   };
 
   // LOUD: canonical layout, canonical run present, state.json unreadable (EACCES).
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "routeback-loud-"));
+  const projectRoot = makeFixtureDir("routeback-loud-");
   try {
     const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", "routeback-loud");
     const flowDir = path.join(projectRoot, ".kontourai", "flow", "runs", "routeback-loud");
@@ -580,7 +581,7 @@ test("sidecar disclosure degrades loudly on real failures; only proven absence s
   }
 
   // BENIGN 2: a non-canonical session layout stays silent (no gate can exist).
-  const plain = fs.mkdtempSync(path.join(os.tmpdir(), "routeback-noncanonical-"));
+  const plain = makeFixtureDir("routeback-noncanonical-");
   try {
     const silent = await capture(() => emitRecordGateClaimRouteBackDisclosure(path.join(plain, "session"), "x", "implementation-scope", "fail"));
     assert.equal(silent, "", "a non-canonical layout stays silent");

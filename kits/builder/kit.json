@@ -19,7 +19,7 @@
     {
       "id": "builder.build-lean",
       "path": "flows/build-lean.flow.json",
-      "description": "REDUCED-GATE ABLATION VARIANT of builder.build: the same steps and terminal behaviour with design-probe-gate and plan-gate removed, so probing and planning run ungated. It enforces strictly fewer gates than builder.build and must not be used as a substitute for it; it exists so the gate-value ablation has an independent variable whose runs are distinguishable by flow_id and definition_digest."
+      "description": "REDUCED-GATE ABLATION VARIANT of builder.build: the same steps and terminal behaviour with design-probe-gate and plan-gate removed. The design-probe and plan steps survive only as unenforced sequencing passthroughs -- they declare NO producer skill and demand no artifact, so this variant removes the gate AND the instruction to do that step's work. That is deliberate (it models the realistic post-cut world, where nothing consumes those artifacts and nothing compels the work), but it means the independent variable is the gate TOGETHER WITH its step's demanded work, never the gate alone; a verdict drawn from these runs must be stated that way. Note also that verify-gate's plan_gap and merge-ready-gate's decision_gap route-backs still resolve structurally, but route to steps that demand nothing here and a re-satisfiable gate in the control. It enforces strictly fewer gates than builder.build and must not be used as a substitute for it; it exists so the gate-value ablation has an independent variable whose runs are distinguishable by flow_id and definition_digest."
     },
     {
       "id": "builder.publish-learn",

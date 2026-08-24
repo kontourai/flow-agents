@@ -39,6 +39,7 @@ import {
 import { resolveEffectiveFlowDefinition } from "../../build/src/lib/flow-resolver.js";
 import { kitFlowRunBindingIssues, resolveKitFlowBinding } from "../../build/src/lib/kit-flow-binding.js";
 import { startBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -64,7 +65,7 @@ const ACTOR = "build-lean-variant-actor";
 process.env.FLOW_AGENTS_ACTOR = ACTOR;
 
 function makeProject(prefix) {
-  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const project = fs.realpathSync(makeFixtureDir(prefix));
   spawnSync("git", ["init", "-q", "."], { cwd: project });
   spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });
   return project;
@@ -114,8 +115,11 @@ test("the variant ablates exactly the two unproven gates and changes nothing els
   assert.deepEqual([...controlGates].filter((gate) => !variantGates.has(gate)).sort(), [...ABLATED_GATES].sort());
   assert.deepEqual([...variantGates].filter((gate) => !controlGates.has(gate)), [], "the treatment may only REMOVE gates");
 
-  // THE STEPS ARE PRESERVED. Only the gates are ablated: design-probe and plan still run and
-  // still sequence into execute, so the variable under test is the GATE, not the work.
+  // THE STEPS ARE PRESERVED AS SEQUENCING, NOT AS WORK. design-probe and plan still exist and
+  // still sequence into execute, but in the variant they declare no producer skill, so nothing
+  // instructs an agent to do that step's work. The variable under test is therefore the gate
+  // TOGETHER WITH its step's demanded work — never the gate alone. Asserted below against the
+  // kit's own action rows so this comment cannot drift from what the manifest declares.
   assert.deepEqual(variant.steps, control.steps, "sequencing must be identical in both arms");
   assert.deepEqual(variant.phase_map, control.phase_map, "phase mapping must be identical in both arms");
   assert.equal(variant.version, control.version);
@@ -124,6 +128,22 @@ test("the variant ablates exactly the two unproven gates and changes nothing els
     assert.ok(variant.steps.some((entry) => entry.id === step), `${step} must survive the ablation as a step`);
     assert.equal(Object.values(variant.gates).some((gate) => gate.step === step), false, `${step} must be UNGATED in the variant`);
     assert.equal(Object.values(control.gates).some((gate) => gate.step === step), true, `${step} must stay gated in the control`);
+  }
+  // THE SECOND VARIABLE, ASSERTED RATHER THAN DESCRIBED. The ablated steps declare no producer
+  // skill in the variant, so removing the gate also removes the instruction to do the work. That
+  // is a deliberate design call — it models the realistic post-cut world — but it is exactly the
+  // kind of property a comment can assert while nothing computes it. Deriving it here from the
+  // kit's own action rows means the arm cannot silently become one-variable (or stay two-variable
+  // while some future description claims otherwise) without this test saying so.
+  const actionRows = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "kits/builder/kit.json"), "utf8")).flow_step_actions;
+  const skillsAt = (flowId, stepId) =>
+    actionRows.filter((row) => row.flow_id === flowId && row.step_id === stepId).flatMap((row) => row.skills ?? []);
+  for (const step of ["design-probe", "plan"]) {
+    assert.deepEqual(skillsAt(VARIANT, step), [], `${step} must declare NO producer skill in the variant — the ablation removes the gate AND the work`);
+    assert.notDeepEqual(skillsAt(CONTROL, step), [], `${step} must declare a producer skill in the control, or there is no second variable to disclose`);
+  }
+  for (const step of ["execute", "verify"]) {
+    assert.deepEqual(skillsAt(VARIANT, step), skillsAt(CONTROL, step), `${step} is retained, so its producer skills must be identical in both arms`);
   }
   // A retained gate must be byte-identical to the control's, or "fewer gates" quietly becomes
   // "fewer AND weaker gates" and the measurement has two variables.

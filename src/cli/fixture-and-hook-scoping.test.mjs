@@ -14,6 +14,7 @@ import {
   RUN_CORRELATION_IDENTITY_KEYS,
   createRunCorrelationEnvelope,
 } from "../../build/src/index.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(here, "..", "..");
@@ -32,7 +33,7 @@ const VALID_STATE = {
 };
 
 function tmpdir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "fa-783-"));
+  return makeFixtureDir("fa-783-");
 }
 
 function runFixture(args, cwd) {
@@ -229,7 +230,7 @@ test("F4: a symlink routed into a declared root cannot launder a fixture write",
 });
 
 test("F4: symlink-aliased tmpdir spelling cannot bypass a declared workspace root", (t) => {
-  const aliased = fs.mkdtempSync(path.join(os.tmpdir(), "alias-"));
+  const aliased = makeFixtureDir("alias-");
   const canonical = fs.realpathSync(aliased);
   if (canonical === path.resolve(aliased)) {
     t.skip("tmpdir is not symlink-aliased on this platform");

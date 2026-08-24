@@ -19,6 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { assertGateFreshnessTurnstile } from "../../build/src/cli/workflow.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SIDECAR = path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js");
@@ -61,7 +62,7 @@ test("a declaring gate refuses a passing claim on an unverified session, quoting
   // Real synthetic session via the sidecar writer (same fixture pattern as the preflight tests):
   // a fresh session has no check/critique claims, so the canonical predicate finds verification
   // stale — the turnstile must surface that predicate's EXACT vocabulary, not a paraphrase.
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), "turnstile-"));
+  const project = makeFixtureDir("turnstile-");
   try {
     spawnSync("git", ["init", "-q", "."], { cwd: project });
     spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });

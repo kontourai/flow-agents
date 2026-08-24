@@ -6,6 +6,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 // #793 learn-gate enforcement: stop-gate flagging, advance-state --skip-learning
 // accepted-gap, and the ensure-session unbound notice. Tests drive the REAL built
@@ -18,7 +19,7 @@ const require_ = createRequire(import.meta.url);
 const hook = require_(path.join(repoRoot, "scripts", "hooks", "stop-goal-fit.js"));
 
 function mkSessionRepo() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-learn-gate-"));
+  const root = makeFixtureDir("flow-agents-learn-gate-");
   execFileSync("git", ["init", "-q", root]);
   execFileSync("git", ["-C", root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
   return root;

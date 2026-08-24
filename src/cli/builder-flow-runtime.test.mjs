@@ -50,6 +50,7 @@ import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, assertRecoveryLedgerCoverage, assertTerminalDeliveryWorkspaceEvidence, assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier, main as workflowMain, recoverProvisionalDeliveryTransaction, recoverProvisionalDeliveryTransactionWithAuthorityVerifier, setProvisionalDeliveryDurabilityTestHooksForTest, setWorkflowEvidenceTransactionTestHooksForTest, stageDeliveryDestination, stageWorkflowEvidenceCandidate, withStableDeliverySnapshot, withStablePublishedDeliverySnapshot } from "../../build/src/cli/workflow.js";
 import { publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest } from "../../build/src/cli/workflow.test-support.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 let releaseRuntimeTestSeams;
 const runtimeTestSeamsReady = new Promise((resolve) => {
@@ -155,7 +156,7 @@ const ACTOR_KEY = "codex:runtime-projection:test-host";
 const AUTHORITY_KEY_ID = "runtime-test";
 const AUTHORITY_KEYS = generateKeyPairSync("ed25519");
 const TEST_AUTHORITY_REGISTRY = { schema_version: "1.0", keys: [{ id: AUTHORITY_KEY_ID, algorithm: "ed25519", public_key_pem: AUTHORITY_KEYS.publicKey.export({ type: "spki", format: "pem" }) }] };
-const TEST_AUTHORITY_FILE = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-os-authority-"))), "authority.json");
+const TEST_AUTHORITY_FILE = path.join(fs.realpathSync(makeFixtureDir("flow-agents-os-authority-")), "authority.json");
 fs.writeFileSync(TEST_AUTHORITY_FILE, `${JSON.stringify(TEST_AUTHORITY_REGISTRY)}\n`, { mode: 0o444 });
 const realExecFileSync = childProcess.execFileSync;
 
@@ -260,7 +261,7 @@ childProcess.execFileSync = ((file, args, options) => {
 });
 
 async function loadHermeticProvisionalAuthority(projectRoot, registryFile, completionPrivateKey, completionPublicKey) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "provisional-public-authority-"));
+  const directory = makeFixtureDir("provisional-public-authority-");
   const stateRoot = path.join(directory, "state");
   fs.mkdirSync(stateRoot, { recursive: true });
   fs.copyFileSync(path.resolve("packaging/lifecycle-authority/runtime-v1.mjs"), path.join(directory, "runtime-v1.mjs"));
@@ -382,7 +383,7 @@ test("public delivery carries one snapshot when source mutates during freshness 
 
 test("public delivery restores the exact prior destination when source mutates during copy", async () => {
   const snapshotA = { version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: "1".repeat(40) };
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-delivery-rollback-"));
+  const root = makeFixtureDir("flow-agents-delivery-rollback-");
   const session = path.join(root, ".kontourai", "flow-agents", "owned");
   const destination = path.join(root, "delivery", "owned");
   const sibling = path.join(root, "delivery", "other", "trust.bundle");
@@ -413,7 +414,7 @@ test("public delivery restores the exact prior destination when source mutates d
 });
 
 test("terminal delivery accepts only its own intact provisional CI transport as post-verification drift", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-delivery-"));
+  const root = makeFixtureDir("flow-agents-provisional-delivery-");
   const run = (args) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
   fs.writeFileSync(path.join(root, ".gitignore"), ".kontourai/\n");
   run(["init"]);
@@ -657,7 +658,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
 
   const operatorKeys = generateKeyPairSync("ed25519");
   const completionKeys = generateKeyPairSync("ed25519");
-  const authorityRoot = fs.mkdtempSync(path.join(os.tmpdir(), "public-provisional-keys-"));
+  const authorityRoot = makeFixtureDir("public-provisional-keys-");
   const registryFile = path.join(authorityRoot, "authority-keys.json");
   const completionPrivateKey = path.join(authorityRoot, "completion-private.pem");
   const completionPublicKey = path.join(authorityRoot, "completion-public.pem");
@@ -874,7 +875,7 @@ test("routed-back provenance keeps the manifest bound to the start definition af
 });
 
 test("provisional delivery journals interrupted replacement until it can deterministically restore or finish", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-journal-"));
+  const root = makeFixtureDir("flow-agents-provisional-journal-");
   const slug = "provisional-session";
   const session = path.join(root, ".kontourai", "flow-agents", slug);
   const destination = path.join(root, "delivery", slug);
@@ -993,7 +994,7 @@ test("public terminal delivery refuses an active learn step even after a positiv
 test("Trust Verify accepts exact four-path and byte-identical terminal companion revisions only", () => {
   const reconcile = require("../../scripts/ci/trust-reconcile.js");
   const makeFixture = ({ status = "unsigned", mutateBeforeCommit } = {}) => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provisional-trust-verify-"));
+    const root = makeFixtureDir("flow-agents-provisional-trust-verify-");
     const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     git("init");
     git("config", "user.email", "test@example.invalid");
@@ -2039,7 +2040,7 @@ provisionedExternalAuthorityE2E("provisioned protocol-v1 helper returns the mini
 });
 
 function makeSession(slug = "runtime-projection") {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-runtime-"));
+  const projectRoot = makeFixtureDir("flow-agents-builder-runtime-");
   const artifactRoot = path.join(projectRoot, ".kontourai", "flow-agents");
   const sessionDir = path.join(artifactRoot, slug);
   writeJson(path.join(sessionDir, "state.json"), {
@@ -2132,7 +2133,7 @@ function installSignedCurrentCompletion(session) {
 }
 
 function makeLifecycleCoordinatorFixture() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "builder-host-redeem-"));
+  const directory = makeFixtureDir("builder-host-redeem-");
   const stateRoot = path.join(directory, "state");
   const coordinatorFile = path.join(directory, "coordinator.mjs");
   const atomicReplaceFile = path.join(directory, "atomic-replace.cjs");
@@ -2266,7 +2267,7 @@ test("public workflow evidence never echoes command or output sentinels in defau
 });
 
 test("shell output cannot spoof an executed-test count", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-count-"));
+  const root = makeFixtureDir("flow-agents-test-count-");
   fs.mkdirSync(path.join(root, "checks"), { recursive: true });
   fs.writeFileSync(path.join(root, "checks", "fake-test.sh"), "#!/bin/sh\nset -e\nprintf '1 passed\\n'\n");
   fs.writeFileSync(path.join(root, "checks", "real-test.sh"), "#!/bin/sh\nset -e\ntest -f checks/real-test.sh\n");
@@ -5733,7 +5734,7 @@ test("historical completion prefix selection requires one exact ordered prefix",
 });
 
 test("public history-repair request deterministically derives every historical/current bridge binding", async () => {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-public-bridge-"));
+  const projectRoot = makeFixtureDir("history-repair-public-bridge-");
   const slug = "history-repair-public-bridge";
   const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", slug);
   const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
@@ -5946,7 +5947,7 @@ test("package graph rejects every coherently rehashed repair authorization missi
 test("public history-repair request preimage reads protected exact bytes and treats only an absent ledger as empty", () => {
   const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
   assert.equal(typeof readPreimage, "function");
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-request-preimage-"));
+  const sessionDir = makeFixtureDir("history-repair-request-preimage-");
   try {
     const bundleFile = path.join(sessionDir, "trust.bundle");
     const ledgerFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
@@ -5984,7 +5985,7 @@ test("public history-repair request preimage reads protected exact bytes and tre
 
 test("public history-repair request preimage rejects symlinked, writable, oversized, and malformed trust bundles", () => {
   const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-request-bundle-adversarial-"));
+  const sessionDir = makeFixtureDir("history-repair-request-bundle-adversarial-");
   try {
     const bundleFile = path.join(sessionDir, "trust.bundle");
     const target = path.join(sessionDir, "bundle-target.json");
@@ -6011,7 +6012,7 @@ test("public history-repair request preimage rejects symlinked, writable, oversi
 
 test("public history-repair request preimage rejects symlinked, writable, oversized, and malformed ledgers", () => {
   const readPreimage = workflowRuntime.readCritiqueResolutionHistoryRepairPreimage;
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "history-repair-request-adversarial-"));
+  const sessionDir = makeFixtureDir("history-repair-request-adversarial-");
   try {
     const bundleFile = path.join(sessionDir, "trust.bundle");
     const ledgerFile = path.join(sessionDir, "lifecycle-authority.resolution-events.json");
@@ -6722,7 +6723,7 @@ externalAuthorityE2E("archive rejects a symlinked archive root without moving th
     sessionDir: session.sessionDir,
     authorizationFile: cancelAuthorization,
   });
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-archive-outside-"));
+  const outside = makeFixtureDir("flow-agents-archive-outside-");
   fs.symlinkSync(outside, path.join(session.artifactRoot, "archive"), "dir");
   const beforeSession = snapshotTree(session.sessionDir);
 
@@ -7439,7 +7440,7 @@ externalAuthorityE2E("a scrubbed thirteen-review repair history migrates through
 });
 
 test("trusted Git ancestry rejects a divergent repair snapshot", () => {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-trusted-git-"));
+  const projectRoot = makeFixtureDir("flow-agents-trusted-git-");
   const git = (args) => {
     const result = spawnSync("/usr/bin/git", args, { cwd: projectRoot, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
@@ -7690,7 +7691,7 @@ test("legacy colon-bearing assignment actor releases only through its normalized
 });
 
 test("string-only legacy liveness identity cannot be released by a colliding modern actor", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-legacy-liveness-"));
+  const root = makeFixtureDir("flow-agents-legacy-liveness-");
   const eventsFile = path.join(root, "liveness", "events.jsonl");
   fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
   fs.writeFileSync(eventsFile, `${JSON.stringify({
@@ -7712,7 +7713,7 @@ test("string-only legacy liveness identity cannot be released by a colliding mod
 });
 
 test("lossy modern liveness key collision cannot release a non-reversible legacy actor", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lossy-liveness-"));
+  const root = makeFixtureDir("flow-agents-lossy-liveness-");
   const eventsFile = path.join(root, "liveness", "events.jsonl");
   fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
   fs.writeFileSync(eventsFile, `${JSON.stringify({ type: "claim", subjectId: "collision", actor: "a:b", at: NOW, ttlSeconds: 1800 })}\n`);
@@ -8872,7 +8873,7 @@ test("recovery fails before any write for invalid Work Item cardinality and Flow
 
 test("recovery fails closed for invalid sidecars and missing or corrupt canonical runs", async (t) => {
   await t.test("invalid session path", async () => {
-    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-invalid-session-"));
+    const projectRoot = makeFixtureDir("flow-agents-builder-invalid-session-");
     await assert.rejects(
       () => recoverBuilderFlowSession({ sessionDir: path.join(projectRoot, "not-a-session") }),
       /sessionDir.*must be \.kontourai\/flow-agents/,
@@ -9034,7 +9035,7 @@ test("recovery rejects symlinked session and projection targets before writes", 
     await t.test(targetKind, async () => {
       const session = makeSession(`recover-${targetKind.replaceAll(" ", "-")}-symlink`);
       await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
-      const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-pointer-symlink-"));
+      const externalRoot = makeFixtureDir("flow-agents-builder-pointer-symlink-");
       const externalPointer = path.join(externalRoot, "current.json");
       writeJson(externalPointer, { active_slug: session.slug, artifact_dir: session.slug, active_step_id: "stale", updated_at: NOW });
       if (targetKind === "global pointer") {

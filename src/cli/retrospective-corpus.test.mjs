@@ -17,9 +17,10 @@ import {
   RUN_CORRELATION_IDENTITY_KEYS,
   createRunCorrelationEnvelope,
 } from "../../build/src/run-correlation.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 function fixture() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "retrospective-corpus-")));
+  const root = fs.realpathSync(makeFixtureDir("retrospective-corpus-"));
   const telemetry = path.join(root, ".kontourai", "telemetry");
   const session = path.join(root, ".kontourai", "flow-agents", "corpus-run");
   const flow = path.join(root, ".kontourai", "flow", "runs", "flow-corpus-run");
@@ -210,7 +211,7 @@ test("corpus compilation streams telemetry beyond the legacy whole-file limit", 
 });
 
 test("one shared telemetry source compiles many correlations from one retained snapshot", (t) => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "corpus-many-runs-")));
+  const root = fs.realpathSync(makeFixtureDir("corpus-many-runs-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const telemetry = path.join(root, ".kontourai", "telemetry");
   fs.mkdirSync(telemetry, { recursive: true });
@@ -281,7 +282,7 @@ test("invalid correlations and oversized lines are quarantined without blocking 
 });
 
 test("UTF-8 split across scanner chunks preserves one exact envelope", (t) => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "corpus-utf8-")));
+  const root = fs.realpathSync(makeFixtureDir("corpus-utf8-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const telemetry = path.join(root, ".kontourai", "telemetry");
   fs.mkdirSync(telemetry, { recursive: true });
@@ -325,7 +326,7 @@ test("UTF-8 split across scanner chunks preserves one exact envelope", (t) => {
 });
 
 test("non-JSONL producer files quarantine invalid UTF-8", (t) => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "corpus-json-utf8-")));
+  const root = fs.realpathSync(makeFixtureDir("corpus-json-utf8-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const session = path.join(root, ".kontourai", "flow-agents", "invalid-utf8");
   fs.mkdirSync(session, { recursive: true });
@@ -341,7 +342,7 @@ test("non-JSONL producer files quarantine invalid UTF-8", (t) => {
 });
 
 test("scanner accepts verified append-only growth but rejects accepted-prefix mutation", (t) => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "corpus-prefix-")));
+  const root = fs.realpathSync(makeFixtureDir("corpus-prefix-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const file = path.join(root, "events.jsonl");
   const initial = `${JSON.stringify({ event_type: "session.start", event_id: "initial" })}\n`;
@@ -385,7 +386,7 @@ test("scanner accepts verified append-only growth but rejects accepted-prefix mu
 
 test("stable root ids do not depend on the configured root set", (t) => {
   const fixtureRoot = fixture();
-  const unrelated = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "aaa-corpus-root-")));
+  const unrelated = fs.realpathSync(makeFixtureDir("aaa-corpus-root-"));
   t.after(() => {
     fs.rmSync(fixtureRoot.root, { recursive: true, force: true });
     fs.rmSync(unrelated, { recursive: true, force: true });
@@ -398,7 +399,7 @@ test("stable root ids do not depend on the configured root set", (t) => {
 
 test("CLI publishes complete generations and moves current away from stale runs", (t) => {
   const { root } = fixture();
-  const output = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "corpus-output-")));
+  const output = fs.realpathSync(makeFixtureDir("corpus-output-"));
   t.after(() => {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(output, { recursive: true, force: true });
@@ -449,7 +450,7 @@ test("CLI publishes complete generations and moves current away from stale runs"
 
 test("CLI rejects a group or world-writable corpus output boundary", (t) => {
   const { root } = fixture();
-  const output = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "corpus-output-unsafe-")));
+  const output = fs.realpathSync(makeFixtureDir("corpus-output-unsafe-"));
   t.after(() => {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(output, { recursive: true, force: true });

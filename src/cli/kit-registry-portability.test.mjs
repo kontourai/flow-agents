@@ -8,12 +8,13 @@ import { pathToFileURL } from "node:url";
 
 import { main as kitMain } from "../../build/src/cli/kit.js";
 import { observeInstalledKitIntegrity } from "../../build/src/flow-kit/content-hash.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const FIXTURE = path.resolve("evals/fixtures/flow-kit-repository/valid-local-kit");
 const CANONICAL_PATH = "kits/local/repositories/example-kit";
 
 function tempRoot(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return makeFixtureDir(prefix);
 }
 
 function copyFixture(destination) {

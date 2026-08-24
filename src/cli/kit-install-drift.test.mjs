@@ -10,11 +10,12 @@ import { main as kitMain, setKitCliTestHooksForTests } from "../../build/src/cli
 import { observeKitContentHash } from "../../build/src/flow-kit/content-hash.js";
 import { activateCodexLocal } from "../../build/src/runtime-adapters.js";
 import { atomicWriteJson, cleanupDirectoryCopyBackups, copyDirAtomicTransaction } from "../../build/src/lib/fs.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const FIXTURE = path.resolve("evals/fixtures/flow-kit-repository/valid-local-kit");
 
 function tempRoot(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return makeFixtureDir(prefix);
 }
 
 function copyFixture(destination) {

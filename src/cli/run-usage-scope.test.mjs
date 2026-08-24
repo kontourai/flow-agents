@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const helper = path.resolve("scripts/telemetry/run-usage-scope.js");
 
@@ -43,7 +44,7 @@ function run(action, root, payload) {
 }
 
 test("sequential Builder correlations subtract independent runtime usage baselines", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-usage-scope-"));
+  const root = makeFixtureDir("flow-agents-usage-scope-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const runA = envelope("run-a");
   const runB = envelope("run-b");
@@ -65,7 +66,7 @@ test("sequential Builder correlations subtract independent runtime usage baselin
 });
 
 test("missing baseline remains explicitly session-scoped", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-usage-scope-"));
+  const root = makeFixtureDir("flow-agents-usage-scope-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const result = run("--delta", root, {
     run_correlation: envelope("run-without-baseline"),

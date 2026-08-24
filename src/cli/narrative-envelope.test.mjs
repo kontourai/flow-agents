@@ -20,6 +20,7 @@ import {
   validateGroundedNarrative,
   writeEnvelope,
 } from "../../build/src/index.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const CAPTURED_AT = "2026-07-14T15:00:00.000Z";
 const COMPILED_AT = "2026-07-14T16:00:00.000Z";
@@ -32,7 +33,7 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const sha8 = (bytes) => sha256(bytes).slice(0, 8);
 
 function constructedNarrative({ missingReport = false, reportBytes: suppliedReportBytes, redactionFields = [] } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-envelope-"));
+  const root = makeFixtureDir("narrative-envelope-");
   const narrativeDir = path.join(root, "narrative");
   const flowRoot = path.join(root, "flow");
   const sessionDir = path.join(root, "session");
@@ -69,7 +70,7 @@ function constructedNarrative({ missingReport = false, reportBytes: suppliedRepo
 }
 
 function correlationNarrativeDir(transitions, { overlapping = false, timezoneLess = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-correlation-"));
+  const root = makeFixtureDir("narrative-correlation-");
   const narrativeDir = path.join(root, "narrative");
   const telemetryDir = path.join(root, "telemetry");
   const flowRoot = path.join(root, "flow");
