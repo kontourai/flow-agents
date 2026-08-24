@@ -2,7 +2,9 @@ import * as fs from "node:fs";
 import { constants as fsConstants } from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { evaluateGate, expectationsForGate, openGates, type FlowExpectation, type FlowGate, type FlowRunState } from "@kontourai/flow";
+import { evaluateGate, expectationsForGate, type FlowExpectation, type FlowGate, type FlowRunState } from "@kontourai/flow";
+import { actionableOpenGates } from "./builder-flow-run-adapter.js";
+import { actionableFlowStepId } from "./lib/flow-resolver.js";
 import { parseKitFlowStepActions, type KitFlowStepActionEntry, type KitFlowStepExpectationBinding } from "./flow-kit/validate.js";
 import {
   EVIDENCE_REF_JSON_SCHEMA,
@@ -415,8 +417,16 @@ function loadGateAction(input: BuilderGateActionEnvelopeInput): LoadedGateAction
   const parsed = parseKitFlowStepActions(kit, manifestRef);
   if (parsed.errors.length) throw new Error(`Builder gate-action metadata is invalid: ${parsed.errors.join("; ")}`);
   const actions = parsed.entries.filter((entry) => entry.flow_id === input.run.definitionId);
-  const selected = actions.filter((entry) => entry.step_id === input.run.state.current_step);
-  if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${input.run.definitionId}/${input.run.state.current_step}`);
+  // #1350: resolve the action for the step whose gate this run must ACT ON, not for the step the
+  // cursor happens to rest on. These are the same step for every gated run, and differ only when
+  // the cursor sits on a gateless sequencing passthrough (#1335). They must not be resolved
+  // independently: `deriveFlowRequirements` asserts the action's declared evidence matches the
+  // gate's canonical requirements exactly, so taking the gate from the walked step and the action
+  // from the cursor's step makes that invariant unsatisfiable — the passthrough declares no
+  // evidence while the gate requires some, and the envelope throws rather than describing the run.
+  const actionStepId = actionableFlowStepId(input.definition, input.run.state.current_step) ?? input.run.state.current_step;
+  const selected = actions.filter((entry) => entry.step_id === actionStepId);
+  if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${input.run.definitionId}/${actionStepId}`);
   const action = selected[0]!;
   const actionableArtifacts = action.artifacts.filter((artifact) => !isControlArtifact(artifact));
   if (action.skills.length > MAX_SKILLS || action.artifacts.length > MAX_ARTIFACTS) {
@@ -426,7 +436,16 @@ function loadGateAction(input: BuilderGateActionEnvelopeInput): LoadedGateAction
 }
 
 function deriveFlowRequirements(input: BuilderGateActionEnvelopeInput, action: KitFlowStepActionEntry): DerivedGateRequirements {
-  const gates = openGates(input.definition, input.run.state) as Array<FlowGate & { id: string }>;
+  // #1350: the gates this run must ACT ON, not the gates of the step the cursor happens to rest
+  // on. Both values in this envelope and the session projection come from the SAME projectFlowRun
+  // call, so using `openGates` here made one returned object tell its two readers different things
+  // about the same run: at a gateless step the projection reported `execute-gate` while the
+  // envelope — the machine-readable contract the adapter is contractually required to obey —
+  // advertised no gate, no unresolved evidence and no mutation to invoke, while `next_action.status`
+  // still said `continue`. A run in that state does not fail; it burns turns recording
+  // `gate_not_advanced`. `actionableOpenGates` is the single shared derivation (#1335) and is
+  // unchanged for any run resting on a gated step, where it delegates straight to `openGates`.
+  const gates = actionableOpenGates(input.definition, input.run.state) as Array<FlowGate & { id: string }>;
   const acceptedExceptions: GateActionEnvelope["gate"]["accepted_exceptions"] = [];
   // Evaluate at the actual current instant, not Flow's own fallback default of
   // `state.updated_at`. `state.updated_at` only advances when a transition is
