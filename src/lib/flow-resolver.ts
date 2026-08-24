@@ -702,6 +702,68 @@ function resolveEffectiveFlowDefinitionInternal(flowId: string, repoRoot: string
 }
 
 /**
+ * The step whose gate a run sitting on `stepId` must satisfy next.
+ *
+ * A flow may declare steps that gate nothing — sequencing passthroughs that exist so route-back
+ * targets and phase names keep resolving, while demanding no evidence. `builder.build-lean` is the
+ * first shipped flow to declare any (#1335), and before this derivation existed a run's cursor
+ * could come to rest on one and never leave: `applyEvaluation` (the only code in @kontourai/flow
+ * that moves a cursor) fires on a GATE outcome, so a step with no gate has nothing to move it, and
+ * `evaluateRun` with no explicit gate throws `no gate for current step`.
+ *
+ * The engine already knows how to traverse them — `evaluateRun(runId, { gate })` walks the cursor
+ * forward across gateless steps (recording an honest `"step has no gate"` transition for each) when
+ * only gateless steps separate the cursor from that gate. What it cannot do is tell a caller WHICH
+ * gate to name. That is this function: it answers "which declared gate is this run working toward",
+ * derived from the definition rather than from any flow identifier.
+ *
+ * Traversal deliberately mirrors the engine's own (`advanceThroughGatelessSteps`): follow `next`
+ * while the step declares no gate, stop at the first step that does, guard against cycles. Returns
+ * `stepId` itself when that step is gated, and `null` when the chain runs out without reaching a
+ * gate — a genuinely unadvanceable run, which callers must refuse rather than paper over.
+ */
+export function actionableFlowStepId(definition: unknown, stepId: string): string | null {
+  if (!isRecord(definition) || !Array.isArray(definition.steps) || !stepId) return null;
+  const gatedSteps = new Set(
+    Object.values(isRecord(definition.gates) ? definition.gates : {})
+      .flatMap((gate) => (isRecord(gate) && typeof gate.step === "string" ? [gate.step] : [])),
+  );
+  const nextByStepId = new Map<string, string | null>();
+  for (const step of definition.steps) {
+    if (isRecord(step) && typeof step.id === "string" && step.id) {
+      nextByStepId.set(step.id, typeof step.next === "string" && step.next ? step.next : null);
+    }
+  }
+  let cursor: string | null = stepId;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor)) {
+    if (!nextByStepId.has(cursor)) return null;
+    if (gatedSteps.has(cursor)) return cursor;
+    seen.add(cursor);
+    cursor = nextByStepId.get(cursor) ?? null;
+  }
+  return null;
+}
+
+/**
+ * `resolveFlowStep` for the step a run sitting on `stepId` must satisfy next — i.e. `stepId`
+ * itself when it declares a gate, otherwise the first gated step reachable across gateless
+ * sequencing passthroughs (#1335).
+ *
+ * The walk runs over the EFFECTIVE definition on purpose: a `uses_flow` step declares its gate in
+ * the child flow, so judging "is this step gated" against the raw file would read every composed
+ * step as gateless and walk straight past it. Resolution of the target step then goes through the
+ * ordinary `resolveFlowStep`, so the returned `stepId`/`gateId` are the real ones the kit binds a
+ * producer at — never the passthrough the cursor happened to be parked on.
+ */
+export function resolveActionableFlowStep(flowId: string, stepId: string, repoRoot: string): ActiveFlowStep | null {
+  const effective = resolveEffectiveFlowDefinition(flowId, repoRoot);
+  const target = actionableFlowStepId(effective, stepId);
+  if (!target) return null;
+  return resolveFlowStep(flowId, target, repoRoot);
+}
+
+/**
  * A single (stepId, gateId) → expects[] tuple, as part of the FULL enumeration of every gate in
  * a FlowDefinition (across every step — see resolveAllFlowGateExpects below), not just the
  * currently-active one.

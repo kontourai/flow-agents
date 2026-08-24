@@ -140,6 +140,23 @@ const MERGE_CHANGE_AUTHORIZATION_FIELDS = [
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
+ * The single gate a definition declares as requiring CURRENT verification — the freshness
+ * turnstile that a provisional delivery exists to satisfy, and the one merge-change requires
+ * evidence-refresh control on.
+ *
+ * #1336: replaces the composed gate-id literal `builder.publish-learn:merge-ready-ci-gate` and the
+ * `builder.build` / `merge-ready-ci` name pins. The coordinator deliberately reads only the
+ * canonical Flow run files, never kit metadata, so the derivation is over the DEFINITION the run is
+ * pinned to — which is the same declared property the unprivileged side now asks about. Returns
+ * null unless exactly one gate declares it, so an ambiguous definition refuses rather than picks.
+ */
+export function freshnessTurnstileGateEntry(definition) {
+  if (!record(definition) || !record(definition.gates)) return null;
+  const matches = Object.entries(definition.gates)
+    .filter(([, gate]) => record(gate) && gate.requires_current_verification === true);
+  return matches.length === 1 ? { id: matches[0][0], gate: matches[0][1] } : null;
+}
+/**
  * #1307: this was the THIRD independent encoding of the route-map contract (after #1300's in
  * merge-change and the static eval's). The semantic requirement is that the refresh entries are
  * PRESENT with the bounded blocking policy; additional repair routes (implementation_defect)
@@ -528,7 +545,11 @@ export function validateProvisionalDeliveryAuthorizationBinding(authorization, e
       || typeof authorization.workspace_snapshot.worktree_clean !== "boolean"
       || (expected.workspace_snapshot !== undefined && canonicalJson(authorization.workspace_snapshot) !== canonicalJson(expected.workspace_snapshot))) throw new Error("provisional delivery authorization workspace snapshot does not match the current session");
   if (!Array.isArray(authorization.companions) || (expected.companions !== undefined && canonicalJson(authorization.companions) !== canonicalJson(expected.companions))) throw new Error("provisional delivery authorization companions do not match the current session");
-  if (authorization.subject !== authorization.work_item || authorization.checkpoint_slug !== authorization.run_id || authorization.flow_definition_id !== "builder.build") throw new Error("provisional delivery authorization cross-binding is invalid");
+  // #1336: the flow identity is already pinned above by exact comparison against
+  // `expected.flow_definition_id`, which the caller derives from the canonical run's own
+  // definition. A second literal pin here refused every kit-declared flow while adding no binding
+  // the exact comparison does not already make.
+  if (authorization.subject !== authorization.work_item || authorization.checkpoint_slug !== authorization.run_id) throw new Error("provisional delivery authorization cross-binding is invalid");
   const requested = Date.parse(authorization.requested_at), expires = Date.parse(authorization.expires_at);
   if (!Number.isFinite(requested) || !Number.isFinite(expires) || expires < requested || Date.now() > expires) throw new Error("provisional delivery authorization time window is invalid");
   return authorization;
@@ -1507,7 +1528,7 @@ async function assertMergeChangeAuthorizationBinding(paths, authorization, reque
   const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
   const { flow } = await loadPinnedFlowReducer();
   const { definition, state } = resolveCanonicalFlowRunIdentity(flow, startDefinition, stateInput, paths.runId);
-  if (definition.id !== "builder.build" || definition.id !== authorization.flow_definition_id
+  if (definition.id !== authorization.flow_definition_id
       || definition.version !== authorization.flow_definition_version
       || flow.definitionDigest(definition) !== authorization.flow_definition_digest
       || flow.flowRunHead(state) !== authorization.flow_run_head
@@ -1517,9 +1538,9 @@ async function assertMergeChangeAuthorizationBinding(paths, authorization, reque
       || action.binding.definition_version !== definition.version) {
     throw new Error("merge-change authorization canonical Flow binding changed");
   }
-  const mergeReadyCi = definition.gates?.["builder.publish-learn:merge-ready-ci-gate"];
+  const mergeReadyCi = freshnessTurnstileGateEntry(definition)?.gate;
   if (!mergeReadyCiRefreshRoutesSatisfied(mergeReadyCi)) {
-    throw new Error("merge-change requires semantic merge-ready-ci evidence-refresh control");
+    throw new Error("merge-change requires semantic evidence-refresh control on the gate its definition declares requires_current_verification");
   }
   assertMergeChangeVerificationRefreshProvenance(state, definition, flow.definitionDigest(definition));
   const assignment = protectedJson(assignmentFile(paths), "canonical assignment", 256 * 1024);
@@ -2119,13 +2140,16 @@ function assertProvisionalAuthorizationContext(paths, authorization, context) {
     subject, work_item: subject, assignment_actor_key: assignment.actor_key, assignment_generation: assignment.claimed_at,
     published_head_sha: changeRef.head_sha, provider_record_id: changeRef.provider_record_id,
     provider_observation_sha256: sha256(providerObservationBytes),
-    flow_definition_id: "builder.build", flow_definition_version: state.definition_version,
+    flow_definition_id: definition.id, flow_definition_version: state.definition_version,
     flow_definition_digest: flow.definitionDigest(definition), flow_run_head: flow.flowRunHead(state),
     flow_gate_id: openGateId(definition, state), flow_gate_visit: provisionalGateVisit(state),
   });
-  if (authorization.run_id !== paths.runId || authorization.flow_definition_id !== "builder.build" || definition.id !== "builder.build"
-      || state.current_step !== "merge-ready-ci" || state.status !== "active") {
-    throw new Error("provisional delivery authorization does not bind the active builder.build merge-ready-ci gate");
+  // #1336: the gate the run must be held at is the one the DEFINITION declares as requiring
+  // current verification, not a step named "merge-ready-ci" in a flow named "builder.build".
+  const turnstile = freshnessTurnstileGateEntry(definition);
+  if (authorization.run_id !== paths.runId || authorization.flow_definition_id !== definition.id
+      || turnstile === null || turnstile.gate.step !== state.current_step || state.status !== "active") {
+    throw new Error("provisional delivery authorization does not bind an active canonical run held at the gate its definition declares requires_current_verification");
   }
   if (assignment.status !== "claimed" || authorization.checkpoint_commit_sha !== authorization.workspace_snapshot.head_sha
       || authorization.published_head_sha !== authorization.checkpoint_commit_sha) {

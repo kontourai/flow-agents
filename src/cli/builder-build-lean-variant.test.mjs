@@ -460,3 +460,44 @@ test("the variant is refused when its declaring kit drops a producer binding", (
     fs.rmSync(project, { recursive: true, force: true });
   }
 });
+
+// ─── #1336: the retained gates are reachable by DECLARATION, not by flow name ─────────────────
+
+import { declaredStepBindsInterface } from "../../build/src/builder-gate-action-envelope.js";
+import { freshnessTurnstileGateEntry, mergeReadyCiRefreshRoutesSatisfied } from "../../packaging/lifecycle-authority/coordinator.mjs";
+
+test("every retained gate's public verb finds the variant by what it declares", () => {
+  const control = resolveEffectiveFlowDefinition(CONTROL, REPO_ROOT);
+  const variant = resolveEffectiveFlowDefinition(VARIANT, REPO_ROOT);
+
+  // `workflow critique`, `recover-exact-current-completion` and `reseal-verification-evidence`
+  // used to ask "is this builder.build at verify". They now ask the declaring kit which interface
+  // produces the step's evidence — and the answer must be the SAME for both arms, because the
+  // ablation does not touch verify-gate.
+  for (const flowId of [CONTROL, VARIANT]) {
+    assert.equal(declaredStepBindsInterface(flowId, "verify", "workflow.critique", REPO_ROOT), true, `${flowId}/verify must be reachable by the critique verb`);
+    // And the derivation must still DISCRIMINATE: a step that produces evidence through
+    // workflow.evidence is not a review gate, whichever arm it belongs to.
+    for (const step of ["pull-work", "execute", "merge-ready", "learn"]) {
+      assert.equal(declaredStepBindsInterface(flowId, step, "workflow.critique", REPO_ROOT), false, `${flowId}/${step} must not be mistaken for the review gate`);
+    }
+  }
+  // A flow no installed kit declares fails closed rather than defaulting to permitted.
+  assert.equal(declaredStepBindsInterface("acme.nonexistent", "verify", "workflow.critique", REPO_ROOT), false);
+
+  // publish-provisional-delivery, publish-delivery and merge-change key on the freshness turnstile
+  // the DEFINITION declares, which replaced both the `merge-ready-ci` step name and the composed
+  // gate-id literal `builder.publish-learn:merge-ready-ci-gate` in the privileged coordinator.
+  for (const [label, definition] of [["control", control], ["variant", variant]]) {
+    const turnstile = freshnessTurnstileGateEntry(definition);
+    assert.ok(turnstile, `${label}: exactly one gate must declare requires_current_verification`);
+    assert.equal(turnstile.id, "builder.publish-learn:merge-ready-ci-gate", `${label}: the derivation still resolves the gate the literal named`);
+    assert.equal(turnstile.gate.step, "merge-ready-ci", `${label}: and it still sits at the step the literal named`);
+    assert.equal(mergeReadyCiRefreshRoutesSatisfied(turnstile.gate), true, `${label}: merge-change's evidence-refresh control is satisfied`);
+  }
+  // The derivation refuses ambiguity rather than picking: two declaring gates is not "the" gate.
+  assert.equal(freshnessTurnstileGateEntry({ gates: {} }), null);
+  assert.equal(freshnessTurnstileGateEntry({
+    gates: { a: { step: "x", requires_current_verification: true }, b: { step: "y", requires_current_verification: true } },
+  }), null);
+});
