@@ -48,11 +48,21 @@ function subRootsFor(root: string): string[] {
  * `flow-resolver.ts` has to judge when it decides whether a FlowDefinition source is runtime
  * artifact storage rather than shipped, digest-covered kit content.
  *
- * The three positions are the SAME ones `subRootsFor` declares, so the two surfaces cannot
- * drift: `<root>/.kontourai/flow-agents`, `<root>/.flow-agents`, `<root>/delivery`. Only
- * `delivery` needs its parent qualified (an ordinary word — a directory named `delivery` is
- * only a declared root when its parent is a git working tree, which is the same condition
- * `declaredArtifactRoots` applies when it derives roots from `walkForGitMarker`).
+ * The three positions are the SAME ones `subRootsFor` declares: `<root>/.kontourai/flow-agents`,
+ * `<root>/.flow-agents`, `<root>/delivery`. Only `delivery` needs its parent qualified — it is an
+ * ordinary word, and a directory named `delivery` is runtime storage only when its parent is a
+ * root `declaredArtifactRoots` would derive. That qualification is `isDeclarableRootPosition`,
+ * and it is the SAME predicate `declaredArtifactRoots` uses to decide it has one.
+ *
+ * #1316 review FIX-3: the qualification used to be `walkForGitMarker(parent) === parent` — parent
+ * is a git working tree — while `declaredArtifactRoots` ALSO derives a root for a cwd with no git
+ * ancestor at all, and declares that root's `delivery/`. So `<non-git-root>/delivery` was declared
+ * by one surface and unrecognized by the other, and `<non-git-root>/kits` could symlink into it
+ * and still pass `canonicalKitsRoot`. The comment claiming the two "cannot drift" was a claim
+ * nothing computed; they now share the predicate, and `declared-artifact-roots.test.mjs` asserts
+ * the equivalence directly (every root `declaredArtifactRoots` declares is recognized here)
+ * rather than asserting it in prose.
+ *
  * Configured workspace roots (`SA_PROTECTED_WORKSPACE_ROOTS`) contribute their three sub-roots
  * verbatim, so one setting still scopes every surface.
  *
@@ -83,11 +93,27 @@ export function isWithinRuntimeArtifactRoot(absPath: string): boolean {
     const base = path.basename(dir);
     if (base === ".flow-agents") return true;
     if (base === "flow-agents" && path.basename(parent) === ".kontourai") return true;
-    if (base === "delivery" && walkForGitMarker(parent) === parent) return true;
+    if (base === "delivery" && isDeclarableRootPosition(parent)) return true;
     if (dir === root || parent === dir) break;
     dir = parent;
   }
   return false;
+}
+
+/**
+ * True when `dir` occupies a position `declaredArtifactRoots` would derive a root at.
+ *
+ * The two cases it derives, and nothing else:
+ *   - `dir` IS a git working tree (`walkForGitMarker(dir) === dir`) — the `worktreeOwnRoot` branch.
+ *   - `dir` has NO git ancestor (`walkForGitMarker(dir) === null`) — the "genuinely no git repo
+ *     anywhere above cwd" branch, which mirrors `flowAgentsArtifactRoot`'s own cwd fallback.
+ *
+ * A directory INSIDE a repo but not its root is neither, which is what keeps an ordinary
+ * `src/delivery/` from being read as runtime artifact storage.
+ */
+function isDeclarableRootPosition(dir: string): boolean {
+  const marker = walkForGitMarker(dir);
+  return marker === dir || marker === null;
 }
 
 /**
@@ -163,10 +189,13 @@ export function declaredArtifactRoots(cwd: string = process.cwd()): DeclaredArti
       // We cannot trust ANY root boundary here. FAIL CLOSED.
       ambiguous = true;
     }
-  } else {
+  } else if (isDeclarableRootPosition(resolvedCwd)) {
     // Genuinely no git repo anywhere above cwd: mirror flowAgentsArtifactRoot's own cwd
     // fallback so the declared root matches what a real sidecar session invoked from this same
-    // cwd would actually write to.
+    // cwd would actually write to. Routed through the SAME predicate the inverted check applies,
+    // so this branch cannot declare a `delivery/` the inverted check would not recognize
+    // (#1316 review FIX-3). `worktreeOwnRoot` being null already implies this is true; asking
+    // through the predicate is what keeps the two surfaces reading one rule.
     repoRoots.add(resolvedCwd);
   }
 

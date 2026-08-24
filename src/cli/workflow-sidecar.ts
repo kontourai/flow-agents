@@ -27,6 +27,7 @@ import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFl
 // a half-start.
 import { isCanonicalRunFlowId } from "../builder-flow-run-adapter.js";
 import { resolveKitFlowBinding, resolveKitGateProducer, kitFlowIdParts, kitFlowSourceRoots } from "../lib/kit-flow-binding.js";
+import { flowAdmissionRefusal } from "../lib/flow-admission.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
@@ -2881,6 +2882,25 @@ function enforceEnsureSessionOwnership(
  *   --claim-ttl-seconds <n>        Overrides the liveness-policy TTL default for a new claim.
  *   --reason <text>                Audit-trail reason recorded on the claim/supersede record.
  */
+/**
+ * THE admission gate for a flow id on the sidecar surface (#1315 review, HIGH).
+ *
+ * The sidecar is an installed binary on PATH, so `workflow start`'s refusal closed one door of
+ * two. `ensure-session --flow-id <anything>` wrote session and current artifacts for any
+ * resolvable flow and merely skipped the canonical run; `advance-state --flow-definition
+ * <anything>` wrote state.json and published `active_step_id` — the pointer the Stop hook reads
+ * to decide which gate governs the turn — with no canonical run and no satisfied gate. Both were
+ * half-admissions: a session advertising an active flow that nothing pins.
+ *
+ * The predicate is the SAME derivation the public verb applies (`flowAdmissionRefusal`), not a
+ * sidecar-local restatement of it. That is the property the review asked for: a flow with no
+ * canonical run binding is refused at ensure-session and at advance-state, exactly as at start.
+ */
+function assertAdmissibleFlow(flowId: string, repoRoot: string, surface: string): void {
+  const refusal = flowAdmissionRefusal(flowId, repoRoot, surface);
+  if (refusal) die(refusal);
+}
+
 function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string): { flowId: string; stepId: string; firstStep: string } {
   const flowId = opt(p, "flow-id");
   const explicitStep = opt(p, "step-id");
@@ -2890,6 +2910,7 @@ function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string)
     return { flowId: "", stepId: "", firstStep: "" };
   }
 
+  assertAdmissibleFlow(flowId, findRepoRootFromDir(dir), "ensure-session --flow-id");
   const firstStep = resolveFirstStep(flowId, findRepoRootFromDir(dir));
   if (!firstStep) die(`ensure-session could not resolve the first step for Flow Definition ${JSON.stringify(flowId)}`);
   if (opt(p, "ad-hoc-reason")) {
@@ -6279,6 +6300,10 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   // AND the target phase maps to a step listed in on_route_back values.
   // builder.build verify-gate already carries this declaration — behavior preserved.
   const repoRoot = flow ? findRepoRootFromDir(dir) : "";
+  // Same admission rule as ensure-session and `workflow start` — see assertAdmissibleFlow. This
+  // must run BEFORE the route-back guard and BEFORE writeState, because everything below it
+  // writes: transition-attempts.json, state.json, handoff.json, and the active_step_id pointer.
+  if (flow) assertAdmissibleFlow(flow, repoRoot, "advance-state --flow-definition");
   const routeBack = flow ? resolveRouteBackPolicy(flow, prev.phase, phase, repoRoot) : null;
   if (routeBack) {
     const reason = opt(p, "route-back-reason");

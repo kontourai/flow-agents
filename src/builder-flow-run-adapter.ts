@@ -25,9 +25,9 @@ import {
 } from "@kontourai/flow";
 import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
 import {
+  canonicalKitFlowSourceRoots,
   declaredKitFlowBindings,
   kitFlowRunBindingIssues,
-  kitFlowSourceRoots,
   resolveKitFlowBinding,
   type KitFlowBinding,
 } from "./lib/kit-flow-binding.js";
@@ -112,12 +112,16 @@ export function canonicalRunFlowRefusal(flowId: string, cwd?: string): string | 
 }
 
 /**
- * The roots that may supply a canonical run binding. The executing PACKAGE first (the shipped,
- * digest-covered tree the adapter has always bound), then the project — so a project kit can add
- * a runnable flow but can never shadow a packaged one. See `kitFlowSourceRoots`.
+ * The roots that may supply a canonical run binding: the executing PACKAGE first (the shipped,
+ * digest-covered tree the adapter has always bound), then the project.
+ *
+ * #1316 review FIX-2: this is now the SAME function the declaration enumeration walks
+ * (`canonicalKitFlowSourceRoots`), not a parallel spelling of the same intent. The order decides
+ * which declaration authorizes a start AND which bytes the run pins; two spellings of it is how
+ * those two answers come apart.
  */
-function canonicalRunSourceRoots(cwd?: string, startDir = moduleDirectory()): string[] {
-  return kitFlowSourceRoots(findPackageRoot(startDir), cwd);
+export function canonicalRunSourceRoots(cwd?: string, startDir?: string): string[] {
+  return canonicalKitFlowSourceRoots(cwd, startDir ?? moduleDirectory());
 }
 
 /**
@@ -744,24 +748,3 @@ function moduleDirectory(): string {
   return path.dirname(fileURLToPath(import.meta.url));
 }
 
-/**
- * The nearest ancestor of `startDir` that is a package shipping a kit tree.
- *
- * #1316: the marker was one kit's flow file, which made "is this the package root" a question
- * only that kit could answer. `package.json` + `kits/` is the same structural fact stated
- * generically — and because the walk always starts inside the executing package, it resolves to
- * the same directory it always did.
- */
-function findPackageRoot(startDir: string): string {
-  let dir = startDir;
-  for (;;) {
-    if (existsSync(path.join(dir, "package.json")) && existsSync(path.join(dir, "kits"))) {
-      return dir;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) {
-      throw new Error(`unable to locate a packaged kits/ root from ${startDir}`);
-    }
-    dir = parent;
-  }
-}

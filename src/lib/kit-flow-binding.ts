@@ -53,6 +53,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { isWithinRuntimeArtifactRoot } from "./declared-artifact-roots.js";
 
 /** The identifier shape `resolveFlowFilePath` actually enforces on both parts of a flow id. */
@@ -117,7 +118,7 @@ export function kitFlowIdParts(flowId: string): { kitId: string; flowName: strin
  * Roots are canonicalized and de-duplicated: in the package's own repo the two are the same
  * tree, and a binding must never be reported twice from one directory.
  */
-export function kitFlowSourceRoots(packageRoot: string, projectRoot?: string): string[] {
+export function kitFlowSourceRoots(packageRoot: string | null, projectRoot?: string): string[] {
   const roots: string[] = [];
   for (const candidate of [packageRoot, projectRoot]) {
     if (!candidate) continue;
@@ -126,6 +127,38 @@ export function kitFlowSourceRoots(packageRoot: string, projectRoot?: string): s
     roots.push(canonical);
   }
   return roots;
+}
+
+/**
+ * The nearest ancestor of `startDir` that is a package shipping a kit tree, or null.
+ *
+ * One walk, shared (#1316 review FIX-2). The resolver and the run adapter each had their own —
+ * same algorithm, different start directory, and therefore no guarantee they agree on WHICH
+ * package is "the packaged tree". They must agree: the root order below decides which
+ * declaration AUTHORIZES a start, and the run binding decides which bytes the run PINS. Two
+ * package-root answers is a start authorized by one tree and a run bound to another.
+ */
+export function packagedKitRoot(startDir: string = path.dirname(fileURLToPath(import.meta.url))): string | null {
+  let dir = startDir;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, "package.json")) && fs.existsSync(path.join(dir, KITS_DIR))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * THE root order, for every surface that asks a kit tree a question (#1316 review FIX-2).
+ *
+ * PACKAGED FIRST — see `kitFlowSourceRoots`. What matters here is that DECLARATION ENUMERATION
+ * (which authorizes a start) and RUN BINDING (which chooses the bytes the run pins) walk the
+ * SAME list in the SAME order. #1315 enumerated declarations consumer-first while #1316's adapter
+ * bound packaged-first, which is exactly how a package declaration could authorize a start whose
+ * bytes came from a consumer file the manifest never declared. One function, both callers.
+ */
+export function canonicalKitFlowSourceRoots(projectRoot?: string, startDir?: string): string[] {
+  return kitFlowSourceRoots(startDir === undefined ? packagedKitRoot() : packagedKitRoot(startDir), projectRoot);
 }
 
 /**

@@ -392,10 +392,15 @@ test("the canonical-run capability is the run adapter's declaration, not a liter
   // The half-start the review found existed because ensure-session re-spelled the same pair
   // independently of the public verb. One predicate, quoted in both.
   assert.ok(!/entry\.flowId === "builder\.build" \|\| entry\.flowId === "builder\.shape"/.test(sidecarSource),
-    "ensure-session must consult isCanonicalRunFlowId, not re-spell the adapter's capability");
-  // #1316: the capability is no longer a two-literal constant, so the CLI quotes the DERIVED
-  // predicate. The refusal names the missing binding rather than listing the pair.
-  assert.ok(workflowSource.includes("canonicalRunFlowRefusal(flow, repoRoot)"));
+    "ensure-session must consult the derived predicate, not re-spell the adapter's capability");
+  // #1316 + #1315 review (HIGH): the capability is no longer a two-literal constant AND the
+  // public verb is no longer the only door. Both doors call the SAME admission function; a
+  // sidecar-local restatement is what let ensure-session/advance-state half-admit what start
+  // refused.
+  assert.ok(workflowSource.includes('flowAdmissionRefusal(flow, repoRoot, "workflow start --flow")'));
+  assert.ok(sidecarSource.includes("flowAdmissionRefusal(flowId, repoRoot, surface)"));
+  assert.ok(sidecarSource.includes('assertAdmissibleFlow(flowId, findRepoRootFromDir(dir), "ensure-session --flow-id")'));
+  assert.ok(sidecarSource.includes('assertAdmissibleFlow(flow, repoRoot, "advance-state --flow-definition")'));
   assert.ok(/isCanonicalRunFlowId\(entry\.flowId, /.test(sidecarSource));
   // The pair is gone as a THING, not merely as a spelling in this file: the module that owned
   // the capability no longer exports it, so nothing can import it back. (A source-text assertion

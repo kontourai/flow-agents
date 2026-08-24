@@ -65,7 +65,10 @@ function fixtureFlow(id, expectations = ["probe-readiness", "probe-record"]) {
     id,
     version: "1.0",
     steps: [{ id: "probe", next: "closeout" }, { id: "closeout", next: null }],
-    phase_map: { probe: "probe", closeout: "done" },
+    // "done" here was a real fixture defect the #1316 review FIX-4 contract floor caught: the
+    // definition declares no `done` step, so advance-state --phase closeout would have published
+    // an active_step_id nothing can resolve. Nothing had ever checked a phase_map value.
+    phase_map: { probe: "probe", closeout: "closeout" },
     gates: {
       "probe-gate": {
         step: "probe",
