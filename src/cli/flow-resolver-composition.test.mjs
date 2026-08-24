@@ -581,3 +581,40 @@ test("required list contributions block the aggregate parent for missing, failed
     else process.env.FLOW_AGENTS_FLOW_DEFS_DIR = prior;
   }
 });
+
+// ─── #1335: gateless sequencing passthroughs, as a pure derivation ────────────────────────────
+//
+// The runtime seam is exercised end to end in builder-flow-runtime.test.mjs against
+// `builder.build-lean`. These cases pin the TRAVERSAL RULE itself against synthetic shapes no
+// shipped flow has — a chain of passthroughs, a cycle, a dead end, a dangling cursor — so the rule
+// is proven by something other than the flows that happen to exist today.
+import { actionableFlowStepId } from "../../build/src/lib/flow-resolver.js";
+
+test("#1335 actionableFlowStepId walks to the first gated step and refuses when there is none", () => {
+  const gated = (step) => ({ step, expects: [] });
+
+  // A step that gates something is its own answer — the case every existing flow takes.
+  assert.equal(actionableFlowStepId({ steps: [{ id: "a", next: null }], gates: { g: gated("a") } }, "a"), "a");
+
+  // One passthrough, then several in a row.
+  const chain = {
+    steps: [{ id: "a", next: "b" }, { id: "b", next: "c" }, { id: "c", next: "d" }, { id: "d", next: null }],
+    gates: { "a-gate": gated("a"), "d-gate": gated("d") },
+  };
+  assert.equal(actionableFlowStepId(chain, "b"), "d", "a run parked on the first of two passthroughs works toward d");
+  assert.equal(actionableFlowStepId(chain, "c"), "d");
+  assert.equal(actionableFlowStepId(chain, "a"), "a", "a gated cursor never walks");
+
+  // A chain that runs out without ever reaching a gate is UNADVANCEABLE, and must say so rather
+  // than return the last step — the caller's refusal is the only honest outcome.
+  assert.equal(actionableFlowStepId({ steps: [{ id: "a", next: "b" }, { id: "b", next: null }], gates: { "a-gate": gated("a") } }, "b"), null);
+
+  // A cycle of gateless steps terminates instead of spinning.
+  assert.equal(actionableFlowStepId({ steps: [{ id: "a", next: "b" }, { id: "b", next: "a" }], gates: {} }, "a"), null);
+
+  // Malformed or unknown input fails closed.
+  assert.equal(actionableFlowStepId(chain, "nope"), null);
+  assert.equal(actionableFlowStepId(null, "a"), null);
+  assert.equal(actionableFlowStepId({}, "a"), null);
+  assert.equal(actionableFlowStepId(chain, ""), null);
+});
