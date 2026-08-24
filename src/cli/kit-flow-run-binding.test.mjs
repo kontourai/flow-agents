@@ -148,16 +148,18 @@ function runSidecar(args, cwd, env = {}) {
 
 // ─── The builder regression, stated first ────────────────────────────────────────────────────
 
-test("the derived canonical run set is exactly what the hardcoded pair enumerated", () => {
+test("the derived canonical run set is exactly what the declaring kit binds", () => {
   // #1315 shipped `CANONICAL_RUN_FLOW_IDS = [builder.build, builder.shape]`. #1316 derives the
-  // set from what each declaring kit binds. This asserts the derivation lands on the SAME set for
-  // the packaged tree — not because those two ids are special-cased, but because they are the
-  // only packaged flows whose kit supplies a producer binding for every gate expectation.
-  assert.deepEqual(canonicalRunFlowIds(), ["builder.build", "builder.shape"]);
-  assert.equal(isCanonicalRunFlowId("builder.build"), true);
-  assert.equal(isCanonicalRunFlowId("builder.shape"), true);
-  assert.equal(canonicalRunFlowRefusal("builder.build"), null);
-  assert.equal(canonicalRunFlowRefusal("builder.shape"), null);
+  // set from what each declaring kit binds. The derivation is what made a kit-declared gate-set
+  // VARIANT runnable with no core change, and the builder kit now ships one: `builder.build-lean`
+  // (#1280's ablation). Its presence here is the proof the set is derived rather than enumerated —
+  // no core file was edited to make it runnable — and the original pair is still exactly as
+  // runnable as before, because nothing about it is special-cased.
+  assert.deepEqual(canonicalRunFlowIds(), ["builder.build", "builder.build-lean", "builder.shape"]);
+  for (const flowId of ["builder.build", "builder.build-lean", "builder.shape"]) {
+    assert.equal(isCanonicalRunFlowId(flowId), true, `${flowId} must be canonically runnable`);
+    assert.equal(canonicalRunFlowRefusal(flowId), null, `${flowId} must have no run refusal`);
+  }
 
   // The packaged extension flow is DECLARED but composed into another flow rather than started,
   // so it supplies no producer bindings of its own and stays unrunnable — the honest answer, and

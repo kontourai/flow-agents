@@ -1,13 +1,18 @@
 import fs from "node:fs";
 import * as path from "node:path";
-import { sameStringSet, type KitFlowStepActionEntry } from "./action-metadata.js";
+import { sameStringSet, skillRoleFlowIds, type KitFlowStepActionEntry } from "./action-metadata.js";
 
-type SkillRoleEntry = { skill_id: string; role: string; flow_id?: string; step_ids: string[]; expectation_ids: string[]; artifacts: string[] };
+type SkillRoleEntry = { skill_id: string; role: string; flow_id?: string; flow_ids?: string[]; step_ids: string[]; expectation_ids: string[]; artifacts: string[] };
 type FlowExpectation = { id: string; exportKeys: Set<string>; sourceFlowId: string };
 type RouteBackMetadata = { onRouteBack: Map<string, string>; routeBackPolicy?: { maxAttempts: number; onExceeded: string } };
 type FlowMetadata = { steps: Set<string>; expectationsByStep: Map<string, Map<string, FlowExpectation>>; gateCountByStep: Map<string, number>; routeBackByStep: Map<string, RouteBackMetadata[] | undefined>; gateIds: Set<string>; usesFlowIdsByStep: Map<string, string[]>; listCompositionSteps: Set<string>; invalidCompositionSteps: Set<string>; exports: Set<string> };
 type EffectiveFlowStep = { sourceFlowId: string; stepId: string; expectations: Map<string, FlowExpectation>; flowIds: Set<string>; gateCount: number; routeBack?: RouteBackMetadata };
 const MAX_FLOW_DEFINITION_BYTES = 1_048_576;
+
+/** True when any flow the role binds contributes to this composed step. */
+function servesRole(effective: EffectiveFlowStep | undefined, roleFlowIds: string[]): boolean {
+  return effective !== undefined && roleFlowIds.some((flowId) => effective.flowIds.has(flowId));
+}
 
 export function validateActionRepositoryMetadata(input: {
   kitDir: string;
@@ -34,7 +39,8 @@ function validateSkillArtifactOwnership(actions: KitFlowStepActionEntry[], roles
   for (const row of roles) {
     if (row.role !== "step" || !row.flow_id) continue;
     const shortId = row.skill_id.replace(prefix, "");
-    const declared = actions.flatMap((action) => resolve(action.flow_id, action.step_id)?.flowIds.has(row.flow_id!)
+    const roleFlowIds = skillRoleFlowIds(row);
+    const declared = actions.flatMap((action) => servesRole(resolve(action.flow_id, action.step_id), roleFlowIds)
       && row.step_ids.includes(action.step_id)
       && action.skills.includes(shortId)
       ? action.artifacts
@@ -219,13 +225,15 @@ function validateCompositionCompatibility(flows: Map<string, FlowMetadata>, reso
 }
 
 function validateRoleReferences(roles: SkillRoleEntry[], flows: Map<string, FlowMetadata>, resolve: ReturnType<typeof effectiveStepResolver>, manifestPath: string, errors: string[]): void {
-  for (const row of roles) {
-    if (!row.flow_id) continue;
-    const flow = flows.get(row.flow_id);
-    if (!flow) { errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown flow '${row.flow_id}'`); continue; }
-    for (const stepId of row.step_ids) if (!flow.steps.has(stepId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown step '${row.flow_id}/${stepId}'`);
-    const allowed = new Set(row.step_ids.flatMap((stepId) => [...(resolve(row.flow_id!, stepId)?.expectations.keys() ?? [])]));
-    for (const expectationId of row.expectation_ids) if (!allowed.has(expectationId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' expectation '${expectationId}' is not owned by its bound step(s)`);
+  // Every flow the role claims is checked, not merely the primary one: an unchecked additional
+  // binding is a producer claim nothing validates, which is the whole class of defect the
+  // owner-cardinality rule below exists to prevent.
+  for (const row of roles) for (const rowFlowId of skillRoleFlowIds(row)) {
+    const flow = flows.get(rowFlowId);
+    if (!flow) { errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown flow '${rowFlowId}'`); continue; }
+    for (const stepId of row.step_ids) if (!flow.steps.has(stepId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown step '${rowFlowId}/${stepId}'`);
+    const allowed = new Set(row.step_ids.flatMap((stepId) => [...(resolve(rowFlowId, stepId)?.expectations.keys() ?? [])]));
+    for (const expectationId of row.expectation_ids) if (!allowed.has(expectationId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' expectation '${expectationId}' is not owned by its bound step(s) in '${rowFlowId}'`);
   }
 }
 
@@ -233,8 +241,10 @@ function seedSkillOwners(roles: SkillRoleEntry[], resolve: ReturnType<typeof eff
   const owners = new Map<string, string[]>();
   for (const row of roles) {
     if (row.role !== "step" || !row.flow_id) continue;
-    for (const stepId of row.step_ids) {
-      const effective = resolve(row.flow_id, stepId);
+    // One owner entry per (bound flow, step, expectation). Cardinality stays per flow, so a role
+    // serving two flows is one producer in each rather than two producers in either.
+    for (const rowFlowId of skillRoleFlowIds(row)) for (const stepId of row.step_ids) {
+      const effective = resolve(rowFlowId, stepId);
       if (!effective) continue;
       for (const expectationId of row.expectation_ids) if (effective.expectations.has(expectationId)) {
         const key = `${effective.expectations.get(expectationId)?.sourceFlowId ?? effective.sourceFlowId}\0${effective.stepId}\0${expectationId}`;
@@ -256,21 +266,27 @@ function validateActions(actions: KitFlowStepActionEntry[], roles: SkillRoleEntr
     if (!sameStringSet(action.expectation_ids, [...effective.expectations.keys()])) errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' expectation_ids must exactly equal its resolved Flow expectation set`);
     for (const skill of action.skills) {
       const row = roleByShortId.get(skill);
-      if (!row || row.role !== "step" || !row.flow_id || !effective.flowIds.has(row.flow_id) || !row.step_ids.includes(action.step_id)) errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' skill '${skill}' must match one step-role binding`);
+      if (!row || row.role !== "step" || !row.flow_id || !servesRole(effective, skillRoleFlowIds(row)) || !row.step_ids.includes(action.step_id)) errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' skill '${skill}' must match one step-role binding`);
     }
     for (const expectationId of effective.expectations.keys()) {
       const binding = action.expectation_bindings.find((entry) => entry.expectation_id === expectationId);
       if (binding?.interface !== "operation") continue;
       const key = `${effective.expectations.get(expectationId)?.sourceFlowId ?? effective.sourceFlowId}\0${effective.stepId}\0${expectationId}`;
-      owners.set(key, [...(owners.get(key) ?? []), `operation:${action.flow_id}/${action.step_id}`]);
+      // The owner is the OPERATION, not the composing step that named it. An extension flow
+      // (`uses_flow`) is composed into every parent that reuses it, so keying by parent counted
+      // one producer once per parent — two parents binding the SAME operation looked like two
+      // producers of one expectation. Two parents binding DIFFERENT operations still does, which
+      // is the case this rule exists to catch.
+      owners.set(key, [...(owners.get(key) ?? []), `operation:${binding.operation ?? `${action.flow_id}/${action.step_id}`}`]);
     }
   }
 }
 
 function validateOwnerCardinality(flows: Map<string, FlowMetadata>, owners: Map<string, string[]>, manifestPath: string, errors: string[]): void {
   for (const [flowId, flow] of flows) for (const [stepId, expectations] of flow.expectationsByStep) for (const expectationId of expectations.keys()) {
-    const found = owners.get(`${flowId}\0${stepId}\0${expectationId}`) ?? [];
-    if (found.length !== 1) errors.push(`${manifestPath}: flow expectation '${flowId}/${stepId}/${expectationId}' must have exactly one producer owner; found ${found.length}`);
+    // DISTINCT owners: the same producer reached through two composition paths is one producer.
+    const found = [...new Set(owners.get(`${flowId}\0${stepId}\0${expectationId}`) ?? [])];
+    if (found.length !== 1) errors.push(`${manifestPath}: flow expectation '${flowId}/${stepId}/${expectationId}' must have exactly one producer owner; found ${found.length}${found.length > 1 ? ` (${found.join(", ")})` : ""}`);
   }
 }
 
