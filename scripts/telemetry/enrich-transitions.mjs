@@ -94,7 +94,7 @@ function parseArgs(argv) {
  * foreign or half-written line survives the rewrite unchanged rather than being
  * re-serialized (or dropped) by a tool that does not understand it.
  */
-function readLog(file) {
+export function readLog(file) {
   const lines = [];
   const transitions = [];
   let unparseable = 0;
