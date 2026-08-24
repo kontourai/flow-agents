@@ -22,7 +22,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/evals/lib/node.sh"
 
-TMP="$(cd "$(mktemp -d)" && pwd -P)"
+TMP="$(mktemp -d)"
+[[ -n "$TMP" && -d "$TMP" ]] || { echo "test_kit_identity_trust: mktemp -d failed" >&2; exit 1; }
 errors=0
 
 _pass() { echo "  ✓ $1"; }
@@ -30,6 +31,15 @@ _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
+
+# Canonicalize only AFTER the cleanup trap is armed, and via a separate variable, so a failure
+# here still cleans up the directory mktemp actually created. This script runs under
+# `set -uo pipefail` with no `-e`, so assigning the result directly would leave TMP set-but-empty
+# on failure and silently turn every "$TMP/..." path filesystem-root-relative. macOS mktemp hands
+# back a /var/folders path beneath a symlinked /var, and the kit source roots the admission rule
+# compares are realpaths, so the fixture project roots below must be realpaths too.
+TMP_CANONICAL="$(cd "$TMP" && pwd -P)" || { echo "test_kit_identity_trust: could not canonicalize $TMP" >&2; exit 1; }
+TMP="$TMP_CANONICAL"
 
 # ─── Fixture kit writer (#1330) ──────────────────────────────────────────────────────────────
 #
