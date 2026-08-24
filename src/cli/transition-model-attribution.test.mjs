@@ -636,4 +636,13 @@ test("--reattribute recomputes the model dimension onto records a prior pass lef
     Object.fromEntries(again.models_observed.map((entry) => [entry.model, entry.transitions])),
     EXPECTED.models,
   );
+
+  // And a plain re-run over the NOW-enriched log reports zero un-examined records —
+  // the counter is "carries no model block", not "was skipped this pass", or an
+  // idempotent second pass would report every measured record as unmeasured.
+  const idempotent = JSON.parse(
+    execFileSync(process.execPath, [ENRICHER, "--transitions", file, "--transcript", TURNS, "--json"], { encoding: "utf8" }),
+  );
+  assert.equal(idempotent.newly_examined, 0, "a second pass examines nothing");
+  assert.equal(idempotent.models_not_enriched, 0, "and finds nothing un-examined for a model");
 });

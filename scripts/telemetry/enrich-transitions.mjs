@@ -246,10 +246,12 @@ export function enrich({ lines, transitions, transcripts, reattribute = false })
       model_granularity: MODEL_GRANULARITY,
       transitions_with_model: withModel,
       transitions_without_model: withoutModel,
-      // Records this pass did not examine for a model at all — enriched by a pre-#1327
-      // build, so their token attribution is preserved and skipped. NOT "no model was
-      // found": nothing looked. `--reattribute` recomputes them.
-      models_not_enriched: preserved.size,
+      // Records that carry NO model attribution after this pass — skipped as already
+      // token-attributed by a pre-#1327 build, so nothing has ever looked at their
+      // model. NOT "no model was found": a preserved record that already carries a
+      // model block is not counted here, or an idempotent re-run would report every
+      // measured record as unmeasured. `--reattribute` recomputes them.
+      models_not_enriched: [...preserved].filter((record) => !record[MODEL_ATTRIBUTION_FIELD]).length,
       turns_reporting_no_model: attribution.turnsReportingNoModel,
       // What was actually observed, so a caller can see the mix rather than trust a
       // headline count. Never a default and never a total.
