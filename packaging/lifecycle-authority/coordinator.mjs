@@ -140,14 +140,6 @@ const MERGE_CHANGE_AUTHORIZATION_FIELDS = [
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * #1307: this was the THIRD independent encoding of the route-map contract (after #1300's in
- * merge-change and the static eval's). The semantic requirement is that the refresh entries are
- * PRESENT with the bounded blocking policy; additional repair routes (implementation_defect)
- * and the #1302 requires_current_verification declaration are the flow definition's business.
- * Exported as a pure predicate so conformance tests drive it with the real shipped definition
- * rather than grepping this file's text.
- */
-/**
  * The single gate a definition declares as requiring CURRENT verification — the freshness
  * turnstile that a provisional delivery exists to satisfy, and the one merge-change requires
  * evidence-refresh control on.
@@ -164,6 +156,14 @@ export function freshnessTurnstileGateEntry(definition) {
     .filter(([, gate]) => record(gate) && gate.requires_current_verification === true);
   return matches.length === 1 ? { id: matches[0][0], gate: matches[0][1] } : null;
 }
+/**
+ * #1307: this was the THIRD independent encoding of the route-map contract (after #1300's in
+ * merge-change and the static eval's). The semantic requirement is that the refresh entries are
+ * PRESENT with the bounded blocking policy; additional repair routes (implementation_defect)
+ * and the #1302 requires_current_verification declaration are the flow definition's business.
+ * Exported as a pure predicate so conformance tests drive it with the real shipped definition
+ * rather than grepping this file's text.
+ */
 export function mergeReadyCiRefreshRoutesSatisfied(gate) {
   if (!record(gate)) return false;
   const routes = gate.on_route_back;

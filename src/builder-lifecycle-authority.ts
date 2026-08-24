@@ -167,9 +167,10 @@ export interface ProvisionalDeliveryAuthorization {
   provider_record_id: string;
   provider_observation_sha256: string;
   /** #1336: the flow the run is actually bound to. Was pinned to one literal, which made every
-   *  kit-declared flow unable to request the operation at all. The binding that matters is checked
-   *  against the run: `flow_step_id` must name a step whose declaring kit binds workflow.critique,
-   *  and the external coordinator additionally requires `definition.id === flow_definition_id`. */
+   *  kit-declared flow unable to request provisional delivery at all. This type carries no step id;
+   *  what binds it is checked elsewhere — the coordinator requires `definition.id ===
+   *  flow_definition_id` AND that the run is held at the gate its definition declares
+   *  `requires_current_verification`, which is the gate provisional delivery exists to unblock. */
   flow_definition_id: string;
   flow_definition_version: string;
   flow_definition_digest: string;

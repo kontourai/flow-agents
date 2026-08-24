@@ -387,8 +387,11 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
  */
 function currentFreshnessTurnstileGate(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): JsonRecord | null {
   const gates = openGates(inspected.run.definition, inspected.run.state) as JsonRecord[];
-  const turnstile = gates.filter((gate) => gate?.requires_current_verification === true && typeof gate?.id === "string");
-  return turnstile.length === 1 ? turnstile[0]! : null;
+  // The "exactly one current gate" invariant the request path asserted separately is kept here,
+  // not merely implied: a step that somehow opened two gates must refuse rather than have the
+  // turnstile picked out of the pair.
+  if (gates.length !== 1 || typeof gates[0]?.id !== "string") return null;
+  return gates[0]!.requires_current_verification === true ? gates[0]! : null;
 }
 
 function assertDeliveryPublicationEligibility(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, kind: DeliveryPublicationKind): void {
