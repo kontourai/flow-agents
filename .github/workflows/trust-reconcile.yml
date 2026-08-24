@@ -27,10 +27,16 @@
 # The agent cannot self-declare success here: it cannot modify the CI environment,
 # pre-disable this job, or post-forge results after the check runs.
 #
-# ADVISORY PHASE: this workflow runs and reports but is not currently a required
-# status check on main. A failure remains visible without blocking merge while the
-# trust workflow is being productionized. Arming it later requires a server-side
-# branch-protection change; editing this file alone cannot make it required.
+# ARMED (2026-08-24): this workflow is a REQUIRED status check on main, alongside
+# Source and Static, Workflow Contracts, Runtime and Kit and Integration Coverage.
+# A failure blocks merge. Requiredness lives in server-side branch protection, not
+# here; editing this file alone can neither arm nor disarm it.
+#
+# Arming basis: the preceding 24 consecutive main commits all passed this lane, so
+# requiring it blocked nothing that was already being delivered — it only removes the
+# window in which a change could merge with its delivery evidence unreconciled. That
+# window was not hypothetical: #1329 merged through it on 2026-08-24 with this lane
+# red, because an armed auto-merge fires on the required set alone.
 #
 # Additive — NOT a gate-hook change. Does not modify scripts/hooks/*, kits/knowledge,
 # or continue-work. Mirrors the structure of .github/workflows/ci.yml.
