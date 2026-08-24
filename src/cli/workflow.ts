@@ -3229,7 +3229,9 @@ function doctor(argv: string[]): number {
   const staleInstall = installedVersion !== null && installedVersion !== cliVersion;
   const activeKitIds = Array.isArray(install?.active_kit_ids) ? install.active_kit_ids.map(String) : (installedKit ? ["builder"] : []);
   const runtime = typeof install?.runtime === "string" ? install.runtime : "base";
-  const remediation = pinnedFlowAgentsCommand(cliVersion, ["init", "--runtime", runtime, "--dest", projectRoot, ...activeKitIds.flatMap((id) => ["--activate-kit", id]), "--yes"]);
+  // #1288: never recommend the bare (destructive) init command -- the remedy previews with
+  // --dry-run first; the dry-run output itself explains how to apply (and when --force is needed).
+  const remediation = pinnedFlowAgentsCommand(cliVersion, ["init", "--runtime", runtime, "--dest", projectRoot, ...activeKitIds.flatMap((id) => ["--activate-kit", id]), "--yes", "--dry-run"]);
   const localDependencyFile = path.join(projectRoot, "node_modules", "@kontourai", "flow-agents", "package.json");
   const localDependency = readOptionalJson(localDependencyFile);
   const installIntegrity = verifyInstalledAssets(projectRoot, packageRoot, runtime);

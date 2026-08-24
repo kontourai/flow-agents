@@ -1345,6 +1345,8 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(observedCommandsMeta && observedCommandsMeta.length > 0 ? { observed_commands: observedCommandsMeta } : {}),
       ...(verificationWorkspaceSnapshotMeta ? { verification_workspace_snapshot: verificationWorkspaceSnapshotMeta } : {}),
       ...(acceptanceContractMeta ? { acceptance_contract: acceptanceContractMeta } : {}),
+      ...(Array.isArray(check._acceptance_contract_history) && check._acceptance_contract_history.length > 0
+        ? { acceptance_contract_history: check._acceptance_contract_history } : {}),
     };
 
     // A multi-command gate claim has one check but multiple real executions. Preserve each
@@ -4949,6 +4951,7 @@ function checksFromBundle(dir: string): AnyObj[] {
     const md = claim.metadata as AnyObj;
     if (md && typeof md.acceptance_contract === "object" && !Array.isArray(md.acceptance_contract)) {
       check._acceptance_contract = md.acceptance_contract;
+      if (Array.isArray(md.acceptance_contract_history)) check._acceptance_contract_history = md.acceptance_contract_history;
     }
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
@@ -5084,7 +5087,7 @@ function acceptanceContract(criteria: AnyObj[]): AnyObj {
   };
 }
 
-function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; critiques: AnyObj[] } {
+function readBundleState(dir: string, options: { reanchoringPlanContract?: boolean } = {}): { checks: AnyObj[]; criteria: AnyObj[]; critiques: AnyObj[] } {
   const acceptance = loadJson(path.join(dir, "acceptance.json"));
   const bundledCriteria = criteriaFromBundle(dir);
   const acceptedCriteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
@@ -5097,7 +5100,14 @@ function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; c
   }
   const checks = checksFromBundle(dir);
   const plannedContract = checks.find((check) => check._gate_claim_expectation_id === "implementation-plan")?._acceptance_contract;
-  if (plannedContract) {
+  // #1312: the refusal below PRESCRIBES revising criteria "through a provenance-bearing planning
+  // operation" — which is recording implementation-plan (pass), the write that snapshots the
+  // amended acceptance.json into the superseding claim's _acceptance_contract. That write calls
+  // THIS function before it can re-anchor, so without the exemption the guard forbids the exact
+  // operation its own message names (found live by run kontourai-flow-agents-1304). The caller
+  // asserts the legitimacy conditions (implementation-plan + pass + cursor at the plan step);
+  // every other write keeps the strict stale-anchor check.
+  if (plannedContract && !options.reanchoringPlanContract) {
     const currentContract = acceptanceContract(acceptedCriteria);
     if (plannedContract.version !== currentContract.version
       || plannedContract.algorithm !== currentContract.algorithm
@@ -5858,6 +5868,24 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     const acceptance = loadJson(path.join(dir, "acceptance.json"));
     const criteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
     check._acceptance_contract = acceptanceContract(criteria);
+    // #1312 review: an amendment must stay AUDITABLE. mergeChecksById replaces the prior plan
+    // claim, which would silently drop contract A — carry the full predecessor chain forward as
+    // an append-only history so an amendment is always distinguishable from a first anchor
+    // (a criteria swap that rides a re-record leaves its predecessor's digest, contents, actor,
+    // and timestamp in the surviving claim).
+    const priorPlan = checksFromBundle(dir).find((prior) => prior._gate_claim_expectation_id === "implementation-plan");
+    const priorContract = priorPlan?._acceptance_contract as AnyObj | undefined;
+    if (priorContract && priorContract.digest !== (check._acceptance_contract as AnyObj).digest) {
+      const priorHistory = Array.isArray(priorPlan?._acceptance_contract_history) ? priorPlan!._acceptance_contract_history as AnyObj[] : [];
+      check._acceptance_contract_history = [...priorHistory, {
+        predecessor: priorContract,
+        superseded_at: ts,
+        superseded_by_actor: gateClaimActorKey,
+        reason: summary,
+      }];
+    } else if (Array.isArray(priorPlan?._acceptance_contract_history)) {
+      check._acceptance_contract_history = priorPlan!._acceptance_contract_history;
+    }
   }
 
   // Include structured evidence refs if provided
@@ -5923,7 +5951,9 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // in the bundle on every gate-claim write (the 21-claims-to-1 wipe). A gate claim against the
   // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
   // gate claim against a different expectation is additive.
-  const _existingState = readBundleState(dir);
+  const _existingState = readBundleState(dir, {
+    reanchoringPlanContract: targetExpectation.id === "implementation-plan" && statusVal === "pass",
+  });
   const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot) : _existingState.criteria;
   if (mustRunTests) {
     const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
