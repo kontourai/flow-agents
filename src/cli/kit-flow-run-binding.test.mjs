@@ -460,3 +460,51 @@ test("a gate claim recorded under one definition cannot be rebuilt into a sessio
     fs.rmSync(project, { recursive: true, force: true });
   }
 });
+
+test("every door enforces admission: the sidecar REFUSES a flow with no canonical run binding", () => {
+  // The finding this closes: `workflow start` refusing is a property of that DOOR, not of the
+  // system. The installed sidecar is a binary on PATH, and `ensure-session --flow-id <anything>`
+  // reached the same artifacts by another route — writing session/current state for a flow that
+  // could never be pinned or satisfy a gate. This test is the discriminator that a warn-instead-
+  // of-refuse regression (the exact pre-fix behavior) reds: an uncaught injection here previously
+  // proved the enforcement was untested, not that it was absent.
+  const project = makeProject("kit-admission-", {
+    // A manifest that declares a flow but supplies NO producer binding for its expectations, so
+    // the run adapter cannot bind it: admissible-looking, unrunnable.
+    gapkit: {
+      manifest: {
+        schema_version: "1.0",
+        id: "gapkit",
+        name: "gapkit",
+        flows: [{ id: "gapkit.probe", path: "flows/probe.flow.json", description: "declared but unbindable" }],
+      },
+      flows: { probe: fixtureFlow("gapkit.probe") },
+    },
+  });
+  try {
+    const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+    const refused = runSidecar([
+      "ensure-session", "--artifact-root", artifactRoot,
+      "--work-item", "acme/widgets#41", "--flow-id", "gapkit.probe",
+      "--source-request", "admission fixture", "--summary", "admission fixture",
+    ], project);
+    assert.notEqual(refused.status, 0, "the sidecar must REFUSE a flow with no canonical run binding, not warn and proceed");
+    const output = refused.stderr + refused.stdout;
+    assert.match(output, /gapkit\.probe/, "the refusal names the flow the caller typed");
+    // and it must leave nothing behind: no session dir, no active pointer for a flow nothing pins
+    const sessionDir = path.join(artifactRoot, "acme-widgets-41");
+    assert.equal(fs.existsSync(sessionDir), false, "a refused admission must write no session directory");
+    assert.equal(fs.existsSync(path.join(artifactRoot, "current.json")), false, "a refused admission must publish no active pointer");
+
+    // Control: the same door admits a flow whose kit DOES supply the bindings — proving the
+    // refusal above is the admission rule discriminating, not the fixture failing to start.
+    const admitted = runSidecar([
+      "ensure-session", "--artifact-root", artifactRoot,
+      "--work-item", "acme/widgets#42", "--flow-id", "builder.build",
+      "--source-request", "admission fixture", "--summary", "admission fixture",
+    ], project);
+    assert.equal(admitted.status, 0, `a fully-bound flow must still be admitted: ${admitted.stderr}`);
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
