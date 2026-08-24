@@ -13,7 +13,7 @@ import {
 import { isMeaningfulTestCommand, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 
 function fixture({ duplicate = false, counts = { executed: 1, passed: 1, failed: 0, infrastructureErrors: 0 }, manifest = true } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-coordinated-receipt-"));
+  const root = makeFixtureDir("flow-agents-coordinated-receipt-");
   fs.mkdirSync(path.join(root, "scripts"), { recursive: true });
   const packageJson = {
     scripts: { "full:regression": "node scripts/receipt-coordinator.mjs request full-regression" },
@@ -26,6 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 const root = process.cwd();
 const stable = (value) => Array.isArray(value) ? "[" + value.map(stable).join(",") + "]" : value && typeof value === "object" ? "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + stable(value[key])).join(",") + "}" : JSON.stringify(value);
 const digest = (value) => createHash("sha256").update(value).digest("hex");
@@ -80,7 +81,7 @@ test("an overwritten coordinator cannot replay an old committed receipt through 
   assert.doesNotThrow(() => observeCoordinatedCommandReceipt(binding, root, original));
   const summary = original.output.slice(original.output.indexOf("{"));
   fs.writeFileSync(path.join(root, "scripts/receipt-coordinator.mjs"), `console.log(${JSON.stringify(summary.trim())});\n`);
-  const shim = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-fake-git-"));
+  const shim = makeFixtureDir("flow-agents-fake-git-");
   const invoked = path.join(shim, "invoked");
   const fakeGit = path.join(shim, "git");
   fs.writeFileSync(fakeGit, `#!/bin/sh\ntouch ${JSON.stringify(invoked)}\nprintf 'forged\\n'\n`);

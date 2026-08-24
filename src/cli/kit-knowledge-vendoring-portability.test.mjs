@@ -7,6 +7,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { main as kitMain } from "../../build/src/cli/kit.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const KNOWLEDGE_SCHEMA_FILES = [
   "context-check-input.schema.json",
@@ -28,7 +29,7 @@ test("Knowledge Kit ships exact copies of its canonical root schemas", () => {
 });
 
 function tempRoot(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return makeFixtureDir(prefix);
 }
 
 test("supported install keeps Knowledge Kit schemas self-contained and every declared eval runnable", async () => {

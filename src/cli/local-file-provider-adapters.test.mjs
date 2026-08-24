@@ -16,9 +16,10 @@ import {
   createLocalFileAssignmentProvider as createLocalFileAssignmentProviderFromPackageRoot,
   createLocalFileMutationProvider as createLocalFileMutationProviderFromPackageRoot,
 } from "@kontourai/flow-agents";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 function withTempDir(run) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "provider-interfaces-adapter-"));
+  const dir = makeFixtureDir("provider-interfaces-adapter-");
   try {
     const result = run(dir);
     fs.rmSync(dir, { recursive: true, force: true });
@@ -227,7 +228,7 @@ test("CLI list filters on canonical actor_key for explicit-override records (#77
   const { fileURLToPath } = await import("node:url");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const cli = path.resolve(here, "..", "..", "build", "src", "cli", "assignment-provider.js");
-  const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), "fa3-cli-list-"));
+  const artifactRoot = makeFixtureDir("fa3-cli-list-");
   // An explicit-override record whose stored actor_key deliberately diverges from
   // serializeActor(actor) — the exact shape the pre-fix CLI list() failed to match.
   const record = {

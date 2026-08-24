@@ -40,6 +40,7 @@ import {
 } from "../../build/src/builder-flow-run-adapter.js";
 import { resolveKitFlowBinding, resolveKitGateProducer, kitFlowSourceRoots } from "../../build/src/lib/kit-flow-binding.js";
 import { startBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -121,7 +122,7 @@ function completeKitManifest(kitId, flowName, expectations = ["probe-readiness",
 
 /** A project tree containing `kits/<kitId>/` for each supplied kit. */
 function makeProject(prefix, kits) {
-  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const project = fs.realpathSync(makeFixtureDir(prefix));
   spawnSync("git", ["init", "-q", "."], { cwd: project });
   spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });
   for (const [kitId, { manifest, flows }] of Object.entries(kits)) {
@@ -312,7 +313,7 @@ test("#1314: a symlinked artifact root is refused for a kit flow exactly as for 
   const project = makeProject("kit-root-", {
     acme: { manifest: completeKitManifest("acme", "probe"), flows: { probe: fixtureFlow("acme.probe") } },
   });
-  const elsewhere = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kit-root-target-")));
+  const elsewhere = fs.realpathSync(makeFixtureDir("kit-root-target-"));
   try {
     // `<project>/.kontourai` is a symlink to a directory outside the project.
     fs.mkdirSync(path.join(elsewhere, "flow-agents"), { recursive: true });

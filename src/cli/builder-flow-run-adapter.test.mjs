@@ -29,6 +29,7 @@ import {
   RUN_CORRELATION_IDENTITY_KEYS,
   createRunCorrelationEnvelope,
 } from "../../build/src/run-correlation.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const BUILDER_BUILD_DEFINITION = path.join(REPO_ROOT, "kits/builder/flows/build.flow.json");
@@ -38,7 +39,7 @@ const FOREIGN_SUBJECT = "flow-agents#178";
 const FIXTURE_NOW = "2026-07-09T20:00:00.000Z";
 
 function makeWorkspace() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-flow-"));
+  return makeFixtureDir("flow-agents-builder-flow-");
 }
 
 function runCorrelation(runId, subject = SUBJECT) {

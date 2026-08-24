@@ -6,9 +6,10 @@ import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 
 import { bootstrapProviders, detectGitHubRepo, setProviderBootstrapTestHooksForTest } from "../../build/src/cli/provider-bootstrap.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 function repoFixture(owner = "example", name = "product") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-repo-"));
+  const root = makeFixtureDir("provider-bootstrap-repo-");
   execFileSync("git", ["init", "-q", root]);
   execFileSync("git", ["-C", root, "remote", "add", "origin", `git@github.com:${owner}/${name}.git`]);
   return root;
@@ -242,7 +243,7 @@ test("incompatible provider pickup rejects before settings or online provider co
     actor: { actorKey: "different-actor" },
     claim: { record: { claimed_at: "2026-07-25T00:00:00.000Z" } },
   })}\n`);
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-rejection-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-rejection-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 1\n`);
@@ -274,7 +275,7 @@ test("pickup transaction rejects an injected race before remote commands and pre
   const settings = path.join(repo, "context", "settings");
   const session = path.join(repo, ".kontourai", "flow-agents", "example-product-44");
   const conflictingActor = path.join(session, "provider-pickup.actor.json");
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-race-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-race-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 1\n`);
@@ -343,7 +344,7 @@ test("provider pickup rejects a branch change by the remote label callback befor
   const repo = repoFixture();
   execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
   const settings = path.join(repo, "context", "settings");
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-branch-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-branch-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
@@ -429,7 +430,7 @@ test("pickup transaction restores exact local preimages when commit fails after 
   const settings = path.join(repo, "context", "settings");
   bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
   const before = snapshotTree(path.join(repo, "context"));
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-commit-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-commit-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
@@ -573,7 +574,7 @@ test("bootstrap, public workflow start, and sidecar share the GitHub Work Item r
 
 test("global bootstrap replaces only the matching repository entry", () => {
   const repo = repoFixture();
-  const settings = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-global-"));
+  const settings = makeFixtureDir("provider-bootstrap-global-");
   const file = path.join(settings, "assignment-provider-settings.json");
   fs.writeFileSync(file, JSON.stringify({
     schema_version: "1.0",
@@ -602,8 +603,8 @@ test("global bootstrap replaces only the matching repository entry", () => {
 test("global bootstrap serializes the full read-modify-write transaction", async () => {
   const repoA = repoFixture("example", "product-a");
   const repoB = repoFixture("example", "product-b");
-  const settings = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-serialized-"));
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-lock-gh-"));
+  const settings = makeFixtureDir("provider-bootstrap-serialized-");
+  const fakeBin = makeFixtureDir("provider-bootstrap-lock-gh-");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
 set -euo pipefail
@@ -662,7 +663,7 @@ test("bootstrap refuses to follow an existing settings symlink", () => {
 
 test("project bootstrap rejects a settings parent symlink that escapes the repository", () => {
   const repo = repoFixture();
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-parent-symlink-"));
+  const outside = makeFixtureDir("provider-bootstrap-parent-symlink-");
   fs.symlinkSync(outside, path.join(repo, "context"));
   assert.throws(() => bootstrapProviders({
     scope: "project",
@@ -875,7 +876,7 @@ test("online bootstrap verifies auth, discovers a sole project, and creates a mi
   const assignment = read(assignmentFile);
   assignment.projects[0].policy.label_name = "-automation";
   fs.writeFileSync(assignmentFile, JSON.stringify(assignment));
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
@@ -1141,7 +1142,7 @@ test("universal bundles do not contain Flow Agents dogfood provider bindings", (
       assert.equal(fs.existsSync(path.join("dist", runtime, "context", "settings", name)), false, `${runtime}/${name}`);
     }
   }
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-kiro-upgrade-"));
+  const dest = makeFixtureDir("provider-bootstrap-kiro-upgrade-");
   const consumerSettings = path.join(dest, "context", "settings", "backlog-provider-settings.json");
   const consumerBytes = '{"consumer_owned":true}\n';
   fs.mkdirSync(path.dirname(consumerSettings), { recursive: true });

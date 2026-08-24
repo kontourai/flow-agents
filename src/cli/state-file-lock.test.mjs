@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const helperUrl = new URL("../../build/src/lib/state-file-lock.js", import.meta.url).href;
 
@@ -33,7 +34,7 @@ async function waitForPath(file, timeoutMs = 5_000) {
 }
 
 test("initial state write creates its destination directory", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-create-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-create-");
   try {
     const file = path.join(workspace, "new-session", "state.json");
     const { writeStateJson } = await import(helperUrl);
@@ -45,7 +46,7 @@ test("initial state write creates its destination directory", async () => {
 });
 
 test("state replacement preserves a newer value when its expected snapshot is stale", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-stale-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-stale-");
   try {
     const file = path.join(workspace, "state.json");
     fs.writeFileSync(file, '{"version":"newer"}\n');
@@ -61,7 +62,7 @@ test("state replacement preserves a newer value when its expected snapshot is st
 });
 
 test("state replacement rejects an oversized existing destination before reading it", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-bounded-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-bounded-");
   try {
     const file = path.join(workspace, "state.json");
     fs.writeFileSync(file, "");
@@ -75,7 +76,7 @@ test("state replacement rejects an oversized existing destination before reading
 });
 
 test("state replacement rejects an oversized new payload before creating a file", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-new-bounded-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-new-bounded-");
   try {
     const file = path.join(workspace, "state.json");
     const { writeStateJson } = await import(helperUrl);
@@ -90,7 +91,7 @@ test("state replacement rejects an oversized new payload before creating a file"
 });
 
 test("sidecar writes and Builder compare-and-swap serialize across processes", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-race-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-race-");
   try {
     const file = path.join(workspace, "state.json");
     const lockDir = `${file}.lockdir`;
@@ -125,7 +126,7 @@ test("sidecar writes and Builder compare-and-swap serialize across processes", a
 });
 
 test("a sidecar read-modify-write observes a Builder projection committed while it waits", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-update-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-update-");
   try {
     const file = path.join(workspace, "state.json");
     const lockDir = `${file}.lockdir`;
@@ -158,7 +159,7 @@ test("a sidecar read-modify-write observes a Builder projection committed while 
 });
 
 test("state replacement rejects a symlink without changing its target", async (t) => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-symlink-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-symlink-");
   try {
     const target = path.join(workspace, "target.json");
     const file = path.join(workspace, "state.json");
@@ -184,7 +185,7 @@ test("state replacement rejects a symlink without changing its target", async (t
 });
 
 test("state replacement rejects a parent directory swapped while lock acquisition waits", async (t) => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-parent-swap-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-parent-swap-");
   try {
     const session = path.join(workspace, "session");
     const savedSession = path.join(workspace, "session.saved");
@@ -243,7 +244,7 @@ test("state replacement rejects a parent directory swapped while lock acquisitio
 });
 
 test("state replacement rejects a lock created under a transiently swapped parent", async (t) => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-detached-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-detached-");
   try {
     const session = path.join(workspace, "session");
     const outside = path.join(workspace, "outside");
@@ -305,7 +306,7 @@ test("state replacement rejects a lock created under a transiently swapped paren
 });
 
 test("state replacement completes legal short writes before reporting success", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-short-write-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-short-write-");
   try {
     const file = path.join(workspace, "state.json");
     fs.writeFileSync(file, '{"version":"old"}\n');
@@ -336,7 +337,7 @@ test("state replacement completes legal short writes before reporting success", 
 });
 
 test("a failed replacement write leaves the prior state byte-identical", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-write-failure-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-write-failure-");
   try {
     const file = path.join(workspace, "state.json");
     const original = '{"version":"old","durable":true}\n';
@@ -384,7 +385,7 @@ test("a failed replacement write leaves the prior state byte-identical", async (
 });
 
 test("failed state-lock initialization never deletes a successor lock", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-successor-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-successor-");
   try {
     const file = path.join(workspace, "state.json");
     const lockDir = `${file}.lockdir`;
@@ -428,7 +429,7 @@ test("failed state-lock initialization never deletes a successor lock", async ()
 });
 
 test("failed state-lock owner creation removes its own empty lock", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-state-lock-owner-failure-"));
+  const workspace = makeFixtureDir("flow-agents-state-lock-owner-failure-");
   try {
     const file = path.join(workspace, "state.json");
     const lockDir = `${file}.lockdir`;
