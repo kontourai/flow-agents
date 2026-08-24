@@ -18,6 +18,11 @@
 #      the modified file and reporting it.
 #   D. Nothing-to-uninstall: an empty destination with no settings/manifest/legacy content exits
 #      non-zero and reports nothing removed.
+#   N. PROJECT destination (--dest, not --global): the same round-trip equality assertion A
+#      applies to a fixture $HOME, applied to an install destination -- plus the ownership,
+#      permission-default and summary-honesty assertions of the project install contract
+#      (kontourai/flow-agents#1343, #1344, #1345). Every other round trip in this file targets
+#      a HOME/global path, which is why a destination-only unowned write went unnoticed.
 #
 # Isolation: every scenario runs against its own fixture $HOME / project dest under a private
 # TMPDIR_EVAL; the real $HOME is never touched.
@@ -1407,7 +1412,186 @@ NODE
 HOME="$TMPDIR_EVAL/instruction-diverge-user-home" $FA init --uninstall --runtime opencode --dest "$INSTRUCTION_DIVERGE_HOME" --yes >"$TMPDIR_EVAL/instruction-diverge.out" 2>&1
 if grep -q '"/user/AGENTS.md"' "$INSTRUCTION_DIVERGE_HOME/opencode.json" && grep -q 'custom/MY-AGENTS.md' "$INSTRUCTION_DIVERGE_HOME/opencode.json" && [[ -f "$INSTRUCTION_DIVERGE_HOME/custom/MY-AGENTS.md" ]]; then _pass "opencode instructions (b): a managed entry re-pointed at a user-owned file is retained and that file is never touched"; else _fail "opencode instructions (b): divergent user edit or its target file was not protected"; fi
 
+# ─── Scenario N: PROJECT-DESTINATION round trip and install-contract assertions ───────────────
+echo "--- Scenario N: project (--dest) install contract: round trip, ownership, permission defaults ---"
+
+# Every existing round-trip assertion in this file targets a HOME/global path (Scenario A's
+# $ROUNDTRIP_HOME, Scenario L's $CODEX_HOME/$OPENCODE_HOME). Nothing asserted that a PROJECT
+# destination returns to its pre-install path set — which is exactly why CLAUDE.md, written
+# into the destination repo by install.sh's instructionBlock and absent from the ownership
+# manifest, survived an uninstall that reported `Preserved — modified or unknown (0)`
+# (kontourai/flow-agents#1343). The equality assertion below is the general safety net: any
+# future unowned write into a project destination fails it, not just this one file.
+
+PROJECT_DEST="$TMPDIR_EVAL/project-dest"
+PROJECT_HOME="$TMPDIR_EVAL/project-fixture-home"
+mkdir -p "$PROJECT_DEST" "$PROJECT_HOME"
+printf '# consumer repo\n' > "$PROJECT_DEST/README.md"
+
+PROJECT_BEFORE="$(tree_snapshot "$PROJECT_DEST")"
+
+PROJECT_INSTALL_OUT="$TMPDIR_EVAL/project-install.out"
+# TELEMETRY_CONFIG_FILE pins the telemetry resolution to this fixture's own (absent) file so
+# the summary can never resolve — and then report on — a real machine-wide
+# ~/.flow-agents/telemetry-console.conf. That silent fallback IS #1344.
+set +e
+HOME="$PROJECT_HOME" TELEMETRY_CONFIG_FILE="$PROJECT_HOME/absent-telemetry.conf" \
+  $FA init --runtime claude-code --dest "$PROJECT_DEST" --telemetry-sink local-files --yes \
+  >"$PROJECT_INSTALL_OUT" 2>&1
+PROJECT_INSTALL_STATUS=$?
+set -e
+
+if [[ "$PROJECT_INSTALL_STATUS" -eq 0 ]]; then
+  _pass "project install: exits 0"
+else
+  _fail "project install: exited $PROJECT_INSTALL_STATUS"
+  sed -n '1,40p' "$PROJECT_INSTALL_OUT"
+fi
+
+# Sanity: the install actually wrote the thing this scenario is about. Without this the
+# round-trip equality below could pass by doing nothing at all.
+if [[ -f "$PROJECT_DEST/CLAUDE.md" && -f "$PROJECT_DEST/.claude/settings.json" ]]; then
+  _pass "project install: wrote CLAUDE.md and .claude/settings.json (scenario is exercising real content)"
+else
+  _fail "project install: did not write CLAUDE.md and/or .claude/settings.json"
+fi
+
+# ── #1343: creation requires manifest registration ──────────────────────────────────────────
+if node - "$PROJECT_DEST/.flow-agents/owned-files.json" <<'NODE'
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const files = manifest.files || [];
+const entry = files.find((f) => f.path === "CLAUDE.md");
+if (!entry) throw new Error(`CLAUDE.md is absent from the ${files.length}-entry ownership manifest`);
+if (!/^[0-9a-f]{64}$/.test(String(entry.sha256 || ""))) throw new Error("CLAUDE.md manifest entry has no usable sha256");
+console.log("ok");
+NODE
+then
+  _pass "project install: CLAUDE.md is registered in the ownership manifest"
+else
+  _fail "project install: CLAUDE.md is NOT registered in the ownership manifest (#1343)"
+fi
+
+# ── #1345: permissive permission defaults are not written into an ordinary repository ───────
+if node - "$PROJECT_DEST/.claude/settings.json" <<'NODE'
+const fs = require("node:fs");
+const settings = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (settings.permissions !== undefined) throw new Error(`permissions must be absent, found ${JSON.stringify(settings.permissions)}`);
+if (settings.skipDangerousModePermissionPrompt !== undefined) throw new Error(`skipDangerousModePermissionPrompt must be absent, found ${JSON.stringify(settings.skipDangerousModePermissionPrompt)}`);
+// The install must still be a real install: hooks and statusLine are what the user asked for.
+if (!settings.hooks || !Object.keys(settings.hooks).length) throw new Error("hooks missing; the strip removed more than the permission keys");
+if (!settings.statusLine) throw new Error("statusLine missing; the strip removed more than the permission keys");
+console.log("ok");
+NODE
+then
+  _pass "project install: permissions.defaultMode and skipDangerousModePermissionPrompt are absent, hooks/statusLine intact"
+else
+  _fail "project install: permissive permission defaults were written into the project settings (#1345)"
+fi
+
+# ── #1344: the summary reports the resolved configuration, not install intent ───────────────
+if grep -q 'Telemetry sink (selected): local-files' "$PROJECT_INSTALL_OUT" \
+  && grep -q 'Console: not configured' "$PROJECT_INSTALL_OUT" \
+  && grep -q 'Console token: not configured' "$PROJECT_INSTALL_OUT" \
+  && grep -q 'Console tenant: not configured' "$PROJECT_INSTALL_OUT" \
+  && ! grep -q 'connected + verified' "$PROJECT_INSTALL_OUT"; then
+  _pass "project install summary: local-files with no credentials reports absence on every Console line"
+else
+  _fail "project install summary: Console lines do not report the resolved configuration (#1344)"
+  sed -n '/Flow Agents install summary/,/^$/p' "$PROJECT_INSTALL_OUT"
+fi
+
+# ── The general safety net: install -> uninstall returns the destination to its exact path set ─
+PROJECT_UNINSTALL_OUT="$TMPDIR_EVAL/project-uninstall.out"
+set +e
+HOME="$PROJECT_HOME" $FA init --uninstall --runtime claude-code --dest "$PROJECT_DEST" --yes >"$PROJECT_UNINSTALL_OUT" 2>&1
+PROJECT_UNINSTALL_STATUS=$?
+set -e
+
+if [[ "$PROJECT_UNINSTALL_STATUS" -eq 0 ]]; then
+  _pass "project uninstall: exits 0"
+else
+  _fail "project uninstall: exited $PROJECT_UNINSTALL_STATUS"
+  sed -n '1,40p' "$PROJECT_UNINSTALL_OUT"
+fi
+
+# Two residues are filtered, and each one is filtered only because the uninstall DECLARES it:
+#   1. the timestamped settings.json backup (same residue Scenario A allows for --global);
+#   2. everything under .kontourai/, which the uninstall reports in its "Residue — explicitly
+#      retained" section as per-repo coordination state it never removes.
+# The filters are bound to those declarations below, so a silent change in what uninstall
+# retains cannot quietly widen what this assertion forgives.
+PROJECT_AFTER_RAW="$(tree_snapshot "$PROJECT_DEST")"
+PROJECT_AFTER_FILTERED="$(echo "$PROJECT_AFTER_RAW" | grep -v 'settings\.json\.bak-uninstall-' | grep -v '^FILE \.kontourai/' | grep -v '^SYMLINK \.kontourai/' || true)"
+
+if sed -n '/^Residue — explicitly retained/,/^$/p' "$PROJECT_UNINSTALL_OUT" | grep -q '\.kontourai'; then
+  _pass "project uninstall: .kontourai residue is declared as explicitly retained (the filter below is bound to that declaration)"
+else
+  _fail "project uninstall: .kontourai residue is filtered from the round-trip check but is no longer declared as retained"
+fi
+
+if [[ "$PROJECT_BEFORE" == "$PROJECT_AFTER_FILTERED" ]]; then
+  _pass "project round-trip: destination is byte-identical to its pre-install path set apart from declared residue"
+else
+  _fail "project round-trip: destination diverged from its pre-install path set (an installer write that nothing owns)"
+  diff <(echo "$PROJECT_BEFORE") <(echo "$PROJECT_AFTER_FILTERED") || true
+fi
+
+# ── #1343: a user-modified instruction file gets the normal preserve-if-modified semantics ──
+PROJECT_MOD_DEST="$TMPDIR_EVAL/project-modified-claude-md"
+PROJECT_MOD_HOME="$TMPDIR_EVAL/project-modified-fixture-home"
+mkdir -p "$PROJECT_MOD_DEST" "$PROJECT_MOD_HOME"
+HOME="$PROJECT_MOD_HOME" TELEMETRY_CONFIG_FILE="$PROJECT_MOD_HOME/absent-telemetry.conf" \
+  $FA init --runtime claude-code --dest "$PROJECT_MOD_DEST" --telemetry-sink local-files --yes >/dev/null 2>&1
+printf '\nuser edit sentinel\n' >> "$PROJECT_MOD_DEST/CLAUDE.md"
+HOME="$PROJECT_MOD_HOME" $FA init --uninstall --runtime claude-code --dest "$PROJECT_MOD_DEST" --yes >"$TMPDIR_EVAL/project-modified.out" 2>&1
+if [[ -f "$PROJECT_MOD_DEST/CLAUDE.md" ]] \
+  && grep -q 'user edit sentinel' "$PROJECT_MOD_DEST/CLAUDE.md" \
+  && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/project-modified.out" | grep -q 'CLAUDE.md'; then
+  _pass "project uninstall: a user-modified CLAUDE.md is preserved AND reported, not silently removed"
+else
+  _fail "project uninstall: user-modified CLAUDE.md was deleted or not reported as preserved"
+  sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/project-modified.out"
+fi
+
+# ── #1345: the permissive posture stays reachable, but only by asking for it ────────────────
+PERMISSIVE_DEST="$TMPDIR_EVAL/project-permissive-dest"
+PERMISSIVE_HOME="$TMPDIR_EVAL/project-permissive-home"
+mkdir -p "$PERMISSIVE_DEST" "$PERMISSIVE_HOME"
+HOME="$PERMISSIVE_HOME" TELEMETRY_CONFIG_FILE="$PERMISSIVE_HOME/absent-telemetry.conf" \
+  $FA init --runtime claude-code --dest "$PERMISSIVE_DEST" --telemetry-sink local-files --permissive-workspace --yes >/dev/null 2>&1
+if node - "$PERMISSIVE_DEST/.claude/settings.json" "$PERMISSIVE_DEST/.flow-agents/install.json" <<'NODE'
+const fs = require("node:fs");
+const settings = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (settings.permissions?.defaultMode !== "auto") throw new Error(`--permissive-workspace must write permissions.defaultMode=auto, got ${JSON.stringify(settings.permissions)}`);
+if (settings.skipDangerousModePermissionPrompt !== true) throw new Error("--permissive-workspace must write skipDangerousModePermissionPrompt=true");
+const record = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+if (record.permissive_workspace !== true) throw new Error("the opt-in must be recorded in the install record, not merely applied");
+console.log("ok");
+NODE
+then
+  _pass "project install: --permissive-workspace opt-in writes the permissive keys AND records the choice"
+else
+  _fail "project install: --permissive-workspace did not write or did not record the permissive posture"
+fi
+
+# The opt-in is what makes the keys removable again: uninstall's owned-value registration
+# (uninstall.ts RUNTIME_CONFIGS.removeOwnedValues) must still clean up a permissive install.
+HOME="$PERMISSIVE_HOME" $FA init --uninstall --runtime claude-code --dest "$PERMISSIVE_DEST" --yes >"$TMPDIR_EVAL/project-permissive-uninstall.out" 2>&1
+if [[ ! -f "$PERMISSIVE_DEST/.claude/settings.json" ]] || node - "$PERMISSIVE_DEST/.claude/settings.json" <<'NODE'
+const fs = require("node:fs");
+const settings = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (settings.permissions !== undefined || settings.skipDangerousModePermissionPrompt !== undefined) throw new Error("permissive keys survived uninstall");
+console.log("ok");
+NODE
+then
+  _pass "project uninstall: a --permissive-workspace install is cleaned up (owned-value removal still applies)"
+else
+  _fail "project uninstall: permissive permission keys survived the uninstall"
+fi
+
 echo ""
+
 echo "==========================="
 total=$((pass + fail))
 echo "Results: ${pass}/${total} passed, ${fail} failed"
