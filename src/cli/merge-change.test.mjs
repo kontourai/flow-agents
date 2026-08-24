@@ -374,3 +374,72 @@ test("the coordinator's route-map predicate accepts the SHIPPED definition seman
   const demanding = source.match(/if \(state\.definition_digest !== definitionDigest\)/g) ?? [];
   assert.equal(demanding.length, 0, "no coordinator site may demand the stamp unconditionally");
 });
+
+// ---------------------------------------------------------------------------
+// #1318 FIX-2: before this, the target-branch approval policy was discoverable
+// only at `merge-change execute` — after `request` had emitted an unsigned
+// authorization and an operator had signed it with a lifecycle-authority key.
+// ---------------------------------------------------------------------------
+
+function requestFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-merge-policy-preflight-"));
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", binding.run_id);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  return { root, sessionDir, out: path.join(root, "unsigned.json") };
+}
+
+async function runRequest(fixture, preflight) {
+  const errors = [];
+  const logs = [];
+  const originalError = console.error;
+  const originalLog = console.log;
+  console.error = (...values) => errors.push(values.join(" "));
+  console.log = (...values) => logs.push(values.join(" "));
+  try {
+    const status = await mergeChangeMain(["request", "--session-dir", fixture.sessionDir, "--strategy", "squash", "--out", fixture.out], {
+      provider,
+      currentAction: async () => action(),
+      preflightProvider: async () => preflight,
+    });
+    return { status, errors: errors.join("\n"), logs: logs.join("\n") };
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
+  }
+}
+
+test("#1318: merge-change request refuses an unsatisfiable branch policy BEFORE it mints an authorization", async () => {
+  const fixture = requestFixture();
+  try {
+    const message = "the target branch 'main' does not enforce a pull-request approval policy (required_pull_request_reviews absent); merge-change requires an enforced no-bypass approval policy on the target branch";
+    const result = await runRequest(fixture, { status: "unsatisfied", base_ref: "main", condition: "approval-policy-absent", message });
+    assert.equal(result.status, 1);
+    assert.match(result.errors, /does not enforce a pull-request approval policy \(required_pull_request_reviews absent\)/);
+    assert.match(result.errors, /refuses to mint an authorization/);
+    assert.doesNotMatch(result.errors, /must be a plain object/);
+    // The whole point of the fix: no authorization material exists to be signed.
+    assert.equal(fs.existsSync(fixture.out), false, "no unsigned authorization may be written when the precondition fails");
+    assert.equal(result.logs, "", "a refused request emits no signing payload");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("#1318: a satisfied or unverified precondition does not itself block merge-change request", async () => {
+  for (const preflight of [
+    { status: "satisfied", base_ref: "main" },
+    { status: "unverified", base_ref: "main", reason: "provider_unavailable: configured ChangeProvider executable is unavailable" },
+  ]) {
+    const fixture = requestFixture();
+    try {
+      const result = await runRequest(fixture, preflight);
+      // Both proceed past the preflight and fail later, on the canonical-session
+      // checks — proving the preflight refuses a policy verdict, not everything.
+      assert.equal(result.status, 1);
+      assert.doesNotMatch(result.errors, /refuses to mint an authorization/, JSON.stringify(preflight));
+      assert.doesNotMatch(result.errors, /approval policy/, JSON.stringify(preflight));
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
