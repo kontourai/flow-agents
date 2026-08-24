@@ -20,6 +20,14 @@ import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
 import { assertTrustedGitAncestor, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
+// #1315 review FIX-4 / #1316: the canonical-run capability is DECLARED by the run adapter that
+// owns it, and is now DERIVED from what each declaring kit binds rather than enumerated. Both
+// ensure-session and the public `workflow start` verb consult this one predicate, so the set of
+// flows that get a pinned run record and the set the public verb admits cannot drift apart into
+// a half-start.
+import { isCanonicalRunFlowId } from "../builder-flow-run-adapter.js";
+import { resolveKitFlowBinding, resolveKitGateProducer, kitFlowIdParts, kitFlowSourceRoots } from "../lib/kit-flow-binding.js";
+import { flowAdmissionRefusal } from "../lib/flow-admission.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
@@ -1018,6 +1026,30 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // FlowDefinition (e.g. a bogus/renamed active_flow_id, or a `kits/` path that no longer
   // resolves) — a `!flowRepoRoot` check can never catch this because flowRepoRoot is always
   // truthy here (see the note above), so that check was dead code against this failure mode.
+  /**
+   * The bound-definition identity of the run THIS session is on, read from the canonical Flow
+   * projection `syncAndProject` writes from the run record. Null for a session with no Flow run
+   * (legacy/ad-hoc), in which case there is nothing to check a restored stamp against.
+   *
+   * #1280/#1316: this is the authority a restored `gate_claim.flow_id` / `definition_version` /
+   * `definition_digest` is validated against. Without it, a claim recorded under a kit's
+   * reduced-gate variant and a claim recorded under the full flow are the same bytes.
+   */
+  let _sessionFlowIdentityCache: AnyObj | null | undefined = undefined;
+  const sessionFlowIdentity = (): AnyObj | null => {
+    if (_sessionFlowIdentityCache !== undefined) return _sessionFlowIdentityCache;
+    _sessionFlowIdentityCache = null;
+    if (flowAgentsDir) {
+      try {
+        const state = loadJson(path.join(flowAgentsDir, slug, "state.json"));
+        const projected = state.flow_run && typeof state.flow_run === "object" && !Array.isArray(state.flow_run) ? state.flow_run as AnyObj : null;
+        _sessionFlowIdentityCache = gateClaimFlowIdentityFields(projected);
+      } catch {
+        _sessionFlowIdentityCache = null;
+      }
+    }
+    return _sessionFlowIdentityCache;
+  };
   let _allGateExpectsCache: import("../lib/flow-resolver.js").FlowGateExpectsEntry[] | null | undefined = undefined;
   const allGateExpectsForSession = (): import("../lib/flow-resolver.js").FlowGateExpectsEntry[] | null => {
     if (_allGateExpectsCache !== undefined) return _allGateExpectsCache;
@@ -1313,6 +1345,23 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const gateClaimDeclaredStepId = typeof check._gate_claim_declared_step_id === "string" ? check._gate_claim_declared_step_id : null;
     const gateClaimRouteReason = typeof check._gate_claim_route_reason === "string" ? check._gate_claim_route_reason : null;
     const gateClaimFlowRunHead = typeof check._gate_claim_flow_run_head === "string" ? check._gate_claim_flow_run_head : null;
+    // #1280/#1316: WHICH FLOW, AND WHICH VARIANT, this claim was recorded against. Stamped from
+    // the session's canonical Flow projection at record time (never from a caller flag), so a
+    // writer cannot assert a gate set it did not run. Validated here on every rebuild: a claim
+    // carried into a session running a DIFFERENT definition is refused, not silently re-typed
+    // against the definition that happens to be bound now — which is how a reduced-gate run
+    // would otherwise come to be read as a full one.
+    const gateClaimFlowIdentity = gateClaimFlowIdentityFields({
+      definition_id: check._gate_claim_flow_id,
+      definition_version: check._gate_claim_definition_version,
+      definition_digest: check._gate_claim_definition_digest,
+    });
+    if (gateClaimFlowIdentity) {
+      const sessionIdentity = sessionFlowIdentity();
+      if (sessionIdentity && !isDeepStrictEqual(sessionIdentity, gateClaimFlowIdentity)) {
+        die(`buildTrustBundle: gate claim '${String(check.id ?? "<unknown>")}' was recorded against flow definition ${String(gateClaimFlowIdentity._gate_claim_flow_id)}@${String(gateClaimFlowIdentity._gate_claim_definition_version)} (digest ${String(gateClaimFlowIdentity._gate_claim_definition_digest)}), but this session's Flow run is bound to ${String(sessionIdentity._gate_claim_flow_id)}@${String(sessionIdentity._gate_claim_definition_version)} (digest ${String(sessionIdentity._gate_claim_definition_digest)}). A claim recorded under one flow definition cannot satisfy a gate of another — a reduced-gate variant and the full flow are different definitions. Re-record the gate claim inside the session whose run it belongs to.`);
+      }
+    }
     // #270 CRITICAL/HIGH fix: checksFromBundle stamps this when it read a claim that is
     // gate-claim-SHAPED (origin:"check", check_kind:"external", kit-typed claimType) but carries
     // NO metadata.gate_claim stamp — a claim this code could not have produced without also
@@ -1449,7 +1498,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
         ? { ...claimMetadata, verification_workspace_snapshot: declaredWorkspaceSnapshot }
         : claimMetadata;
       const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...declaredBaseMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
+        ? { ...declaredBaseMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}), ...(gateClaimFlowIdentity ? { flow_id: gateClaimFlowIdentity._gate_claim_flow_id, definition_version: gateClaimFlowIdentity._gate_claim_definition_version, definition_digest: gateClaimFlowIdentity._gate_claim_definition_digest } : {}) } }
         : declaredBaseMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: evItems as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
@@ -2083,7 +2132,7 @@ function findRepoRootFromDirStrict(startDir: string): string | null {
  * session dir with no repo ancestor fails closed (skips publish) rather than
  * silently trusting process.cwd(), which could be an unrelated real repo.
  */
-function findRepoRootFromDir(startDir: string): string {
+export function findRepoRootFromDir(startDir: string): string {
   const discovered = findRepoRootFromDirStrict(startDir);
   if (discovered) return discovered;
   if (path.basename(startDir) === ".kontourai") return path.dirname(startDir);
@@ -2833,6 +2882,25 @@ function enforceEnsureSessionOwnership(
  *   --claim-ttl-seconds <n>        Overrides the liveness-policy TTL default for a new claim.
  *   --reason <text>                Audit-trail reason recorded on the claim/supersede record.
  */
+/**
+ * THE admission gate for a flow id on the sidecar surface (#1315 review, HIGH).
+ *
+ * The sidecar is an installed binary on PATH, so `workflow start`'s refusal closed one door of
+ * two. `ensure-session --flow-id <anything>` wrote session and current artifacts for any
+ * resolvable flow and merely skipped the canonical run; `advance-state --flow-definition
+ * <anything>` wrote state.json and published `active_step_id` — the pointer the Stop hook reads
+ * to decide which gate governs the turn — with no canonical run and no satisfied gate. Both were
+ * half-admissions: a session advertising an active flow that nothing pins.
+ *
+ * The predicate is the SAME derivation the public verb applies (`flowAdmissionRefusal`), not a
+ * sidecar-local restatement of it. That is the property the review asked for: a flow with no
+ * canonical run binding is refused at ensure-session and at advance-state, exactly as at start.
+ */
+function assertAdmissibleFlow(flowId: string, repoRoot: string, surface: string): void {
+  const refusal = flowAdmissionRefusal(flowId, repoRoot, surface);
+  if (refusal) die(refusal);
+}
+
 function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string): { flowId: string; stepId: string; firstStep: string } {
   const flowId = opt(p, "flow-id");
   const explicitStep = opt(p, "step-id");
@@ -2842,6 +2910,7 @@ function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string)
     return { flowId: "", stepId: "", firstStep: "" };
   }
 
+  assertAdmissibleFlow(flowId, findRepoRootFromDir(dir), "ensure-session --flow-id");
   const firstStep = resolveFirstStep(flowId, findRepoRootFromDir(dir));
   if (!firstStep) die(`ensure-session could not resolve the first step for Flow Definition ${JSON.stringify(flowId)}`);
   if (opt(p, "ad-hoc-reason")) {
@@ -2854,7 +2923,23 @@ function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string)
   return { flowId, stepId: explicitStep || firstStep, firstStep };
 }
 
-function assertCanonicalBuilderArtifactRoot(root: string, flowId: "builder.build" | "builder.shape"): void {
+/**
+ * The artifact root a Flow session may be entered against.
+ *
+ * #1314 / #1316: this guard used to run only for two hardcoded flow ids, so EVERY other flow
+ * skipped it entirely — a fail-open the widening of the run adapter would have inherited and
+ * multiplied. Nothing in the rule is kit-specific: it asserts that the artifact root occupies
+ * the canonical `<project>/.kontourai/flow-agents` position and that neither it, its `.kontourai`
+ * parent, nor the project root is a symlink. That is a PORTABILITY mechanic — it keeps a session's
+ * artifacts where every other surface (the config-protection hook, the fixture writer, the
+ * `delivery/` publisher, relative `run_ref`s) computes them to be, and stops a redirected root
+ * from having a session's artifacts land somewhere those surfaces do not guard.
+ *
+ * A kit cannot opt out of that and still be portable, so there is nothing to derive per kit:
+ * the check now runs for every flow id. The refusal text interpolates the flow id, so the
+ * messages for the previously-covered flows are unchanged.
+ */
+function assertCanonicalFlowArtifactRoot(root: string, flowId: string): void {
   const kontouraiRoot = path.dirname(root);
   const projectRoot = path.dirname(kontouraiRoot);
   if (path.basename(root) !== "flow-agents" || path.basename(kontouraiRoot) !== ".kontourai") {
@@ -2892,7 +2977,9 @@ function preflightEnsureSession(p: ReturnType<typeof parseArgs>): void {
   const dir = sessionDirFor(root, slug);
   assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
-  if (entry.flowId === "builder.build" || entry.flowId === "builder.shape") assertCanonicalBuilderArtifactRoot(root, entry.flowId);
+  // #1314: universal, not per-flow — see assertCanonicalFlowArtifactRoot. An entry with no flow
+  // id is not a Flow session and has no canonical root to assert.
+  if (entry.flowId) assertCanonicalFlowArtifactRoot(root, entry.flowId);
   sessionWorkItem(p, slug, dir);
 }
 
@@ -2902,7 +2989,7 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
   const dir = sessionDirFor(root, slug);
   assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
-  if (entry.flowId === "builder.build" || entry.flowId === "builder.shape") assertCanonicalBuilderArtifactRoot(root, entry.flowId);
+  if (entry.flowId) assertCanonicalFlowArtifactRoot(root, entry.flowId);
   const workItem = sessionWorkItem(p, slug, dir);
   // #291 Wave 2 Task 2.1 (§3, §4): resolve the actor ONCE, then run the ownership guard BEFORE
   // any directory/file is created — a refusal must never leave a stray empty session dir. Reused
@@ -3023,14 +3110,14 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     entry.flowId || undefined,
     resumedStep || undefined,
     actorResolution.unresolved ? undefined : actorResolution.branchActorKey,
-    entry.flowId === "builder.build" || entry.flowId === "builder.shape",
+    isCanonicalRunFlowId(entry.flowId, findRepoRootFromDir(dir)),
   );
   if (selectedWorkEvidence?.providerBranch) {
     // current.json and the actor-scoped projection are both derived from state.json. Verify that
     // both projections retained the exact provider branch before the canonical Builder run starts.
     assertProviderBranchAgreement(root, slug, dir, selectedWorkEvidence.providerBranch, actorResolution.branchActorKey);
   }
-  if (allowCanonicalFlowMutation && (entry.flowId === "builder.build" || entry.flowId === "builder.shape")) {
+  if (allowCanonicalFlowMutation && isCanonicalRunFlowId(entry.flowId, findRepoRootFromDir(dir))) {
     try {
       const started = await startBuilderFlowSession({ sessionDir: dir, flowId: entry.flowId });
       if (started.run.state.current_step === "pull-work"
@@ -3515,6 +3602,33 @@ function globMatches(pattern: string, relative: string): boolean {
 
 type GateProducer = { id: string; artifactPatterns: string[]; selfProducedTrustSlices: string[] };
 
+/**
+ * The BOUND-DEFINITION IDENTITY carried by a session's canonical Flow projection, in the
+ * underscore-prefixed check-field form gate claims are stamped with — or null when the
+ * projection does not carry a complete one.
+ *
+ * #1280/#1316. `syncAndProject` writes `state.json.flow_run.definition_{id,version,digest}`
+ * straight from the run record, which the run adapter pins to the declaring kit's binding and
+ * re-asserts by deep equality on every load. So these three fields are the run record's own
+ * answer to "which flow, and which variant of it, is this session running" — the property #1280
+ * requires so that a reduced-gate run can never be mistaken for a full one once kits can declare
+ * gate-set variants.
+ *
+ * ALL THREE OR NOTHING. A partial identity ("this flow, unknown variant") is exactly the
+ * ambiguity the stamp exists to remove: two variants of one flow share `definition_id`, so an
+ * identity without the version and digest would read as agreement between definitions that
+ * differ. Callers treat null from a session that HAS a Flow run as a projection that must be
+ * regenerated, not as permission to skip the stamp.
+ */
+function gateClaimFlowIdentityFields(projectedRun: AnyObj | null): AnyObj | null {
+  if (!projectedRun) return null;
+  const flowId = typeof projectedRun.definition_id === "string" && projectedRun.definition_id ? projectedRun.definition_id : null;
+  const version = typeof projectedRun.definition_version === "string" && projectedRun.definition_version ? projectedRun.definition_version : null;
+  const digest = typeof projectedRun.definition_digest === "string" && projectedRun.definition_digest ? projectedRun.definition_digest : null;
+  if (!flowId || !version || !digest) return null;
+  return { _gate_claim_flow_id: flowId, _gate_claim_definition_version: version, _gate_claim_definition_digest: digest };
+}
+
 export function rejectOperationBoundExpectation(expectationId: string, operation: string): never {
   const completion = operation === NARRATIVE_PROMOTE_OPERATION
     ? "authenticated external narrative provider completion"
@@ -3522,29 +3636,32 @@ export function rejectOperationBoundExpectation(expectationId: string, operation
   die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires ${completion}`);
 }
 
-function expectedGateProducer(flowId: string, stepId: string, expectationId: string): GateProducer {
-  const manifest = loadJson(path.join(flowAgentsPackageRoot(), "kits", "builder", "kit.json"));
-  const actions = Array.isArray(manifest.flow_step_actions) ? manifest.flow_step_actions as AnyObj[] : [];
-  const action = actions.find((candidate) => candidate.flow_id === flowId && candidate.step_id === stepId);
-  if (!action) die(`record-gate-claim cannot derive a producer for unknown Flow step ${flowId}/${stepId}`);
-  const binding = Array.isArray(action.expectation_bindings)
-    ? action.expectation_bindings.find((candidate): candidate is AnyObj => candidate && typeof candidate === "object" && !Array.isArray(candidate) && candidate.expectation_id === expectationId)
-    : undefined;
-  if (binding?.interface === "operation") {
-    const operation = typeof binding.operation === "string" ? binding.operation : "the declared external operation";
-    rejectOperationBoundExpectation(expectationId, operation);
+/**
+ * The producer the DECLARING kit binds to this gate expectation.
+ *
+ * #1316: this used to load ONE packaged kit's manifest for every flow, which is why a
+ * kit-declared flow could be started but never satisfy a gate — the producer lookup could not
+ * see its bindings. The manifest is now the one belonging to the kit that declares `flowId`,
+ * resolved through the same binding the canonical run adapter pins, so the producer a claim is
+ * checked against and the definition the run is bound to come from the same kit.
+ *
+ * `projectRoot` widens the search to a project-installed kit; the packaged tree is still
+ * searched first, so a project kit can never shadow a packaged one (see `kitFlowSourceRoots`).
+ * Every refusal string here is unchanged — they are matched by consumers.
+ */
+function expectedGateProducer(flowId: string, stepId: string, expectationId: string, projectRoot?: string): GateProducer {
+  const parts = kitFlowIdParts(flowId);
+  const binding = parts ? resolveKitFlowBinding(flowId, kitFlowSourceRoots(flowAgentsPackageRoot(), projectRoot)) : null;
+  if (!binding) die(`record-gate-claim cannot derive a producer for unknown Flow step ${flowId}/${stepId}`);
+  const resolution = resolveKitGateProducer(binding.manifest, binding.kitId, flowId, stepId, expectationId);
+  if (resolution.kind === "operation") rejectOperationBoundExpectation(expectationId, resolution.operation);
+  if (resolution.kind === "missing") {
+    if (resolution.reason === "no-step-action") die(`record-gate-claim cannot derive a producer for unknown Flow step ${flowId}/${stepId}`);
+    die(`record-gate-claim cannot derive exactly one producer for ${flowId}/${stepId}/${expectationId}`);
   }
-  const skills = Array.isArray(action.skills) ? action.skills.filter((value: unknown): value is string => typeof value === "string") : [];
-  const roles = Array.isArray(manifest.skill_roles) ? manifest.skill_roles as AnyObj[] : [];
-  const owners = roles.filter((role) => typeof role.skill_id === "string"
-    && Array.isArray(role.step_ids) && role.step_ids.includes(stepId)
-    && Array.isArray(role.expectation_ids) && role.expectation_ids.includes(expectationId)
-    && skills.includes(role.skill_id.replace(/^builder\./, "")));
-  if (owners.length !== 1) die(`record-gate-claim cannot derive exactly one producer for ${flowId}/${stepId}/${expectationId}`);
-  const owner = owners[0]!;
-  const artifacts = (Array.isArray(owner.artifacts) ? owner.artifacts : []).filter((value): value is string => typeof value === "string" && value !== "ephemeral decision record");
+  const artifacts = resolution.artifacts;
   return {
-    id: owner.skill_id,
+    id: resolution.skillId,
     artifactPatterns: artifacts.filter((value) => !value.includes("#")),
     selfProducedTrustSlices: artifacts.filter((value) => value.startsWith("trust.bundle#")).map((value) => value.slice("trust.bundle#".length)),
   };
@@ -4948,6 +5065,12 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
     if (typeof gc.flow_run_head === "string") check._gate_claim_flow_run_head = gc.flow_run_head;
+    // #1280/#1316 read side of the bound-definition identity (write side: the gate_claim
+    // assembly in buildTrustBundle). Restoring it is what lets a REBUILD re-assert that the
+    // claim still belongs to the definition this session's run is bound to.
+    if (typeof gc.flow_id === "string") check._gate_claim_flow_id = gc.flow_id;
+    if (typeof gc.definition_version === "string") check._gate_claim_definition_version = gc.definition_version;
+    if (typeof gc.definition_digest === "string") check._gate_claim_definition_digest = gc.definition_digest;
     const md = claim.metadata as AnyObj;
     if (md && typeof md.acceptance_contract === "object" && !Array.isArray(md.acceptance_contract)) {
       check._acceptance_contract = md.acceptance_contract;
@@ -5738,6 +5861,12 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   }
   const exactFlowId = projectedRun && typeof projectedRun.definition_id === "string" ? projectedRun.definition_id : null;
   const exactStepId = projectedRun && typeof projectedRun.current_step === "string" ? projectedRun.current_step : null;
+  // Fail closed, with the projection's own remedy: a session that HAS a Flow run but whose
+  // projection cannot supply the bound-definition identity would record a gate claim that no
+  // rebuild could bind to a definition. That is the same class of staleness
+  // FlowProjectionRegenerationRequiredError already exists for (a projection lagging its run),
+  // and it has the same fix — re-sync the projection from the run record.
+  const projectedRunDefinition = gateClaimFlowIdentityFields(projectedRun);
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
   const activeStep = exactFlowContext
     ? resolveFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, findRepoRootFromDir(path.dirname(flowAgentsDir)))
@@ -5863,7 +5992,30 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     _gate_claim_recorded_at: ts,
     ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
     ...(effectiveFlowRunHead ? { _gate_claim_flow_run_head: effectiveFlowRunHead } : {}),
+    // #1280/#1316 — WHICH FLOW, AND WHICH VARIANT OF IT, THIS CLAIM WAS RECORDED AGAINST.
+    //
+    // `flow_run_head` pins run POSITION (sha256 of run state); the four typing fields pin the
+    // EXPECTATION. Neither pins the DEFINITION, and the stamp was validated at bundle-build time
+    // against `current.json`'s `active_flow_id` — mutable session state read at a later moment.
+    // So a claim recorded under a kit's reduced-gate variant was byte-indistinguishable from one
+    // recorded under the full flow, which is exactly the confusion #1280 requires be impossible
+    // once a kit can declare gate-set variants.
+    //
+    // Source is the session's canonical Flow projection, which `syncAndProject` writes straight
+    // from the run record's pinned definition — never a caller flag, so a writer cannot assert a
+    // variant it did not run. `assertGateClaimFlowIdentity` re-checks a restored stamp against
+    // the projection at bundle-build time, so a claim carried into a session running a different
+    // definition is refused rather than re-typed.
+    ...(projectedRunDefinition ?? {}),
   };
+  // Fail closed AT WRITE TIME, not at projection-parse time: a session that HAS a Flow run but
+  // whose projection cannot supply the bound-definition identity would record a claim no rebuild
+  // could bind. Checking it here rather than earlier keeps input validation's own diagnostics
+  // first — the narrative-trust-isolation refusal (#619) is a security property, and preempting
+  // it with a staleness message told the caller to regenerate a projection when the real answer
+  // was that the command was refused. Same remedy as FlowProjectionRegenerationRequiredError's
+  // other site: re-sync the projection from the run record.
+  if (projectedRun && !projectedRunDefinition) throw new FlowProjectionRegenerationRequiredError(dir);
   if (targetExpectation.id === "implementation-plan" && statusVal === "pass") {
     const acceptance = loadJson(path.join(dir, "acceptance.json"));
     const criteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
@@ -5890,7 +6042,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
 
   // Include structured evidence refs if provided
   const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json", projectRoot));
-  const producer = expectedGateProducer(exactFlowContext?.flowId ?? activeStep.flowId, activeStep.stepId, targetExpectation.id);
+  const producer = expectedGateProducer(exactFlowContext?.flowId ?? activeStep.flowId, activeStep.stepId, targetExpectation.id, projectRoot);
   if (statusVal === "pass") validateReviewableGateEvidence(dir, slug, evidenceRefs, producer, `gate claim ${targetExpectation.id}`);
   if (mustRunTests) requireObservedCommandRefs(evidenceRefs, observedCommandNames, "a passing tests-evidence claim", true);
 
@@ -6155,6 +6307,10 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   // AND the target phase maps to a step listed in on_route_back values.
   // builder.build verify-gate already carries this declaration — behavior preserved.
   const repoRoot = flow ? findRepoRootFromDir(dir) : "";
+  // Same admission rule as ensure-session and `workflow start` — see assertAdmissibleFlow. This
+  // must run BEFORE the route-back guard and BEFORE writeState, because everything below it
+  // writes: transition-attempts.json, state.json, handoff.json, and the active_step_id pointer.
+  if (flow) assertAdmissibleFlow(flow, repoRoot, "advance-state --flow-definition");
   const routeBack = flow ? resolveRouteBackPolicy(flow, prev.phase, phase, repoRoot) : null;
   if (routeBack) {
     const reason = opt(p, "route-back-reason");

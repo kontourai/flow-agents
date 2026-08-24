@@ -196,6 +196,64 @@ export interface TransitionRecord {
   duration_ms: number;
   cwd_repo: string | null;
   actor: { runtime: string | null; session_id: string | null };
+  /**
+   * Output-token attribution — WRITTEN BY THE ENRICHER, NEVER BY THIS MODULE.
+   *
+   * `scripts/telemetry/enrich-transitions.mjs` stamps these afterwards, from the host
+   * transcript, using the same rule `scripts/telemetry/gate-scorecard.mjs` folds with
+   * (both import `scripts/telemetry/token-attribution.mjs`). They are declared here
+   * because they are part of this record's published shape, and consumers — Console's
+   * `ConsoleTransitionRecord` among them — read them off it.
+   *
+   * This module must not fill them in, and a test pins that it does not. Three reasons,
+   * in descending order of how badly guessing would go:
+   *
+   *   1. "At most one transition per turn" is a decision about a SET of competing
+   *      transitions. A process exiting knows one invocation. Whatever it wrote would be
+   *      a guess that later evidence contradicts, and an inflated total is worse than no
+   *      total because it cannot be told apart from a real one.
+   *   2. This write is best-effort and must never change the outcome of the command it
+   *      describes. Parsing a multi-megabyte host transcript on every CLI exit trades
+   *      that guarantee away for a number available a second later.
+   *   3. This module is provider-independent and wrapper-immune by construction — that is
+   *      its entire justification over the capture hook and the transcript. Reading one
+   *      host's private, explicitly-unstable file format here would reintroduce exactly
+   *      the blindness it was built to remove.
+   *
+   * `output_tokens` is present IFF `token_attribution.attributed` is true. An
+   * unattributable transition carries NO `output_tokens` key — never a zero. Absent cost
+   * and zero cost are different claims, and only the second one says a gate was free.
+   */
+  output_tokens?: number;
+  token_attribution?: TransitionTokenAttribution;
+}
+
+/**
+ * The granularity label travelling WITH the number, mirroring console's
+ * `EconomicsDelegationCostGranularity = "model-proxy"` precedent: name what the figure is
+ * rather than implying precision. Output tokens are roughly 6.6% of spend on this repo's
+ * own corpus and are not proportional to it, so the figure is a FLOOR — a lower bound on
+ * one token class, which is a lower bound on spend. It is never a total and never currency.
+ */
+export interface TransitionTokenAttribution {
+  granularity: "output-tokens-only";
+  /**
+   * TRUE means a turn was found and charged. FALSE is a positive finding, not an absence:
+   * this transition was examined and had no turn to charge, so it must be COUNTED as
+   * unattributable rather than folded in as an attributed zero. The block's presence is
+   * what distinguishes an enriched log from one nothing has looked at — deriving
+   * "without turn" from a missing `output_tokens` alone cannot tell those apart, and
+   * reports an unmeasured run as a measured one whose gates happened to cost nothing.
+   */
+  attributed: boolean;
+  /** Path-free, session-scoped hash of the turn charged (or the turn that was unavailable). */
+  turn_ref?: string;
+  /** Why nothing was attributed, when nothing was. Emitted, never inferred by the reader. */
+  reason?: string;
+  /** The turn was claimed by two transitions stamped at the same instant; line order, not the data, decided. */
+  ambiguous?: boolean;
+  /** What the attribution was derived from. Names the derivation, not the machine. */
+  source?: string;
 }
 
 /** A class name is developer-authored, but it is still bounded before recording. */

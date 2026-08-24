@@ -17,6 +17,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { isWithinRuntimeArtifactRoot } from "./declared-artifact-roots.js";
+// #1280 review FIX-1 / FIX-2 (the rules) live in kit-flow-binding.ts (#1316, the location), so
+// the RESOLVER — which reads a flow's bytes — and the RUN BINDING — which decides which kit's
+// manifest supplies the run's provenance — share ONE answer to "is this tree a kit source" and
+// ONE answer to "which ids may this manifest declare". Each branch had grown its own copy; the
+// resolver admitting bytes the run binding rejects (or vice versa) is exactly the disagreement
+// those rules exist to prevent, and it is the mechanism behind the start-validates-consumer /
+// run-binds-package split this merge closes.
+import { canonicalKitFlowSourceRoots, canonicalKitsRoot, kitManifestFlowDeclarations } from "./kit-flow-binding.js";
 
 // ─── Security: Layer 1 traversal defense ─────────────────────────────────────
 //
@@ -38,23 +47,24 @@ import { fileURLToPath } from "node:url";
 const SLUG_RE = /^[a-zA-Z0-9_-]+$/;
 
 /**
- * Returns true when the given resolved absolute path falls within a Flow Agents
- * runtime artifact directory (an agent-writable area). Used to reject FLOW_AGENTS_FLOW_DEFS_DIR
- * overrides that point into agent-controlled storage.
+ * True when a resolved directory lies inside Flow Agents RUNTIME ARTIFACT STORAGE — the
+ * `.kontourai/flow-agents` / `.flow-agents` / `delivery` sub-roots the runtime writes session
+ * artifacts into. Delegates to the ONE definition of those roots
+ * (`declared-artifact-roots.ts`, the same list the config-protection hook and the sidecar's
+ * fixture writer scope themselves to), so a FlowDefinition source can never be judged in-bounds
+ * here while the hook treats the same path as protected runtime storage.
+ *
+ * #1280 review FIX-1: this replaced a local `isAgentWritableDir` that scanned path SEGMENTS for
+ * the literals `.flow-agents` / `.kontourai/flow-agents`. Two defects that fixed: it missed
+ * `delivery` entirely, and — because it was a flat segment scan on the spelled path with
+ * realpath only as a fallback for the WHOLE string — it had no notion of a root's POSITION.
+ * The name was also a claim nothing computed: it said "agent-writable" while deriving
+ * "matches a name". Writability is not derivable here at all (runtime and agent share a uid),
+ * so the honest boundary is containment in runtime storage, and the name now says that.
+ * See the contract note on `isWithinRuntimeArtifactRoot` for what is deliberately NOT covered.
  */
-function hasAgentWritableRuntimeSegment(resolvedDir: string): boolean {
-  const parts = resolvedDir.split(path.sep);
-  if (parts.includes(".flow-agents")) return true;
-  return parts.some((part, index) => part === ".kontourai" && parts[index + 1] === "flow-agents");
-}
-
-function isAgentWritableDir(resolvedDir: string): boolean {
-  if (hasAgentWritableRuntimeSegment(resolvedDir)) return true;
-  try {
-    return hasAgentWritableRuntimeSegment(fs.realpathSync.native(resolvedDir));
-  } catch {
-    return false;
-  }
+function isRuntimeArtifactDir(resolvedDir: string): boolean {
+  return isWithinRuntimeArtifactRoot(resolvedDir);
 }
 
 function installedPackageRoot(): string | null {
@@ -72,13 +82,13 @@ function installedPackageRoot(): string | null {
 function packagedFlowFile(kitId: string, flowName: string, consumerRoot: string): string | null {
   const packageRoot = installedPackageRoot();
   if (!packageRoot || path.resolve(packageRoot) === path.resolve(consumerRoot)) return null;
-  const kitsRoot = path.resolve(packageRoot, "kits");
+  const kitsRoot = canonicalKitsRoot(packageRoot);
+  if (!kitsRoot) return null;
   const candidate = path.resolve(kitsRoot, kitId, "flows", `${flowName}.flow.json`);
   if (!candidate.startsWith(kitsRoot + path.sep)) return null;
   try {
-    const realKitsRoot = fs.realpathSync.native(kitsRoot);
     const realCandidate = fs.realpathSync.native(candidate);
-    return realCandidate.startsWith(realKitsRoot + path.sep) ? realCandidate : null;
+    return realCandidate.startsWith(kitsRoot + path.sep) ? realCandidate : null;
   } catch {
     return null;
   }
@@ -113,7 +123,7 @@ export function resolveFlowFilePath(
 
   if (override) {
     const resolvedOverride = path.resolve(override);
-    if (isAgentWritableDir(resolvedOverride)) {
+    if (isRuntimeArtifactDir(resolvedOverride)) {
       return null;
     } else {
       expectedRoot = resolvedOverride;
@@ -122,8 +132,13 @@ export function resolveFlowFilePath(
       flowFilePath = path.join(resolvedOverride, `${flowId}.flow.json`);
     }
   } else {
-    expectedRoot = path.resolve(repoRoot, "kits");
-    flowFilePath = path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+    // #1280 review FIX-1: the expected root is the REALPATH of `<repoRoot>/kits`, refused
+    // outright when that realpath escapes the repo root or lands in runtime artifact storage.
+    // Deriving the boundary from the same link that is being followed is not a boundary.
+    const kitsRoot = canonicalKitsRoot(repoRoot);
+    if (!kitsRoot) return null;
+    expectedRoot = kitsRoot;
+    flowFilePath = path.join(kitsRoot, kitId, "flows", `${flowName}.flow.json`);
     canonicalLookup = true;
   }
 
@@ -137,9 +152,13 @@ export function resolveFlowFilePath(
 
   // If the file exists, resolve final symlinks before returning a readable path.
   // `readFileSync` follows symlinks; this keeps lexical containment from turning
-  // into an out-of-root file read through a symlinked FlowDefinition.
+  // into an out-of-root file read through a symlinked FlowDefinition. For the canonical
+  // lookup `expectedRoot` is ALREADY a realpath (canonicalKitsRoot), so this comparison is
+  // against a boundary the tree owner controls, not one a symlink under test chose.
   try {
-    const realExpectedRoot = fs.existsSync(expectedRoot) ? fs.realpathSync.native(expectedRoot) : expectedRoot;
+    const realExpectedRoot = canonicalLookup
+      ? expectedRoot
+      : (fs.existsSync(expectedRoot) ? fs.realpathSync.native(expectedRoot) : expectedRoot);
     const realPath = fs.realpathSync.native(resolvedPath);
     if (!realPath.startsWith(realExpectedRoot + path.sep) && realPath !== realExpectedRoot) {
       return null;
@@ -231,6 +250,245 @@ function flowIdParts(flowId: string): { kitId: string; flowName: string } | null
   const flowName = flowId.slice(dotIdx + 1);
   if (!kitId || !flowName) return null;
   return { kitId, flowName };
+}
+
+/**
+ * Enumerate the flow ids the installed kits DECLARE — the derivation the public
+ * `workflow start` verb consults instead of enumerating flow identifiers in core (#1280).
+ *
+ * Sources mirror resolveFlowFilePath's resolution order exactly, so the derived list never
+ * names a flow the resolver would look up somewhere else:
+ *   - FLOW_AGENTS_FLOW_DEFS_DIR override (when set and outside runtime artifact storage):
+ *     every `<flowId>.flow.json` file in that directory. The override replaces canonical kit
+ *     lookup wholesale, so it replaces discovery too. An override inside runtime artifact
+ *     storage yields an empty list — the same fail-closed posture resolveFlowFilePath takes.
+ *   - Canonical: each kit directory under `<repoRoot>/kits/*` (that root resolved, and refused
+ *     when it escapes the repo root or lands in runtime storage), plus the executing package's
+ *     own `kits/*` (the same package fallback canonical resolution applies). A kit's
+ *     declaration surface is its `kit.json` `flows[].id` list when the manifest declares
+ *     one — the packaged, digest-covered artifact — else its `flows/*.flow.json` directory.
+ *
+ * Ids without the `<kit>.<flow>` slug shape the resolver requires are excluded: a refusal
+ * that recommends an id the resolver can never resolve would be worse than none. This
+ * enumerates EXISTENCE only; conformance stays with resolveEffectiveFlowDefinition.
+ */
+export function declaredKitFlowIds(repoRoot: string): string[] {
+  return [...new Set(declaredKitFlows(repoRoot).map((declaration) => declaration.flowId))].sort();
+}
+
+/** How a kit tree told us a flow exists. The three are not interchangeable — see below. */
+export type KitFlowDeclarationVia = "override" | "manifest" | "flows-directory";
+
+/** A declared flow id, BOUND TO THE ROOT THAT DECLARED IT. */
+export interface DeclaredKitFlow {
+  flowId: string;
+  /** The root whose `kits/` tree (or defs override directory) carries the declaration. */
+  sourceRoot: string;
+  via: KitFlowDeclarationVia;
+}
+
+/**
+ * `declaredKitFlowIds`, but each id carries the SOURCE that declared it (#1316 review FIX-2).
+ *
+ * The bare `Set<string>` this replaced is the whole defect: a union of package and consumer
+ * declarations, handed to a caller that then resolved the definition by a DIFFERENT rule. A
+ * package declaration for `builder.build` could therefore authorize a start whose bytes came from
+ * a consumer `kits/builder/flows/build.flow.json` the package never declared — start validating
+ * one file while the run adapter pins another. Carrying the source makes the two comparable, and
+ * `flow-admission.ts` requires them to be EQUAL.
+ *
+ * Roots are walked in `canonicalKitFlowSourceRoots` order — PACKAGED FIRST, the same order the
+ * run binding uses — and the FIRST declaration of an id is the one that authorizes it. That is
+ * what makes a project kit unable to shadow a packaged one on the start path, matching what the
+ * adapter has always done on the run path.
+ *
+ * `via` is retained because the three sources are not equivalent authority:
+ *   - `manifest`        — the kit said so, in the artifact the package digest covers. Only this
+ *                         one can also supply a RUN BINDING.
+ *   - `flows-directory` — a file exists where canonical resolution would look, but no manifest
+ *                         declares it. Enough to LIST in a refusal (a refusal should name
+ *                         everything a start could resolve); never enough to bind.
+ *   - `override`        — FLOW_AGENTS_FLOW_DEFS_DIR. Existence only, and never a run binding: an
+ *                         env var is not provenance.
+ */
+export function declaredKitFlows(repoRoot: string): DeclaredKitFlow[] {
+  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
+  if (override) {
+    const resolvedOverride = path.resolve(override);
+    if (isRuntimeArtifactDir(resolvedOverride)) return [];
+    const overridden: DeclaredKitFlow[] = [];
+    for (const entry of listDirents(resolvedOverride)) {
+      if (!entry.isFile() || !entry.name.endsWith(".flow.json")) continue;
+      const id = entry.name.slice(0, -".flow.json".length);
+      if (slugFlowIdParts(id)) overridden.push({ flowId: id, sourceRoot: resolvedOverride, via: "override" });
+    }
+    return overridden;
+  }
+  const declarations: DeclaredKitFlow[] = [];
+  const seen = new Set<string>();
+  const push = (flowId: string, sourceRoot: string, via: KitFlowDeclarationVia): void => {
+    if (seen.has(flowId)) return;
+    seen.add(flowId);
+    declarations.push({ flowId, sourceRoot, via });
+  };
+  for (const sourceRoot of canonicalKitFlowSourceRoots(repoRoot)) {
+    const kitsRoot = canonicalKitsRoot(sourceRoot);
+    if (!kitsRoot) continue;
+    for (const kitEntry of listDirents(kitsRoot)) {
+      if (!kitEntry.isDirectory() || !SLUG_RE.test(kitEntry.name)) continue;
+      const declared = kitManifestFlowDeclarations(kitsRoot, kitEntry.name);
+      if (declared) {
+        for (const declaration of declared) push(declaration.flowId, sourceRoot, "manifest");
+        continue;
+      }
+      for (const flowEntry of listDirents(path.join(kitsRoot, kitEntry.name, "flows"))) {
+        if (!flowEntry.isFile() || !flowEntry.name.endsWith(".flow.json")) continue;
+        const id = `${kitEntry.name}.${flowEntry.name.slice(0, -".flow.json".length)}`;
+        if (slugFlowIdParts(id)) push(id, sourceRoot, "flows-directory");
+      }
+    }
+  }
+  return declarations;
+}
+
+function listDirents(dir: string): fs.Dirent[] {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+/** flowIdParts, plus the SLUG_RE contract `resolveFlowFilePath` actually enforces on both parts.
+ *  A declaration whose id the resolver could never resolve is not a declaration. */
+function slugFlowIdParts(flowId: string): { kitId: string; flowName: string } | null {
+  const parts = flowIdParts(flowId);
+  if (!parts) return null;
+  return SLUG_RE.test(parts.kitId) && SLUG_RE.test(parts.flowName) ? parts : null;
+}
+
+
+/**
+ * The identifier contract THIS RESOLVER enforces at read time, applied as a start-time
+ * conformance check (#1280 review FIX-5).
+ *
+ * `validateDefinition` from `@kontourai/flow` is the base contract and is deliberately looser:
+ * it accepts any non-empty string as a step id. The resolver is stricter — `resolveFlowStep`
+ * returns null for any `stepId` outside SLUG_RE (see resolveFlowStepInternal), and
+ * `resolveFlowFilePath` returns null for a flow id whose parts fall outside it. A definition
+ * that passes only the base contract can therefore be published as an active step and then
+ * resolve to NOTHING, at which point the Stop hook silently falls back to generic `workflow.*`
+ * enforcement — a governance downgrade produced by a definition the start accepted. Callers
+ * that admit a definition into a session must apply this too, so what start validates and what
+ * runtime can resolve are the same set.
+ *
+ * Returns a list of human-readable issues; empty means the definition satisfies the resolver's
+ * own identifier contract.
+ *
+ * `phase_map` IS checked, on its VALUES only (#1316 review FIX-4). It was on the not-checked list
+ * as "a kit chooses its own lifecycle projection" — true of the phase KEYS, which are the kit's
+ * own vocabulary and stay unchecked. The values are not a vocabulary: `advance-state` publishes
+ * one verbatim into `active_step_id`, and `resolvePhaseMap` only ever asserted they are strings.
+ * A mapping to `"bad step"`, or to a step the definition never declares, therefore recreates
+ * exactly the unresolvable active pointer the step-id clause above exists to prevent — through a
+ * second door, with the same consequence (the Stop hook silently falls back to generic
+ * `workflow.*` enforcement). A projection may choose WHICH declared step a phase lands on; it may
+ * not name a step that does not exist.
+ *
+ * DELIBERATELY NOT CHECKED HERE (disclosed rather than implied — a third-party definition still
+ * influences these, and no further check stands between the declaration and the behavior):
+ *   - `phase_map` KEYS: the kit's own phase vocabulary, matched against whatever `--phase` the
+ *     caller passes. An unmatched phase publishes no pointer at all, which is already fail-closed.
+ *   - `expects[].bundle_claim` (claimType / subjectType / accepted_statuses): selects which
+ *     Stop-hook claim satisfies a gate; a kit chooses its own claim vocabulary.
+ *   - `on_route_back` / `route_back_policy`: route-back targets and attempt limits consumed by
+ *     `advance-state`; structurally validated by `routeBackMetadataForGate`, but the declared
+ *     targets and limits themselves are the kit's.
+ *   - `requires_current_verification`: enforced at the canonical Builder evaluation seam, so it
+ *     has no effect for a flow with no canonical run.
+ *   - producer-binding completeness: whether a step's expectations have a producer that can
+ *     actually satisfy them is not knowable from the definition alone (see
+ *     `expectedGateProducer`, which resolves producers from a kit manifest, not the definition).
+ */
+export function flowDefinitionResolverContractIssues(
+  definition: unknown,
+  options: { declaredStepIds?: ReadonlySet<string> } = {},
+): string[] {
+  const issues: string[] = [];
+  if (!isRecord(definition)) return ["definition must be an object"];
+  const id = definition["id"];
+  if (typeof id !== "string" || !slugFlowIdParts(id)) {
+    issues.push(`definition id ${JSON.stringify(String(id))} must be "<kit>.<flow>" with both parts matching ${SLUG_RE}`);
+  }
+  const steps = definition["steps"];
+  const stepIds = new Set<string>();
+  if (Array.isArray(steps)) {
+    for (const step of steps) {
+      const stepId = isRecord(step) ? step["id"] : undefined;
+      if (typeof stepId !== "string") continue;
+      stepIds.add(stepId);
+      if (!SLUG_RE.test(stepId)) {
+        issues.push(`step id ${JSON.stringify(stepId)} must match ${SLUG_RE}; the resolver cannot resolve a gate for it`);
+      }
+    }
+  }
+  const gates = definition["gates"];
+  if (isRecord(gates)) {
+    for (const [gateId, gate] of Object.entries(gates)) {
+      const step = isRecord(gate) ? gate["step"] : undefined;
+      if (typeof step !== "string") continue;
+      if (!SLUG_RE.test(step)) {
+        issues.push(`gate ${JSON.stringify(gateId)} names step ${JSON.stringify(step)}, which must match ${SLUG_RE}`);
+      } else if (steps !== undefined && !stepIds.has(step)) {
+        issues.push(`gate ${JSON.stringify(gateId)} names step ${JSON.stringify(step)}, which the definition does not declare`);
+      }
+    }
+  }
+  // #1316 review FIX-4: `advance-state` publishes a phase_map VALUE verbatim into
+  // `active_step_id`. Hold it to the same contract a step id is held to, at the same floor.
+  const phaseMap = definition["phase_map"];
+  if (isRecord(phaseMap)) {
+    // Judge the value against the steps THE RESOLVER WILL SEE when it resolves the published
+    // active_step_id, which is `declaredStepIds` when the caller supplies it. That set is NOT
+    // always this definition's own `steps`: `resolveEffectiveFlowDefinition` prunes TERMINAL
+    // SENTINELS (an ungated `next: null` step some other step points at), while
+    // `resolveFlowStepInternal` reads the RAW file, where the sentinel is still a step. Judging a
+    // phase_map against the pruned list would refuse `closeout: "closeout"` — a correct mapping
+    // to a real, ungated terminal step — as if it named nothing.
+    const resolvable = options.declaredStepIds ?? stepIds;
+    const canJudgeMembership = options.declaredStepIds !== undefined || steps !== undefined;
+    for (const [phase, mapped] of Object.entries(phaseMap)) {
+      if (typeof mapped !== "string") {
+        issues.push(`phase_map ${JSON.stringify(phase)} maps to ${JSON.stringify(mapped)}, which must be a declared step id`);
+      } else if (!SLUG_RE.test(mapped)) {
+        issues.push(`phase_map ${JSON.stringify(phase)} maps to step ${JSON.stringify(mapped)}, which must match ${SLUG_RE}; advance-state would publish it as an active_step_id the resolver cannot resolve`);
+      } else if (canJudgeMembership && !resolvable.has(mapped)) {
+        issues.push(`phase_map ${JSON.stringify(phase)} maps to step ${JSON.stringify(mapped)}, which the definition does not declare`);
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * The step ids the RAW definition declares — the exact set `resolveFlowStepInternal` matches a
+ * published `active_step_id` against, because it is read the same way (`readFlowDefinition`).
+ *
+ * Exported so the admission check can judge `phase_map` against what an active pointer will
+ * actually be resolved against rather than against the composed definition, which legitimately
+ * omits pruned terminal sentinels. Deriving it from the same read is the point: a second
+ * enumeration of "which steps exist" is a second answer.
+ *
+ * Returns null when the definition cannot be read at all.
+ */
+export function declaredFlowStepIds(flowId: string, repoRoot: string, allowOverride = true): ReadonlySet<string> | null {
+  const source = readFlowDefinition(flowId, repoRoot, allowOverride);
+  if (!source || !Array.isArray(source.steps)) return null;
+  const ids = new Set<string>();
+  for (const step of source.steps) {
+    if (step && typeof step.id === "string") ids.add(step.id);
+  }
+  return ids;
 }
 
 function readFlowDefinition(flowId: string, repoRoot: string, allowOverride = true): FlowDefinition | null {

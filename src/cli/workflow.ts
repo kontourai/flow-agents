@@ -21,7 +21,7 @@ import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
-import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
@@ -33,6 +33,7 @@ import {
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
+import { flowAdmissionRefusal } from "../lib/flow-admission.js";
 import {
   createContinuationEvidenceCheckpointWriter,
   validateContinuationEvidenceCheckpointDirectory,
@@ -1310,13 +1311,28 @@ function startContractReport(issues: string[], workItem: string | undefined): st
   ].join("\n");
 }
 
+/**
+ * #1280 / #1316: `workflow start` admits a flow only when it EXISTS, CONFORMS, CAN ACTUALLY RUN,
+ * and would run THE BYTES THIS CHECK JUST VALIDATED — each answer derived, never enumerated in
+ * core. Core spells no kit name here.
+ *
+ * The rule itself lives in `flow-admission.ts` because this verb is not the only door: the
+ * installed sidecar's `ensure-session --flow-id` and `advance-state --flow-definition` reach the
+ * same artifacts, and the #1315 review found them still admitting what this refused. One rule,
+ * every door — see that module for the four questions and who answers each.
+ */
+function assertKitDeclaredFlow(flow: string, repoRoot: string): void {
+  const refusal = flowAdmissionRefusal(flow, repoRoot, "workflow start --flow");
+  if (refusal) throw new Error(refusal);
+}
+
 async function start(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("start"), "workflow start");
   const flow = flagString(parsed.flags, "flow", "builder.build")!;
-  if (flow !== "builder.build" && flow !== "builder.shape") throw new Error("workflow start supports only --flow builder.build or builder.shape");
   const workItem = flagString(parsed.flags, "work-item");
   const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
+  assertKitDeclaredFlow(flow, findRepoRootFromDir(artifactRoot));
   const taskSlug = flagString(parsed.flags, "task-slug");
   const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
   const effectiveStateJson = flagString(parsed.flags, "effective-state-json");
