@@ -9618,7 +9618,7 @@ test("builder.build-lean runs end to end to terminal completion and terminal del
   execFileSync("git", ["add", ".gitignore", "package.json", "context", "review-target"], { cwd: session.projectRoot });
   execFileSync("git", ["commit", "-m", "reviewed implementation"], { cwd: session.projectRoot, stdio: "ignore" });
 
-  const { latest: atPrOpen, verification } = await advanceLeanSessionToPrOpen(session);
+  const { latest: atPrOpen } = await advanceLeanSessionToPrOpen(session);
   assert.equal(atPrOpen.run.definitionId, LEAN_FLOW_ID, "every gate so far was cleared by the VARIANT, not the control");
   assert.equal(atPrOpen.run.state.current_step, "pr-open");
 
