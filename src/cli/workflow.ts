@@ -21,7 +21,7 @@ import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
-import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
@@ -827,6 +827,19 @@ type ProvisionalCompletionVerifier = (
   value: unknown,
   expected: { runId: string; requestSha256: string; resultCoreSha256: string },
 ) => JsonRecord;
+
+/**
+ * #1304: the publish-first suppression key. The whole delivery-evidence predicate
+ * (`assertTerminalDeliveryWorkspaceEvidence`) is the WRONG key for the route-back disclosure:
+ * its strict branch succeeds on fresh current verification WITHOUT examining the provisional
+ * record — exactly the pre-trap state where recording a non-pass claim would make that evidence
+ * stale and block the publish that would resolve it. Only a VERIFYING provisional delivery
+ * record — bindings validated by the production record verifier — may suppress the guidance.
+ * Throws whenever no such record exists (absent, stale, or invalid).
+ */
+export function assertVerifiedProvisionalDeliveryRecord(sessionDir: string, projectRoot: string, slug: string): void {
+  verifyRecordedProvisionalDelivery(sessionDir, projectRoot, slug, verifyProvisionalDeliveryLifecycleCompletion);
+}
 
 function verifyRecordedProvisionalDelivery(
   sessionDir: string,
@@ -1647,6 +1660,42 @@ export function assertGateFreshnessTurnstile(
   }
 }
 
+/**
+ * #1304: route-back cost disclosure — the factual POST half. `routeBackDisclosureLines` (the
+ * subjunctive PRE half, shared with the sidecar writer) states only declared/persisted facts
+ * before the mutation; this half reports what evaluation ACTUALLY did, derived verbatim from the
+ * transitions the committed mutation appended to canonical state — never from a re-derivation of
+ * route semantics. Exactly one of three truths is reported:
+ *   - a `route_back` transition was appended and the run left/looped its step → routed, with the
+ *     transition's own attempt/max/reason;
+ *   - a `route_back` transition was appended with `limit_exceeded` and the run is blocked →
+ *     budget exhausted, the run did not route;
+ *   - no `route_back` transition was appended → the non-pass claim sits LIVE at the unchanged
+ *     step (the run-4 trap: an unpublished `not_verified` at a `requires_current_verification`
+ *     gate is withheld, not routed).
+ */
+export function routeBackOutcomeLines(
+  postState: { status?: unknown; current_step: string; transitions?: unknown },
+  preTransitionCount: number,
+  expectation: string,
+  requestedStatus: string,
+): string[] {
+  const transitions = Array.isArray(postState.transitions) ? postState.transitions as JsonRecord[] : [];
+  const appended = transitions.slice(preTransitionCount)
+    .filter((transition) => transition && typeof transition === "object" && (transition as JsonRecord).type === "route_back");
+  if (appended.length === 0) {
+    return [`[workflow evidence] NOTICE: recorded ${requestedStatus} for ${expectation}; the run did not route — it remains at '${postState.current_step}', and a non-pass claim recorded here sits live until superseded.`];
+  }
+  const routeBack = appended[appended.length - 1]!;
+  const attempt = String(routeBack.attempt);
+  const max = String(routeBack.max_attempts);
+  if (routeBack.limit_exceeded === true && postState.status === "blocked") {
+    return [`[workflow evidence] NOTICE: route-back budget exhausted (attempt ${attempt} of ${max}); the run did not route and is BLOCKED at '${postState.current_step}'.`];
+  }
+  const reason = typeof routeBack.route_reason === "string" && routeBack.route_reason.length > 0 ? `, reason ${routeBack.route_reason}` : "";
+  return [`[workflow evidence] NOTICE: recorded ${requestedStatus} for ${expectation} routed the run back to '${String(routeBack.to_step)}' (route-back attempt ${attempt} of ${max}${reason}); current-visit verification evidence (critique/tests) must be re-recorded.`];
+}
+
 async function evidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("evidence"), "workflow evidence");
@@ -1678,6 +1727,18 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     const repaired = await recoverBuilderFlowSession({ sessionDir });
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
     assertGateFreshnessTurnstile(sessionDir, repaired.run, expectation, requestedStatus);
+    // #1304 PRE: declared route map + persisted per-identity attempt history, emitted under the
+    // lock after authorization and immediately before the mutation — facts only, never a
+    // prediction of what evaluation will decide (an unauthorized or refused invocation
+    // discloses nothing). The publish-first guidance is suppressed ONLY by a VERIFYING
+    // provisional delivery record (production record verifier) — never by fresh current
+    // verification evidence, which is the pre-trap state.
+    const routeFacts = routeBackDisclosureLines(repaired.run, expectation, requestedStatus,
+      () => assertVerifiedProvisionalDeliveryRecord(sessionDir, repaired.projectRoot, slug));
+    for (const line of routeFacts) process.stderr.write(`${line}\n`);
+    const preTransitionCount = Array.isArray((repaired.run.state as JsonRecord).transitions)
+      ? ((repaired.run.state as JsonRecord).transitions as unknown[]).length
+      : 0;
     const run = (beforeCanonicalMutation?: () => void) => runEvidenceTransaction({
       sessionDir,
       slug,
@@ -1690,11 +1751,28 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
       beforeRun: repaired.run,
       beforeCanonicalMutation,
     });
+    let result: Awaited<ReturnType<typeof runEvidenceTransaction>>;
     if (!caller.hostRecovery) {
       if (flagString(parsed.flags, "authorization-file")) throw new Error("workflow evidence --authorization-file is only valid for host recovery");
-      return run();
+      result = await run();
+    } else {
+      result = await runHostAuthorizedEvidence({ sessionDir, slug, parsed, validated, repaired, caller, run });
     }
-    return runHostAuthorizedEvidence({ sessionDir, slug, parsed, validated, repaired, caller, run });
+    // #1304 POST: report what evaluation actually did, derived from the canonical state this
+    // invocation just committed (still under the subject lock, so the read is race-free).
+    // "recovered" means THIS invocation's candidate was canonically attached and only a later
+    // operation failed — its observed outcome is reported exactly like the fresh-commit path.
+    if (routeFacts.length > 0 && (result.state === "attached" || result.state === "recovered")) {
+      const post = await loadBuilderFlowRun({ cwd: repaired.projectRoot, runId: slug });
+      const outcomeLines = routeBackOutcomeLines(
+        post.state as { status?: unknown; current_step: string; transitions?: unknown },
+        preTransitionCount,
+        expectation,
+        requestedStatus,
+      );
+      for (const line of outcomeLines) process.stderr.write(`${line}\n`);
+    }
+    return result;
   });
   return reportEvidenceOutcome(outcome, json);
 }
@@ -2673,7 +2751,9 @@ function formatCommandOutcomes(observations: CommandObservationReport[]): string
   return observations.length === 0 ? "none" : observations.map((observation) => `${observation.outcome} (exit ${observation.exit_code})`).join(", ");
 }
 
-function assertExecuteFailureRouteBeforeMutation(
+// Exported for the #1304 byte-stability tests: these refusal strings predate the route-back
+// disclosure and consumers substring-match them, so they must stay byte-identical.
+export function assertExecuteFailureRouteBeforeMutation(
   definition: JsonRecord,
   currentStep: string,
   status: string,
