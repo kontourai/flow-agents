@@ -280,11 +280,12 @@ function flowIdParts(flowId: string): { kitId: string; flowName: string } | null
  *
  * Sources mirror resolveFlowFilePath's resolution order exactly, so the derived list never
  * names a flow the resolver would look up somewhere else:
- *   - FLOW_AGENTS_FLOW_DEFS_DIR override (when set and not agent-writable): every
- *     `<flowId>.flow.json` file in that directory. The override replaces canonical kit
- *     lookup wholesale, so it replaces discovery too. An agent-writable override yields an
- *     empty list — the same fail-closed posture resolveFlowFilePath takes.
- *   - Canonical: each kit directory under `<repoRoot>/kits/*`, plus the executing package's
+ *   - FLOW_AGENTS_FLOW_DEFS_DIR override (when set and outside runtime artifact storage):
+ *     every `<flowId>.flow.json` file in that directory. The override replaces canonical kit
+ *     lookup wholesale, so it replaces discovery too. An override inside runtime artifact
+ *     storage yields an empty list — the same fail-closed posture resolveFlowFilePath takes.
+ *   - Canonical: each kit directory under `<repoRoot>/kits/*` (that root resolved, and refused
+ *     when it escapes the repo root or lands in runtime storage), plus the executing package's
  *     own `kits/*` (the same package fallback canonical resolution applies). A kit's
  *     declaration surface is its `kit.json` `flows[].id` list when the manifest declares
  *     one — the packaged, digest-covered artifact — else its `flows/*.flow.json` directory.
