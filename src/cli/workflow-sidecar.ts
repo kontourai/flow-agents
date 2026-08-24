@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
-import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { resolveActionableFlowStep, resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { FLOW_AGENTS_RUNTIME_DIR, defaultArtifactRootForRead, flowAgentsArtifactRoot, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } from "../lib/local-artifact-root.js";
 import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
 import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
@@ -972,8 +972,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // writeTrustBundle below) threads through to resolveActiveFlowStep's per-actor-first,
   // legacy-fallback current.json read; omitted, this is IDENTICAL to pre-#291 behavior.
   const exactRepoRoot = flowAgentsDir ? findRepoRootFromDir(path.dirname(flowAgentsDir)) : null;
+  // #1335: the run's cursor may rest on a gateless sequencing passthrough, which declares no gate
+  // and therefore no expects[] to type a claim against. The step a claim belongs to is the one the
+  // run must SATISFY next, which `resolveActionableFlowStep` derives; for a cursor already on a
+  // gated step it is that step, so flows that gate every step are unaffected.
   const activeStep: ActiveFlowStep | null = exactFlowContext && exactRepoRoot
-    ? resolveFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, exactRepoRoot)
+    ? resolveActionableFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, exactRepoRoot)
     : flowAgentsDir ? resolveActiveFlowStep(flowAgentsDir, actorKey) : null;
 
   // #270 CRITICAL/HIGH fix: resolve the session's active_flow_id independent of whether the
@@ -5869,7 +5873,9 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const projectedRunDefinition = gateClaimFlowIdentityFields(projectedRun);
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
   const activeStep = exactFlowContext
-    ? resolveFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, findRepoRootFromDir(path.dirname(flowAgentsDir)))
+    // #1335: the actionable step, not the parked one — see buildTrustBundle's note. A gateless
+    // passthrough has no gate to record against, and the kit binds its producer at the gated step.
+    ? resolveActionableFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, findRepoRootFromDir(path.dirname(flowAgentsDir)))
     : resolveActiveFlowStep(flowAgentsDir, gateClaimActorKey);
   if (exactFlowContext && !activeStep) die(`record-gate-claim cannot resolve exact session Flow step ${exactFlowContext.flowId}/${exactFlowContext.stepId}`);
   if (!activeStep) die("record-gate-claim requires an active flow step in current.json (set via ensure-session --flow-id or advance-state --flow-definition)");

@@ -11,7 +11,6 @@ import {
   evaluateGate,
   expectationsForGate,
   flowRunHead,
-  openGates,
   withRunMutationLock,
   type FlowGate,
   type FlowExpectation,
@@ -46,6 +45,7 @@ import {
   BUILDER_BUILD_FLOW_ID,
   type BuilderFlowId,
   BuilderBuildRunInputError,
+  actionableOpenGates,
   evaluateBuilderFlowRun,
   loadBuilderFlowRun,
   pauseBuilderFlowRun,
@@ -1557,8 +1557,19 @@ function persistedFlowId(state: AnyRecord): BuilderFlowId | null {
   return flowId === "builder.build" || flowId === "builder.shape" ? flowId : null;
 }
 
+/**
+ * The gates the run must act on now.
+ *
+ * #1335: this used to be `openGates` verbatim, which answers only "what does the cursor's own step
+ * gate". A flow may declare gateless sequencing passthroughs, and a cursor resting on one made this
+ * return nothing — which every caller below reads as "this run is unadvanceable". The derivation
+ * now looks forward across those passthroughs to the first step that actually gates something, so
+ * the answer is the gate the run is working toward rather than an accident of where the cursor
+ * happens to be parked. Flows that gate every step are unaffected: the forward walk is only reached
+ * when the cursor's own step declares no gate.
+ */
 function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: string }> {
-  return openGates(run.definition, run.state) as Array<FlowGate & { id: string }>;
+  return actionableOpenGates(run.definition, run.state) as Array<FlowGate & { id: string }>;
 }
 
 /**
@@ -2368,7 +2379,7 @@ function manifestEvidence(manifest: JsonObject): AnyRecord[] {
 
 function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, sidecar: AnyRecord): { projection: AnyRecord; gateActionEnvelope: GateActionEnvelope | null; progressSnapshot: GateActionProgressSnapshot } {
   const definition = run.definition;
-  const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
+  const gates = openGatesForResult(run);
   const complete = run.state.status === "completed";
   const paused = run.state.status === "paused";
   const canceled = run.state.status === "canceled";
