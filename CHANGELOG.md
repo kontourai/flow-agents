@@ -1,5 +1,39 @@
 # Changelog
 
+## [6.1.0](https://github.com/kontourai/flow-agents/compare/v6.0.0...v6.1.0) (2026-08-24)
+
+
+### Features
+
+* **cli:** intercept --help before any verb runs; derive help from the enforcing option sets ([#1298](https://github.com/kontourai/flow-agents/issues/1298)) ([43b2b08](https://github.com/kontourai/flow-agents/commit/43b2b0870450bac9ff97aa398ccd7556dc7b97b3))
+* **cli:** one-pass contract reports on the builder.build critical path ([#1301](https://github.com/kontourai/flow-agents/issues/1301)) ([5f8684b](https://github.com/kontourai/flow-agents/commit/5f8684b2da9f420b787ceacd90999e8f8d1e3005))
+* **delivery:** project accepted gaps from delivery/DECLARED as aging Console records ([#1267](https://github.com/kontourai/flow-agents/issues/1267)) ([cc1456f](https://github.com/kontourai/flow-agents/commit/cc1456fdbb934c83041897cef46ea3315ac65d46))
+* **kit:** status reads become conditional — the steering contract, taught accurately (11 → 0 unconditional mandates) ([#1269](https://github.com/kontourai/flow-agents/issues/1269)) ([07e9384](https://github.com/kontourai/flow-agents/commit/07e9384651d17bfd332b65f9f8f71eeabca0fd88))
+* **telemetry,delivery:** stop-gate summary record + accepted-gaps projection ([#1266](https://github.com/kontourai/flow-agents/issues/1266), [#1267](https://github.com/kontourai/flow-agents/issues/1267)) ([#1268](https://github.com/kontourai/flow-agents/issues/1268)) ([6f742d8](https://github.com/kontourai/flow-agents/commit/6f742d8d8852564bf5a161f8d54fe2585cc110d0))
+* **telemetry:** emit the stop-gate cross-check summary as a machine-readable record ([#1266](https://github.com/kontourai/flow-agents/issues/1266)) ([9ca8078](https://github.com/kontourai/flow-agents/commit/9ca8078cb4b3ff374522e823eb89c47f335e64a6))
+* **telemetry:** local-only measurement trend sink that reports changes, not scores ([#1258](https://github.com/kontourai/flow-agents/issues/1258)) ([#1262](https://github.com/kontourai/flow-agents/issues/1262)) ([16d9203](https://github.com/kontourai/flow-agents/commit/16d92036bb577cb2f85ed62f67bc575a09b71928))
+* **telemetry:** the CLI witnesses its own transitions, and a kit-agnostic scorer derives gate cost and outcome from them ([#1274](https://github.com/kontourai/flow-agents/issues/1274)) ([a534834](https://github.com/kontourai/flow-agents/commit/a5348344167d4ee90bfed6fe199956b771c1fe73))
+* **workflow:** route-back cost disclosure — declared facts before, observed outcome after ([#1304](https://github.com/kontourai/flow-agents/issues/1304)) ([#1317](https://github.com/kontourai/flow-agents/issues/1317)) ([4056348](https://github.com/kontourai/flow-agents/commit/4056348d7acce863a8a10036a852cb9b03f0cb8b))
+
+
+### Fixes
+
+* **assignment-provider:** bootstrap preserves tracked settings byte-identically ([#1305](https://github.com/kontourai/flow-agents/issues/1305)) ([#1310](https://github.com/kontourai/flow-agents/issues/1310)) ([7502550](https://github.com/kontourai/flow-agents/commit/7502550745e85105e287808d2132815a90279811))
+* **builder:** refusals name their cause and their remedy ([#1282](https://github.com/kontourai/flow-agents/issues/1282)) ([8bac992](https://github.com/kontourai/flow-agents/commit/8bac9925007a0cee5015a87defb52d7bb5b994c5))
+* **cli:** report the diagnostic a failing verb already composed, not its stack ([#1257](https://github.com/kontourai/flow-agents/issues/1257)) ([#1260](https://github.com/kontourai/flow-agents/issues/1260)) ([4f34314](https://github.com/kontourai/flow-agents/commit/4f343143767b1fce5d71ca09ed2bc2dd9534502a))
+* **cli:** sidecar --key=value parser parity + option-level specs and allowlists ([#1294](https://github.com/kontourai/flow-agents/issues/1294)) ([#1303](https://github.com/kontourai/flow-agents/issues/1303)) ([df3e4ce](https://github.com/kontourai/flow-agents/commit/df3e4ce9d46ae44ba23e5adc96a0fc364dbe2e93))
+* **evals:** MCP-on-PATH is a host property — skip with a note when absent, never fail the package ([#1311](https://github.com/kontourai/flow-agents/issues/1311)) ([8fcd57f](https://github.com/kontourai/flow-agents/commit/8fcd57f75fd17a62cbcbaac125f9f1e791979ac6))
+* **init:** ignore the artifact root so the evidence writer can observe itself ([#1264](https://github.com/kontourai/flow-agents/issues/1264)) ([#1265](https://github.com/kontourai/flow-agents/issues/1265)) ([7f5669e](https://github.com/kontourai/flow-agents/commit/7f5669e7be1c6cee70225d56a35ba40215a404de))
+* **init:** never overwrite what the bundle does not own — plan, preserve, disclose ([#1288](https://github.com/kontourai/flow-agents/issues/1288)) ([#1309](https://github.com/kontourai/flow-agents/issues/1309)) ([ee8d0d9](https://github.com/kontourai/flow-agents/commit/ee8d0d9853b94684b079aee299c55fdcbcc3e075))
+* **merge-change:** derive start-definition proof; coordinator adopts the semantic route-map form ([#1307](https://github.com/kontourai/flow-agents/issues/1307)) ([#1308](https://github.com/kontourai/flow-agents/issues/1308)) ([17d6bf4](https://github.com/kontourai/flow-agents/commit/17d6bf4e523d7cee83d91870c60381ba69a428b1))
+* **projection,schema:** review round 1 — printable digest input (raw NUL removed), contradiction-scope sentence ([#1266](https://github.com/kontourai/flow-agents/issues/1266) [#1267](https://github.com/kontourai/flow-agents/issues/1267)) ([3976662](https://github.com/kontourai/flow-agents/commit/39766625bd4819084a9d5eb510a462a2cf1dcf03))
+* **sidecar:** the plan re-record IS the provenance-bearing criterion amendment channel ([#1312](https://github.com/kontourai/flow-agents/issues/1312)) ([#1313](https://github.com/kontourai/flow-agents/issues/1313)) ([15723f9](https://github.com/kontourai/flow-agents/commit/15723f945f4b9d04f9dfaf1efcc3c8d20e9a9c54))
+* **telemetry:** count one API response once — transcript token totals were 2-3x inflated ([#1277](https://github.com/kontourai/flow-agents/issues/1277)) ([864b53d](https://github.com/kontourai/flow-agents/commit/864b53d64fbd1edf4a8ebe04227f35077edcb3ee))
+* **telemetry:** report an absent host binding as absent, not as an invalid one ([#1278](https://github.com/kontourai/flow-agents/issues/1278)) ([002cc28](https://github.com/kontourai/flow-agents/commit/002cc281c4956510524215eb1c4dda5769a108ad)), closes [#1276](https://github.com/kontourai/flow-agents/issues/1276)
+* **test:** descendant wait uses a 30s wall-clock deadline, not a 2s attempt budget ([#1259](https://github.com/kontourai/flow-agents/issues/1259)) ([#1270](https://github.com/kontourai/flow-agents/issues/1270)) ([8b27bd1](https://github.com/kontourai/flow-agents/commit/8b27bd1fe71cc6a19372012cb84fce3cd54508b7))
+* **workflow:** freshness turnstile at cursor-advancing gates, enforced at the evaluation seam ([#1302](https://github.com/kontourai/flow-agents/issues/1302), [#1300](https://github.com/kontourai/flow-agents/issues/1300)) ([#1306](https://github.com/kontourai/flow-agents/issues/1306)) ([5b580d4](https://github.com/kontourai/flow-agents/commit/5b580d4e5c1ba59016e0f6831f824fbd47b35537))
+* **workflow:** name every failing clause of the ensure-session ownership check ([#1297](https://github.com/kontourai/flow-agents/issues/1297)) ([dea2505](https://github.com/kontourai/flow-agents/commit/dea25050b5a310f9aedd68a9d742115ca9e346cb))
+
 ## [6.0.0](https://github.com/kontourai/flow-agents/compare/v5.10.0...v6.0.0) (2026-08-16)
 
 
