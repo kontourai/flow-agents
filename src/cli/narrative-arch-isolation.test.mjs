@@ -13,6 +13,7 @@ import {
 } from "../../build/src/cli/public-contracts.js";
 import { rejectOperationBoundExpectation } from "../../build/src/cli/workflow-sidecar.js";
 import { main as narrativeSourcesMain, NARRATIVE_NAMESPACE_ROOT } from "../../build/src/cli/narrative-sources.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const NARRATIVE_SOURCE_ROOT = path.resolve("src/narrative");
 const ALLOWED_SHARED_IMPORTS = new Set([
@@ -86,7 +87,7 @@ test("narrative sources remain isolated from Flow trust and mutation machinery",
 });
 
 test("narrative snapshots resolve beneath the canonical project namespace", { concurrency: false }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-namespace-"));
+  const root = makeFixtureDir("narrative-namespace-");
   const projectRoot = path.join(root, "project");
   const repoRoot = path.join(projectRoot, "repo");
   const sourceFile = path.join(repoRoot, "input.json");

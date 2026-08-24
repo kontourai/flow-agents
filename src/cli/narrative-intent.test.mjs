@@ -13,6 +13,7 @@ import {
   readIntentEconomics,
   reduceIntentEconomics,
 } from "../../build/src/index.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const action = `fa1:file:action.json:${"a".repeat(64)}`;
 const gate = `fa1:file:gate.json:${"b".repeat(64)}`;
@@ -63,7 +64,7 @@ test("#622 (R1): a nonexistent / unresolvable action_ref is REJECTED (no annotat
 });
 
 test("#622 (R1): captured_at is bound to the action entry, not bind-time wall-clock", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "intent-cobind-"));
+  const dir = makeFixtureDir("intent-cobind-");
   try {
     const captured = captureIntent({
       capability: supported, actor: "codex", runtimeId: "claude-code",
@@ -108,7 +109,7 @@ test("#622: a redacted purpose field is nulled before emission (falls back)", ()
 });
 
 test("#622: bindIntentAnnotation freezes write-once; a post-hoc write is EEXIST-rejected", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "intent-bind-"));
+  const dir = makeFixtureDir("intent-bind-");
   try {
     const captured = captureIntent({
       capability: supported, actor: "codex", runtimeId: "claude-code",
@@ -137,7 +138,7 @@ test("#622: agent_stated can never assert a prohibited (gate-evidence) category"
 });
 
 test("#622: A/B reducer reports a mean delta WITH an uncertainty spread", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "intent-econ-"));
+  const dir = makeFixtureDir("intent-econ-");
   try {
     appendIntentEconomics(dir, { mode: "annotation_off", input_tokens: 100, output_tokens: 40, wall_clock_ms: 1000, attempted_at: "2026-07-15T00:00:00.000Z" });
     appendIntentEconomics(dir, { mode: "annotation_on", input_tokens: 130, output_tokens: 44, wall_clock_ms: 1100, attempted_at: "2026-07-15T00:00:01.000Z" });

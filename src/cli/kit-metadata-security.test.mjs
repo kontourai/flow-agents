@@ -9,12 +9,13 @@ import { readKitInventory } from "../../build/src/runtime-adapters.js";
 import { main as validateHookInfluence } from "../../build/src/cli/validate-hook-influence.js";
 import { parseKitAgentSpawnTriggers, parseKitFlowStepActions, parseKitSkillRoles, validateKitRepository, validateKitRepositoryDiagnostics } from "../../build/src/flow-kit/validate.js";
 import { observeBuilderArtifactsForProgress } from "../../build/src/builder-gate-action-envelope.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require = createRequire(import.meta.url);
 const { workflowTriggersFor } = require("../../scripts/hooks/lib/kit-catalog.js");
 
 function tempRoot(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return makeFixtureDir(prefix);
 }
 
 function writeJson(file, value) {

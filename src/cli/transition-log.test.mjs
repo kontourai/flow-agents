@@ -25,6 +25,7 @@ import {
   UNKNOWN_COMMAND,
   UNPARSED,
 } from "../../build/src/transition-log.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const CLI = path.resolve(import.meta.dirname, "../../build/src/cli.js");
 
@@ -48,7 +49,7 @@ function readLog(root) {
 }
 
 function fixtureRepo() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "transition-log-"));
+  const root = makeFixtureDir("transition-log-");
   execFileSync("git", ["init", "-q"], { cwd: root });
   return root;
 }
@@ -296,7 +297,7 @@ test("one repository keeps one log, whatever directory the CLI runs from", () =>
 // there afterwards — the repo asserts this in test_public_workflow_cli.sh, and the
 // first version of this writer failed it.
 test("outside a repository nothing is written at all", () => {
-  const loose = fs.mkdtempSync(path.join(os.tmpdir(), "transition-log-bare-"));
+  const loose = makeFixtureDir("transition-log-bare-");
   assert.equal(transitionLogRoot(loose), null);
   assert.equal(
     recordTransition({
@@ -367,7 +368,7 @@ test("the log directory carries its own ignore rule wherever it is created", () 
 // still returned success.
 test("a symlinked parent directory is refused, not written through", () => {
   const root = fixtureRepo();
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "transition-log-outside-"));
+  const outside = makeFixtureDir("transition-log-outside-");
   fs.mkdirSync(path.join(root, ".flow-agents"), { recursive: true });
   fs.symlinkSync(outside, path.join(root, ".flow-agents", "telemetry"));
   const record = buildTransitionRecord({

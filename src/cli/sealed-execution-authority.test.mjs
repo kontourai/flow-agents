@@ -8,6 +8,7 @@ import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { sealedProjection, sealedWorkload } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const coordinator = fs.readFileSync(path.resolve("packaging/lifecycle-authority/coordinator.mjs"), "utf8");
 const workflowSource = fs.readFileSync(path.resolve("src/cli/workflow.ts"), "utf8");
@@ -82,7 +83,7 @@ test("sealed result projection keeps bounded, replayable policy artifacts but re
 });
 
 async function sealedCoordinatorFixture({ controllerScript = null, maxRuntimeMs = 5000, maxOutputBytes = 64 * 1024, runtimeBytes = null, instrumentSource = (source) => source } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sealed-exec-coordinator-"));
+  const root = makeFixtureDir("sealed-exec-coordinator-");
   const config = path.join(root, "config"); const state = path.join(root, "state"); const execution = path.join(root, "execution");
   fs.mkdirSync(config, { recursive: true });
   for (const directory of [state, execution, path.join(state, "stages"), path.join(state, "nonces"), path.join(state, "completions"), path.join(state, "locks")]) fs.mkdirSync(directory, { recursive: true });

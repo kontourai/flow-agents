@@ -17,9 +17,10 @@ import {
   flowAgentsArtifactRoot,
   KONTOURAI_DIR,
 } from "../../build/src/index.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 test("public API resolves the workflow driver's integrity-bound adapter identity", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-adapter-identity-"));
+  const root = makeFixtureDir("flow-agents-adapter-identity-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const adapter = path.join(root, "adapter.mjs");
   const command = path.join(root, "adapter-command.json");
@@ -108,7 +109,7 @@ test("public API exports the pure narrative source contract", async () => {
 test("TS and CJS artifact helpers stay in parity without durable-root fallback", () => {
   const require = createRequire(import.meta.url);
   const cjs = require("../../scripts/hooks/lib/local-artifact-paths.js");
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-paths-"));
+  const cwd = makeFixtureDir("flow-agents-paths-");
 
   fs.mkdirSync(path.join(cwd, DURABLE_FLOW_AGENTS_DIR, "previous-session"), { recursive: true });
   fs.writeFileSync(path.join(cwd, DURABLE_FLOW_AGENTS_DIR, "current.json"), "{}\n");

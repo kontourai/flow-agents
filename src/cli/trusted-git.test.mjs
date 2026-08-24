@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { execTrustedGitSync, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../../build/src/lib/trusted-git.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const systemGit = process.platform === "win32" ? "git" : "/usr/bin/git";
 
@@ -19,7 +20,7 @@ function initializeRepository(root, content) {
 }
 
 test("trusted Git resolution ignores ambient repository and configuration control variables", () => {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-trusted-git-"));
+  const fixture = makeFixtureDir("flow-agents-trusted-git-");
   const target = path.join(fixture, "target");
   const foreign = path.join(fixture, "foreign");
   const targetSha = initializeRepository(target, "target\n");
@@ -40,7 +41,7 @@ test("trusted Git resolution ignores ambient repository and configuration contro
 });
 
 test("trusted immutable blob reads ignore replacement objects and ambient Git redirection", () => {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-trusted-blob-"));
+  const fixture = makeFixtureDir("flow-agents-trusted-blob-");
   const target = path.join(fixture, "target");
   const foreign = path.join(fixture, "foreign");
   try {
@@ -63,7 +64,7 @@ test("trusted immutable blob reads ignore replacement objects and ambient Git re
 });
 
 test("trusted commit call surfaces reject non-fixed-width commit identifiers", () => {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-trusted-sha-width-"));
+  const fixture = makeFixtureDir("flow-agents-trusted-sha-width-");
   try {
     initializeRepository(fixture, "fixture\n");
     for (const length of [41, 63]) {
@@ -79,7 +80,7 @@ test("trusted commit call surfaces reject non-fixed-width commit identifiers", (
 
 test("trusted Git never launches a repository-local fsmonitor command", () => {
   if (process.platform === "win32") return;
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-trusted-git-fsmonitor-"));
+  const fixture = makeFixtureDir("flow-agents-trusted-git-fsmonitor-");
   try {
     initializeRepository(fixture, "fixture\n");
     const marker = path.join(fixture, "fsmonitor-ran");

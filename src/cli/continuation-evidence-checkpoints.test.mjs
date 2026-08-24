@@ -10,13 +10,14 @@ import {
   validateContinuationEvidenceCheckpointDirectory,
   verifyContinuationEvidenceCheckpoints,
 } from "../../build/src/continuation-evidence-checkpoints.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const ADAPTER_IDENTITY = createHash("sha256").update("adapter").digest("hex");
 const RUN_ID = "checkpoint-run";
 const DEFINITION_ID = "builder";
 
 function fixture() {
-  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-checkpoints-")));
+  const directory = fs.realpathSync(makeFixtureDir("flow-agents-checkpoints-"));
   const keys = generateKeyPairSync("ed25519");
   const publicKeySpkiB64 = keys.publicKey.export({ type: "spki", format: "der" }).toString("base64");
   const writer = createContinuationEvidenceCheckpointWriter({

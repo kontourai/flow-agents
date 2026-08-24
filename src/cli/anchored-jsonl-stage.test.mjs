@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const helper = path.resolve("scripts/hooks/lib/anchored-jsonl-stage.js");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -17,7 +18,7 @@ async function waitFor(file) {
 }
 
 test("anchored JSONL staging cannot be redirected by a concurrent parent replacement", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-anchored-jsonl-"));
+  const root = makeFixtureDir("flow-agents-anchored-jsonl-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const agentDir = path.join(root, "agent");
   const movedDir = path.join(root, "agent-original");

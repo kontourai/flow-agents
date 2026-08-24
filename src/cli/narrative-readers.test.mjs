@@ -17,12 +17,13 @@ import {
   readTranscriptCandidate,
   readTrustCandidate,
 } from "../../build/src/narrative/readers.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require = createRequire(import.meta.url);
 const { CHAIN_GENESIS, computeChainHash } = require("../../scripts/lib/command-log-chain.js");
 
 function tempDir(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-readers-"));
+  const dir = makeFixtureDir("narrative-readers-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }

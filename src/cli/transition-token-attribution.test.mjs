@@ -43,6 +43,7 @@ import {
   TOKEN_ATTRIBUTION_FIELD,
 } from "../../scripts/telemetry/token-attribution.mjs";
 import { buildTransitionRecord } from "../../build/src/transition-log.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const FIXTURES = path.join(import.meta.dirname, "fixtures", "transition-attribution");
@@ -68,7 +69,7 @@ function readCorpus() {
 }
 
 function scratch(prefix = "transition-attribution-") {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return makeFixtureDir(prefix);
 }
 
 /** Enrich a copy of the real corpus in memory, the way the CLI does. */
