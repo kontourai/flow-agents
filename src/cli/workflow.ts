@@ -21,7 +21,7 @@ import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
-import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
@@ -32,6 +32,7 @@ import {
 } from "../lib/host-workflow-binding.js";
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
+import { canonicalRunFlowRefusal } from "../builder-flow-run-adapter.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
 import {
   createContinuationEvidenceCheckpointWriter,
@@ -1301,9 +1302,17 @@ async function start(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("start"), "workflow start");
   const flow = flagString(parsed.flags, "flow", "builder.build")!;
-  if (flow !== "builder.build" && flow !== "builder.shape") throw new Error("workflow start supports only --flow builder.build or builder.shape");
   const workItem = flagString(parsed.flags, "work-item");
   const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
+  // #1316: the startable set is DERIVED from what each declaring kit binds, not enumerated here.
+  // Core spells no kit name: a kit that ships a flow with a resolvable definition and a producer
+  // binding for every gate expectation becomes startable with no change to this file, and one
+  // that is missing a binding is refused WITH THE MISSING BINDING NAMED rather than half-started
+  // (#1315's refusal property, preserved by deriving eligibility from the same bindings the run
+  // then uses). The project root is passed so a project-installed kit is visible; the packaged
+  // tree is searched first, so a project kit can never shadow a packaged one.
+  const startRefusal = canonicalRunFlowRefusal(flow, findRepoRootFromDir(artifactRoot));
+  if (startRefusal) throw new Error(`workflow start --flow ${flow} cannot be started: ${startRefusal}`);
   const taskSlug = flagString(parsed.flags, "task-slug");
   const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
   const effectiveStateJson = flagString(parsed.flags, "effective-state-json");
