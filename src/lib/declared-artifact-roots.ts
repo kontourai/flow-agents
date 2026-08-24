@@ -38,6 +38,59 @@ function subRootsFor(root: string): string[] {
 }
 
 /**
+ * isWithinRuntimeArtifactRoot(absPath) -> boolean  (#1280 review FIX-1)
+ *
+ * The STRUCTURAL half of `subRootsFor`, inverted: rather than enumerate every repo/workspace
+ * root and join the three sub-root names onto each, walk the candidate's own ancestors and ask
+ * whether any of them OCCUPIES one of those three positions. That answers the question for a
+ * path belonging to a repo this process never resolved (a sibling checkout, an installed
+ * package tree, a path handed in through an env var) — which is exactly the population
+ * `flow-resolver.ts` has to judge when it decides whether a FlowDefinition source is runtime
+ * artifact storage rather than shipped, digest-covered kit content.
+ *
+ * The three positions are the SAME ones `subRootsFor` declares, so the two surfaces cannot
+ * drift: `<root>/.kontourai/flow-agents`, `<root>/.flow-agents`, `<root>/delivery`. Only
+ * `delivery` needs its parent qualified (an ordinary word — a directory named `delivery` is
+ * only a declared root when its parent is a git working tree, which is the same condition
+ * `declaredArtifactRoots` applies when it derives roots from `walkForGitMarker`).
+ * Configured workspace roots (`SA_PROTECTED_WORKSPACE_ROOTS`) contribute their three sub-roots
+ * verbatim, so one setting still scopes every surface.
+ *
+ * The path is canonicalized first, so a symlink pointing INTO runtime storage is judged by
+ * where it lands, not by how it was spelled.
+ *
+ * WHAT THIS DOES NOT DERIVE (do not let the name drift back into a claim): it is not a
+ * permission or ownership test. Flow Agents' runtime and the agents it governs run as the SAME
+ * uid, so no writability check can separate "the agent wrote this" from "the operator wrote
+ * this" — an agent-supplied `/tmp/anything` is writable and so is a legitimate custom install
+ * directory. What IS derivable, and what this computes, is whether a path lies inside the
+ * storage the runtime itself writes session artifacts into. Callers that need a stronger
+ * guarantee than "not runtime storage" must require provenance (a packaged, digest-covered
+ * artifact), not writability — see `assertKitDeclaredFlow` in src/cli/workflow.ts.
+ */
+export function isWithinRuntimeArtifactRoot(absPath: string): boolean {
+  let dir: string;
+  try {
+    dir = canonicalize(path.resolve(absPath));
+  } catch {
+    return true; // cannot canonicalize → cannot prove it is outside runtime storage → fail closed
+  }
+  const configured = configuredWorkspaceRoots().flatMap((root) => subRootsFor(canonicalize(root)));
+  if (isWithinAnyRoot(dir, configured)) return true;
+  const root = path.parse(dir).root;
+  for (let depth = 0; depth < 1024; depth++) {
+    const parent = path.dirname(dir);
+    const base = path.basename(dir);
+    if (base === ".flow-agents") return true;
+    if (base === "flow-agents" && path.basename(parent) === ".kontourai") return true;
+    if (base === "delivery" && walkForGitMarker(parent) === parent) return true;
+    if (dir === root || parent === dir) break;
+    dir = parent;
+  }
+  return false;
+}
+
+/**
  * Nearest ancestor of `startDir` containing a `.git` entry (a directory for a primary checkout,
  * or a file for a linked worktree's gitdir pointer), or null if none found within the bounded
  * walk. Never throws.

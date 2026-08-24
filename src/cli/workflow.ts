@@ -34,6 +34,7 @@ import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdap
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalRunFlowRefusal } from "../builder-flow-run-adapter.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
+import { declaredKitFlowIds, flowDefinitionResolverContractIssues, resolveEffectiveFlowDefinition } from "../lib/flow-resolver.js";
 import {
   createContinuationEvidenceCheckpointWriter,
   validateContinuationEvidenceCheckpointDirectory,
@@ -1311,21 +1312,87 @@ function startContractReport(issues: string[], workItem: string | undefined): st
   ].join("\n");
 }
 
+/**
+ * #1280: `workflow start` validates that the requested flow EXISTS, CONFORMS, and CAN ACTUALLY
+ * RUN — each answer DERIVED, never enumerated in core. Core spells no kit name here.
+ *
+ * The three questions, and where each answer comes from:
+ *
+ *  1. EXISTENCE — `declaredKitFlowIds(repoRoot)`: what the installed kits declare (kit.json
+ *     `flows[]`, else the kit's `flows/` directory), with each declaration bound to the kit
+ *     that made it (id namespaced to the kit directory, `flows[].path` in agreement with the
+ *     file canonical resolution will read). An unknown flow fails closed naming the derived list.
+ *  2. CONFORMANCE — the resolver's own composition machinery
+ *     (`resolveEffectiveFlowDefinition`), declared-id agreement, `@kontourai/flow`'s
+ *     `validateDefinition`, AND `flowDefinitionResolverContractIssues`. The last one exists
+ *     because the base validator is LOOSER than the resolver downstream (it accepts any
+ *     non-empty step id, the resolver requires SLUG_RE) — without it, a definition can pass
+ *     start, publish a step nothing can resolve, and silently downgrade the Stop hook to
+ *     generic `workflow.*` enforcement (#1280 review FIX-5).
+ *  3. RUNNABILITY — `canonicalRunFlowRefusal`, the run adapter's OWN capability, DERIVED (#1316)
+ *     from whether the DECLARING kit supplies a resolvable definition and a producer binding for
+ *     every gate expectation. #1315 spelled this as the hardcoded `CANONICAL_RUN_FLOW_IDS` pair
+ *     and said widening it was the follow-up; #1316 is that widening, so the pair is gone and
+ *     the refusal now NAMES THE MISSING BINDING instead of listing two literals. ensure-session
+ *     consults the same predicate, so the two cannot drift into a half-start.
+ *     See the refusal below for why this is a refusal and not a warning.
+ *
+ * A kit that ships another `*.flow.json` in its packaged, digest-covered artifact and that the
+ * run adapter can bind becomes startable with no core change.
+ */
+function assertKitDeclaredFlow(flow: string, repoRoot: string): void {
+  const declared = declaredKitFlowIds(repoRoot);
+  if (!declared.includes(flow)) {
+    throw new Error(`workflow start --flow ${JSON.stringify(flow)} is not a flow declared by the installed kits; declared flows: ${declared.length > 0 ? declared.join(", ") : "<none>"}`);
+  }
+  const definition = resolveEffectiveFlowDefinition(flow, repoRoot);
+  if (!definition) {
+    throw new Error(`workflow start --flow ${flow} is declared by an installed kit but does not resolve to a conforming flow composition`);
+  }
+  if (definition.id !== flow) {
+    throw new Error(`workflow start --flow ${flow} resolved a definition declaring id ${JSON.stringify(String(definition.id))}; a kit's declared flow id and its definition must agree`);
+  }
+  try {
+    validateDefinition(definition);
+  } catch (error) {
+    throw new Error(`workflow start --flow ${flow} does not conform to the Flow definition contract: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const contractIssues = flowDefinitionResolverContractIssues(definition);
+  if (contractIssues.length > 0) {
+    throw new Error(`workflow start --flow ${flow} does not satisfy the flow resolver's identifier contract, so its steps would publish but never resolve: ${contractIssues.join("; ")}`);
+  }
+  // #1280 review FIX-4 and FIX-3, one refusal.
+  //
+  // A start for a flow the canonical run runtime cannot bind used to SUCCEED: it wrote
+  // sidecars, an active pointer and a continuation advertisement, suppressed the "no canonical
+  // Flow bound" notice (a flow id was present), and created no run. That session cannot
+  // progress — `record-gate-claim` resolves producers from a packaged kit manifest that has no
+  // bindings for it — and cannot be trusted either: with no run record there is no pinned
+  // definition digest, so the bytes validated HERE are not bound to the bytes every later
+  // consumer rereads from the same path (ensure-session's first-step lookup, gate resolution,
+  // the Stop hook). Advertising an active flow session with neither property is a claim
+  // nothing derives.
+  //
+  // So: refuse, naming the missing capability. Binding validated bytes for flows WITHOUT a
+  // canonical run would mean introducing a second, parallel pinning mechanism (a start-time
+  // digest recorded into session state and re-verified at every read site) — strictly more
+  // machinery than widening the run adapter, which pins by construction and is what #1280 asks
+  // for. #1316 IS that widening: a kit that supplies every binding becomes runnable with no core
+  // change, and one that does not is refused WITH THE MISSING BINDING NAMED. There is still no
+  // unbound start path, because there is still no non-canonical start path at all.
+  const runRefusal = canonicalRunFlowRefusal(flow, repoRoot);
+  if (runRefusal) {
+    throw new Error(`workflow start --flow ${flow} is declared and conforming, but the canonical run runtime cannot bind it, so the session could not record a pinned definition digest or satisfy a gate: ${runRefusal}`);
+  }
+}
+
 async function start(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("start"), "workflow start");
   const flow = flagString(parsed.flags, "flow", "builder.build")!;
   const workItem = flagString(parsed.flags, "work-item");
   const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
-  // #1316: the startable set is DERIVED from what each declaring kit binds, not enumerated here.
-  // Core spells no kit name: a kit that ships a flow with a resolvable definition and a producer
-  // binding for every gate expectation becomes startable with no change to this file, and one
-  // that is missing a binding is refused WITH THE MISSING BINDING NAMED rather than half-started
-  // (#1315's refusal property, preserved by deriving eligibility from the same bindings the run
-  // then uses). The project root is passed so a project-installed kit is visible; the packaged
-  // tree is searched first, so a project kit can never shadow a packaged one.
-  const startRefusal = canonicalRunFlowRefusal(flow, findRepoRootFromDir(artifactRoot));
-  if (startRefusal) throw new Error(`workflow start --flow ${flow} cannot be started: ${startRefusal}`);
+  assertKitDeclaredFlow(flow, findRepoRootFromDir(artifactRoot));
   const taskSlug = flagString(parsed.flags, "task-slug");
   const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
   const effectiveStateJson = flagString(parsed.flags, "effective-state-json");

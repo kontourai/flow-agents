@@ -17,6 +17,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { isWithinRuntimeArtifactRoot } from "./declared-artifact-roots.js";
 
 // ─── Security: Layer 1 traversal defense ─────────────────────────────────────
 //
@@ -38,22 +39,53 @@ import { fileURLToPath } from "node:url";
 const SLUG_RE = /^[a-zA-Z0-9_-]+$/;
 
 /**
- * Returns true when the given resolved absolute path falls within a Flow Agents
- * runtime artifact directory (an agent-writable area). Used to reject FLOW_AGENTS_FLOW_DEFS_DIR
- * overrides that point into agent-controlled storage.
+ * True when a resolved directory lies inside Flow Agents RUNTIME ARTIFACT STORAGE — the
+ * `.kontourai/flow-agents` / `.flow-agents` / `delivery` sub-roots the runtime writes session
+ * artifacts into. Delegates to the ONE definition of those roots
+ * (`declared-artifact-roots.ts`, the same list the config-protection hook and the sidecar's
+ * fixture writer scope themselves to), so a FlowDefinition source can never be judged in-bounds
+ * here while the hook treats the same path as protected runtime storage.
+ *
+ * #1280 review FIX-1: this replaced a local `isAgentWritableDir` that scanned path SEGMENTS for
+ * the literals `.flow-agents` / `.kontourai/flow-agents`. Two defects that fixed: it missed
+ * `delivery` entirely, and — because it was a flat segment scan on the spelled path with
+ * realpath only as a fallback for the WHOLE string — it had no notion of a root's POSITION.
+ * The name was also a claim nothing computed: it said "agent-writable" while deriving
+ * "matches a name". Writability is not derivable here at all (runtime and agent share a uid),
+ * so the honest boundary is containment in runtime storage, and the name now says that.
+ * See the contract note on `isWithinRuntimeArtifactRoot` for what is deliberately NOT covered.
  */
-function hasAgentWritableRuntimeSegment(resolvedDir: string): boolean {
-  const parts = resolvedDir.split(path.sep);
-  if (parts.includes(".flow-agents")) return true;
-  return parts.some((part, index) => part === ".kontourai" && parts[index + 1] === "flow-agents");
+function isRuntimeArtifactDir(resolvedDir: string): boolean {
+  return isWithinRuntimeArtifactRoot(resolvedDir);
 }
 
-function isAgentWritableDir(resolvedDir: string): boolean {
-  if (hasAgentWritableRuntimeSegment(resolvedDir)) return true;
+/**
+ * The canonical `kits/` root under `root`, or null when it is not usable as a kit source.
+ *
+ * #1280 review FIX-1: `kits/` was previously joined lexically and then realpath'd on BOTH sides
+ * of the containment comparison, so a symlinked `kits -> .kontourai/flow-agents/<slug>/kits`
+ * compared the definition against the symlink's own target and passed. Containment against a
+ * boundary the attacker chose is not containment. Refuse when:
+ *   - the resolved kits root escapes the resolved repo/package root (a symlink out of the tree), or
+ *   - the resolved kits root lands inside runtime artifact storage (a symlink into the area the
+ *     runtime itself writes), or
+ *   - `kits` is not a directory (a file or dangling link named `kits` is not a kit source).
+ * Returns the REALPATH, so every later containment check compares canonical forms.
+ */
+function canonicalKitsRoot(root: string): string | null {
+  const lexicalKitsRoot = path.resolve(root, "kits");
   try {
-    return hasAgentWritableRuntimeSegment(fs.realpathSync.native(resolvedDir));
+    const realRoot = fs.realpathSync.native(path.resolve(root));
+    const realKitsRoot = fs.realpathSync.native(lexicalKitsRoot);
+    if (!realKitsRoot.startsWith(realRoot + path.sep)) return null;
+    if (!fs.statSync(realKitsRoot).isDirectory()) return null;
+    if (isRuntimeArtifactDir(realKitsRoot)) return null;
+    return realKitsRoot;
   } catch {
-    return false;
+    // The kits root does not exist yet (or is unreadable). There is nothing to be tricked by,
+    // and callers that only need a lexical expected-root still get one; enumeration callers
+    // simply find nothing there.
+    return isRuntimeArtifactDir(lexicalKitsRoot) ? null : lexicalKitsRoot;
   }
 }
 
@@ -72,13 +104,13 @@ function installedPackageRoot(): string | null {
 function packagedFlowFile(kitId: string, flowName: string, consumerRoot: string): string | null {
   const packageRoot = installedPackageRoot();
   if (!packageRoot || path.resolve(packageRoot) === path.resolve(consumerRoot)) return null;
-  const kitsRoot = path.resolve(packageRoot, "kits");
+  const kitsRoot = canonicalKitsRoot(packageRoot);
+  if (!kitsRoot) return null;
   const candidate = path.resolve(kitsRoot, kitId, "flows", `${flowName}.flow.json`);
   if (!candidate.startsWith(kitsRoot + path.sep)) return null;
   try {
-    const realKitsRoot = fs.realpathSync.native(kitsRoot);
     const realCandidate = fs.realpathSync.native(candidate);
-    return realCandidate.startsWith(realKitsRoot + path.sep) ? realCandidate : null;
+    return realCandidate.startsWith(kitsRoot + path.sep) ? realCandidate : null;
   } catch {
     return null;
   }
@@ -113,7 +145,7 @@ export function resolveFlowFilePath(
 
   if (override) {
     const resolvedOverride = path.resolve(override);
-    if (isAgentWritableDir(resolvedOverride)) {
+    if (isRuntimeArtifactDir(resolvedOverride)) {
       return null;
     } else {
       expectedRoot = resolvedOverride;
@@ -122,8 +154,13 @@ export function resolveFlowFilePath(
       flowFilePath = path.join(resolvedOverride, `${flowId}.flow.json`);
     }
   } else {
-    expectedRoot = path.resolve(repoRoot, "kits");
-    flowFilePath = path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+    // #1280 review FIX-1: the expected root is the REALPATH of `<repoRoot>/kits`, refused
+    // outright when that realpath escapes the repo root or lands in runtime artifact storage.
+    // Deriving the boundary from the same link that is being followed is not a boundary.
+    const kitsRoot = canonicalKitsRoot(repoRoot);
+    if (!kitsRoot) return null;
+    expectedRoot = kitsRoot;
+    flowFilePath = path.join(kitsRoot, kitId, "flows", `${flowName}.flow.json`);
     canonicalLookup = true;
   }
 
@@ -137,9 +174,13 @@ export function resolveFlowFilePath(
 
   // If the file exists, resolve final symlinks before returning a readable path.
   // `readFileSync` follows symlinks; this keeps lexical containment from turning
-  // into an out-of-root file read through a symlinked FlowDefinition.
+  // into an out-of-root file read through a symlinked FlowDefinition. For the canonical
+  // lookup `expectedRoot` is ALREADY a realpath (canonicalKitsRoot), so this comparison is
+  // against a boundary the tree owner controls, not one a symlink under test chose.
   try {
-    const realExpectedRoot = fs.existsSync(expectedRoot) ? fs.realpathSync.native(expectedRoot) : expectedRoot;
+    const realExpectedRoot = canonicalLookup
+      ? expectedRoot
+      : (fs.existsSync(expectedRoot) ? fs.realpathSync.native(expectedRoot) : expectedRoot);
     const realPath = fs.realpathSync.native(resolvedPath);
     if (!realPath.startsWith(realExpectedRoot + path.sep) && realPath !== realExpectedRoot) {
       return null;
@@ -231,6 +272,198 @@ function flowIdParts(flowId: string): { kitId: string; flowName: string } | null
   const flowName = flowId.slice(dotIdx + 1);
   if (!kitId || !flowName) return null;
   return { kitId, flowName };
+}
+
+/**
+ * Enumerate the flow ids the installed kits DECLARE — the derivation the public
+ * `workflow start` verb consults instead of enumerating flow identifiers in core (#1280).
+ *
+ * Sources mirror resolveFlowFilePath's resolution order exactly, so the derived list never
+ * names a flow the resolver would look up somewhere else:
+ *   - FLOW_AGENTS_FLOW_DEFS_DIR override (when set and outside runtime artifact storage):
+ *     every `<flowId>.flow.json` file in that directory. The override replaces canonical kit
+ *     lookup wholesale, so it replaces discovery too. An override inside runtime artifact
+ *     storage yields an empty list — the same fail-closed posture resolveFlowFilePath takes.
+ *   - Canonical: each kit directory under `<repoRoot>/kits/*` (that root resolved, and refused
+ *     when it escapes the repo root or lands in runtime storage), plus the executing package's
+ *     own `kits/*` (the same package fallback canonical resolution applies). A kit's
+ *     declaration surface is its `kit.json` `flows[].id` list when the manifest declares
+ *     one — the packaged, digest-covered artifact — else its `flows/*.flow.json` directory.
+ *
+ * Ids without the `<kit>.<flow>` slug shape the resolver requires are excluded: a refusal
+ * that recommends an id the resolver can never resolve would be worse than none. This
+ * enumerates EXISTENCE only; conformance stays with resolveEffectiveFlowDefinition.
+ */
+export function declaredKitFlowIds(repoRoot: string): string[] {
+  const ids = new Set<string>();
+  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
+  if (override) {
+    const resolvedOverride = path.resolve(override);
+    if (isRuntimeArtifactDir(resolvedOverride)) return [];
+    for (const entry of listDirents(resolvedOverride)) {
+      if (!entry.isFile() || !entry.name.endsWith(".flow.json")) continue;
+      const id = entry.name.slice(0, -".flow.json".length);
+      if (slugFlowIdParts(id)) ids.add(id);
+    }
+    return [...ids].sort();
+  }
+  const kitsRoots: string[] = [];
+  const consumerKitsRoot = canonicalKitsRoot(repoRoot);
+  if (consumerKitsRoot) kitsRoots.push(consumerKitsRoot);
+  const packageRoot = installedPackageRoot();
+  if (packageRoot && path.resolve(packageRoot) !== path.resolve(repoRoot)) {
+    const packagedKitsRoot = canonicalKitsRoot(packageRoot);
+    if (packagedKitsRoot && !kitsRoots.includes(packagedKitsRoot)) kitsRoots.push(packagedKitsRoot);
+  }
+  for (const kitsRoot of kitsRoots) {
+    for (const kitEntry of listDirents(kitsRoot)) {
+      if (!kitEntry.isDirectory() || !SLUG_RE.test(kitEntry.name)) continue;
+      const declared = kitManifestFlowIds(kitsRoot, kitEntry.name);
+      if (declared) {
+        for (const id of declared) ids.add(id);
+        continue;
+      }
+      for (const flowEntry of listDirents(path.join(kitsRoot, kitEntry.name, "flows"))) {
+        if (!flowEntry.isFile() || !flowEntry.name.endsWith(".flow.json")) continue;
+        const id = `${kitEntry.name}.${flowEntry.name.slice(0, -".flow.json".length)}`;
+        if (slugFlowIdParts(id)) ids.add(id);
+      }
+    }
+  }
+  return [...ids].sort();
+}
+
+function listDirents(dir: string): fs.Dirent[] {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+/** flowIdParts, plus the SLUG_RE contract `resolveFlowFilePath` actually enforces on both parts.
+ *  A declaration whose id the resolver could never resolve is not a declaration. */
+function slugFlowIdParts(flowId: string): { kitId: string; flowName: string } | null {
+  const parts = flowIdParts(flowId);
+  if (!parts) return null;
+  return SLUG_RE.test(parts.kitId) && SLUG_RE.test(parts.flowName) ? parts : null;
+}
+
+/**
+ * The flow ids `<kitsRoot>/<kitDirName>/kit.json` is ALLOWED to declare, or null when the kit
+ * declares no flow list at all (callers then fall back to `flows/` enumeration).
+ *
+ * #1280 review FIX-2: a manifest previously contributed every `flows[].id` it listed, with no
+ * ownership requirement and `flows[].path` ignored entirely — so `kits/acme/kit.json` could
+ * declare `victim.hidden` and authorize a start against `kits/victim/flows/hidden.flow.json`
+ * that the victim kit never declared. A declaration is now bound to its declarer on both axes:
+ *
+ *   OWNERSHIP — the id must be namespaced to the DIRECTORY the manifest lives in
+ *     (`<kitDirName>.<flowName>`), because the directory is what canonical resolution derives
+ *     the path from. When the manifest also carries an `id`, it must agree with that directory;
+ *     a manifest that misnames its own kit is refused WHOLESALE (empty list, no `flows/`
+ *     fallback) rather than partially trusted — its identity claim is the thing under doubt.
+ *   PATH AGREEMENT — when `flows[].path` is present it must name, relative to the kit
+ *     directory, the exact file canonical resolution will read for that id
+ *     (`flows/<flowName>.flow.json`). A declaration that points somewhere else is either wrong
+ *     or is trying to authorize an id whose bytes live elsewhere; either way it is refused.
+ *
+ * Non-conforming ENTRIES are skipped, never rewritten — the derived list must contain only ids
+ * a start would resolve to the bytes the declaring kit actually owns.
+ */
+function kitManifestFlowIds(kitsRoot: string, kitDirName: string): string[] | null {
+  const kitDir = path.join(kitsRoot, kitDirName);
+  let manifest: { id?: unknown; flows?: unknown };
+  try {
+    manifest = JSON.parse(fs.readFileSync(path.join(kitDir, "kit.json"), "utf8")) as { id?: unknown; flows?: unknown };
+  } catch {
+    return null;
+  }
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return null;
+  if (manifest.id !== undefined && manifest.id !== kitDirName) return [];
+  if (!Array.isArray(manifest.flows)) return null;
+  const ids: string[] = [];
+  for (const entry of manifest.flows) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const declaredId = (entry as { id?: unknown }).id;
+    if (typeof declaredId !== "string") continue;
+    const parts = slugFlowIdParts(declaredId);
+    if (!parts || parts.kitId !== kitDirName) continue;
+    const declaredPath = (entry as { path?: unknown }).path;
+    if (declaredPath !== undefined) {
+      if (typeof declaredPath !== "string" || declaredPath === "" || path.isAbsolute(declaredPath)) continue;
+      const resolvedDeclared = path.resolve(kitDir, declaredPath);
+      if (resolvedDeclared !== path.join(kitDir, "flows", `${parts.flowName}.flow.json`)) continue;
+    }
+    ids.push(declaredId);
+  }
+  return ids;
+}
+
+/**
+ * The identifier contract THIS RESOLVER enforces at read time, applied as a start-time
+ * conformance check (#1280 review FIX-5).
+ *
+ * `validateDefinition` from `@kontourai/flow` is the base contract and is deliberately looser:
+ * it accepts any non-empty string as a step id. The resolver is stricter — `resolveFlowStep`
+ * returns null for any `stepId` outside SLUG_RE (see resolveFlowStepInternal), and
+ * `resolveFlowFilePath` returns null for a flow id whose parts fall outside it. A definition
+ * that passes only the base contract can therefore be published as an active step and then
+ * resolve to NOTHING, at which point the Stop hook silently falls back to generic `workflow.*`
+ * enforcement — a governance downgrade produced by a definition the start accepted. Callers
+ * that admit a definition into a session must apply this too, so what start validates and what
+ * runtime can resolve are the same set.
+ *
+ * Returns a list of human-readable issues; empty means the definition satisfies the resolver's
+ * own identifier contract.
+ *
+ * DELIBERATELY NOT CHECKED HERE (disclosed rather than implied — a third-party definition still
+ * influences these, and no further check stands between the declaration and the behavior):
+ *   - `phase_map`: a kit-owned phase→step mapping consumed by `advance-state` to write
+ *     `active_step_id`; a kit chooses its own lifecycle projection.
+ *   - `expects[].bundle_claim` (claimType / subjectType / accepted_statuses): selects which
+ *     Stop-hook claim satisfies a gate; a kit chooses its own claim vocabulary.
+ *   - `on_route_back` / `route_back_policy`: route-back targets and attempt limits consumed by
+ *     `advance-state`; structurally validated by `routeBackMetadataForGate`, but the declared
+ *     targets and limits themselves are the kit's.
+ *   - `requires_current_verification`: enforced at the canonical Builder evaluation seam, so it
+ *     has no effect for a flow with no canonical run.
+ *   - producer-binding completeness: whether a step's expectations have a producer that can
+ *     actually satisfy them is not knowable from the definition alone (see
+ *     `expectedGateProducer`, which resolves producers from a kit manifest, not the definition).
+ */
+export function flowDefinitionResolverContractIssues(definition: unknown): string[] {
+  const issues: string[] = [];
+  if (!isRecord(definition)) return ["definition must be an object"];
+  const id = definition["id"];
+  if (typeof id !== "string" || !slugFlowIdParts(id)) {
+    issues.push(`definition id ${JSON.stringify(String(id))} must be "<kit>.<flow>" with both parts matching ${SLUG_RE}`);
+  }
+  const steps = definition["steps"];
+  const stepIds = new Set<string>();
+  if (Array.isArray(steps)) {
+    for (const step of steps) {
+      const stepId = isRecord(step) ? step["id"] : undefined;
+      if (typeof stepId !== "string") continue;
+      stepIds.add(stepId);
+      if (!SLUG_RE.test(stepId)) {
+        issues.push(`step id ${JSON.stringify(stepId)} must match ${SLUG_RE}; the resolver cannot resolve a gate for it`);
+      }
+    }
+  }
+  const gates = definition["gates"];
+  if (isRecord(gates)) {
+    for (const [gateId, gate] of Object.entries(gates)) {
+      const step = isRecord(gate) ? gate["step"] : undefined;
+      if (typeof step !== "string") continue;
+      if (!SLUG_RE.test(step)) {
+        issues.push(`gate ${JSON.stringify(gateId)} names step ${JSON.stringify(step)}, which must match ${SLUG_RE}`);
+      } else if (steps !== undefined && !stepIds.has(step)) {
+        issues.push(`gate ${JSON.stringify(gateId)} names step ${JSON.stringify(step)}, which the definition does not declare`);
+      }
+    }
+  }
+  return issues;
 }
 
 function readFlowDefinition(flowId: string, repoRoot: string, allowOverride = true): FlowDefinition | null {
