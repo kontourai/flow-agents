@@ -27,6 +27,22 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  ATTRIBUTION_GRANULARITY,
+  attributeTokens,
+  attributionFromRecords,
+  readJsonl,
+  TURN_GRACE_MS,
+} from "./token-attribution.mjs";
+
+// The attribution rule lives in ONE module, imported by this fold and by
+// `enrich-transitions.mjs`, the producer that writes it onto the records. It used to live
+// here; a second copy over there would be the #1300/#1302/#1307/#1312 failure again — two
+// components independently encoding one contract, drifting inside a release, with nothing
+// to say which number was right. Re-exported because it is part of this module's tested
+// surface and callers already import it from here.
+export { attributeTokens, TURN_GRACE_MS };
+
 /** Mirrors the writer's root resolution so reader and writer cannot disagree. */
 export function sharedRepoRoot(cwd) {
   try {
@@ -38,9 +54,6 @@ export function sharedRepoRoot(cwd) {
     return cwd;
   }
 }
-
-/** How far before a transition its invoking turn may sit before the link is a guess. */
-const TURN_GRACE_MS = 10 * 60_000;
 
 function parseArgs(argv) {
   const options = { transcripts: [], json: false };
@@ -58,25 +71,6 @@ function parseArgs(argv) {
     else throw new Error(`unknown option: ${token}`);
   }
   return options;
-}
-
-function readJsonl(file) {
-  const records = [];
-  let unparseable = 0;
-  if (!fs.existsSync(file)) return { records, unparseable, missing: true };
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      records.push(JSON.parse(trimmed));
-    } catch {
-      // A truncated final line is normal for a log being appended to live — but the
-      // count is reported, because "dropped silently" is the defect this tool exists
-      // to find and it should not be committed at the parse layer.
-      unparseable += 1;
-    }
-  }
-  return { records, unparseable, missing: false };
 }
 
 /**
@@ -262,103 +256,6 @@ function tally(bucket, record) {
   else bucket.refused_or_error += 1;
 }
 
-/**
- * Attribute per-turn OUTPUT TOKENS from a host transcript to transitions.
- *
- * This is not cost, and nothing here may call it that. Priced against this repo's own
- * pricing table over a 164-transcript corpus, output tokens are **6.6% of spend**;
- * cache READ is 80%. Worse, output is not proportional to cost — a transition late in a
- * long session pays enormous cache-read for a terse output and would rank as cheap. The
- * field is named for what it holds.
- *
- * Two further limits, both disclosed in `coverage.tokens` rather than smoothed over:
- *
- *   - The transcript format is INTERNAL to Claude Code and documented as changing
- *     between releases (code.claude.com/docs/en/sessions.md explicitly warns against
- *     parsing it). The supported source is the OTel `claude_code.token.usage` metric,
- *     which carries the token class and a `query_source` discriminator; migrating to it
- *     is the real fix (#1276).
- *   - Subagent turns are logged with the PARENT's session id, so a session filter does
- *     not exclude them, and "the nearest preceding turn" picks a subagent's turn
- *     instead of the orchestrator's between 8% and 42% of the time on delegation-heavy
- *     sessions. Sidechain turns are excluded here and counted, so the reader can see
- *     which regime they are in rather than silently getting another agent's tokens.
- */
-export function attributeTokens(transitions, transcriptFiles) {
-  const turns = [];
-  for (const file of transcriptFiles) {
-    const fallbackSession = path.basename(file).replace(/\.jsonl$/, "");
-    for (const record of readJsonl(file).records) {
-      const usage = record?.message?.usage;
-      const at = Date.parse(record?.timestamp ?? "");
-      if (!usage || Number.isNaN(at)) continue;
-      // Keyed by file AND id: `/branch` and `--fork-session` copy a transcript, so the
-      // same response appears in two files, and first-seen-wins would attribute it to
-      // whichever session was read first.
-      const id = `${file}::${record?.message?.id ?? at}`;
-      // One API response is logged as several lines sharing a message id and identical
-      // usage totals; counting each line triples the tokens.
-      turns.push({
-        id,
-        at,
-        output: Number(usage.output_tokens) || 0,
-        session: record?.sessionId ?? record?.session_id ?? fallbackSession,
-        sidechain: record?.isSidechain === true,
-      });
-    }
-  }
-  const deduped = new Map();
-  for (const turn of turns) if (!deduped.has(turn.id)) deduped.set(turn.id, turn);
-  const all = [...deduped.values()].sort((a, b) => a.at - b.at);
-  const sidechainTurns = all.filter((turn) => turn.sidechain).length;
-  const ordered = all.filter((turn) => !turn.sidechain);
-
-  const attributed = new Map();
-  const consumed = new Set();
-  let matchedTurns = 0;
-
-  // A turn's timestamp is when the model EMITTED the tool call, which precedes the
-  // command running — verified live: a transition at 00:45:32 was invoked by a turn
-  // stamped 00:45:21. Searching forward from the transition therefore matches nothing,
-  // or worse matches the NEXT turn. The invoking turn is the most recent one before it.
-  //
-  // A turn is consumed once. One turn routinely invokes several transitions, and if
-  // each claimed it the total would inflate; and a transition whose turn is already
-  // consumed must NOT reach further back, because that older turn belongs to earlier
-  // work. Those transitions are disclosed as `transitions_without_turn` instead, so
-  // every per-gate cost is a floor rather than an invention.
-  const chronological = [...transitions].sort(
-    (a, b) => (Date.parse(a.started_at ?? "") || 0) - (Date.parse(b.started_at ?? "") || 0),
-  );
-  for (const transition of chronological) {
-    const start = Date.parse(transition.started_at ?? "");
-    if (Number.isNaN(start)) continue;
-    // Sibling sessions write their transcripts into the same directory, so matching on
-    // time alone imports another run's spend. When the transition names its session,
-    // only that session's turns may pay for it.
-    const session = transition?.actor?.session_id ?? null;
-    let candidate = null;
-    for (const turn of ordered) {
-      if (turn.at > start) break;
-      if (session && turn.session && turn.session !== session) continue;
-      candidate = turn;
-    }
-    if (!candidate) continue;
-    if (start - candidate.at > TURN_GRACE_MS) continue;
-    if (consumed.has(candidate.id)) continue;
-    consumed.add(candidate.id);
-    attributed.set(transition, candidate);
-    matchedTurns += 1;
-  }
-  return {
-    attributed,
-    matchedTurns,
-    availableTurns: ordered.length,
-    sidechainTurnsExcluded: sidechainTurns,
-    transitionsWithoutTurn: transitions.length - matchedTurns,
-  };
-}
-
 export function buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution, ambiguousExpectations = [] }) {
   const gates = new Map();
   const verbs = new Map();
@@ -488,12 +385,32 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
       tokens: tokenAttribution
         ? {
             note: "output tokens only — roughly 6.6% of spend, and not proportional to it. Not cost.",
+            granularity: ATTRIBUTION_GRANULARITY,
+            // Which of the two equivalent readings produced these numbers: a transcript
+            // this tool parsed itself, or an attribution a producer already stamped onto
+            // the records. They agree by construction — one module computes both — and a
+            // test pins that agreement over the live corpus.
+            source: tokenAttribution.source ?? "transcript",
             matched_turns: tokenAttribution.matchedTurns,
             available_turns: tokenAttribution.availableTurns,
             sidechain_turns_excluded: tokenAttribution.sidechainTurnsExcluded,
             // Transitions that share a turn with an earlier one get no tokens of their
             // own, so every per-gate cost here is a FLOOR. Stated, not smoothed over.
             transitions_without_turn: tokenAttribution.transitionsWithoutTurn,
+            // Records nothing ever attributed. NOT "no turn": no one looked. Folding the
+            // two together makes an un-enriched log read as a measured one whose gates
+            // happened to be free.
+            ...(tokenAttribution.transitionsNotEnriched === undefined
+              ? {}
+              : { transitions_not_enriched: tokenAttribution.transitionsNotEnriched }),
+            ...(tokenAttribution.malformedAttributions
+              ? { malformed_attributions: tokenAttribution.malformedAttributions }
+              : {}),
+            // Turns claimed by two transitions stamped at the SAME instant: which one is
+            // charged follows line order, not the data. Reported rather than presented as
+            // a derivation.
+            ambiguous_turn_claims:
+              tokenAttribution.ambiguousTurnClaims?.length ?? tokenAttribution.ambiguousAttributions ?? 0,
           }
         : null,
     },
@@ -539,11 +456,20 @@ function main(argv) {
     return 2;
   }
 
-  const tokenAttribution = options.transcripts.length ? attributeTokens(transitions, options.transcripts) : null;
+  // Two sources for one contract. With `--transcript` this tool reads the host transcript
+  // itself, as it always has. Without it, it reads the attribution a producer already
+  // stamped onto the records (`enrich-transitions.mjs`) — the same module computes both,
+  // so a consumer that has never seen a transcript gets the same figure rather than the
+  // `activity_only` no-answer. An explicit --transcript wins: it is the primary evidence,
+  // and silently preferring a stored derivation over the source it was derived from is how
+  // a stale figure outlives the data that produced it.
+  const tokenAttribution = options.transcripts.length
+    ? attributeTokens(transitions, options.transcripts)
+    : attributionFromRecords(transitions);
   // A renamed field, a moved path or a typo'd --transcript all converge on "no turns",
   // which used to render as a scorecard that simply omits the token column. That is the
   // format-break-looks-like-a-quiet-run failure this tool exists to refuse.
-  if (tokenAttribution && tokenAttribution.availableTurns === 0) {
+  if (tokenAttribution?.source === "transcript" && tokenAttribution.availableTurns === 0) {
     console.error(
       `gate-scorecard: --transcript was given but yielded no usable turns. The transcript format is internal to Claude Code and changes between releases; token figures are omitted rather than guessed.`,
     );
