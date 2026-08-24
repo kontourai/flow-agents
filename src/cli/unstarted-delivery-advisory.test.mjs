@@ -16,6 +16,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require_ = createRequire(import.meta.url);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -40,7 +41,7 @@ const KIT_MANIFEST = {
 };
 
 function mkRepo({ kitConfigured = true } = {}) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-unstarted-")));
+  const root = fs.realpathSync(makeFixtureDir("flow-agents-unstarted-"));
   execFileSync("git", ["init", "-q", "-b", "main", root]);
   execFileSync("git", ["-C", root, "config", "user.email", "t@t"]);
   execFileSync("git", ["-C", root, "config", "user.name", "t"]);

@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { walkFiles as toolsWalkFiles } from "../../build/src/tools/common.js";
 import { walkFiles as libWalkFiles } from "../../build/src/lib/fs.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 // Regression guard for #1006: `out.push(...walkFiles(child))` passes one *argument* per
 // discovered path, so a subtree larger than the engine's argument limit throws
@@ -30,7 +31,7 @@ const FILE_COUNT = 130_000;
 
 test("walkFiles returns subtrees larger than the engine argument limit without overflowing", (t) => {
   // Built outside the repo so the tree can never be picked up by a repo-wide scan.
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-walk-scale-"));
+  const root = makeFixtureDir("flow-agents-walk-scale-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   // One nested directory holds every file, so the parent frame spreads the full result.

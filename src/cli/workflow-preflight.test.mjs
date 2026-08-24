@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, "../../build/src/cli.js");
@@ -21,7 +22,7 @@ test("a cold start reports the complete contract in ONE invocation", () => {
   // context read: --work-item, then --assignment-provider, then --effective-state-json, then the
   // pull-work artifact. One bare invocation must now surface every diagnosable requirement plus a
   // runnable template naming the producing verbs.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  const dir = makeFixtureDir("preflight-");
   try {
     const result = runStart([], dir);
     assert.notEqual(result.status, 0);
@@ -53,7 +54,7 @@ test("a single missing input keeps its pre-existing error string byte-identical"
   // test_public_workflow_cli.sh substring-matches these; and a lone missing input needs no
   // template. These literals are the pre-#1293 strings — if this test fails, a consumer sweep is
   // required before shipping the new text.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  const dir = makeFixtureDir("preflight-");
   try {
     const state = path.join(dir, "es.json");
     fs.writeFileSync(state, "{}");
@@ -77,7 +78,7 @@ test("a single missing input keeps its pre-existing error string byte-identical"
 });
 
 test("the template binds the caller's own work-item when it is well-formed", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  const dir = makeFixtureDir("preflight-");
   try {
     // two issues (provider + effective-state) with a concrete ref: the template must use the
     // caller's ref and derived slug, not placeholders.
@@ -92,7 +93,7 @@ test("the template binds the caller's own work-item when it is well-formed", () 
 });
 
 test("shape-flow issues stay scoped to shape and never render the provider template", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  const dir = makeFixtureDir("preflight-");
   try {
     const result = runStart(["--flow", "builder.shape", "--work-item", "acme/w#5"], dir);
     assert.notEqual(result.status, 0);
@@ -108,7 +109,7 @@ test("an invalid work-item is a NUMBERED issue and non-github refs never bind th
   // Round-2 review: owner/repo#0 (rejected by the real parser) fell back to placeholders while
   // the numbered list omitted the actually-broken input; and jira:ABC (valid provider-neutral,
   // not github) rendered nonsense runnable text `gh issue view jira:ABC --repo jira:AB`.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  const dir = makeFixtureDir("preflight-");
   try {
     const invalid = runStart(["--work-item", "acme/widgets#0"], dir);
     assert.notEqual(invalid.status, 0);
@@ -129,7 +130,7 @@ test("the template's derivations are real: whoami field and claim-verb contract"
   // Round-2 review: the template piped `jq -r .actor_key` but whoami emits {actor, source} — a
   // runnable-looking command yielding null. The template's own derivations must name fields that
   // exist and flags the named verb actually requires.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  const dir = makeFixtureDir("preflight-");
   try {
     const result = runStart([], dir);
     assert.match(result.stderr, /jq -r \.actor\b/);
@@ -153,7 +154,7 @@ test("shape flow still enforces the provider-combination rules (fail-open guard)
   // that always applied to it, silently ACCEPTING a previously-refused invocation — and the
   // downstream ownership guard logs 'not evaluated' and proceeds, so the widening was fail-open.
   // The fault injection that restores the early return must fail HERE, not in production.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-"));
+  const dir = makeFixtureDir("preflight-");
   try {
     const githubNoState = runStart(["--flow", "builder.shape", "--task-slug", "shape-x", "--assignment-provider", "github"], dir);
     assert.notEqual(githubNoState.status, 0, "shape + github provider without effective state must be refused");
@@ -179,7 +180,7 @@ test("gate-evidence refusals name every unmet requirement and the expected artif
   // also the unit-level catcher for the artifact-naming fault injection that previously only a
   // live probe could see.
   const SIDECAR = path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js");
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-gate-"));
+  const project = makeFixtureDir("preflight-gate-");
   try {
     const run = (args, env = {}) => spawnSync(process.execPath, [SIDECAR, ...args], {
       cwd: project, encoding: "utf8", env: { ...process.env, ...env },

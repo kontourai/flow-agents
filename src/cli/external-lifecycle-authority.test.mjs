@@ -10,6 +10,7 @@ import { PassThrough } from "node:stream";
 import * as lifecycleAuthority from "../../build/src/external-lifecycle-authority.js";
 import * as packageApi from "../../build/src/index.js";
 import * as sealedExecutionApi from "../../build/src/sealed-execution.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const {
   LIFECYCLE_AUTHORITY_COMPLETION_VERIFICATION_KEY_PATH,
@@ -548,7 +549,7 @@ test("package-side bundle validation cannot turn a helper response into authoriz
 });
 
 test("sealed execution transport follows the signed runtime budget rather than the ordinary 30-second helper timeout", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sealed-transport-"));
+  const directory = makeFixtureDir("sealed-transport-");
   const file = path.join(directory, "authorization.json");
   try {
     fs.writeFileSync(file, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 31_000, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }), { mode: 0o600 });
@@ -561,7 +562,7 @@ test("sealed execution transport follows the signed runtime budget rather than t
 });
 
 test("public sealed transport remains responsive and forwards parent cancellation", async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "sealed-cancellable-transport-"));
+  const directory = makeFixtureDir("sealed-cancellable-transport-");
   const authorizationFile = path.join(directory, "authorization.json");
   fs.writeFileSync(authorizationFile, JSON.stringify({ schema_version: "1.0", operation: "execute-sealed-workload", max_runtime_ms: 31_000, signature: { algorithm: "ed25519", key_id: "fixture", value: "AA==" } }), { mode: 0o600 });
   const mutableFs = createRequire(import.meta.url)("node:fs");

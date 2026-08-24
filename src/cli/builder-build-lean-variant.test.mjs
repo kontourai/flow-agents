@@ -39,6 +39,7 @@ import {
 import { resolveEffectiveFlowDefinition } from "../../build/src/lib/flow-resolver.js";
 import { kitFlowRunBindingIssues, resolveKitFlowBinding } from "../../build/src/lib/kit-flow-binding.js";
 import { startBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -64,7 +65,7 @@ const ACTOR = "build-lean-variant-actor";
 process.env.FLOW_AGENTS_ACTOR = ACTOR;
 
 function makeProject(prefix) {
-  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const project = fs.realpathSync(makeFixtureDir(prefix));
   spawnSync("git", ["init", "-q", "."], { cwd: project });
   spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });
   return project;

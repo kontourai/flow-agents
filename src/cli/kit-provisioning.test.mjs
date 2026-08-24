@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 
 import { validateKitRepository } from "../../build/src/flow-kit/validate.js";
 import { provisionKit, ProvisionConflictError } from "../../build/src/flow-kit/provision.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const FLOW = {
   id: "fixture.review",
@@ -16,7 +17,7 @@ const FLOW = {
 };
 
 function fixture(provisions) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-unit-"));
+  const dir = makeFixtureDir("kit-provision-unit-");
   fs.mkdirSync(path.join(dir, "flows"));
   fs.mkdirSync(path.join(dir, "payload"));
   fs.writeFileSync(path.join(dir, "flows", "review.flow.json"), JSON.stringify(FLOW));
@@ -53,7 +54,7 @@ test("provision validation rejects unsafe and duplicate normalized targets", asy
 
 test("provision core preflights conflicts before writing and force overwrites", async () => {
   const kit = fixture([entry("one", "one.txt", "docs/one.txt"), entry("two", "two.txt", "docs/two.txt")]);
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-target-"));
+  const target = makeFixtureDir("kit-provision-target-");
   fs.mkdirSync(path.join(target, "docs"));
   fs.writeFileSync(path.join(target, "docs", "two.txt"), "keep\n");
 
@@ -73,7 +74,7 @@ test("provision core preflights conflicts before writing and force overwrites", 
 
 test("provision core dry-run writes neither files nor manifest", async () => {
   const kit = fixture([entry("one", "one.txt", "docs/one.txt")]);
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-dry-"));
+  const target = makeFixtureDir("kit-provision-dry-");
   const result = await provisionKit(kit, target, { dryRun: true });
   assert.equal(result.dry_run, true);
   assert.equal(fs.existsSync(path.join(target, "docs", "one.txt")), false);
@@ -82,8 +83,8 @@ test("provision core dry-run writes neither files nor manifest", async () => {
 
 test("provision core rejects destination paths whose existing ancestor escapes through a symlink", async () => {
   const kit = fixture([entry("one", "one.txt", "linked/one.txt")]);
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-link-target-"));
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-link-outside-"));
+  const target = makeFixtureDir("kit-provision-link-target-");
+  const outside = makeFixtureDir("kit-provision-link-outside-");
   fs.symlinkSync(outside, path.join(target, "linked"), "dir");
   await assert.rejects(() => provisionKit(kit, target), /escapes consumer repository/);
   assert.equal(fs.existsSync(path.join(outside, "one.txt")), false);
@@ -91,7 +92,7 @@ test("provision core rejects destination paths whose existing ancestor escapes t
 
 test("provision rejects a source that resolves outside the kit through a symlink", async () => {
   const kit = fixture([entry("host", "host.txt", "copied.txt")]);
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-src-outside-"));
+  const outside = makeFixtureDir("kit-provision-src-outside-");
   const secret = path.join(outside, "secret.txt");
   fs.writeFileSync(secret, "off-kit-secret\n");
   fs.symlinkSync(secret, path.join(kit, "payload", "host.txt"));
@@ -99,14 +100,14 @@ test("provision rejects a source that resolves outside the kit through a symlink
   const errors = await validateKitRepository(kit);
   assert.equal(errors.some((error) => error.includes("must not resolve outside the kit directory")), true, errors.join("\n"));
 
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-src-target-"));
+  const target = makeFixtureDir("kit-provision-src-target-");
   await assert.rejects(() => provisionKit(kit, target), /escapes the kit directory|validation failed/);
   assert.equal(fs.existsSync(path.join(target, "copied.txt")), false);
 });
 
 test("init activation provisions create-only and reports rerun conflicts without failing", () => {
   const kit = fixture([entry("one", "one.txt", "docs/one.txt")]);
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-init-"));
+  const target = makeFixtureDir("kit-provision-init-");
   const install = spawnSync(process.execPath, ["build/src/cli.js", "kit", "install", kit, "--dest", target], { encoding: "utf8" });
   assert.equal(install.status, 0, `${install.stdout}\n${install.stderr}`);
   const args = ["build/src/cli.js", "init", "--runtime", "codex", "--dest", target, "--telemetry-sink", "local-files", "--activate-kit", "fixture", "--yes"];
