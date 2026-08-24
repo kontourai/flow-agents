@@ -2,7 +2,8 @@ import * as fs from "node:fs";
 import { constants as fsConstants } from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { evaluateGate, expectationsForGate, openGates, type FlowExpectation, type FlowGate, type FlowRunState } from "@kontourai/flow";
+import { evaluateGate, expectationsForGate, type FlowExpectation, type FlowGate, type FlowRunState } from "@kontourai/flow";
+import { actionableOpenGates } from "./builder-flow-run-adapter.js";
 import { parseKitFlowStepActions, type KitFlowStepActionEntry, type KitFlowStepExpectationBinding } from "./flow-kit/validate.js";
 import {
   EVIDENCE_REF_JSON_SCHEMA,
@@ -426,7 +427,16 @@ function loadGateAction(input: BuilderGateActionEnvelopeInput): LoadedGateAction
 }
 
 function deriveFlowRequirements(input: BuilderGateActionEnvelopeInput, action: KitFlowStepActionEntry): DerivedGateRequirements {
-  const gates = openGates(input.definition, input.run.state) as Array<FlowGate & { id: string }>;
+  // #1350: the gates this run must ACT ON, not the gates of the step the cursor happens to rest
+  // on. Both values in this envelope and the session projection come from the SAME projectFlowRun
+  // call, so using `openGates` here made one returned object tell its two readers different things
+  // about the same run: at a gateless step the projection reported `execute-gate` while the
+  // envelope — the machine-readable contract the adapter is contractually required to obey —
+  // advertised no gate, no unresolved evidence and no mutation to invoke, while `next_action.status`
+  // still said `continue`. A run in that state does not fail; it burns turns recording
+  // `gate_not_advanced`. `actionableOpenGates` is the single shared derivation (#1335) and is
+  // unchanged for any run resting on a gated step, where it delegates straight to `openGates`.
+  const gates = actionableOpenGates(input.definition, input.run.state) as Array<FlowGate & { id: string }>;
   const acceptedExceptions: GateActionEnvelope["gate"]["accepted_exceptions"] = [];
   // Evaluate at the actual current instant, not Flow's own fallback default of
   // `state.updated_at`. `state.updated_at` only advances when a transition is
