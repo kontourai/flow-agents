@@ -268,6 +268,38 @@ export function installedBuilderImplementationAllowed(definitionId: string, curr
   return selected[0]!.implementation_allowed;
 }
 
+/**
+ * True when the kit that DECLARES `definitionId` binds at least one of `stepId`'s expectations to
+ * the named public interface.
+ *
+ * #1336: several public verbs used to ask "is this flow `builder.build` and this step `verify`",
+ * which is a proxy for the question they actually need answered — "is this the step whose evidence
+ * my interface produces". The kit manifest states that directly (`flow_step_actions[]
+ * .expectation_bindings[].interface`), and it states it per flow, so a kit-declared variant that
+ * keeps the same binding is served by the same code path instead of being refused by name.
+ *
+ * Fail-closed: any flow no installed kit declares, any malformed metadata, or a step the kit
+ * declares no action for all answer `false`. A verb must refuse when it cannot establish that the
+ * step it is about to write to is the one it produces evidence for.
+ */
+export function declaredStepBindsInterface(
+  definitionId: string,
+  stepId: string,
+  wanted: KitFlowStepExpectationBinding["interface"],
+  projectRoot?: string,
+): boolean {
+  try {
+    const { manifest: kit, manifestRef } = declaringKitForFlow(definitionId, projectRoot);
+    const parsed = parseKitFlowStepActions(kit, manifestRef);
+    if (parsed.errors.length) return false;
+    return parsed.entries.some((entry) => entry.flow_id === definitionId
+      && entry.step_id === stepId
+      && entry.expectation_bindings.some((binding) => binding.interface === wanted));
+  } catch {
+    return false;
+  }
+}
+
 export function installedBuilderGateActionAuthority(definitionId: string, currentStep: string, runId: string, projectRoot?: string): {
   definition_version: string;
   gate_id: string;
