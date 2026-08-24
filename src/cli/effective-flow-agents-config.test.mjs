@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { inspectEffectiveFlowAgentsConfig } from "../../build/src/lib/effective-flow-agents-config.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const git = process.platform === "win32" ? "git" : "/usr/bin/git";
 
@@ -20,7 +21,7 @@ function commit(root, message) {
 }
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-effective-config-"));
+  const root = makeFixtureDir("flow-agents-effective-config-");
   execFileSync(git, ["init", "-q", "-b", "main", root]);
   fs.writeFileSync(path.join(root, "README.md"), "fixture\n");
   commit(root, "initial");
@@ -69,7 +70,7 @@ test("effective configuration reads only the immutable HEAD blob and reports ign
 test("invalid committed configuration fails closed and absent configuration preserves defaults", () => {
   const empty = fixture();
   const invalid = fixture();
-  const nonGit = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-non-git-config-"));
+  const nonGit = makeFixtureDir("flow-agents-non-git-config-");
   try {
     assert.equal(inspectEffectiveFlowAgentsConfig(empty).core.state, "default");
     assert.equal(inspectEffectiveFlowAgentsConfig(nonGit).core.state, "default");

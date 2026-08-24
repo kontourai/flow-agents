@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { warnIfEvidenceCommandUnreconcilable } from "../../build/src/cli/workflow.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 // #1056: `publish-delivery` refuses a command claim that is not in the CI reconcile manifest. That
 // refusal is correct; discovering it at publish time is not, because the run is `completed` by then
@@ -15,7 +16,7 @@ import { warnIfEvidenceCommandUnreconcilable } from "../../build/src/cli/workflo
 // would be worse than the late refusal it exists to pre-empt.
 
 function projectWithManifest(commands) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-warn-"));
+  const root = makeFixtureDir("flow-agents-warn-");
   fs.writeFileSync(
     path.join(root, "package.json"),
     JSON.stringify({
@@ -66,7 +67,7 @@ test("#1056: warns only about the unreconcilable commands in a mixed set", () =>
 });
 
 test("#1056: says nothing when no manifest is declared, rather than warning about everything", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-warn-none-"));
+  const root = makeFixtureDir("flow-agents-warn-none-");
   fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "no-manifest" }));
   const out = captureStderr(() => warnIfEvidenceCommandUnreconcilable(["git diff --stat"], root));
   assert.equal(out, "", "a repo that declares nothing cannot be judged; silence beats a false alarm");

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const api = await import(pathToFileURL(path.join(root, "build/src/index.js")));
@@ -63,7 +64,7 @@ function readEconomics(narrativeDir) {
 }
 
 test("#614 success: stub generator publishes prose alongside the deterministic narrative", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-render-success-"));
+  const tmp = makeFixtureDir("narrative-render-success-");
   try {
     const narrativeDir = buildNarrativeDir(tmp);
     const outDir = path.join(tmp, "out");
@@ -98,7 +99,7 @@ test("#614 success: stub generator publishes prose alongside the deterministic n
 });
 
 test("#614 fail-closed: generator timeout writes zero prose artifacts and records economics", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-render-timeout-"));
+  const tmp = makeFixtureDir("narrative-render-timeout-");
   try {
     const narrativeDir = buildNarrativeDir(tmp);
     const outDir = path.join(tmp, "out");
@@ -119,7 +120,7 @@ test("#614 fail-closed: generator timeout writes zero prose artifacts and record
 });
 
 test("#614 fail-closed: generator error writes zero prose artifacts and records economics", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-render-error-"));
+  const tmp = makeFixtureDir("narrative-render-error-");
   try {
     const narrativeDir = buildNarrativeDir(tmp);
     const outDir = path.join(tmp, "out");
@@ -138,7 +139,7 @@ test("#614 fail-closed: generator error writes zero prose artifacts and records 
 });
 
 test("#614 fail-closed: an unsupported/unresolved summary is rejected and writes zero prose artifacts", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-render-reject-"));
+  const tmp = makeFixtureDir("narrative-render-reject-");
   try {
     const narrativeDir = buildNarrativeDir(tmp);
     const outDir = path.join(tmp, "out");
@@ -163,7 +164,7 @@ test("#614 fail-closed: an unsupported/unresolved summary is rejected and writes
 });
 
 test("#614 economics-always: every attempted outcome kind appends exactly one provenance record", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-render-economics-"));
+  const tmp = makeFixtureDir("narrative-render-economics-");
   try {
     const narrativeDir = buildNarrativeDir(tmp);
     await api.renderProse(narrativeDir, { compiledAt: COMPILED_AT, outDir: path.join(tmp, "out-1"), generator: api.stubGenerator });

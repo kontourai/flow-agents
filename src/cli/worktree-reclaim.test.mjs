@@ -6,6 +6,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { reclaimBuilderWorktree } from "../../build/src/cli/worktree-reclaim.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 test("reclaim removes only the clean merged linked worktree, retains its branch, and persists a receipt", async () => {
   const fixture = makeFixture();
@@ -99,7 +100,7 @@ test("reclaim refuses before accepted learning evidence", async () => {
 });
 
 function makeFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-reclaim-"));
+  const root = makeFixtureDir("flow-agents-reclaim-");
   const primary = path.join(root, "repo");
   const worktree = path.join(root, "repo-worktrees", "feature");
   fs.mkdirSync(primary, { recursive: true });

@@ -7,11 +7,12 @@ import test from "node:test";
 import { parseSourceId, formatSourceId } from "../../build/src/narrative/source-ids.js";
 import { snapshotNarrative, validateNarrativeSourceManifest } from "../../build/src/narrative/snapshot.js";
 import { resolveSource, verifyManifest } from "../../build/src/narrative/resolver.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const NOW = "2026-07-14T12:00:00Z";
 
 function setup() {
-  const scope = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-resolver-"));
+  const scope = makeFixtureDir("narrative-resolver-");
   const repo = path.join(scope, "repo");
   const narrativeDir = path.join(scope, "artifacts", "narrative", "n1");
   fs.mkdirSync(repo, { recursive: true });
@@ -71,7 +72,7 @@ test("unknown source id is not_captured", () => {
 
 test("scope mismatch is unauthorized", () => {
   const { narrativeDir, sourceId } = setup();
-  const otherScope = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-other-scope-"));
+  const otherScope = makeFixtureDir("narrative-other-scope-");
   assert.deepEqual(resolveSource(narrativeDir, sourceId, { scope: otherScope }).reason, "unauthorized");
 });
 
@@ -85,7 +86,7 @@ test("verifyManifest reports every source and fails after corruption", () => {
 });
 
 test("a symlinked sources directory is rejected as corrupt, never followed", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-resolver-symdir-"));
+  const root = makeFixtureDir("narrative-resolver-symdir-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const narrativeDir = path.join(root, "narrative", "n1");
   const elsewhere = path.join(root, "elsewhere");

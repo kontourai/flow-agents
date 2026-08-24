@@ -19,6 +19,7 @@ import {
   continuePausedFlowGateFromSurvey,
   createSurveyFlowGateAdapter,
 } from "../../build/src/index.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const SUBJECT = "work-item:survey-gate-851";
 const GATE = "review-gate";
@@ -26,7 +27,7 @@ const TIME = "2026-07-22T12:00:00.000Z";
 const EVALUATION_TIME = "2026-07-22T12:01:00.000Z";
 
 function workspace() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-survey-gate-"));
+  return makeFixtureDir("flow-agents-survey-gate-");
 }
 
 function writeJson(file, value) {

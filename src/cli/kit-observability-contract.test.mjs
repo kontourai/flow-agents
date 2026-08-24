@@ -12,6 +12,7 @@ import {
   validateKitObservabilityRecord,
 } from "../../build/src/index.js";
 import { validateKitRepository, validateKitRepositoryDiagnostics } from "../../build/src/flow-kit/validate.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const root = path.resolve(import.meta.dirname, "..", "..");
 const fixtureRoot = path.join(root, "evals/fixtures/kit-observability");
@@ -228,7 +229,7 @@ test("descriptor digest is canonical across key order and changes with descripto
 });
 
 test("a symlinked descriptor cannot escape the Kit root", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-observability-symlink-"));
+  const tempRoot = makeFixtureDir("kit-observability-symlink-");
   try {
     const kitDir = path.join(tempRoot, "kit");
     const outsideDir = path.join(tempRoot, "outside");

@@ -25,6 +25,7 @@ import { spawnSync } from "node:child_process";
 import { declaredKitFlowIds, flowDefinitionResolverContractIssues, resolveEffectiveFlowDefinition, resolveFlowFilePath } from "../../build/src/lib/flow-resolver.js";
 import { canonicalRunFlowIds, canonicalRunFlowRefusal } from "../../build/src/builder-flow-run-adapter.js";
 import * as adapterExports from "../../build/src/builder-flow-run-adapter.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -76,7 +77,7 @@ function withDefsDir(defs, fn) {
 }
 
 test("declaredKitFlowIds derives from kit.json flow lists, flows/ directories, and the package fallback", () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-"));
+  const repoRoot = makeFixtureDir("kit-flows-");
   try {
     // Kit with a kit.json flows list — the list is the declaration surface, so an extra
     // undeclared file in flows/ must NOT appear.
@@ -115,7 +116,7 @@ test("declaredKitFlowIds derives from kit.json flow lists, flows/ directories, a
 // ─── FIX-2: a declaration is bound to the kit that made it ───────────────────────────────────
 
 test("a kit manifest cannot declare another kit's flow id (cross-kit ownership)", () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-own-"));
+  const repoRoot = makeFixtureDir("kit-flows-own-");
   try {
     // acme claims victim.hidden. The bytes it would authorize are kits/victim/flows/hidden.flow.json,
     // a file the victim kit never declared — and, here, one that exists.
@@ -136,7 +137,7 @@ test("a kit manifest cannot declare another kit's flow id (cross-kit ownership)"
 });
 
 test("a manifest whose id disagrees with its directory is refused wholesale", () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-id-"));
+  const repoRoot = makeFixtureDir("kit-flows-id-");
   try {
     // The directory is `acme`; the manifest calls itself `builder`. Its identity claim is the
     // thing under doubt, so nothing it says is trusted — including the flows/ fallback.
@@ -152,7 +153,7 @@ test("a manifest whose id disagrees with its directory is refused wholesale", ()
 });
 
 test("flows[].path must agree with the file canonical resolution will read", () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-path-"));
+  const repoRoot = makeFixtureDir("kit-flows-path-");
   try {
     writeJson(path.join(repoRoot, "kits/acme/kit.json"), {
       id: "acme",
@@ -184,7 +185,7 @@ test("flows[].path must agree with the file canonical resolution will read", () 
 });
 
 test("malformed kit manifests neither crash nor silently widen the derived list", () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-bad-"));
+  const repoRoot = makeFixtureDir("kit-flows-bad-");
   try {
     // Unparseable manifest → no declaration to honor; the flows/ directory is the surface.
     fs.mkdirSync(path.join(repoRoot, "kits/broken/flows"), { recursive: true });
@@ -213,7 +214,7 @@ test("malformed kit manifests neither crash nor silently widen the derived list"
 // ─── FIX-1: the kits root boundary is resolved, not spelled ──────────────────────────────────
 
 test("a kits/ root symlinked into runtime artifact storage authorizes nothing", () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-symlink-"));
+  const repoRoot = makeFixtureDir("kit-flows-symlink-");
   try {
     // The bypass the review found: the containment check realpath'd BOTH sides, so a symlinked
     // kits/ compared definitions against the attacker's own target and passed.
@@ -238,9 +239,9 @@ test("a kits/ root symlinked into RUNTIME ARTIFACT STORAGE authorizes nothing; o
   // consumes packaged kits without vendoring them. (Caught by the narrative-trust-isolation
   // eval, whose fixture does exactly that.) Escaping the repo is not the attack; landing
   // somewhere writable is. The pair below is the discriminator.
-  const attackRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-attack-"));
-  const legitRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-legit-"));
-  const packageLike = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-pkg-"));
+  const attackRoot = makeFixtureDir("kit-flows-attack-");
+  const legitRoot = makeFixtureDir("kit-flows-legit-");
+  const packageLike = makeFixtureDir("kit-flows-pkg-");
   try {
     // ATTACK: kits -> this repo's own runtime artifact storage.
     const runtimeKits = path.join(attackRoot, ".kontourai", "flow-agents", "kits");
@@ -262,8 +263,8 @@ test("a kits/ root symlinked into RUNTIME ARTIFACT STORAGE authorizes nothing; o
 });
 
 test("a non-directory kits/ entry is not a kit source", () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-file-"));
-  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-empty-"));
+  const repoRoot = makeFixtureDir("kit-flows-file-");
+  const emptyRoot = makeFixtureDir("kit-flows-empty-");
   try {
     fs.writeFileSync(path.join(repoRoot, "kits"), "not a directory\n");
     // A file (or dangling link) named `kits` contributes nothing: the derived list is exactly
@@ -276,7 +277,7 @@ test("a non-directory kits/ entry is not a kit source", () => {
 });
 
 test("the FLOW_AGENTS_FLOW_DEFS_DIR override is judged by containment in runtime artifact storage, not by writability", () => {
-  const defs = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-defs-"));
+  const defs = makeFixtureDir("kit-flows-defs-");
   try {
     writeJson(path.join(defs, "acme.custom.flow.json"), fixtureFlow("acme.custom"));
     writeJson(path.join(defs, "not-a-flow.json"), {});
@@ -307,7 +308,7 @@ test("the FLOW_AGENTS_FLOW_DEFS_DIR override is judged by containment in runtime
 
     // REFUSED: `delivery` under a git working tree — the third declared sub-root, which the
     // previous segment scan missed entirely.
-    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-repo-"));
+    const repo = makeFixtureDir("kit-flows-repo-");
     try {
       fs.mkdirSync(path.join(repo, ".git"), { recursive: true });
       const deliveryStorage = path.join(repo, "delivery", "defs");
@@ -329,7 +330,7 @@ test("the FLOW_AGENTS_FLOW_DEFS_DIR override is judged by containment in runtime
 // ─── The public verb ─────────────────────────────────────────────────────────────────────────
 
 test("an unknown flow fails closed naming the flows the installed kits actually declare", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flow-start-"));
+  const dir = makeFixtureDir("kit-flow-start-");
   try {
     const result = runStart(["--flow", "acme.custom"], dir);
     assert.notEqual(result.status, 0);
@@ -351,7 +352,7 @@ test("an unknown flow fails closed naming the flows the installed kits actually 
 });
 
 test("under a defs override the derived refusal lists the override's declared flows", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flow-start-"));
+  const dir = makeFixtureDir("kit-flow-start-");
   const defs = path.join(dir, "defs");
   try {
     writeJson(path.join(defs, "acme.custom.flow.json"), fixtureFlow("acme.custom"));
@@ -370,7 +371,7 @@ test("under a defs override the derived refusal lists the override's declared fl
 // ─── FIX-4/FIX-3: a flow with no canonical run is refused, not half-started ───────────────────
 
 test("a declared, conforming flow with no canonical run adapter is REFUSED, naming the missing capability", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flow-start-"));
+  const dir = makeFixtureDir("kit-flow-start-");
   const defs = path.join(dir, "defs");
   const consumer = path.join(dir, "consumer");
   const artifactRoot = path.join(consumer, ".kontourai", "flow-agents");
@@ -429,7 +430,7 @@ test("the canonical-run capability is the run adapter's declaration, not a liter
 // ─── FIX-5: conformance matches the downstream resolver contract ──────────────────────────────
 
 test("a declared flow that does not conform fails closed", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flow-start-"));
+  const dir = makeFixtureDir("kit-flow-start-");
   const defs = path.join(dir, "defs");
   try {
     // Declared (file exists in the defs dir) but no steps — the resolver cannot compile it.
@@ -475,7 +476,7 @@ test("the resolver identifier contract is enforced for a CANONICALLY-RUNNABLE fl
   // load-bearing while being dead. Here the definition IS builder.build — the runnability
   // check passes — and the only thing standing between a step id the resolver can never
   // resolve and a published active_step_id is this contract.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flow-badstep-"));
+  const dir = makeFixtureDir("kit-flow-badstep-");
   const defs = path.join(dir, "defs");
   try {
     writeJson(path.join(defs, "builder.build.flow.json"), fixtureFlow("builder.build", [{ id: "bad step", next: "closeout" }, { id: "closeout", next: null }]));
@@ -532,7 +533,7 @@ test("flowDefinitionResolverContractIssues accepts every packaged kit-declared f
 });
 
 test("builder.build and builder.shape pass flow validation and keep their byte-stable contract refusals (regression)", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flow-start-"));
+  const dir = makeFixtureDir("kit-flow-start-");
   try {
     // Reaching the contract-issue stage proves the derived validation accepted the flow; the
     // pinned strings prove the pre-existing consumer-matched refusals are untouched.

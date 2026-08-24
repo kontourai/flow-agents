@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { startBuilderFlowSession, syncBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
 import { performLocalClaim } from "../../build/src/cli/assignment-provider.js";
 import { cancelRun } from "@kontourai/flow";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require = createRequire(import.meta.url);
 const currentPointer = require("../../scripts/hooks/lib/current-pointer.js");
@@ -17,7 +18,7 @@ const {
 } = require("../../scripts/telemetry/run-correlation-binding.js");
 
 function workspaceFixture(t) {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "telemetry-run-binding-"));
+  const workspace = makeFixtureDir("telemetry-run-binding-");
   t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
   const artifactRoot = path.join(workspace, ".kontourai", "flow-agents");
   fs.mkdirSync(artifactRoot, { recursive: true });

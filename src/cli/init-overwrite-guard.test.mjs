@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const cli = path.join(repoRoot, "build", "src", "cli.js");
@@ -38,7 +39,7 @@ function runInit(dest, extraArgs = []) {
 }
 
 function fixtureDest(label) {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), `init-guard-${label}-`));
+  const dest = makeFixtureDir(`init-guard-${label}-`);
   fs.writeFileSync(path.join(dest, "README.md"), USER_README);
   return dest;
 }
@@ -131,7 +132,7 @@ test("init --force overwrites a user-authored README.md and reports the overwrit
 // (d) Stale bundle-owned content (hash recorded by a previous install's ownership
 // manifest) is updated WITHOUT --force: the normal upgrade path must keep working.
 test("init updates a stale bundle-owned file without --force (upgrade path)", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-upgrade-"));
+  const dest = makeFixtureDir("init-guard-upgrade-");
   const first = runInit(dest);
   assert.equal(first.status, 0, first.output);
   // Simulate a previous bundle version: on-disk content and manifest hash agree with
@@ -154,7 +155,7 @@ test("init updates a stale bundle-owned file without --force (upgrade path)", ()
 
 // (e) doctor must not recommend the destructive command bare.
 test("workflow doctor's init remediation includes --dry-run", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-doctor-"));
+  const dest = makeFixtureDir("init-guard-doctor-");
   const result = spawnSync(
     process.execPath,
     [cli, "workflow", "doctor", "--project-root", dest, "--artifact-root", path.join(dest, ".kontourai", "flow-agents"), "--json"],
@@ -201,7 +202,7 @@ function runKiroInit(dest, extraArgs = []) {
 // `rsync --delete`), and its token substitution must not mutate preserved or non-bundle
 // files that merely match a substituted extension.
 test("kiro init never deletes unclassified destination files and never token-substitutes preserved/user files", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-kiro-"));
+  const dest = makeFixtureDir("init-guard-kiro-");
   const userApp = "user app with __KIRO_PACKAGE_ROOT__ token inside\n";
   const userReadme = "# user kiro readme with __KIRO_PACKAGE_ROOT__\n";
   fs.mkdirSync(path.join(dest, "src"));
@@ -227,7 +228,7 @@ test("kiro init never deletes unclassified destination files and never token-sub
 // the summary with a removal suggestion, and NOTHING is deleted (a poisoned or stale
 // manifest entry, or a deliberately-restored file with old bytes, must not disappear).
 test("kiro init reports stale bundle-owned files without deleting anything", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-kiro-rm-"));
+  const dest = makeFixtureDir("init-guard-kiro-rm-");
   const first = runKiroInit(dest);
   assert.equal(first.status, 0, first.output);
   fs.mkdirSync(path.join(dest, "obsolete"));
@@ -258,7 +259,7 @@ test("kiro init reports stale bundle-owned files without deleting anything", () 
 // BLOCKING-2: --global claude-code sync preserves unowned differing files, reports them,
 // keeps them out of the ownership manifest, supports --dry-run (writes nothing) and --force.
 test("global claude-code sync preserves a user-authored agents file; --dry-run writes nothing; --force overwrites", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-global-"));
+  const dest = makeFixtureDir("init-guard-global-");
   fs.mkdirSync(path.join(dest, "agents"));
   const userAgent = "MY CUSTOM DEV AGENT\n";
   fs.writeFileSync(path.join(dest, "agents", "dev.md"), userAgent);
@@ -293,7 +294,7 @@ test("global claude-code sync preserves a user-authored agents file; --dry-run w
 // HIGH-2: a preserved (user-modified) telemetry.conf must not be rewritten by
 // install-console-config.sh, and the skip is disclosed.
 test("preserved telemetry.conf is not rewritten by console config and the skip is disclosed", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-conf-"));
+  const dest = makeFixtureDir("init-guard-conf-");
   fs.mkdirSync(path.join(dest, "scripts", "telemetry"), { recursive: true });
   const userConf = "# user-managed telemetry conf\n";
   fs.writeFileSync(path.join(dest, "scripts", "telemetry", "telemetry.conf"), userConf);
@@ -308,8 +309,8 @@ test("preserved telemetry.conf is not rewritten by console config and the skip i
 // install before any write -- children classified through the link are not what rsync
 // would actually touch.
 test("init refuses when a destination parent directory is a symlink, before any write", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-symlink-"));
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-symlink-outside-"));
+  const dest = makeFixtureDir("init-guard-symlink-");
+  const outside = makeFixtureDir("init-guard-symlink-outside-");
   fs.symlinkSync(outside, path.join(dest, "docs"), "dir");
   const before = snapshotTree(dest);
   const result = runInit(dest);
@@ -324,8 +325,8 @@ test("init refuses when a destination parent directory is a symlink, before any 
 test("verifyInstallPlanMatchesDisk refuses when a planned file changes after classification", async () => {
   const { computeInstallPlan, verifyInstallPlanMatchesDisk, InstallPlanDriftError } =
     await import("../../build/src/cli/install-plan.js");
-  const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-toctou-src-"));
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-toctou-dest-"));
+  const bundleDir = makeFixtureDir("init-guard-toctou-src-");
+  const dest = makeFixtureDir("init-guard-toctou-dest-");
   fs.writeFileSync(path.join(bundleDir, "a.md"), "bundle a\n");
   fs.writeFileSync(path.join(bundleDir, "b.md"), "bundle b\n");
   const params = {
@@ -385,8 +386,8 @@ test("installerSupportsPreserveExcludes requires the rsync line to enforce exclu
 // a literal bracketed filename round-trips as an exclusion (driven end-to-end through the
 // real generated installer against a minimal fixture bundle).
 test("install.sh --exclude-path treats rsync wildcard characters literally", () => {
-  const fixtureBundle = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-esc-bundle-"));
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-esc-dest-"));
+  const fixtureBundle = makeFixtureDir("init-guard-esc-bundle-");
+  const dest = makeFixtureDir("init-guard-esc-dest-");
   fs.copyFileSync(path.join(repoRoot, "dist", "base", "install.sh"), path.join(fixtureBundle, "install.sh"));
   fs.writeFileSync(path.join(fixtureBundle, "AGENTS.md"), "agents\n");
   fs.writeFileSync(path.join(fixtureBundle, "CLAUDE.md"), "claude\n");
@@ -406,7 +407,7 @@ test("install.sh --exclude-path treats rsync wildcard characters literally", () 
 // (merging over it would replace possibly-recoverable user content with managed-only
 // settings). --force does not override a parse failure, and nothing is written.
 test("global claude-code refuses over invalid existing settings JSON, even with --force", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-badjson-"));
+  const dest = makeFixtureDir("init-guard-badjson-");
   fs.writeFileSync(path.join(dest, "settings.json"), "{ this is not json\n");
   const before = snapshotTree(dest);
   for (const extra of [[], ["--force"]]) {
@@ -429,8 +430,8 @@ test("global claude-code refuses over invalid existing settings JSON, even with 
 test("executePlanCopies enforces exclusive creates and re-hash-before-rename replaces", async () => {
   const { computeInstallPlan, executePlanCopies, InstallPlanDriftError } =
     await import("../../build/src/cli/install-plan.js");
-  const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-exec-src-"));
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-exec-dest-"));
+  const bundleDir = makeFixtureDir("init-guard-exec-src-");
+  const dest = makeFixtureDir("init-guard-exec-dest-");
   fs.writeFileSync(path.join(bundleDir, "new.md"), "bundle new\n");
   fs.writeFileSync(path.join(bundleDir, "owned.md"), "bundle owned v2\n");
   // Seed a stale bundle-owned file recorded by a previous install's manifest.
@@ -476,8 +477,8 @@ test("executePlanCopies enforces exclusive creates and re-hash-before-rename rep
 // --ignore-existing, so the copy layer cannot overwrite ANY existing destination file --
 // including one that appeared after planning (planned as "create").
 test("install.sh --only-absent never overwrites an existing destination file", () => {
-  const fixtureBundle = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-oa-bundle-"));
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-oa-dest-"));
+  const fixtureBundle = makeFixtureDir("init-guard-oa-bundle-");
+  const dest = makeFixtureDir("init-guard-oa-dest-");
   fs.copyFileSync(path.join(repoRoot, "dist", "base", "install.sh"), path.join(fixtureBundle, "install.sh"));
   fs.writeFileSync(path.join(fixtureBundle, "AGENTS.md"), "agents\n");
   fs.writeFileSync(path.join(fixtureBundle, "CLAUDE.md"), "claude\n");
@@ -520,8 +521,8 @@ test("installBundleArgs passes each preserved path as --exclude-path (independen
 // contract against any future path normalization at the lookup site.)
 test("poisoned valid-shaped manifest entries never make a user file replaceable", async () => {
   const { computeInstallPlan } = await import("../../build/src/cli/install-plan.js");
-  const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-poison-src-"));
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "init-guard-poison-dest-"));
+  const bundleDir = makeFixtureDir("init-guard-poison-src-");
+  const dest = makeFixtureDir("init-guard-poison-dest-");
   fs.writeFileSync(path.join(bundleDir, "README.md"), "bundle readme\n");
   const userReadme = "user readme that must stay preserved\n";
   fs.writeFileSync(path.join(dest, "README.md"), userReadme);

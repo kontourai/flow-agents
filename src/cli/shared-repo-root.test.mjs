@@ -6,6 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { resolveSharedRepoRoot } from "../../build/src/lib/local-artifact-root.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 // #1055: `resolveSharedRepoRoot` used `path.dirname(--git-common-dir)`, which strips exactly one
 // segment. Correct for `<repo>/.git`; wrong inside a submodule, where the common dir is
@@ -20,7 +21,7 @@ import { resolveSharedRepoRoot } from "../../build/src/lib/local-artifact-root.j
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 
 function topology() {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-shared-root-")));
+  const root = fs.realpathSync(makeFixtureDir("flow-agents-shared-root-"));
   const inner = path.join(root, "inner");
   const superRepo = path.join(root, "super");
   for (const dir of [inner, superRepo]) {
@@ -83,7 +84,7 @@ test("#1055: every worktree of one repository agrees on a single shared root", (
 });
 
 test("#1055: a non-git directory still resolves to null, so callers still fail open", (t) => {
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-nongit-"));
+  const scratch = makeFixtureDir("flow-agents-nongit-");
   assert.equal(resolveSharedRepoRoot(scratch), null);
   assert.equal(resolveSharedRepoRoot("/definitely/does/not/exist"), null);
 });

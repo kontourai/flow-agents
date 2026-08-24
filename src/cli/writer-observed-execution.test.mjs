@@ -6,6 +6,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 import { appendWriterObservedCommands, WRITER_OBSERVATION_SOURCE } from "../../build/src/cli/workflow-sidecar.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require = createRequire(import.meta.url);
 const repoRoot = path.resolve(import.meta.dirname, "../..");
@@ -20,7 +21,7 @@ const CLEAN_SNAPSHOT = {
 };
 
 function tempSession(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "writer-observed-"));
+  const dir = makeFixtureDir("writer-observed-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }

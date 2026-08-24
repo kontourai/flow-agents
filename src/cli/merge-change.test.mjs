@@ -12,6 +12,7 @@ import { issueMergeChangeAction } from "../../build/src/merge-change-operation-a
 import { issuePublishChangeAction } from "../../build/src/publish-change-operation-authority.js";
 import { performLocalClaim, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { resolveEffectiveFlowDefinition } from "../../build/src/lib/flow-resolver.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const SHA = "a".repeat(40);
 const provider = { role: "ChangeProvider", kind: "github", repository: { owner: "kontourai", name: "flow-agents" }, capabilities: ["change.create", "change.observe", "change.merge"], executor: "gh-cli" };
@@ -44,7 +45,7 @@ function mergedObservation(issued, observedAt) {
 }
 
 function fixtureSession() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-merge-transaction-"));
+  const root = makeFixtureDir("flow-agents-merge-transaction-");
   const sessionDir = path.join(root, ".kontourai", "flow-agents", binding.run_id);
   fs.mkdirSync(sessionDir, { recursive: true });
   return { root, sessionDir, lockDir: path.join(root, ".kontourai", "flow-agents", "assignment", `.${binding.run_id}.lockdir`) };
@@ -201,7 +202,7 @@ for (const [label, current] of [
 }
 
 test("public merge-change request accepts effective amended bindings while retaining the start-bound manifest", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-merge-amended-request-"));
+  const root = makeFixtureDir("flow-agents-merge-amended-request-");
   const slug = "amended-merge-request";
   const artifactRoot = path.join(root, ".kontourai", "flow-agents");
   const sessionDir = path.join(artifactRoot, slug);
@@ -382,7 +383,7 @@ test("the coordinator's route-map predicate accepts the SHIPPED definition seman
 // ---------------------------------------------------------------------------
 
 function requestFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-merge-policy-preflight-"));
+  const root = makeFixtureDir("flow-agents-merge-policy-preflight-");
   const sessionDir = path.join(root, ".kontourai", "flow-agents", binding.run_id);
   fs.mkdirSync(sessionDir, { recursive: true });
   return { root, sessionDir, out: path.join(root, "unsigned.json") };
