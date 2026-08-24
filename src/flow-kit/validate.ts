@@ -4,7 +4,7 @@ import { readJson } from "../lib/fs.js";
 import { parseKitFlowStepActions, workflowTriggerIdentifier } from "./action-metadata.js";
 import { validateActionRepositoryMetadata } from "./action-repository-validation.js";
 import { loadKitObservabilityContribution } from "../kit-observability-contract.js";
-export { isObservableBuilderArtifactRef, isSafeBuilderArtifactRef, parseKitFlowStepActions } from "./action-metadata.js";
+export { isObservableBuilderArtifactRef, isSafeBuilderArtifactRef, parseKitFlowStepActions, skillRoleFlowIds } from "./action-metadata.js";
 export type { KitFlowStepActionEntry, KitFlowStepArtifactBinding, KitFlowStepExpectationBinding } from "./action-metadata.js";
 
 // Extension-only asset classes: validated by Flow Agents. Flows are validated by @kontourai/flow.
@@ -82,6 +82,25 @@ export interface KitSkillRoleEntry {
   skill_id: string;
   role: KitSkillRole;
   flow_id?: string;
+  /**
+   * ADDITIONAL flows this role produces for, beyond `flow_id` (#1280).
+   *
+   * #1316 made the RUN binding kit-generic so a kit can declare a gate-set VARIANT of its own
+   * flow and have it run with provenance. This is the other half: the kit-metadata validator
+   * assumed one flow per producing step-role, so a variant that reuses the SAME producers at the
+   * SAME steps — which is exactly what makes it a controlled ablation rather than a different
+   * flow — could not be expressed at all. The alternatives were both worse than a field: alias
+   * skills (a second role naming the same SKILL.md, so the manifest asserts two producers where
+   * there is one), or composing the variant off the full flow (which needs the full flow to grow
+   * `exports`, changing ITS definition digest and invalidating every run record already pinned
+   * against it).
+   *
+   * `flow_id` stays the role's primary binding and is always included in the effective set, so
+   * every existing manifest keeps its exact meaning. Listing a flow here is a POSITIVE claim by
+   * the kit that this producer owns the expectation in that flow too; it is not a wildcard, and
+   * owner cardinality is still enforced per flow.
+   */
+  flow_ids?: string[];
   step_ids: string[];
   artifacts: string[];
   expectation_ids: string[];
@@ -418,7 +437,7 @@ export function parseKitSkillRoles(manifest: Record<string, unknown>, manifestPa
     return { entries, errors };
   }
   const roles = new Set<KitSkillRole>(["entrypoint", "profile", "step", "shared-primitive", "extension"]);
-  const fields = new Set(["skill_id", "role", "flow_id", "step_ids", "artifacts", "expectation_ids"]);
+  const fields = new Set(["skill_id", "role", "flow_id", "flow_ids", "step_ids", "artifacts", "expectation_ids"]);
   const seen = new Set<string>();
   raw.forEach((entry, index) => {
     if (typeof entry !== "object" || entry === null) {
@@ -442,6 +461,18 @@ export function parseKitSkillRoles(manifest: Record<string, unknown>, manifestPa
     if (record.flow_id !== undefined && !workflowTriggerIdentifier(record.flow_id)) {
       errors.push(`${manifestPath}: skill_roles[${index}].flow_id must be a Flow identifier when present`);
     }
+    // `flow_ids` names ADDITIONAL flows only, so it is meaningless without a primary binding and
+    // must not restate it — one flow, one place, or "which flow does this role belong to" has two
+    // answers again.
+    if (record.flow_ids !== undefined) {
+      if (!Array.isArray(record.flow_ids) || record.flow_ids.length === 0 || !record.flow_ids.every(workflowTriggerIdentifier) || new Set(record.flow_ids).size !== record.flow_ids.length) {
+        errors.push(`${manifestPath}: skill_roles[${index}].flow_ids must be a non-empty unique Flow identifier list when present`);
+      } else if (typeof record.flow_id !== "string") {
+        errors.push(`${manifestPath}: skill_roles[${index}].flow_ids requires a primary flow_id`);
+      } else if (record.flow_ids.includes(record.flow_id)) {
+        errors.push(`${manifestPath}: skill_roles[${index}].flow_ids must not restate flow_id '${record.flow_id}'`);
+      }
+    }
     for (const field of ["step_ids", "expectation_ids"] as const) {
       const value = record[field];
       if (!Array.isArray(value) || !value.every(workflowTriggerIdentifier) || new Set(value).size !== value.length) {
@@ -455,6 +486,9 @@ export function parseKitSkillRoles(manifest: Record<string, unknown>, manifestPa
     const expectationIds = Array.isArray(record.expectation_ids) ? record.expectation_ids.filter(workflowTriggerIdentifier) : [];
     const artifacts = Array.isArray(record.artifacts) ? record.artifacts.filter((artifact): artifact is string => typeof artifact === "string" && artifact.trim().length > 0) : [];
     const flowId = typeof record.flow_id === "string" && workflowTriggerIdentifier(record.flow_id) ? record.flow_id : undefined;
+    const additionalFlowIds = flowId && Array.isArray(record.flow_ids)
+      ? record.flow_ids.filter((value): value is string => workflowTriggerIdentifier(value) && value !== flowId)
+      : [];
     if ((role === "entrypoint" || role === "profile") && (!flowId || stepIds.length > 0 || expectationIds.length > 0 || artifacts.length > 0)) {
       errors.push(`${manifestPath}: skill_roles[${index}] ${role} must select one flow and own no steps, artifacts, or expectations`);
     }
@@ -467,7 +501,12 @@ export function parseKitSkillRoles(manifest: Record<string, unknown>, manifestPa
     if (role === "extension" && (flowId || stepIds.length > 0 || expectationIds.length > 0)) {
       errors.push(`${manifestPath}: skill_roles[${index}] extension must own no Builder flow, steps, or expectations`);
     }
-    entries.push({ skill_id: record.skill_id, role, ...(flowId ? { flow_id: flowId } : {}), step_ids: stepIds, artifacts, expectation_ids: expectationIds });
+    // Only a `step` role PRODUCES anything, so only a step role can serve more than one flow.
+    // An entrypoint/profile selects one flow by definition; the others select none.
+    if (role !== "step" && additionalFlowIds.length > 0) {
+      errors.push(`${manifestPath}: skill_roles[${index}] ${role} must not declare flow_ids; only a step role produces for more than one flow`);
+    }
+    entries.push({ skill_id: record.skill_id, role, ...(flowId ? { flow_id: flowId } : {}), ...(role === "step" && additionalFlowIds.length > 0 ? { flow_ids: additionalFlowIds } : {}), step_ids: stepIds, artifacts, expectation_ids: expectationIds });
   });
   return { entries, errors };
 }
