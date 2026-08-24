@@ -89,6 +89,102 @@ export const UNATTRIBUTED_REASONS = Object.freeze({
   UNPARSEABLE_START: "unparseable-started-at",
 });
 
+/* ------------------------------------------------------------------------- *
+ * MODEL ATTRIBUTION (flow-agents#1327)
+ *
+ * The transition record has carried `actor.runtime` — `claude-code` / `codex` —
+ * since it shipped, and nothing else about who ran the gate. Gate value is
+ * plausibly model-dependent: a gate that catches real defects under a weaker
+ * model can be ceremony under a stronger one. Pooling gate outcomes across
+ * models answers "is this gate worth it on average over whatever mix happened to
+ * run", and cutting on that basis cuts for every model at once. So the honest
+ * unit is (gate × model), and the dimension has to exist on the same records the
+ * fold already reads.
+ *
+ * WHAT IS ACTUALLY KNOWABLE, per runtime, measured rather than assumed:
+ *
+ *   claude-code, at ENRICH time — AUTHORITATIVE. Every transcript record that
+ *     carries `message.usage` carries `message.model` on the same line. It is the
+ *     same record `loadTurns` already reads, so the model of the turn that emitted
+ *     the invoking tool call is available at exactly the granularity the token
+ *     figure already is, with no second source and no second join.
+ *
+ *   claude-code, at EMIT time — ABSENT. No environment variable names the
+ *     executing model. `CLAUDE_CODE_SESSION_ID` is published; there is no model
+ *     counterpart. `docs/decisions/model-routing.md` records `ANTHROPIC_MODEL` as a
+ *     REJECTED mechanism, and even where such a variable is set it is a request the
+ *     host may not honour and is wrong for a delegated sub-agent, whose turns this
+ *     repo's own corpus shows interleaved with the orchestrator's.
+ *
+ *   codex — UNAVAILABLE through this pipeline. Codex rollout files do name a model
+ *     (`turn_context.payload.model`), but they carry no `message.usage` record, so
+ *     `loadTurns` yields no turn for them and no codex transition is attributed a
+ *     turn at all today. Ingesting them is a different contract (a second turn
+ *     parser and a second timestamp semantics) and is not smuggled in here. A codex
+ *     transition therefore reports `attributed: false` with a reason, which is the
+ *     true state, not a gap dressed as a value.
+ *
+ * `<synthetic>` IS NOT A MODEL. Claude Code writes host-generated assistant
+ * messages — "You've hit your weekly limit", "No response requested", a rejected
+ * model id — with `model: "<synthetic>"` and all-zero usage. There are 379 of them
+ * in a 400-transcript sample of this repo's own corpus, and two in the 730-turn
+ * fixture below. Folding that string as a model would put a bucket named
+ * `<synthetic>` in a per-model scorecard and invite exactly the comparison it
+ * cannot support. Any angle-bracketed placeholder is refused, so a future host
+ * sentinel in the same shape lands as "no model" rather than as a new model.
+ */
+
+/**
+ * The granularity label that must travel with the model, mirroring the
+ * `EconomicsDelegationCostGranularity = "model-proxy"` precedent this repo already
+ * follows for cost: name what the value IS rather than letting the field name imply
+ * more than the derivation supports.
+ *
+ * It says: the model that emitted the tool call which invoked this transition. That
+ * is not "the model that ran the gate" — the gate is a subprocess and no model runs
+ * inside it — and it is not "the model of the session", which changes mid-session
+ * and differs between an orchestrator and its delegates. It is one turn's model,
+ * and it is the strongest claim the available evidence supports.
+ */
+export const MODEL_GRANULARITY = "invoking-turn-model";
+
+/** The wire field. Named for the economics vocabulary a consumer already folds. */
+export const RESOLVED_MODEL_FIELD = "resolved_model";
+
+/**
+ * The self-describing block beside it, and the only thing that can tell "examined,
+ * no model to report" apart from "nothing ever looked at this record" — the same
+ * distinction `token_attribution` exists to preserve for tokens. A per-model
+ * scorecard that cannot make it reports an un-enriched log as a measured one whose
+ * gates all happened to run on nothing.
+ */
+export const MODEL_ATTRIBUTION_FIELD = "model_attribution";
+
+/** Why a transition carries no model. Emitted, never inferred by the reader. */
+export const UNATTRIBUTED_MODEL_REASONS = Object.freeze({
+  NO_TURN: "no-turn-before-transition",
+  OUTSIDE_GRACE: "turn-outside-grace-window",
+  UNPARSEABLE_START: "unparseable-started-at",
+  /** A turn was identified, and it named no usable model — absent, or `<synthetic>`. */
+  TURN_REPORTS_NO_MODEL: "turn-reports-no-model",
+});
+
+/**
+ * The model a turn reports, or null when it reports none this module will stand behind.
+ *
+ * Refuses: a missing or non-string value; a blank one; anything in the host's
+ * angle-bracket placeholder shape (`<synthetic>` today). Bounded, because it is
+ * written to a record that is read back by other tools and an unbounded string from a
+ * host-private file is not something to copy onto a wire unchecked.
+ */
+export function normalizeTurnModel(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 128) return null;
+  if (trimmed.startsWith("<") && trimmed.endsWith(">")) return null;
+  return trimmed;
+}
+
 export function readJsonl(file) {
   const records = [];
   let unparseable = 0;
@@ -152,6 +248,10 @@ export function loadTurns(transcriptFiles) {
         ref: turnRef(session, messageId),
         at,
         output: Number(usage.output_tokens) || 0,
+        // Read off the SAME record as the usage totals, so the model and the number
+        // can never describe different turns. null when the turn names no model this
+        // module will stand behind (see normalizeTurnModel).
+        model: normalizeTurnModel(record?.message?.model),
         session,
         sidechain: record?.isSidechain === true,
       });
@@ -181,6 +281,17 @@ export function loadTurns(transcriptFiles) {
  * `preConsumedTurnRefs` lets a second enrichment pass honour the first: a turn already
  * charged to a record on disk must not be charged again to a different one. Without it,
  * "at most one transition per turn" would hold within a run and fail across runs.
+ *
+ * MODEL ATTRIBUTION RIDES THE SAME MATCH, AND DELIBERATELY NOT THE SAME EXCLUSION.
+ * Tokens are additive, so a turn may be charged to at most one transition or the total
+ * inflates. A model is not a quantity: three transitions invoked by one turn were all
+ * invoked by that turn's model, and saying so for only the first would under-report the
+ * dimension by ~85% on this repo's own corpus while telling no additional truth. So the
+ * model follows the CANDIDATE turn — the one identified as the plausible invoker, inside
+ * the grace window and inside the session — whether or not that turn's tokens were still
+ * available to charge. The two attributions are stamped as separate blocks with separate
+ * reasons for precisely this reason: they answer different questions and their absences
+ * mean different things.
  */
 export function attributeTokens(transitions, transcriptFiles, options = {}) {
   const { ordered, sidechainTurns } = loadTurns(transcriptFiles);
@@ -188,9 +299,20 @@ export function attributeTokens(transitions, transcriptFiles, options = {}) {
 
   const attributed = new Map();
   const reasons = new Map();
+  const models = new Map();
+  const modelReasons = new Map();
   const ambiguousTurnClaims = [];
   const consumed = new Map();
   let matchedTurns = 0;
+  let matchedModels = 0;
+  const noteModel = (transition, turn) => {
+    if (turn.model) {
+      models.set(transition, { model: turn.model, turn_ref: turn.ref });
+      matchedModels += 1;
+    } else {
+      modelReasons.set(transition, { reason: UNATTRIBUTED_MODEL_REASONS.TURN_REPORTS_NO_MODEL, turn_ref: turn.ref });
+    }
+  };
 
   const chronological = [...transitions].sort(
     (a, b) => (Date.parse(a.started_at ?? "") || 0) - (Date.parse(b.started_at ?? "") || 0),
@@ -199,6 +321,7 @@ export function attributeTokens(transitions, transcriptFiles, options = {}) {
     const start = Date.parse(transition.started_at ?? "");
     if (Number.isNaN(start)) {
       reasons.set(transition, { reason: UNATTRIBUTED_REASONS.UNPARSEABLE_START });
+      modelReasons.set(transition, { reason: UNATTRIBUTED_MODEL_REASONS.UNPARSEABLE_START });
       continue;
     }
     const session = transition?.actor?.session_id ?? null;
@@ -210,12 +333,20 @@ export function attributeTokens(transitions, transcriptFiles, options = {}) {
     }
     if (!candidate) {
       reasons.set(transition, { reason: UNATTRIBUTED_REASONS.NO_TURN });
+      modelReasons.set(transition, { reason: UNATTRIBUTED_MODEL_REASONS.NO_TURN });
       continue;
     }
     if (start - candidate.at > TURN_GRACE_MS) {
       reasons.set(transition, { reason: UNATTRIBUTED_REASONS.OUTSIDE_GRACE, turn_ref: candidate.ref });
+      // Too far back to be the invoker. The turn is not evidence of the model either:
+      // a stale match would report whichever model happened to speak last, and a wrong
+      // model is worse than none because nothing downstream can tell it apart.
+      modelReasons.set(transition, { reason: UNATTRIBUTED_MODEL_REASONS.OUTSIDE_GRACE, turn_ref: candidate.ref });
       continue;
     }
+    // Past this point the candidate IS the plausible invoker, so its model is this
+    // transition's model regardless of which transition the tokens go to.
+    noteModel(transition, candidate);
     if (preConsumed.has(candidate.ref)) {
       reasons.set(transition, { reason: UNATTRIBUTED_REASONS.CONSUMED, turn_ref: candidate.ref });
       continue;
@@ -260,11 +391,16 @@ export function attributeTokens(transitions, transcriptFiles, options = {}) {
     source: "transcript",
     attributed,
     reasons,
+    models,
+    modelReasons,
     ambiguousTurnClaims,
     matchedTurns,
+    matchedModels,
     availableTurns: ordered.length,
+    turnsReportingNoModel: ordered.filter((turn) => !turn.model).length,
     sidechainTurnsExcluded: sidechainTurns,
     transitionsWithoutTurn: transitions.length - matchedTurns,
+    transitionsWithoutModel: transitions.length - matchedModels,
   };
 }
 
@@ -294,6 +430,31 @@ export function stampAttribution(record, outcome, meta = {}) {
 }
 
 /**
+ * Write one MODEL attribution onto one record, in place.
+ *
+ * The single writer of both model fields, on the same terms `stampAttribution` holds
+ * for tokens: `resolved_model` is present IFF `model_attribution.attributed` is true,
+ * and a transition whose model could not be observed carries NO `resolved_model` key
+ * — never a default, never the model that happens to be fashionable, never the one the
+ * operator's shell mentions. A fabricated model is worse than an absent one: absent is
+ * countable as unknown, and a fabrication is indistinguishable from a measurement in
+ * every per-model comparison drawn from this data afterwards.
+ */
+export function stampModelAttribution(record, outcome, meta = {}) {
+  const block = { granularity: MODEL_GRANULARITY, attributed: outcome.attributed === true };
+  if (outcome.attributed) {
+    record[RESOLVED_MODEL_FIELD] = outcome.model;
+  } else {
+    delete record[RESOLVED_MODEL_FIELD];
+    block.reason = outcome.reason;
+  }
+  if (outcome.turn_ref) block.turn_ref = outcome.turn_ref;
+  if (meta.source) block.source = meta.source;
+  record[MODEL_ATTRIBUTION_FIELD] = block;
+  return record;
+}
+
+/**
  * Read attribution back off records that already carry it, in the same shape
  * `attributeTokens` returns — so the fold consumes one contract whether the numbers came
  * from a transcript it read or from a producer that read one for it.
@@ -311,13 +472,40 @@ export function stampAttribution(record, outcome, meta = {}) {
 export function attributionFromRecords(transitions) {
   const attributed = new Map();
   const reasons = new Map();
+  const models = new Map();
+  const modelReasons = new Map();
   let matchedTurns = 0;
   let withoutTurn = 0;
   let notEnriched = 0;
   let malformed = 0;
   let ambiguous = 0;
+  let matchedModels = 0;
+  let withoutModel = 0;
+  let modelNotEnriched = 0;
+  let malformedModels = 0;
 
   for (const record of transitions) {
+    // The two attributions are independent populations: a record enriched before
+    // #1327 carries tokens and no model block at all, and that third state —
+    // "nothing looked at the model" — must stay distinguishable from "looked, and
+    // there was none". Read separately so one cannot mask the other.
+    const modelBlock = record?.[MODEL_ATTRIBUTION_FIELD];
+    if (!modelBlock || typeof modelBlock !== "object") {
+      modelNotEnriched += 1;
+    } else if (modelBlock.attributed === true) {
+      const model = normalizeTurnModel(record?.[RESOLVED_MODEL_FIELD]);
+      // A claim of attribution with no usable model is a producer bug. Absorbing it
+      // as "no model" would hide the bug inside an honest-looking unknown count.
+      if (model === null) malformedModels += 1;
+      else {
+        models.set(record, { model, turn_ref: modelBlock.turn_ref ?? null });
+        matchedModels += 1;
+      }
+    } else {
+      modelReasons.set(record, { reason: modelBlock.reason ?? null, turn_ref: modelBlock.turn_ref });
+      withoutModel += 1;
+    }
+
     const block = record?.[TOKEN_ATTRIBUTION_FIELD];
     if (!block || typeof block !== "object") {
       notEnriched += 1;
@@ -341,18 +529,29 @@ export function attributionFromRecords(transitions) {
     withoutTurn += 1;
   }
 
-  if (notEnriched === transitions.length) return null;
+  // Null only when NOTHING carries either block: a scorecard of tidy zeroes over a log
+  // nothing has looked at is exactly the result these tools refuse to render. A log
+  // carrying one attribution and not the other is measured in one dimension and is
+  // reported that way, per-dimension, rather than discarded.
+  if (notEnriched === transitions.length && modelNotEnriched === transitions.length) return null;
   return {
     source: "record",
     attributed,
     reasons,
+    models,
+    modelReasons,
     ambiguousTurnClaims: [],
     ambiguousAttributions: ambiguous,
     matchedTurns,
+    matchedModels,
     availableTurns: null,
+    turnsReportingNoModel: null,
     sidechainTurnsExcluded: null,
     transitionsWithoutTurn: withoutTurn,
+    transitionsWithoutModel: withoutModel,
     transitionsNotEnriched: notEnriched,
+    modelsNotEnriched: modelNotEnriched,
     malformedAttributions: malformed,
+    malformedModelAttributions: malformedModels,
   };
 }
