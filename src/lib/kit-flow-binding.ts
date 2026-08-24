@@ -53,12 +53,23 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { isWithinRuntimeArtifactRoot } from "./declared-artifact-roots.js";
 
 /** The identifier shape `resolveFlowFilePath` actually enforces on both parts of a flow id. */
 const SLUG_RE = /^[a-zA-Z0-9_-]+$/;
 
 /** Every packaged/tracked kit tree lives under this directory name, one level below its root. */
 const KITS_DIR = "kits";
+
+/** One conforming `kit.json` `flows[]` entry, bound to the kit directory that declared it. */
+export interface KitFlowDeclaration {
+  flowId: string;
+  /** The kit DIRECTORY name the declaration is namespaced to. */
+  kitId: string;
+  flowName: string;
+  /** Canonical `flows/<flowName>.flow.json`, relative to the kit directory. */
+  relativePath: string;
+}
 
 export interface KitFlowBinding {
   /** The declared flow id, `<kit>.<flow>`. */
@@ -120,28 +131,33 @@ export function kitFlowSourceRoots(packageRoot: string, projectRoot?: string): s
 /**
  * The canonical `<root>/kits` directory, or null when it cannot serve as a kit source.
  *
+ * THE one definition of "what counts as a kit source", consumed by both the RESOLVER
+ * (`flow-resolver.ts`, which reads a flow's bytes) and the RUN BINDING (this module, which
+ * decides which kit's manifest supplies the run's provenance). #1315 and #1316 each grew a copy;
+ * two copies of a containment boundary is two answers to "is this tree a kit source", and the
+ * one that disagrees is the one an attacker uses. This is the surviving copy — #1315's, verbatim
+ * in behavior, including its lexical fallback — and flow-resolver.ts now imports it.
+ *
  * Refused when the resolved kits root escapes its own root (a symlink out of the tree), when it
  * is not a directory, or when it lands inside runtime artifact storage. Returns the REALPATH, so
  * every later containment comparison is against a boundary the tree owner controls rather than
- * one a symlink under test chose — the #1315 review FIX-1 rule, applied to the run binding.
- *
- * MERGE NOTE (#1315): that branch adds an equivalent private `canonicalKitsRoot` to
- * flow-resolver.ts, with the same three refusals plus its `isWithinRuntimeArtifactRoot`
- * derivation of the runtime-storage rule. On merge, export that one and delete this: the two
- * must never be able to disagree about what counts as a kit source.
+ * one a symlink under test chose — #1315 review FIX-1.
  */
-export function resolveKitsRoot(root: string): string | null {
-  const realRoot = canonicalPathOrNull(root);
-  if (!realRoot) return null;
-  const realKitsRoot = canonicalPathOrNull(path.join(realRoot, KITS_DIR));
-  if (!realKitsRoot) return null;
-  if (!realKitsRoot.startsWith(realRoot + path.sep)) return null;
+export function canonicalKitsRoot(root: string): string | null {
+  const lexicalKitsRoot = path.resolve(root, KITS_DIR);
   try {
+    const realRoot = (fs.realpathSync.native ?? fs.realpathSync)(path.resolve(root));
+    const realKitsRoot = (fs.realpathSync.native ?? fs.realpathSync)(lexicalKitsRoot);
+    if (!realKitsRoot.startsWith(realRoot + path.sep)) return null;
     if (!fs.statSync(realKitsRoot).isDirectory()) return null;
+    if (isWithinRuntimeArtifactRoot(realKitsRoot)) return null;
+    return realKitsRoot;
   } catch {
-    return null;
+    // The kits root does not exist yet (or is unreadable). There is nothing to be tricked by,
+    // and callers that only need a lexical expected-root still get one; enumeration callers
+    // simply find nothing there.
+    return isWithinRuntimeArtifactRoot(lexicalKitsRoot) ? null : lexicalKitsRoot;
   }
-  return isWithinRuntimeArtifactStorage(realKitsRoot) ? null : realKitsRoot;
 }
 
 /**
@@ -156,32 +172,30 @@ export function resolveKitFlowBinding(flowId: string, sourceRoots: readonly stri
   const parts = kitFlowIdParts(flowId);
   if (!parts) return null;
   for (const root of sourceRoots) {
-    const kitsRoot = resolveKitsRoot(root);
+    const kitsRoot = canonicalKitsRoot(root);
     if (!kitsRoot) continue;
-    const binding = bindingInKitsRoot(flowId, parts, root, kitsRoot);
+    const declarations = kitManifestFlowDeclarations(kitsRoot, parts.kitId);
+    const declaration = declarations?.find((candidate) => candidate.flowId === flowId);
+    if (!declaration) continue;
+    const binding = bindingInKitsRoot(declaration, root, kitsRoot);
     if (binding) return binding;
   }
   return null;
 }
 
 function bindingInKitsRoot(
-  flowId: string,
-  parts: { kitId: string; flowName: string },
+  declaration: KitFlowDeclaration,
   sourceRoot: string,
   kitsRoot: string,
 ): KitFlowBinding | null {
-  const kitDir = path.join(kitsRoot, parts.kitId);
+  const kitDir = path.join(kitsRoot, declaration.kitId);
   const manifestPath = path.join(kitDir, "kit.json");
+  // Re-read rather than thread the parsed object through: `kitManifestFlowDeclarations` answers
+  // WHICH ids this kit may declare; the manifest itself is the producer-binding surface, and the
+  // binding must carry the bytes it was derived from.
   const manifest = readJsonObject(manifestPath);
   if (!manifest) return null;
-  // OWNERSHIP: a manifest that misnames its own kit is refused wholesale.
-  if (manifest["id"] !== undefined && manifest["id"] !== parts.kitId) return null;
-  const declaredPath = declaredFlowPath(manifest, parts);
-  if (declaredPath === null) return null;
-  // PATH AGREEMENT: the declared path must name the file canonical resolution reads.
-  const canonicalRelative = path.join("flows", `${parts.flowName}.flow.json`);
-  if (path.resolve(kitDir, declaredPath) !== path.join(kitDir, canonicalRelative)) return null;
-  const definitionPath = canonicalPathOrNull(path.join(kitDir, declaredPath));
+  const definitionPath = canonicalPathOrNull(path.join(kitDir, declaration.relativePath));
   if (!definitionPath || !definitionPath.startsWith(kitsRoot + path.sep)) return null;
   try {
     if (!fs.statSync(definitionPath).isFile()) return null;
@@ -189,38 +203,81 @@ function bindingInKitsRoot(
     return null;
   }
   return {
-    flowId,
-    kitId: parts.kitId,
-    flowName: parts.flowName,
+    flowId: declaration.flowId,
+    kitId: declaration.kitId,
+    flowName: declaration.flowName,
     sourceRoot,
     kitsRoot,
     manifestPath,
     manifest,
-    flowRelativePath: [KITS_DIR, parts.kitId, declaredPath].join("/"),
+    flowRelativePath: [KITS_DIR, declaration.kitId, ...declaration.relativePath.split(path.sep)].join("/"),
     definitionPath,
   };
 }
 
 /**
- * The path the manifest declares for `flowId`, or null when the manifest does not declare it.
+ * THE declaration predicate: what `<kitsRoot>/<kitDirName>/kit.json` is ALLOWED to declare.
  *
- * A manifest with no `flows[]` list declares nothing the RUN binding can use. #1315 lets such a
- * kit fall back to enumerating `flows/` for EXISTENCE, because a refusal listing startable flows
- * should list everything a start could resolve. A run binding is a stronger claim — it is the
- * provenance the run record pins — so it requires the kit to have said so in its manifest.
+ * ONE predicate for BOTH questions, deliberately (#1315 review FIX-2 + #1316). #1315 asked it as
+ * "which ids may this manifest contribute to the startable set" (`kitManifestFlowIds`) and #1316
+ * asked it as "which file may this manifest bind for the run" (`declaredFlowPath`). Two functions
+ * applying the same two rules is two places for the rules to drift, and the drift is not
+ * cosmetic: EXISTENCE authorizes the start and RUN BINDING chooses the bytes, so a manifest the
+ * two disagree about is precisely a start validated against bytes the run does not bind. They
+ * cannot disagree now because there is one answer.
+ *
+ * The two rules, unchanged from #1315:
+ *
+ *   OWNERSHIP — the id must be namespaced to the DIRECTORY the manifest lives in
+ *     (`<kitDirName>.<flowName>`), because the directory is what canonical resolution derives the
+ *     path from. When the manifest also carries an `id`, it must agree with that directory; a
+ *     manifest that misnames its own kit is refused WHOLESALE (an empty list — not null, so no
+ *     caller falls back to enumerating its `flows/`) rather than partially trusted: its identity
+ *     claim is the thing under doubt.
+ *   PATH AGREEMENT — when `flows[].path` is present it must name, relative to the kit directory,
+ *     the exact file canonical resolution will read for that id (`flows/<flowName>.flow.json`).
+ *     A declaration pointing anywhere else is either wrong or is trying to authorize an id whose
+ *     bytes live where the resolver will never look; either way it is refused.
+ *
+ * Non-conforming ENTRIES are skipped, never rewritten.
+ *
+ * RETURN CONTRACT — the three outcomes must stay distinguishable, because the two callers treat
+ * one of them differently (the deliberate difference #1280 and #1316 preserve between them):
+ *   - `null`  — this manifest declares NO flow list at all (absent, unreadable, or `flows` is not
+ *     an array). EXISTENCE may then fall back to enumerating the kit's `flows/` directory,
+ *     because a refusal listing startable flows should list everything a start could resolve.
+ *     RUN BINDING may NOT: a binding is the provenance the run record pins, so it requires the
+ *     kit to have said so in its manifest.
+ *   - `[]`    — the manifest declares a list and NOTHING in it survives the rules (including the
+ *     wholesale refusal above). No caller falls back.
+ *   - a list  — exactly the declarations both callers must honor, each carrying the canonical
+ *     kit-relative path. `path` is normalized to that canonical form: PATH AGREEMENT has already
+ *     proven the declared spelling resolves to it, so carrying the raw spelling forward would
+ *     only reintroduce a second way to name one file.
  */
-function declaredFlowPath(manifest: Record<string, unknown>, parts: { kitId: string; flowName: string }): string | null {
+export function kitManifestFlowDeclarations(kitsRoot: string, kitDirName: string): KitFlowDeclaration[] | null {
+  const manifest = readJsonObject(path.join(kitsRoot, kitDirName, "kit.json"));
+  if (!manifest) return null;
+  if (manifest["id"] !== undefined && manifest["id"] !== kitDirName) return [];
   const flows = manifest["flows"];
   if (!Array.isArray(flows)) return null;
-  const flowId = `${parts.kitId}.${parts.flowName}`;
+  const declarations: KitFlowDeclaration[] = [];
+  const kitDir = path.join(kitsRoot, kitDirName);
   for (const entry of flows) {
-    if (!isRecord(entry) || entry["id"] !== flowId) continue;
+    if (!isRecord(entry)) continue;
+    const declaredId = entry["id"];
+    if (typeof declaredId !== "string") continue;
+    const parts = kitFlowIdParts(declaredId);
+    if (!parts || parts.kitId !== kitDirName) continue;
+    const canonicalRelative = path.join("flows", `${parts.flowName}.flow.json`);
     const declaredPath = entry["path"];
-    if (declaredPath === undefined) return path.join("flows", `${parts.flowName}.flow.json`);
-    if (typeof declaredPath !== "string" || declaredPath === "" || path.isAbsolute(declaredPath)) return null;
-    return declaredPath;
+    if (declaredPath !== undefined) {
+      if (typeof declaredPath !== "string" || declaredPath === "" || path.isAbsolute(declaredPath)) continue;
+      if (path.resolve(kitDir, declaredPath) !== path.join(kitDir, canonicalRelative)) continue;
+    }
+    declarations.push({ flowId: declaredId, kitId: parts.kitId, flowName: parts.flowName, relativePath: canonicalRelative });
   }
-  return null;
+  return declarations;
 }
 
 // ─── Producer bindings ───────────────────────────────────────────────────────────────────────
@@ -321,21 +378,15 @@ export function declaredKitFlowBindings(sourceRoots: readonly string[]): KitFlow
   const bindings: KitFlowBinding[] = [];
   const seen = new Set<string>();
   for (const root of sourceRoots) {
-    const kitsRoot = resolveKitsRoot(root);
+    const kitsRoot = canonicalKitsRoot(root);
     if (!kitsRoot) continue;
     for (const kitEntry of listDirents(kitsRoot)) {
       if (!kitEntry.isDirectory() || !SLUG_RE.test(kitEntry.name)) continue;
-      const manifest = readJsonObject(path.join(kitsRoot, kitEntry.name, "kit.json"));
-      if (!manifest || !Array.isArray(manifest["flows"])) continue;
-      for (const entry of manifest["flows"] as unknown[]) {
-        if (!isRecord(entry) || typeof entry["id"] !== "string") continue;
-        const flowId = entry["id"];
-        if (seen.has(flowId)) continue;
-        const parts = kitFlowIdParts(flowId);
-        if (!parts || parts.kitId !== kitEntry.name) continue;
-        const binding = bindingInKitsRoot(flowId, parts, root, kitsRoot);
+      for (const declaration of kitManifestFlowDeclarations(kitsRoot, kitEntry.name) ?? []) {
+        if (seen.has(declaration.flowId)) continue;
+        const binding = bindingInKitsRoot(declaration, root, kitsRoot);
         if (!binding) continue;
-        seen.add(flowId);
+        seen.add(declaration.flowId);
         bindings.push(binding);
       }
     }
@@ -344,34 +395,6 @@ export function declaredKitFlowBindings(sourceRoots: readonly string[]): KitFlow
 }
 
 // ─── Local helpers ───────────────────────────────────────────────────────────────────────────
-
-/**
- * True when `absPath` lies inside the storage the RUNTIME writes session artifacts into, at one
- * of the three positions `declared-artifact-roots.ts` declares: `<root>/.kontourai/flow-agents`,
- * `<root>/.flow-agents`, `<root>/delivery`. A kit authored there is agent scratch space, not a
- * kit source, so it can never become runnable.
- *
- * MERGE NOTE (#1315): that branch adds `isWithinRuntimeArtifactRoot` to
- * declared-artifact-roots.ts — the same three positions, derived from the one list the config
- * hook and the fixture writer already scope themselves to, and additionally honoring
- * `SA_PROTECTED_WORKSPACE_ROOTS`. On merge, import that and delete this: a kit source judged
- * in-bounds here while the hook treats the same path as protected runtime storage is precisely
- * the disagreement that function exists to prevent. `delivery` is intentionally NOT matched
- * here on its name alone — see that function's parent-qualification rule.
- */
-function isWithinRuntimeArtifactStorage(absPath: string): boolean {
-  let dir = absPath;
-  const root = path.parse(dir).root;
-  for (let depth = 0; depth < 1024; depth++) {
-    const parent = path.dirname(dir);
-    const base = path.basename(dir);
-    if (base === ".flow-agents") return true;
-    if (base === "flow-agents" && path.basename(parent) === ".kontourai") return true;
-    if (dir === root || parent === dir) break;
-    dir = parent;
-  }
-  return false;
-}
 
 function canonicalPathOrNull(candidate: string): string | null {
   try {

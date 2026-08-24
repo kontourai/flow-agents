@@ -18,6 +18,14 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { isWithinRuntimeArtifactRoot } from "./declared-artifact-roots.js";
+// #1280 review FIX-1 / FIX-2 (the rules) live in kit-flow-binding.ts (#1316, the location), so
+// the RESOLVER — which reads a flow's bytes — and the RUN BINDING — which decides which kit's
+// manifest supplies the run's provenance — share ONE answer to "is this tree a kit source" and
+// ONE answer to "which ids may this manifest declare". Each branch had grown its own copy; the
+// resolver admitting bytes the run binding rejects (or vice versa) is exactly the disagreement
+// those rules exist to prevent, and it is the mechanism behind the start-validates-consumer /
+// run-binds-package split this merge closes.
+import { canonicalKitsRoot, kitManifestFlowDeclarations } from "./kit-flow-binding.js";
 
 // ─── Security: Layer 1 traversal defense ─────────────────────────────────────
 //
@@ -57,36 +65,6 @@ const SLUG_RE = /^[a-zA-Z0-9_-]+$/;
  */
 function isRuntimeArtifactDir(resolvedDir: string): boolean {
   return isWithinRuntimeArtifactRoot(resolvedDir);
-}
-
-/**
- * The canonical `kits/` root under `root`, or null when it is not usable as a kit source.
- *
- * #1280 review FIX-1: `kits/` was previously joined lexically and then realpath'd on BOTH sides
- * of the containment comparison, so a symlinked `kits -> .kontourai/flow-agents/<slug>/kits`
- * compared the definition against the symlink's own target and passed. Containment against a
- * boundary the attacker chose is not containment. Refuse when:
- *   - the resolved kits root escapes the resolved repo/package root (a symlink out of the tree), or
- *   - the resolved kits root lands inside runtime artifact storage (a symlink into the area the
- *     runtime itself writes), or
- *   - `kits` is not a directory (a file or dangling link named `kits` is not a kit source).
- * Returns the REALPATH, so every later containment check compares canonical forms.
- */
-function canonicalKitsRoot(root: string): string | null {
-  const lexicalKitsRoot = path.resolve(root, "kits");
-  try {
-    const realRoot = fs.realpathSync.native(path.resolve(root));
-    const realKitsRoot = fs.realpathSync.native(lexicalKitsRoot);
-    if (!realKitsRoot.startsWith(realRoot + path.sep)) return null;
-    if (!fs.statSync(realKitsRoot).isDirectory()) return null;
-    if (isRuntimeArtifactDir(realKitsRoot)) return null;
-    return realKitsRoot;
-  } catch {
-    // The kits root does not exist yet (or is unreadable). There is nothing to be tricked by,
-    // and callers that only need a lexical expected-root still get one; enumeration callers
-    // simply find nothing there.
-    return isRuntimeArtifactDir(lexicalKitsRoot) ? null : lexicalKitsRoot;
-  }
 }
 
 function installedPackageRoot(): string | null {
@@ -318,9 +296,9 @@ export function declaredKitFlowIds(repoRoot: string): string[] {
   for (const kitsRoot of kitsRoots) {
     for (const kitEntry of listDirents(kitsRoot)) {
       if (!kitEntry.isDirectory() || !SLUG_RE.test(kitEntry.name)) continue;
-      const declared = kitManifestFlowIds(kitsRoot, kitEntry.name);
+      const declared = kitManifestFlowDeclarations(kitsRoot, kitEntry.name);
       if (declared) {
-        for (const id of declared) ids.add(id);
+        for (const declaration of declared) ids.add(declaration.flowId);
         continue;
       }
       for (const flowEntry of listDirents(path.join(kitsRoot, kitEntry.name, "flows"))) {
@@ -349,56 +327,6 @@ function slugFlowIdParts(flowId: string): { kitId: string; flowName: string } | 
   return SLUG_RE.test(parts.kitId) && SLUG_RE.test(parts.flowName) ? parts : null;
 }
 
-/**
- * The flow ids `<kitsRoot>/<kitDirName>/kit.json` is ALLOWED to declare, or null when the kit
- * declares no flow list at all (callers then fall back to `flows/` enumeration).
- *
- * #1280 review FIX-2: a manifest previously contributed every `flows[].id` it listed, with no
- * ownership requirement and `flows[].path` ignored entirely — so `kits/acme/kit.json` could
- * declare `victim.hidden` and authorize a start against `kits/victim/flows/hidden.flow.json`
- * that the victim kit never declared. A declaration is now bound to its declarer on both axes:
- *
- *   OWNERSHIP — the id must be namespaced to the DIRECTORY the manifest lives in
- *     (`<kitDirName>.<flowName>`), because the directory is what canonical resolution derives
- *     the path from. When the manifest also carries an `id`, it must agree with that directory;
- *     a manifest that misnames its own kit is refused WHOLESALE (empty list, no `flows/`
- *     fallback) rather than partially trusted — its identity claim is the thing under doubt.
- *   PATH AGREEMENT — when `flows[].path` is present it must name, relative to the kit
- *     directory, the exact file canonical resolution will read for that id
- *     (`flows/<flowName>.flow.json`). A declaration that points somewhere else is either wrong
- *     or is trying to authorize an id whose bytes live elsewhere; either way it is refused.
- *
- * Non-conforming ENTRIES are skipped, never rewritten — the derived list must contain only ids
- * a start would resolve to the bytes the declaring kit actually owns.
- */
-function kitManifestFlowIds(kitsRoot: string, kitDirName: string): string[] | null {
-  const kitDir = path.join(kitsRoot, kitDirName);
-  let manifest: { id?: unknown; flows?: unknown };
-  try {
-    manifest = JSON.parse(fs.readFileSync(path.join(kitDir, "kit.json"), "utf8")) as { id?: unknown; flows?: unknown };
-  } catch {
-    return null;
-  }
-  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return null;
-  if (manifest.id !== undefined && manifest.id !== kitDirName) return [];
-  if (!Array.isArray(manifest.flows)) return null;
-  const ids: string[] = [];
-  for (const entry of manifest.flows) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    const declaredId = (entry as { id?: unknown }).id;
-    if (typeof declaredId !== "string") continue;
-    const parts = slugFlowIdParts(declaredId);
-    if (!parts || parts.kitId !== kitDirName) continue;
-    const declaredPath = (entry as { path?: unknown }).path;
-    if (declaredPath !== undefined) {
-      if (typeof declaredPath !== "string" || declaredPath === "" || path.isAbsolute(declaredPath)) continue;
-      const resolvedDeclared = path.resolve(kitDir, declaredPath);
-      if (resolvedDeclared !== path.join(kitDir, "flows", `${parts.flowName}.flow.json`)) continue;
-    }
-    ids.push(declaredId);
-  }
-  return ids;
-}
 
 /**
  * The identifier contract THIS RESOLVER enforces at read time, applied as a start-time

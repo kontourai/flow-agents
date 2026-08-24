@@ -23,7 +23,8 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import { declaredKitFlowIds, flowDefinitionResolverContractIssues, resolveEffectiveFlowDefinition, resolveFlowFilePath } from "../../build/src/lib/flow-resolver.js";
-import { CANONICAL_RUN_FLOW_IDS } from "../../build/src/builder-flow-run-adapter.js";
+import { canonicalRunFlowIds, canonicalRunFlowRefusal } from "../../build/src/builder-flow-run-adapter.js";
+import * as adapterExports from "../../build/src/builder-flow-run-adapter.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -370,7 +371,7 @@ test("a declared, conforming flow with no canonical run adapter is REFUSED, nami
 
     assert.notEqual(result.status, 0, `start must refuse a flow with no canonical run: ${result.stdout}`);
     assert.ok(
-      result.stderr.includes(`workflow start --flow acme.custom is declared and conforming, but the canonical run runtime cannot bind it: no run adapter ships or pins this definition, and no producer bindings exist for its gates, so the session could not record a pinned definition digest or satisfy a gate. Flows with a canonical run: ${CANONICAL_RUN_FLOW_IDS.join(", ")}`),
+      result.stderr.includes(`workflow start --flow acme.custom is declared and conforming, but the canonical run runtime cannot bind it, so the session could not record a pinned definition digest or satisfy a gate: ${canonicalRunFlowRefusal("acme.custom", consumer)}`),
       `unexpected diagnostic: ${result.stderr}`,
     );
     // The refusal is total: no session artifacts, no active pointer, nothing downstream can
@@ -392,8 +393,16 @@ test("the canonical-run capability is the run adapter's declaration, not a liter
   // independently of the public verb. One predicate, quoted in both.
   assert.ok(!/entry\.flowId === "builder\.build" \|\| entry\.flowId === "builder\.shape"/.test(sidecarSource),
     "ensure-session must consult isCanonicalRunFlowId, not re-spell the adapter's capability");
-  assert.ok(workflowSource.includes("isCanonicalRunFlowId(flow)"));
-  assert.ok(sidecarSource.includes("isCanonicalRunFlowId(entry.flowId)"));
+  // #1316: the capability is no longer a two-literal constant, so the CLI quotes the DERIVED
+  // predicate. The refusal names the missing binding rather than listing the pair.
+  assert.ok(workflowSource.includes("canonicalRunFlowRefusal(flow, repoRoot)"));
+  assert.ok(/isCanonicalRunFlowId\(entry\.flowId, /.test(sidecarSource));
+  // The pair is gone as a THING, not merely as a spelling in this file: the module that owned
+  // the capability no longer exports it, so nothing can import it back. (A source-text assertion
+  // would trip on the prose that explains the history, which is the opposite of what we want to
+  // keep out.)
+  assert.equal(adapterExports.CANONICAL_RUN_FLOW_IDS, undefined, "the hardcoded pair is no longer an export");
+  assert.equal(typeof adapterExports.canonicalRunFlowIds, "function", "the derived set replaced it");
 });
 
 // ─── FIX-5: conformance matches the downstream resolver contract ──────────────────────────────
