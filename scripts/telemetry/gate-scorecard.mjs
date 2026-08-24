@@ -615,7 +615,12 @@ function main(argv) {
     console.log(`non-gate transitions (${scorecard.coverage.verb_attributed} calls):`);
     for (const verb of scorecard.verbs) {
       const cost = verb.output_tokens ? `  ${verb.output_tokens} out-tok` : "";
-      console.log(`  ${verb.verb.padEnd(36)} calls ${String(verb.calls).padStart(3)}  refused/error ${String(verb.refused_or_error).padStart(3)}${cost}`);
+      const models = verb.by_model.map((entry) => `${entry.model} ${entry.calls}`).join(", ");
+      // Compact here rather than one row each: the verb list is long, and the split is
+      // still shown rather than pooled away. `--json` carries the full per-model tally.
+      const unknown = verb.calls_without_model || verb.calls_model_not_enriched;
+      const split = models || unknown ? `  [${[models, unknown ? `${unknown} unknown` : ""].filter(Boolean).join(", ")}]` : "";
+      console.log(`  ${verb.verb.padEnd(36)} calls ${String(verb.calls).padStart(3)}  refused/error ${String(verb.refused_or_error).padStart(3)}${cost}${split}`);
     }
   }
   for (const shared of scorecard.ambiguous_expectations) {
