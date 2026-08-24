@@ -40,7 +40,7 @@ import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLo
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
-import { definitionDigest, flowRunHead, runDir, validateRunStateConsistency } from "@kontourai/flow";
+import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, normalizeRouteReasonForBudget, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
 
 type AnyObj = Record<string, any>;
 
@@ -5505,6 +5505,155 @@ function diagnostic(dir: string, code: string, summary: string): never {
 }
 
 /**
+ * #1304: route-back cost disclosure at the point of use — the subjunctive PRE half.
+ *
+ * Emitted to stderr BEFORE a non-pass gate claim is recorded at a gate that declares an
+ * `on_route_back` map. It states only facts that exist before the mutation: the DECLARED route
+ * map, the attempt history already PERSISTED at this gate grouped by Flow's real budget
+ * identity (normalized reason + loop + retry epoch, read verbatim from the transitions), and
+ * the declared budget. It never predicts what evaluation will decide — the actual outcome
+ * (routed / blocked / live non-pass claim) is a separate post-mutation report derived from the
+ * transitions evaluation actually recorded (`routeBackOutcomeLines` in workflow.ts). Predicting
+ * `routeBackDecision` here was reviewed as a parallel encoding of route semantics that lies in
+ * the live #1304 scenario: an unpublished `not_verified` at a `requires_current_verification`
+ * gate is WITHHELD by the freshness seam, not routed.
+ *
+ * The publish-first line is keyed off two facts, never a gate name (#1280 kit-generic
+ * boundary): the gate's `requires_current_verification` declaration, and the caller-supplied
+ * `publishFirstVerifier` — the production provisional-delivery RECORD verifier
+ * (`assertVerifiedProvisionalDeliveryRecord`), whose throw means "no verifying provisional
+ * delivery record exists" (absent, stale, or invalid all mean publish-first is still the
+ * needed action). Fresh current verification evidence must never suppress the guidance: that
+ * is exactly the pre-trap state, where recording a non-pass claim makes the evidence stale and
+ * blocks the publish that would resolve it.
+ */
+export function routeBackDisclosureLines(
+  run: { definition: unknown; state: { current_step: string; transitions?: unknown } },
+  expectation: string,
+  requestedStatus: string,
+  publishFirstVerifier?: () => unknown,
+): string[] {
+  if (requestedStatus !== "fail" && requestedStatus !== "not_verified") return [];
+  const gates = openGates(run.definition as never, run.state as never) as AnyObj[];
+  const gate = gates.find((candidate) => Array.isArray(candidate.expects)
+    && (candidate.expects as AnyObj[]).some((requirement) => requirement && typeof requirement === "object" && requirement.id === expectation));
+  if (!gate) return [];
+  const routes = gate.on_route_back;
+  if (!routes || typeof routes !== "object" || Array.isArray(routes) || Object.keys(routes).length === 0) return [];
+  const gateName = String(gate.id ?? "the current gate");
+  const declared = Object.entries(routes as Record<string, unknown>).map(([reason, step]) => `${reason} -> ${String(step)}`).join(", ");
+  const transitions = Array.isArray(run.state.transitions) ? run.state.transitions as AnyObj[] : [];
+  // Per-identity history: Flow budgets attempts per route identity — normalized reason + exact
+  // loop (from_step -> to_step) + retry epoch — so anything less granular would be a claim the
+  // accounting does not make. Group persisted transitions by that identity (first-recorded
+  // order), name the CURRENT epoch's recorded count, and parenthesize closed epochs. The current
+  // epoch consults `retry_authorized` transitions, not just observed route_backs: Flow's own
+  // epoch derivation (routeBackEpoch) is keyed off the paired authorization, so an
+  // authorized-but-undebited epoch reports as "epoch N: 0 attempts (authorized)" — reading only
+  // route_backs would name a closed epoch as current.
+  const transitionIdentity = (transition: AnyObj): { key: string; reason: string; from: string; to: string; epoch: number } => {
+    const reason = normalizeRouteReasonForBudget(gate, typeof transition.route_reason === "string" && transition.route_reason.length > 0
+      ? transition.route_reason
+      : typeof transition.reason === "string" && transition.reason.length > 0 ? transition.reason : null);
+    const from = String(transition.from_step ?? "");
+    const to = String(transition.to_step ?? "");
+    const epoch = Number.isInteger(Number(transition.retry_epoch)) && Number(transition.retry_epoch) > 0 ? Number(transition.retry_epoch) : 1;
+    return { key: `${reason}|${from}|${to}`, reason, from, to, epoch };
+  };
+  const identities = new Map<string, { reason: string; from: string; to: string; epochs: Map<number, number>; authorizedEpoch: number }>();
+  for (const transition of transitions) {
+    if (!transition || typeof transition !== "object" || transition.gate_id !== gate.id) continue;
+    if (transition.type === "route_back") {
+      const attempt = Number(transition.attempt);
+      if (!Number.isInteger(attempt) || attempt <= 0) continue;
+      const { key, reason, from, to, epoch } = transitionIdentity(transition);
+      const identity = identities.get(key) ?? { reason, from, to, epochs: new Map<number, number>(), authorizedEpoch: 0 };
+      identity.epochs.set(epoch, Math.max(identity.epochs.get(epoch) ?? 0, attempt));
+      identities.set(key, identity);
+    } else if (transition.type === "retry_authorized" && transition.status === "retry-authorized") {
+      const { key, reason, from, to, epoch } = transitionIdentity(transition);
+      const identity = identities.get(key) ?? { reason, from, to, epochs: new Map<number, number>(), authorizedEpoch: 0 };
+      identity.authorizedEpoch = Math.max(identity.authorizedEpoch, epoch);
+      identities.set(key, identity);
+    }
+  }
+  const history = identities.size === 0
+    ? "none"
+    : [...identities.values()].map(({ reason, from, to, epochs, authorizedEpoch }) => {
+      const currentEpoch = Math.max(authorizedEpoch, ...(epochs.size ? epochs.keys() : [1]));
+      const current = epochs.get(currentEpoch) ?? 0;
+      const closed = [...epochs.entries()].filter(([epoch]) => epoch !== currentEpoch)
+        .sort(([left], [right]) => left - right)
+        .map(([epoch, attempt]) => `epoch ${epoch} closed at ${attempt}`);
+      return `${reason} ${from}->${to} epoch ${currentEpoch}: ${current} attempt${current === 1 ? "" : "s"}${current === 0 ? " (authorized)" : ""}${closed.length ? ` (${closed.join(", ")})` : ""}`;
+    }).join("; ");
+  const policy = gate.route_back_policy as AnyObj | undefined;
+  const maxAttempts = Number.isInteger(policy?.max_attempts) ? Number(policy!.max_attempts) : DEFAULT_ROUTE_BACK_MAX_ATTEMPTS;
+  const lines = [
+    `[workflow] NOTICE: recording ${requestedStatus} for ${expectation} at ${gateName} can spend a bounded route-back attempt: this gate declares route-backs (${declared}); route-back attempts recorded at this gate: ${history} (budget max ${maxAttempts} per route identity); a route-back invalidates current-visit verification evidence (critique/tests must be re-recorded).`,
+  ];
+  if (gate.requires_current_verification === true && publishFirstVerifier) {
+    let deliveryVerified = false;
+    try {
+      publishFirstVerifier();
+      deliveryVerified = true;
+    } catch { /* absent, stale, or invalid provisional delivery: publish-first still applies */ }
+    if (!deliveryVerified) {
+      lines.push(`[workflow] NOTICE: ${gateName} declares requires_current_verification and no verifying provisional delivery exists for this session — publish the provisional delivery BEFORE recording this gate; a live non-pass claim here blocks the publish that would resolve it.`);
+    }
+  }
+  return lines;
+}
+
+/**
+ * #1304: the direct-CLI record-gate-claim disclosure emission, extracted so its
+ * benign-vs-loud decision is directly testable through the production function.
+ *
+ * Only two states are PROVEN benign and stay silent: a non-canonical session layout (path
+ * shape alone — no gate can exist) and a canonical layout whose run state is ENOENT (no
+ * canonical Flow run). Every other failure — root stat errors, unreadable/corrupt run files,
+ * module load, disclosure computation — degrades LOUDLY: a silent skip would let a non-pass
+ * claim spend its route-back cost undisclosed, the exact contract failure #1304 exists to
+ * prevent. (`tryCanonicalProjectRootForSession` is deliberately NOT used here: it collapses
+ * stat failures and layout mismatches into one null.) Note the loud line is defense-in-depth:
+ * within `record-gate-claim` itself, the earlier signal-validation reader consumes the same
+ * canonical files more strictly and fails the whole command CLOSED before any write, so no
+ * currently-reachable corruption spends a cost undisclosed — the loud path guards the failure
+ * classes that skip that reader (root resolution, module load, computation).
+ */
+export async function emitRecordGateClaimRouteBackDisclosure(dir: string, slug: string, expectationId: string, statusVal: string): Promise<void> {
+  const artifactRootDir = path.dirname(dir);
+  const isCanonicalLayout = path.basename(artifactRootDir) === "flow-agents" && path.basename(path.dirname(artifactRootDir)) === ".kontourai";
+  if (!isCanonicalLayout) return;
+  try {
+    const disclosureRoot = canonicalProjectRootForSession(dir);
+    const flowDir = runDir(slug, disclosureRoot);
+    let runStatePresent = true;
+    try {
+      fs.statSync(path.join(flowDir, "state.json"));
+    } catch (statError) {
+      if ((statError as NodeJS.ErrnoException).code === "ENOENT") runStatePresent = false;
+      else throw statError;
+    }
+    if (runStatePresent) {
+      const disclosureRun = {
+        definition: JSON.parse(fs.readFileSync(path.join(flowDir, "definition.json"), "utf8")) as unknown,
+        state: JSON.parse(fs.readFileSync(path.join(flowDir, "state.json"), "utf8")) as { current_step: string; transitions?: unknown },
+      };
+      // Lazy import: the public workflow module statically imports this one, so the
+      // production provisional-delivery record verifier is reached dynamically (only on
+      // this direct-CLI, non-pass path) to keep the module graph acyclic at load time.
+      const { assertVerifiedProvisionalDeliveryRecord } = await import("./workflow.js");
+      const lines = routeBackDisclosureLines(disclosureRun, expectationId, statusVal,
+        () => assertVerifiedProvisionalDeliveryRecord(dir, disclosureRoot, slug));
+      for (const line of lines) process.stderr.write(`${line}\n`);
+    }
+  } catch {
+    process.stderr.write("[workflow] NOTICE: route-back disclosure unavailable (module load failed); a non-pass claim here may spend a route-back attempt and sit live.\n");
+  }
+}
+
+/**
  * record-gate-claim — Generic gate-claim producer for skills (ADR 0016 P-d Increment 1).
  *
  * Allows a skill to record a claim that satisfies a SPECIFIC gate expectation at the
@@ -5611,6 +5760,14 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     targetExpectation = expects[0]!;
   } else {
     die(`record-gate-claim: gate "${activeStep.gateId}" has ${expects.length} expects[] entries; --expectation <id> is required. Available: ${expects.map((e) => e.id).join(", ")}`);
+  }
+
+  // #1304: direct sidecar writes spend route-back cost too — disclose the declared/persisted
+  // facts before the bundle write. The public `workflow evidence` wrapper emits this itself
+  // under the subject lock (fresher state), so suppress here to avoid a double disclosure.
+  // Reseal (signed authority path, orchestrator-mediated) is a disclosed non-goal of #1304.
+  if (!publicWorkflowAuthority && statusVal !== "pass") {
+    await emitRecordGateClaimRouteBackDisclosure(dir, slug, targetExpectation.id, statusVal);
   }
 
   const { claimType, subjectType } = targetExpectation.bundle_claim;
