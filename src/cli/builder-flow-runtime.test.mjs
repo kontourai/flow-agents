@@ -9491,6 +9491,10 @@ const LEAN_FLOW_ID = "builder.build-lean";
  */
 async function advanceLeanSessionToPrOpen(session) {
   await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir, flowId: LEAN_FLOW_ID });
+  // These fixtures REPLACE the bundle on every write where real writers accumulate, and the
+  // merge-ready-ci freshness turnstile reads the CURRENT bundle — so the verification entries are
+  // carried forward explicitly, exactly as the control's provisional-delivery E2E does.
+  let verification = [];
   const steps = [
     () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
     // No design-probe entries. No plan entries. The ablated steps demand nothing, and the next
@@ -9499,13 +9503,19 @@ async function advanceLeanSessionToPrOpen(session) {
     () => {
       const tests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
       tests.claim.status = "verified";
-      return [tests, ...verifiedTestsPrerequisites(session)];
+      verification = [tests, ...verifiedTestsPrerequisites(session)];
+      for (const entry of verification) entry.claim.status = "verified";
+      return verification;
     },
-    () => [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
+    () => {
+      const readiness = bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" });
+      readiness.claim.status = "verified";
+      return [...verification, readiness];
+    },
   ];
   let latest = null;
   for (const entries of steps) latest = await writeAndSync(session, entries());
-  return latest;
+  return { latest, verification };
 }
 
 test("a kit-declared flow with gateless steps advances across them instead of parking (#1335)", async () => {
@@ -9591,4 +9601,114 @@ test("the control is unaffected: builder.build still stops at every gate it decl
   } finally {
     await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
   }
+});
+
+test("builder.build-lean runs end to end to terminal completion and terminal delivery (#1335, #1336)", async () => {
+  // The acceptance test for both issues. Everything downstream of `execute` is a gate the ablation
+  // deliberately RETAINS, so if any of it refuses a flow for not being named `builder.build`, the
+  // treatment arm cannot produce a measurement — and the experiment is dead whatever the gates say.
+  const session = makeSession("lean-terminal-e2e");
+  session.projectRoot = fs.realpathSync(session.projectRoot);
+  session.artifactRoot = path.join(session.projectRoot, ".kontourai", "flow-agents");
+  session.sessionDir = path.join(session.artifactRoot, session.slug);
+  const ambient = claimAmbientSessionAssignment(session);
+  configurePublishChangeProvider(session.projectRoot);
+  fs.writeFileSync(path.join(session.projectRoot, ".gitignore"), ".kontourai/\n");
+  initializePublishChangeGitRepository(session.projectRoot);
+  execFileSync("git", ["add", ".gitignore", "package.json", "context", "review-target"], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "reviewed implementation"], { cwd: session.projectRoot, stdio: "ignore" });
+
+  const { latest: atPrOpen, verification } = await advanceLeanSessionToPrOpen(session);
+  assert.equal(atPrOpen.run.definitionId, LEAN_FLOW_ID, "every gate so far was cleared by the VARIANT, not the control");
+  assert.equal(atPrOpen.run.state.current_step, "pr-open");
+
+  const action = await issuePublishChangeOperation({ sessionDir: session.sessionDir, intent: {
+    title: "Lean variant terminal E2E",
+    body: "Drive the reduced-gate variant through every retained gate.",
+    base_ref: "main",
+    head_ref: "agent/publish-change",
+    head_sha: execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim(),
+  } });
+  await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action });
+  assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
+
+  const requestOutput = [];
+  const originalLog = console.log;
+  console.log = (...values) => requestOutput.push(values.join(" "));
+  try {
+    assert.equal(await workflowMain(["publish-provisional-delivery-request", "--session-dir", session.sessionDir]), 0);
+  } finally {
+    console.log = originalLog;
+  }
+  const request = JSON.parse(requestOutput[0]);
+  assert.equal(
+    request.authorization.flow_definition_id,
+    LEAN_FLOW_ID,
+    "the signed authorization names the flow that actually ran, not a hardcoded one",
+  );
+
+  const operatorKeys = generateKeyPairSync("ed25519");
+  const completionKeys = generateKeyPairSync("ed25519");
+  const authorityRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lean-provisional-keys-"));
+  const registryFile = path.join(authorityRoot, "authority-keys.json");
+  const completionPrivateKey = path.join(authorityRoot, "completion-private.pem");
+  const completionPublicKey = path.join(authorityRoot, "completion-public.pem");
+  writeJson(registryFile, {
+    schema_version: "1.0",
+    keys: [{ id: "lean-terminal-e2e", algorithm: "ed25519", public_key_pem: operatorKeys.publicKey.export({ type: "spki", format: "pem" }) }],
+  });
+  fs.writeFileSync(completionPrivateKey, completionKeys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(completionPublicKey, completionKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+  const authorizationFile = path.join(authorityRoot, "publish-provisional-delivery.authorization.json");
+  writeJson(authorizationFile, {
+    ...request.authorization,
+    signature: {
+      algorithm: "ed25519",
+      key_id: "lean-terminal-e2e",
+      value: sign(null, Buffer.from(request.signing_payload), operatorKeys.privateKey).toString("base64"),
+    },
+  });
+  const authority = await loadHermeticProvisionalAuthority(session.projectRoot, registryFile, completionPrivateKey, completionPublicKey);
+  assert.equal(await publishDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authorizationFile, authority), 0);
+  assert.equal(readJson(path.join(session.projectRoot, "delivery", session.slug, "trust.checkpoint.json")).status, "provisional");
+
+  execFileSync("git", ["add", `delivery/${session.slug}`], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "provisional delivery companions"], { cwd: session.projectRoot, stdio: "ignore" });
+
+  // HEAD moved when the provisional delivery companions were committed, so the turnstile needs
+  // verification evidence bound to the CURRENT snapshot, not the pre-publish one.
+  const currentVerification = [
+    (() => {
+      const tests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+      tests.claim.status = "verified";
+      return tests;
+    })(),
+    ...verifiedTestsPrerequisites(session).map((entry) => { entry.claim.status = "verified"; return entry; }),
+  ];
+  const ciReadiness = bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" });
+  ciReadiness.claim.status = "verified";
+  const turnstileEntries = [...currentVerification, ciReadiness];
+  bindFixturePassingObservations(session, turnstileEntries);
+  writeBundle(session.sessionDir, turnstileEntries);
+  const learning = await syncBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    gateFreshnessCompletionVerifier: authority.verifyCompletion,
+  });
+  assert.equal(learning.run.state.current_step, "learn", "the retained merge-ready-ci turnstile accepts the variant");
+
+  const learningEntries = [
+    bundleClaim({ expectation: "decision-evidence", claimType: "builder.learn.decisions", subjectType: "decision" }),
+    bundleClaim({ expectation: "learning-evidence", claimType: "builder.learn.evidence", subjectType: "release" }),
+  ];
+  const completed = await writeAndSync(session, learningEntries);
+  assert.equal(completed.run.state.status, "completed", "THE ACCEPTANCE CRITERION: the reduced-gate variant reaches terminal completion");
+  assert.equal(completed.run.definitionId, LEAN_FLOW_ID);
+
+  for (const entry of learningEntries) entry.claim.status = "verified";
+  writeBundle(session.sessionDir, learningEntries);
+  assert.equal(await publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authority), 0);
+  const terminalCheckpoint = readJson(path.join(session.projectRoot, "delivery", session.slug, "trust.checkpoint.json"));
+  assert.equal(terminalCheckpoint.status, "delivered");
+  assert.equal(terminalCheckpoint.phase, "release");
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
