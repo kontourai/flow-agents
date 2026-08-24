@@ -47,6 +47,7 @@ import {
   BuilderBuildRunInputError,
   actionableOpenGates,
   evaluateBuilderFlowRun,
+  isCanonicalRunFlowId,
   loadBuilderFlowRun,
   pauseBuilderFlowRun,
   resumeBuilderFlowRun,
@@ -462,7 +463,7 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
   return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
     const sidecarSnapshot = readSidecarSnapshot(context);
     const subject = workflowSubject(sidecarSnapshot.state);
-    const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state) ?? BUILDER_BUILD_FLOW_ID;
+    const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state, context.projectRoot) ?? BUILDER_BUILD_FLOW_ID;
     let run: BuilderFlowRunResult;
     try {
       run = await loadBuilderFlowRun({
@@ -470,7 +471,7 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
         runId: context.slug,
       });
       if (run.definitionId !== requestedFlowId) {
-        throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start builder.build from a provider Work Item instead of retrying a local shape session`);
+        throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start ${requestedFlowId} from a provider Work Item instead of retrying an existing ${run.definitionId} session`);
       }
     } catch (error) {
       if (!isRunNotFound(error)) throw error;
@@ -1551,10 +1552,21 @@ function workflowSubject(state: AnyRecord): string {
   return refs[0]!;
 }
 
-function persistedFlowId(state: AnyRecord): BuilderFlowId | null {
+/**
+ * The flow a resumed session is already bound to, as recorded in the sidecar projection.
+ *
+ * #1336: this used to be a two-value allowlist, so resuming a run of any OTHER kit-declared flow
+ * fell through to the `builder.build` default and then failed the identity check below against its
+ * own canonical run. The projection is agent-writable, which is why it was an allowlist at all —
+ * but the property that makes a value trustworthy is not "it is one of two names", it is "the
+ * canonical run runtime can bind it", which `isCanonicalRunFlowId` derives from what the declaring
+ * kit supplies. A wrong guess remains harmless: the loaded run's own `definitionId` is the
+ * authority, and a mismatch is refused rather than adopted.
+ */
+function persistedFlowId(state: AnyRecord, cwd: string): BuilderFlowId | null {
   const flowRun = isRecord(state.flow_run) ? state.flow_run : null;
   const flowId = flowRun?.definition_id;
-  return flowId === "builder.build" || flowId === "builder.shape" ? flowId : null;
+  return typeof flowId === "string" && flowId.length > 0 && isCanonicalRunFlowId(flowId, cwd) ? flowId : null;
 }
 
 /**

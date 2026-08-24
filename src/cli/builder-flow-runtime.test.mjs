@@ -9467,3 +9467,128 @@ test("#1192 fault injection: pre-taxonomy hard rejection vs post-taxonomy transp
   assert.ok(claim, "a pull-work claim was recorded");
   assert.equal(claim.metadata.gate_claim.flow_run_head, currentHead2, "post-taxonomy: claim stamped with canonical head");
 });
+
+// ─── #1335/#1336: a kit-declared flow with GATELESS steps must be runnable, not merely startable ──
+//
+// `builder.build-lean` is the first shipped flow to declare steps that gate nothing. #1329's suite
+// proved it ADMISSIBLE and STARTABLE and that was read as RUNNABLE; it threw at step 2 of 10. These
+// two tests drive the variant the way a real run is driven — the same helpers, the same public
+// seams, the same provider and lifecycle-authority fixtures the control uses — because the only
+// thing that proves a flow runs is running it.
+//
+// The control is driven alongside as the discriminator wherever a claim about the variant would
+// otherwise be unfalsifiable: an assertion that the variant reaches a step means nothing unless the
+// control reaching the same step is what a working runtime looks like.
+
+const LEAN_FLOW_ID = "builder.build-lean";
+
+/**
+ * The variant's walk to pr-open. Identical to `advanceSessionToPrOpen` except that the two ABLATED
+ * gates contribute nothing — which is the whole point: `design-probe` and `plan` survive as
+ * gateless sequencing passthroughs, so the run must traverse them without being handed evidence for
+ * them. Any step the control needs and the variant does not is a step the runtime has to cross on
+ * its own.
+ */
+async function advanceLeanSessionToPrOpen(session) {
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir, flowId: LEAN_FLOW_ID });
+  const steps = [
+    () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
+    // No design-probe entries. No plan entries. The ablated steps demand nothing, and the next
+    // write the run accepts is the one the EXECUTE gate declares.
+    () => [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
+    () => {
+      const tests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+      tests.claim.status = "verified";
+      return [tests, ...verifiedTestsPrerequisites(session)];
+    },
+    () => [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
+  ];
+  let latest = null;
+  for (const entries of steps) latest = await writeAndSync(session, entries());
+  return latest;
+}
+
+test("a kit-declared flow with gateless steps advances across them instead of parking (#1335)", async () => {
+  const session = makeSession("lean-gateless-advance");
+  session.projectRoot = fs.realpathSync(session.projectRoot);
+  session.artifactRoot = path.join(session.projectRoot, ".kontourai", "flow-agents");
+  session.sessionDir = path.join(session.artifactRoot, session.slug);
+  const ambient = claimAmbientSessionAssignment(session);
+  try {
+    const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir, flowId: LEAN_FLOW_ID });
+    assert.equal(started.run.definitionId, LEAN_FLOW_ID);
+    assert.equal(started.run.state.current_step, "pull-work");
+    assert.deepEqual(started.projection.flow_run.open_gate_ids, ["pull-work-gate"]);
+
+    // Passing pull-work-gate lands the cursor on `design-probe`, which gates NOTHING. Before #1335
+    // this is where the arm died: `openGates` returned [], the runtime threw
+    // "expected exactly one gate for active step design-probe, found 0", and `evaluateRun` had no
+    // gate to name. The run must instead report the gate it is actually working toward.
+    const afterPullWork = await writeAndSync(session, [
+      bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" }),
+    ]);
+    assert.equal(afterPullWork.run.state.current_step, "design-probe", "the canonical cursor is still where Flow put it");
+    assert.deepEqual(
+      afterPullWork.projection.flow_run.open_gate_ids,
+      ["execute-gate"],
+      "a run parked on a gateless step reports the gate it must satisfy next, not an empty set",
+    );
+    // Re-projecting is what used to throw — the first sync computed its gate list BEFORE the
+    // evaluation moved the cursor, so the failure only surfaced on the NEXT call.
+    const reprojected = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+    assert.deepEqual(reprojected.projection.flow_run.open_gate_ids, ["execute-gate"]);
+
+    // Satisfying that gate must carry the cursor ACROSS both passthroughs, and the traversal has to
+    // be recorded rather than assumed: Flow writes one honest transition per step it walks.
+    const afterExecute = await writeAndSync(session, [
+      bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" }),
+    ]);
+    assert.equal(afterExecute.run.state.current_step, "verify", "execute-gate advances the run from beyond the passthroughs");
+    const traversed = afterExecute.run.state.transitions.filter((entry) => entry.reason === "step has no gate");
+    assert.deepEqual(
+      traversed.map((entry) => [entry.from_step, entry.to_step]),
+      [["design-probe", "plan"], ["plan", "execute"]],
+      "each gateless step it crossed is named in the run's own transition history",
+    );
+    assert.equal(
+      afterExecute.run.state.gate_outcomes.filter((outcome) => outcome.status === "pass").map((outcome) => outcome.gate_id).sort().join(","),
+      "execute-gate,pull-work-gate",
+      "crossing the passthroughs passes no gate that was not evaluated",
+    );
+  } finally {
+    await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+  }
+});
+
+test("the control is unaffected: builder.build still stops at every gate it declares", async () => {
+  // The discriminator for the test above. If the forward walk ever leaked into flows that gate every
+  // step, this is where it would show: the control must still REST on design-probe and plan and
+  // refuse to advance without their evidence.
+  const session = makeSession("control-gate-by-gate");
+  session.projectRoot = fs.realpathSync(session.projectRoot);
+  session.artifactRoot = path.join(session.projectRoot, ".kontourai", "flow-agents");
+  session.sessionDir = path.join(session.artifactRoot, session.slug);
+  const ambient = claimAmbientSessionAssignment(session);
+  try {
+    await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+    const afterPullWork = await writeAndSync(session, [
+      bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" }),
+    ]);
+    assert.equal(afterPullWork.run.state.current_step, "design-probe");
+    assert.deepEqual(afterPullWork.projection.flow_run.open_gate_ids, ["design-probe-gate"], "the control's cursor step gates its own evidence");
+
+    // The variant's very next write. In the control it must NOT advance: design-probe-gate and
+    // plan-gate are unsatisfied, and skipping them is the #202 failure this repo refuses.
+    const withExecuteOnly = await writeAndSync(session, [
+      bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" }),
+    ]);
+    assert.equal(withExecuteOnly.run.state.current_step, "design-probe", "execute evidence cannot carry the control past an unevaluated gate");
+    assert.equal(
+      withExecuteOnly.run.state.transitions.some((entry) => entry.reason === "step has no gate"),
+      false,
+      "a flow that gates every step never traverses a passthrough",
+    );
+  } finally {
+    await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+  }
+});
