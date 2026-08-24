@@ -33,7 +33,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import Ajv from "ajv";
@@ -51,6 +50,7 @@ import {
   OUTPUT_TOKENS_FIELD,
 } from "../../scripts/telemetry/token-attribution.mjs";
 import { buildTransitionRecord } from "../../build/src/transition-log.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const FIXTURES = path.join(import.meta.dirname, "fixtures", "transition-attribution");
@@ -80,8 +80,14 @@ function readCorpus() {
   return fs.readFileSync(CORPUS, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
+/**
+ * Reclaimable, per #1326/#1349: this file builds ~10 fixture roots per run and a bare
+ * `fs.mkdtempSync` leaks every one of them permanently. It landed in the same window as
+ * the sweep that fixed the rest of the corpus, so it adopts the helper rather than
+ * reintroducing the leak one file at a time.
+ */
 function scratch(prefix = "transition-model-") {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return makeFixtureDir(prefix);
 }
 
 /** Run the real enricher binary over a copy of the real corpus. Not a helper call. */
