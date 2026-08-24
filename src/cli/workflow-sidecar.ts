@@ -6249,6 +6249,29 @@ async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
   return 0;
 }
 
+/**
+ * Refuse an `active_step_id` write that the canonical Flow run does not support.
+ *
+ * Sessions with no canonical run bound are untouched: there is nothing to diverge from, and the
+ * pointer is the only cursor they have.
+ */
+function assertPointerMatchesCanonicalRun(dir: string, flow: string, repoRoot: string, phase: string, stepId: string): void {
+  const state = loadJson(path.join(dir, "state.json"));
+  const flowRun = state && typeof state === "object" && !Array.isArray(state.flow_run) && typeof state.flow_run === "object" && state.flow_run !== null
+    ? state.flow_run as Record<string, unknown> : null;
+  const boundFlowId = typeof flowRun?.definition_id === "string" ? flowRun.definition_id : null;
+  const canonicalStep = typeof flowRun?.current_step === "string" ? flowRun.current_step : null;
+  if (!boundFlowId || !canonicalStep) return;
+  if (boundFlowId !== flow) {
+    diagnostic(dir, "flow_definition_mismatch", `advance-state --flow-definition ${flow} does not match the canonical Flow run this session is bound to (${boundFlowId}). Refusing to move the active_step_id pointer under a different definition.`);
+  }
+  const actionable = resolveActionableFlowStep(boundFlowId, canonicalStep, repoRoot);
+  const actionableStepId = actionable?.stepId ?? canonicalStep;
+  if (stepId !== actionableStepId) {
+    diagnostic(dir, "canonical_step_divergence", `advance-state --phase ${phase} would point active_step_id at "${stepId}", but the canonical Flow run for ${boundFlowId} is at "${canonicalStep}" and its next gate is at "${actionableStepId}". The pointer cannot advance past the canonical run: record the evidence its current gate declares (flow-agents workflow evidence / workflow-sidecar record-gate-claim), then re-synchronize.`);
+  }
+}
+
 async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const status = opt(p, "status");
@@ -6342,6 +6365,16 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     // repoRoot already computed above when flow is present
     const phaseMap = resolvePhaseMap(flow, repoRoot);
     const stepId = phaseMap?.[phase] ?? undefined;
+    // #1335: the pointer must never claim a step the canonical run is not at. This used to write
+    // whatever the phase map named and exit 0, so `--phase execution` on a run parked at
+    // `design-probe` reported success while leaving current.json saying "execute" and the canonical
+    // run saying "design-probe" — a split-brain manufactured by a command that said it worked. The
+    // canonical run is the authority; when it cannot be moved, this refuses instead of pretending.
+    //
+    // The comparison is against the ACTIONABLE step, not the parked one, because a run resting on a
+    // gateless passthrough is legitimately working toward the next gated step (see
+    // resolveActionableFlowStep) — that is agreement, not divergence.
+    if (stepId) assertPointerMatchesCanonicalRun(dir, flow, repoRoot, phase, stepId);
     if (stepId) {
       // #291 Wave 2 Task 2.1 (§5): thread the calling actor through so this second writeCurrent()
       // call site ALSO dual-writes the per-actor projection, not only ensure-session's call site —
