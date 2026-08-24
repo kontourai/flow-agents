@@ -10,7 +10,7 @@ import { validateRunStateConsistency } from "@kontourai/flow";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync } from "./assignment-provider.js";
 import { validateTrustBundle } from "./workflow-sidecar.js";
 import { resolveEffectiveChangeProviderSettings } from "./effective-change-provider-settings.js";
-import { executeMergeChangeProvider } from "./merge-change-provider.js";
+import { executeMergeChangeProvider, preflightMergeChangeProvider, type MergeBranchPolicyPreflight } from "./merge-change-provider.js";
 import { assertAuthenticatedMergeChangeObservation, assertIssuedMergeChangeAction, buildUnsignedMergeChangeAuthorization, issueMergeChangeAction, MERGE_CHANGE_STRATEGIES, type AuthenticatedMergeChangeObservation, type IssuedMergeChangeAction, type MergeChangeStrategy } from "../merge-change-operation-authority.js";
 import { assertAuthenticatedPublishChangeObservation, issuePublishChangeAction } from "../publish-change-operation-authority.js";
 import type { ChangeProviderSettings, PublishChangeActionBinding } from "./public-contracts.js";
@@ -31,6 +31,8 @@ type MergeChangeCliDependencies = Readonly<{
   executeProvider?: (provider: ChangeProviderSettings, action: IssuedMergeChangeAction) => Promise<AuthenticatedMergeChangeObservation>;
   /** Internal test seam; production always invokes the protected lifecycle helper. */
   authorizeOperation?: (context: SessionContext, action: IssuedMergeChangeAction, authorizationFile: string) => ExternalLifecycleMutationResult;
+  /** Internal test seam; production always observes the configured provider. */
+  preflightProvider?: (provider: ChangeProviderSettings, action: IssuedMergeChangeAction) => Promise<MergeBranchPolicyPreflight>;
 }>;
 
 function projectRootForSession(sessionDirInput: string): SessionContext {
@@ -350,20 +352,52 @@ export function assertEvidenceRefreshVerificationProvenance(state: Record<string
   if (!refreshedPass) throw new Error("merge-change requires an accepted verify-gate pass ordered after the definition amendment that adopted evidence refresh");
 }
 
-async function prepareAuthorizationRequest(context: SessionContext, strategy: MergeChangeStrategy, input: { nonce?: string; requestedAt?: string; expiresAt?: string }) {
-  const action = await currentAction(context, strategy);
+/**
+ * #1318 FIX-2: the branch-policy precondition used to be discoverable only at
+ * `merge-change execute` — that is, only AFTER this command emitted an unsigned
+ * authorization and an operator signed it with a lifecycle-authority key. Run
+ * the same read-only observation here, before anything is minted.
+ *
+ * `unsatisfied` refuses: minting an authorization the provider will certainly
+ * refuse wastes a signature and teaches the caller the wrong lesson at the
+ * wrong time. `unverified` does NOT refuse (an offline/unauthenticated request
+ * is a legitimate signing-request flow), but it is reported as unverified and
+ * never reported as satisfied.
+ */
+async function resolveMergePolicyPreflight(context: SessionContext, action: IssuedMergeChangeAction, dependencies: MergeChangeCliDependencies): Promise<MergeBranchPolicyPreflight> {
+  const effective = dependencies.provider
+    ? { status: "configured" as const, provider: dependencies.provider }
+    : resolveEffectiveChangeProviderSettings(context.projectRoot, path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"));
+  if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") throw new Error("merge-change requires a configured ChangeProvider");
+  const preflight = dependencies.preflightProvider ?? preflightMergeChangeProvider;
+  return preflight(effective.provider as ChangeProviderSettings, action);
+}
+
+function assertMergePolicyPreconditionSatisfiable(preflight: MergeBranchPolicyPreflight): void {
+  if (preflight.status !== "unsatisfied") return;
+  throw new Error(`${preflight.message}. merge-change request refuses to mint an authorization the target branch policy cannot execute; see 'flow-agents merge-change --help'`);
+}
+
+async function prepareAuthorizationRequest(context: SessionContext, strategy: MergeChangeStrategy, input: { nonce?: string; requestedAt?: string; expiresAt?: string }, dependencies: MergeChangeCliDependencies = {}) {
+  const action = await (dependencies.currentAction ?? currentAction)(context, strategy);
+  // Before ANY authorization material exists.
+  const policyPreflight = await resolveMergePolicyPreflight(context, action, dependencies);
+  assertMergePolicyPreconditionSatisfiable(policyPreflight);
   const inspected = await inspectBuilderFlowSession({ sessionDir: context.sessionDir });
   assertEvidenceRefreshControl(inspected, validateCanonicalRunDefinitions(inspected));
   const flow = record(inspected.projection.flow_run, "canonical Flow projection");
   const manifestBytes = readRegularFile(path.join(inspected.run.dir, "evidence", "manifest.json"), "canonical Flow evidence manifest");
   const requested_at = input.requestedAt ?? new Date().toISOString();
   const expires_at = input.expiresAt ?? new Date(Date.now() + 15 * 60_000).toISOString();
-  return buildUnsignedMergeChangeAuthorization({
-    project_root: context.projectRoot, run_id: context.slug, subject: String(inspected.run.state.subject ?? ""),
-    flow_definition_id: inspected.run.definitionId, flow_definition_version: inspected.run.definitionVersion,
-    flow_definition_digest: inspected.run.definitionDigest, flow_run_head: String(flow.run_head ?? ""), flow_manifest_sha256: sha256(manifestBytes),
-    issued_action: action, nonce: input.nonce ?? randomBytes(24).toString("hex"), requested_at, expires_at,
-  });
+  return {
+    ...buildUnsignedMergeChangeAuthorization({
+      project_root: context.projectRoot, run_id: context.slug, subject: String(inspected.run.state.subject ?? ""),
+      flow_definition_id: inspected.run.definitionId, flow_definition_version: inspected.run.definitionVersion,
+      flow_definition_digest: inspected.run.definitionDigest, flow_run_head: String(flow.run_head ?? ""), flow_manifest_sha256: sha256(manifestBytes),
+      issued_action: action, nonce: input.nonce ?? randomBytes(24).toString("hex"), requested_at, expires_at,
+    }),
+    policyPreflight,
+  };
 }
 
 async function execute(argv: string[], dependencies: MergeChangeCliDependencies = {}): Promise<number> {
@@ -408,7 +442,7 @@ async function execute(argv: string[], dependencies: MergeChangeCliDependencies 
 }
 
 /** Public, read-only signing-request surface for a protected merge authorization. */
-async function requestAuthorization(argv: string[]): Promise<number> {
+async function requestAuthorization(argv: string[], dependencies: MergeChangeCliDependencies = {}): Promise<number> {
   const args = parseArgs(argv);
   if (args.positionals.length !== 0) throw new Error("merge-change request accepts only named flags");
   for (const key of Object.keys(args.flags)) if (!REQUEST_FLAGS.has(key) || Array.isArray(args.flags[key])) throw new Error(`merge-change request does not support repeated or unknown --${key}`);
@@ -419,11 +453,16 @@ async function requestAuthorization(argv: string[]): Promise<number> {
   const context = projectRootForSession(sessionDir);
   const prepared = await withSubjectLockAsync(context.artifactRoot, context.slug, async () => prepareAuthorizationRequest(context, strategy as MergeChangeStrategy, {
     nonce: flagString(args.flags, "nonce"), requestedAt: flagString(args.flags, "requested-at"), expiresAt: flagString(args.flags, "expires-at"),
-  }));
+  }, dependencies));
   const target = path.resolve(out);
   const descriptor = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
   try { fs.writeFileSync(descriptor, `${JSON.stringify(prepared.unsigned, null, 2)}\n`); } finally { fs.closeSync(descriptor); }
-  console.log(JSON.stringify({ operation: "merge-change", unsigned_authorization_file: target, signing_payload: prepared.signingPayload, next_steps: [
+  // An unverified precondition is stated, never folded into the satisfied case:
+  // "we could not check" and "the policy is in place" are different facts.
+  if (prepared.policyPreflight.status === "unverified") {
+    console.error(`merge-change: ${MERGE_POLICY_PRECONDITION} This request did NOT verify it (${prepared.policyPreflight.reason}); merge-change execute will re-check it against the provider.`);
+  }
+  console.log(JSON.stringify({ operation: "merge-change", unsigned_authorization_file: target, signing_payload: prepared.signingPayload, merge_policy_precondition: prepared.policyPreflight, next_steps: [
     "Sign signing_payload with a registered lifecycle-authority Ed25519 key.",
     `Add signature {\"algorithm\":\"ed25519\",\"key_id\":\"<registry key id>\",\"value\":\"<base64 signature>\"} to ${target}.`,
     `Run: flow-agents merge-change execute --session-dir ${context.sessionDir} --strategy ${strategy} --authorization-file ${target}`,
@@ -446,13 +485,44 @@ async function validateTerminalDelivery(argv: string[]): Promise<number> {
   return 0;
 }
 
+/**
+ * #1318 FIX-3: the precondition existed only as provider-refusal text reachable
+ * after a signature had been minted. It is a rollout requirement, so it is
+ * stated in the command's own usage surface and in docs/public-workflow-cli.md
+ * plus docs/workflow-usage-guide.md. `merge-change-help.test.mjs` binds the
+ * three copies together so they cannot drift apart.
+ */
+export const MERGE_POLICY_PRECONDITION = "Automated merge requires the target branch to enforce a no-bypass pull-request approval policy (required_pull_request_reviews with required_approving_review_count >= 1, plus enforce_admins).";
+
+export const MERGE_CHANGE_USAGE = [
+  "usage: merge-change <request|execute|validate-terminal-delivery> --session-dir .kontourai/flow-agents/<slug>",
+  "",
+  "  request                      Emit an unsigned lifecycle authorization for the terminal merge.",
+  "  execute                      Consume a signed authorization and merge the exact terminal head.",
+  "  validate-terminal-delivery   Diagnose the local terminal-delivery binding without calling a provider.",
+  "",
+  "Branch policy precondition",
+  `  ${MERGE_POLICY_PRECONDITION}`,
+  "  `merge-change request` observes this precondition before it mints an authorization and refuses",
+  "  when the target branch does not satisfy it; when the provider cannot be reached it reports",
+  "  merge_policy_precondition.status = \"unverified\" rather than passing silently.",
+  "  Practical consequence: a repository whose only write-access account authors every pull request",
+  "  cannot satisfy it, because GitHub forbids approving your own pull request. Such a repository",
+  "  needs a second approving reviewer (or an app/bot with write access) before automated merge is",
+  "  possible; otherwise merges stay a disclosed provider operation outside merge-change.",
+].join("\n");
+
 export function main(argv = process.argv.slice(2), dependencies: MergeChangeCliDependencies = {}): number | Promise<number> {
   try {
     const [command, ...rest] = argv;
+    if (command === "--help" || command === "-h" || command === "help" || rest.includes("--help") || rest.includes("-h")) {
+      console.log(MERGE_CHANGE_USAGE);
+      return 0;
+    }
     if (command === "execute") return execute(rest, dependencies).catch((error) => { console.error(`merge-change: ${(error as Error).message}`); return 1; });
-    if (command === "request") return requestAuthorization(rest).catch((error) => { console.error(`merge-change: ${(error as Error).message}`); return 1; });
+    if (command === "request") return requestAuthorization(rest, dependencies).catch((error) => { console.error(`merge-change: ${(error as Error).message}`); return 1; });
     if (command === "validate-terminal-delivery") return validateTerminalDelivery(rest).catch((error) => { console.error(`merge-change: ${(error as Error).message}`); return 1; });
-    console.error("usage: merge-change <request|execute|validate-terminal-delivery> --session-dir .kontourai/flow-agents/<slug>");
+    console.error(MERGE_CHANGE_USAGE);
     return 2;
   } catch (error) { console.error(`merge-change: ${(error as Error).message}`); return 1; }
 }
