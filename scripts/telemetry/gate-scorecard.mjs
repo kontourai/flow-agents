@@ -31,6 +31,7 @@ import {
   ATTRIBUTION_GRANULARITY,
   attributeTokens,
   attributionFromRecords,
+  MODEL_GRANULARITY,
   readJsonl,
   TURN_GRACE_MS,
 } from "./token-attribution.mjs";
@@ -256,6 +257,44 @@ function tally(bucket, record) {
   else bucket.refused_or_error += 1;
 }
 
+/**
+ * Split one bucket's tally by the model that invoked each transition — flow-agents#1327.
+ *
+ * The pooled per-gate figure answers "is this gate worth it on average over whatever mix
+ * of models happened to run", and a decision to drop a gate taken on that number drops it
+ * for every model at once. Gate value is plausibly model-dependent, so the honest unit is
+ * (gate × model) and this is where it becomes expressible.
+ *
+ * THREE POPULATIONS, KEPT APART, because collapsing any two of them is the failure this
+ * whole module is built to avoid:
+ *
+ *   by_model[]              one entry per OBSERVED model. Only models. There is no
+ *                           `model: "unknown"` row, because a reader summing the column
+ *                           would then be summing a non-model as if it were one.
+ *   calls_without_model     examined, and no model was observable. A measured absence.
+ *   calls_model_not_enriched nothing ever looked. A pre-#1327 log, or none at all.
+ *
+ * A gate whose calls are all in the last two buckets carries an EMPTY `by_model` and its
+ * pooled tally: unknown, never a per-model verdict inferred from a pooled one.
+ */
+function modelBucket(bucket, model) {
+  bucket.by_model ??= new Map();
+  if (!bucket.by_model.has(model)) bucket.by_model.set(model, { ...emptyTally(), model });
+  return bucket.by_model.get(model);
+}
+
+/** Map → sorted array, once, at the end. Buckets are built as Maps for O(1) lookup. */
+function finalizeModels(bucket) {
+  if (bucket.by_model instanceof Map) {
+    bucket.by_model = [...bucket.by_model.values()].sort(
+      (a, b) => b.calls - a.calls || a.model.localeCompare(b.model),
+    );
+  } else bucket.by_model ??= [];
+  bucket.calls_without_model ??= 0;
+  bucket.calls_model_not_enriched ??= 0;
+  return bucket;
+}
+
 export function buildScorecard({ transitions, expectationIndex, gateIndex, tokenAttribution, ambiguousExpectations = [] }) {
   const gates = new Map();
   const verbs = new Map();
@@ -326,12 +365,34 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
       if (expectation) unattributed.push({ expectation, command: record.command ?? null, exit_code: record.exit_code });
     }
 
+    const target = mapped ? gates.get(mapped.key) : verbs.get(`${record.command ?? "?"} ${record.verb ?? ""}`.trim());
+
+    // The model dimension. `models` holds an observation; `modelReasons` holds a measured
+    // absence; a record in neither was never examined. Those are three different states
+    // and each gets its own counter — a gate whose model was never looked for must not
+    // read the same as one whose model was looked for and not found.
+    const observedModel = tokenAttribution?.models?.get(record) ?? null;
+    if (observedModel) {
+      tally(modelBucket(target, observedModel.model), record);
+    } else if (tokenAttribution?.modelReasons?.has(record)) {
+      target.calls_without_model = (target.calls_without_model ?? 0) + 1;
+    } else {
+      target.calls_model_not_enriched = (target.calls_model_not_enriched ?? 0) + 1;
+    }
+
     if (tokenAttribution) {
       const turn = tokenAttribution.attributed.get(record);
       if (turn) {
-        const target = mapped ? gates.get(mapped.key) : verbs.get(`${record.command ?? "?"} ${record.verb ?? ""}`.trim());
         target.output_tokens = (target.output_tokens ?? 0) + turn.output;
         target.token_turns = (target.token_turns ?? 0) + 1;
+        // The per-model floor is a floor twice over: output tokens only, and only for the
+        // transitions that won their turn. Carried per model so the cost side of a
+        // (gate × model) comparison is not silently pooled either.
+        if (observedModel) {
+          const perModel = modelBucket(target, observedModel.model);
+          perModel.output_tokens = (perModel.output_tokens ?? 0) + turn.output;
+          perModel.token_turns = (perModel.token_turns ?? 0) + 1;
+        }
       }
     }
   }
@@ -413,11 +474,41 @@ export function buildScorecard({ transitions, expectationIndex, gateIndex, token
               tokenAttribution.ambiguousTurnClaims?.length ?? tokenAttribution.ambiguousAttributions ?? 0,
           }
         : null,
+      // The (gate × model) dimension's own coverage, reported beside the tokens' rather
+      // than folded into it: the two have different denominators, because a turn's model
+      // is readable even when its tokens are already charged to an earlier transition.
+      models: tokenAttribution
+        ? {
+            note: "the model that emitted the invoking tool call — not 'the model that ran the gate', and not the session's model. A gate with no attribution reports unknown; it is never pooled.",
+            granularity: MODEL_GRANULARITY,
+            source: tokenAttribution.source ?? "transcript",
+            transitions_with_model: tokenAttribution.matchedModels ?? 0,
+            // Examined, and no model was observable. A measured absence.
+            transitions_without_model: tokenAttribution.transitionsWithoutModel ?? 0,
+            // Never examined for a model: a log enriched before #1327, or not at all.
+            // Folding these into the line above would report an un-enriched log as one
+            // whose gates were measured and found to be model-less.
+            ...(tokenAttribution.modelsNotEnriched === undefined
+              ? {}
+              : { transitions_model_not_enriched: tokenAttribution.modelsNotEnriched }),
+            ...(tokenAttribution.malformedModelAttributions
+              ? { malformed_model_attributions: tokenAttribution.malformedModelAttributions }
+              : {}),
+            // Turns present in the window that named no model. Every turn landing here is
+            // the shape a renamed transcript field would take, so it is reported.
+            ...(tokenAttribution.turnsReportingNoModel === undefined || tokenAttribution.turnsReportingNoModel === null
+              ? {}
+              : { turns_reporting_no_model: tokenAttribution.turnsReportingNoModel }),
+            models_observed: [
+              ...new Set([...(tokenAttribution.models?.values() ?? [])].map((entry) => entry.model)),
+            ].sort(),
+          }
+        : null,
     },
     ambiguous_expectations: ambiguousExpectations,
     ambiguous,
-    gates: [...gates.values()].sort((a, b) => b.calls - a.calls || a.gate.localeCompare(b.gate)),
-    verbs: [...verbs.values()].sort((a, b) => b.calls - a.calls),
+    gates: [...gates.values()].map(finalizeModels).sort((a, b) => b.calls - a.calls || a.gate.localeCompare(b.gate)),
+    verbs: [...verbs.values()].map(finalizeModels).sort((a, b) => b.calls - a.calls),
     unattributed,
   };
 }
@@ -500,6 +591,23 @@ function main(argv) {
     const note = gate.never_invoked ? "  never invoked in window" : verdicts;
     const label = `${gate.flow ?? "?"}/${gate.gate}`;
     console.log(`  ${label.padEnd(42)} calls ${String(gate.calls).padStart(3)}  refused/error ${String(gate.refused_or_error).padStart(3)}${cost}${note}`);
+    // Per-model rows are printed BENEATH the pooled one, never instead of it, and the
+    // unknown calls are printed as their own line rather than distributed across the
+    // models above. A reader must be able to see that a gate's evidence covers one model
+    // and not another before removing it for both.
+    for (const perModel of gate.by_model) {
+      const perCost = perModel.output_tokens ? `  ${perModel.output_tokens} out-tok` : "";
+      console.log(
+        `    ${`· ${perModel.model}`.padEnd(40)} calls ${String(perModel.calls).padStart(3)}  refused/error ${String(perModel.refused_or_error).padStart(3)}${perCost}` +
+          (perModel.advanced || perModel.awaiting ? `  advanced ${perModel.advanced}/awaiting ${perModel.awaiting}` : ""),
+      );
+    }
+    if (gate.calls_without_model || gate.calls_model_not_enriched) {
+      const parts = [];
+      if (gate.calls_without_model) parts.push(`${gate.calls_without_model} no model observed`);
+      if (gate.calls_model_not_enriched) parts.push(`${gate.calls_model_not_enriched} never examined for a model`);
+      console.log(`    ${"· unknown".padEnd(40)} ${parts.join(", ")}`);
+    }
   }
   // Verbs are not gates, but they are where the run's cost actually went in the one
   // window measured so far. Printing gates alone would report a third of the work.
@@ -507,7 +615,12 @@ function main(argv) {
     console.log(`non-gate transitions (${scorecard.coverage.verb_attributed} calls):`);
     for (const verb of scorecard.verbs) {
       const cost = verb.output_tokens ? `  ${verb.output_tokens} out-tok` : "";
-      console.log(`  ${verb.verb.padEnd(36)} calls ${String(verb.calls).padStart(3)}  refused/error ${String(verb.refused_or_error).padStart(3)}${cost}`);
+      const models = verb.by_model.map((entry) => `${entry.model} ${entry.calls}`).join(", ");
+      // Compact here rather than one row each: the verb list is long, and the split is
+      // still shown rather than pooled away. `--json` carries the full per-model tally.
+      const unknown = verb.calls_without_model || verb.calls_model_not_enriched;
+      const split = models || unknown ? `  [${[models, unknown ? `${unknown} unknown` : ""].filter(Boolean).join(", ")}]` : "";
+      console.log(`  ${verb.verb.padEnd(36)} calls ${String(verb.calls).padStart(3)}  refused/error ${String(verb.refused_or_error).padStart(3)}${cost}${split}`);
     }
   }
   for (const shared of scorecard.ambiguous_expectations) {
