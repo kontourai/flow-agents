@@ -33,6 +33,7 @@ import {
 // function's behavior through the SAME expectations the prototype carried, so a
 // Surface regression (or an accidental un-lift) fails here.
 import { explainClaim, buildTrustReport, TrustBundleBuilder } from "@kontourai/surface";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const CLEAN_COMMIT = "a".repeat(40);
 const cleanObservation = (command, observedResult = "pass", exitCode = 0, snapshot = {}) => ({
@@ -169,7 +170,7 @@ test("narrative namespace paths and free-form references are rejected with the t
 });
 
 test("narrative isolation canonicalizes aliases and rejects narrative content independent of location", { concurrency: false }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-isolation-unit-"));
+  const root = makeFixtureDir("narrative-isolation-unit-");
   const narrativeDir = path.join(root, ".kontourai", "narrative", "run", "n1");
   const envelope = path.join(narrativeDir, "envelope.json");
   const relocated = path.join(root, "evidence", "relocated.json");

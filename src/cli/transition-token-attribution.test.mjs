@@ -43,6 +43,7 @@ import {
   TOKEN_ATTRIBUTION_FIELD,
 } from "../../scripts/telemetry/token-attribution.mjs";
 import { buildTransitionRecord } from "../../build/src/transition-log.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const FIXTURES = path.join(import.meta.dirname, "fixtures", "transition-attribution");
@@ -68,7 +69,7 @@ function readCorpus() {
 }
 
 function scratch(prefix = "transition-attribution-") {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return makeFixtureDir(prefix);
 }
 
 /** Enrich a copy of the real corpus in memory, the way the CLI does. */
@@ -224,6 +225,10 @@ test("enrichment leaves every field the emitter wrote byte-identical", () => {
     const stripped = { ...transitions[index] };
     delete stripped[OUTPUT_TOKENS_FIELD];
     delete stripped[TOKEN_ATTRIBUTION_FIELD];
+    // The model dimension is stamped by the same pass (#1327) and is additive on the
+    // same terms; `transition-model-attribution.test.mjs` holds it to them.
+    delete stripped.resolved_model;
+    delete stripped.model_attribution;
     assert.deepEqual(stripped, raw[index], `record ${index} was altered beyond the additive fields`);
     // Key ORDER too: the additions are appended, so an old consumer reading the
     // serialized line sees its own fields in the positions it has always seen them.

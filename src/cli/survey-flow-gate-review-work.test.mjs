@@ -10,6 +10,7 @@ import {
   discoverSurveyGateReviewWork,
   publishSurveyGateReviewWork,
 } from "../../build/src/index.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const SUBJECT = "work-item:review-work-821";
 const GATE = "human-review";
@@ -17,7 +18,7 @@ const EXPECTATION = "reviewed-quality";
 const TIME = "2026-07-22T17:00:00.000Z";
 
 function workspace() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-review-work-"));
+  return makeFixtureDir("flow-agents-review-work-");
 }
 
 function definition() {

@@ -8,6 +8,7 @@ import { evaluateGate, initialState, validateDefinition } from "@kontourai/flow"
 
 import { resolveEffectiveFlowDefinition, resolveFlowFilePath, resolveFlowStep } from "../../build/src/lib/flow-resolver.js";
 import { validateActionRepositoryMetadata } from "../../build/src/flow-kit/action-repository-validation.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 
@@ -90,7 +91,7 @@ test("aggregate (uses_flows) composition propagates requires_current_verificatio
   // The scalar path preserves the field by spreading the child gate; the aggregate path builds a
   // fresh gate object and must propagate it explicitly, or list-composed kits silently lose the
   // guard. Kit-neutral fixture flows (boundary rule: no builder content in core tests).
-  const defs = fs.mkdtempSync(path.join(os.tmpdir(), "flowdefs-turnstile-"));
+  const defs = makeFixtureDir("flowdefs-turnstile-");
   try {
     writeJson(path.join(defs, "acme.child-a.flow.json"), {
       id: "acme.child-a", version: "1.0",
@@ -139,7 +140,7 @@ test("aggregate (uses_flows) composition propagates requires_current_verificatio
 });
 
 test("installed package definitions resolve when a consumer repo has no kits directory", () => {
-  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-consumer-"));
+  const consumer = makeFixtureDir("flow-agents-consumer-");
   const resolved = resolveFlowFilePath("builder", "build", "builder.build", consumer, false);
   assert.ok(resolved);
   assert.equal(fs.realpathSync(resolved), fs.realpathSync(path.join(REPO_ROOT, "kits", "builder", "flows", "build.flow.json")));
@@ -147,14 +148,14 @@ test("installed package definitions resolve when a consumer repo has no kits dir
 });
 
 test("consumer-vendored definitions remain authoritative over package fallback", () => {
-  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-consumer-vendored-"));
+  const consumer = makeFixtureDir("flow-agents-consumer-vendored-");
   const vendored = path.join(consumer, "kits", "builder", "flows", "build.flow.json");
   writeJson(vendored, { id: "builder.build", version: "consumer", steps: [{ id: "local", next: null }], gates: {} });
   assert.equal(resolveFlowFilePath("builder", "build", "builder.build", consumer, false), fs.realpathSync(vendored));
 });
 
 test("unsafe explicit overrides fail closed instead of using package fallback", () => {
-  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-consumer-unsafe-"));
+  const consumer = makeFixtureDir("flow-agents-consumer-unsafe-");
   const unsafeDefinitions = path.join(consumer, ".kontourai", "flow-agents", "definitions");
   fs.mkdirSync(unsafeDefinitions, { recursive: true });
   const prior = process.env.FLOW_AGENTS_FLOW_DEFS_DIR;
@@ -168,7 +169,7 @@ test("unsafe explicit overrides fail closed instead of using package fallback", 
 });
 
 test("effective definition compilation rejects uses_flow cycles", () => {
-  const definitions = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-composition-cycle-"));
+  const definitions = makeFixtureDir("flow-agents-composition-cycle-");
   writeJson(path.join(definitions, "loop.one.flow.json"), {
     id: "loop.one",
     version: "1.0",
@@ -194,7 +195,7 @@ test("effective definition compilation rejects uses_flow cycles", () => {
 });
 
 test("canonical compilation ignores Flow definition overrides", () => {
-  const definitions = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-composition-override-"));
+  const definitions = makeFixtureDir("flow-agents-composition-override-");
   writeJson(path.join(definitions, "builder.build.flow.json"), {
     id: "builder.build",
     version: "999.0",
@@ -213,7 +214,7 @@ test("canonical compilation ignores Flow definition overrides", () => {
 });
 
 test("legacy scalar uses_flow rejects an array fan-in while uses_flows compiles the same contributors", () => {
-  const definitions = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-legacy-scalar-fan-in-"));
+  const definitions = makeFixtureDir("flow-agents-legacy-scalar-fan-in-");
   const children = ["one.verify", "two.verify"];
   for (const [index, id] of children.entries()) writeJson(path.join(definitions, `${id}.flow.json`), {
     id, version: "1.0", steps: [{ id: "verify", next: null }],
@@ -236,7 +237,7 @@ test("legacy scalar uses_flow rejects an array fan-in while uses_flows compiles 
 });
 
 test("action-repository validation rejects the route-back incompatibility previously missed by review", () => {
-  const kitDir = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-action-route-back-"));
+  const kitDir = makeFixtureDir("flow-agents-action-route-back-");
   const children = ["one.verify", "two.verify"];
   const child = (id, target) => ({ id, version: "1.0", steps: [{ id: "verify", next: null }], gates: { gate: { step: "verify", expects: [], on_route_back: { missing_evidence: target }, route_back_policy: { max_attempts: 2, on_exceeded: "block" } } }, exports: [] });
   writeJson(path.join(kitDir, "flows/one.verify.flow.json"), child(children[0], "execute"));
@@ -283,7 +284,7 @@ test("action-repository validation fails closed for every aggregate incompatibil
     ambiguous_scalar_and_list: { children: [child("one.verify")], parentStep: { id: "verify", next: null, uses_flow: "one.verify", uses_flows: ["one.verify"] } },
   };
   for (const [name, scenario] of Object.entries(cases)) {
-    const kitDir = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-action-${name}-`));
+    const kitDir = makeFixtureDir(`flow-agents-action-${name}-`);
     const parent = { id: "parent.build", version: "1.0", steps: [scenario.parentStep ?? { id: "verify", next: null, uses_flows: scenario.children.map((entry) => entry.id) }], gates: scenario.parentGates ?? {} };
     writeJson(path.join(kitDir, "flows/parent.json"), parent);
     for (const entry of scenario.children) writeJson(path.join(kitDir, `flows/${entry.id}.json`), entry);
@@ -294,7 +295,7 @@ test("action-repository validation fails closed for every aggregate incompatibil
 });
 
 test("a parent composes ordered contributions from three Kit-neutral child flows", () => {
-  const definitions = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-multi-composition-"));
+  const definitions = makeFixtureDir("flow-agents-multi-composition-");
   const children = [
     ["verification.verify", "verification-gate", "verification.proof"],
     ["veritas.verify", "veritas-gate", "veritas.attestation"],
@@ -353,7 +354,7 @@ test("a parent composes ordered contributions from three Kit-neutral child flows
 });
 
 test("multi-child composition rejects duplicate, ambiguous, colliding, and cyclic declarations", () => {
-  const definitions = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-multi-composition-invalid-"));
+  const definitions = makeFixtureDir("flow-agents-multi-composition-invalid-");
   const child = {
     id: "child.verify",
     version: "1.0",
@@ -398,7 +399,7 @@ test("multi-child composition rejects duplicate, ambiguous, colliding, and cycli
 });
 
 test("effective and live resolution reject duplicate imported expectation ids before importing child gates", () => {
-  const definitions = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-duplicate-expectation-"));
+  const definitions = makeFixtureDir("flow-agents-duplicate-expectation-");
   const child = (id, gate) => ({
     id,
     version: "1.0",
@@ -437,7 +438,7 @@ test("effective and live resolution reject duplicate imported expectation ids be
 });
 
 test("list aggregate rejects colliding and incompatible route-back metadata before emitting a gate", () => {
-  const definitions = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-list-route-back-"));
+  const definitions = makeFixtureDir("flow-agents-list-route-back-");
   const child = (id, claimType, routeBack = {}) => ({
     id,
     version: "1.0",
@@ -495,7 +496,7 @@ test("list aggregate rejects colliding and incompatible route-back metadata befo
 });
 
 test("list aggregate merges compatible route-back metadata into the one live gate", () => {
-  const definitions = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-list-route-back-compatible-"));
+  const definitions = makeFixtureDir("flow-agents-list-route-back-compatible-");
   const child = (id, claimType, on_route_back) => ({
     id,
     version: "1.0",
@@ -524,7 +525,7 @@ test("list aggregate merges compatible route-back metadata into the one live gat
 });
 
 test("required list contributions block the aggregate parent for missing, failed, disputed, stale, and not_verified evidence", () => {
-  const definitions = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-composition-status-matrix-"));
+  const definitions = makeFixtureDir("flow-agents-composition-status-matrix-");
   const children = ["one.verify", "two.verify", "three.verify"];
   for (const [index, flowId] of children.entries()) {
     const claimType = `matrix.child.${index + 1}`;

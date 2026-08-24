@@ -4,6 +4,7 @@ import os from "node:os";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const cli = path.join(root, "build", "src", "cli.js");
@@ -39,7 +40,7 @@ test("effective ChangeProvider settings report configured, absent, malformed, an
 });
 
 test("effective ChangeProvider settings default to the consumer repository context path", () => {
-  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-change-provider-consumer-"));
+  const consumer = makeFixtureDir("flow-agents-change-provider-consumer-");
   try {
     fs.writeFileSync(path.join(consumer, "package.json"), JSON.stringify({ repository: "https://github.com/consumer/example.git" }));
     const settings = path.join(consumer, "context", "settings", "change-provider-settings.json");
@@ -60,7 +61,7 @@ test("effective ChangeProvider settings default to the consumer repository conte
 });
 
 test("dotted repository names resolve (kontourai.io-class repos, #840)", () => {
-  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-change-provider-dotted-"));
+  const consumer = makeFixtureDir("flow-agents-change-provider-dotted-");
   try {
     fs.writeFileSync(path.join(consumer, "package.json"), JSON.stringify({ repository: "git@github.com:consumer/example.io.git" }));
     const settings = path.join(consumer, "context", "settings", "change-provider-settings.json");
@@ -84,8 +85,8 @@ test("dotted repository names resolve (kontourai.io-class repos, #840)", () => {
 });
 
 test("effective ChangeProvider settings do not trust ambient HOME or Git package metadata fallback", async () => {
-  const hostileHome = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-hostile-home-"));
-  const gitRepo = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-provider-git-"));
+  const hostileHome = makeFixtureDir("flow-agents-hostile-home-");
+  const gitRepo = makeFixtureDir("flow-agents-provider-git-");
   const previousHome = process.env.HOME;
   try {
     process.env.HOME = hostileHome;

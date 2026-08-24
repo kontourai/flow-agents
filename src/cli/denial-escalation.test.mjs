@@ -26,6 +26,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(here, "..", "..");
@@ -58,7 +59,7 @@ const STATE_JSON_DENIAL =
 
 /** Isolated scratch root, so no test ever writes into the real .kontourai tree. */
 function scratchRepo() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "denial-streak-"));
+  return makeFixtureDir("denial-streak-");
 }
 
 // ---------------------------------------------------------------------------

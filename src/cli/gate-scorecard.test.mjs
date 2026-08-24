@@ -17,11 +17,12 @@ import {
   buildScorecard,
   discoverKitDirs,
 } from "../../scripts/telemetry/gate-scorecard.mjs";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 
 function kitFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-"));
+  const root = makeFixtureDir("gate-scorecard-");
   const flows = path.join(root, "flows");
   fs.mkdirSync(flows, { recursive: true });
   fs.writeFileSync(
@@ -293,7 +294,7 @@ function transcript(dir, name, entries) {
 }
 
 test("token attribution counts one API response once, not once per content block", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const dir = makeFixtureDir("gate-scorecard-tx-");
   // One response logged as three lines sharing a message id and identical usage.
   const file = transcript(dir, "transcript.jsonl", [
     ["msg_a", "2026-08-17T12:00:00.000Z", 500],
@@ -310,7 +311,7 @@ test("token attribution counts one API response once, not once per content block
 // Over-attribution manufactures spend that never happened — the exact defect the
 // scorecard exists to find.
 test("one turn cannot pay for two transitions", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const dir = makeFixtureDir("gate-scorecard-tx-");
   const file = transcript(dir, "transcript.jsonl", [["m1", "2026-08-17T12:00:00.000Z", 500]]);
   const first = transition({ started_at: "2026-08-17T12:00:05.000Z", duration_ms: 100 });
   const second = transition({ started_at: "2026-08-17T12:00:06.000Z", duration_ms: 100 });
@@ -326,7 +327,7 @@ test("one turn cannot pay for two transitions", () => {
 // A transition whose invoking turn is already consumed must not reach further back:
 // that older turn paid for earlier work, and claiming it invents spend for this one.
 test("a transition does not reach back past its own invoking turn", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const dir = makeFixtureDir("gate-scorecard-tx-");
   const file = transcript(dir, "transcript.jsonl", [
     ["older", "2026-08-17T12:00:00.000Z", 900],
     ["invoker", "2026-08-17T12:00:10.000Z", 100],
@@ -342,7 +343,7 @@ test("a transition does not reach back past its own invoking turn", () => {
 // Sibling sessions write transcripts into the same directory. Matching on time alone
 // imports another run's spend as this run's cost.
 test("a sibling session's turn never pays for this run's transition", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const dir = makeFixtureDir("gate-scorecard-tx-");
   const file = transcript(dir, "mixed.jsonl", [
     ["mine", "2026-08-17T12:00:00.000Z", 100, "sess-a"],
     ["theirs", "2026-08-17T12:00:04.000Z", 8000, "sess-b"],
@@ -358,7 +359,7 @@ test("a sibling session's turn never pays for this run's transition", () => {
 });
 
 test("attributed tokens never exceed the transcript's own total", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const dir = makeFixtureDir("gate-scorecard-tx-");
   const file = transcript(dir, "transcript.jsonl", [
     ["m1", "2026-08-17T12:00:00.000Z", 300],
     ["m2", "2026-08-17T12:00:01.000Z", 200],
@@ -377,7 +378,7 @@ test("attributed tokens never exceed the transcript's own total", () => {
 });
 
 test("a turn far outside a transition's window is not attributed to it", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const dir = makeFixtureDir("gate-scorecard-tx-");
   // Hours earlier: too distant to be the turn that invoked this transition.
   const file = transcript(dir, "transcript.jsonl", [["msg_b", "2026-08-17T09:00:00.000Z", 900]]);
   const transitions = [transition({ started_at: "2026-08-17T12:00:00.000Z", duration_ms: 1000 })];
@@ -404,7 +405,7 @@ test("gates of an unexercised flow are counted, not listed as never invoked", ()
 // --- what a kit declares, and what happens when the declaration is broken ---------
 
 function kitWithManifest(flows, extraFiles = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-kit-"));
+  const root = makeFixtureDir("gate-scorecard-kit-");
   fs.mkdirSync(path.join(root, "flows"), { recursive: true });
   fs.writeFileSync(path.join(root, "kit.json"), JSON.stringify({ id: "demo", flows }), "utf8");
   for (const [name, body] of Object.entries(extraFiles)) {
@@ -439,7 +440,7 @@ test("a kit with no manifest at all still globs its flows directory", () => {
 // unambiguous expectation into two claimants: a phantom collision, and the gate that
 // actually fired credited with nothing.
 test("a kit listed twice in the catalog is registered once", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-cat-"));
+  const root = makeFixtureDir("gate-scorecard-cat-");
   const kitDir = path.join(root, "kits", "solo");
   fs.mkdirSync(path.join(kitDir, "flows"), { recursive: true });
   fs.writeFileSync(path.join(kitDir, "kit.json"), JSON.stringify({ id: "solo", flows: [{ id: "solo.flow", path: "flows/solo.flow.json" }] }), "utf8");
@@ -471,7 +472,7 @@ test("a kit listed twice in the catalog is registered once", () => {
 });
 
 test("discovery falls back to scanning when no catalog is published", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-scan-"));
+  const root = makeFixtureDir("gate-scorecard-scan-");
   const kitDir = path.join(root, "kits", "scanned");
   fs.mkdirSync(path.join(kitDir, "flows"), { recursive: true });
   fs.writeFileSync(path.join(kitDir, "kit.json"), JSON.stringify({ id: "scanned", flows: [] }), "utf8");
@@ -533,7 +534,7 @@ test("a --gate naming a gate only one flow declares does resolve", () => {
 // them — and "the nearest preceding turn" then picks a subagent's turn instead of the
 // orchestrator's between 8% and 42% of the time on delegation-heavy sessions.
 test("a subagent turn never pays for the orchestrator's transition", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const dir = makeFixtureDir("gate-scorecard-tx-");
   const file = path.join(dir, "t.jsonl");
   fs.writeFileSync(
     file,
@@ -551,7 +552,7 @@ test("a subagent turn never pays for the orchestrator's transition", () => {
 
 // The same response appears in two files after /branch or --fork-session.
 test("a response copied into two transcripts is not collapsed across sessions", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate-scorecard-tx-"));
+  const dir = makeFixtureDir("gate-scorecard-tx-");
   const line = (session) =>
     JSON.stringify({ timestamp: "2026-08-17T12:00:00.000Z", sessionId: session, message: { id: "shared", usage: { output_tokens: 50 } } });
   const a = path.join(dir, "a.jsonl");

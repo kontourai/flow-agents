@@ -6,13 +6,14 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { parseSourceId } from "../../build/src/narrative/source-ids.js";
 import { snapshotNarrative } from "../../build/src/narrative/snapshot.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const NOW = "2026-07-14T12:00:00Z";
 const compiler = { name: "test", version: "1", policy_hash: "policy" };
 const captureCompleteness = { channels: { full: "active" }, known_gaps: [] };
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-snapshot-"));
+  const root = makeFixtureDir("narrative-snapshot-");
   const repo = path.join(root, "repo");
   const narrativeDir = path.join(root, "artifacts", "narrative", "n1");
   fs.mkdirSync(repo, { recursive: true });
