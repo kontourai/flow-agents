@@ -11,6 +11,7 @@ import {
   resolveCoordinatedCommandBinding,
 } from "../../build/src/lib/coordinated-command-receipt.js";
 import { isMeaningfulTestCommand, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 function fixture({ duplicate = false, counts = { executed: 1, passed: 1, failed: 0, infrastructureErrors: 0 }, manifest = true } = {}) {
   const root = makeFixtureDir("flow-agents-coordinated-receipt-");
@@ -26,7 +27,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 const root = process.cwd();
 const stable = (value) => Array.isArray(value) ? "[" + value.map(stable).join(",") + "]" : value && typeof value === "object" ? "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + stable(value[key])).join(",") + "}" : JSON.stringify(value);
 const digest = (value) => createHash("sha256").update(value).digest("hex");
