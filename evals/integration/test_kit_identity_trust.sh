@@ -245,14 +245,14 @@ const flow = {
   gates: {
     "execute-gate": {
       step: "execute",
-      expects: [{ id: "execution-scope", kind: "trust.bundle", required: true,
+      expects: [{ id: "execution-scope", kind: "trust.bundle", required: true, description: "execution-scope fixture expectation",
         bundle_claim: { claimType: "acme.execute.scope", subjectType: "change", accepted_statuses: ["trusted","accepted"] } }]
     },
     "verify-gate": {
       step: "verify",
       on_route_back: { implementation_defect: "execute", missing_evidence: "verify", default: "verify" },
       route_back_policy: { max_attempts: 2, on_exceeded: "block" },
-      expects: [{ id: "verify-evidence", kind: "trust.bundle", required: true,
+      expects: [{ id: "verify-evidence", kind: "trust.bundle", required: true, description: "verify-evidence fixture expectation",
         bundle_claim: { claimType: "acme.verify.tests", subjectType: "flow-step", accepted_statuses: ["trusted","accepted"] } }]
     }
   }
@@ -343,7 +343,7 @@ const flow = {
   gates: {
     "verify-gate": {
       step: "verify",
-      expects: [{ id: "verify-evidence", kind: "trust.bundle", required: true,
+      expects: [{ id: "verify-evidence", kind: "trust.bundle", required: true, description: "verify-evidence fixture expectation",
         bundle_claim: { claimType: "acme.verify.tests", subjectType: "flow-step", accepted_statuses: ["trusted","accepted"] } }]
     }
   }
