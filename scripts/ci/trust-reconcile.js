@@ -146,9 +146,9 @@
  *   "no comprehensive trust-reconcile-verify configured" — refuses to attest a
  *   compile-only check.
  *
- * ADVISORY PHASE: this job is not currently a required status check on `main`.
- * Arming it later is a server-side branch-protection change; editing this script or
- * .github/workflows/trust-reconcile.yml alone cannot make it required.
+ * ARMED (2026-08-24): this job IS a required status check on `main`; a failure blocks
+ * merge. Requiredness is a server-side branch-protection setting — editing this script
+ * or .github/workflows/trust-reconcile.yml can neither arm nor disarm it.
  *
  * Programmatic use:
  *   const { runTrustReconcile } = require('./trust-reconcile.js');
