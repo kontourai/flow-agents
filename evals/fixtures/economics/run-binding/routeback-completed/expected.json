@@ -1,0 +1,22 @@
+{
+  "run_id": "econ-fixture-routeback-completed",
+  "terminal_status": "completed",
+  "phase_wall_clock_s": {
+    "design-probe": 100,
+    "plan": 120,
+    "execute": 800,
+    "verify": 120,
+    "merge-ready": 20,
+    "pr-open": 30
+  },
+  "total_wall_clock_s": 1190,
+  "iterations": {
+    "count": 2,
+    "route_backs": 1
+  },
+  "defects": {
+    "gate_fires": 2,
+    "verification_verdict": "PASS"
+  },
+  "_gate_fires_note": "This fixture also carries a real-shaped gate_outcome_history (9 entries: 6 pass + 1 block + 1 route-back + the final pass) so the PRIMARY gate_fires derivation path (deriveGateFires's history branch) is exercised, not just the legacy transitions[].status==blocked fallback (which alone would compute 1 from this fixture's single blocked transition). 2 == count of block+route-back entries in gate_outcome_history; a history.length mutation would wrongly report 9."
+}

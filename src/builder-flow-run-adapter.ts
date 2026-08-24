@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -24,6 +24,13 @@ import {
   type JsonObject,
 } from "@kontourai/flow";
 import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
+import {
+  canonicalKitFlowSourceRoots,
+  declaredKitFlowBindings,
+  kitFlowRunBindingIssues,
+  resolveKitFlowBinding,
+  type KitFlowBinding,
+} from "./lib/kit-flow-binding.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "./flow-recovery-fence.js";
 import {
   readRunCorrelation,
@@ -36,7 +43,133 @@ export const BUILDER_BUILD_FLOW_ID = "builder.build";
 export const BUILDER_BUILD_FLOW_RELATIVE_PATH = "kits/builder/flows/build.flow.json";
 export const BUILDER_SHAPE_FLOW_ID = "builder.shape";
 export const BUILDER_SHAPE_FLOW_RELATIVE_PATH = "kits/builder/flows/shape.flow.json";
-export type BuilderFlowId = typeof BUILDER_BUILD_FLOW_ID | typeof BUILDER_SHAPE_FLOW_ID;
+/**
+ * #1316: the canonical run set is DERIVED, so this can no longer be a two-literal union. The
+ * name is retained because it is what the runtime and the public exports already spell; what it
+ * denotes is now "a flow id the canonical run runtime can bind", which is answered by
+ * `isCanonicalRunFlowId` rather than by the type.
+ */
+export type BuilderFlowId = string;
+
+/**
+ * #1315 introduced `CANONICAL_RUN_FLOW_IDS` as a CAPABILITY declaration by the module that owns
+ * the capability — `workflow start` and `ensure-session` both consult it, so the set of flows
+ * with a pinned run record and the set the public verb admits cannot drift into a half-start.
+ * It was a hardcoded pair, and #1315 said so: widening it "requires `flowRelativePath`,
+ * `assertCanonicalBuilderArtifactRoot` and `expectedGateProducer` to derive from each kit's own
+ * manifest rather than the builder kit's."
+ *
+ * #1316 does that, so the pair is gone. A flow is canonically runnable when — and only when —
+ * the kit that DECLARES it supplies every binding this adapter needs:
+ *
+ *   1. a `flows[]` declaration naming the definition file, owned by the declaring kit's own
+ *      directory and in agreement with what canonical resolution reads (`resolveKitFlowBinding`);
+ *   2. a definition that composes and validates (`resolveEffectiveFlowDefinition` +
+ *      `validateDefinition`, so `uses_flow` extensions are judged as they will run); and
+ *   3. a producer binding for every expectation of every gate in that definition
+ *      (`kitFlowRunBindingIssues`).
+ *
+ * Any missing binding is a REFUSAL naming what is absent — never a half-start. That is the
+ * property #1315 bought by refusing outright, and it is preserved here by making eligibility a
+ * derivation over the same bindings the run then uses, rather than a list someone maintains.
+ *
+ * Byte-identical for the builder kit by construction, not by exception: its `build` and `shape`
+ * flows satisfy all three, its `publish-learn` extension declares no `flow_step_actions` of its
+ * own (it is composed INTO build, never started), and the other packaged kits declare no
+ * producer bindings at all — so the derived set is exactly the pair this replaced.
+ */
+export function canonicalRunFlowIds(cwd?: string): string[] {
+  const ids: string[] = [];
+  for (const binding of declaredKitFlowBindings(canonicalRunSourceRoots(cwd))) {
+    if (canonicalRunBindingIssues(binding).length === 0) ids.push(binding.flowId);
+  }
+  return ids.sort();
+}
+
+/** True when the canonical run runtime can start and pin a Flow run for `value`. */
+export function isCanonicalRunFlowId(value: string, cwd?: string): boolean {
+  const binding = resolveKitFlowBinding(value, canonicalRunSourceRoots(cwd));
+  return binding !== null && canonicalRunBindingIssues(binding).length === 0;
+}
+
+/**
+ * The refusal text for a flow the canonical run runtime cannot bind, naming the missing
+ * binding. Empty when the flow IS bindable.
+ *
+ * Callers must render this rather than compose their own: a refusal that says only "unsupported"
+ * sends the reader to guess which of the three bindings is absent, which is what made the
+ * hardcoded pair survivable in the first place.
+ */
+export function canonicalRunFlowRefusal(flowId: string, cwd?: string): string | null {
+  const roots = canonicalRunSourceRoots(cwd);
+  const binding = resolveKitFlowBinding(flowId, roots);
+  if (!binding) {
+    return `no installed kit declares ${flowId} in its kit.json flows[] with a resolvable definition file owned by that kit; flows with a canonical run: ${canonicalRunFlowIds(cwd).join(", ") || "<none>"}`;
+  }
+  const issues = canonicalRunBindingIssues(binding);
+  if (issues.length === 0) return null;
+  return `${flowId} is declared by kit ${binding.kitId} (${binding.flowRelativePath}) but that kit does not supply every binding the canonical run runtime needs: ${issues.join("; ")}`;
+}
+
+/**
+ * The roots that may supply a canonical run binding: the executing PACKAGE first (the shipped,
+ * digest-covered tree the adapter has always bound), then the project.
+ *
+ * #1316 review FIX-2: this is now the SAME function the declaration enumeration walks
+ * (`canonicalKitFlowSourceRoots`), not a parallel spelling of the same intent. The order decides
+ * which declaration authorizes a start AND which bytes the run pins; two spellings of it is how
+ * those two answers come apart.
+ */
+export function canonicalRunSourceRoots(cwd?: string, startDir?: string): string[] {
+  return canonicalKitFlowSourceRoots(cwd, startDir ?? moduleDirectory());
+}
+
+/**
+ * The bindings the declaring kit failed to supply for `binding`, including the composition and
+ * conformance of the definition itself. Empty means the adapter can bind this flow.
+ */
+function canonicalRunBindingIssues(binding: KitFlowBinding): string[] {
+  // Eligibility is asked on every run load (and twice per origin assertion, since the id check
+  // and the definition load each need the answer), and answering it composes and validates the
+  // definition. Memoize on the bytes it is derived FROM — the manifest and definition file
+  // identities and their mtimes — so a kit edited mid-process is re-derived rather than served
+  // from a stale answer. A file that cannot be stat'ed is not cached at all.
+  const key = bindingFreshnessKey(binding);
+  if (key) {
+    const cached = canonicalRunBindingIssuesCache.get(key);
+    if (cached) return cached;
+  }
+  const issues = deriveCanonicalRunBindingIssues(binding);
+  if (key) canonicalRunBindingIssuesCache.set(key, issues);
+  return issues;
+}
+
+const canonicalRunBindingIssuesCache = new Map<string, string[]>();
+
+function bindingFreshnessKey(binding: KitFlowBinding): string | null {
+  try {
+    const manifest = statSync(binding.manifestPath);
+    const definition = statSync(binding.definitionPath);
+    return [binding.flowId, binding.manifestPath, manifest.mtimeMs, manifest.size, binding.definitionPath, definition.mtimeMs, definition.size].join("\u0000");
+  } catch {
+    return null;
+  }
+}
+
+function deriveCanonicalRunBindingIssues(binding: KitFlowBinding): string[] {
+  const effective = resolveEffectiveFlowDefinition(binding.flowId, binding.sourceRoot, { allowOverride: false });
+  if (!effective) return [`its definition at ${binding.flowRelativePath} does not compile to an effective composition`];
+  let definition: unknown;
+  try {
+    definition = validateDefinition(effective);
+  } catch (error) {
+    return [`its definition at ${binding.flowRelativePath} does not conform to the Flow definition contract: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  if (!isRecord(definition) || definition.id !== binding.flowId) {
+    return [`its definition at ${binding.flowRelativePath} declares id ${JSON.stringify(String(isRecord(definition) ? definition.id : definition))}, which disagrees with the declared flow id`];
+  }
+  return kitFlowRunBindingIssues(binding, definition);
+}
 
 export interface BuilderBuildTrustBundleEvidenceInput {
   gate: string;
@@ -49,7 +182,6 @@ export interface BuilderBuildTrustBundleEvidenceInput {
   expectedSha256?: string;
   status?: "passed" | "failed";
   producer?: string;
-  authorityTrace?: string;
   routeReason?: string;
   expectationIds?: string[];
   supersede?: string | string[];
@@ -167,9 +299,23 @@ export async function startBuilderBuildRun(input: StartBuilderBuildRunInput): Pr
   return asBuilderBuildResult(result, input.runId ?? result.runId);
 }
 
+/**
+ * The definition file the DECLARING kit's manifest names for `flowId`.
+ *
+ * #1316: this used to join a per-kit constant (`flowRelativePath`) onto the package root, so it
+ * could only ever answer for one kit's two flows. The path now comes from the kit that declares
+ * the flow — which is what makes a packaged kit-declared variant addressable at all.
+ */
 export function resolveBuilderFlowDefinitionPath(flowId: BuilderFlowId, startDir = moduleDirectory()): string {
-  const root = findPackageRoot(startDir);
-  return path.join(root, flowRelativePath(flowId));
+  return requireKitFlowBinding(flowId, undefined, startDir).definitionPath;
+}
+
+function requireKitFlowBinding(flowId: string, cwd?: string, startDir = moduleDirectory()): KitFlowBinding {
+  const binding = resolveKitFlowBinding(flowId, canonicalRunSourceRoots(cwd, startDir));
+  if (!binding) {
+    throw new BuilderBuildRunInputError("definition", `no installed kit declares ${flowId} in its kit.json flows[] with a resolvable definition file owned by that kit`);
+  }
+  return binding;
 }
 
 export async function startBuilderFlowRun(input: StartBuilderFlowRunInput): Promise<BuilderFlowRunResult> {
@@ -193,8 +339,14 @@ export async function startBuilderFlowRun(input: StartBuilderFlowRunInput): Prom
       : undefined
   );
   const cwd = input.cwd ?? process.cwd();
-  const definitionPath = resolveBuilderFlowDefinitionPath(input.flowId);
-  const definition = await loadShippedBuilderFlowDefinition(input.flowId, definitionPath);
+  // #1316: the definition is resolved through the DECLARING kit's binding, and the run record
+  // that follows pins exactly these bytes — `assertCanonicalBuilderRunOrigin` re-derives the
+  // same binding on every later load and asserts deep equality. That is what lets a kit ship a
+  // reduced-gate variant without it being mistakable for the full flow: the variant's gate set
+  // IS the pinned definition, and a run whose definition no longer matches its binding is
+  // refused rather than reinterpreted.
+  const binding = requireKitFlowBinding(input.flowId, cwd);
+  const definition = await loadBoundKitFlowDefinition(binding);
   const runtimeDefinitionPath = materializeRuntimeDefinition(cwd, input.flowId, definition);
   const started = await startRun(runtimeDefinitionPath, {
     cwd,
@@ -226,7 +378,7 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
 
   const cwd = input.cwd ?? process.cwd();
   const run = await withFlowRunRecoveryFenceReadAsync(cwd, input.runId, () => loadRun(input.runId, cwd));
-  await assertCanonicalBuilderRunOrigin(input.runId, run);
+  await assertCanonicalBuilderRunOrigin(input.runId, run, cwd);
 
   let attachedEvidence: FlowEvidenceEntry[] = [];
   if (input.evidence !== undefined) {
@@ -273,7 +425,7 @@ export async function loadBuilderFlowRun(input: LoadBuilderBuildRunInput): Promi
   assertRuntimeInput(input, ["evidence", "now", "gate"]);
   const cwd = input.cwd ?? process.cwd();
   const run = await withFlowRunRecoveryFenceReadAsync(cwd, input.runId, () => loadRun(input.runId, cwd));
-  await assertCanonicalBuilderRunOrigin(input.runId, run);
+  await assertCanonicalBuilderRunOrigin(input.runId, run, cwd);
   return resultFromRun(run, input.runId);
 }
 
@@ -313,7 +465,7 @@ async function changeBuilderFlowRunLifecycleResult(
   const before = await loadBuilderFlowRun({ runId: input.runId, cwd });
   assertFlowRunRecoveryFenceOpen(cwd, input.runId);
   const changed = await operation(input.runId, { cwd, ...input.request, ...(input.at ? { at: input.at } : {}) });
-  await assertCanonicalBuilderRunOrigin(input.runId, changed);
+  await assertCanonicalBuilderRunOrigin(input.runId, changed, cwd);
   if (changed.state.subject !== before.state.subject) {
     throw new BuilderBuildRunInputError("flow_run.state.subject", "changed during lifecycle transition");
   }
@@ -353,6 +505,7 @@ async function loadCanonicalBuilderFlowRun(
 async function assertCanonicalBuilderRunOrigin(
   runId: string,
   run: Pick<Awaited<ReturnType<typeof loadRun>>, "definition" | "startDefinition" | "state">,
+  cwd: string,
 ): Promise<void> {
   // Flow owns the complete amendment ledger. Resolve it again here so an
   // adapter never treats an arbitrary immutable start snapshot as sufficient
@@ -361,32 +514,36 @@ async function assertCanonicalBuilderRunOrigin(
   if (!isDeepStrictEqual(effective, run.definition)) {
     throw new BuilderBuildRunIdentityError(runId, effective, run.definition, "definition-content");
   }
-  const definition = await loadShippedBuilderFlowDefinitionForRun(runId, run.definition);
+  const definition = await loadShippedBuilderFlowDefinitionForRun(runId, run.definition, cwd);
   assertCanonicalDefinition(runId, definition, run.definition);
-  if (!isBuilderFlowId(run.definition.id)) {
+  if (!isCanonicalRunFlowId(run.definition.id, cwd)) {
     throw new BuilderBuildRunIdentityError(runId, definition, run.definition, "definition-id");
   }
 }
 
-async function loadShippedBuilderFlowDefinition(flowId: BuilderFlowId, definitionPath: string): Promise<{ id: string; version: string }> {
-  const packageRoot = findPackageRoot(path.dirname(definitionPath));
-  const effective = resolveEffectiveFlowDefinition(flowId, packageRoot, { allowOverride: false });
+/**
+ * Compose and validate the definition the binding names, from the ROOT the binding was resolved
+ * in. Composition stays with the resolver (`uses_flow`), so the bytes judged here are the bytes
+ * the runtime will resolve later.
+ */
+async function loadBoundKitFlowDefinition(binding: KitFlowBinding): Promise<{ id: string; version: string }> {
+  const effective = resolveEffectiveFlowDefinition(binding.flowId, binding.sourceRoot, { allowOverride: false });
   if (!effective) {
     throw new BuilderBuildRunInputError("definition", "could not compile the shipped uses_flow composition");
   }
   const definition = validateDefinition(effective);
-  if (definition.id !== flowId) {
-    throw new BuilderBuildRunInputError("definition", `expected shipped definition id ${flowId}`);
+  if (definition.id !== binding.flowId) {
+    throw new BuilderBuildRunInputError("definition", `expected shipped definition id ${binding.flowId}`);
   }
   return definition;
 }
 
-async function loadShippedBuilderFlowDefinitionForRun(runId: string, actualDefinition: { id: string; version: string }): Promise<{ id: string; version: string }> {
+async function loadShippedBuilderFlowDefinitionForRun(runId: string, actualDefinition: { id: string; version: string }, cwd: string): Promise<{ id: string; version: string }> {
   const flowId = actualDefinition.id;
-  if (!isBuilderFlowId(flowId)) {
+  if (!isCanonicalRunFlowId(flowId, cwd)) {
     throw new BuilderBuildRunIdentityError(runId, { id: BUILDER_BUILD_FLOW_ID, version: "unknown" }, actualDefinition, "definition-id");
   }
-  return loadShippedBuilderFlowDefinition(flowId, resolveBuilderFlowDefinitionPath(flowId));
+  return loadBoundKitFlowDefinition(requireKitFlowBinding(flowId, cwd));
 }
 
 function materializeRuntimeDefinition(cwd: string, flowId: BuilderFlowId, definition: unknown): string {
@@ -397,14 +554,6 @@ function materializeRuntimeDefinition(cwd: string, flowId: BuilderFlowId, defini
   const file = path.join(directory, `${flowId.replace(".", "-")}-${digest}.flow.json`);
   if (!existsSync(file)) writeFileSync(file, content);
   return file;
-}
-
-function flowRelativePath(flowId: BuilderFlowId): string {
-  return flowId === BUILDER_BUILD_FLOW_ID ? BUILDER_BUILD_FLOW_RELATIVE_PATH : BUILDER_SHAPE_FLOW_RELATIVE_PATH;
-}
-
-function isBuilderFlowId(value: string): value is BuilderFlowId {
-  return value === BUILDER_BUILD_FLOW_ID || value === BUILDER_SHAPE_FLOW_ID;
 }
 
 function assertExpectedFlow(runId: string, actual: BuilderFlowId, expected: BuilderFlowId): void {
@@ -510,7 +659,7 @@ function trustBundleAttachOptions(
   expectedSha256: string,
   expectedRunHead: string,
   correlation: RunCorrelationPresence,
-): JsonObject {
+): JsonObject & { gate: string; file: string } {
   const analytics = {
     ...(evidence.analytics ?? {}),
     run_correlation: correlation.status === "present"
@@ -527,7 +676,11 @@ function trustBundleAttachOptions(
     bundle: true,
     ...(evidence.status ? { status: evidence.status } : {}),
     ...(evidence.producer ? { producer: evidence.producer } : {}),
-    ...(evidence.authorityTrace ? { authorityTrace: evidence.authorityTrace } : {}),
+    // authorityTrace is no longer an attachEvidence option under Flow 5.0 (it
+    // throws on unknown keys); the operation-authority binding is now embedded
+    // in the bundle content itself before this function is ever called — see
+    // publishChangeAuthorityRef / writePublishChangeEvidence in
+    // builder-flow-runtime.ts.
     ...(evidence.routeReason ? { route_reason: evidence.routeReason } : {}),
     ...(evidence.expectationIds ? { expectation_ids: evidence.expectationIds } : {}),
     ...(evidence.supersede ? { supersede: evidence.supersede } : {}),
@@ -595,16 +748,3 @@ function moduleDirectory(): string {
   return path.dirname(fileURLToPath(import.meta.url));
 }
 
-function findPackageRoot(startDir: string): string {
-  let dir = startDir;
-  for (;;) {
-    if (existsSync(path.join(dir, "package.json")) && existsSync(path.join(dir, BUILDER_BUILD_FLOW_RELATIVE_PATH))) {
-      return dir;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) {
-      throw new Error(`unable to locate ${BUILDER_BUILD_FLOW_RELATIVE_PATH} from ${startDir}`);
-    }
-    dir = parent;
-  }
-}

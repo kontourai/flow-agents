@@ -134,7 +134,22 @@ fallback_envelope() {
   echo '{"schema":"kontour.learning-review-proposals","version":"0.1","window":{"since":null,"until":null},"records_considered":0,"outcome":"insufficient-data","aggregates":{"by_kit":[],"by_gate":[],"partial":true},"proposals":[],"notes":["no parseable records"]}'
 }
 
-records_json="$(printf '%s' "$records" | jq -s -c '[ .[] | select(type == "object" and .schema == "kontour.console.economics") ]' 2>/dev/null)"
+# producer_authority "flow_run_record" is EXCLUDED from this population, deliberately.
+#
+# The Stop hook now emits two economics records per Builder Stop: the legacy session.usage-derived
+# record this analyzer was built on, and the canonical Flow-run-derived record. They describe the
+# SAME run from two incompatible vantage points, and every aggregate below would silently mix them:
+# `records_considered` is reported as `runs` (so one run counts twice and sample thresholds trip
+# early), `.cost.estimated_cost_usd // 0` turns the run-derived record's honest "cost is unknown"
+# null into a real $0 that drags cost trends down, and `.time.wall_clock_s` averages a session
+# duration together with a pause-subtracted Flow active duration.
+#
+# Filtering here keeps this analyzer's population byte-for-byte what it was before dual emission --
+# a no-behaviour-change fix, not a new opinion about which producer is better. Teaching it to prefer
+# the run-derived record (which carries the honest phases, route-backs and terminal status) needs
+# token attribution to exist first and is tracked separately; it is a redesign of these aggregates,
+# not a filter.
+records_json="$(printf '%s' "$records" | jq -s -c '[ .[] | select(type == "object" and .schema == "kontour.console.economics" and .producer_authority != "flow_run_record") ]' 2>/dev/null)"
 [[ -n "$records_json" ]] || { fallback_envelope; exit 0; }
 
 # Distinct, non-null task_slugs present in the gathered records — the join keys we need to resolve.

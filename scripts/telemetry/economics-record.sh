@@ -58,16 +58,172 @@ state_path=""
 acceptance_path=""
 critique_path=""
 agents_dir=""
+flow_run_dir=""
+flow_run_now=""
+flow_run_task_slug=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --state) state_path="${2:-}"; shift 2 ;;
     --acceptance) acceptance_path="${2:-}"; shift 2 ;;
     --critique) critique_path="${2:-}"; shift 2 ;;
     --agents-dir) agents_dir="${2:-}"; shift 2 ;;
+    --flow-run-dir) flow_run_dir="${2:-}"; shift 2 ;;
+    --now) flow_run_now="${2:-}"; shift 2 ;;
+    --task-slug) flow_run_task_slug="${2:-}"; shift 2 ;;
     --) shift ;;
     *) [[ -z "$usage_event" ]] && usage_event="$1"; shift ;;
   esac
 done
+
+# --- Phase A run-derived mode (#922/#925): --flow-run-dir bypasses the session.usage-event path
+# entirely and derives phases[]/iterations/defects/terminal_status straight from the canonical Flow
+# run store (schemas/flow-run.schema.json) via flow-run-economics.mjs — see that file for the full
+# derivation rationale. This is a SEPARATE, self-contained branch so the legacy session.usage-event
+# invocation below is untouched. Token/cost fields stay null/0 here (never fabricated); token
+# attribution is the separate, explicit scripts/telemetry/economics-enrich-tokens.mjs tool (not
+# wired in automatically — see docs/specs/economics-record-contract.md "flow-run-record mode").
+# Local-only: this mode never relays to the console (producer_authority "flow_run_record" is not an
+# authenticated runtime binding); it only appends to the local economics log.
+if [[ -n "$flow_run_dir" ]]; then
+  node_bin="$(command -v node 2>/dev/null || true)"
+  helper="$SCRIPT_DIR/flow-run-economics.mjs"
+  if [[ -z "$node_bin" || ! -f "$helper" ]]; then
+    exit 0
+  fi
+  now_arg=()
+  [[ -n "$flow_run_now" ]] && now_arg=(--now "$flow_run_now")
+  # Portability (review finding 1): expand as "${now_arg[@]+"${now_arg[@]}"}" rather than the
+  # plain "${now_arg[@]}" -- macOS's stock /bin/bash (3.2, pre-GPLv3) treats a zero-element
+  # array as unbound under `set -u` and aborts with "unbound variable" (this script's shebang
+  # resolves whichever `bash` PATH finds first, which is not guaranteed to be >= 4.4). Same
+  # documented idiom as scripts/telemetry/console-board-sync.sh:60-64.
+  derived="$("$node_bin" "$helper" --flow-run-dir "$flow_run_dir" "${now_arg[@]+"${now_arg[@]}"}" 2>/dev/null)" || exit 0
+  printf '%s' "$derived" | jq -e '.ok == true' >/dev/null 2>&1 || exit 0
+
+  # --- producer identity (#970), resolved the same way as the legacy path below. -------------------
+  install_identity_json=""
+  if declare -f install_identity >/dev/null 2>&1; then
+    install_identity_json=$(install_identity 2>/dev/null) || install_identity_json=""
+  fi
+  printf '%s' "$install_identity_json" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || install_identity_json='{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}'
+
+  tenant_self="${CONSOLE_TENANT_ID:-${FLOW_AGENTS_CONSOLE_TENANT:-}}"
+
+  record="$(printf '%s' "$derived" | jq -c \
+    --argjson install_identity "$install_identity_json" \
+    --arg tenant "$tenant_self" \
+    --arg task_slug "$flow_run_task_slug" '
+    def bounded_number: if (type == "number" and . >= 0) then . else 0 end;
+    . as $d
+    | ($d.phases // []) as $phases
+    | ({critical:0, high:0, medium:0, low:0}) as $sev
+    # Review finding 3 fix: a real zero and "we do not know" must never be byte-identical.
+    # tokens_unattributed is true iff ANY phase has null token fields -- in that case the
+    # top-level cost.* token fields are ALSO null (never a coalesced 0-sum of partial/absent
+    # data); only when EVERY phase carries real, attributed tokens does cost.* sum them.
+    # estimated_cost_usd is unconditionally null in this mode: pricing is never attempted here
+    # regardless of token attribution (see docs/specs/economics-record-contract.md).
+    | (([$phases[] | select(.input_tokens == null)] | length) > 0) as $tokens_unattributed
+    | {
+        schema: "kontour.console.economics",
+        version: "0.2",
+        run_id: $d.run_id,
+        run_correlation: {
+          status: "incomplete",
+          reason: "flow-run-record mode derives from the Flow run store only; runtime session identity is not bound here (flow-agents#922)"
+        },
+        observation_semantics: "snapshot",
+        producer_authority: "flow_run_record",
+        terminal_status: $d.terminal_status,
+        at: (if $d.record_at_iso then
+              (($d.record_at_iso | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) * 1000 | floor | tostring)
+            else null end),
+        task_slug: (if $task_slug == "" then null else $task_slug end),
+        model: null,
+        pricing_version: null,
+        cost: {
+          input_tokens: (if $tokens_unattributed then null else ([$phases[].input_tokens] | add // 0) end),
+          output_tokens: (if $tokens_unattributed then null else ([$phases[].output_tokens] | add // 0) end),
+          cache_creation_input_tokens: (if $tokens_unattributed then null else ([$phases[].cache_creation_input_tokens] | add // 0) end),
+          cache_read_input_tokens: (if $tokens_unattributed then null else ([$phases[].cache_read_input_tokens] | add // 0) end),
+          estimated_cost_usd: null,
+          by_model: []
+        },
+        time: {
+          wall_clock_s: ($d.time.wall_clock_s | bounded_number),
+          human_wait_s: ($d.time.human_wait_s | bounded_number)
+        },
+        phases: $phases,
+        tokens_unattributed: $tokens_unattributed,
+        iterations: {
+          count: ($d.iterations.count | bounded_number),
+          route_backs: ($d.iterations.route_backs | bounded_number)
+        },
+        defects: {
+          gate_fires: ($d.defects.gate_fires | bounded_number),
+          findings_by_severity: $sev,
+          caught_false_completions: 0,
+          verification_verdict: $d.defects.verification_verdict
+        },
+        delegations: [],
+        signals: {
+          runtime: null,
+          per_delegation_tokens: false,
+          per_delegation_outcome: "n/a"
+        },
+        tenant_id: (if $tenant == "" then null else $tenant end),
+        install_identity: $install_identity
+      }' 2>/dev/null)" || exit 0
+  [[ -z "$record" || "$record" == "null" ]] && exit 0
+
+  # Structural sanity check before the local-first write (mirrors the legacy path's guard).
+  # Review finding 3: cost.* token/cost leaves may be null (tokens_unattributed) -- never
+  # required to be a real number here. Review finding 11 (defense-in-depth): also pin
+  # terminal_status to the canonical observable Flow-status vocabulary before it reaches the local log.
+  if ! printf '%s' "$record" | jq -e '
+    def number: type == "number" and . >= 0;
+    def number_or_null: (type == "number" and . >= 0) or . == null;
+    .schema == "kontour.console.economics"
+    and .version == "0.2"
+    and (.run_id | type == "string")
+    and (.cost.input_tokens | number_or_null)
+    and (.cost.estimated_cost_usd | number_or_null)
+    and (.time.wall_clock_s | number)
+    and (.iterations.count | number)
+    and (.defects.gate_fires | number)
+    and (.terminal_status as $t | ["completed","canceled","failed","accepted_by_exception","active","blocked","needs_decision","paused"] | index($t) != null)
+  ' >/dev/null 2>&1; then
+    exit 0
+  fi
+
+  if [[ -n "${TELEMETRY_ECONOMICS_LOG_FILE:-}" ]]; then
+    economics_log="$TELEMETRY_ECONOMICS_LOG_FILE"
+  elif [[ -n "${TELEMETRY_DATA_DIR:-}" ]]; then
+    economics_log="${TELEMETRY_DATA_DIR}/economics.jsonl"
+  else
+    economics_log="${TELEMETRY_DIR}/../../.kontourai/telemetry/economics.jsonl"
+  fi
+  mkdir -p "$(dirname "$economics_log")" 2>/dev/null || true
+  # Terminal Flow snapshots are byte-identical on every later Stop. Scan only the bounded recent
+  # tail for this producer/run pair so an old terminal record is not appended forever; beyond 1000
+  # lines a duplicate snapshot is benign, while an unbounded scan of a growing local log is not.
+  if [[ -f "$economics_log" ]]; then
+    flow_run_id="$(printf '%s' "$record" | jq -r '.run_id // empty' 2>/dev/null)"
+    # -R + fromjson? so ONE corrupt line does not abort the scan: jq halts a JSON stream at the
+    # first parse error, which would hide every matching record after it and re-append a duplicate.
+    # Degradation was already benign (duplicate, never a suppressed observation) -- this just makes
+    # the common case correct too.
+    recent_flow_run_record="$(tail -n 1000 "$economics_log" 2>/dev/null | jq -R -c \
+      --arg run_id "$flow_run_id" '
+        fromjson? | select(type == "object" and .producer_authority == "flow_run_record" and .run_id == $run_id)
+      ' 2>/dev/null | tail -n 1)"
+    [[ -n "$recent_flow_run_record" && "$recent_flow_run_record" == "$record" ]] && exit 0
+  fi
+  printf '%s\n' "$record" >> "$economics_log" 2>/dev/null || true
+  exit 0
+fi
+
 explicit_sidecars=false
 [[ -n "$state_path$acceptance_path$critique_path$agents_dir" ]] && explicit_sidecars=true
 if [[ "$explicit_sidecars" == "true" && "${FLOW_AGENTS_ECONOMICS_FIXTURE_MODE:-}" != "true" ]]; then

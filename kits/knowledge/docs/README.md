@@ -481,14 +481,16 @@ a snapshot digest + timestamp is recorded on the graph.
 
 ```js
 import { GitRepoProvider } from "./kits/knowledge/providers/git-repo/index.js";
-import { WorkItemProvider } from "./kits/knowledge/providers/work-item/index.js";
+import { WorkItemProvider, createGhRunner } from "./kits/knowledge/providers/work-item/index.js";
 import { syncToNeo4j } from "./kits/knowledge/providers/neo4j/index.js";
 import { resolveNeo4jConfig, createDriver } from "./kits/knowledge/providers/neo4j/index.js";
 
 const driver = await createDriver(resolveNeo4jConfig());
 const providers = [
   new GitRepoProvider({ repoRoot: process.cwd() }),
-  new WorkItemProvider({ repo: "kontourai/flow-agents" }), // reads via gh
+  // WorkItemProvider requires an injected runner (no default); createGhRunner()
+  // shells out to `gh` for read-only issue listing.
+  new WorkItemProvider({ repo: "kontourai/flow-agents", runner: createGhRunner() }),
 ];
 console.log(await syncToNeo4j({ driver, providers })); // { writes, unchanged, digest, ... }
 ```

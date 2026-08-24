@@ -73,6 +73,16 @@ const SEALED_EXECUTION_HARD_MAX_OUTPUT_BYTES = 256 * 1024;
 const SEALED_EXECUTION_HARD_MAX_PROVIDER_CALLS = 64;
 const SEALED_EXECUTION_HARD_MAX_COST_MICROUSD = 5_000_000;
 const SEALED_EXECUTION_HARD_MAX_TOKENS = 750_000;
+// These are the same canonical snapshot resource limits used by the public
+// command observer. An authorization comparison must never be weaker than the
+// snapshot it is intended to bind.
+const MAX_TRACKED_DIFF_BYTES = 16 * 1024 * 1024;
+const MAX_UNTRACKED_LIST_BYTES = 4 * 1024 * 1024;
+const MAX_TRACKED_INDEX_BYTES = 4 * 1024 * 1024;
+const MAX_UNTRACKED_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_UNTRACKED_TOTAL_BYTES = 64 * 1024 * 1024;
+const HASH_READ_CHUNK_BYTES = 64 * 1024;
+const EXACT_COMMIT_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const PROVISIONAL_DELIVERY_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject", "work_item", "assignment_actor_key", "assignment_generation",
   "published_head_sha", "provider_record_id", "provider_observation_sha256",
@@ -128,6 +138,22 @@ const MERGE_CHANGE_AUTHORIZATION_FIELDS = [
 ];
 
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * #1307: this was the THIRD independent encoding of the route-map contract (after #1300's in
+ * merge-change and the static eval's). The semantic requirement is that the refresh entries are
+ * PRESENT with the bounded blocking policy; additional repair routes (implementation_defect)
+ * and the #1302 requires_current_verification declaration are the flow definition's business.
+ * Exported as a pure predicate so conformance tests drive it with the real shipped definition
+ * rather than grepping this file's text.
+ */
+export function mergeReadyCiRefreshRoutesSatisfied(gate) {
+  if (!record(gate)) return false;
+  const routes = gate.on_route_back;
+  if (!record(routes)) return false;
+  return routes.missing_evidence === "verify" && routes.default === "verify"
+    && canonicalJson(gate.route_back_policy) === canonicalJson({ max_attempts: 3, on_exceeded: "block" });
+}
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (record(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
@@ -148,35 +174,137 @@ function within(candidate, root) {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
-function provisionalWorkspaceSnapshot(projectRoot, runId) {
-  const excluded = `delivery/${runId}`;
-  const git = (args, encoding = "utf8") => {
-    const result = spawnSync("git", args, { cwd: projectRoot, encoding, maxBuffer: 32 * 1024 * 1024 });
-    if (result.status !== 0) throw new Error("provisional delivery could not inspect the signed Git workspace");
-    return result.stdout;
+function provisionalTrustedGitEnvironment() {
+  return {
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_NO_REPLACE_OBJECTS: "1",
+    LANG: "C",
+    LC_ALL: "C",
+    PATH: process.platform === "win32" ? "C:\\Program Files\\Git\\cmd;C:\\Windows\\System32;C:\\Windows" : "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    ...(process.platform === "win32" ? { SystemRoot: "C:\\Windows", WINDIR: "C:\\Windows" } : {}),
   };
-  const root = String(git(["rev-parse", "--show-toplevel"])).trim();
-  if (fs.realpathSync(root) !== projectRoot) throw new Error("provisional delivery project root is not the Git worktree root");
-  const head = String(git(["rev-parse", "HEAD"])).trim();
-  const tracked = git(["diff", "--binary", "--no-ext-diff", "HEAD", "--", ".", `:(exclude)${excluded}/**`], null);
-  const untracked = Buffer.from(git(["ls-files", "--others", "--exclude-standard", "-z"], null))
-    .toString("utf8").split("\0").filter(Boolean)
+}
+function provisionalTrustedGitCandidates() {
+  if (process.platform === "darwin") return ["/usr/bin/git", "/run/current-system/sw/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"];
+  if (process.platform === "win32") return ["C:\\Program Files\\Git\\cmd\\git.exe"];
+  return ["/usr/bin/git", "/run/current-system/sw/bin/git", "/usr/local/bin/git"];
+}
+function provisionalTrustedGitIdentity(candidate) {
+  const resolved = fs.realpathSync(candidate);
+  const stat = fs.statSync(resolved);
+  if (!path.isAbsolute(resolved) || !stat.isFile() || (process.platform !== "win32" && (stat.mode & 0o111) === 0)) throw new Error("untrusted Git executable");
+  if (process.platform !== "win32") {
+    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("untrusted Git executable ownership");
+    for (let cursor = path.dirname(resolved);;) {
+      const parent = fs.statSync(cursor);
+      if (!parent.isDirectory() || parent.uid !== 0 || (parent.mode & 0o022) !== 0) throw new Error("untrusted Git executable parent");
+      const next = path.dirname(cursor);
+      if (next === cursor) break;
+      cursor = next;
+    }
+  }
+  return { candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode };
+}
+export function resolveProvisionalTrustedGitExecutable() {
+  for (const candidate of provisionalTrustedGitCandidates()) {
+    try { return provisionalTrustedGitIdentity(candidate); } catch {}
+  }
+  throw new Error("trusted Git executable is unavailable");
+}
+function revalidateProvisionalTrustedGit(identity) {
+  const current = provisionalTrustedGitIdentity(identity.candidate);
+  return current.device === identity.device && current.inode === identity.inode && current.size === identity.size
+    && current.mtimeMs === identity.mtimeMs && current.mode === identity.mode;
+}
+function provisionalTrustedGit(root, args, maxBytes, label) {
+  let executable;
+  try { executable = resolveProvisionalTrustedGitExecutable(); } catch {
+    throw new Error(`provisional delivery could not inspect the signed Git workspace (${label})`);
+  }
+  const result = spawnSync(executable.path, [
+    "--no-replace-objects",
+    "-c", "core.fsmonitor=false",
+    "-c", `core.hooksPath=${process.platform === "win32" ? "NUL" : "/dev/null"}`,
+    "-c", "diff.external=",
+    "-C", root,
+    ...args,
+  ], {
+    encoding: "buffer",
+    env: provisionalTrustedGitEnvironment(),
+    stdio: ["ignore", "pipe", "ignore"],
+    maxBuffer: maxBytes + 1,
+  });
+  if (!result || result.error || result.signal || result.status !== 0 || !Buffer.isBuffer(result.stdout) || result.stdout.length > maxBytes || !revalidateProvisionalTrustedGit(executable)) {
+    throw new Error(`provisional delivery could not inspect the signed Git workspace (${label})`);
+  }
+  return result.stdout;
+}
+function provisionalHead(root) {
+  const head = provisionalTrustedGit(root, ["rev-parse", "--verify", "HEAD^{commit}"], 256, "HEAD").toString("utf8").trim().toLowerCase();
+  if (!EXACT_COMMIT_SHA.test(head)) throw new Error("provisional delivery Git HEAD is invalid");
+  return head;
+}
+function assertProvisionalOrdinaryTrackedIndex(root) {
+  const entries = provisionalTrustedGit(root, ["ls-files", "-v", "-z"], MAX_TRACKED_INDEX_BYTES, "tracked-index list").toString("utf8").split("\0");
+  for (const entry of entries) if (entry && !entry.startsWith("H ")) throw new Error("provisional delivery tracked index contains a nonordinary ls-files tag");
+}
+function sameProvisionalFileIdentity(before, after) {
+  return before.dev === after.dev && before.ino === after.ino && before.size === after.size
+    && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs;
+}
+function hashProvisionalUntrackedFile(hash, file, absolute, totalBytes) {
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  const descriptor = fs.openSync(absolute, fs.constants.O_RDONLY | noFollow);
+  try {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile()) throw new Error("provisional delivery untracked entry is not a regular file");
+    if (before.size > MAX_UNTRACKED_FILE_BYTES) throw new Error("provisional delivery untracked file exceeds the per-file snapshot limit");
+    if (totalBytes + before.size > MAX_UNTRACKED_TOTAL_BYTES) throw new Error("provisional delivery untracked files exceed the total snapshot limit");
+    hash.update(file).update("\0");
+    const buffer = Buffer.allocUnsafe(HASH_READ_CHUNK_BYTES);
+    let remaining = before.size;
+    let position = 0;
+    while (remaining > 0) {
+      const bytesRead = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, remaining), position);
+      if (bytesRead <= 0) throw new Error("provisional delivery untracked file changed during workspace snapshot capture");
+      hash.update(buffer.subarray(0, bytesRead));
+      remaining -= bytesRead;
+      position += bytesRead;
+    }
+    if (!sameProvisionalFileIdentity(before, fs.fstatSync(descriptor))) throw new Error("provisional delivery untracked file changed during workspace snapshot capture");
+    hash.update("\0");
+    return totalBytes + before.size;
+  } finally { fs.closeSync(descriptor); }
+}
+export function provisionalWorkspaceSnapshot(projectRoot, runId, hooks = {}) {
+  const canonicalRoot = fs.realpathSync(projectRoot);
+  const excluded = `delivery/${runId}`;
+  const root = provisionalTrustedGit(canonicalRoot, ["rev-parse", "--show-toplevel"], 64 * 1024, "worktree root").toString("utf8").trim();
+  if (fs.realpathSync(root) !== canonicalRoot) throw new Error("provisional delivery project root is not the Git worktree root");
+  const head = provisionalHead(canonicalRoot);
+  assertProvisionalOrdinaryTrackedIndex(canonicalRoot);
+  const tracked = provisionalTrustedGit(canonicalRoot, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ".", `:(exclude)${excluded}/**`], MAX_TRACKED_DIFF_BYTES, "tracked diff");
+  const untrackedBytes = provisionalTrustedGit(canonicalRoot, ["ls-files", "--others", "--exclude-standard", "-z"], MAX_UNTRACKED_LIST_BYTES, "untracked-file list");
+  const untracked = untrackedBytes.toString("utf8").split("\0").filter(Boolean)
     .filter((file) => file !== excluded && !file.startsWith(`${excluded}/`)).sort();
   const hash = crypto.createHash("sha256");
   hash.update("flow-agents:git-worktree:v1\0").update(head).update("\0");
   hash.update("exclude\0").update(excluded).update("\0");
   hash.update(tracked).update("\0");
+  let untrackedTotalBytes = 0;
   for (const file of untracked) {
-    const absolute = path.resolve(projectRoot, file);
-    if (!within(absolute, projectRoot)) throw new Error("provisional delivery untracked file escapes the project root");
-    const descriptor = fs.openSync(absolute, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    try {
-      const stat = fs.fstatSync(descriptor);
-      if (!stat.isFile()) throw new Error("provisional delivery untracked entry is not a regular file");
-      hash.update(file).update("\0").update(fs.readFileSync(descriptor)).update("\0");
-    } finally { fs.closeSync(descriptor); }
+    const absolute = path.resolve(canonicalRoot, file);
+    if (!within(absolute, canonicalRoot)) throw new Error("provisional delivery untracked file escapes the project root");
+    untrackedTotalBytes = hashProvisionalUntrackedFile(hash, file, absolute, untrackedTotalBytes);
   }
-  return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: head };
+  hooks.afterInitialInputsRead?.();
+  const settledTracked = provisionalTrustedGit(canonicalRoot, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ".", `:(exclude)${excluded}/**`], MAX_TRACKED_DIFF_BYTES, "settled tracked diff");
+  const settledUntrackedBytes = provisionalTrustedGit(canonicalRoot, ["ls-files", "--others", "--exclude-standard", "-z"], MAX_UNTRACKED_LIST_BYTES, "settled untracked-file list");
+  if (!settledTracked.equals(tracked) || !settledUntrackedBytes.equals(untrackedBytes)) throw new Error("provisional delivery workspace inputs changed while collecting the snapshot");
+  assertProvisionalOrdinaryTrackedIndex(canonicalRoot);
+  if (provisionalHead(canonicalRoot) !== head) throw new Error("provisional delivery Git HEAD changed while collecting the workspace snapshot");
+  return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: head, worktree_clean: tracked.length === 0 && untracked.length === 0 };
 }
 function protectedRegularFile(file, label, maxBytes = 64 * 1024) {
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
@@ -387,11 +515,18 @@ export function validateProvisionalDeliveryAuthorizationBinding(authorization, e
     if (expected[field] !== undefined && authorization[field] !== expected[field]) throw new Error(`provisional delivery authorization ${field} does not match the current session`);
   }
   for (const field of ["flow_definition_digest", "flow_run_head", "published_head_sha", "checkpoint_commit_sha", "provider_observation_sha256", "checkpoint_sha256", "bundle_sha256", "attestation_sha256"]) {
-    const pattern = field === "checkpoint_commit_sha" || field === "published_head_sha" ? /^[a-f0-9]{40}$/ : /^[a-f0-9]{64}$/;
+    const pattern = field === "checkpoint_commit_sha" || field === "published_head_sha" ? EXACT_COMMIT_SHA : /^[a-f0-9]{64}$/;
     if (!pattern.test(String(authorization[field]))) throw new Error(`provisional delivery authorization ${field} is invalid`);
     if (expected[field] !== undefined && authorization[field] !== expected[field]) throw new Error(`provisional delivery authorization ${field} does not match the current session`);
   }
-  if (!record(authorization.workspace_snapshot) || (expected.workspace_snapshot !== undefined && canonicalJson(authorization.workspace_snapshot) !== canonicalJson(expected.workspace_snapshot))) throw new Error("provisional delivery authorization workspace snapshot does not match the current session");
+  if (!record(authorization.workspace_snapshot)
+      || authorization.workspace_snapshot.version !== 1
+      || authorization.workspace_snapshot.kind !== "git-worktree"
+      || authorization.workspace_snapshot.algorithm !== "sha256"
+      || !EXACT_COMMIT_SHA.test(String(authorization.workspace_snapshot.head_sha))
+      || !/^[a-f0-9]{64}$/.test(String(authorization.workspace_snapshot.digest))
+      || typeof authorization.workspace_snapshot.worktree_clean !== "boolean"
+      || (expected.workspace_snapshot !== undefined && canonicalJson(authorization.workspace_snapshot) !== canonicalJson(expected.workspace_snapshot))) throw new Error("provisional delivery authorization workspace snapshot does not match the current session");
   if (!Array.isArray(authorization.companions) || (expected.companions !== undefined && canonicalJson(authorization.companions) !== canonicalJson(expected.companions))) throw new Error("provisional delivery authorization companions do not match the current session");
   if (authorization.subject !== authorization.work_item || authorization.checkpoint_slug !== authorization.run_id || authorization.flow_definition_id !== "builder.build") throw new Error("provisional delivery authorization cross-binding is invalid");
   const requested = Date.parse(authorization.requested_at), expires = Date.parse(authorization.expires_at);
@@ -758,7 +893,7 @@ function exactObject(value, expected, label) {
 async function loadPinnedFlowReducer() {
   const pin = protectedJson(FLOW_REDUCER_PIN_FILE, "Flow reducer pin", 16 * 1024);
   exact(pin, ["package", "package_version", "release_commit", "closure_sha256", "reducer"], "Flow reducer pin");
-  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.9.0" || pin.release_commit !== "a7c101f" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
+  if (pin.package !== "@kontourai/flow" || pin.package_version !== "5.0.0" || pin.release_commit !== "99f139b" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
   const packageJson = protectedJson(path.join(FLOW_REDUCER_PACKAGE_ROOT, "package.json"), "pinned Flow package metadata", 64 * 1024);
   if (packageJson.name !== pin.package || packageJson.version !== pin.package_version) throw new Error("installed Flow package does not match the pinned reducer package identity");
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
@@ -1325,7 +1460,12 @@ function assertMergeChangeVerificationRefreshProvenance(state, definition, defin
     && entry.successor_definition.version === definition.version
     && entry.successor_definition.digest === definitionDigest);
   if (amendments.length === 0) {
-    if (state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
+    // #1307: @kontourai/flow's writer has never stamped state.definition_digest; the identity the
+    // stamp would prove is already established by the caller's deep-equal of the persisted start
+    // definition against the resolved effective definition. Accept the derived proof when the
+    // stamp is absent (the validator-derived identity established upstream is the proof; this
+    // function does not itself perform that comparison); refuse only a PRESENT mismatched stamp.
+    if (state.definition_digest !== undefined && state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
     return;
   }
   if (adopted.length !== 1) throw new Error("merge-change requires one authenticated definition amendment adopting the canonical evidence-refresh definition");
@@ -1378,9 +1518,7 @@ async function assertMergeChangeAuthorizationBinding(paths, authorization, reque
     throw new Error("merge-change authorization canonical Flow binding changed");
   }
   const mergeReadyCi = definition.gates?.["builder.publish-learn:merge-ready-ci-gate"];
-  if (!record(mergeReadyCi)
-      || canonicalJson(mergeReadyCi.on_route_back) !== canonicalJson({ missing_evidence: "verify", default: "verify" })
-      || canonicalJson(mergeReadyCi.route_back_policy) !== canonicalJson({ max_attempts: 3, on_exceeded: "block" })) {
+  if (!mergeReadyCiRefreshRoutesSatisfied(mergeReadyCi)) {
     throw new Error("merge-change requires semantic merge-ready-ci evidence-refresh control");
   }
   assertMergeChangeVerificationRefreshProvenance(state, definition, flow.definitionDigest(definition));

@@ -59,6 +59,7 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | builder-lifecycle-authorization.schema.json | Builder Lifecycle Authorization | https://kontourai.dev/schemas/builder-lifecycle-authorization.schema.json |
 | change-provider-settings.schema.json | Flow Agents Change Provider Settings | https://flow-agents.dev/schemas/change-provider-settings.schema.json |
 | decision-record.schema.json | Flow Agents Decision Record | https://flow-agents.dev/schemas/decision-record.schema.json |
+| delegation-envelope.schema.json | Provider-neutral delegation envelope | https://kontourai.dev/schemas/flow-agents/delegation-envelope/1.0.json |
 | flow-agents-core-config.schema.json | Flow Agents committed core configuration |  |
 | flow-agents-kit-config.schema.json | Flow Agents committed Kit Flow config proposal |  |
 | flow-agents-settings.schema.json | Flow Agents Settings | https://flow-agents.dev/schemas/flow-agents-settings.schema.json |

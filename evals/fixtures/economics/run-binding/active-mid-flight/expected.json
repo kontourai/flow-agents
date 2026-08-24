@@ -1,0 +1,18 @@
+{
+  "run_id": "econ-fixture-active-mid-flight",
+  "terminal_status": "active",
+  "phase_wall_clock_s": {
+    "design-probe": 90,
+    "plan": 300,
+    "execute": 500
+  },
+  "iterations": {
+    "count": 1,
+    "route_backs": 0
+  },
+  "defects": {
+    "gate_fires": 0,
+    "verification_verdict": "NOT_VERIFIED"
+  },
+  "total_wall_clock_s": 890
+}

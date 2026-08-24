@@ -149,6 +149,51 @@ definition bounds that correction to three Flow-owned attempts and blocks on exh
 there is no default execute route. Status and sync are read-only/reprojection operations,
 not implicit backtracking or definition amendment.
 
+A gate may declare `requires_current_verification: true` in its Flow Definition
+(the Builder Kit declares it on `merge-ready-ci-gate`). The evidence writer then
+refuses a **passing** claim for that gate's expectations while canonical review
+and test verification evidence is stale for the current workspace, running the
+same snapshot-freshness predicate the delivery publish preflight runs and
+surfacing its exact vocabulary. This closes the #1302 composition trap: freshness
+was previously guarded only at the exits (publish), so a cursor-advancing gate
+could commit the run past its last repair point on stale evidence. Failing
+claims are exempt — they are the repair path — and the Builder `learn-gate`
+declares `missing_evidence`/`default -> verify` so staleness discovered past
+`merge-ready-ci` remains repairable through the ordinary bounded route-back
+mechanism instead of stranding the run.
+
+Recording a non-pass status at a gate with an `on_route_back` map is a disclosed
+cost, not a silent transition (#1304). The disclosure has two halves, split along
+declared-versus-observed lines so it never predicts what evaluation will decide.
+Before the mutation, the evidence writer (and the direct sidecar gate-claim
+writer) prints a stderr NOTICE stating only pre-existing facts: the gate's
+declared route map (`reason -> step`, quoted from the definition), the persisted
+attempt history grouped by Flow's budget identity — normalized reason + loop +
+retry epoch, with the current epoch derived from `retry_authorized` pairings
+(an authorized-but-undebited epoch reads `0 attempts (authorized)`) and closed
+epochs parenthesized — against the declared budget, and that a route-back
+invalidates current-visit verification evidence (critique/tests re-records).
+After the mutation commits — fresh or recovered, a recovered outcome being this
+invocation's canonically attached candidate whose later bookkeeping failed — the
+evidence writer reports what evaluation actually did, derived verbatim from the
+transitions it appended to canonical state: routed to a step (with the
+transition's own attempt/max/reason), blocked on an exhausted budget, or — the
+#1304 live trap — no route at all, with the non-pass claim sitting live at the
+unchanged step. A gate declaring `requires_current_verification` adds the
+point-of-use ordering rule whenever no VERIFIED provisional delivery record
+exists for the session (the production record verifier is the suppression key;
+a record's mere existence, or fresh current verification evidence — the exact
+pre-trap state — never suppresses it): publish the provisional delivery BEFORE
+recording this gate; a live non-pass claim here blocks the publish that would
+resolve it. Both keys are facts (the declaration and the record verifier's
+verdict), never a gate name, so core stays kit-generic; the disclosure is
+additive output and existing refusal strings are unchanged. On the direct
+sidecar path a disclosure failure degrades loudly (a static warning that a
+non-pass claim may spend a route-back attempt and sit live) rather than
+silently; only a proven-noncanonical session or a proven-absent canonical run
+stays quiet. The signed reseal path is orchestrator-mediated and out of this
+disclosure's scope.
+
 ## Agent Projection
 
 While a run is active, `state.json` contains:
@@ -442,7 +487,7 @@ the transition.
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
 the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
-The script stages the exact published `@kontourai/flow` 3.9.0 package and the transitive runtime
+The script stages the exact published `@kontourai/flow` 5.0.0 package and the transitive runtime
 dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,

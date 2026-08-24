@@ -12,6 +12,11 @@ const TRUSTED_GIT_EXECUTABLES = process.platform === "darwin"
 
 const TRUSTED_GIT_NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
 
+/** A Git object format is fixed-width: SHA-1 is 40 lowercase hex and SHA-256 is 64. */
+export function isExactLowercaseCommitSha(value: unknown): value is string {
+  return typeof value === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(value);
+}
+
 /** Execute bounded Git argv with replacement objects and caller configuration disabled. */
 export function execTrustedGitSync(projectRoot: string, argv: readonly string[], encoding: "utf8" | "buffer" = "utf8", maxBuffer = 1024 * 1024): string | Buffer {
   const executable = resolveTrustedGitIdentity();
@@ -28,7 +33,7 @@ export function execTrustedGitSync(projectRoot: string, argv: readonly string[],
 
 /** Read a bounded blob addressed by an already-resolved immutable commit. */
 export function readTrustedGitBlobSync(projectRoot: string, commit: string, relativePath: string, maxBytes = 1024 * 1024): Buffer {
-  if (!/^[0-9a-f]{40,64}$/u.test(commit) || !isSafeGitRelativePath(relativePath)) {
+  if (!isExactLowercaseCommitSha(commit) || !isSafeGitRelativePath(relativePath)) {
     throw new Error("unsafe immutable Git blob reference");
   }
   try {
@@ -77,13 +82,35 @@ function appendSafeDiffOptions(argv: readonly string[]): string[] {
 export function resolveTrustedLocalGitCommit(projectRoot: string, ref: string): string {
   try {
     const sha = String(execTrustedGitSync(projectRoot, ["rev-parse", "--verify", `${ref}^{commit}`])).trim().toLowerCase();
-    if (!/^[0-9a-f]{40,64}$/u.test(sha)) throw new Error("not an immutable commit");
+    if (!isExactLowercaseCommitSha(sha)) throw new Error("not an immutable commit");
     return sha;
   } catch { throw new Error("could not resolve ref to an immutable local commit with trusted Git"); }
 }
 
 export function assertTrustedGitAncestor(cwd: string, ancestor: string, descendant: string): void {
   execTrustedGitSync(cwd, ["merge-base", "--is-ancestor", ancestor, descendant]);
+}
+
+/**
+ * Prove that a commit remains reachable after a squash merge without trusting
+ * branch names or replacement objects. A direct ancestor is always accepted.
+ * Otherwise, a reachable commit with the exact same Git tree is the narrow
+ * squash bridge: the reviewed bytes survived under a new commit identity.
+ */
+export function assertTrustedGitAncestorOrEquivalentTree(cwd: string, ancestor: string, descendant: string): void {
+  if (!isExactLowercaseCommitSha(ancestor) || !isExactLowercaseCommitSha(descendant)) throw new Error("invalid immutable Git commit");
+  try {
+    assertTrustedGitAncestor(cwd, ancestor, descendant);
+    return;
+  } catch { /* A squash merge deliberately breaks commit ancestry. */ }
+  const tree = String(execTrustedGitSync(cwd, ["rev-parse", "--verify", `${ancestor}^{tree}`])).trim().toLowerCase();
+  if (!isExactLowercaseCommitSha(tree)) throw new Error("could not resolve immutable Git tree");
+  // A bounded traversal prevents a malformed fixture/repository from turning
+  // validation into an unbounded history scan. The 1 MiB output cap is also
+  // enforced by execTrustedGitSync.
+  const reachableTrees = String(execTrustedGitSync(cwd, ["log", "--format=%T", "--max-count=10000", descendant]));
+  if (reachableTrees.split(/\r?\n/u).some((candidate) => candidate === tree)) return;
+  throw new Error("commit is neither an ancestor nor an equivalent-tree squash predecessor");
 }
 
 function trustedGitEnvironment(): NodeJS.ProcessEnv {

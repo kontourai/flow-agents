@@ -33,10 +33,21 @@ run_bounded() {
   wait "$pid"
 }
 
+init_git_fixture() {
+  local repo="$1"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email "fixture@flow-agents.invalid"
+  git -C "$repo" config user.name "Flow Agents fixture"
+  printf '.kontourai/\n' > "$repo/.gitignore"
+  git -C "$repo" add -A
+  git -C "$repo" commit -qm "fixture baseline"
+}
+
 WRITER="workflow-sidecar"
 VALIDATOR="validate-workflow-artifacts"
 ARTIFACT_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/auto-sidecars"
 mkdir -p "$ARTIFACT_DIR"
+init_git_fixture "$TMPDIR_EVAL/repo"
 # Every direct critique write must identify a review lane. Individual focused cases below
 # additionally prove local artifact hashing and stale-target rejection.
 CRITIQUE_LANE='{"id":"code-review","status":"pass","summary":"Fixture code review completed.","evidence_refs":[{"kind":"external","url":"https://example.invalid/review-fixture","summary":"Fixture review evidence."}]}'
@@ -3594,10 +3605,17 @@ fi
 # ─── #270/#298 compose layer: gate-claim accumulation, gate-claim typing survives rebuild, ──
 # compose-two/three/four-writer round-trip, waiver + artifact_refs/standard_refs round-trip,
 # runnability rejection at record time (AC1-AC6, AC8, AC10) ──────────────────────────────────
-COMPOSE_ROOT="$TMPDIR_EVAL/compose-project/.kontourai/flow-agents"
+COMPOSE_PROJECT_ROOT="$TMPDIR_EVAL/compose-project"
+COMPOSE_ROOT="$COMPOSE_PROJECT_ROOT/.kontourai/flow-agents"
 COMPOSE_SLUG="compose-270"
 COMPOSE_DIR="$COMPOSE_ROOT/$COMPOSE_SLUG"
 mkdir -p "$COMPOSE_ROOT"
+git -C "$COMPOSE_PROJECT_ROOT" init -q
+git -C "$COMPOSE_PROJECT_ROOT" config user.email sidecar-writer@example.invalid
+git -C "$COMPOSE_PROJECT_ROOT" config user.name "Sidecar Writer Eval"
+printf '.kontourai/\n' > "$COMPOSE_PROJECT_ROOT/.gitignore"
+git -C "$COMPOSE_PROJECT_ROOT" add .gitignore
+git -C "$COMPOSE_PROJECT_ROOT" commit -qm "seed compose writer fixture"
 
 flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$COMPOSE_ROOT" \
@@ -3941,6 +3959,7 @@ printf 'import test from "node:test";\nimport assert from "node:assert/strict";\
 cat > "$MULTI_PROJECT/package.json" <<'JSON'
 {"scripts":{"test":"true","check":"echo check"}}
 JSON
+init_git_fixture "$MULTI_PROJECT"
 flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$MULTI_ROOT" --task-slug "$MULTI_SLUG" --actor multi-observed-actor \
   --title "Multiple observed commands" --summary "Verify immutable acceptance criteria." \
@@ -3962,11 +3981,8 @@ fi
 
 MULTI_ONE="bash checks/test-one.sh test/sample.test.mjs"
 MULTI_TWO="bash checks/test-two.sh test/sample.test.mjs"
-MULTI_DIGEST="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 MULTI_REF_ONE="{\"kind\":\"command\",\"excerpt\":\"$MULTI_ONE\",\"summary\":\"First exact command.\"}"
 MULTI_REF_TWO="{\"kind\":\"command\",\"excerpt\":\"$MULTI_TWO\",\"summary\":\"Second exact command.\"}"
-MULTI_OBS_ONE="{\"command\":\"$MULTI_ONE\",\"exit_code\":0,\"test_count\":1,\"output_sha256\":\"$MULTI_DIGEST\"}"
-MULTI_OBS_TWO="{\"command\":\"$MULTI_TWO\",\"exit_code\":0,\"test_count\":1,\"output_sha256\":\"$MULTI_DIGEST\"}"
 
 MULTI_VACUOUS_REJECTED=yes
 for multi_script_command in "npm test" "pnpm test" "yarn test" "bun run test"; do
@@ -3986,18 +4002,23 @@ else
 fi
 
 cat > "$MULTI_PROJECT/package.json" <<'JSON'
-{"scripts":{"build":"tsc --noEmit","test":"node --test test/*.test.mjs","test:unit":"npm run build && node --test test/*.test.mjs"}}
+{"scripts":{"build":"tsc --noEmit","test":"node --test test/*.test.mjs","test:unit":"npm run build && node --test test/*.test.mjs","verify:static":"node --check checks/static-check.mjs","test:full":"node --test test/*.test.mjs","ci:fast":"npm run verify:static && npm run test:full"},"trust-reconcile-manifest":[{"id":"ci-fast","command":"npm run ci:fast"}]}
 JSON
+printf 'export {};\n' > "$MULTI_PROJECT/checks/static-check.mjs"
+git -C "$MULTI_PROJECT" add package.json
+git -C "$MULTI_PROJECT" add checks/static-check.mjs
+git -C "$MULTI_PROJECT" commit -qm "substantive test fixture"
 if node --input-type=module - "$ROOT/build/src/cli/workflow-sidecar.js" "$MULTI_PROJECT" <<'NODE'
 const [modulePath, projectRoot] = process.argv.slice(2);
 const { isMeaningfulTestCommand } = await import(modulePath);
 if (!isMeaningfulTestCommand('npm test', projectRoot)) process.exit(1);
 if (!isMeaningfulTestCommand('npm run test:unit', projectRoot)) process.exit(2);
+if (!isMeaningfulTestCommand('npm run ci:fast', projectRoot)) process.exit(3);
 NODE
 then
-  _pass "tests-evidence accepts substantive direct and composed Node package test scripts"
+  _pass "tests-evidence accepts substantive direct/composed scripts and an exact committed manifest CI lane"
 else
-  _fail "tests-evidence rejected a substantive package test script"
+  _fail "tests-evidence rejected a substantive package test script or exact committed manifest CI lane"
 fi
 if flow_agents_node "$WRITER" record-critique "$MULTI_DIR" \
   --id multi-review --reviewer multi-reviewer --verdict pass --summary "Review refreshed after the package-script fixture changed." \
@@ -4008,9 +4029,45 @@ else
   _fail "tests-evidence fixture failed to refresh stale review: $(cat "$TMPDIR_EVAL/multi-critique-refresh.out" "$TMPDIR_EVAL/multi-critique-refresh.err")"
 fi
 
+MULTI_MANIFEST_CI="npm run ci:fast"
+MULTI_MANIFEST_CI_REF="{\"kind\":\"command\",\"excerpt\":\"$MULTI_MANIFEST_CI\",\"summary\":\"Exact committed manifest CI lane observed by the writer.\"}"
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Missing-input batch probe." \
+  >"$TMPDIR_EVAL/multi-missing-inputs.out" 2>"$TMPDIR_EVAL/multi-missing-inputs.err"; then
+  _fail "tests-evidence accepted an invocation missing every required input"
+elif rg -q -- '--command' "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err" \
+  && rg -q -- 'kind:"command".*evidence-ref-json.*excerpt exactly equals' "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err" \
+  && rg -q -- '--criterion-json.*every declared acceptance criterion' "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err" \
+  && rg -q -- 'Do not supply --observed-command-json' "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err"; then
+  _pass "tests-evidence batches missing command, exact command-ref, and criterion inputs while explaining writer-owned observations"
+else
+  _fail "tests-evidence missing-input batch was incomplete: $(cat "$TMPDIR_EVAL/multi-missing-inputs.out" "$TMPDIR_EVAL/multi-missing-inputs.err")"
+fi
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Exact committed manifest CI lane." \
+  --command "$MULTI_MANIFEST_CI" \
+  --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\".kontourai/flow-agents/$MULTI_SLUG/$MULTI_SLUG--plan-work.md\",\"summary\":\"Durable verification plan.\"}" \
+  --evidence-ref-json "$MULTI_MANIFEST_CI_REF" \
+  --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_MANIFEST_CI_REF]}" \
+  --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_MANIFEST_CI_REF]}" \
+  --timestamp "2026-07-11T11:00:28Z" >"$TMPDIR_EVAL/multi-manifest-ci.out" 2>"$TMPDIR_EVAL/multi-manifest-ci.err" \
+  && node - "$MULTI_DIR/trust.bundle" "$MULTI_MANIFEST_CI" <<'NODE'
+const fs = require('node:fs');
+const [bundleFile, command] = process.argv.slice(2);
+const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
+const gate = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence');
+const observed = gate?.metadata?.observed_commands?.[0];
+if (!observed || observed.command !== command || observed.exit_code !== 0 || !/^[a-f0-9]{64}$/.test(observed.output_sha256 ?? '') || observed.execution_proof?.kind !== 'local-process-exit' || observed.test_count < 1) process.exit(1);
+NODE
+then
+  _pass "#1048: exact committed manifest CI lane is writer-observed with exit code, output digest, and substantive local proof"
+else
+  _fail "#1048: manifest CI lane did not record as observed substantive tests-evidence: $(cat "$TMPDIR_EVAL/multi-manifest-ci.out" "$TMPDIR_EVAL/multi-manifest-ci.err")"
+fi
+
 if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
   --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Rewritten criterion." \
-  --command "$MULTI_ONE" --observed-command-json "$MULTI_OBS_ONE" --evidence-ref-json "$MULTI_REF_ONE" \
+  --command "$MULTI_ONE" --evidence-ref-json "$MULTI_REF_ONE" \
   --criterion-json "{\"id\":\"first-immutable-criterion\",\"description\":\"Caller rewrite.\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
   --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
   >"$TMPDIR_EVAL/multi-rewrite.out" 2>"$TMPDIR_EVAL/multi-rewrite.err"; then
@@ -4021,7 +4078,7 @@ fi
 
 if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
   --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Unknown criterion field." \
-  --command "$MULTI_ONE" --observed-command-json "$MULTI_OBS_ONE" --evidence-ref-json "$MULTI_REF_ONE" \
+  --command "$MULTI_ONE" --evidence-ref-json "$MULTI_REF_ONE" \
   --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"unexpected\":true,\"evidence_refs\":[$MULTI_REF_ONE]}" \
   --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
   >"$TMPDIR_EVAL/multi-unknown.out" 2>"$TMPDIR_EVAL/multi-unknown.err"; then
@@ -4030,10 +4087,40 @@ else
   _pass "tests-evidence rejects unknown criterion fields"
 fi
 
+# A zero exit while the observation sees untracked content is explicitly non-confirming.
+# The writer must refuse the requested pass instead of re-snapshotting after this command.
+touch "$MULTI_PROJECT/dirty-provenance"
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Dirty provenance must not confirm." \
+  --command "$MULTI_ONE" --evidence-ref-json "$MULTI_REF_ONE" \
+  --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+  --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+  >"$TMPDIR_EVAL/multi-dirty.out" 2>"$TMPDIR_EVAL/multi-dirty.err"; then
+  _fail "tests-evidence accepted a requested pass from a dirty observed workspace"
+elif rg -q 'captured clean Git provenance' "$TMPDIR_EVAL/multi-dirty.out" "$TMPDIR_EVAL/multi-dirty.err"; then
+  _pass "tests-evidence refuses a requested pass from a dirty observed workspace"
+else
+  _fail "tests-evidence dirty-provenance refusal was unclear: $(cat "$TMPDIR_EVAL/multi-dirty.out" "$TMPDIR_EVAL/multi-dirty.err")"
+fi
+rm -f "$MULTI_PROJECT/dirty-provenance"
+
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Caller observation must be rejected." \
+  --command "$MULTI_ONE" --observed-command-json '{"command":"not-run","exit_code":0}' \
+  --evidence-ref-json "$MULTI_REF_ONE" \
+  --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+  --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+  >"$TMPDIR_EVAL/multi-caller-observation.out" 2>"$TMPDIR_EVAL/multi-caller-observation.err"; then
+  _fail "tests-evidence accepted a caller-supplied command observation"
+elif rg -q 'does not accept --observed-command-json' "$TMPDIR_EVAL/multi-caller-observation.out" "$TMPDIR_EVAL/multi-caller-observation.err"; then
+  _pass "tests-evidence rejects caller-supplied command observations"
+else
+  _fail "tests-evidence caller-observation refusal was unclear: $(cat "$TMPDIR_EVAL/multi-caller-observation.out" "$TMPDIR_EVAL/multi-caller-observation.err")"
+fi
+
 if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
   --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Two exact observed commands." \
   --command "$MULTI_ONE" --command "$MULTI_TWO" \
-  --observed-command-json "$MULTI_OBS_ONE" --observed-command-json "$MULTI_OBS_TWO" \
   --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\".kontourai/flow-agents/$MULTI_SLUG/$MULTI_SLUG--plan-work.md\",\"summary\":\"Durable verification plan.\"}" \
   --evidence-ref-json "$MULTI_REF_ONE" --evidence-ref-json "$MULTI_REF_TWO" \
   --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
@@ -4048,6 +4135,14 @@ const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
 const gate = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence');
 const review = bundle.claims.find((claim) => claim.metadata?.origin === 'critique');
 if (!gate || gate.metadata?.observed_commands?.length !== 2) process.exit(2);
+const observed = gate.metadata.observed_commands;
+const snapshot = gate.metadata.verification_workspace_snapshot;
+if (!snapshot || snapshot.kind !== 'git-worktree' || snapshot.worktree_clean !== true) process.exit(7);
+if (observed.some((entry) => entry.worktree_clean !== true || entry.observed_at_commit !== snapshot.head_sha || JSON.stringify(entry.verification_workspace_snapshot) !== JSON.stringify(snapshot))) process.exit(8);
+const gateEvidence = bundle.evidence.filter((item) => item.claimId === gate.id);
+if (gateEvidence.length !== 2 || gateEvidence.some((item, index) => item.execution?.label !== observed[index].command || item.execution?.exitCode !== 0 || item.passing !== true)) process.exit(9);
+const gateEvent = bundle.events.find((item) => item.claimId === gate.id && item.status === 'verified');
+if (!gateEvent || JSON.stringify(gateEvent.evidenceIds) !== JSON.stringify(gateEvidence.map((item) => item.id))) process.exit(10);
 const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
 if (criteria.length !== 2 || criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(4);
 for (const claim of criteria) {
@@ -4056,8 +4151,8 @@ for (const claim of criteria) {
   if (evidence.length !== 1 || evidence[0].evidenceType !== 'test_output' || evidence[0].passing !== true) process.exit(5);
   if (!event || event.evidenceIds.length !== 1 || event.evidenceIds[0] !== evidence[0].id) process.exit(6);
 }
-const snapshot = review?.metadata?.review_target?.workspace_snapshot;
-if (!snapshot || snapshot.version !== 1 || snapshot.algorithm !== 'sha256' || typeof snapshot.digest !== 'string') process.exit(3);
+const reviewSnapshot = review?.metadata?.review_target?.workspace_snapshot;
+if (!reviewSnapshot || reviewSnapshot.version !== 1 || reviewSnapshot.algorithm !== 'sha256' || typeof reviewSnapshot.digest !== 'string') process.exit(3);
 NODE
   then
     _pass "tests-evidence preserves immutable acceptance semantics and maps each criterion to its successful observed command"
@@ -4068,6 +4163,21 @@ else
   _fail "tests-evidence multi-command write failed: $(cat "$TMPDIR_EVAL/multi-pass.out" "$TMPDIR_EVAL/multi-pass.err")"
 fi
 
+cat > "$MULTI_DIR/release.json" <<'JSON'
+{"decision":"merge","gates":[{"id":"merge","required":true,"status":"pass"}]}
+JSON
+if node "$ROOT/scripts/publish-change-helper.js" reconcile-final-state "$MULTI_DIR" >"$TMPDIR_EVAL/multi-publish-reconcile.out" \
+  && node - "$TMPDIR_EVAL/multi-publish-reconcile.out" <<'NODE'
+const fs = require('node:fs');
+const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (result?.status !== 'pass') process.exit(1);
+NODE
+then
+  _pass "canonical multi-command gate claim reconciles through publish authority"
+else
+  _fail "canonical multi-command gate claim did not reconcile: $(cat "$TMPDIR_EVAL/multi-publish-reconcile.out")"
+fi
+
 if flow_agents_node "$WRITER" record-evidence "$MULTI_DIR" \
   --verdict not_verified \
   --check-json '{"id":"acceptance-rebuild-probe","kind":"external","status":"not_verified","summary":"Trigger a valid unrelated bundle rebuild."}' \
@@ -4075,8 +4185,10 @@ if flow_agents_node "$WRITER" record-evidence "$MULTI_DIR" \
   && node - "$MULTI_DIR/trust.bundle" <<'NODE'
 const fs = require('node:fs');
 const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const gate = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence');
 const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
 if (criteria.length !== 2 || criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(1);
+if (!gate || gate.metadata?.observed_commands?.some((entry) => entry.worktree_clean !== true || !entry.observed_at_commit || !entry.verification_workspace_snapshot)) process.exit(4);
 for (const claim of criteria) {
   if (claim.createdAt !== '2026-07-11T11:00:30Z' || claim.updatedAt !== '2026-07-11T11:00:30Z') process.exit(2);
   const event = bundle.events.find((item) => item.claimId === claim.id);

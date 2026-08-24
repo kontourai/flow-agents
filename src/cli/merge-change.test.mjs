@@ -276,6 +276,16 @@ test("public merge-change request accepts effective amended bindings while retai
     const manifestFile = path.join(flowDir, "evidence", "manifest.json");
     const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
     const summary = `Authenticated publish-change operation ${issued.action_id} observed open provider record PR_fixture`;
+    // This fixture hand-writes the manifest (including the legacy flat
+    // `authority_trace` field) rather than going through a real Flow 5.x
+    // attachEvidence call; that's fine here because this test isn't exercising
+    // authority-trace authentication at all — it's plumbing to reach the
+    // *later* terminal-delivery validation step in merge-change request. Flow
+    // 5.x's real write path can no longer produce `authority_trace` (see
+    // builder-flow-runtime.test.mjs's authorityTrace-option-removed test); the
+    // legacy field here still round-trips because
+    // resultDigestClaimedByCanonicalRun deliberately keeps recognizing it as a
+    // backward-compatibility fallback (merge-change.ts).
     manifest.evidence.push({
       id: "publish-change-fixture", gate_id: publishBinding.gate_ids[0], kind: "custom", requested_kind: "custom", status: "passed", attached_at: "2026-07-27T12:00:03.000Z",
       producer: "publish-change-operation-authority", authority_trace: issued.action_id, expectation_ids: ["pull-request-opened"],
@@ -304,5 +314,132 @@ test("public merge-change request accepts effective amended bindings while retai
     assert.match(errors.join("\n"), /exactly the canonical session terminal bundle/i, "the public request reached terminal-delivery validation after accepting the amended effective definition and start-bound manifest");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("evidence-refresh route predicate accepts the SHIPPED builder definition and refuses missing refresh entries (#1300)", async () => {
+  // #1300 shipped because the old two-key deep-equal literal had zero coverage against the real
+  // kit map — a fixture-vs-reality gap. Bind the predicate to the RESOLVED effective definition
+  // so any future divergence between merge-change and the flow definition reds here first.
+  const { evidenceRefreshRoutesSatisfied } = await import("../../build/src/cli/merge-change.js");
+  const repoRoot = path.resolve(import.meta.dirname, "../..");
+  const definition = resolveEffectiveFlowDefinition("builder.build", repoRoot);
+  assert.ok(definition);
+  const shipped = definition.gates["builder.publish-learn:merge-ready-ci-gate"];
+  assert.equal(evidenceRefreshRoutesSatisfied(shipped), true, "the kit's own shipped three-key map must satisfy merge-change");
+  // additional repair routes are the flow definition's business
+  assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), true);
+  // but the refresh entries themselves are non-negotiable
+  assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "execute" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "warn" } }), false);
+  assert.equal(evidenceRefreshRoutesSatisfied({}), false);
+});
+
+test("start-definition provenance derives when the stamp is absent and refuses a mismatched stamp (#1307)", async () => {
+  // @kontourai/flow has never written state.definition_digest (absent in every measured run
+  // state; zero references in the flow dist). Demanding it failed EVERY unamended run — the
+  // wedge stacked directly behind #1300, hit live by the first run to get past it (PR #1303).
+  const { assertEvidenceRefreshVerificationProvenance } = await import("../../build/src/cli/merge-change.js");
+  const digest = "d".repeat(64);
+  // absent stamp: the identity is already proven by the caller's deep-equal — accepted
+  assert.doesNotThrow(() => assertEvidenceRefreshVerificationProvenance({}, "builder.build", "1.4", digest));
+  // present and matching — accepted
+  assert.doesNotThrow(() => assertEvidenceRefreshVerificationProvenance({ definition_digest: digest }, "builder.build", "1.4", digest));
+  // present but MISMATCHED — refused (a stamp that exists must be true)
+  assert.throws(
+    () => assertEvidenceRefreshVerificationProvenance({ definition_digest: "e".repeat(64) }, "builder.build", "1.4", digest),
+    /start-definition proof/,
+  );
+});
+
+test("the coordinator's route-map predicate accepts the SHIPPED definition semantically (#1307)", async () => {
+  // The coordinator carried the THIRD independent encoding of this contract. Its check is now an
+  // exported pure predicate driven here with the REAL resolved definition — semantic conformance,
+  // not text-grepping (review round: greps are refactor-fragile and regression-evadable).
+  const { mergeReadyCiRefreshRoutesSatisfied } = await import("../../packaging/lifecycle-authority/coordinator.mjs");
+  const definition = resolveEffectiveFlowDefinition("builder.build", path.resolve(import.meta.dirname, "../.."));
+  assert.ok(definition);
+  const shipped = definition.gates["builder.publish-learn:merge-ready-ci-gate"];
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied(shipped), true, "the kit's own shipped map must satisfy the coordinator");
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), true);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied({ on_route_back: null, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied({ on_route_back: ["verify"], route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied(null), false);
+  assert.equal(mergeReadyCiRefreshRoutesSatisfied(undefined), false);
+  // supplemental policy grep (kept per review guidance): no unconditional stamp demand remains
+  const fs = await import("node:fs");
+  const source = fs.readFileSync(new URL("../../packaging/lifecycle-authority/coordinator.mjs", import.meta.url), "utf8");
+  const demanding = source.match(/if \(state\.definition_digest !== definitionDigest\)/g) ?? [];
+  assert.equal(demanding.length, 0, "no coordinator site may demand the stamp unconditionally");
+});
+
+// ---------------------------------------------------------------------------
+// #1318 FIX-2: before this, the target-branch approval policy was discoverable
+// only at `merge-change execute` — after `request` had emitted an unsigned
+// authorization and an operator had signed it with a lifecycle-authority key.
+// ---------------------------------------------------------------------------
+
+function requestFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-merge-policy-preflight-"));
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", binding.run_id);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  return { root, sessionDir, out: path.join(root, "unsigned.json") };
+}
+
+async function runRequest(fixture, preflight) {
+  const errors = [];
+  const logs = [];
+  const originalError = console.error;
+  const originalLog = console.log;
+  console.error = (...values) => errors.push(values.join(" "));
+  console.log = (...values) => logs.push(values.join(" "));
+  try {
+    const status = await mergeChangeMain(["request", "--session-dir", fixture.sessionDir, "--strategy", "squash", "--out", fixture.out], {
+      provider,
+      currentAction: async () => action(),
+      preflightProvider: async () => preflight,
+    });
+    return { status, errors: errors.join("\n"), logs: logs.join("\n") };
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
+  }
+}
+
+test("#1318: merge-change request refuses an unsatisfiable branch policy BEFORE it mints an authorization", async () => {
+  const fixture = requestFixture();
+  try {
+    const message = "the target branch 'main' does not enforce a pull-request approval policy (required_pull_request_reviews absent); merge-change requires an enforced no-bypass approval policy on the target branch";
+    const result = await runRequest(fixture, { status: "unsatisfied", base_ref: "main", condition: "approval-policy-absent", message });
+    assert.equal(result.status, 1);
+    assert.match(result.errors, /does not enforce a pull-request approval policy \(required_pull_request_reviews absent\)/);
+    assert.match(result.errors, /refuses to mint an authorization/);
+    assert.doesNotMatch(result.errors, /must be a plain object/);
+    // The whole point of the fix: no authorization material exists to be signed.
+    assert.equal(fs.existsSync(fixture.out), false, "no unsigned authorization may be written when the precondition fails");
+    assert.equal(result.logs, "", "a refused request emits no signing payload");
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("#1318: a satisfied or unverified precondition does not itself block merge-change request", async () => {
+  for (const preflight of [
+    { status: "satisfied", base_ref: "main" },
+    { status: "unverified", base_ref: "main", reason: "provider_unavailable: configured ChangeProvider executable is unavailable" },
+  ]) {
+    const fixture = requestFixture();
+    try {
+      const result = await runRequest(fixture, preflight);
+      // Both proceed past the preflight and fail later, on the canonical-session
+      // checks — proving the preflight refuses a policy verdict, not everything.
+      assert.equal(result.status, 1);
+      assert.doesNotMatch(result.errors, /refuses to mint an authorization/, JSON.stringify(preflight));
+      assert.doesNotMatch(result.errors, /approval policy/, JSON.stringify(preflight));
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
   }
 });

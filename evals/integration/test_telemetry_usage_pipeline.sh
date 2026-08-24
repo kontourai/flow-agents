@@ -61,14 +61,26 @@ _wait_for_line() {
   done
 }
 
-_wait_for_file_line() {
-  local file="$1" i=0 current_lines
+_wait_for_file_line() { # <file> [jq-selector]
+  # A single Builder Stop appends TWO economics records from two INDEPENDENT detached writers
+  # (legacy session.usage-derived and canonical Flow-run-derived), so their append order is a race
+  # and "the file has a line" no longer means "the record I need has arrived" — waiting on the raw
+  # line count returns as soon as EITHER producer wins. Callers reading a specific producer must
+  # pass the same selector they read with, or they will sample an empty result and report it as a
+  # missing field rather than as a race they lost.
+  local file="$1" selector="${2:-}" i=0 current_lines
   while [[ $i -lt 50 ]]; do
-    current_lines=$(wc -l < "$file" 2>/dev/null | tr -d ' ')
+    if [[ -n "$selector" ]]; then
+      current_lines=$(jq -c "$selector" "$file" 2>/dev/null | wc -l | tr -d ' ')
+    else
+      current_lines=$(wc -l < "$file" 2>/dev/null | tr -d ' ')
+    fi
     [[ "${current_lines:-0}" -gt 0 ]] && break
     sleep 0.1; i=$((i + 1))
   done
 }
+# The legacy authenticated-session producer, which is what every assertion in this eval is about.
+LEGACY_ECON='select(.producer_authority != "flow_run_record")'
 
 # Run a real Stop event against a freshly-established session (agentSpawn
 # first, matching real usage — Claude Code always sends SessionStart before
@@ -283,13 +295,13 @@ out_attr=$(_run_stop "$input_attr" \
   TELEMETRY_RELAY_CAPTURE="$ECON_RELAY_LOG" \
   PATH="$ECON_FAKE_BIN:$PATH")
 TELEMETRY_SH="$TELEMETRY_SH_SAVED"
-_wait_for_file_line "$ECON_LOG"
+_wait_for_file_line "$ECON_LOG" "$LEGACY_ECON"
 
 if [[ -n "$out_attr" && -s "$ECON_LOG" ]]; then
-  attr_task=$(tail -1 "$ECON_LOG" | jq -r '.task_slug')
-  attr_phase=$(tail -1 "$ECON_LOG" | jq -r '.phases[0].phase')
-  attr_gate_fires=$(tail -1 "$ECON_LOG" | jq -r '.defects.gate_fires')
-  attr_correlation=$(tail -1 "$ECON_LOG" | jq -r '.run_correlation.correlation_id')
+  attr_task=$(jq -c "$LEGACY_ECON" "$ECON_LOG" | tail -1 | jq -r '.task_slug')
+  attr_phase=$(jq -c "$LEGACY_ECON" "$ECON_LOG" | tail -1 | jq -r '.phases[0].phase')
+  attr_gate_fires=$(jq -c "$LEGACY_ECON" "$ECON_LOG" | tail -1 | jq -r '.defects.gate_fires')
+  attr_correlation=$(jq -c "$LEGACY_ECON" "$ECON_LOG" | tail -1 | jq -r '.run_correlation.correlation_id')
   [[ "$attr_task" == "$CANON_SLUG" ]] && _pass "economics task_slug comes from authenticated actor binding" || _fail "expected authenticated task_slug '$CANON_SLUG', got '$attr_task'"
   [[ "$attr_phase" == "$ATTR_PHASE" && "$attr_phase" != "wrong" ]] && _pass "economics sidecars come from the correlated state, not competing shared current" || _fail "expected correlated phase '$ATTR_PHASE', got '$attr_phase'"
   [[ "$attr_gate_fires" == "0" ]] && _pass "economics snapshot rejects a symlinked critique instead of following foreign sidecar content" || _fail "symlinked critique leaked gate_fires=$attr_gate_fires"
@@ -349,11 +361,11 @@ out_terminal=$(_run_stop "$input_terminal" \
   TELEMETRY_RELAY_CAPTURE="$ECON_RELAY_LOG" \
   PATH="$ECON_FAKE_BIN:$PATH")
 TELEMETRY_SH="$TELEMETRY_SH_SAVED"
-_wait_for_file_line "$ECON_LOG"
+_wait_for_file_line "$ECON_LOG" "$LEGACY_ECON"
 terminal_usage_correlation=$(printf '%s' "$out_terminal" | jq -r '.run_correlation.correlation_id')
 terminal_usage_scope=$(printf '%s' "$out_terminal" | jq -r '.usage.scope')
 terminal_baseline_status=$(printf '%s' "$out_terminal" | jq -r '.usage.baseline_status')
-terminal_econ_correlation=$(tail -1 "$ECON_LOG" | jq -r '.run_correlation.correlation_id')
+terminal_econ_correlation=$(jq -c "$LEGACY_ECON" "$ECON_LOG" | tail -1 | jq -r '.run_correlation.correlation_id')
 terminal_outcome=$(jq -c 'select(.event_type=="workflow.outcome" and .workflow_outcome.process_status=="canceled")' "$TMPLOG" | tail -1)
 terminal_outcome_correlation=$(printf '%s' "$terminal_outcome" | jq -r '.run_correlation.correlation_id')
 _wait_for_file_line "$ECON_RELAY_LOG"

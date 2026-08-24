@@ -1,0 +1,5 @@
+{
+  "status": "unsigned",
+  "path": "trust.checkpoint.intoto.json",
+  "reason": "no ambient signing identity"
+}

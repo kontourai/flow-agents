@@ -201,6 +201,22 @@ planning artifact. Do not edit `acceptance.json` to repair a planned placeholder
 package-private `workflow:sidecar record-evidence` writer for that purpose. Generic/private
 evidence writes continue to validate their final refs and fail closed on incomplete source refs.
 
+### Revision-bound command observations
+
+The public evidence command does not accept caller-supplied Git provenance. Repository-owned
+capture records `observed_at_commit` and `worktree_clean` after each command result settles, then
+preserves them in `trust.bundle` metadata and the consumer-facing `workflow-evidence` v2 projection.
+For an item to contribute to a passing gate, its captured commit must resolve through trusted Git
+and be an ancestor of current `HEAD`, its cleanliness must be `true`, and its exact captured
+Git-worktree snapshot must equal the current snapshot. Ancestry is not byte proof; the snapshot
+comparison is required as well.
+
+Dirty, missing, non-Git, malformed, unavailable, unresolved/shallow, or non-ancestor provenance
+is `NOT_VERIFIED`/`not_verified`, never an implicit pass. Schema v1 is rejected and must be
+re-recorded; v2 command entries missing these fields are non-confirming. A delivery checkpoint or attestation `commit_sha` is
+aggregate transport provenance, not a substitute for an individual command's
+`observed_at_commit`.
+
 An embedding host whose current runtime identity cannot reproduce the active
 assignment actor must establish an expiring recovery-capable session binding,
 then authorize each ordinary evidence mutation separately. Run
@@ -731,6 +747,12 @@ flow_agents merge-change execute \
 ```
 
 The protected lifecycle coordinator validates and consumes this signed, single-use authorization under the session subject lock immediately before provider mutation. It binds the exact run, definition identity/digest and Flow state, repository/PR, terminal head, strategy, assignment actor, publication-time expected provider actor, issued action digest, nonce, request time, and expiry. Repeating the same operation after a crash can return only its exact durable replay; it cannot authorize a different head, strategy, provider, PR, actor, or request. A read-only `merge-change validate-terminal-delivery --session-dir <session> --head-ref <ref>` diagnoses the local terminal-delivery binding without calling a provider.
+
+#### Target-branch policy precondition
+
+Automated merge requires the target branch to enforce a no-bypass pull-request approval policy (required_pull_request_reviews with required_approving_review_count >= 1, plus enforce_admins). `merge-change request` observes this precondition against the configured provider **before** it mints an unsigned authorization and refuses when the target branch does not satisfy it, naming the actual condition (approval policy absent, zero required approvals, or `enforce_admins` disabled) rather than a type error. When the provider cannot be reached the request reports `merge_policy_precondition.status: "unverified"` with the reason instead of passing silently; `merge-change execute` re-checks the same policy against the provider immediately before mutation. Ruleset-only configurations that do not expose an equivalent no-bypass policy remain deliberately unsupported rather than guessed.
+
+The practical consequence for a rollout: a repository whose only write-access account authors every pull request **cannot** satisfy this precondition, because GitHub forbids approving your own pull request and `enforce_admins` leaves no bypass. Such a repository needs a second approving reviewer with write access (or an app/bot with write access that can submit approving reviews) before `merge-change` can merge; until then its merges remain a disclosed provider operation performed outside `merge-change`. Enabling required reviews on a target branch is a repository policy decision with consequences for bot-authored pull requests (release automation, dependency bots) and is deliberately not something the kit changes.
 
 The enforced order is publish change, provisional delivery if CI needs it, exact-head checks, readiness, learning, terminal delivery on the same source branch, commit/push its delivery-only companions, refreshed required checks on that exact terminal head, then merge. The operation requires a completed canonical Builder run that semantically contains the `merge-ready-ci` evidence-refresh control (`missing_evidence` and `default` route to `verify`, bounded by a block-on-exceeded policy) and passing refreshed verification evidence, the current matching assignment actor, a clean source worktree, byte-identical session/working-tree/committed terminal companions, a checkpoint-bound in-toto or DSSE companion, and an ancestor-bound delivery-only delta. It rejects source drift, a changed head, provider-configuration drift, provider-actor drift, zero required checks, and non-passing required checks before mutation. Squash, rebase, merge-commit, and merge-queue each use exact-head provider behavior; no tree-equivalence or post-squash delivery-only provenance relaxation is accepted.
 

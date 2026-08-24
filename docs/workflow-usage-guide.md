@@ -134,11 +134,21 @@ flow-agents init --runtime codex --dest . \
 This detects the GitHub repository from its `origin`, verifies `gh` auth,
 selects the sole accessible GitHub Project (or validates
 `--provider-project NUMBER`), creates the `agent:claimed` label when missing,
-schema-validates all three documents before atomically replacing each file:
+schema-validates every document it will write before atomically replacing that
+file:
 
 - `context/settings/backlog-provider-settings.json`
 - `context/settings/assignment-provider-settings.json`
 - `context/settings/change-provider-settings.json`
+
+An existing settings file that already carries the target configuration is left
+byte-identical: no reformatting, no re-serialization, and fields the generator
+does not model always survive. When an existing git-tracked settings file would
+actually change content, bootstrap refuses with a diff preview; pass
+`--rewrite-settings` (accepted by both `flow-agents provider-bootstrap` and
+`flow-agents init --configure-providers`) to accept the update. A git probe
+failure while checking tracking state also refuses — an unknown state never
+rewrites. Untracked or newly created files are written without the flag.
 
 For a headless offline setup, omit `--online` and provide
 `--provider-project NUMBER`. The command does not pretend remote state was
@@ -691,6 +701,8 @@ npm run workflow:sidecar -- dogfood-pass \
 Flow Agents source changes also have a deterministic CI baseline. Run it locally before publishing a branch when the change touches workflow contracts, hooks, package/bundle output, or Builder Kit behavior:
 
 For provider-backed delivery, do not treat a passing release-readiness decision as merge authority. After learning completes, publish terminal delivery on the already reviewed source branch, commit and push only its delivery companions, and collect required provider checks for that new exact head. Obtain a signed single-use lifecycle authorization with `flow-agents merge-change request`, then provide it to `flow-agents merge-change execute --session-dir <session> --strategy squash --authorization-file <signed-file>` (or `rebase`, `merge-commit`, or `merge-queue`). The protected authority binds and consumes the exact merge operation under the subject lock; it requires the completed Builder definition's semantic `merge-ready-ci` evidence-refresh control and passing verification evidence, as well as a clean worktree and exact session/committed terminal-delivery binding. Zero required checks or provider-actor drift fails closed. A provisional CI delivery never qualifies.
+
+Automated merge requires the target branch to enforce a no-bypass pull-request approval policy (required_pull_request_reviews with required_approving_review_count >= 1, plus enforce_admins). Check this when rolling the kit out to a repository, not on the first merge attempt: `flow-agents merge-change request` observes the precondition before it mints an authorization and refuses with the specific condition, and reports `merge_policy_precondition.status: "unverified"` when it could not reach the provider. A repository whose only write-access account authors every pull request cannot satisfy the precondition, because GitHub forbids approving your own pull request — it needs a second approving reviewer with write access (or an app/bot with write access) before automated merge is possible. Enabling required reviews is a repository policy decision the kit deliberately does not make for you; see `flow-agents merge-change --help` and the `merge-change` section of `docs/public-workflow-cli.md`.
 
 ```bash
 bash evals/ci/run-baseline.sh

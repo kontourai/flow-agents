@@ -81,8 +81,9 @@ its current state with the public workflow status command. Record each completed
 expectation with the public workflow evidence command; use reviewable shaping
 references and never an internal writer:
 
+The steering hook injects the run state at session start and re-injects it whenever it changes; if a steering state block appears anywhere in your context and you have not recorded evidence or a critique since it appeared, it is current. Run `flow-agents workflow status --session-dir <session-dir> --json` only after such a write (a fresh `workflow start` counts) or when no steering state block appears in your context at all; the write itself refuses an unbound, stale, or wrong-step binding either way.
+
 ```bash
-flow-agents workflow status --session-dir <session-dir>
 flow-agents workflow evidence --session-dir <session-dir> \
   --expectation <expectation-id> --status pass \
   --summary "Shaped work and filed Work Item evidence are recorded." \

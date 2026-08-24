@@ -61,8 +61,9 @@ Require evidence that is proportionate to the change and named by the accepted c
 
 This skill does not create or restamp a Builder run. For an already active `builder.build` `plan` step, confirm the run and record the completed plan through the public interface:
 
+The steering hook injects the run state at session start and re-injects it whenever it changes; if a steering state block appears anywhere in your context and you have not recorded evidence or a critique since it appeared, it is current. Run `flow-agents workflow status --session-dir <session-dir> --json` only after such a write or when no steering state block appears in your context at all; the write itself refuses an unbound, stale, or wrong-step binding either way.
+
 ```bash
-flow-agents workflow status --session-dir <session-dir>
 flow-agents workflow evidence --session-dir <session-dir> \
   --expectation implementation-plan --status pass \
   --summary "Implementation plan records scope, sequencing, acceptance criteria, and required evidence." \

@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { basename } from "node:path";
+import { recordTransition, UNKNOWN_COMMAND } from "./transition-log.js";
 import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settings.js";
 import { main as effectiveAssignmentProviderSettings } from "./cli/effective-assignment-provider-settings.js";
 import { main as effectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { main as effectiveFlowAgentsConfig } from "./cli/effective-flow-agents-config.js";
 import { main as assignmentProvider } from "./cli/assignment-provider.js";
 import { main as builderRun } from "./cli/builder-run.js";
+import { main as consoleDeclaredProjection } from "./cli/console-declared-projection.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
 import { main as consoleProcessProjection } from "./cli/console-process-projection.js";
 import { main as livenessFleet } from "./cli/liveness-fleet.js";
@@ -40,6 +42,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["build-bundles", () => buildBundles()],
   ["builder-run", builderRun],
   ["capability-matrix", capabilityMatrix],
+  ["console-declared-projection", consoleDeclaredProjection],
   ["console-learning-projection", consoleLearningProjection],
   ["console-process-projection", consoleProcessProjection],
   ["console-trust-projection", consoleTrustProjection],
@@ -77,6 +80,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
 const aliases = new Map<string, string>([
   ["flow-agents-build-bundles", "build-bundles"],
   ["flow-agents-capability-matrix", "capability-matrix"],
+  ["flow-agents-console-declared-projection", "console-declared-projection"],
   ["flow-agents-console-learning-projection", "console-learning-projection"],
   ["flow-agents-console-process-projection", "console-process-projection"],
   ["flow-agents-console-trust-projection", "console-trust-projection"],
@@ -112,6 +116,9 @@ function printHelp(): void {
   for (const name of availableCommands.keys()) console.log(`  ${name}`);
 }
 
+/** Names `run()` handles itself, before the command registry is consulted. */
+const BUILT_IN_COMMANDS = new Set(["--help", "-h", "help", "commands", "list"]);
+
 const invokedAs = basename(process.argv[1] ?? "flow-agents");
 const commandName = aliases.get(invokedAs) ?? process.argv[2];
 const forwardedArgs = aliases.has(invokedAs) ? process.argv.slice(2) : process.argv.slice(3);
@@ -135,4 +142,69 @@ async function run(): Promise<number> {
   return 64;
 }
 
-process.exit(await run());
+// A verb that throws used to reach Node's default handler, which prints the stack and the
+// internal frames that produced it. That is unreadable for an operator and useless for an
+// agent, which retries rather than learns. Report the message; keep the stack behind an
+// opt-in so debugging a CLI bug is still possible.
+// Every invocation ends here, so this is where the CLI records what it did. Best
+// effort in both senses: it never throws, and it never changes the exit code the
+// command earned. See src/transition-log.ts for why neither the capture hook nor the
+// host transcript can stand in for this.
+const startedAt = new Date();
+function witness(exitCode: number, errorName?: string): void {
+  try {
+    // The command is recorded only when it is one we register. Anything else is the
+    // caller's first argument verbatim — a mistyped shell variable, a pasted line —
+    // and there is no version of writing that down that is worth its risk.
+    // `run()` answers the built-ins before it consults the registry, so the registry
+    // alone is not the set of names this CLI accepts.
+    const known =
+      commandName !== undefined && (availableCommands.has(commandName) || BUILT_IN_COMMANDS.has(commandName));
+    recordTransition({
+      command: commandName === undefined ? null : known ? commandName : UNKNOWN_COMMAND,
+      argv: forwardedArgs,
+      exitCode,
+      startedAt,
+      endedAt: new Date(),
+      errorName: errorName ?? null,
+    });
+  } catch {
+    // A telemetry failure is not a command failure.
+  }
+}
+
+/**
+ * process.exit discards stdout/stderr bytes still queued in the stream buffer. On POSIX,
+ * a piped stdout is asynchronous everywhere except Linux, so any verb whose output
+ * outruns the reader loses its tail -- observed on PR #1309's CI (macOS fleet runners):
+ * `init --dry-run`'s ~70KB plan was truncated mid-line at ~20KB, which read as a partial
+ * install plan and failed the plan-content assertion. An empty write's callback fires
+ * only after everything queued before it has drained, so awaiting one on each stream
+ * guarantees the exit code never outruns the output that explains it.
+ */
+async function flushStdio(): Promise<void> {
+  await Promise.all([
+    new Promise<void>((resolve) => process.stdout.write("", () => resolve())),
+    new Promise<void>((resolve) => process.stderr.write("", () => resolve())),
+  ]);
+}
+
+try {
+  const exitCode = await run();
+  witness(exitCode);
+  await flushStdio();
+  process.exit(exitCode);
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`flow-agents ${commandName ?? ""}`.trimEnd() + `: ${message}`);
+  if (process.env["FLOW_AGENTS_DEBUG"] === "1" && error instanceof Error && error.stack) {
+    console.error(error.stack);
+  } else {
+    console.error("Set FLOW_AGENTS_DEBUG=1 to print the stack trace.");
+  }
+  // The class name, not the message: several verbs interpolate raw operator input
+  // into the text they throw.
+  witness(70, error instanceof Error ? error.constructor.name : "unknown");
+  await flushStdio();
+  process.exit(70);
+}

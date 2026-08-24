@@ -19,7 +19,7 @@ import {
   type JsonObject,
 } from "@kontourai/flow";
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
-import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
+import { captureReviewWorkspaceSnapshot, isGitWorktreeSnapshot } from "./lib/review-workspace-snapshot.js";
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, readLocalRecord, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
@@ -28,8 +28,12 @@ import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-p
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
 import type { ChangeProviderSettings } from "./cli/public-contracts.js";
-import { resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
+import { assertTrustedGitAncestor, isExactLowercaseCommitSha, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
+// Circular at module level (workflow.ts imports this file) — safe: the binding is only
+// dereferenced inside function bodies, the same tolerated shape as the sidecar import above.
+import { assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier } from "./cli/workflow.js";
+import { verifyProvisionalDeliveryLifecycleCompletion } from "./external-lifecycle-authority.js";
 import {
   assertAuthenticatedPublishChangeObservation,
   assertIssuedPublishChangeAction,
@@ -72,6 +76,13 @@ export interface BuilderFlowSessionInput {
     identity: { dev: number; ino: number };
     expectedSha256: string;
   };
+  /**
+   * Per-call authority verifier for the #1302 freshness turnstile's delivery-tolerant fallback.
+   * Defaults to the production lifecycle-authority verifier; hermetic tests pass their test
+   * authority's verifier here. Deliberately NOT module state — see
+   * gateAdvancementFreshnessSatisfied.
+   */
+  gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier;
 }
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
@@ -495,7 +506,7 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
     runId: context.slug,
   });
   assertRunSubjectBinding(run, subject);
-  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead, input.stagedTrustBundle);
+  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead, input.stagedTrustBundle, undefined, input.gateFreshnessCompletionVerifier);
 }
 
 /**
@@ -618,7 +629,10 @@ async function advancePublishChangeGate(
         expectedSha256: evidenceFile.sha256,
         expectationIds: ["pull-request-opened"],
         producer: "publish-change-operation-authority",
-        authorityTrace: issued.action_id,
+        // The action_id binding is now embedded in the attached TrustBundle's
+        // own authorityTrace record (see writePublishChangeEvidence), not
+        // passed as an attachEvidence option — Flow 5.0 throws on unknown
+        // attachment options and authorityTrace is no longer one of them.
       },
     });
     if (run.state.current_step === issued.binding.step_id && run.state.status === "active") {
@@ -643,6 +657,46 @@ function projectCompletedPublishChange(
   return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection, gateActionEnvelope, progressSnapshot, attached: true, action, observation };
 }
 
+/** Collect the `authorityRef` values from a `trust.bundle` evidence entry's embedded, Flow-5.0-shaped authorityTrace array. */
+function evidenceBundleAuthorityRefs(entry: AnyRecord): Set<string> {
+  const refs = new Set<string>();
+  const bundle = entry.bundle;
+  if (isRecord(bundle) && Array.isArray(bundle.authorityTrace)) {
+    for (const trace of bundle.authorityTrace) {
+      if (isRecord(trace) && typeof trace.authorityRef === "string") refs.add(trace.authorityRef);
+    }
+  }
+  return refs;
+}
+
+/**
+ * Authenticate that a persisted evidence entry was produced by the exact
+ * publish-change action identified by `actionId`.
+ *
+ * Primary path (Flow 5.0+): the action_id is bound as a claim-scoped
+ * `authorityRef` inside the attached TrustBundle's own `authorityTrace` array
+ * (see publishChangeAuthorityRef / writePublishChangeEvidence) — the
+ * replacement for the removed `authorityTrace` attachEvidence option.
+ *
+ * Legacy fallback: evidence attached by flow-agents before this migration
+ * wrote the binding as a flat `authority_trace` string on the evidence entry
+ * (Flow 3.9 accepted that as an attachEvidence option, though Flow itself
+ * documented it as "never used to authorize a gate" — see flow
+ * docs/migrations/5.0.0.md). A long-running builder.build session whose
+ * evidence was attached before an in-place `@kontourai/flow-agents` upgrade
+ * must still be recoverable, so an exact legacy match is still honored on
+ * read. action_id is a locally-computed SHA-256 digest of the full canonical
+ * request (publish-change-operation-authority.ts issuePublishChangeAction),
+ * never an externally-asserted authority — recognizing it here does not
+ * reopen the opaque-authority trust Flow 5.0 closed, it is flow-agents' own
+ * idempotent-replay receipt, orthogonal to Flow's gate-level producer
+ * authorization.
+ */
+function entryAuthenticatesPublishChangeAction(entry: AnyRecord, actionId: string): boolean {
+  if (evidenceBundleAuthorityRefs(entry).has(publishChangeAuthorityRef(actionId))) return true;
+  return entry.authority_trace === actionId;
+}
+
 async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext, action: IssuedPublishChangeAction): Promise<boolean> {
   const bytes = readPublishChangeResultBytes(context);
   if (!bytes) return false;
@@ -656,7 +710,7 @@ async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext,
   const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   return manifestEvidence(run.manifest).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && entry.producer === "publish-change-operation-authority"
-    && entry.authority_trace === action.action_id
+    && entryAuthenticatesPublishChangeAction(entry, action.action_id)
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1
     && entry.expectation_ids[0] === "pull-request-opened"
     && publishChangeEvidenceCarriesDigest(entry, resultDigest));
@@ -1027,6 +1081,7 @@ async function syncAndProject(
   expectedRunHead?: string,
   stagedTrustBundle?: BuilderFlowSessionInput["stagedTrustBundle"],
   binding?: BuilderActorBinding,
+  gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
   assertLifecycleResolutionAttestation(context, run);
@@ -1068,6 +1123,7 @@ async function syncAndProject(
         context.sessionDir,
         manifestEvidence(run.manifest),
         run.config,
+        gateFreshnessCompletionVerifier,
       );
       if (gateEvidence) {
         const alreadyAttached = manifestEvidence(run.manifest).some((entry) =>
@@ -1104,7 +1160,10 @@ async function syncAndProject(
       if (!stagedTrustBundle) removeTrustBundleSnapshot(snapshot);
     }
   }
-  if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)) {
+  if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)
+    // #1302: the no-new-evidence path is the route-back RE-ENTRY trap — a prior visit's passing
+    // claim must not advance a requires_current_verification gate while verification is stale.
+    && gateAdvancementFreshnessSatisfied(gates[0]!, context.sessionDir, context.projectRoot, gateFreshnessCompletionVerifier)) {
     run = await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   }
   assertLifecycleResolutionAttestation(context, run);
@@ -1180,7 +1239,15 @@ function assertLifecycleResolutionAttestation(context: SessionContext, run: Buil
 
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
   const expectations = expectationsForGate(gate, run.config) as FlowExpectation[];
-  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config);
+  // Evaluate at the actual current instant, not Flow's fallback default of
+  // `state.updated_at` (which only advances on a recorded transition, not on
+  // every evidence attachment). Flow 5.0 fails closed on any claim/event
+  // timestamped after its evaluation clock (flow-gates.ts
+  // reconciliationForClaim); using a stale `state.updated_at` here could make
+  // this pre-check under-report readiness (return false when a real
+  // evaluateRun — which does use a live clock — would pass), silently
+  // skipping the sync's real evaluate call below and leaving the run stuck.
+  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config, new Date().toISOString());
   return outcome.status === "pass"
     && (typeof outcome.accepted_exception_id === "string" || expectations.every((expectation) => !expectation.required));
 }
@@ -1348,6 +1415,19 @@ async function recoverCommittedPublishChange(
   };
 }
 
+/**
+ * Flow 5.0 removed the `authorityTrace` attachEvidence option (opaque, unscoped
+ * metadata); the replacement is a validated, claim-scoped `authorityTrace` record
+ * embedded directly in the attached TrustBundle (Hachure `authorityTrace` array —
+ * see @kontourai/surface schemas/trust-bundle.schema.json). This ref format is the
+ * read side's (hasCommittedPublishChangeRecoveryReceipt, merge-change.ts
+ * resultDigestClaimedByCanonicalRun) authoritative binding between a persisted
+ * evidence entry and the specific publish-change action_id that produced it.
+ */
+export function publishChangeAuthorityRef(actionId: string): string {
+  return `publish-change-operation-authority:${actionId}`;
+}
+
 async function writePublishChangeEvidence(
   context: SessionContext,
   action: IssuedPublishChangeAction,
@@ -1356,8 +1436,9 @@ async function writePublishChangeEvidence(
 ): Promise<{ file: string; sha256: string }> {
   const file = path.join(context.sessionDir, `.publish-change.evidence-${randomBytes(16).toString("hex")}.json`);
   const timestamp = observation.observed_at;
+  const checkId = `publish-change-${action.action_id}`;
   const check = {
-    id: `publish-change-${action.action_id}`,
+    id: checkId,
     kind: "external",
     status: "pass",
     summary: `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`,
@@ -1380,6 +1461,22 @@ async function writePublishChangeEvidence(
     { flowId: action.binding.definition_id, stepId: action.binding.step_id },
   );
   if (!bundle) throw new BuilderBuildRunInputError("publish-change", "could not build the required operation-bound trust bundle");
+  const boundClaim = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyRecord[]).find((claim) => claim && claim.subjectId === `${context.slug}/${checkId}`)
+    : undefined;
+  if (!boundClaim || typeof boundClaim.id !== "string" || typeof boundClaim.subjectType !== "string" || typeof boundClaim.subjectId !== "string") {
+    throw new BuilderBuildRunInputError("publish-change", "operation-bound trust bundle did not produce the expected claim to scope the authority trace to");
+  }
+  bundle.authorityTrace = [{
+    id: `authority.publish-change.${action.action_id}`,
+    subject: { subjectType: boundClaim.subjectType, subjectId: boundClaim.subjectId },
+    actorRef: "flow-agents/publish-change-operation-authority",
+    authorityType: "system",
+    authorityRef: publishChangeAuthorityRef(action.action_id),
+    sourceRef: "publish-change-operation-authority",
+    observedAt: timestamp,
+    claimIds: [boundClaim.id],
+  }];
   const validation = await validateTrustBundle(bundle);
   if (validation.available && !validation.valid) throw new BuilderBuildRunInputError("publish-change", `operation-bound trust bundle is invalid: ${validation.errors.join("; ")}`);
   const bytes = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`);
@@ -1464,7 +1561,52 @@ function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: s
   return openGates(run.definition, run.state) as Array<FlowGate & { id: string }>;
 }
 
-async function bundleGateEvidence(
+/**
+ * #1302 freshness turnstile, enforced at the canonical evaluation seam. Independent review of the
+ * first version (a check only in the public `workflow evidence` wrapper) found two BLOCKING
+ * bypasses: a sidecar `record-gate-claim` followed by ANY synchronization advanced the cursor
+ * without the wrapper ever running, and the wrapper's early check was a TOCTOU — an evidence
+ * command could move the workspace between check and evaluation. Every advancement path converges
+ * HERE, and this runs at evaluation time, after evidence commands have executed.
+ *
+ * Advancement is WITHHELD (return false + NOTICE), never thrown: a throw during sync would wedge
+ * every status/projection call for a run holding a stale sidecar-recorded pass claim — the #1164
+ * failure shape. The cursor simply stays at the declaring gate until verification is re-recorded;
+ * the public wrapper's pre-flight check remains for a loud early refusal.
+ */
+export type GateFreshnessCompletionVerifier = typeof verifyProvisionalDeliveryLifecycleCompletion;
+
+/**
+ * The verifier is a PER-CALL parameter defaulting to production, never module state: an earlier
+ * revision exposed a setter here and independent review correctly flagged it as a shipped ambient
+ * enforcement kill-switch (one preloaded call would disable the authority boundary for every
+ * subsequent synchronization in the process). Hermetic tests pass their authority's verifier
+ * explicitly at their own call sites, mirroring how the delivery path itself injects authority.
+ */
+export function gateAdvancementFreshnessSatisfied(
+  gate: unknown,
+  sessionDir: string,
+  projectRoot: string,
+  verifyCompletion: GateFreshnessCompletionVerifier = verifyProvisionalDeliveryLifecycleCompletion,
+): boolean {
+  if (!isRecord(gate) || gate.requires_current_verification !== true) return true;
+  try {
+    // The delivery-tolerant form, not the raw predicate: provisional publication necessarily
+    // adds the session's own delivery/<slug>/ commit BEFORE CI readiness can be recorded, and
+    // the raw snapshot-equality predicate would deadlock that legitimate ordering. This accepts
+    // exactly one hash-bound provisional delivery atop the verified base and nothing else —
+    // the same narrow continuation terminal publication uses.
+    assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(
+      sessionDir, projectRoot, path.basename(sessionDir), verifyCompletion,
+    );
+    return true;
+  } catch (error) {
+    process.stderr.write(`[flow-agents] NOTICE: ${String(gate.id ?? "gate")} advancement withheld (requires_current_verification): ${error instanceof Error ? error.message : String(error)}\n`);
+    return false;
+  }
+}
+
+export async function bundleGateEvidence(
   bundle: unknown,
   gate: FlowGate,
   state: FlowRunState,
@@ -1473,6 +1615,7 @@ async function bundleGateEvidence(
   sessionDir: string,
   manifest: AnyRecord[],
   config: JsonObject,
+  gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier,
 ): Promise<{ failed: boolean; routeReason: string | null; expectationIds: string[]; visitEnteredAt: number } | null> {
   if (!isRecord(bundle) || !Array.isArray(bundle.claims)) return null;
   const expectations = expectationsForGate(gate, config) as FlowExpectation[];
@@ -1546,8 +1689,23 @@ async function bundleGateEvidence(
     const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
     return gateClaim !== null || metadata?.origin === "check";
   });
-  assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot);
+  const executionEvidenceByClaimId = new Map<string, AnyRecord[]>();
+  for (const evidence of Array.isArray(bundle.evidence) ? bundle.evidence : []) {
+    if (!isRecord(evidence)
+      || typeof evidence.claimId !== "string"
+      || !isRecord(evidence.execution)
+      || typeof evidence.execution.label !== "string"
+      || evidence.execution.label.trim().length === 0) continue;
+    const linked = executionEvidenceByClaimId.get(evidence.claimId) ?? [];
+    linked.push(evidence);
+    executionEvidenceByClaimId.set(evidence.claimId, linked);
+  }
+  assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot, executionEvidenceByClaimId);
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
+  // #1302: a PASSING claim at a gate declaring requires_current_verification may not advance the
+  // cursor while review/verification evidence is stale — evaluated here, at the seam, after any
+  // evidence commands ran. Failing claims stay attachable: they are the route-back repair path.
+  if (!failed && !gateAdvancementFreshnessSatisfied(gate, sessionDir, projectRoot, gateFreshnessCompletionVerifier)) return null;
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
     const selector = expectation.bundle_claim;
     return selector.claimType === claim.claimType && (!selector.subjectType || selector.subjectType === claim.subjectType);
@@ -1624,26 +1782,77 @@ const GATE_CLAIM_STALE_REASON = "must match the canonical Flow state authorized 
  * writer-declared file list, so honoring it here would let a claim carry an empty list and
  * declare itself permanently current.
  */
-function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string): void {
+function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string, executionEvidenceByClaimId: ReadonlyMap<string, readonly AnyRecord[]>): void {
   if (headBoundGateClaims.length === 0) return;
   const currentHead = flowRunHead(state);
   const currentStep = state.current_step;
+  let trustedCurrentCommit: string | null = null;
   let currentWorkspace: { snapshot: AnyRecord | null; error: string | null } | null = null;
   for (const claim of headBoundGateClaims) {
     const claimId = typeof claim.id === "string" ? claim.id : "<unknown>";
     const metadata = isRecord(claim.metadata) ? claim.metadata : null;
     const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
     const recordedHead = gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
-    if (recordedHead === currentHead) continue;
+    const observedCommands = metadata && Array.isArray(metadata.observed_commands) ? metadata.observed_commands : [];
+    const linkedExecution = executionEvidenceByClaimId.get(claimId) ?? [];
+    const commandReferences = commandEvidenceReferences(metadata);
+    const hasCommandReference = hasCommandEvidenceReference(metadata);
+    // Only a passing claim can satisfy a gate. Failed, disputed, and
+    // not-verified observations remain auditable route-back evidence even when
+    // their capture-time Git provenance is unavailable or dirty. A passing
+    // tests-evidence claim is command-backed by contract even if an older or
+    // malformed record omitted its observation array, so it cannot evade this
+    // check through a matching Flow head.
+    const commandBacked = claim.claimType === "builder.verify.tests"
+      || claim.claimType === "workflow.check.command"
+      || observedCommands.length > 0
+      || hasCommandReference
+      || metadata?.check_kind === "command"
+      || linkedExecution.length > 0;
+    const requiresObservationProvenance = claim.value === "pass" && commandBacked;
+    // Claims with no command observation retain the #1170 Flow-head fast path.
+    // They cannot establish a verified test gate; command-backed passing claims
+    // receive revision-bound provenance and are validated on the same Flow head.
+    if (!requiresObservationProvenance && recordedHead === currentHead) continue;
     const recordedHeadText = recordedHead === null ? "no recorded head" : `recorded head ${recordedHead}`;
     const recordedSnapshot = gateClaimWorkspaceSnapshot(claim);
     if (recordedSnapshot === null) {
+      if (requiresObservationProvenance) {
+        throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot", `claim '${claimId}' cannot contribute to a passing gate without its clean Git-worktree observation snapshot. Re-record this check after the command completes.`);
+      }
       throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText} and no Git workspace snapshot, so it cannot be reconciled against current head ${currentHead}. Re-record this check at the current head (public: flow-agents workflow evidence; sidecar: workflow:sidecar record-gate-claim).`);
+    }
+    if (requiresObservationProvenance && recordedSnapshot.worktree_clean !== true) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.worktree_clean", `claim '${claimId}' was observed in a dirty Git worktree and is provisional. Clean the worktree and re-record this check.`);
+    }
+    if (requiresObservationProvenance && !isExactLowercaseCommitSha(recordedSnapshot.head_sha)) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.head_sha", `claim '${claimId}' has malformed observed_at_commit '${String(recordedSnapshot.head_sha)}'. Re-record this check from a trusted Git worktree.`);
+    }
+    if (requiresObservationProvenance) {
+      assertPassingCommandObservationProvenance(claimId, observedCommands, recordedSnapshot, linkedExecution, commandReferences, hasCommandReference);
+      if (trustedCurrentCommit === null) {
+        try {
+          trustedCurrentCommit = resolveTrustedLocalGitCommit(projectRoot, "HEAD");
+        } catch (error) {
+          throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.head_sha", `cannot establish a trusted current Git HEAD for passing gate evidence (${errorMessage(error)}). Re-record this check in a complete local Git worktree.`);
+        }
+      }
+      assertObservationAncestor(claimId, recordedSnapshot.head_sha, trustedCurrentCommit, projectRoot);
     }
     currentWorkspace ??= captureCurrentGitWorkspaceSnapshot(projectRoot);
     const recordedStep = gateClaim && typeof gateClaim.step_id === "string" ? gateClaim.step_id : null;
     const treeUnchanged = currentWorkspace.snapshot !== null && isDeepStrictEqual(recordedSnapshot, currentWorkspace.snapshot);
+    if (requiresObservationProvenance && currentWorkspace.snapshot !== null && currentWorkspace.snapshot.worktree_clean !== true) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.worktree_clean", `the current Git worktree is dirty, so clean observation evidence for claim '${claimId}' cannot satisfy this gate. Clean the worktree and re-record this check.`);
+    }
     const stepMatches = recordedStep === null || recordedStep === currentStep;
+    // Flow position equality used to bypass repository-state checks entirely. It
+    // is not evidence that a command observation is bound to this tree, so the
+    // exact snapshot comparison and trusted ancestry above always run first.
+    // A command observation remains step-bound even when its Flow run head is
+    // current. The no-observation fast path above preserves #1170 behavior for
+    // older non-confirming claims; it cannot waive visit/step freshness for a
+    // claim that could satisfy a verified gate.
     if (treeUnchanged && stepMatches) continue;
     const detail = treeUnchanged
       ? `its workspace snapshot still matches the current tree, but it was recorded at step '${recordedStep}' rather than the current step '${currentStep}'`
@@ -1651,6 +1860,69 @@ function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state
         ? `the current Git workspace snapshot could not be captured (${currentWorkspace.error})`
         : "its recorded Git workspace snapshot no longer matches the current tree";
     throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText}, the current head is ${currentHead}, and ${detail}. Re-record this check at the current head.`);
+  }
+}
+
+function commandEvidenceReferences(metadata: AnyRecord | null): string[] {
+  return Array.isArray(metadata?.artifact_refs)
+    ? metadata.artifact_refs.flatMap((reference: unknown) => isRecord(reference)
+      && reference.kind === "command"
+      && typeof reference.excerpt === "string"
+      && reference.excerpt.trim().length > 0
+        ? [reference.excerpt.trim()]
+        : [])
+    : [];
+}
+
+function hasCommandEvidenceReference(metadata: AnyRecord | null): boolean {
+  return Array.isArray(metadata?.artifact_refs)
+    && metadata.artifact_refs.some((reference: unknown) => isRecord(reference) && reference.kind === "command");
+}
+
+function assertPassingCommandObservationProvenance(claimId: string, observedCommands: unknown[], snapshot: AnyRecord, linkedExecution: readonly AnyRecord[], commandReferences: readonly string[], hasCommandReference: boolean): void {
+  if (observedCommands.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands", `passing command-backed claim '${claimId}' has no captured command observation. Re-record the command through the canonical writer.`);
+  }
+  const observedLabels: string[] = [];
+  for (const observation of observedCommands) {
+    if (!isRecord(observation)
+      || typeof observation.command !== "string"
+      || observation.command.length === 0
+      || observation.exit_code !== 0
+      || typeof observation.output_sha256 !== "string"
+      || !/^[a-f0-9]{64}$/u.test(observation.output_sha256)
+      || !isExactLowercaseCommitSha(observation.observed_at_commit)
+      || observation.observed_at_commit !== snapshot.head_sha
+      || observation.worktree_clean !== true
+      || !isValidGitWorktreeSnapshot(observation.verification_workspace_snapshot)
+      || observation.verification_workspace_snapshot.worktree_clean !== true
+      || !isDeepStrictEqual(observation.verification_workspace_snapshot, snapshot)) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands", `passing command-backed claim '${claimId}' must carry clean observation-time Git provenance matching its verification workspace snapshot. Re-run the command and re-record the result.`);
+    }
+    observedLabels.push(observation.command);
+  }
+  if (linkedExecution.length > 0) {
+    const labels = linkedExecution.map((evidence) => isRecord(evidence.execution) && typeof evidence.execution.label === "string" ? evidence.execution.label.trim() : "");
+    if (linkedExecution.some((evidence) => !isRecord(evidence.execution)
+      || evidence.passing !== true
+      || evidence.execution.isError !== false
+      || evidence.execution.exitCode !== 0)
+      || labels.length !== observedLabels.length
+      || labels.some((label, index) => label.length === 0 || label !== observedLabels[index])) {
+      throw new BuilderBuildRunInputError("evidence.evidence.execution", `passing command-backed claim '${claimId}' must bind every linked execution label, in order and multiplicity, to a successful captured command observation. Re-run and re-record the command evidence.`);
+    }
+  }
+  if (linkedExecution.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.evidence.execution", `passing command-backed claim '${claimId}' has no linked execution evidence. Re-run and re-record the command through the canonical writer.`);
+  }
+  if (hasCommandReference && commandReferences.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.artifact_refs", `passing command-backed claim '${claimId}' has an unbindable command evidence ref. Supply the exact runnable command text and re-record the observed command evidence.`);
+  }
+  if (commandReferences.length > 0) {
+    const labels = linkedExecution.map((evidence) => (evidence.execution as AnyRecord).label as string);
+    if (commandReferences.length !== labels.length || commandReferences.some((command, index) => command !== labels[index])) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.artifact_refs", `passing command-backed claim '${claimId}' must bind command evidence refs, linked execution labels, and captured observations in the same order and multiplicity. Re-run and re-record the command evidence.`);
+    }
   }
 }
 
@@ -1682,10 +1954,10 @@ function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state
 function gateClaimWorkspaceSnapshot(claim: AnyRecord): AnyRecord | null {
   const metadata = isRecord(claim.metadata) ? claim.metadata : null;
   if (!metadata) return null;
-  if (isGitWorktreeSnapshot(metadata.verification_workspace_snapshot)) return metadata.verification_workspace_snapshot;
+  if (isValidGitWorktreeSnapshot(metadata.verification_workspace_snapshot)) return metadata.verification_workspace_snapshot;
   if (!isCritiqueOriginClaim(claim, metadata)) return null;
   const reviewTarget = isRecord(metadata.review_target) ? metadata.review_target : null;
-  if (reviewTarget && isGitWorktreeSnapshot(reviewTarget.workspace_snapshot)) return reviewTarget.workspace_snapshot;
+  if (reviewTarget && isValidGitWorktreeSnapshot(reviewTarget.workspace_snapshot)) return reviewTarget.workspace_snapshot;
   return null;
 }
 
@@ -1695,9 +1967,9 @@ function isCritiqueOriginClaim(claim: AnyRecord, metadata: AnyRecord): boolean {
     && claim.subjectType === "workflow-critique";
 }
 
-function isGitWorktreeSnapshot(value: unknown): value is AnyRecord {
+function isValidGitWorktreeSnapshot(value: unknown): value is AnyRecord {
   return isRecord(value)
-    && value.kind === "git-worktree"
+    && isGitWorktreeSnapshot(value)
     && typeof value.digest === "string"
     && typeof value.head_sha === "string";
 }
@@ -1705,10 +1977,26 @@ function isGitWorktreeSnapshot(value: unknown): value is AnyRecord {
 function captureCurrentGitWorkspaceSnapshot(projectRoot: string): { snapshot: AnyRecord | null; error: string | null } {
   try {
     const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
-    return { snapshot: isGitWorktreeSnapshot(snapshot) ? snapshot : null, error: null };
+    return { snapshot: isValidGitWorktreeSnapshot(snapshot) ? snapshot : null, error: null };
   } catch (error) {
     return { snapshot: null, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function assertObservationAncestor(claimId: string, observedCommit: string, currentCommit: string, projectRoot: string): void {
+  try {
+    assertTrustedGitAncestor(projectRoot, observedCommit, currentCommit);
+  } catch (error) {
+    const exitStatus = isRecord(error) && typeof error.status === "number" ? error.status : null;
+    if (exitStatus === 1) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands.observed_at_commit", `claim '${claimId}' was observed at ${observedCommit}, which is not an ancestor of trusted current HEAD ${currentCommit}. Re-run the check against the current revision.`);
+    }
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands.observed_at_commit", `could not prove that claim '${claimId}' observed commit ${observedCommit} is an ancestor of trusted current HEAD ${currentCommit} (${errorMessage(error)}). Git history may be shallow or missing; fetch the required history and re-record this check.`);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function mergeGateClaimsWithCritiqueHistory(
@@ -1839,8 +2127,26 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
     && isRecord(claim.metadata)
     && claim.metadata.origin === "critique"
     && liveRecordIds.has(claim.metadata.critique_record_id));
-  if (liveCritiques.length === 0 || liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
-    throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a current clean critique");
+  // Two distinguishable causes, two different remedies. Naming the unmet state without the
+  // transition leaves a correct caller with retry as its only move — measured across 12 eval arms:
+  // 81 refusals, 32% of them repeats of a reason already hit in the same run (#1281).
+  if (liveCritiques.length === 0) {
+    throw new BuilderBuildRunInputError(
+      "evidence.critique",
+      "a passing tests-evidence claim requires a current clean critique, and this gate visit has none. "
+        + "Record one with `workflow critique` under a reviewer identity distinct from the implementation "
+        + "actor (set FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process). Note that a route-back "
+        + "starts a new gate visit: critiques from a previous visit remain as audit history but do not "
+        + "satisfy this one.",
+    );
+  }
+  if (liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
+    throw new BuilderBuildRunInputError(
+      "evidence.critique",
+      "a passing tests-evidence claim requires a current clean critique, and this gate visit has one that "
+        + "is not a substantive pass. Address its open findings, then re-record with `workflow critique` "
+        + "(re-recording under the same critique id supersedes the previous verdict).",
+    );
   }
   const critiqueCandidates = await Promise.all(liveCritiques.map(async (claim) => {
     const artifacts = reviewedArtifacts(claim);
@@ -1883,10 +2189,14 @@ function assertObservedTestsEvidence(testClaim: AnyRecord, criteria: AnyRecord[]
   if (!Array.isArray(observed) || observed.length === 0) {
     throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain successful command observations");
   }
+  const observationSnapshot = gateClaimWorkspaceSnapshot(testClaim);
+  if (observationSnapshot === null || observationSnapshot.worktree_clean !== true) {
+    throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must be bound to a clean Git-worktree observation snapshot");
+  }
   const commands = new Set<string>();
   for (const entry of observed) {
-    if (!isRecord(entry) || typeof entry.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256) || commands.has(entry.command)) {
-      throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain unique commands with exit_code 0, a positive executed-test count, and SHA-256 output digests");
+    if (!isRecord(entry) || typeof entry.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(entry.output_sha256) || !isExactLowercaseCommitSha(entry.observed_at_commit) || entry.worktree_clean !== true || entry.observed_at_commit !== observationSnapshot.head_sha || !isValidGitWorktreeSnapshot(entry.verification_workspace_snapshot) || entry.verification_workspace_snapshot.worktree_clean !== true || !isDeepStrictEqual(entry.verification_workspace_snapshot, observationSnapshot) || commands.has(entry.command)) {
+      throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain unique clean command observations with exit_code 0, a positive executed-test count, SHA-256 output digests, and matching observation-time Git-worktree snapshots");
     }
     commands.add(entry.command);
   }

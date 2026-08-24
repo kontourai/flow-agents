@@ -1,0 +1,41 @@
+{
+  "schema_version": "0.1",
+  "run_id": "econ-fixture-zero-duration-boundary",
+  "definition_id": "builder.build",
+  "definition_version": "1.4",
+  "subject": "econ-fixture/zero-duration-boundary",
+  "status": "active",
+  "current_step": "execute",
+  "params": {},
+  "next_action": "continue execute",
+  "updated_at": "2026-02-04T00:02:00.000Z",
+  "gate_outcomes": [],
+  "transitions": [
+    {
+      "from_step": "pull-work",
+      "to_step": "design-probe",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "pull-work-gate",
+      "at": "2026-02-04T00:00:00.000Z"
+    },
+    {
+      "from_step": "design-probe",
+      "to_step": "plan",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "design-probe-gate",
+      "at": "2026-02-04T00:00:00.000Z"
+    },
+    {
+      "from_step": "plan",
+      "to_step": "execute",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "plan-gate",
+      "at": "2026-02-04T00:02:00.000Z"
+    }
+  ],
+  "lifecycle": [],
+  "exceptions": []
+}

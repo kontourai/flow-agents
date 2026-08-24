@@ -36,6 +36,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 // Hash-chain primitives + the exit-code-laundering heuristic come from ONE shared
@@ -69,6 +70,15 @@ try {
 }
 
 const MAX_STDIN = 1024 * 1024;
+const MAX_WORKSPACE_TRACKED_DIFF_BYTES = 16 * 1024 * 1024;
+const MAX_WORKSPACE_UNTRACKED_LIST_BYTES = 4 * 1024 * 1024;
+const MAX_WORKSPACE_TRACKED_INDEX_BYTES = 4 * 1024 * 1024;
+const MAX_WORKSPACE_UNTRACKED_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_WORKSPACE_UNTRACKED_TOTAL_BYTES = 64 * 1024 * 1024;
+const WORKSPACE_HASH_READ_CHUNK_BYTES = 64 * 1024;
+const WORKSPACE_GIT_TIMEOUT_MS = 3000;
+const WORKSPACE_HEAD_OUTPUT_BYTES = 256;
+const EXACT_COMMIT_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 /**
  * #1172: prefix of the machine-readable control line this hook appends to a HARD (non-releasable)
  * block, telling the harness adapter that this gate will never release on its own and the refusal
@@ -576,11 +586,13 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
     const existing = byCmd.get(cmd);
     if (existing) {
       recordScopeClaim(existing, id, scope);
+      recordClaimWorkspaceSnapshot(existing, claim);
       continue;
     }
     // Use 'pass' as the nominal claimed status; cross-reference catches contradictions.
-    const check = { id, kind: 'command', status: 'pass', command: cmd, evidenceScope: scope, undisclosedClaimIds: [] };
+    const check = { id, kind: 'command', status: 'pass', command: cmd, evidenceScope: scope, undisclosedClaimIds: [], verificationWorkspaceSnapshots: [] };
     recordScopeClaim(check, id, scope);
+    recordClaimWorkspaceSnapshot(check, claim);
     byCmd.set(cmd, check);
     checks.push(check);
   }
@@ -611,10 +623,12 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
     const existing = byCmd.get(cmd);
     if (existing) {
       recordScopeClaim(existing, id, scope);
+      recordClaimWorkspaceSnapshot(existing, c);
       continue;
     }
-    const check = { id, kind: 'command', status: 'pass', command: cmd, evidenceScope: scope, undisclosedClaimIds: [] };
+    const check = { id, kind: 'command', status: 'pass', command: cmd, evidenceScope: scope, undisclosedClaimIds: [], verificationWorkspaceSnapshots: [] };
     recordScopeClaim(check, id, scope);
+    recordClaimWorkspaceSnapshot(check, c);
     byCmd.set(cmd, check);
     checks.push(check);
   }
@@ -855,6 +869,227 @@ function normalizeCommand(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function canonicalWorkspaceJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalWorkspaceJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalWorkspaceJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function isCleanCanonicalWorkspaceSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false;
+  const keys = Object.keys(snapshot).sort();
+  if (keys.join(',') !== 'algorithm,digest,head_sha,kind,version,worktree_clean') return false;
+  return snapshot.version === 1 && snapshot.kind === 'git-worktree' && snapshot.algorithm === 'sha256'
+    && typeof snapshot.digest === 'string' && /^[a-f0-9]{64}$/.test(snapshot.digest)
+    && typeof snapshot.head_sha === 'string' && EXACT_COMMIT_SHA.test(snapshot.head_sha)
+    && snapshot.worktree_clean === true;
+}
+
+function trustedWorkspaceGitEnvironment() {
+  return {
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_NO_REPLACE_OBJECTS: '1',
+    LANG: 'C',
+    LC_ALL: 'C',
+    PATH: process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd;C:\\Windows\\System32' : '/usr/bin:/bin',
+  };
+}
+
+function trustedWorkspaceGitCandidates() {
+  if (process.platform === 'darwin') return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'];
+  if (process.platform === 'win32') return ['C:\\Program Files\\Git\\cmd\\git.exe'];
+  return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/usr/local/bin/git'];
+}
+
+function resolveTrustedWorkspaceGitExecutable() {
+  for (const candidate of trustedWorkspaceGitCandidates()) {
+    try { return trustedWorkspaceGitIdentity(candidate); } catch {}
+  }
+  return null;
+}
+
+function trustedWorkspaceGitIdentity(candidate) {
+  const resolved = fs.realpathSync(candidate);
+  const stat = fs.statSync(resolved);
+  if (!path.isAbsolute(resolved) || !stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) throw new Error('untrusted Git executable');
+  if (process.platform !== 'win32') {
+    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error('untrusted Git executable ownership');
+    for (let cursor = path.dirname(resolved);;) {
+      const parent = fs.statSync(cursor);
+      if (!parent.isDirectory() || parent.uid !== 0 || (parent.mode & 0o022) !== 0) throw new Error('untrusted Git executable parent');
+      const next = path.dirname(cursor);
+      if (next === cursor) break;
+      cursor = next;
+    }
+  }
+  return { candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode };
+}
+
+function revalidateTrustedWorkspaceGit(identity) {
+  const current = trustedWorkspaceGitIdentity(identity.candidate);
+  return current.device === identity.device && current.inode === identity.inode && current.size === identity.size
+    && current.mtimeMs === identity.mtimeMs && current.mode === identity.mode;
+}
+
+function runTrustedWorkspaceGit(root, args, maxOutput) {
+  try {
+    const executable = resolveTrustedWorkspaceGitExecutable();
+    if (!executable) return null;
+    const hardenedArgs = args[0] === 'diff'
+      ? ['diff', '--no-ext-diff', '--no-textconv', ...args.slice(1)]
+      : args;
+    const result = spawnSync(executable.path, [
+      '--no-replace-objects',
+      '-c', 'core.fsmonitor=false',
+      '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
+      '-c', 'diff.external=',
+      '-C', root,
+      ...hardenedArgs,
+    ], {
+      encoding: 'buffer',
+      env: trustedWorkspaceGitEnvironment(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: WORKSPACE_GIT_TIMEOUT_MS,
+      maxBuffer: maxOutput + 1,
+    });
+    if (!result || result.error || result.signal || result.status !== 0 || !Buffer.isBuffer(result.stdout) || result.stdout.length > maxOutput || !revalidateTrustedWorkspaceGit(executable)) return null;
+    return result.stdout;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the actual worktree containing the hook invocation. Artifact lookup
+ * deliberately uses the shared repository root, while snapshot provenance must
+ * describe this worktree (which may have a different HEAD in a linked worktree).
+ */
+function resolveObservedWorkspaceRoot(startDir) {
+  try {
+    const canonicalStart = fs.realpathSync(path.resolve(startDir || process.cwd()));
+    const observedRoot = runTrustedWorkspaceGit(canonicalStart, ['rev-parse', '--show-toplevel'], WORKSPACE_HEAD_OUTPUT_BYTES);
+    if (!observedRoot) return null;
+    const canonicalRoot = fs.realpathSync(observedRoot.toString('utf8').trim());
+    if (!path.isAbsolute(canonicalRoot) || !isWithinWorkspaceRoot(canonicalStart, canonicalRoot)) return null;
+    const confirmedRoot = runTrustedWorkspaceGit(canonicalRoot, ['rev-parse', '--show-toplevel'], WORKSPACE_HEAD_OUTPUT_BYTES);
+    if (!confirmedRoot || fs.realpathSync(confirmedRoot.toString('utf8').trim()) !== canonicalRoot) return null;
+    return canonicalRoot;
+  } catch {
+    return null;
+  }
+}
+
+function trustedWorkspaceHead(root) {
+  const output = runTrustedWorkspaceGit(root, ['rev-parse', '--verify', 'HEAD^{commit}'], WORKSPACE_HEAD_OUTPUT_BYTES);
+  const head = output ? output.toString('utf8').trim() : '';
+  return EXACT_COMMIT_SHA.test(head) ? head : null;
+}
+
+function hasOrdinaryWorkspaceIndex(root) {
+  const output = runTrustedWorkspaceGit(root, ['ls-files', '-v', '-z'], MAX_WORKSPACE_TRACKED_INDEX_BYTES);
+  return !!output && output.toString('utf8').split('\0').filter(Boolean).every(entry => entry.startsWith('H '));
+}
+
+function isWithinWorkspaceRoot(candidate, root) {
+  const relative = path.relative(root, candidate);
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function sameWorkspaceFileIdentity(before, after) {
+  return before.dev === after.dev && before.ino === after.ino && before.size === after.size
+    && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs;
+}
+
+function hashWorkspaceUntrackedFile(hash, root, file, totalBytes) {
+  const absolute = path.resolve(root, file);
+  if (!isWithinWorkspaceRoot(absolute, root)) return null;
+  const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+  const descriptor = fs.openSync(absolute, fs.constants.O_RDONLY | noFollow);
+  try {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile() || before.size > MAX_WORKSPACE_UNTRACKED_FILE_BYTES || totalBytes + before.size > MAX_WORKSPACE_UNTRACKED_TOTAL_BYTES) return null;
+    hash.update(file).update('\0');
+    const buffer = Buffer.allocUnsafe(WORKSPACE_HASH_READ_CHUNK_BYTES);
+    let remaining = before.size;
+    let position = 0;
+    while (remaining > 0) {
+      const bytesRead = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, remaining), position);
+      if (bytesRead <= 0) return null;
+      hash.update(buffer.subarray(0, bytesRead));
+      remaining -= bytesRead;
+      position += bytesRead;
+    }
+    if (!sameWorkspaceFileIdentity(before, fs.fstatSync(descriptor))) return null;
+    hash.update('\0');
+    return totalBytes + before.size;
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function currentCanonicalWorkspaceSnapshot(root) {
+  try {
+    const canonicalRoot = resolveObservedWorkspaceRoot(root);
+    if (!canonicalRoot) return null;
+    const head = trustedWorkspaceHead(canonicalRoot);
+    if (!head || !hasOrdinaryWorkspaceIndex(canonicalRoot)) return null;
+    const trackedDiff = runTrustedWorkspaceGit(canonicalRoot, ['diff', '--binary', 'HEAD', '--', '.'], MAX_WORKSPACE_TRACKED_DIFF_BYTES);
+    const untrackedBytes = runTrustedWorkspaceGit(canonicalRoot, ['ls-files', '--others', '--exclude-standard', '-z'], MAX_WORKSPACE_UNTRACKED_LIST_BYTES);
+    if (!trackedDiff || !untrackedBytes) return null;
+    const untracked = untrackedBytes.toString('utf8').split('\0').filter(Boolean).sort();
+    const hash = crypto.createHash('sha256');
+    hash.update('flow-agents:git-worktree:v1\0').update(head).update('\0').update(trackedDiff).update('\0');
+    let totalBytes = 0;
+    for (const file of untracked) {
+      totalBytes = hashWorkspaceUntrackedFile(hash, canonicalRoot, file, totalBytes);
+      if (totalBytes === null) return null;
+    }
+    const settledTrackedDiff = runTrustedWorkspaceGit(canonicalRoot, ['diff', '--binary', 'HEAD', '--', '.'], MAX_WORKSPACE_TRACKED_DIFF_BYTES);
+    const settledUntrackedBytes = runTrustedWorkspaceGit(canonicalRoot, ['ls-files', '--others', '--exclude-standard', '-z'], MAX_WORKSPACE_UNTRACKED_LIST_BYTES);
+    if (!settledTrackedDiff || !settledUntrackedBytes || !settledTrackedDiff.equals(trackedDiff) || !settledUntrackedBytes.equals(untrackedBytes)
+      || !hasOrdinaryWorkspaceIndex(canonicalRoot) || trustedWorkspaceHead(canonicalRoot) !== head) return null;
+    return {
+      version: 1,
+      kind: 'git-worktree',
+      algorithm: 'sha256',
+      digest: hash.digest('hex'),
+      head_sha: head,
+      worktree_clean: trackedDiff.length === 0 && untracked.length === 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function claimWorkspaceSnapshot(claim) {
+  const metadata = claim && typeof claim.metadata === 'object' && claim.metadata && !Array.isArray(claim.metadata)
+    ? claim.metadata
+    : null;
+  return metadata ? metadata.verification_workspace_snapshot : undefined;
+}
+
+function recordClaimWorkspaceSnapshot(check, claim) {
+  if (!Array.isArray(check.verificationWorkspaceSnapshots)) check.verificationWorkspaceSnapshots = [];
+  check.verificationWorkspaceSnapshots.push(claimWorkspaceSnapshot(claim));
+}
+
+function capturedPassProvenanceIssue(workspaceRoot, logged, check, currentSnapshot) {
+  const entry = logged && logged.entry;
+  if (!entry || !EXACT_COMMIT_SHA.test(String(entry.observed_at_commit || ''))) return 'capture record has no canonical observed_at_commit';
+  if (entry.worktree_clean !== true) return 'capture record was observed with a dirty worktree';
+  const expectedSnapshots = Array.isArray(check.verificationWorkspaceSnapshots) ? check.verificationWorkspaceSnapshots : [];
+  if (expectedSnapshots.length === 0 || expectedSnapshots.some(snapshot => !isCleanCanonicalWorkspaceSnapshot(snapshot))) return 'trust.bundle claim has no clean canonical verification workspace snapshot';
+  if (expectedSnapshots.some(snapshot => snapshot.head_sha !== entry.observed_at_commit)) return 'capture record commit does not exactly bind the trust.bundle claim snapshot';
+  if (!currentSnapshot || !isCleanCanonicalWorkspaceSnapshot(currentSnapshot)) return 'current canonical workspace snapshot is unavailable or dirty';
+  if (expectedSnapshots.some(snapshot => canonicalWorkspaceJson(snapshot) !== canonicalWorkspaceJson(currentSnapshot))) return 'trust.bundle claim snapshot does not match the current canonical workspace snapshot';
+  if (!runTrustedWorkspaceGit(workspaceRoot, ['cat-file', '-e', `${entry.observed_at_commit}^{commit}`], WORKSPACE_HEAD_OUTPUT_BYTES)
+    || !runTrustedWorkspaceGit(workspaceRoot, ['merge-base', '--is-ancestor', entry.observed_at_commit, currentSnapshot.head_sha], WORKSPACE_HEAD_OUTPUT_BYTES)) return 'capture record commit is not a trusted ancestor of current HEAD';
+  return null;
+}
+
 /**
  * #362 (iteration-2 fix item 4/LOW): single-sourced human-facing remediation phrase for an
  * ambiguous bare grep/diff exit-1 command. Every emission site below (captureCrossReference's
@@ -964,6 +1199,7 @@ function readLatestCommandLog(artifactDir) {
       ambiguous,
       absenceAmbiguous,
       exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : null,
+      entry,
     });
   }
   return byCommand;
@@ -1569,18 +1805,30 @@ function runBackstop(trusted) {
 }
 
 /**
- * ADR 0010 Phase 4b: captureCrossReference — bundle-first command check sourcing.
- * Sources the claimed-pass command checks from trust.bundle evidence[] (execution/
- * command items) when the bundle is present, falling back to evidence.json checks
- * for bundle-less sessions. command-log.jsonl UNCHANGED — it stays the capture
- * truth source. The teeth (claimed-pass + captured-fail → block) are byte-identical.
+ * A passing backstop is an observed command only after its process exits. Bind
+ * that observation to the worktree that actually executed it, then apply the
+ * same clean snapshot and ancestry requirements as a captured command-log pass.
+ */
+function observeBackstopWorkspaceProvenance(workspaceRoot, check) {
+  const snapshot = currentCanonicalWorkspaceSnapshot(workspaceRoot);
+  const logged = snapshot
+    ? { entry: { observed_at_commit: snapshot.head_sha, worktree_clean: snapshot.worktree_clean } }
+    : null;
+  return capturedPassProvenanceIssue(workspaceRoot, logged, check, snapshot);
+}
+
+/**
+ * ADR 0010 Phase 4b: captureCrossReference — bundle-authoritative command checks.
+ * Only trust.bundle can supply a confirming command claim. evidence.json remains
+ * an auditable pessimistic signal: it can trigger capture-fail detection and a
+ * trusted backstop, but it cannot confirm a pass without a trust.bundle claim.
  *
  * ADR 0016 P-c (fix): accept activeFlowStep so declared-type sessions (e.g.
  * builder.verify.tests) are visible to the cross-reference, closing the hole
  * where captureCrossReference was the only capture consumer not threaded with
  * the FlowDefinition. Mirrors the pattern in bundleEnforcement / sidecarGuidance.
  */
-function captureCrossReference(root, artifactDir, activeFlowStep) {
+function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot = root, summary = null) {
   // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
   // Null when no FlowDefinition is active (fallback: bundleClaimedPassCommandChecks
   // uses workflow.check.* prefix only — no regression for non-FlowDefinition sessions).
@@ -1588,11 +1836,28 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
   const log = readLatestCommandLog(artifactDir); // Fix C: latest-wins; genuine fix-then-rerun-to-pass clears the block
+  // #1266: the cross-check summary collector observes THIS derivation rather than recomputing
+  // it anywhere else (one truth source). commands_captured is DISTINCT NORMALIZED COMMANDS —
+  // the size of readLatestCommandLog's latest-wins map — NOT raw command-log.jsonl lines; a
+  // command re-run five times counts once.
+  if (summary) {
+    summary.computed = true;
+    summary.commands_captured = log.size;
+  }
   const base = relative(root, artifactDir);
   const backstopMode = resolveBackstopMode(root);
   const warnings = [];
   const captureState = readJsonFile(path.join(artifactDir, 'state.json'));
   const terminalDelivered = isTerminalDeliveredState(captureState);
+  let currentWorkspaceSnapshot;
+  let currentWorkspaceSnapshotResolved = false;
+  const currentSnapshot = () => {
+    if (!currentWorkspaceSnapshotResolved) {
+      currentWorkspaceSnapshot = currentCanonicalWorkspaceSnapshot(workspaceRoot);
+      currentWorkspaceSnapshotResolved = true;
+    }
+    return currentWorkspaceSnapshot;
+  };
 
   // AC3 fail-closed: detect a missing command log in a post-execution session.
   // When state.json confirms the session is past the planning phase (commands should
@@ -1652,6 +1917,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   let chainBroken = false;
   {
     const chainResult = verifyCommandLogChain(artifactDir);
+    // #1266: carry verifyCommandLogChain's REAL enum (ok | legacy | forked | broken) into the
+    // summary unmapped. `legacy` means NO chain exists — a consumer must never render it as
+    // verified/ok; collapsing the enum here would be exactly that lie.
+    if (summary) summary.chain = chainResult.status;
     if (chainResult.status === 'broken') {
       chainBroken = true;
       const brokenIdx = chainResult.brokenAt !== null ? ` (entry ${chainResult.brokenAt})` : '';
@@ -1675,26 +1944,37 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
     }
   }
 
-  // Build the list of claimed-pass command checks — bundle-first, evidence.json fallback.
+  // Build claimed-pass command checks from trust.bundle. A bundle-less
+  // evidence.json check may trigger a safe negative/backstop path, never a
+  // command-log confirmation shortcut.
   let claimedPass;
+  let sidecarOnlyClaims = false;
   if (bundle && Array.isArray(bundle.claims)) {
-    // Phase 4b: source from trust.bundle evidence[] (execution/command items).
     claimedPass = bundleClaimedPassCommandChecks(bundle, declaredClaimTypes);
   } else {
-    // Fallback: no bundle — read from evidence.json (existing behavior, no regression).
     const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
     if (!evidence || !Array.isArray(evidence.checks)) return warnings;
+    sidecarOnlyClaims = true;
     claimedPass = evidence.checks.filter(check => {
       if (!check || typeof check !== 'object') return false;
       const kind = normalizedStatus(check.kind);
       const status = normalizedStatus(check.status);
       return kind === 'command' && (status === 'pass' || status === 'passed') && normalizeCommand(check.command);
     });
+    if (claimedPass.length > 0) {
+      warnings.push(`${base} evidence.json command claims are NOT_VERIFIED — trust.bundle is required for runtime confirmation; command-log records and sidecar status cannot independently confirm a pass.`);
+    }
   }
 
+  // #1266: claims_total vs claims_checked is mandatory in the summary — the loop below caps
+  // at 8 claimed-pass commands (slice(0, 8)), so zero-contradicted must never be readable as
+  // full coverage. claims_total is every claimed-pass check; claims_checked counts only the
+  // ones this loop actually cross-referenced (capped, and skipping empty-command checks).
+  if (summary) summary.claims_total = claimedPass.length;
   for (const check of claimedPass.slice(0, 8)) {
     const cmd = normalizeCommand(check.command);
     if (!cmd) continue;
+    if (summary) summary.claims_checked += 1;
     const id = safeOneLine(check.id || cmd, 80);
     const logged = log.get(cmd);
     // #1171: emitted ONLY on the two paths that accept the claimed pass — a narrowed-but-
@@ -1709,6 +1989,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       // shortcut and fall through to the backstop/NOT_VERIFIED path below.
       if (logged.failed) {
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
+        // #1266: one contradiction identity per normalized command — capturedFailReconciliation
+        // can flag the SAME contradiction namespace-agnostically; the shared Set dedups them
+        // (one contradiction, one count), mirroring the bundleEnforcement warning dedup in analyze().
+        if (summary) summary.contradicted.add(cmd);
         warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
       } else if (logged.ambiguous && logged.absenceAmbiguous) {
         // #362: a bare grep/diff logged exit 1 — ambiguous (zero matches/no diff), not a
@@ -1737,8 +2021,24 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
         // like. Surfaced here rather than swallowed by the "satisfied deterministically" path.
         warnings.push(scopeNote);
       }
-      // else: log shows it ran and passed with no laundering → satisfied deterministically.
-      continue;
+      let provenanceIssue = null;
+      if (!sidecarOnlyClaims && !logged.failed && !logged.ambiguous && !hasLaunderingOperator(cmd) && !scopeNote) {
+        provenanceIssue = capturedPassProvenanceIssue(workspaceRoot, logged, check, currentSnapshot());
+        if (provenanceIssue) {
+          warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — ${provenanceIssue}. Re-record this command with a clean canonical workspace snapshot bound to the trust.bundle claim.`);
+        }
+      }
+      // A bundle claim can be confirmed by its intact capture record. A
+      // sidecar-only claim must continue to the trusted backstop and remains
+      // nonconfirming even when that backstop passes.
+      // #1266: claims_confirmed_from_capture counts ONLY this deterministic confirmation path —
+      // a bundle claim whose intact (chain-not-broken) capture record shows a clean pass with no
+      // failure, no ambiguity, no laundering, no undisclosed narrowing, and no provenance issue.
+      // A narrowed-but-passing or provenance-flagged claim is deliberately NOT "confirmed".
+      if (summary && !sidecarOnlyClaims && !logged.failed && !logged.ambiguous && !hasLaunderingOperator(cmd) && !scopeNote && !provenanceIssue) {
+        summary.claims_confirmed_from_capture += 1;
+      }
+      if (!sidecarOnlyClaims || logged.failed || logged.ambiguous || hasLaunderingOperator(cmd) || scopeNote || provenanceIssue) continue;
     }
 
     // (2) Backstop: the log has NO execution for this claimed-pass command.
@@ -1768,7 +2068,13 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       warnings.push(`${base} evidence check ${id}: malformed-evidence — terminal delivered/done session recorded model-command text asserted by FLOW_AGENTS_GOAL_FIT_RECHECK ("${safeOneLine(cmd, 120)}"); it was NOT re-run on a terminal session. Captured-execution evidence and CI/L2 checks remain the anchors.`);
       continue;
     }
-    const outcome = runBackstop(trusted);
+    // Artifact and manifest discovery use the shared authority root. The
+    // command itself must run in the observed worktree that the provenance
+    // snapshot describes, including when it is a linked worktree.
+    const outcome = runBackstop({ ...trusted, cwd: workspaceRoot });
+    // #1266: backstop_reruns counts trusted backstop re-runs that actually EXECUTED
+    // (outcome.ran); a backstop that could not start is not a re-run.
+    if (summary && outcome.ran) summary.backstop_reruns += 1;
     if (!outcome.ran) {
       warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — trusted backstop (${trusted.source}) could not run (${safeOneLine(outcome.error, 80)}).`);
       continue;
@@ -1780,6 +2086,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" exited 1 — for grep/diff this may mean zero matches/no differences (PASS for an absence check) or an unintended miss (FAIL for a presence check); NOT_VERIFIED (ambiguous): ${AMBIGUOUS_REMEDIATION} to remove the ambiguity.`;
       warnings.push(note);
     } else if (outcome.classification === 'fail') {
+      // #1266: a backstop FAIL contradicting a claimed pass is a contradiction from the SAME
+      // source (captureCrossReference) — same per-command dedup Set, counted even in warn mode
+      // (the count reports what was observed; `blocking` on the record reports enforcement).
+      if (summary) summary.contradicted.add(cmd);
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" FAILED with exit ${outcome.exitCode}, contradicting the claimed pass. This is a caught false-completion.`;
       if (backstopMode === 'off') warnings.push(`${note} [backstop in warn mode — not blocking]`);
       else warnings.push(note);
@@ -1795,8 +2105,15 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
         : trusted.argv.join(' ');
       const backstopScopeNote = testScopeDivergence(root, base, check, cmd, executed);
       if (backstopScopeNote) warnings.push(backstopScopeNote);
+      if (sidecarOnlyClaims) {
+        warnings.push(`${base} evidence check ${id}: NOT_VERIFIED — trusted backstop (${trusted.source}) passed, but evidence.json and command-log data cannot confirm runtime evidence without a matching trust.bundle claim.`);
+      } else {
+        const provenanceIssue = observeBackstopWorkspaceProvenance(workspaceRoot, check);
+        if (provenanceIssue) {
+          warnings.push(`${base} evidence check ${id}: trusted backstop (${trusted.source}) passed but NOT_VERIFIED — ${provenanceIssue}. Re-run it from a clean canonical workspace snapshot bound to the trust.bundle claim.`);
+        }
+      }
     }
-    // backstop classification 'pass' → claim deterministically confirmed by re-run, no warning.
   }
 
   return warnings;
@@ -1829,7 +2146,7 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
  *   - No-command session: no log → latestLog empty → no warning.
  *   - Incidental fail (grep/diff/find) with no pass-claim → no warning (Case B removed).
  */
-function capturedFailReconciliation(root, artifactDir, taskStatus) {
+function capturedFailReconciliation(root, artifactDir, taskStatus, summary = null) {
   // Fix A: removed the `completing` guard. Run on EVERY stop — status-independent.
   // A claim contradicting the capture is a false-completion whether or not the agent
   // has set state.json.status to a terminal value. (taskStatus param kept for compat.)
@@ -1929,6 +2246,12 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     if (acc && acc.passClaims.length > 0) {
       // Any-namespace claim asserts pass for a command whose latest capture is FAIL.
       // This is the namespace-agnostic false-completion signal.
+      // #1266: same contradiction identity (normalized command) as captureCrossReference's
+      // capture-log contradiction — the shared Set merges both sources into ONE count when
+      // they flag the same command, mirroring analyze()'s bundleEnforcement warning dedup.
+      // Only this Case-A bucket is a contradiction; the laundered-pass and ambiguous buckets
+      // below are NOT_VERIFIED classes, never counted as contradicted.
+      if (summary) summary.contradicted.add(cmd);
       const claim = acc.passClaims[0];
       warnings.push(
         `${base} captured command '${safeOneLine(cmd, 120)}' last ran FAIL${exitStr} ` +
@@ -2534,7 +2857,7 @@ function learningGateOutstandingWarning(root, artifactDir, state) {
   return `${base} learning outstanding — state ${status}/${phase} has no learning.json and no learning-evidence check in trust.bundle; run learning-review, or record an accepted skip via \`workflow-sidecar advance-state ${base} --skip-learning "<reason>" --waived-by <actor>\`.`;
 }
 
-async function analyze(root, now = Date.now(), fencedRunId = null) {
+async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot = root) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
   const { actor: actorKey } = resolveActor(process.env);
   const activeTurnScope = validatedActiveTurnScope(root);
@@ -2553,7 +2876,7 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
   // legitimately handling an authorized continuation-driver turn is never treated as "no own
   // work to scope to" here, even without its own per-actor current pointer — this check only
   // fires when NEITHER mechanism finds a scope.
-  if (!scoped && !isUnresolvedActor(actorKey)) {
+  if (!scoped && !isUnresolvedActor(actorKey) && flowAgentsDirs.length > 0) {
     const ownStale = flowAgentsDirs.map(staleCurrentSlug).find(Boolean);
     process.stderr.write(ownStale
       ? `[Hook] Goal Fit: actor "${safeOneLine(actorKey, 80)}"'s own current-pointer names slug "${safeOneLine(ownStale, 80)}" but no such session directory exists — ignoring the stale own pointer; other sessions' sidecars are informational only, not blocking (#440).\n`
@@ -2622,7 +2945,7 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
   const selectedRunId = path.basename(latestArtifactDir);
   if (fencedRunId === null) {
     try {
-      return await withFlowRecoveryFenceReadAsync(root, selectedRunId, () => analyze(root, now, selectedRunId));
+      return await withFlowRecoveryFenceReadAsync(root, selectedRunId, () => analyze(root, now, selectedRunId, workspaceRoot));
     } catch (error) {
       return {
         warnings: [`workflow recovery fence: ${String(error && error.message || error)}. Canonical workflow artifacts are unavailable until recovery completes.`],
@@ -2659,7 +2982,25 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
 
   warnings.push(...sidecarValidation(root, latestArtifactDir));
   warnings.push(...sidecarGuidance(root, latestArtifactDir, activeFlowStep));
-  const captureWarnings = captureCrossReference(root, latestArtifactDir, activeFlowStep);
+  // #1266: stop-gate cross-check summary collector. Populated ONLY by observing the two
+  // existing truth sources (captureCrossReference + capturedFailReconciliation) as they run —
+  // never recomputed elsewhere. `computed` flips true only when captureCrossReference actually
+  // executed for a scoped session, so absent hooks/session ⇒ absent record downstream (a
+  // fabricated zero row would be this record committing the defect it exists to kill).
+  // `contradicted` is a Set of normalized commands: both sources can flag the same
+  // contradiction; one contradiction, one count (same dedup posture as the bundleEnforcement
+  // warning suppression just below).
+  const stopGateStats = {
+    computed: false,
+    commands_captured: 0,
+    claims_total: 0,
+    claims_checked: 0,
+    claims_confirmed_from_capture: 0,
+    backstop_reruns: 0,
+    chain: 'legacy',
+    contradicted: new Set(),
+  };
+  const captureWarnings = captureCrossReference(root, latestArtifactDir, activeFlowStep, workspaceRoot, stopGateStats);
   warnings.push(...captureWarnings);
   // Dedup: bundleEnforcement and captureCrossReference can both fire "caught false-completion"
   // for the same disputed claim. Suppress the bundleEnforcement warning ONLY when
@@ -2705,7 +3046,7 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
   // Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
   // Fix A: status-independent — runs on EVERY stop. A claim contradicting the capture
   // is a false-completion whether or not the agent says the task is 'done'.
-  warnings.push(...capturedFailReconciliation(root, latestArtifactDir, taskStatus));
+  warnings.push(...capturedFailReconciliation(root, latestArtifactDir, taskStatus, stopGateStats));
 
   // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
   // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
@@ -2762,6 +3103,19 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
     gatePrefix: gateLabel(activeFlowStep),
     warningRelPath: relPath,
     latestArtifactDir,
+    // #1266: null (never a zero-filled object) when the cross-reference did not run —
+    // recordStopGateSummary() treats null as "emit nothing".
+    stopGateSummary: stopGateStats.computed
+      ? {
+        commands_captured: stopGateStats.commands_captured,
+        claims_total: stopGateStats.claims_total,
+        claims_checked: stopGateStats.claims_checked,
+        claims_confirmed_from_capture: stopGateStats.claims_confirmed_from_capture,
+        claims_contradicted: stopGateStats.contradicted.size,
+        backstop_reruns: stopGateStats.backstop_reruns,
+        chain: stopGateStats.chain,
+      }
+      : null,
   };
 }
 
@@ -3195,12 +3549,61 @@ function releaseOnNonTerminalStop(root, artifactDir) {
   }
 }
 
+// ─── #1266: stop-gate cross-check summary record (the computed heartbeat) ─────
+//
+// One machine-readable JSON line appended to .kontourai/telemetry/stop-gate-summary.jsonl
+// per Stop-gate EVALUATION, emitted alongside the economics record (which the telemetry Stop
+// flow also emits per Stop). The latest row for a session slug is that session's close
+// reading; earlier rows are the gate's honest readings at blocked stops — in block mode a
+// caught contradiction blocks the stop, so ONLY the per-evaluation rows ever carry
+// claims_contradicted > 0 (a close-only record would hide exactly the catches this record
+// exists to surface, and the economics record's self-reported defects.caught_false_completions
+// would keep having no machine-derived counterpart). `blocking` discloses whether this
+// evaluation allowed the stop.
+//
+// Delivery class: best-effort local record (#1087 slice C / economics pattern at
+// telemetry.sh:907–946). The economics emitter detaches a subshell because it runs jq/node
+// subprocesses and an opt-in network relay; this emitter is a local sub-millisecond append
+// with no subprocess and no network, so the fail-open try/catch alone provides the class
+// guarantee (can never alter the hook's verdict, output, or exit code) while keeping the
+// write deterministic for evals. Nothing is recomputed here: every number comes from the
+// analyze() collector fed by captureCrossReference + capturedFailReconciliation.
+//
+// Absent hooks ⇒ absent record: stopGateSummary is null whenever the cross-reference did not
+// run (no scoped session, mode off, analyze early-return), and null emits NOTHING — never a
+// fabricated zero row.
+function recordStopGateSummary(root, result) {
+  try {
+    const summary = result && result.stopGateSummary;
+    if (!summary) return;
+    const record = {
+      schema: 'flow-agents.stop-gate-summary',
+      version: '0.1',
+      at: new Date().toISOString(),
+      session: path.basename(result.latestArtifactDir || ''),
+      blocking: Boolean(result.blocking),
+      ...summary,
+    };
+    const file = path.join(root, '.kontourai', 'telemetry', 'stop-gate-summary.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
+  } catch { /* best-effort: the summary record must never fail or delay the Stop hook */ }
+}
+
 async function run(rawInput) {
   const input = parseJson(rawInput);
-  const root = findRepoRoot(input.cwd || process.cwd());
+  const inputCwd = input.cwd || process.cwd();
+  const root = findRepoRoot(inputCwd);
+  // A non-Git invocation still runs any configured backstop in its supplied
+  // working directory, but canonical observation remains unavailable and so
+  // cannot confirm the claim.
+  const workspaceRoot = resolveObservedWorkspaceRoot(inputCwd) || inputCwd;
   const mode = resolveGoalFitMode(root);
   if (mode === 'off') return rawInput;
-  const result = await analyze(root);
+  const result = await analyze(root, Date.now(), null, workspaceRoot);
+  // #1266: additive side effect only — never changes analyze()'s contract or this function's
+  // return value (same discipline as releaseOnNonTerminalStop below).
+  recordStopGateSummary(root, result);
   // #292 Wave 2: additive side effect only — never changes analyze()'s warnings/blocking
   // contract or this function's return value. Reuses analyze()'s already-resolved
   // latestArtifactDir rather than re-deriving a second "what is the active session" path.
@@ -3366,4 +3769,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { STOP_CONTROL_PREFIX, analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning };
+module.exports = { STOP_CONTROL_PREFIX, analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning, currentCanonicalWorkspaceSnapshot, resolveObservedWorkspaceRoot, resolveTrustedWorkspaceGitExecutable };

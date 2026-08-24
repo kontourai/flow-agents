@@ -1,0 +1,22 @@
+{
+  "run_id": "econ-fixture-canceled-with-pause",
+  "terminal_status": "canceled",
+  "human_wait_s": 40,
+  "phase_wall_clock_s": {
+    "design-probe": 50,
+    "plan": 15
+  },
+  "phase_human_wait_s": {
+    "design-probe": 0,
+    "plan": 40
+  },
+  "iterations": {
+    "count": 1,
+    "route_backs": 0
+  },
+  "defects": {
+    "gate_fires": 0,
+    "verification_verdict": "NOT_VERIFIED"
+  },
+  "total_wall_clock_s": 65
+}

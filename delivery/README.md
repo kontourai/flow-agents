@@ -97,6 +97,31 @@ A marker missing any of these four fields on an entry is treated as malformed an
 through to the fail-closed default (`bundle-required-no-declared-marker`), same as if no
 marker existed at all.
 
+**Optional `gaps[]` field (ADR 0022 addendum part 6, #1267).** An entry MAY additionally
+carry `gaps`, an array of non-empty strings, each naming one disclosed gap accepted along
+with the exemption:
+
+```json
+{
+  "scope": "branch-prefix:feat/example",
+  "reason": "scoped change delivered with an accepted gap",
+  "approved_by": "brian.anderson1222",
+  "declared_at": "2026-08-17T00:00:00Z",
+  "gaps": ["trend readings have no automatic reader"]
+}
+```
+
+`gaps` does not participate in exemption matching or well-formedness — the four required
+fields above remain the complete validity contract, and both readers
+(`scripts/ci/trust-reconcile.js`, `scripts/hooks/lib/unstarted-delivery.js`) tolerate the
+extra field. It is read only by `flow-agents console-declared-projection`, which folds every
+structured gap into an aging record a Console can render (one record per gap, carrying this
+entry's `declared_at` so an old gap surfaces with its real age). Prose in `reason` is never
+scraped for gaps: a legacy entry without `gaps` is counted and disclosed in the projection's
+summary (`legacy_entries_not_projected`), not silently omitted. When declaring a new
+exemption that accepts a known gap, prefer naming the gap in `gaps[]` (structure) in
+addition to explaining it in `reason` (rationale).
+
 **Scope forms.** A `scope` string is one or more space-separated conditions; each condition
 is one of exactly four forms (string equality/prefix matching only — **no `RegExp` is ever
 constructed from marker content**, in either the single- or compound-condition path):

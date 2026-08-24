@@ -21,6 +21,19 @@ export type KitFlowStepExpectationBinding = {
 
 export type KitFlowStepArtifactBinding = { artifact: string; expectation_ids: string[] };
 
+/**
+ * Every flow a producing step-role serves: its primary `flow_id` plus any additional `flow_ids`.
+ *
+ * Lives here, in the leaf both validators already import, rather than beside the role type in
+ * validate.ts — that module and action-repository-validation.ts import each other, and a shared
+ * predicate reached through an import cycle is a predicate that resolves differently depending on
+ * which module is loaded first.
+ */
+export function skillRoleFlowIds(role: { flow_id?: string; flow_ids?: string[] }): string[] {
+  return [...new Set([...(role.flow_id ? [role.flow_id] : []), ...(role.flow_ids ?? [])])];
+}
+
+
 const MAX_FLOW_STEP_ACTIONS = 128;
 const MAX_FLOW_STEP_ACTION_LIST_ITEMS = 32;
 const MAX_FLOW_STEP_ACTION_SKILLS = 16;
