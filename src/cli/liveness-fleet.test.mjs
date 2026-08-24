@@ -7,6 +7,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 import { classifyLane, readFleet } from "../../build/src/lib/liveness-fleet.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const { freshHolders } = createRequire(import.meta.url)("../../scripts/hooks/lib/liveness-read.js");
 
@@ -121,7 +122,7 @@ test("classifyLane: separate actors on one subject are separate lanes", () => {
 // --- readFleet over real streams on disk ---
 
 function repoFixture(name, lines) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-fleet-${name}-`));
+  const root = makeFixtureDir(`flow-agents-fleet-${name}-`);
   const stream = path.join(root, ".kontourai", "flow-agents", "liveness", "events.jsonl");
   fs.mkdirSync(path.dirname(stream), { recursive: true });
   fs.writeFileSync(stream, lines.join("\n") + "\n");
@@ -148,7 +149,7 @@ test("readFleet: a truncated final JSONL line does not lose the well-formed even
 });
 
 test("readFleet: a missing stream contributes no lanes and does not throw", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-fleet-empty-"));
+  const root = makeFixtureDir("flow-agents-fleet-empty-");
   const result = readFleet({ roots: [root], nowMs: NOW, includeStrandedStreams: false });
   assert.deepEqual(result.lanes, []);
   assert.deepEqual(result.streams, []);
@@ -174,7 +175,7 @@ test("readFleet: lanes are sorted newest first, deterministically", () => {
 });
 
 test("readFleet: a dangling symlink at a stream path warns instead of reading as 'never claimed'", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-fleet-symlink-"));
+  const root = makeFixtureDir("flow-agents-fleet-symlink-");
   const stream = path.join(root, ".kontourai", "flow-agents", "liveness", "events.jsonl");
   fs.mkdirSync(path.dirname(stream), { recursive: true });
   fs.symlinkSync(path.join(root, "gone", "events.jsonl"), stream);

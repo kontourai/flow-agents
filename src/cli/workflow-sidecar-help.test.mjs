@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Absolute path: some tests below spawn with a different `cwd` (to prove side-effect-freedom in
@@ -13,7 +14,7 @@ const CLI = path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js");
 const SOURCE = path.join(__dirname, "workflow-sidecar.ts");
 
 function tempDir(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return makeFixtureDir(prefix);
 }
 
 function tree(root) {

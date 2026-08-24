@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { flowRunHead } from "@kontourai/flow";
 import { bundleGateEvidence, gateAdvancementFreshnessSatisfied } from "../../build/src/builder-flow-runtime.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SIDECAR = path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js");
@@ -22,7 +23,7 @@ const SUBJECT = "acme/widgets#11";
 function makeUnverifiedSession() {
   // A real synthetic session via the sidecar writer: fresh bundle, no critique, no tests claims —
   // the canonical predicate reads this as stale/unverified.
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), "seam-"));
+  const project = makeFixtureDir("seam-");
   spawnSync("git", ["init", "-q", "."], { cwd: project });
   spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });
   const artifactRoot = path.join(project, ".kontourai", "flow-agents");

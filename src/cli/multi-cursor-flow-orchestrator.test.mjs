@@ -14,9 +14,10 @@ import {
 import { startBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
 import { performLocalClaim, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 function workspace() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-multi-cursor-"));
+  return makeFixtureDir("flow-agents-multi-cursor-");
 }
 
 function writeDefinition(cwd) {

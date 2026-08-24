@@ -11,6 +11,7 @@ import {
   isAssertionProhibited,
   validateNarrativeGrounding,
 } from "../../build/src/narrative/grounding-validator.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const NOW = "2026-07-14T15:00:00.000Z";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -23,7 +24,7 @@ function sourceId(stream, index, bytes) {
 }
 
 function narrativeDirFor(records = []) {
-  const narrativeDir = fs.mkdtempSync(path.join(os.tmpdir(), "grounding-validator-"));
+  const narrativeDir = makeFixtureDir("grounding-validator-");
   const sourcesDir = path.join(narrativeDir, "sources");
   fs.mkdirSync(sourcesDir);
   const sources = records.map(({ stream, record }, index) => {

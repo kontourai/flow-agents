@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const require_ = createRequire(import.meta.url);
@@ -36,7 +37,7 @@ const {
 const goalFit = require_(path.join(packageRoot, "scripts", "hooks", "stop-goal-fit.js"));
 
 function scratch() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "stop-escalation-"));
+  return makeFixtureDir("stop-escalation-");
 }
 
 const TERMINAL_LINE = `${STOP_CONTROL_PREFIX} {"v":1,"terminal":true,"code":"non-releasable-hard-block"}`;

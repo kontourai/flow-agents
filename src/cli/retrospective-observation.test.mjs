@@ -18,11 +18,12 @@ import {
   RUN_CORRELATION_IDENTITY_KEYS,
   createRunCorrelationEnvelope,
 } from "../../build/src/run-correlation.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const timestamp = "2026-07-24T12:00:00.000Z";
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "retrospective-observation-"));
+  const root = makeFixtureDir("retrospective-observation-");
   const correlation = createRunCorrelationEnvelope({
     correlation_id: "compiler-fixture-run",
     identities: Object.fromEntries(RUN_CORRELATION_IDENTITY_KEYS.map((key) => [
@@ -518,7 +519,7 @@ test("runtime observation validation rejects nested schema drift", (t) => {
 });
 
 test("pinned directory chains detect an ancestor replacement", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "retrospective-directory-chain-"));
+  const root = makeFixtureDir("retrospective-directory-chain-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const parent = path.join(root, "parent");
   const leaf = path.join(parent, "leaf");

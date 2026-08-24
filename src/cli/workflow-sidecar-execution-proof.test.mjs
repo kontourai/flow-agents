@@ -9,11 +9,12 @@ import { createRequire } from "node:module";
 import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, observedExecutedTestCount, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 import * as workflowSidecar from "../../build/src/cli/workflow-sidecar.js";
 import { lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const commandLogChain = createRequire(import.meta.url)("../../scripts/lib/command-log-chain.js");
 
 function fixture(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-proof-"));
+  const root = makeFixtureDir("flow-agents-test-proof-");
   for (const [name, content] of Object.entries(files)) {
     const file = path.join(root, name);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -34,7 +35,7 @@ function appendTransactionAbortForTest(capability, transactionId = "transaction-
 
 test("transaction abort journal safely appends to present and absent regular logs", () => {
   for (const present of [false, true]) {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-abort-${present ? "present" : "absent"}-`));
+    const directory = makeFixtureDir(`flow-agents-abort-${present ? "present" : "absent"}-`);
     const logFile = path.join(directory, "command-log.jsonl");
     if (present) fs.writeFileSync(logFile, '{"source":"foreign"}\n');
 
@@ -49,7 +50,7 @@ test("transaction abort journal safely appends to present and absent regular log
 
 test("transaction abort journal refuses non-regular log targets without modifying them", () => {
   for (const kind of ["symlink", "fifo", "directory"]) {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-abort-${kind}-`));
+    const directory = makeFixtureDir(`flow-agents-abort-${kind}-`);
     const logFile = path.join(directory, "command-log.jsonl");
     const outside = path.join(directory, "outside.log");
     if (kind === "symlink") {
@@ -69,7 +70,7 @@ test("transaction abort journal refuses non-regular log targets without modifyin
 });
 
 test("transaction abort journal refuses create races and replaced session identities", () => {
-  const racedDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-create-race-"));
+  const racedDirectory = makeFixtureDir("flow-agents-abort-create-race-");
   const racedLog = path.join(racedDirectory, "command-log.jsonl");
   assert.equal(typeof workflowSidecar.setWriterTransactionAbortTestHooksForTest, "function", "the abort journal exposes a deterministic create-race test hook");
   workflowSidecar.setWriterTransactionAbortTestHooksForTest({ beforeExclusiveCreate: () => fs.writeFileSync(racedLog, "foreign race\n") });
@@ -80,7 +81,7 @@ test("transaction abort journal refuses create races and replaced session identi
   }
   assert.equal(fs.readFileSync(racedLog, "utf8"), "foreign race\n");
 
-  const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-replaced-root-"));
+  const artifactRoot = makeFixtureDir("flow-agents-abort-replaced-root-");
   const sessionDir = path.join(artifactRoot, "session");
   fs.mkdirSync(sessionDir);
   const capability = writerAbortCapabilityForTest(sessionDir);
@@ -94,7 +95,7 @@ test("transaction abort journal refuses create races and replaced session identi
 });
 
 test("transaction abort journal refuses to extend a broken execution-proof chain", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-broken-chain-"));
+  const directory = makeFixtureDir("flow-agents-abort-broken-chain-");
   const logFile = path.join(directory, "command-log.jsonl");
   const broken = `${JSON.stringify({
     source: "canonical-writer-execution",
@@ -118,7 +119,7 @@ test("transaction abort denial preserves malformed and gap command-log bytes exa
     ["malformed", `${JSON.stringify(chained)}\nnot json\n`],
     ["mid-chain-gap", `${JSON.stringify(chained)}\n[]\n`],
   ]) {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-abort-denied-${name}-`));
+    const directory = makeFixtureDir(`flow-agents-abort-denied-${name}-`);
     const logFile = path.join(directory, "command-log.jsonl");
     fs.writeFileSync(logFile, raw);
     assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), `transaction-denied-${name}`), false, `${name}: denied authority is fail closed`);
@@ -127,7 +128,7 @@ test("transaction abort denial preserves malformed and gap command-log bytes exa
 });
 
 test("transaction abort journal refuses to extend a valid-hash non-benign fork", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-non-benign-fork-"));
+  const directory = makeFixtureDir("flow-agents-abort-non-benign-fork-");
   const logFile = path.join(directory, "command-log.jsonl");
   const makeSibling = (source) => {
     const record = {
@@ -146,7 +147,7 @@ test("transaction abort journal refuses to extend a valid-hash non-benign fork",
 });
 
 test("transaction abort journal never deletes a stale foreign lock", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-stale-lock-"));
+  const directory = makeFixtureDir("flow-agents-abort-stale-lock-");
   const lockFile = path.join(directory, "command-log.jsonl.lock.0");
   const contents = `${JSON.stringify({ generation: 0, nonce: "foreign", state: "active" })}\n`;
   fs.writeFileSync(lockFile, contents);
@@ -159,7 +160,7 @@ test("transaction abort journal never deletes a stale foreign lock", () => {
 });
 
 test("transaction abort journal loops partial writes and rejects zero writes", () => {
-  const partialDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-partial-write-"));
+  const partialDirectory = makeFixtureDir("flow-agents-abort-partial-write-");
   workflowSidecar.setWriterTransactionAbortTestHooksForTest({
     write: (fd, buffer, offset, length, position) => fs.writeSync(fd, buffer, offset, Math.min(length, 3), position),
   });
@@ -170,7 +171,7 @@ test("transaction abort journal loops partial writes and rejects zero writes", (
   }
   assert.equal(JSON.parse(fs.readFileSync(path.join(partialDirectory, "command-log.jsonl"), "utf8")).transaction.id, "transaction-partial");
 
-  const zeroDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-zero-write-"));
+  const zeroDirectory = makeFixtureDir("flow-agents-abort-zero-write-");
   workflowSidecar.setWriterTransactionAbortTestHooksForTest({ write: () => 0 });
   try {
     assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(zeroDirectory), "transaction-zero"), false);
@@ -180,7 +181,7 @@ test("transaction abort journal loops partial writes and rejects zero writes", (
 });
 
 test("transaction abort journal rereads and rejects post-fsync corruption", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-reread-corruption-"));
+  const directory = makeFixtureDir("flow-agents-abort-reread-corruption-");
   workflowSidecar.setWriterTransactionAbortTestHooksForTest({
     beforeReread: (descriptor) => { fs.writeSync(descriptor, Buffer.from("!"), 0, 1, 0); },
   });
@@ -192,7 +193,7 @@ test("transaction abort journal rereads and rejects post-fsync corruption", () =
 });
 
 test("transaction abort journal rejects lock replacement during descriptor release", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-lock-replacement-"));
+  const directory = makeFixtureDir("flow-agents-abort-lock-replacement-");
   let replacement = "";
   let stderr = "";
   const writeStderr = process.stderr.write;
@@ -231,7 +232,7 @@ test("explicit gate verdicts remain authoritative over successful and failing co
 });
 
 test("critique authority gates ignore embedded ledger events and require a protected external ledger", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-critique-authority-"));
+  const dir = makeFixtureDir("flow-agents-critique-authority-");
   const bundle = {
     claims: [{ metadata: { origin: "critique", critique_resolution: { kind: "cross-reviewer" } } }],
     critique_resolution_events: [{ event_id: "embedded-forgery" }],

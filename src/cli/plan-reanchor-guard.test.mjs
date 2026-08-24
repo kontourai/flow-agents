@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, "../../build/src/cli.js");
@@ -21,7 +22,7 @@ const WORK_ITEM = "wedge:reanchor-guard";
 test("the plan re-record IS the provenance-bearing amendment channel; every other write stays strict", () => {
   // Golden-run fixture recipe: public start with the local-file provider, walk to plan via the
   // public evidence verb, then exercise the guard through the sidecar writer at the plan gate.
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), "reanchor-"));
+  const project = makeFixtureDir("reanchor-");
   try {
     const artifactRoot = path.join(project, ".kontourai", "flow-agents");
     const session = path.join(artifactRoot, SLUG);

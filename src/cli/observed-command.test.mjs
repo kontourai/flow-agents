@@ -7,9 +7,10 @@ import { execFileSync } from "node:child_process";
 
 import { runObservedCommand } from "../../build/src/lib/observed-command.js";
 import { captureReviewWorkspaceSnapshot, MAX_UNTRACKED_FILE_BYTES, MAX_UNTRACKED_TOTAL_BYTES, setWorkspaceSnapshotTestHooksForTest } from "../../build/src/lib/review-workspace-snapshot.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 function gitFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-observed-command-"));
+  const root = makeFixtureDir("flow-agents-observed-command-");
   fs.writeFileSync(path.join(root, "tracked.txt"), "clean\n");
   execFileSync("git", ["init", "-q"], { cwd: root });
   execFileSync("git", ["add", "tracked.txt"], { cwd: root });
@@ -62,12 +63,12 @@ test("observed command captures the post-command commit rather than the revision
 });
 
 test("non-Git and underivable Git state remain explicit, non-confirming observations", async () => {
-  const nonGitRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-observed-command-non-git-"));
+  const nonGitRoot = makeFixtureDir("flow-agents-observed-command-non-git-");
   const nonGit = await runObservedCommand("printf observed", nonGitRoot);
   assert.equal(nonGit.exit_code, 0);
   assert.deepEqual(nonGit.observation, { status: "unavailable", reason: "canonical Git workspace state is unavailable" });
 
-  const brokenGitRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-observed-command-broken-git-"));
+  const brokenGitRoot = makeFixtureDir("flow-agents-observed-command-broken-git-");
   fs.writeFileSync(path.join(brokenGitRoot, ".git"), "gitdir: missing-worktree\n");
   const brokenGit = await runObservedCommand("printf observed", brokenGitRoot);
   assert.equal(brokenGit.exit_code, 0);

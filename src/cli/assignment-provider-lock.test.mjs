@@ -6,9 +6,10 @@ import path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 
 import { withSubjectLock, withSubjectLockAsync } from "../../build/src/cli/assignment-provider.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 test("async subject locks remain owned through settlement and release for both outcomes", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lock-async-lifetime-"));
+  const root = makeFixtureDir("flow-agents-lock-async-lifetime-");
   const subject = "async-lifetime";
   const lockDir = path.join(root, "assignment", ".async-lifetime.lockdir");
   let resolve;
@@ -25,7 +26,7 @@ test("async subject locks remain owned through settlement and release for both o
 });
 
 test("async contenders yield so the current same-process owner can settle", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-async-lock-contention-"));
+  const root = makeFixtureDir("flow-agents-async-lock-contention-");
   const subject = "async-contention";
   const order = [];
   let releaseFirst;
@@ -50,7 +51,7 @@ test("async contenders yield so the current same-process owner can settle", asyn
 });
 
 test("a displaced lock owner cannot heartbeat or release a replacement lock", async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lock-aba-"));
+  const root = makeFixtureDir("flow-agents-lock-aba-");
   const subject = "lock-aba";
   const lockDir = path.join(root, "assignment", ".lock-aba.lockdir");
   let finish;
@@ -72,7 +73,7 @@ test("a displaced lock owner cannot heartbeat or release a replacement lock", as
 });
 
 test("stale locks fail closed instead of risking concurrent reclamation", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lock-stale-"));
+  const root = makeFixtureDir("flow-agents-lock-stale-");
   const lockDir = path.join(root, "assignment", ".lock-stale.lockdir");
   fs.mkdirSync(lockDir, { recursive: true });
   const ownerFile = path.join(lockDir, "owner.json");
@@ -87,7 +88,7 @@ test("stale locks fail closed instead of risking concurrent reclamation", () => 
 });
 
 test("old ownerless and malformed locks fail closed without a busy-spin", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lock-malformed-"));
+  const root = makeFixtureDir("flow-agents-lock-malformed-");
   const assignmentDir = path.join(root, "assignment");
   for (const [subject, owner] of [["ownerless", null], ["malformed", "not-json\n"]]) {
     const lockDir = path.join(assignmentDir, `.${subject}.lockdir`);
@@ -104,7 +105,7 @@ test("old ownerless and malformed locks fail closed without a busy-spin", () => 
 });
 
 test("failed owner metadata creation removes the ownerless lock directory", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lock-owner-write-"));
+  const root = makeFixtureDir("flow-agents-lock-owner-write-");
   const originalWriteFileSync = fs.writeFileSync;
   fs.writeFileSync = function injectedOwnerWriteFailure(file, ...args) {
     if (path.basename(String(file)) === "owner.json") {

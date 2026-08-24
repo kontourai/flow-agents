@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -7,6 +7,7 @@ import {
   createRuntimeUtteranceExtractor,
   createUtteranceModelExtractor,
 } from "../../build/src/cli/utterance-model-extractor.js";
+import { makeFixtureDir, makeFixtureDirAsync } from "./fixture-temp-dir.mjs";
 
 const utterance = "Camp Alpha has 40 openings.";
 const toolInput = {
@@ -57,7 +58,7 @@ test("generic extractor accepts any Relay ModelRuntime", async () => {
 });
 
 test("Dispatch falls back and persists only opaque runtime identifiers", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "flow-utterance-dispatch-"));
+  const root = await makeFixtureDirAsync("flow-utterance-dispatch-");
   const receiptPath = path.join(root, "receipts.ndjson");
   const fixtureCredential = ["fixture", "credential"].join(":");
   const client = {
