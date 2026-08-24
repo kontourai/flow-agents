@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { evaluateGate, expectationsForGate, type FlowExpectation, type FlowGate, type FlowRunState } from "@kontourai/flow";
 import { actionableOpenGates } from "./builder-flow-run-adapter.js";
+import { actionableFlowStepId } from "./lib/flow-resolver.js";
 import { parseKitFlowStepActions, type KitFlowStepActionEntry, type KitFlowStepExpectationBinding } from "./flow-kit/validate.js";
 import {
   EVIDENCE_REF_JSON_SCHEMA,
@@ -416,8 +417,16 @@ function loadGateAction(input: BuilderGateActionEnvelopeInput): LoadedGateAction
   const parsed = parseKitFlowStepActions(kit, manifestRef);
   if (parsed.errors.length) throw new Error(`Builder gate-action metadata is invalid: ${parsed.errors.join("; ")}`);
   const actions = parsed.entries.filter((entry) => entry.flow_id === input.run.definitionId);
-  const selected = actions.filter((entry) => entry.step_id === input.run.state.current_step);
-  if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${input.run.definitionId}/${input.run.state.current_step}`);
+  // #1350: resolve the action for the step whose gate this run must ACT ON, not for the step the
+  // cursor happens to rest on. These are the same step for every gated run, and differ only when
+  // the cursor sits on a gateless sequencing passthrough (#1335). They must not be resolved
+  // independently: `deriveFlowRequirements` asserts the action's declared evidence matches the
+  // gate's canonical requirements exactly, so taking the gate from the walked step and the action
+  // from the cursor's step makes that invariant unsatisfiable — the passthrough declares no
+  // evidence while the gate requires some, and the envelope throws rather than describing the run.
+  const actionStepId = actionableFlowStepId(input.definition, input.run.state.current_step) ?? input.run.state.current_step;
+  const selected = actions.filter((entry) => entry.step_id === actionStepId);
+  if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${input.run.definitionId}/${actionStepId}`);
   const action = selected[0]!;
   const actionableArtifacts = action.artifacts.filter((artifact) => !isControlArtifact(artifact));
   if (action.skills.length > MAX_SKILLS || action.artifacts.length > MAX_ARTIFACTS) {

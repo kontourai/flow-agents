@@ -534,6 +534,26 @@ test("the envelope and the projection agree about the open gate, and the gateles
   );
   assert.notDeepEqual(inspected.gateActionEnvelope.flow.gate_ids, [], "an active run must name at least one gate to act on");
 
+  // THE DISCRIMINATING CASE. The invariant above holds trivially at a gated step, where both
+  // derivations agree — a session starts at `pull-work`, which IS gated, so it cannot catch this
+  // defect on its own. (Proven: an injection restoring raw `openGates` here passed that assertion.)
+  // So drive the ENVELOPE at a gateless step, reusing the REAL run — real definition, real kit
+  // manifest, real config — with only the cursor moved. Nothing here is synthetic except the step.
+  const { deriveBuilderGateActionEnvelope } = await import("../../build/src/builder-gate-action-envelope.js");
+  const envelopeGatesAtStep = (stepId) =>
+    deriveBuilderGateActionEnvelope({
+      sessionDir,
+      projectRoot: inspected.projectRoot,
+      definition: inspected.run.definition,
+      run: { ...inspected.run, state: { ...inspected.run.state, current_step: stepId } },
+    }).flow.gate_ids;
+
+  for (const gatelessStep of ["design-probe", "plan"]) {
+    assert.deepEqual(envelopeGatesAtStep(gatelessStep), ["execute-gate"],
+      `the ENVELOPE at ${VARIANT}/${gatelessStep} must name the gate reached across the passthrough — an empty list is the machine-readable contract telling the adapter there is nothing to do while next_action says continue`);
+  }
+  assert.deepEqual(envelopeGatesAtStep("execute"), ["execute-gate"], "a step that declares its own gate is unaffected");
+
   // THE GATELESS WALK, over the real shipped definitions. The variant's two ablated steps declare
   // no gate, so the derivation the envelope now shares must reach the gate across the passthrough.
   const gatesAt = (flowId, stepId) =>
