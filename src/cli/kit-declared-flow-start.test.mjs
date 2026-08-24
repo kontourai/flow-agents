@@ -229,19 +229,35 @@ test("a kits/ root symlinked into runtime artifact storage authorizes nothing", 
   }
 });
 
-test("a kits/ root symlinked out of the repo authorizes nothing", () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-escape-"));
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-outside-"));
+test("a kits/ root symlinked into RUNTIME ARTIFACT STORAGE authorizes nothing; one linked to a package's kits still resolves", () => {
+  // The threat is a kits root that lands where the AGENT can write (`kits ->
+  // .kontourai/flow-agents/.../kits`): a runtime-authored definition posing as a packaged
+  // declaration. An earlier version of this test asserted that ANY symlink escaping the repo
+  // authorizes nothing — which is a different, broader claim, and it broke a supported
+  // arrangement outright: symlinking `kits/` at an installed package's kit tree is how a repo
+  // consumes packaged kits without vendoring them. (Caught by the narrative-trust-isolation
+  // eval, whose fixture does exactly that.) Escaping the repo is not the attack; landing
+  // somewhere writable is. The pair below is the discriminator.
+  const attackRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-attack-"));
+  const legitRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-legit-"));
+  const packageLike = fs.mkdtempSync(path.join(os.tmpdir(), "kit-flows-pkg-"));
   try {
-    writeJson(path.join(outside, "acme/kit.json"), { id: "acme", flows: [{ id: "acme.outside", path: "flows/outside.flow.json" }] });
-    writeJson(path.join(outside, "acme/flows/outside.flow.json"), fixtureFlow("acme.outside"));
-    fs.symlinkSync(outside, path.join(repoRoot, "kits"), "dir");
+    // ATTACK: kits -> this repo's own runtime artifact storage.
+    const runtimeKits = path.join(attackRoot, ".kontourai", "flow-agents", "kits");
+    writeJson(path.join(runtimeKits, "acme/kit.json"), { id: "acme", flows: [{ id: "acme.smuggled", path: "flows/smuggled.flow.json" }] });
+    writeJson(path.join(runtimeKits, "acme/flows/smuggled.flow.json"), fixtureFlow("acme.smuggled"));
+    fs.symlinkSync(runtimeKits, path.join(attackRoot, "kits"), "dir");
+    assert.ok(!declaredKitFlowIds(attackRoot).includes("acme.smuggled"), "a kits root inside runtime artifact storage must authorize nothing");
+    assert.equal(resolveFlowFilePath("acme", "smuggled", "acme.smuggled", attackRoot, false), null);
 
-    assert.ok(!declaredKitFlowIds(repoRoot).includes("acme.outside"), "a resolved kits root outside the repo root is refused");
-    assert.equal(resolveFlowFilePath("acme", "outside", "acme.outside", repoRoot, false), null);
+    // CONTROL: kits -> an ordinary kit tree outside the repo (the packaged-kits arrangement).
+    writeJson(path.join(packageLike, "acme/kit.json"), { id: "acme", flows: [{ id: "acme.linked", path: "flows/linked.flow.json" }] });
+    writeJson(path.join(packageLike, "acme/flows/linked.flow.json"), fixtureFlow("acme.linked"));
+    fs.symlinkSync(packageLike, path.join(legitRoot, "kits"), "dir");
+    assert.ok(declaredKitFlowIds(legitRoot).includes("acme.linked"), "a kits root linked at an ordinary kit tree must still resolve");
+    assert.ok(resolveFlowFilePath("acme", "linked", "acme.linked", legitRoot, false), "the linked definition must resolve");
   } finally {
-    fs.rmSync(repoRoot, { recursive: true, force: true });
-    fs.rmSync(outside, { recursive: true, force: true });
+    for (const dir of [attackRoot, legitRoot, packageLike]) fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

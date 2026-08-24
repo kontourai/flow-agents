@@ -5867,7 +5867,6 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // FlowProjectionRegenerationRequiredError already exists for (a projection lagging its run),
   // and it has the same fix — re-sync the projection from the run record.
   const projectedRunDefinition = gateClaimFlowIdentityFields(projectedRun);
-  if (projectedRun && !projectedRunDefinition) throw new FlowProjectionRegenerationRequiredError(dir);
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
   const activeStep = exactFlowContext
     ? resolveFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, findRepoRootFromDir(path.dirname(flowAgentsDir)))
@@ -6009,6 +6008,14 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     // definition is refused rather than re-typed.
     ...(projectedRunDefinition ?? {}),
   };
+  // Fail closed AT WRITE TIME, not at projection-parse time: a session that HAS a Flow run but
+  // whose projection cannot supply the bound-definition identity would record a claim no rebuild
+  // could bind. Checking it here rather than earlier keeps input validation's own diagnostics
+  // first — the narrative-trust-isolation refusal (#619) is a security property, and preempting
+  // it with a staleness message told the caller to regenerate a projection when the real answer
+  // was that the command was refused. Same remedy as FlowProjectionRegenerationRequiredError's
+  // other site: re-sync the projection from the run record.
+  if (projectedRun && !projectedRunDefinition) throw new FlowProjectionRegenerationRequiredError(dir);
   if (targetExpectation.id === "implementation-plan" && statusVal === "pass") {
     const acceptance = loadJson(path.join(dir, "acceptance.json"));
     const criteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];

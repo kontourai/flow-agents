@@ -181,9 +181,20 @@ export function canonicalKitsRoot(root: string): string | null {
   try {
     const realRoot = (fs.realpathSync.native ?? fs.realpathSync)(path.resolve(root));
     const realKitsRoot = (fs.realpathSync.native ?? fs.realpathSync)(lexicalKitsRoot);
-    if (!realKitsRoot.startsWith(realRoot + path.sep)) return null;
     if (!fs.statSync(realKitsRoot).isDirectory()) return null;
+    // The threat is a kits root that resolves into AGENT-WRITABLE runtime artifact storage
+    // (`kits -> .kontourai/flow-agents/.../kits`), which would let a runtime-authored definition
+    // pose as a packaged declaration. That is what this refuses.
+    //
+    // It deliberately does NOT refuse merely for resolving outside `root`: symlinking a consumer
+    // `kits/` at an installed package's kit tree is how a repo consumes packaged kits without
+    // vendoring them, it long predates this check, and refusing it broke that arrangement
+    // outright (caught by the narrative-trust-isolation eval, whose fixture links `kits ->
+    // <package>/kits`). Escaping the repo is not the attack; landing somewhere the agent can
+    // write is. Containment of individual DEFINITION paths is still enforced against the
+    // resolved kits root by every caller, so a link cannot widen what is reachable beneath it.
     if (isWithinRuntimeArtifactRoot(realKitsRoot)) return null;
+    void realRoot;
     return realKitsRoot;
   } catch {
     // The kits root does not exist yet (or is unreadable). There is nothing to be tricked by,
