@@ -250,6 +250,77 @@ export async function mergeGithubChangeExactHead(
   }
 }
 
+/**
+ * #1318 FIX-2: the same repository/branch-level merge preconditions
+ * `mergeGithubChangeExactHead` asserts immediately before mutation, observed
+ * standalone and read-only. `merge-change request` runs this BEFORE it mints an
+ * unsigned authorization, so a run learns an unsatisfiable branch policy before
+ * an operator signs rather than after.
+ *
+ * It never mutates and never touches transient pull-request state: it reads the
+ * repository record, the target branch's protection, and the branch's effective
+ * rules. When the provider cannot be reached or answers unusably it returns
+ * `unverified` with the reason — an unreachable provider is never a silent pass.
+ */
+export type MergeBranchPolicyPreflight =
+  | Readonly<{ status: "satisfied"; base_ref: string }>
+  | Readonly<{ status: "unsatisfied"; base_ref: string; condition: MergeBranchPolicyCondition; message: string }>
+  | Readonly<{ status: "unverified"; base_ref: string; reason: string }>;
+
+export async function inspectGithubMergeBranchPolicy(
+  settings: ChangeProviderSettings,
+  action: IssuedMergeChangeAction,
+  dependencies: GithubChangeProviderDependencies = {},
+): Promise<MergeBranchPolicyPreflight> {
+  if (settings.kind !== "github" || settings.executor !== "gh-cli"
+    || settings.repository.owner !== action.repository.owner || settings.repository.name !== action.repository.name) {
+    throw new ChangeProviderError("invalid_request", "merge-change does not match the configured GitHub provider");
+  }
+  if (publishChangeProviderConfigurationId(settings) !== action.provider.configuration_id) {
+    throw new ChangeProviderError("provider_observation_mismatch", "merge-change provider configuration changed after action issuance");
+  }
+  const injectedExecutor = dependencies.executor !== undefined;
+  if (!injectedExecutor && dependencies.executable !== undefined) {
+    throw new ChangeProviderError("invalid_request", "ChangeProvider executable overrides require an injected executor");
+  }
+  const baseRef = action.intent.base_ref;
+  let execution: GithubExecutionDependencies;
+  try {
+    const trustedExecutable = injectedExecutor ? null : resolveTrustedGithubExecutableIdentity();
+    execution = {
+      executor: dependencies.executor ?? execFileArgv,
+      executable: injectedExecutor ? validateExecutable(dependencies.executable ?? "gh") : trustedExecutable!.path,
+      now: dependencies.now ?? (() => new Date().toISOString()),
+      trustedExecutable,
+    };
+  } catch (error) {
+    // A missing/untrusted gh binary is an environment condition at preflight
+    // time, not a policy verdict. Report it as unverified rather than either
+    // refusing the request or passing it silently.
+    return Object.freeze({ status: "unverified" as const, base_ref: baseRef, reason: preflightUnverifiedReason(error) });
+  }
+  let authenticated: GithubExecutionDependencies | null = null;
+  try {
+    authenticated = await bindGithubAuthentication(execution);
+    const refusal = await observeMergeBranchPolicy(action, authenticated);
+    if (refusal) return Object.freeze({ status: "unsatisfied" as const, base_ref: baseRef, condition: refusal.condition, message: refusal.message });
+    return Object.freeze({ status: "satisfied" as const, base_ref: baseRef });
+  } catch (error) {
+    return Object.freeze({ status: "unverified" as const, base_ref: baseRef, reason: preflightUnverifiedReason(error) });
+  } finally {
+    if (authenticated) releaseGithubAuthentication(authenticated);
+  }
+}
+
+/**
+ * ChangeProviderError messages are fixed, sanitized strings; gh stdout/stderr
+ * and authentication material are never copied into them (see `invoke`).
+ */
+function preflightUnverifiedReason(error: unknown): string {
+  if (error instanceof ChangeProviderError) return `${error.code}: ${error.message}`;
+  return "the configured ChangeProvider could not be observed";
+}
+
 /** `headCommit` is GitHub's immutable merge-group candidate, not the PR source commit. */
 type QueueEntry = Readonly<{ id: string; headSha: string; admittedMergeGroupSha?: string }>;
 
@@ -350,11 +421,82 @@ function assertMutationActor(value: unknown, action: IssuedMergeChangeAction, la
 }
 
 /**
- * Re-observe the effective branch policy before a destructive call. This
- * refuses an absent/ambiguous policy rather than treating a passing check as
- * authorization to bypass review or branch protection.
+ * #1318: the live refusal a caller saw when `main` simply has no approval
+ * policy was `merge branch protection review policy must be a plain object` —
+ * a `plainObject()` TYPE complaint for a POLICY condition, which sends the
+ * reader hunting for a malformed provider response. These conditions name the
+ * actual state of the target branch. A genuinely malformed response still
+ * raises `malformed_provider_output` and still reads as a type error.
  */
-async function assertMergeMutationPolicy(settings: ChangeProviderSettings, action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies): Promise<void> {
+export type MergeBranchPolicyCondition =
+  | "merge-strategy-disabled"
+  | "approval-policy-absent"
+  | "approval-count-zero"
+  | "enforce-admins-absent"
+  | "enforce-admins-disabled"
+  | "ruleset-review-policy-ambiguous"
+  | "ruleset-review-policy-absent";
+
+export type MergeBranchPolicyRefusal = Readonly<{ condition: MergeBranchPolicyCondition; message: string }>;
+
+function branchPolicyRefusal(condition: MergeBranchPolicyCondition, message: string): MergeBranchPolicyRefusal {
+  return Object.freeze({ condition, message });
+}
+
+/**
+ * Diagnose the branch-protection approval policy for `baseRef`.
+ *
+ * Presence and shape are checked separately and in that order so each policy
+ * state gets its own diagnosis: absent policy, present-but-zero approvals,
+ * enforce_admins absent, enforce_admins disabled. Every refusal keeps the
+ * "no-bypass approval policy" phrase the refusal has always carried, so the
+ * requirement stays greppable and pinned consumers keep matching.
+ *
+ * Exported for direct unit coverage of every branch: the live condition shipped
+ * because the only reachable message came from a shared type guard.
+ */
+export function diagnoseBranchProtectionApprovalPolicy(protectionValue: unknown, baseRef: string): MergeBranchPolicyRefusal | null {
+  const protection = plainObject(protectionValue, "merge branch protection policy");
+  const requirement = `merge-change requires an enforced no-bypass approval policy on the target branch`;
+  const reviewPolicyValue = protection.required_pull_request_reviews;
+  if (reviewPolicyValue === undefined || reviewPolicyValue === null) {
+    return branchPolicyRefusal("approval-policy-absent", `the target branch '${baseRef}' does not enforce a pull-request approval policy (required_pull_request_reviews absent); ${requirement}`);
+  }
+  const reviewPolicy = plainObject(reviewPolicyValue, "merge branch protection review policy");
+  if (!Number.isSafeInteger(reviewPolicy.required_approving_review_count)) {
+    malformed("merge branch protection review policy required-approval count is invalid");
+  }
+  const approvals = Number(reviewPolicy.required_approving_review_count);
+  if (approvals < 1) {
+    return branchPolicyRefusal("approval-count-zero", `the target branch '${baseRef}' enforces a pull-request approval policy that requires ${approvals} approving reviews; ${requirement}`);
+  }
+  const enforceAdminsValue = protection.enforce_admins;
+  if (enforceAdminsValue === undefined || enforceAdminsValue === null) {
+    return branchPolicyRefusal("enforce-admins-absent", `the target branch '${baseRef}' does not enforce its protection for administrators (enforce_admins absent), so the approval policy can be bypassed; ${requirement}`);
+  }
+  const enforceAdmins = plainObject(enforceAdminsValue, "merge branch protection enforce-admins");
+  if (typeof enforceAdmins.enabled !== "boolean") {
+    malformed("merge branch protection enforce-admins enabled flag is invalid");
+  }
+  if (enforceAdmins.enabled !== true) {
+    return branchPolicyRefusal("enforce-admins-disabled", `the target branch '${baseRef}' does not enforce its protection for administrators (enforce_admins disabled), so the approval policy can be bypassed; ${requirement}`);
+  }
+  return null;
+}
+
+/**
+ * Observe every repository/branch-level merge precondition for `action`.
+ *
+ * These observations depend only on repository and target-branch policy, never
+ * on transient pull-request state, which is exactly why the request-time
+ * preflight (#1318 FIX-2) and the pre-mutation assertion share this one
+ * function: a second reader of the same policy eventually reads it differently.
+ * PR-state observations (review decision, mergeability) stay in the caller.
+ *
+ * Returns the first refusal, or null when every branch-level precondition is
+ * satisfied. Malformed provider output still throws.
+ */
+async function observeMergeBranchPolicy(action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies): Promise<MergeBranchPolicyRefusal | null> {
   const repository = plainObject(parseProviderJson(
     await invoke(dependencies, ["api", `repos/${repoSlug(action)}`]),
     "merge repository policy",
@@ -367,7 +509,7 @@ async function assertMergeMutationPolicy(settings: ChangeProviderSettings, actio
         ? "allow_merge_commit"
         : "allow_auto_merge";
   if (repository[strategyFlag] !== true) {
-    throw new ChangeProviderError("provider_observation_mismatch", `provider policy does not permit the selected ${action.intent.strategy} merge strategy`);
+    return branchPolicyRefusal("merge-strategy-disabled", `provider policy does not permit the selected ${action.intent.strategy} merge strategy`);
   }
 
   // The branch-protection resource is GitHub's provider-authenticated policy
@@ -375,17 +517,12 @@ async function assertMergeMutationPolicy(settings: ChangeProviderSettings, actio
   // positive approval threshold rejects both no-policy and admin-bypass
   // ambiguity. Ruleset-only configurations that do not expose an equivalent
   // no-bypass policy remain deliberately unsupported rather than guessed.
-  const protection = plainObject(parseProviderJson(
+  const protection = parseProviderJson(
     await invoke(dependencies, ["api", `repos/${repoSlug(action)}/branches/${encodeURIComponent(action.intent.base_ref)}/protection`]),
     "merge branch protection policy",
-  ), "merge branch protection policy");
-  const enforceAdmins = plainObject(protection.enforce_admins, "merge branch protection enforce-admins");
-  const reviewPolicy = plainObject(protection.required_pull_request_reviews, "merge branch protection review policy");
-  if (enforceAdmins.enabled !== true
-    || !Number.isSafeInteger(reviewPolicy.required_approving_review_count)
-    || Number(reviewPolicy.required_approving_review_count) < 1) {
-    throw new ChangeProviderError("provider_observation_mismatch", "provider branch protection does not establish an enforced no-bypass approval policy");
-  }
+  );
+  const approvalRefusal = diagnoseBranchProtectionApprovalPolicy(protection, action.intent.base_ref);
+  if (approvalRefusal) return approvalRefusal;
 
   // Rulesets can add or supersede classic branch protection. GitHub's
   // effective-rules endpoint is the provider's branch-specific projection, so
@@ -409,13 +546,24 @@ async function assertMergeMutationPolicy(settings: ChangeProviderSettings, actio
     return type === "pull_request" ? entry : null;
   }).filter((rule): rule is Record<string, unknown> => rule !== null);
   if (reviewRules.length !== 1) {
-    throw new ChangeProviderError("provider_observation_mismatch", "provider effective ruleset returned an ambiguous pull-request review policy");
+    return branchPolicyRefusal("ruleset-review-policy-ambiguous", "provider effective ruleset returned an ambiguous pull-request review policy");
   }
   const rulesetParameters = plainObject(reviewRules[0].parameters, "merge effective ruleset review policy parameters");
   if (!Number.isSafeInteger(rulesetParameters.required_approving_review_count)
     || Number(rulesetParameters.required_approving_review_count) < 1) {
-    throw new ChangeProviderError("provider_observation_mismatch", "provider effective ruleset does not establish a review policy for the terminal target branch");
+    return branchPolicyRefusal("ruleset-review-policy-absent", "provider effective ruleset does not establish a review policy for the terminal target branch");
   }
+  return null;
+}
+
+/**
+ * Re-observe the effective branch policy before a destructive call. This
+ * refuses an absent/ambiguous policy rather than treating a passing check as
+ * authorization to bypass review or branch protection.
+ */
+async function assertMergeMutationPolicy(settings: ChangeProviderSettings, action: IssuedMergeChangeAction, dependencies: GithubExecutionDependencies): Promise<void> {
+  const refusal = await observeMergeBranchPolicy(action, dependencies);
+  if (refusal) throw new ChangeProviderError("provider_observation_mismatch", refusal.message);
 
   // This is deliberately the final provider observation before mutation: the
   // same authenticated GraphQL response binds the current actor, source head,
