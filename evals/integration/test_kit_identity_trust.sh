@@ -22,7 +22,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/evals/lib/node.sh"
 
-TMP="$(mktemp -d)"
+TMP="$(cd "$(mktemp -d)" && pwd -P)"
 errors=0
 
 _pass() { echo "  ✓ $1"; }
@@ -30,6 +30,92 @@ _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
+
+# ─── Fixture kit writer (#1330) ──────────────────────────────────────────────────────────────
+#
+# The Fix 2 checks below drive route-back policy on NON-BUILDER flows. They used to supply those
+# flows through FLOW_AGENTS_FLOW_DEFS_DIR, which #1324 ("one admission rule, every door")
+# correctly stopped admitting at `advance-state --flow-definition`: an env var is not provenance,
+# and a session whose flow the canonical run runtime cannot bind has no pinned definition digest
+# and no producer that could satisfy a gate.
+#
+# So the fixtures now arrive the way a real kit does — a `kits/<kit>/kit.json` declaring the flow
+# it owns, at the path canonical resolution reads, with a `flow_step_actions`/`skill_roles`
+# producer binding for EVERY expectation of EVERY gate. That is exactly what
+# `src/cli/kit-flow-run-binding.test.mjs` builds (`completeKitManifest`/`fixtureFlow`/
+# `makeProject`), restated here in the eval's own idiom. The route-back assertions are unchanged;
+# only the fixture's provenance is.
+#
+# Usage: _write_fixture_kit <project-dir> <kit-id> <flow-definition-json>
+# The kit id must be the flow id's own namespace — a manifest may only declare ids namespaced to
+# the directory it lives in, and this writer refuses rather than emitting a manifest that lies.
+_write_fixture_kit() {
+  local project="$1" kit_id="$2" flow_json="$3"
+  mkdir -p "$project"
+  ( cd "$project" && git init -q . >/dev/null 2>&1 \
+    && git -c user.email=fixture@example.invalid -c user.name=fixture commit -q --allow-empty -m init >/dev/null 2>&1 )
+  node - "$project" "$kit_id" "$flow_json" << 'NODE'
+const fs = require('fs');
+const path = require('path');
+// argv[0]=node, argv[1]="-", argv[2..]=args
+const [project, kitId, flowJsonPath] = process.argv.slice(2);
+const flow = JSON.parse(fs.readFileSync(flowJsonPath, 'utf8'));
+const dot = flow.id.indexOf('.');
+if (flow.id.slice(0, dot) !== kitId) {
+  throw new Error(`fixture kit ${kitId} may not declare ${flow.id}: a manifest only owns ids namespaced to its own directory`);
+}
+const flowName = flow.id.slice(dot + 1);
+const kitDir = path.join(project, 'kits', kitId);
+const relativeFlowPath = path.join('flows', `${flowName}.flow.json`);
+fs.mkdirSync(path.join(kitDir, 'flows'), { recursive: true });
+fs.writeFileSync(path.join(kitDir, relativeFlowPath), `${JSON.stringify(flow, null, 2)}\n`);
+
+// One producer binding per expectation of every gate. A missing binding is refused BY DESIGN
+// with the binding named, so this is derived from the definition rather than hand-listed:
+// adding a gate to a fixture flow cannot silently leave it unbound.
+const expectationsByStep = new Map();
+for (const gate of Object.values(flow.gates ?? {})) {
+  if (!gate || typeof gate.step !== 'string') continue;
+  const ids = expectationsByStep.get(gate.step) ?? [];
+  for (const expect of gate.expects ?? []) {
+    if (expect && typeof expect.id === 'string' && !ids.includes(expect.id)) ids.push(expect.id);
+  }
+  expectationsByStep.set(gate.step, ids);
+}
+// A kit namespaces its own skill roles (`<kit>.<skill>`) while a step action names the bare skill.
+const skillName = `${kitId}-produce`;
+const skillId = `${kitId}.${skillName}`;
+const steps = [...expectationsByStep];
+const manifest = {
+  schema_version: '1.0',
+  id: kitId,
+  name: `${kitId} fixture kit`,
+  description: `Fixture kit declaring ${flow.id} for the kit-identity route-back eval.`,
+  flows: [{ id: flow.id, path: relativeFlowPath, description: `${flow.id} fixture flow` }],
+  flow_step_actions: steps.map(([stepId, ids]) => ({
+    flow_id: flow.id,
+    step_id: stepId,
+    skills: [skillName],
+    implementation_allowed: false,
+    artifacts: [`<slug>--${stepId}.md`],
+    expectation_ids: ids,
+    expectation_bindings: ids.map((id) => ({ expectation_id: id, interface: 'workflow.evidence' })),
+    artifact_bindings: [{ artifact: `<slug>--${stepId}.md`, expectation_ids: ids }],
+  })),
+  skill_roles: steps.flatMap(([stepId, ids]) => ids.map((id) => ({
+    skill_id: skillId,
+    step_ids: [stepId],
+    expectation_ids: [id],
+    artifacts: [`<slug>--${stepId}.md`],
+  }))),
+  skills: [{ id: skillId, path: `skills/${skillName}/SKILL.md`, description: `${kitId} fixture producer skill` }],
+};
+fs.writeFileSync(path.join(kitDir, 'kit.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+const skillFile = path.join(kitDir, 'skills', skillName, 'SKILL.md');
+fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+fs.writeFileSync(skillFile, `# ${skillId}\n\nFixture producer skill.\n`);
+NODE
+}
 
 SIDECAR_JS="${ROOT}/build/src/cli/workflow-sidecar.js"
 SIDECAR_BUNDLE_WRITER="workflow-sidecar"
@@ -231,11 +317,9 @@ fi
 echo ""
 echo "=== 2b. Custom non-builder flow WITH route_back_policy: enforced ==="
 
-CUSTOM_FLOWS_DIR="$TMP/custom-flows"
-mkdir -p "$CUSTOM_FLOWS_DIR"
-
-# Write acme.deliver flow with route_back_policy (using argv[2] correctly)
-node - "$CUSTOM_FLOWS_DIR/acme.deliver.flow.json" << 'NODE'
+# Write the acme.deliver definition with route_back_policy (using argv[2] correctly), then
+# install it as a declared fixture kit so the canonical run runtime can bind it.
+node - "$TMP/acme.deliver.flow.json" << 'NODE'
 const fs = require('fs');
 const flowPath = process.argv[2];
 const flow = {
@@ -260,18 +344,17 @@ const flow = {
 fs.writeFileSync(flowPath, JSON.stringify(flow, null, 2));
 NODE
 
-ACME_DIR="$TMP/fix2-acme/.flow-agents/acme-fix2"
-mkdir -p "$TMP/fix2-acme/.flow-agents"
+ACME_PROJECT="$TMP/fix2-acme"
+ACME_DIR="$ACME_PROJECT/.flow-agents/acme-fix2"
+mkdir -p "$ACME_PROJECT/.flow-agents"
+_write_fixture_kit "$ACME_PROJECT" "acme" "$TMP/acme.deliver.flow.json"
 
 flow_agents_node "$SIDECAR_BUNDLE_WRITER" ensure-session \
-  --artifact-root "$TMP/fix2-acme/.flow-agents" \
+  --artifact-root "$ACME_PROJECT/.flow-agents" \
   --task-slug "acme-fix2" \
   --title "Fix2 acme route-back test" \
   --summary "Verify non-builder flow with route_back_policy is enforced." \
   --timestamp "2026-06-27T10:00:00Z" > "$TMP/fix2-acme-ensure.out" 2>&1
-
-# Set FLOW_AGENTS_FLOW_DEFS_DIR and export it for the duration of this block
-export FLOW_AGENTS_FLOW_DEFS_DIR="$CUSTOM_FLOWS_DIR"
 
 flow_agents_node "$SIDECAR_BUNDLE_WRITER" advance-state "$ACME_DIR" \
   --status verifying --phase verification \
@@ -324,16 +407,11 @@ else
   _fail "acme.deliver exceeded max_attempts but wrong diagnostic (got: $(cat "$TMP/fix2-acme-exceeded.out"))"
 fi
 
-unset FLOW_AGENTS_FLOW_DEFS_DIR
-
 # ─── 2c. Custom flow WITHOUT route_back_policy: NOT enforced ──────────────────
 echo ""
 echo "=== 2c. Custom flow WITHOUT route_back_policy: verification→execution NOT enforced ==="
 
-CUSTOM_FLOWS_DIR_2="$TMP/custom-flows-2"
-mkdir -p "$CUSTOM_FLOWS_DIR_2"
-
-node - "$CUSTOM_FLOWS_DIR_2/acme.nodecl.flow.json" << 'NODE'
+node - "$TMP/acme.nodecl.flow.json" << 'NODE'
 const fs = require('fs');
 const flowPath = process.argv[2];
 const flow = {
@@ -351,17 +429,17 @@ const flow = {
 fs.writeFileSync(flowPath, JSON.stringify(flow, null, 2));
 NODE
 
-NODECL_DIR="$TMP/fix2-nodecl/.flow-agents/nodecl-fix2"
-mkdir -p "$TMP/fix2-nodecl/.flow-agents"
+NODECL_PROJECT="$TMP/fix2-nodecl"
+NODECL_DIR="$NODECL_PROJECT/.flow-agents/nodecl-fix2"
+mkdir -p "$NODECL_PROJECT/.flow-agents"
+_write_fixture_kit "$NODECL_PROJECT" "acme" "$TMP/acme.nodecl.flow.json"
 
 flow_agents_node "$SIDECAR_BUNDLE_WRITER" ensure-session \
-  --artifact-root "$TMP/fix2-nodecl/.flow-agents" \
+  --artifact-root "$NODECL_PROJECT/.flow-agents" \
   --task-slug "nodecl-fix2" \
   --title "Fix2 nodecl route-back test" \
   --summary "Verify flow without route_back_policy is not guarded." \
   --timestamp "2026-06-27T10:00:00Z" > "$TMP/fix2-nodecl-ensure.out" 2>&1
-
-export FLOW_AGENTS_FLOW_DEFS_DIR="$CUSTOM_FLOWS_DIR_2"
 
 flow_agents_node "$SIDECAR_BUNDLE_WRITER" advance-state "$NODECL_DIR" \
   --status verifying --phase verification \
@@ -379,8 +457,6 @@ if flow_agents_node "$SIDECAR_BUNDLE_WRITER" advance-state "$NODECL_DIR" \
 else
   _fail "acme.nodecl without route_back_policy should allow route-back freely (got: $(cat "$TMP/fix2-nodecl-rb.out"))"
 fi
-
-unset FLOW_AGENTS_FLOW_DEFS_DIR
 
 echo ""
 echo "────────────────────────────────────────────"
