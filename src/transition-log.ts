@@ -226,6 +226,71 @@ export interface TransitionRecord {
    */
   output_tokens?: number;
   token_attribution?: TransitionTokenAttribution;
+  /**
+   * The model that emitted the invoking tool call — WRITTEN BY THE ENRICHER, NEVER BY
+   * THIS MODULE, for the same reasons `output_tokens` is not (flow-agents#1327).
+   *
+   * `actor.runtime` says `claude-code` or `codex` and nothing more, so a per-gate
+   * scorecard folded from these records cannot compare a gate across models. It has to,
+   * because gate value is plausibly model-dependent: a gate that catches real defects
+   * under a weaker model can be ceremony under a stronger one, and a decision taken on
+   * the pooled number removes the gate for every model at once.
+   *
+   * NOTHING HERE CAN OBSERVE IT. Measured, not assumed: no environment variable names
+   * the executing model on either runtime. `CLAUDE_CODE_SESSION_ID` is published and has
+   * no model counterpart; `docs/decisions/model-routing.md` records `ANTHROPIC_MODEL` as
+   * a REJECTED mechanism, and a variable of that shape is a request the host may ignore
+   * and is wrong for a delegated sub-agent in any case. A field filled from a hopeful env
+   * var, or defaulted to whatever model is current, would be a label nothing computes —
+   * this repo's dominant historical defect, and strictly worse than no field, because an
+   * absence is countable as unknown while a fabrication is indistinguishable from a
+   * measurement in every comparison drawn from it afterwards.
+   *
+   * The turn that emitted the tool call DOES name its model, on the same transcript
+   * record that carries the usage totals `output_tokens` is derived from. So the model
+   * is stamped by the same post-hoc pass, from the same evidence, through the same
+   * module (`scripts/telemetry/token-attribution.mjs`), and a test pins that this module
+   * writes neither.
+   *
+   * `resolved_model` — the economics vocabulary, matching
+   * `scripts/telemetry/economics-record.sh`'s per-delegation field — is present IFF
+   * `model_attribution.attributed` is true. An unobservable model carries NO key.
+   */
+  resolved_model?: string;
+  model_attribution?: TransitionModelAttribution;
+}
+
+/**
+ * The granularity label travelling WITH the model, on the same principle as
+ * `TransitionTokenAttribution`: name what the value is rather than letting the field name
+ * imply more than the derivation supports.
+ *
+ * `"invoking-turn-model"` says one thing precisely — the model of the turn that emitted
+ * the tool call this transition ran under. It is NOT "the model that ran the gate" (the
+ * gate is a subprocess; no model runs inside it) and NOT "the session's model", which
+ * changes mid-session and differs between an orchestrator and the delegates whose turns
+ * interleave with it.
+ */
+export interface TransitionModelAttribution {
+  granularity: "invoking-turn-model";
+  /**
+   * TRUE means a turn was identified and it named a model. FALSE is a positive finding:
+   * this transition was examined and its model could not be observed, so it must be
+   * COUNTED as unknown rather than pooled into whichever models the window happened to
+   * contain. The block's absence is a third state again — nothing looked.
+   */
+  attributed: boolean;
+  /** The turn the model was read from, when one was identified. */
+  turn_ref?: string;
+  /**
+   * Why nothing was attributed, when nothing was: `no-turn-before-transition`,
+   * `turn-outside-grace-window`, `unparseable-started-at`, or `turn-reports-no-model` —
+   * the last covering a host placeholder such as `<synthetic>`, which is not a model and
+   * is refused rather than folded as one.
+   */
+  reason?: string;
+  /** What the attribution was derived from. Names the derivation, not the machine. */
+  source?: string;
 }
 
 /**
