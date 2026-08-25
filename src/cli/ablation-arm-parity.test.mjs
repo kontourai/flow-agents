@@ -94,8 +94,31 @@ test("both arms refuse a bogus provider AssignmentStatus at ensure-session", () 
   // The ownership guard. Before the fix the variant sailed past this with exit 0 because
   // `selectionWorkItemRef` was undefined for any flow not literally named `builder.build`.
   const project = scratchProject("flow-agents-arm-own-");
-  const bogus = path.join(project, "bogus-state.json");
-  fs.writeFileSync(bogus, JSON.stringify({ role: "AssignmentStatus", provider: "github", assignment: {} }));
+  // A WELL-FORMED AssignmentStatus for a DIFFERENT Work Item. This matters: a malformed status is
+  // refused by a shape check that runs BEFORE the flow-dependent ownership guard, so both arms
+  // refuse for the same shape reason and the equality below holds trivially. That is exactly how
+  // the first version of this test passed with all three call sites reverted. The fixture must be
+  // valid enough to REACH the guard and wrong only in the way the guard exists to catch.
+  // A WELL-FORMED AssignmentStatus for a DIFFERENT Work Item — shape taken from a real
+  // `assignment-provider status` output, `effective` block included.
+  //
+  // THIS MATTERS AND IS THE REASON THIS TEST EXISTS TWICE. A *malformed* status is refused by a
+  // shape check that runs BEFORE the flow-dependent ownership guard, so both arms refuse for the
+  // same shape reason and the equality below holds trivially. The first version of this test used
+  // `{role, provider, assignment:{}}` and passed with all three call sites reverted. The fixture
+  // must be valid enough to REACH the guard and wrong only in the way the guard exists to catch.
+  const bogus = path.join(project, "wrong-item-state.json");
+  fs.writeFileSync(bogus, JSON.stringify({
+    role: "AssignmentStatus",
+    provider: "github",
+    assignment: {
+      subject_id: "acme-widgets-999", provider: "github", assignee: "someone-else",
+      record: { actor_key: "claude-code:other-session:OtherHost", work_item_ref: "acme/widgets#999", branch: "other/branch", artifact_dir: "acme-widgets-999" },
+      has_claim_label: true, claim_comment_author: "someone-else", claim_comment_id: 1,
+      repository: { owner: "acme", name: "widgets" }, issue_number: 999,
+    },
+    effective: { effective_state: "held", reason: "self_is_holder", holder: { actor: "claude-code:other-session:OtherHost" } },
+  }));
   const codes = {};
   for (const flowId of [CONTROL, VARIANT]) {
     const slug = `arm-own-${flowId.replace(/[^a-z]/g, "")}`;
