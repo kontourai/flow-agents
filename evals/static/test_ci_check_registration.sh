@@ -53,7 +53,7 @@ function slugify(label) {
 }
 
 // ---------------------------------------------------------------------------
-// evals/ci/run-baseline.sh: the registry
+// The registry — evals/ci/run-baseline.sh
 // ---------------------------------------------------------------------------
 const runBaseline = read('evals/ci/run-baseline.sh');
 
@@ -151,7 +151,7 @@ for (const label of Object.keys(LANELESS_CHECK_EXEMPTIONS)) {
 }
 
 // ---------------------------------------------------------------------------
-// .github/workflows/ci.yml: the workflow that must agree with the registry
+// The workflow that must agree with the registry — .github/workflows/ci.yml
 // ---------------------------------------------------------------------------
 const ci = read('.github/workflows/ci.yml');
 const jobsIndex = ci.search(/^jobs:$/m);
