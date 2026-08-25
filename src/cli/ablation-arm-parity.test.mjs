@@ -83,8 +83,16 @@ import os from "node:os";
 const CLI = path.resolve(REPO_ROOT, "build/src/cli.js");
 const SIDECAR = path.resolve(REPO_ROOT, "build/src/cli/workflow-sidecar.js");
 
+const SCRATCH_ROOTS = [];
+process.on("exit", () => {
+  // 53 sibling src/cli/*.test.mjs files clean up their mkdtemp roots; these did not, leaving four
+  // scratch projects per run behind (#1326 is the same class at corpus scale).
+  for (const dir of SCRATCH_ROOTS) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* cleanup must never fail a green test */ } }
+});
+
 function scratchProject(prefix) {
   const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  SCRATCH_ROOTS.push(project);
   spawnSync("git", ["init", "-q", "."], { cwd: project });
   spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });
   return project;
@@ -94,11 +102,6 @@ test("both arms refuse a bogus provider AssignmentStatus at ensure-session", () 
   // The ownership guard. Before the fix the variant sailed past this with exit 0 because
   // `selectionWorkItemRef` was undefined for any flow not literally named `builder.build`.
   const project = scratchProject("flow-agents-arm-own-");
-  // A WELL-FORMED AssignmentStatus for a DIFFERENT Work Item. This matters: a malformed status is
-  // refused by a shape check that runs BEFORE the flow-dependent ownership guard, so both arms
-  // refuse for the same shape reason and the equality below holds trivially. That is exactly how
-  // the first version of this test passed with all three call sites reverted. The fixture must be
-  // valid enough to REACH the guard and wrong only in the way the guard exists to catch.
   // A WELL-FORMED AssignmentStatus for a DIFFERENT Work Item — shape taken from a real
   // `assignment-provider status` output, `effective` block included.
   //
