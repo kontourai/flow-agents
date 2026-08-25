@@ -102,11 +102,11 @@ test("both arms refuse a bogus provider AssignmentStatus at ensure-session", () 
   // A WELL-FORMED AssignmentStatus for a DIFFERENT Work Item — shape taken from a real
   // `assignment-provider status` output, `effective` block included.
   //
-  // THIS MATTERS AND IS THE REASON THIS TEST EXISTS TWICE. A *malformed* status is refused by a
-  // shape check that runs BEFORE the flow-dependent ownership guard, so both arms refuse for the
-  // same shape reason and the equality below holds trivially. The first version of this test used
-  // `{role, provider, assignment:{}}` and passed with all three call sites reverted. The fixture
-  // must be valid enough to REACH the guard and wrong only in the way the guard exists to catch.
+  // THE FIXTURE HAS TO REACH THE GUARD. A *malformed* status is refused by a shape check that runs
+  // BEFORE the flow-dependent ownership guard, so both arms refuse for the same shape reason and
+  // the equality below holds trivially. The first version of this test used
+  // `{role, provider, assignment:{}}` and passed with all three call sites reverted. Valid enough
+  // to reach the guard, wrong only in the way the guard exists to catch.
   const bogus = path.join(project, "wrong-item-state.json");
   fs.writeFileSync(bogus, JSON.stringify({
     role: "AssignmentStatus",
@@ -135,17 +135,78 @@ test("both arms refuse a bogus provider AssignmentStatus at ensure-session", () 
 });
 
 test("both arms refuse to start without pull-work selection evidence", () => {
-  // The selection-evidence check. Before the fix the variant started with no `--pull-work.md`.
+  // MUST pass --assignment-provider, or both arms die in collectStartContractIssues long before
+  // the selection-evidence check and the equality is a tautology. That is exactly how the first
+  // version of this test passed with the site reverted.
+  //
+  // AND MUST ASSERT THE STDERR, NOT THE STATUS: with the site reverted the variant also exits 70,
+  // just from a different failure downstream. Only the message distinguishes them.
   const project = scratchProject("flow-agents-arm-sel-");
-  const codes = {};
+  const out = {};
   for (const flowId of [CONTROL, VARIANT]) {
-    codes[flowId] = spawnSync(process.execPath, [CLI, "workflow", "start",
+    const r = spawnSync(process.execPath, [CLI, "workflow", "start",
       "--artifact-root", path.join(project, ".kontourai", "flow-agents"),
       "--work-item", "acme/widgets#2", "--flow", flowId,
+      "--assignment-provider", "local-file",
       "--source-request", "arm parity", "--summary", "arm parity",
-    ], { cwd: project, encoding: "utf8" }).status;
+    ], { cwd: project, encoding: "utf8" });
+    out[flowId] = `${r.stdout || ""}${r.stderr || ""}`;
   }
-  assert.equal(codes[VARIANT], codes[CONTROL],
-    `both arms must reach the same verdict when selection evidence is absent (control=${codes[CONTROL]}, variant=${codes[VARIANT]})`);
-  assert.notEqual(codes[CONTROL], 0, "the control must refuse without selection evidence, or this asserts nothing");
+  const NEEDLE = "requires concrete pull-work selection evidence";
+  assert.ok(out[CONTROL].includes(NEEDLE), `the control must refuse for the selection-evidence reason, or this asserts nothing (got: ${out[CONTROL].slice(0, 200)})`);
+  assert.ok(out[VARIANT].includes(NEEDLE), `the variant must refuse for the SAME reason as the control — a variant refused for some other reason is not the same start-time contract (got: ${out[VARIANT].slice(0, 200)})`);
+});
+
+test("both arms emit a machine-readable next_action", () => {
+  // The third call site. A bare-string next_action drops `skills` and the pinned start `command`
+  // from the sidecar, which is a difference in what the arm can be driven by.
+  const project = scratchProject("flow-agents-arm-na-");
+  const keys = {};
+  for (const flowId of [CONTROL, VARIANT]) {
+    const issue = flowId.endsWith("lean") ? 3101 : 3100;
+    const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+    const r = spawnSync(process.execPath, [SIDECAR, "ensure-session",
+      "--artifact-root", artifactRoot, "--work-item", `acme/widgets#${issue}`,
+      "--flow-id", flowId, "--assignment-provider", "local-file",
+      "--source-request", "arm parity", "--summary", "arm parity",
+    ], { cwd: project, encoding: "utf8" });
+    assert.equal(r.status, 0, `ensure-session must succeed for ${flowId} (stderr: ${(r.stderr || "").slice(0, 200)})`);
+    const dir = (r.stdout || "").trim().split("\n").pop();
+    const state = JSON.parse(fs.readFileSync(path.join(dir, "state.json"), "utf8"));
+    keys[flowId] = Object.keys(state.next_action ?? {}).sort();
+  }
+  assert.deepEqual(keys[VARIANT], keys[CONTROL],
+    `both arms must emit the same next_action shape (control=${JSON.stringify(keys[CONTROL])}, variant=${JSON.stringify(keys[VARIANT])})`);
+  assert.ok(keys[CONTROL].includes("skills") && keys[CONTROL].includes("command"),
+    "the control must emit a structured next_action, or the equality above is satisfied by both arms being bare strings");
+});
+
+test("a session that declares no flow does not acquire work-item ownership validation", () => {
+  // The guard added for the BLOCKER: fail-closed protects flows we cannot CLASSIFY, not callers
+  // who declared no flow. Without `Boolean(entry.flowId) &&`, resolveEffectiveFlowDefinition("")
+  // returns null, flowSelectsWorkItem(null) fails closed to true, and a documented flow-less
+  // invocation acquires the whole ownership machinery — which regressed two shipped suites.
+  const project = scratchProject("flow-agents-arm-noflow-");
+  const bogus = path.join(project, "wrong-item-state.json");
+  // Well-formed, as in the ownership test above: a malformed status is refused by a shape check
+  // that runs before the guard, which would make this pass for the wrong reason (it did, twice).
+  fs.writeFileSync(bogus, JSON.stringify({
+    role: "AssignmentStatus",
+    provider: "github",
+    assignment: {
+      subject_id: "acme-widgets-999", provider: "github", assignee: "someone-else",
+      record: { actor_key: "claude-code:other-session:OtherHost", work_item_ref: "acme/widgets#999", branch: "other/branch", artifact_dir: "acme-widgets-999" },
+      has_claim_label: true, claim_comment_author: "someone-else", claim_comment_id: 1,
+      repository: { owner: "acme", name: "widgets" }, issue_number: 999,
+    },
+    effective: { effective_state: "held", reason: "self_is_holder", holder: { actor: "claude-code:other-session:OtherHost" } },
+  }));
+  const r = spawnSync(process.execPath, [SIDECAR, "ensure-session",
+    "--artifact-root", path.join(project, ".kontourai", "flow-agents"),
+    "--work-item", "acme/widgets#1",
+    "--assignment-provider", "github", "--effective-state-json", bogus,
+    "--source-request", "arm parity", "--summary", "arm parity",
+  ], { cwd: project, encoding: "utf8" });
+  assert.equal(r.status, 0,
+    `a flow-less ensure-session must not be routed through work-item ownership validation (stderr: ${(r.stderr || "").slice(0, 240)})`);
 });
