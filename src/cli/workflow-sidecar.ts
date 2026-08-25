@@ -33,9 +33,10 @@ import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } fr
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
 import { validateRunCorrelationPresence } from "../run-correlation.js";
 import {
-  EVIDENCE_REF_FIELD_SCHEMAS,
-  EVIDENCE_REF_KINDS,
-  EVIDENCE_REF_RULES,
+  criterionShapeViolations,
+  critiqueLaneShapeViolations,
+  CRITIQUE_LANE_ID_PATTERN,
+  evidenceRefShapeViolations,
   NARRATIVE_PROMOTE_OPERATION,
   WORKFLOW_ACCEPTANCE_STATUSES,
   WORKFLOW_CRITIQUE_STATUSES,
@@ -3352,44 +3353,40 @@ function evidenceRef(kind: string, fields: AnyObj): AnyObj {
 function hasNonEmptyString(value: unknown): boolean {
   return typeof value === "string" && value.length > 0;
 }
-function hasPositiveInteger(value: unknown): boolean {
-  return Number.isInteger(value) && Number(value) >= 1;
+/**
+ * #1359: one refusal, every problem. A caller fixing N faults in one payload must not pay N
+ * invocations to discover them, so every validator below COLLECTS violations and refuses once.
+ * The refusal text is unchanged per violation — nothing here accepts an input the field-by-field
+ * version rejected; only the arrival rate changed.
+ */
+function dieOnViolations(violations: readonly string[]): void {
+  if (violations.length === 0) return;
+  if (violations.length === 1) die(violations[0]!);
+  die(`${violations.length} problems must be fixed together:\n  - ${violations.join("\n  - ")}`);
+}
+/** Shape problems with one candidate evidence ref, including "this is not an object at all". */
+function evidenceRefViolations(raw: unknown, label: string): string[] {
+  if (typeof raw === "string") return [`${label} entries must be structured evidence reference objects; legacy string refs are not supported`];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [`${label} entries must be objects`];
+  return evidenceRefShapeViolations(raw as AnyObj, label);
+}
+/** Shape problems across a whole `evidence_refs` array, each carrying its own entry index. */
+function evidenceRefListViolations(raw: unknown, label: string): string[] {
+  if (!Array.isArray(raw)) return [`${label} must be an array`];
+  return raw.flatMap((ref, index) => evidenceRefViolations(ref, `${label}[${index}]`));
 }
 export function validateEvidenceRef(ref: AnyObj, label: string, projectRoot = process.cwd()): AnyObj {
-  if (!(EVIDENCE_REF_KINDS as readonly unknown[]).includes(ref.kind)) die(`${label} entry kind must be one of: ${EVIDENCE_REF_KINDS.join(", ")}`);
-  for (const key of Object.keys(ref)) if (!Object.hasOwn(EVIDENCE_REF_FIELD_SCHEMAS, key)) die(`${label} entries contain unsupported field: ${key}`);
-  if (ref.url !== undefined && !hasNonEmptyString(ref.url)) die(`${label} entry url must be a non-empty string`);
-  if (ref.file !== undefined && !hasNonEmptyString(ref.file)) die(`${label} entry file must be a non-empty string`);
-  if (ref.excerpt !== undefined && !hasNonEmptyString(ref.excerpt)) die(`${label} entry excerpt must be a non-empty string`);
-  if (ref.summary !== undefined && !hasNonEmptyString(ref.summary)) die(`${label} entry summary must be a non-empty string`);
-  if (ref.line_start !== undefined && !hasPositiveInteger(ref.line_start)) die(`${label} entry line_start must be a positive integer`);
-  if (ref.line_end !== undefined && !hasPositiveInteger(ref.line_end)) die(`${label} entry line_end must be a positive integer`);
+  // Shape rules are enforced from the SAME constants `workflow <verb> --explain` prints (#1358);
+  // a rule hand-written here would be a rule the accepted-shape output cannot know about.
+  dieOnViolations(evidenceRefShapeViolations(ref, label));
   rejectNarrativeReference(projectRoot, ref.file, `${label} entry file`);
   rejectNarrativeReference(projectRoot, ref.url, `${label} entry url`);
   rejectNarrativeReference(projectRoot, ref.excerpt, `${label} entry excerpt`);
-  const rules = EVIDENCE_REF_RULES[ref.kind as keyof typeof EVIDENCE_REF_RULES];
-  for (const rule of rules) {
-    const present = (field: string): boolean => field === "line_start" || field === "line_end"
-      ? hasPositiveInteger(ref[field])
-      : hasNonEmptyString(ref[field]);
-    const valid = rule.mode === "all" ? rule.fields.every(present) : rule.fields.some(present);
-    if (!valid) {
-      const separator = rule.fields.length > 2 ? ", " : " ";
-      const joined = rule.fields.length > 1
-        ? `${rule.fields.slice(0, -1).join(separator)}${rule.fields.length > 2 ? "," : ""} or ${rule.fields.at(-1)}`
-        : rule.fields[0];
-      die(`${label} ${ref.kind} refs require ${rule.mode === "all" && rule.fields.length > 1 ? joined.replace(/ or ([^,]+)$/, " and $1") : joined}`);
-    }
-  }
   return ref;
 }
 export function normalizeEvidenceRefs(raw: unknown, label: string, projectRoot = process.cwd()): AnyObj[] {
-  if (!Array.isArray(raw)) die(`${label} must be an array`);
-  return raw.map((ref) => {
-    if (typeof ref === "string") die(`${label} entries must be structured evidence reference objects; legacy string refs are not supported`);
-    if (!ref || typeof ref !== "object" || Array.isArray(ref)) die(`${label} entries must be objects`);
-    return validateEvidenceRef({ ...ref as AnyObj }, label, projectRoot);
-  });
+  dieOnViolations(evidenceRefListViolations(raw, label));
+  return (raw as unknown[]).map((ref, index) => validateEvidenceRef({ ...ref as AnyObj }, `${label}[${index}]`, projectRoot));
 }
 
 function canonicalProjectRootForSession(dir: string): string {
@@ -4313,20 +4310,35 @@ export function appendWriterTransactionAbort(capability: WriterTransactionAbortC
   }
 }
 
-function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySet<string>, label: string, requireAll = false): void {
+function observedCommandRefViolations(refs: AnyObj[], observedCommands: ReadonlySet<string>, label: string, requireAll = false): string[] {
+  const violations: string[] = [];
   const commandRefs = refs.filter((ref) => ref.kind === "command");
-  if (commandRefs.length === 0) die(`${label} requires a command evidence ref matching a successful observed command`);
-  for (const ref of commandRefs) {
-    if (!observedCommands.has(commandFromEvidenceRef(ref))) die(`${label} command evidence ref must exactly match a successful writer-observed command`);
+  if (commandRefs.length === 0) violations.push(`${label} requires a command evidence ref matching a successful observed command`);
+  if (commandRefs.some((ref) => !observedCommands.has(commandFromEvidenceRef(ref)))) {
+    violations.push(`${label} command evidence ref must exactly match a successful writer-observed command`);
   }
   if (requireAll) {
     const referenced = new Set(commandRefs.map(commandFromEvidenceRef));
-    if ([...observedCommands].some((command) => !referenced.has(command))) die(`${label} requires a top-level command evidence ref for every successful observed command`);
+    if ([...observedCommands].some((command) => !referenced.has(command))) violations.push(`${label} requires a top-level command evidence ref for every successful observed command`);
   }
+  return violations;
 }
 
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string): AnyObj[] {
-  if (raw.length === 0) die("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
+function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySet<string>, label: string, requireAll = false): void {
+  dieOnViolations(observedCommandRefViolations(refs, observedCommands, label, requireAll));
+}
+
+/**
+ * `preconditionProblems` carries state-level refusals that are knowable BEFORE any payload is
+ * parsed (today: the current-clean-critique requirement, #1359 step 8), so a caller whose payload
+ * is also malformed learns both in the same refusal instead of after four shape round-trips.
+ */
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string, preconditionProblems: readonly string[] = []): AnyObj[] {
+  const problems: string[] = [...preconditionProblems];
+  if (raw.length === 0) {
+    problems.push("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
+    dieOnViolations(problems);
+  }
   const incoming = raw.map((value) => parseJson(value, "--criterion-json"));
   const expectedById = new Map<string, AnyObj>();
   for (const criterion of existing) {
@@ -4336,39 +4348,48 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   const expectedIds = [...expectedById.keys()];
   const ids = incoming.map((criterion) => typeof criterion.id === "string" ? criterion.id : "");
   if (new Set(ids).size !== ids.length || ids.length !== expectedIds.length || ids.some((id) => !expectedIds.includes(id))) {
-    die(`--criterion-json must cover every declared acceptance criterion exactly once (expected: ${expectedIds.join(", ") || "none"}; received: ${ids.join(", ") || "none"})`);
+    problems.push(`--criterion-json must cover every declared acceptance criterion exactly once (expected: ${expectedIds.join(", ") || "none"}; received: ${ids.join(", ") || "none"})`);
   }
+  const labels = ids.map((id, index) => id.length > 0 ? id : `#${index}`);
+  incoming.forEach((criterion, index) => {
+    problems.push(...criterionShapeViolations(criterion, labels[index]!));
+    problems.push(...evidenceRefListViolations(criterion.evidence_refs, `criterion ${labels[index]} evidence_refs`));
+    if (Array.isArray(criterion.evidence_refs) && criterion.evidence_refs.length === 0) problems.push(`criterion ${labels[index]} requires reviewable evidence_refs`);
+  });
+  dieOnViolations(problems);
   const observedCommandNames = new Set(observedCommands.map((observation) => observation.command));
-  return incoming.map((criterion, index) => {
-    if (Object.keys(criterion).some((key) => !["id", "status", "evidence_refs"].includes(key))) die(`criterion ${ids[index]} may update only id, status, and evidence_refs`);
-    if (criterion.status !== "pass") die(`criterion ${ids[index]} must have status pass for a passing tests-evidence claim`);
-    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot);
-    if (refs.length === 0) die(`criterion ${ids[index]} requires reviewable evidence_refs`);
-    requireObservedCommandRefs(refs, observedCommandNames, `criterion ${ids[index]}`);
+  const normalized = incoming.map((criterion, index) => normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot));
+  dieOnViolations(normalized.flatMap((refs, index) => observedCommandRefViolations(refs, observedCommandNames, `criterion ${ids[index]}`)));
+  return normalized.map((refs, index) => {
     const referencedCommands = new Set(refs.filter((ref) => ref.kind === "command").map(commandFromEvidenceRef));
     const criterionObservedCommands = observedCommands.filter((observation) => referencedCommands.has(observation.command));
     return markCanonicallyObservedCriterion({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _observed_commands: criterionObservedCommands });
   });
 }
 
+// The verdict vocabulary and the id grammar `record-critique` enforces are the SAME constants
+// `--explain` prints for `--lane-json`; a second local copy is a second thing to drift.
 const critiqueStatuses = new Set<string>(WORKFLOW_CRITIQUE_STATUSES);
-const safeCritiqueId = /^[a-z][a-z0-9_-]*$/;
+const safeCritiqueId = new RegExp(CRITIQUE_LANE_ID_PATTERN);
 
 function normalizeCritiqueLanes(raw: string[], projectRoot: string): AnyObj[] {
   if (raw.length === 0) die("record-critique requires at least one --lane-json");
-  const lanes = raw.map((value, index) => {
-    const lane = parseJson(value, "--lane-json");
-    const keys = Object.keys(lane);
-    if (keys.some((key) => !["id", "status", "summary", "evidence_refs"].includes(key))) die(`--lane-json ${index} contains unsupported fields`);
-    if (!safeCritiqueId.test(String(lane.id ?? ""))) die(`--lane-json ${index} id must be a unique safe identifier`);
-    if (!critiqueStatuses.has(String(lane.status ?? ""))) die(`--lane-json ${index} status must be one of: pass, fail, not_verified`);
-    if (!hasNonEmptyString(lane.summary)) die(`--lane-json ${index} summary must be non-empty`);
-    const evidenceRefs = normalizeEvidenceRefs(lane.evidence_refs, `--lane-json ${index} evidence_refs`, projectRoot);
-    if (evidenceRefs.length === 0) die(`--lane-json ${index} requires structured reviewable evidence_refs`);
-    return { id: lane.id, status: lane.status, summary: lane.summary, evidence_refs: evidenceRefs };
+  const parsed = raw.map((value) => parseJson(value, "--lane-json"));
+  const problems: string[] = [];
+  parsed.forEach((lane, index) => {
+    problems.push(...critiqueLaneShapeViolations(lane, index));
+    problems.push(...evidenceRefListViolations(lane.evidence_refs, `--lane-json ${index} evidence_refs`));
+    if (Array.isArray(lane.evidence_refs) && lane.evidence_refs.length === 0) problems.push(`--lane-json ${index} requires structured reviewable evidence_refs`);
   });
-  if (new Set(lanes.map((lane) => lane.id)).size !== lanes.length) die("--lane-json ids must be unique");
-  return lanes;
+  const ids = parsed.map((lane) => lane.id);
+  if (new Set(ids).size !== ids.length) problems.push("--lane-json ids must be unique");
+  dieOnViolations(problems);
+  return parsed.map((lane, index) => ({
+    id: lane.id,
+    status: lane.status,
+    summary: lane.summary,
+    evidence_refs: normalizeEvidenceRefs(lane.evidence_refs, `--lane-json ${index} evidence_refs`, projectRoot),
+  }));
 }
 
 function reviewTargetArtifacts(dir: string, rawPaths: string[], label: string): AnyObj[] {
@@ -4405,6 +4426,39 @@ function reviewTargetArtifactsMatch(dir: string, reviewTarget: unknown): boolean
       return digest === sha256;
     });
   } catch { return false; }
+}
+
+/**
+ * The current-clean-critique precondition for a passing tests-evidence claim, as a list rather
+ * than a throw so it can be reported alongside payload faults in one refusal (#1359).
+ *
+ * Three distinguishable causes were collapsed into one message that named none of them, and the
+ * remedy differs per cause. Measured across 12 eval arms: this refusal fired 13x, 6 of those as
+ * repeats within a single run — a caller told only "requires a current clean critique" has no
+ * transition to act on, so retrying is its only move (kontourai/flow-agents#1281). At most one
+ * cause is reported: they are ordered from most to least fundamental and the later ones are
+ * meaningless once an earlier one holds.
+ */
+function passingTestsCritiquePreconditionProblems(dir: string, critiques: AnyObj[]): string[] {
+  const liveCritiques = critiques.filter((critique) => !critique.superseded_by);
+  if (liveCritiques.length === 0) {
+    return ["a passing tests-evidence claim requires a current clean critique first, and this run has no critique yet. "
+      + "Record one with `workflow critique` under a reviewer identity distinct from the implementation actor: "
+      + "set FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process."];
+  }
+  if (liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique))) {
+    return ["a passing tests-evidence claim requires a current clean critique first, and this gate visit has a live "
+      + "critique that is not a substantive pass. It is not necessarily the newest one: supersession is "
+      + "per reviewer, so an earlier reviewer's open critique stays live even after a different reviewer "
+      + "records a clean one. Address that critique's open findings and re-record it with `workflow critique` "
+      + "under the SAME critique id and the same reviewer identity, which is what supersedes it."];
+  }
+  if (!liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique))) {
+    return ["a passing tests-evidence claim requires a current clean critique first, and this run's critique predates "
+      + "the current workspace state. Re-record the critique with `workflow critique` against the tree as it "
+      + "stands now, then retry this claim."];
+  }
+  return [];
 }
 
 function critiqueIsCleanAndCurrent(dir: string, critique: AnyObj): boolean {
@@ -6112,37 +6166,14 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const _existingState = readBundleState(dir, {
     reanchoringPlanContract: targetExpectation.id === "implementation-plan" && statusVal === "pass",
   });
-  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot) : _existingState.criteria;
+  // #1359 step 8: the current-clean-critique requirement is state, knowable before a single
+  // character of the payload is parsed. It used to be checked AFTER the criteria were accepted,
+  // so a caller with four criterion faults paid four round-trips before even hearing about it.
+  // It is now collected first and refused TOGETHER with any payload faults.
+  const criteria = mustRunTests
+    ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot, passingTestsCritiquePreconditionProblems(dir, _existingState.critiques))
+    : _existingState.criteria;
   if (mustRunTests) {
-    const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
-    const hasCurrentCritique = liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique));
-    // Three distinguishable causes were collapsed into one message that named none of them, and the
-    // remedy differs per cause. Measured across 12 eval arms: this refusal fired 13x, 6 of those as
-    // repeats within a single run — a caller told only "requires a current clean critique" has no
-    // transition to act on, so retrying is its only move (kontourai/flow-agents#1281).
-    if (liveCritiques.length === 0) {
-      die(
-        "a passing tests-evidence claim requires a current clean critique first, and this run has no critique yet. " +
-          "Record one with `workflow critique` under a reviewer identity distinct from the implementation actor: " +
-          "set FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process.",
-      );
-    }
-    if (liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique))) {
-      die(
-        "a passing tests-evidence claim requires a current clean critique first, and this gate visit has a live " +
-          "critique that is not a substantive pass. It is not necessarily the newest one: supersession is " +
-          "per reviewer, so an earlier reviewer's open critique stays live even after a different reviewer " +
-          "records a clean one. Address that critique's open findings and re-record it with `workflow critique` " +
-          "under the SAME critique id and the same reviewer identity, which is what supersedes it.",
-      );
-    }
-    if (!hasCurrentCritique) {
-      die(
-        "a passing tests-evidence claim requires a current clean critique first, and this run's critique predates " +
-          "the current workspace state. Re-record the critique with `workflow critique` against the tree as it " +
-          "stands now, then retry this claim.",
-      );
-    }
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
   }
   const _mergedChecks = mergeChecksById(_existingState.checks, [checkNormalized]);

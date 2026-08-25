@@ -45,6 +45,198 @@ export const EVIDENCE_REF_JSON_SCHEMA = {
   ],
 } as const;
 
+// ─── Accepted-shape derivation (#1358) and one-pass violation collection (#1359) ──────────────
+//
+// One set of constants, two consumers: `workflow <verb> --explain` renders the accepted shape
+// from these, and the sidecar's validators refuse from these. Neither side hand-writes a rule,
+// so neither can advertise a shape the other does not enforce. A drift test
+// (workflow-explain.test.mjs) binds the two directions executably: every shape --explain prints
+// is fed to the real validator and must be accepted, and every clause the validator emits on a
+// violation must be the byte-identical clause --explain printed.
+//
+// Every collector below returns EVERY violation it finds rather than throwing on the first, which
+// is the whole of #1359: a caller fixing N problems must not pay N invocations to discover them.
+
+export const EVIDENCE_REF_FIELDS = Object.keys(EVIDENCE_REF_FIELD_SCHEMAS) as ReadonlyArray<keyof typeof EVIDENCE_REF_FIELD_SCHEMAS>;
+export const CRITERION_MUTABLE_FIELDS = ["id", "status", "evidence_refs"] as const;
+/** The only criterion status a passing tests-evidence claim accepts (`completePassingCriteria`). */
+export const PASSING_CRITERION_STATUS = "pass" as const;
+export const CRITIQUE_LANE_FIELDS = ["id", "status", "summary", "evidence_refs"] as const;
+export const CRITIQUE_LANE_ID_PATTERN = "^[a-z][a-z0-9_-]*$";
+
+type FieldSchema = { type: string; enum?: readonly string[]; minLength?: number; minimum?: number };
+
+/** The human clause for a field schema — the exact words the refusal uses, so help cannot paraphrase. */
+export function describeEvidenceRefField(field: string): string {
+  const schema = EVIDENCE_REF_FIELD_SCHEMAS[field as keyof typeof EVIDENCE_REF_FIELD_SCHEMAS] as FieldSchema | undefined;
+  if (!schema) return "not a supported field";
+  if (schema.enum) return `one of: ${schema.enum.join(", ")}`;
+  if (schema.type === "integer") return "a positive integer";
+  return "a non-empty string";
+}
+
+function fieldSatisfiesSchema(field: string, value: unknown): boolean {
+  const schema = EVIDENCE_REF_FIELD_SCHEMAS[field as keyof typeof EVIDENCE_REF_FIELD_SCHEMAS] as FieldSchema | undefined;
+  if (!schema) return false;
+  if (schema.enum) return typeof value === "string" && schema.enum.includes(value);
+  if (schema.type === "integer") return Number.isInteger(value) && Number(value) >= (schema.minimum ?? 1);
+  return typeof value === "string" && value.length >= (schema.minLength ?? 1);
+}
+
+/** The clause text for one `EVIDENCE_REF_RULES` entry: "file, line_start, line_end, and excerpt". */
+export function describeEvidenceRefRule(rule: { mode: string; fields: readonly string[] }): string {
+  const separator = rule.fields.length > 2 ? ", " : " ";
+  const joined = rule.fields.length > 1
+    ? `${rule.fields.slice(0, -1).join(separator)}${rule.fields.length > 2 ? "," : ""} or ${rule.fields.at(-1)}`
+    : rule.fields[0]!;
+  return rule.mode === "all" && rule.fields.length > 1 ? joined.replace(/ or ([^,]+)$/, " and $1") : joined;
+}
+
+/** Every shape problem with one evidence ref. Empty means the ref satisfies every declared rule. */
+export function evidenceRefShapeViolations(ref: Record<string, unknown>, label: string): string[] {
+  const violations: string[] = [];
+  const kindIsKnown = fieldSatisfiesSchema("kind", ref.kind);
+  if (!kindIsKnown) violations.push(`${label} entry kind must be one of: ${EVIDENCE_REF_KINDS.join(", ")}`);
+  for (const key of Object.keys(ref)) {
+    if (!Object.hasOwn(EVIDENCE_REF_FIELD_SCHEMAS, key)) violations.push(`${label} entries contain unsupported field: ${key}`);
+  }
+  for (const field of EVIDENCE_REF_FIELDS) {
+    if (field === "kind" || ref[field] === undefined) continue;
+    if (!fieldSatisfiesSchema(field, ref[field])) violations.push(`${label} entry ${field} must be ${describeEvidenceRefField(field)}`);
+  }
+  // Clause rules are keyed by kind: an unknown kind selects no clause, so they are skipped rather
+  // than reported against an arbitrary kind's requirements.
+  if (kindIsKnown) {
+    for (const rule of EVIDENCE_REF_RULES[ref.kind as keyof typeof EVIDENCE_REF_RULES]) {
+      const satisfied = rule.mode === "all"
+        ? rule.fields.every((field) => fieldSatisfiesSchema(field, ref[field]))
+        : rule.fields.some((field) => fieldSatisfiesSchema(field, ref[field]));
+      if (!satisfied) violations.push(`${label} ${String(ref.kind)} refs require ${describeEvidenceRefRule(rule)}`);
+    }
+  }
+  return violations;
+}
+
+/** "id, status, and evidence_refs" — the prose list form the refusals already used. */
+function andList(values: readonly string[]): string {
+  return values.length > 1 ? `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}` : values[0] ?? "";
+}
+
+/** Shape problems with one `--criterion-json` object, excluding its evidence refs. */
+export function criterionShapeViolations(criterion: Record<string, unknown>, id: string): string[] {
+  const violations: string[] = [];
+  const extras = Object.keys(criterion).filter((key) => !(CRITERION_MUTABLE_FIELDS as readonly string[]).includes(key));
+  if (extras.length > 0) violations.push(`criterion ${id} may update only ${andList(CRITERION_MUTABLE_FIELDS)}`);
+  if (criterion.status !== PASSING_CRITERION_STATUS) violations.push(`criterion ${id} must have status ${PASSING_CRITERION_STATUS} for a passing tests-evidence claim`);
+  return violations;
+}
+
+/** Shape problems with one `--lane-json` object, excluding its evidence refs. */
+export function critiqueLaneShapeViolations(lane: Record<string, unknown>, index: number): string[] {
+  const violations: string[] = [];
+  const extras = Object.keys(lane).filter((key) => !(CRITIQUE_LANE_FIELDS as readonly string[]).includes(key));
+  if (extras.length > 0) violations.push(`--lane-json ${index} contains unsupported fields: ${extras.join(", ")}`);
+  if (!new RegExp(CRITIQUE_LANE_ID_PATTERN).test(String(lane.id ?? ""))) violations.push(`--lane-json ${index} id must be a unique safe identifier matching ${CRITIQUE_LANE_ID_PATTERN}`);
+  if (!(WORKFLOW_CRITIQUE_STATUSES as readonly string[]).includes(String(lane.status ?? ""))) violations.push(`--lane-json ${index} status must be one of: ${WORKFLOW_CRITIQUE_STATUSES.join(", ")}`);
+  if (typeof lane.summary !== "string" || lane.summary.length === 0) violations.push(`--lane-json ${index} summary must be non-empty`);
+  return violations;
+}
+
+/**
+ * A filled evidence ref of `kind` that satisfies every declared clause for that kind — built by
+ * walking EVIDENCE_REF_RULES, never hand-authored, so `--explain`'s example is accepted by
+ * construction. Placeholder values are angle-bracketed where the caller must substitute.
+ */
+export function exampleEvidenceRef(kind: (typeof EVIDENCE_REF_KINDS)[number]): Record<string, unknown> {
+  const placeholders: Record<string, unknown> = {
+    url: "https://example.invalid/run/123",
+    file: "src/example.ts",
+    line_start: 1,
+    line_end: 2,
+    excerpt: "<verbatim quoted line or the exact command>",
+    summary: "<what this reference proves>",
+  };
+  const example: Record<string, unknown> = { kind };
+  for (const rule of EVIDENCE_REF_RULES[kind]) {
+    const fields = rule.mode === "all" ? rule.fields : [rule.fields[0]!];
+    for (const field of fields) example[field] = placeholders[field];
+  }
+  return example;
+}
+
+export function exampleCriterion(): Record<string, unknown> {
+  return { id: "<declared-acceptance-criterion-id>", status: PASSING_CRITERION_STATUS, evidence_refs: [exampleEvidenceRef("command")] };
+}
+
+export function exampleCritiqueLane(): Record<string, unknown> {
+  return { id: "correctness", status: WORKFLOW_CRITIQUE_STATUSES[0], summary: "<what this lane reviewed and concluded>", evidence_refs: [exampleEvidenceRef("source")] };
+}
+
+export type JsonFlagShape = {
+  flag: string;
+  description: string;
+  /** Ordered, human-readable clauses — the same strings the refusal emits. */
+  rules: string[];
+  fields: string[];
+  examples: Record<string, unknown>[];
+  /** Shape keys this payload nests inside itself, so a verb can explain them without advertising a flag it rejects. */
+  embeds: string[];
+};
+
+/**
+ * The accepted shape of every repeatable JSON flag on the public verbs, derived from the
+ * constants above. Keys are flag names without `--`, so a verb can select the shapes it accepts
+ * straight from the option set its own `assertOnlyFlags` enforces.
+ */
+export function publicJsonFlagShapes(): Record<string, JsonFlagShape> {
+  const evidenceRefRules = [
+    `every entry is a JSON object; legacy string refs are not supported`,
+    `kind must be one of: ${EVIDENCE_REF_KINDS.join(", ")}`,
+    `no field outside: ${EVIDENCE_REF_FIELDS.join(", ")}`,
+    ...EVIDENCE_REF_FIELDS.filter((field) => field !== "kind").map((field) => `${field} must be ${describeEvidenceRefField(field)}`),
+    ...EVIDENCE_REF_KINDS.flatMap((kind) => EVIDENCE_REF_RULES[kind].map((rule) => `${kind} refs require ${describeEvidenceRefRule(rule)}`)),
+    `file is a path relative to the repository root; a gate-evidence ref must name a file that exists there`,
+  ];
+  return {
+    "evidence-ref-json": {
+      flag: "--evidence-ref-json",
+      description: "One structured evidence reference. Repeat the flag once per reference.",
+      rules: evidenceRefRules,
+      fields: [...EVIDENCE_REF_FIELDS],
+      examples: EVIDENCE_REF_KINDS.map((kind) => exampleEvidenceRef(kind)),
+      embeds: [],
+    },
+    "criterion-json": {
+      flag: "--criterion-json",
+      description: "One acceptance-criterion update. A passing tests-evidence claim must cover every declared criterion exactly once.",
+      rules: [
+        `may update only ${andList(CRITERION_MUTABLE_FIELDS)}`,
+        `status must be ${PASSING_CRITERION_STATUS} for a passing tests-evidence claim`,
+        `evidence_refs must be a non-empty array of evidence refs (see --evidence-ref-json)`,
+        `each criterion needs a kind:"command" ref whose excerpt (or url, when the command lives there) equals an observed --command exactly`,
+        `ids must cover every declared acceptance criterion exactly once`,
+      ],
+      fields: [...CRITERION_MUTABLE_FIELDS],
+      examples: [exampleCriterion()],
+      embeds: ["evidence-ref-json"],
+    },
+    "lane-json": {
+      flag: "--lane-json",
+      description: "One review lane. At least one is required; ids must be unique across lanes.",
+      rules: [
+        `no field outside: ${CRITIQUE_LANE_FIELDS.join(", ")}`,
+        `id must be a unique safe identifier matching ${CRITIQUE_LANE_ID_PATTERN}`,
+        `status must be one of: ${WORKFLOW_CRITIQUE_STATUSES.join(", ")}`,
+        `summary must be non-empty`,
+        `evidence_refs must be a non-empty array of evidence refs (see --evidence-ref-json)`,
+      ],
+      fields: [...CRITIQUE_LANE_FIELDS],
+      examples: [exampleCritiqueLane()],
+      embeds: ["evidence-ref-json"],
+    },
+  };
+}
+
 export const WORKFLOW_EVIDENCE_PARAMETERS = [
   { name: "status", flag: "--status", required: true, allowed_values: ["pass", "fail", "not_verified"] },
   { name: "summary", flag: "--summary", required: true },
