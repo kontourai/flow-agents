@@ -35,6 +35,7 @@ import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdap
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
 import { flowAdmissionRefusal } from "../lib/flow-admission.js";
+import { flowSelectsWorkItem, resolveEffectiveFlowDefinition } from "../lib/flow-resolver.js";
 import {
   createContinuationEvidenceCheckpointWriter,
   validateContinuationEvidenceCheckpointDirectory,
@@ -1391,7 +1392,11 @@ async function start(argv: string[]): Promise<number> {
       if ((error as { code?: string }).code !== "flow.run_location.not_found") throw error;
     }
   }
-  if (flow === "builder.build" && workItem && !workItem.startsWith("local:")) {
+  // #1341: selection evidence is required because the flow SELECTS A WORK ITEM, not because of its
+  // name. Gating on the literal meant the ablation's treatment arm could start without the
+  // `--pull-work.md` report the control demands — a difference in start-time strictness that would
+  // have been read as an effect of gate removal. Fails closed on an unresolvable definition.
+  if (flow && flowSelectsWorkItem(resolveEffectiveFlowDefinition(flow, findRepoRootFromDir(artifactRoot))) && workItem && !workItem.startsWith("local:")) {
     const slug = workItemSlug(workItem);
     const report = path.join(artifactRoot, slug, `${slug}--pull-work.md`);
     try {

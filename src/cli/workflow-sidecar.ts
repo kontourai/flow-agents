@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
-import { resolveActionableFlowStep, resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { flowSelectsWorkItem, resolveActionableFlowStep, resolveActiveFlowStep, resolveAllFlowGateExpects, resolveEffectiveFlowDefinition, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { FLOW_AGENTS_RUNTIME_DIR, defaultArtifactRootForRead, flowAgentsArtifactRoot, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } from "../lib/local-artifact-root.js";
 import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
 import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
@@ -332,6 +332,15 @@ function fixtureCmd(p: ReturnType<typeof parseArgs>): number {
   return 0;
 }
 function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
+
+/**
+ * The repo root to resolve a flow definition against, derived from the artifact root (#1341).
+ * Mirrors the `findRepoRootFromDir(path.dirname(flowAgentsDir))` idiom already used in this file;
+ * `findRepoRootFromDir` always returns a string (falling back to cwd), so this never returns null.
+ */
+function flowRepoRootForOwnership(artifactRoot: string): string {
+  return findRepoRootFromDir(path.dirname(artifactRoot));
+}
 
 function assignmentSubjectMatchesWorkItem(slug: string, ref: string): boolean {
   if (ref === `local:${slug}`) return true;
@@ -3000,7 +3009,16 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
   // below (writeCurrent's per-actor dual-write) so the branch-naming actor and the
   // assignment-claim actor are always the same identity.
   const actorResolution = resolveEnsureSessionActor(p);
-  const selectionWorkItemRef = entry.flowId === "builder.build" && assignmentSubjectMatchesWorkItem(slug, workItem.ref)
+  // #1341: a flow gets provider-ownership validation because it SELECTS A WORK ITEM, not because
+  // it is named `builder.build`. The literal that used to stand here silently disabled five
+  // behaviours in enforceEnsureSessionOwnership for every other flow — provider hard-fail on an
+  // unresolved actor, the whole --effective-state-json AssignmentStatus conjunction, provider-branch
+  // agreement, the different-work-item refusal, and the immutable provider-state snapshot. For the
+  // gate-value ablation that meant the treatment arm ran with the ownership guard OFF, so an
+  // outcome difference caused by weaker validation would have been attributed to gate removal.
+  // flowSelectsWorkItem FAILS CLOSED: an unresolvable definition keeps validation on.
+  const selectionWorkItemRef = flowSelectsWorkItem(resolveEffectiveFlowDefinition(entry.flowId ?? "", flowRepoRootForOwnership(root)))
+    && assignmentSubjectMatchesWorkItem(slug, workItem.ref)
     ? workItem.ref
     : undefined;
   let selectedWorkEvidence = enforceEnsureSessionOwnership(p, root, slug, dir, actorResolution, selectionWorkItemRef);
@@ -3064,8 +3082,11 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
       "--summary", opt(p, "summary", "Workflow session is durable."),
       ...opts(p, "criterion").flatMap((criterion) => ["--criterion", criterion]),
     ]);
+    // #1341: the machine-readable next_action is not a privilege of one flow name. The bare-string
+    // branch below dropped `skills` and the pinned start `command` from the sidecar for every
+    // non-`builder.build` flow — a fourth way the ablation's arms differed, filed as cosmetic.
     const nextAction: string | AnyObj = entry.flowId
-      ? entry.flowId === "builder.build"
+      ? flowSelectsWorkItem(resolveEffectiveFlowDefinition(entry.flowId, flowRepoRootForOwnership(root)))
         ? {
             status: "continue",
             summary: `Start the canonical Flow run; activate \`pull-work\` for work item ${JSON.stringify(workItem.ref)}, and satisfy the declared gate before advancing.`,
