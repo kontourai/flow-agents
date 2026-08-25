@@ -11,6 +11,7 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { declaredStepBindsInterface } from "../builder-gate-action-envelope.js";
 import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
@@ -327,8 +328,12 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
     const caller = assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
     recoverProvisionalDeliveryTransaction(sessionDir, projectRoot, slug);
     const inspected = await inspectBuilderFlowSession({ sessionDir });
-    if (inspected.run.definitionId !== "builder.build" || inspected.run.state.status !== "active" || inspected.run.state.current_step !== "merge-ready-ci") {
-      throw new Error("provisional delivery authorization requires the active builder.build merge-ready-ci gate");
+    // #1336: the declared property, not the flow's name — the run must be held at the gate that
+    // refuses to advance without current verification, which is exactly what this authorization
+    // unblocks. `assertDeliveryPublicationEligibility` asks the same question at publication.
+    const turnstileGate = inspected.run.state.status === "active" ? currentFreshnessTurnstileGate(inspected) : null;
+    if (!turnstileGate) {
+      throw new Error(`provisional delivery authorization requires an active canonical run held at a single gate declaring requires_current_verification; ${inspected.run.definitionId} is ${inspected.run.state.status} at ${inspected.run.state.current_step}`);
     }
     assertCurrentVerifiedWorkspaceEvidence(sessionDir);
     const workspace = provisionalSourceSnapshot(projectRoot, slug);
@@ -338,8 +343,7 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
     assertCurrentVerifiedWorkspaceEvidence(sessionDir);
     if (!isDeepStrictEqual(workspace, provisionalSourceSnapshot(projectRoot, slug))) throw new Error("provisional delivery authorization workspace changed while sealing");
     const checkpoint = readJsonFile(path.join(sessionDir, "trust.checkpoint.json"), "provisional delivery checkpoint");
-    const gates = openGates(inspected.run.definition, inspected.run.state) as JsonRecord[];
-    if (gates.length !== 1 || typeof gates[0]?.id !== "string") throw new Error("provisional delivery authorization requires exactly one current gate");
+    const gates = [turnstileGate];
     const assignment = readLocalAssignmentStatus(path.dirname(sessionDir), slug).record;
     if (!assignment || assignment.status !== "claimed" || assignment.actor_key !== caller.actorKey || !assignment.claimed_at) throw new Error("provisional delivery authorization requires the current assignment generation");
     const workItems = Array.isArray(sidecar.work_item_refs) ? sidecar.work_item_refs.filter((value): value is string => typeof value === "string") : [];
@@ -359,9 +363,9 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
       project_root: projectRoot, run_id: slug, subject: workItems[0], work_item: workItems[0], assignment_actor_key: caller.actorKey,
       assignment_generation: assignment.claimed_at, published_head_sha: String(changeRef.head_sha), provider_record_id: String(changeRef.provider_record_id),
       provider_observation_sha256: sha256File(providerObservationPath),
-      flow_definition_id: "builder.build", flow_definition_version: inspected.run.definitionVersion,
-      flow_definition_digest: definitionDigest(inspected.run.definition), flow_run_head: flowRunHead(inspected.run.state), flow_gate_id: gates[0].id as string,
-      flow_gate_visit: new Date(currentGateVisit(inspected.run.state, "merge-ready-ci").enteredAt).toISOString(), workspace_snapshot: workspace,
+      flow_definition_id: inspected.run.definitionId, flow_definition_version: inspected.run.definitionVersion,
+      flow_definition_digest: definitionDigest(inspected.run.definition), flow_run_head: flowRunHead(inspected.run.state), flow_gate_id: gates[0]!.id as string,
+      flow_gate_visit: new Date(currentGateVisit(inspected.run.state, inspected.run.state.current_step).enteredAt).toISOString(), workspace_snapshot: workspace,
       checkpoint_slug: slug, checkpoint_commit_sha: String(checkpoint.commit_sha), checkpoint_sha256: sha256File(path.join(sessionDir, "trust.checkpoint.json")),
       bundle_sha256: sha256File(path.join(sessionDir, "trust.bundle")), attestation_sha256: sha256File(path.join(sessionDir, "trust.checkpoint.attestation.json")), companions,
       nonce: randomBytes(16).toString("hex"), requested_at: requestedAt.toISOString(), expires_at: new Date(requestedAt.getTime() + hours * 3_600_000).toISOString(),
@@ -371,18 +375,35 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
   return 0;
 }
 
+/**
+ * The gate the run's cursor sits on, when it declares the freshness turnstile that provisional
+ * delivery exists to satisfy (`requires_current_verification`). Null otherwise.
+ *
+ * #1336: this replaces `current_step === "merge-ready-ci"` on a flow named `builder.build`. That
+ * pair is a proxy for the declared property — the run is held at a gate that will not advance until
+ * current verification evidence exists for the published workspace (see
+ * `gateAdvancementFreshnessSatisfied`). Asking the definition removes the proxy, and a kit-declared
+ * flow that keeps that gate keeps the verb.
+ */
+function currentFreshnessTurnstileGate(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): JsonRecord | null {
+  const gates = openGates(inspected.run.definition, inspected.run.state) as JsonRecord[];
+  // The "exactly one current gate" invariant the request path asserted separately is kept here,
+  // not merely implied: a step that somehow opened two gates must refuse rather than have the
+  // turnstile picked out of the pair.
+  if (gates.length !== 1 || typeof gates[0]?.id !== "string") return null;
+  return gates[0]!.requires_current_verification === true ? gates[0]! : null;
+}
+
 function assertDeliveryPublicationEligibility(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, kind: DeliveryPublicationKind): void {
-  const completed = inspected.run.definitionId === "builder.build"
-    && inspected.run.state.status === "completed"
-    && ["learn", "done"].includes(inspected.run.state.current_step);
-  const provisionalReady = inspected.run.definitionId === "builder.build"
-    && inspected.run.state.status === "active"
-    && inspected.run.state.current_step === "merge-ready-ci";
+  // A run reaches "completed" only by PASSING the gate on a step whose `next` is null, so the
+  // status is the derivation; the old step-name list was a restatement of it for one flow.
+  const completed = inspected.run.state.status === "completed";
+  const provisionalReady = inspected.run.state.status === "active" && currentFreshnessTurnstileGate(inspected) !== null;
   if (kind === "provisional" && !provisionalReady) {
-    throw new Error("workflow publish-provisional-delivery requires the canonical builder.build run to be at merge-ready-ci after a pull request is opened; it cannot stand in for release readiness or terminal delivery");
+    throw new Error(`workflow publish-provisional-delivery requires the canonical ${inspected.run.definitionId} run to be active at a gate declaring requires_current_verification after a pull request is opened; it is at ${inspected.run.state.current_step} (${inspected.run.state.status}) and cannot stand in for release readiness or terminal delivery`);
   }
   if (kind === "terminal" && !completed) {
-    throw new Error("workflow publish-delivery requires a completed canonical builder.build run after passing learning; partial or active learn sessions cannot publish terminal delivery evidence");
+    throw new Error(`workflow publish-delivery requires a completed canonical ${inspected.run.definitionId} run after passing learning; partial or active sessions (this one is ${inspected.run.state.status} at ${inspected.run.state.current_step}) cannot publish terminal delivery evidence`);
   }
 }
 function deliveryWorkspaceCapture(
@@ -1865,9 +1886,11 @@ async function recoverExactCurrentCompletionRequest(sessionDir: string, argv: st
   const { slug, projectRoot } = readBoundSession(sessionDir);
   const request = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     const repaired = await recoverBuilderFlowSession({ sessionDir });
-    if (repaired.run.definitionId !== "builder.build" || repaired.run.state.current_step !== "verify") throw new Error("exact-current completion recovery is allowed only for the canonical builder.build verify gate");
+    if (!declaredStepBindsInterface(repaired.run.definitionId, repaired.run.state.current_step, "workflow.critique", projectRoot)) {
+      throw new Error(`exact-current completion recovery is allowed only at the canonical review gate — a step whose declaring kit binds an expectation to workflow.critique; ${repaired.run.definitionId}/${repaired.run.state.current_step} declares none`);
+    }
     const gates = openGates(repaired.run.definition, repaired.run.state) as JsonRecord[];
-    if (gates.length !== 1 || typeof gates[0]?.id !== "string") throw new Error("exact-current completion recovery requires exactly one canonical current verify gate");
+    if (gates.length !== 1 || typeof gates[0]?.id !== "string") throw new Error("exact-current completion recovery requires exactly one canonical current review gate");
     const bundleBytes = readProtectedRegularFileBytes(path.join(sessionDir, "trust.bundle"), "exact-current completion recovery trust bundle", 4 * 1024 * 1024);
     if (!bundleBytes) throw new Error("exact-current completion recovery requires a current trust.bundle");
     const bundle = JSON.parse(bundleBytes.toString("utf8")) as JsonRecord;
@@ -1902,7 +1925,7 @@ async function recoverExactCurrentCompletionRequest(sessionDir: string, argv: st
       stale_completion_request_sha256: String(stale.request_sha256), stale_completion_result_core_sha256: String(stale.result_core_sha256), stale_completion_coordinator_runtime_sha256: String(stale.coordinator_runtime_sha256),
       current_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"), current_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"), current_ledger_length: events.length, current_ledger_tail_hash: String(events.at(-1)?.event_hash ?? "0".repeat(64)),
       critique_projection_sha256: String(critique.digest), resolution_edge_projection_sha256: String(edges.digest), resolution_edge_projection_count: Number(edges.count),
-      flow_definition_id: "builder.build", flow_definition_sha256: createHash("sha256").update(definitionBytes).digest("hex"), flow_step_id: "verify", flow_gate_id: gates[0]!.id as string, flow_gate_policy_sha256: canonicalSha256({ gate_id: gates[0]!.id, requirements: gates[0]!.expects }), flow_run_head: flowRunHead(repaired.run.state), flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
+      flow_definition_id: repaired.run.definitionId, flow_definition_sha256: createHash("sha256").update(definitionBytes).digest("hex"), flow_step_id: repaired.run.state.current_step, flow_gate_id: gates[0]!.id as string, flow_gate_policy_sha256: canonicalSha256({ gate_id: gates[0]!.id, requirements: gates[0]!.expects }), flow_run_head: flowRunHead(repaired.run.state), flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
       nonce: `exact-current-recovery-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
     });
   });
@@ -1926,10 +1949,12 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
   const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json", "expires-in-hours"]));
   const request = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     const repaired = await recoverBuilderFlowSession({ sessionDir });
-    if (repaired.run.definitionId !== "builder.build" || repaired.run.state.current_step !== "verify") throw new Error("verification evidence reseal is allowed only for the canonical builder.build verify gate");
+    if (!declaredStepBindsInterface(repaired.run.definitionId, repaired.run.state.current_step, "workflow.critique", projectRoot)) {
+      throw new Error(`verification evidence reseal is allowed only at the canonical review gate — a step whose declaring kit binds an expectation to workflow.critique; ${repaired.run.definitionId}/${repaired.run.state.current_step} declares none`);
+    }
     const currentGates = openGates(repaired.run.definition, repaired.run.state) as JsonRecord[];
     if (currentGates.length !== 1 || typeof currentGates[0]?.id !== "string") {
-      throw new Error("verification evidence reseal requires exactly one canonical current verify gate");
+      throw new Error("verification evidence reseal requires exactly one canonical current review gate");
     }
     const currentGate = currentGates[0]!;
     const currentRequirements = Array.isArray(currentGate.expects) ? currentGate.expects as JsonRecord[] : [];
@@ -2027,8 +2052,8 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
       current_completion_sha256: createHash("sha256").update(completionBytes).digest("hex"),
       current_completion_request_sha256: String(completion.request_sha256),
       current_completion_result_core_sha256: String(completion.result_core_sha256),
-      flow_definition_id: "builder.build",
-      flow_step_id: "verify",
+      flow_definition_id: repaired.run.definitionId,
+      flow_step_id: repaired.run.state.current_step,
       flow_gate_id: currentGate.id as string,
       flow_run_head: caller.expectedRunHead,
       flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
@@ -2807,7 +2832,12 @@ async function critique(sessionDir: string, argv: string[], json: boolean): Prom
   const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     const caller = assertDistinctReviewActor(sessionDir, slug);
     const current = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
-    if (current.definitionId !== "builder.build" || current.state.current_step !== "verify") throw new Error("workflow critique is allowed only for the canonical builder.build verify step");
+    // #1336: `workflow.critique` is the interface a kit BINDS an expectation to. Asking the
+    // declaring kit whether the run's current step carries that binding is the same question the
+    // old `builder.build`/`verify` pair approximated, asked of the declaration instead of the name.
+    if (!declaredStepBindsInterface(current.definitionId, current.state.current_step, "workflow.critique", projectRoot)) {
+      throw new Error(`workflow critique is allowed only at a step whose declaring kit binds an expectation to the workflow.critique interface; ${current.definitionId}/${current.state.current_step} declares none`);
+    }
     const beforeManifest = JSON.parse(JSON.stringify(current.manifest)) as JsonRecord;
     const beforeTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
     const legacySidecars = ["critique.json", "evidence.json"].map((name) => ({ name, digest: optionalFileDigest(path.join(sessionDir, name)) }));

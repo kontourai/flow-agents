@@ -246,8 +246,13 @@ function readExistingResult(context: SessionContext, action: IssuedMergeChangeAc
 
 async function currentAction(context: SessionContext, strategy: MergeChangeStrategy): Promise<IssuedMergeChangeAction> {
   const inspected = await inspectBuilderFlowSession({ sessionDir: context.sessionDir });
-  if (inspected.run.definitionId !== "builder.build" || inspected.run.state.status !== "completed" || !["learn", "done"].includes(inspected.run.state.current_step)) {
-    throw new Error("merge-change requires the completed canonical builder.build run after learning and terminal delivery; run flow-agents workflow publish-delivery, then refresh the exact-head provider checks before retrying");
+  // #1336: a run reaches "completed" only by passing the gate on a step whose `next` is null, so
+  // the status IS the derivation the old triple approximated for one flow; the step-name list added
+  // nothing a completed run could contradict, and the flow-id literal refused every kit-declared
+  // variant outright. What must stay canonical is the run itself, which inspectBuilderFlowSession
+  // already asserts, and the definitions checked below.
+  if (inspected.run.state.status !== "completed") {
+    throw new Error(`merge-change requires a completed canonical run after learning and terminal delivery; ${inspected.run.definitionId} is ${inspected.run.state.status} at ${inspected.run.state.current_step}. Run flow-agents workflow publish-delivery, then refresh the exact-head provider checks before retrying`);
   }
   const actor = assertCurrentAssignment(context);
   const effective = resolveEffectiveChangeProviderSettings(context.projectRoot, path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"));

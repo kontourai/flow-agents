@@ -58,6 +58,28 @@
         "ambiguous": { "type": "boolean", "description": "Two or more transitions share this instant and competed for the same turn; which one was charged followed line order, not the data. Surfaced rather than picked silently." },
         "source": { "type": "string", "description": "What the attribution was derived from. Names the derivation, not the machine." }
       }
+    },
+    "resolved_model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "THE MODEL THAT EMITTED THE INVOKING TOOL CALL — not 'the model that ran the gate' (the gate is a subprocess; no model runs inside it) and not 'the session's model', which changes mid-session and differs between an orchestrator and its delegates. Written by scripts/telemetry/enrich-transitions.mjs AFTER the fact, never by the emitter (flow-agents #1327): no environment variable names the executing model on either runtime, so a field filled at emit time would be a label nothing computes. Named for the economics vocabulary (scripts/telemetry/economics-record.sh's per-delegation `resolved_model`) so the two records join. Present IFF model_attribution.attributed is true. AN ABSENT FIELD IS NOT A DEFAULT MODEL — it means the model was not observable, and a consumer must count it as unknown rather than pooling the transition into whichever models the window happened to contain. Per-gate effectiveness is plausibly model-dependent, so a pooled verdict removes a gate for every model at once on evidence that covers only some."
+    },
+    "model_attribution": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["granularity", "attributed"],
+      "description": "The granularity label travelling WITH the model, plus a POSITIVE statement for a transition whose model could not be observed — the same discipline token_attribution applies to the number. Three states must stay distinguishable: attributed (a model was observed), attributed:false (examined, none observable), and NO BLOCK AT ALL (nothing ever looked — a log enriched before #1327, or not at all). Collapsing the last two reports an un-enriched log as a measured one whose gates all ran on nothing.",
+      "properties": {
+        "granularity": { "const": "invoking-turn-model", "description": "Names the derivation rather than implying precision, mirroring the EconomicsDelegationCostGranularity = 'model-proxy' precedent." },
+        "attributed": { "type": "boolean", "description": "true iff a turn was identified within the grace window and it named a usable model; resolved_model is present iff this is true." },
+        "turn_ref": { "type": "string", "description": "Path-free, session-scoped hash of the turn the model was read from. The same handle token_attribution uses, so the two can be checked against each other." },
+        "reason": {
+          "type": "string",
+          "description": "Why nothing was attributed: no-turn-before-transition, turn-outside-grace-window, unparseable-started-at, turn-reports-no-model. The last covers a host placeholder such as `<synthetic>` — which Claude Code writes for its own generated messages (rate-limit notices, 'No response requested', a rejected model id) — and an absent field after a transcript format change. A placeholder is refused rather than folded as if it were a model."
+        },
+        "source": { "type": "string", "description": "What the attribution was derived from. Names the derivation, not the machine." }
+      }
     }
   }
 }

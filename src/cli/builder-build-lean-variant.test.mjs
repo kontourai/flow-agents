@@ -460,3 +460,117 @@ test("the variant is refused when its declaring kit drops a producer binding", (
     fs.rmSync(project, { recursive: true, force: true });
   }
 });
+
+// ─── #1336: the retained gates are reachable by DECLARATION, not by flow name ─────────────────
+
+import { declaredStepBindsInterface } from "../../build/src/builder-gate-action-envelope.js";
+import { freshnessTurnstileGateEntry, mergeReadyCiRefreshRoutesSatisfied } from "../../packaging/lifecycle-authority/coordinator.mjs";
+
+test("every retained gate's public verb finds the variant by what it declares", () => {
+  const control = resolveEffectiveFlowDefinition(CONTROL, REPO_ROOT);
+  const variant = resolveEffectiveFlowDefinition(VARIANT, REPO_ROOT);
+
+  // `workflow critique`, `recover-exact-current-completion` and `reseal-verification-evidence`
+  // used to ask "is this builder.build at verify". They now ask the declaring kit which interface
+  // produces the step's evidence — and the answer must be the SAME for both arms, because the
+  // ablation does not touch verify-gate.
+  for (const flowId of [CONTROL, VARIANT]) {
+    assert.equal(declaredStepBindsInterface(flowId, "verify", "workflow.critique", REPO_ROOT), true, `${flowId}/verify must be reachable by the critique verb`);
+    // And the derivation must still DISCRIMINATE: a step that produces evidence through
+    // workflow.evidence is not a review gate, whichever arm it belongs to.
+    for (const step of ["pull-work", "execute", "merge-ready", "learn"]) {
+      assert.equal(declaredStepBindsInterface(flowId, step, "workflow.critique", REPO_ROOT), false, `${flowId}/${step} must not be mistaken for the review gate`);
+    }
+  }
+  // A flow no installed kit declares fails closed rather than defaulting to permitted.
+  assert.equal(declaredStepBindsInterface("acme.nonexistent", "verify", "workflow.critique", REPO_ROOT), false);
+
+  // publish-provisional-delivery, publish-delivery and merge-change key on the freshness turnstile
+  // the DEFINITION declares, which replaced both the `merge-ready-ci` step name and the composed
+  // gate-id literal `builder.publish-learn:merge-ready-ci-gate` in the privileged coordinator.
+  for (const [label, definition] of [["control", control], ["variant", variant]]) {
+    const turnstile = freshnessTurnstileGateEntry(definition);
+    assert.ok(turnstile, `${label}: exactly one gate must declare requires_current_verification`);
+    assert.equal(turnstile.id, "builder.publish-learn:merge-ready-ci-gate", `${label}: the derivation still resolves the gate the literal named`);
+    assert.equal(turnstile.gate.step, "merge-ready-ci", `${label}: and it still sits at the step the literal named`);
+    assert.equal(mergeReadyCiRefreshRoutesSatisfied(turnstile.gate), true, `${label}: merge-change's evidence-refresh control is satisfied`);
+  }
+  // The derivation refuses ambiguity rather than picking: two declaring gates is not "the" gate.
+  assert.equal(freshnessTurnstileGateEntry({ gates: {} }), null);
+  assert.equal(freshnessTurnstileGateEntry({
+    gates: { a: { step: "x", requires_current_verification: true }, b: { step: "y", requires_current_verification: true } },
+  }), null);
+});
+
+// ─── #1350: the envelope and the projection must agree about which gate to act on ────────────
+//
+// THE REGRESSION THIS PINS. `actionableOpenGates` (#1335) forward-walks gateless sequencing
+// passthroughs so a run can name the gate it must satisfy. It was applied at the evidence seam,
+// the session projection and the sidecar — but NOT at the gate-action envelope, which kept calling
+// raw `openGates`. Both values come from the SAME `projectFlowRun` call, so one returned object
+// told its two readers different things about one run: at `builder.build-lean/design-probe` the
+// projection reported `execute-gate` while the envelope — the machine-readable contract the adapter
+// is contractually required to obey — advertised no gate, no unresolved evidence and no mutation to
+// invoke, with `next_action.status` still `continue`. Such a run does not fail; it burns turns
+// recording `gate_not_advanced`.
+//
+// WHY NO EXISTING TEST CAUGHT IT: every other test here advances a run with `writeAndSync`, which
+// writes the trust bundle directly and never derives an envelope. A derivation added at three seams
+// and missed at a fourth is only caught by exercising the seam that was missed.
+test("the envelope and the projection agree about the open gate, and the gateless walk reaches the real gate", async () => {
+  const { inspectBuilderFlowSession } = await import("../../build/src/builder-flow-runtime.js");
+  const { actionableOpenGates } = await import("../../build/src/builder-flow-run-adapter.js");
+  const project = makeProject("flow-agents-envelope-1350-");
+  const { sessionDir } = await startSession(project, VARIANT, "acme/widgets#350", "acme-widgets-350");
+
+  // THE INVARIANT. Both values below are produced by ONE projectFlowRun call over a real run — the
+  // very object whose two readers disagreed. Whatever gate the projection reports, the envelope
+  // must report the same one; that equality is what the defect broke.
+  const inspected = await inspectBuilderFlowSession({ sessionDir });
+  assert.ok(inspected.gateActionEnvelope, "an active run must derive an envelope");
+  assert.deepEqual(
+    inspected.gateActionEnvelope.flow.gate_ids,
+    inspected.projection.flow_run.open_gate_ids,
+    "the envelope and the projection are derived from one projectFlowRun call and must never disagree about which gates the run must act on",
+  );
+  assert.notDeepEqual(inspected.gateActionEnvelope.flow.gate_ids, [], "an active run must name at least one gate to act on");
+
+  // THE DISCRIMINATING CASE. The invariant above holds trivially at a gated step, where both
+  // derivations agree — a session starts at `pull-work`, which IS gated, so it cannot catch this
+  // defect on its own. (Proven: an injection restoring raw `openGates` here passed that assertion.)
+  // So drive the ENVELOPE at a gateless step, reusing the REAL run — real definition, real kit
+  // manifest, real config — with only the cursor moved. Nothing here is synthetic except the step.
+  const { deriveBuilderGateActionEnvelope } = await import("../../build/src/builder-gate-action-envelope.js");
+  const envelopeGatesAtStep = (stepId) =>
+    deriveBuilderGateActionEnvelope({
+      sessionDir,
+      projectRoot: inspected.projectRoot,
+      definition: inspected.run.definition,
+      run: { ...inspected.run, state: { ...inspected.run.state, current_step: stepId } },
+    }).flow.gate_ids;
+
+  for (const gatelessStep of ["design-probe", "plan"]) {
+    assert.deepEqual(envelopeGatesAtStep(gatelessStep), ["execute-gate"],
+      `the ENVELOPE at ${VARIANT}/${gatelessStep} must name the gate reached across the passthrough — an empty list is the machine-readable contract telling the adapter there is nothing to do while next_action says continue`);
+  }
+  assert.deepEqual(envelopeGatesAtStep("execute"), ["execute-gate"], "a step that declares its own gate is unaffected");
+
+  // THE GATELESS WALK, over the real shipped definitions. The variant's two ablated steps declare
+  // no gate, so the derivation the envelope now shares must reach the gate across the passthrough.
+  const gatesAt = (flowId, stepId) =>
+    actionableOpenGates(resolveEffectiveFlowDefinition(flowId, REPO_ROOT), {
+      status: "active", current_step: stepId, updated_at: "2026-01-01T00:00:00.000Z",
+    }).map((gate) => gate.id);
+
+  for (const gatelessStep of ["design-probe", "plan"]) {
+    assert.deepEqual(gatesAt(VARIANT, gatelessStep), ["execute-gate"],
+      `${VARIANT}/${gatelessStep} declares no gate, so the shared derivation must name the gate reached across the passthrough — an empty list tells the adapter there is nothing to do while next_action says continue`);
+  }
+
+  // THE CONTROL MUST BE UNTOUCHED — the discriminator proving this is a forward walk for gateless
+  // steps only, not a blanket redefinition of "open".
+  for (const [step, gate] of [["design-probe", "design-probe-gate"], ["plan", "plan-gate"], ["execute", "execute-gate"]]) {
+    assert.deepEqual(gatesAt(CONTROL, step), [gate], `${CONTROL}/${step} rests on its own gate and must be unchanged`);
+  }
+  assert.deepEqual(gatesAt(VARIANT, "execute"), ["execute-gate"], "a variant step that declares a gate resolves to its own, not a walked one");
+});

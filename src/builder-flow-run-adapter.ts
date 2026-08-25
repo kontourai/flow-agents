@@ -9,6 +9,7 @@ import {
   evaluateRun,
   expectationsForGate,
   flowRunHead,
+  gatesForStep,
   loadRun,
   normalizeTrustBundle,
   openGates,
@@ -23,7 +24,7 @@ import {
   type GateOutcome,
   type JsonObject,
 } from "@kontourai/flow";
-import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
+import { actionableFlowStepId, resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
 import {
   canonicalKitFlowSourceRoots,
   declaredKitFlowBindings,
@@ -406,7 +407,16 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
   }
 
   assertFlowRunRecoveryFenceOpen(cwd, input.runId);
-  const evaluated = await evaluateRun(input.runId, { cwd });
+  // #1335: when the cursor rests on a gateless sequencing passthrough, `evaluateRun` cannot infer
+  // which gate to evaluate and throws `no gate for current step`. Naming the gate the evidence was
+  // just attached to is what lets the engine walk the cursor across the passthroughs (recording a
+  // `"step has no gate"` transition for each) and then evaluate that gate at its own step. The #202
+  // forward-skip guard stays fully armed: the engine only walks when GATELESS steps separate the
+  // cursor from the named gate, and by the time the outcome is applied the gate is the current one.
+  const namedGate = attachedEvidence.length > 0 && cursorRestsOnGatelessStep(run.definition, run.state)
+    ? { gate: attachedEvidence[0]!.gate_id as string }
+    : {};
+  const evaluated = await evaluateRun(input.runId, { cwd, ...namedGate });
   const result = resultFromRun(evaluated, input.runId);
   return {
     ...result,
@@ -611,12 +621,43 @@ function validateEvidenceInput(evidence: unknown): BuilderBuildTrustBundleEviden
   return evidence as unknown as BuilderBuildTrustBundleEvidenceInput;
 }
 
+/**
+ * The gates this run must act on now: the gates of the step the cursor sits on, or — when that
+ * step declares none — the gates of the first step reachable from it across gateless sequencing
+ * passthroughs (#1335).
+ *
+ * This is the one derivation every caller shares, so "which gate is open" has a single answer
+ * whether it is asked by the evidence seam, the session projection, or a public verb. It is
+ * derived from what the DEFINITION declares, never from a flow identifier, so a kit-declared flow
+ * with gateless steps is served by the same code path as one without.
+ *
+ * `openGates` is still the authority for the cursor's own step, so a paused or canceled run keeps
+ * returning nothing, and a run resting on a gated step is completely unaffected — the forward walk
+ * is reached only when the cursor's own step declares no gate at all.
+ */
+export function actionableOpenGates(definition: unknown, state: FlowRunState): ReturnType<typeof openGates> {
+  const atCursor = openGates(definition, state);
+  if (atCursor.length > 0 || state.status !== "active") return atCursor;
+  const target = actionableFlowStepId(definition, state.current_step);
+  if (!target || target === state.current_step) return atCursor;
+  return gatesForStep(definition, target);
+}
+
+/**
+ * True when the cursor's own step declares no gate, so reaching `actionableOpenGates`' answer
+ * requires the engine to walk the cursor across the passthroughs first. `evaluateRun` does that
+ * only when it is told which gate to evaluate, which is why the evaluation below names one.
+ */
+function cursorRestsOnGatelessStep(definition: unknown, state: FlowRunState): boolean {
+  return state.status === "active" && openGates(definition, state).length === 0;
+}
+
 function assertCurrentOpenGate(definition: unknown, state: FlowRunState, evidenceGate: string): unknown {
-  const gates = openGates(definition, state);
+  const gates = actionableOpenGates(definition, state);
   if (gates.length !== 1) {
     throw new BuilderBuildRunInputError("evidence.gate", "requires exactly one current open gate");
   }
-  if (gates[0].id !== evidenceGate) {
+  if (gates[0]!.id !== evidenceGate) {
     throw new BuilderBuildRunInputError("evidence.gate", "must target the persisted current open gate");
   }
   return gates[0];

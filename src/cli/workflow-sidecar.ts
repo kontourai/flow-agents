@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
-import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { resolveActionableFlowStep, resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { FLOW_AGENTS_RUNTIME_DIR, defaultArtifactRootForRead, flowAgentsArtifactRoot, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } from "../lib/local-artifact-root.js";
 import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
 import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
@@ -972,8 +972,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // writeTrustBundle below) threads through to resolveActiveFlowStep's per-actor-first,
   // legacy-fallback current.json read; omitted, this is IDENTICAL to pre-#291 behavior.
   const exactRepoRoot = flowAgentsDir ? findRepoRootFromDir(path.dirname(flowAgentsDir)) : null;
+  // #1335: the run's cursor may rest on a gateless sequencing passthrough, which declares no gate
+  // and therefore no expects[] to type a claim against. The step a claim belongs to is the one the
+  // run must SATISFY next, which `resolveActionableFlowStep` derives; for a cursor already on a
+  // gated step it is that step, so flows that gate every step are unaffected.
   const activeStep: ActiveFlowStep | null = exactFlowContext && exactRepoRoot
-    ? resolveFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, exactRepoRoot)
+    ? resolveActionableFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, exactRepoRoot)
     : flowAgentsDir ? resolveActiveFlowStep(flowAgentsDir, actorKey) : null;
 
   // #270 CRITICAL/HIGH fix: resolve the session's active_flow_id independent of whether the
@@ -5869,7 +5873,9 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const projectedRunDefinition = gateClaimFlowIdentityFields(projectedRun);
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
   const activeStep = exactFlowContext
-    ? resolveFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, findRepoRootFromDir(path.dirname(flowAgentsDir)))
+    // #1335: the actionable step, not the parked one — see buildTrustBundle's note. A gateless
+    // passthrough has no gate to record against, and the kit binds its producer at the gated step.
+    ? resolveActionableFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, findRepoRootFromDir(path.dirname(flowAgentsDir)))
     : resolveActiveFlowStep(flowAgentsDir, gateClaimActorKey);
   if (exactFlowContext && !activeStep) die(`record-gate-claim cannot resolve exact session Flow step ${exactFlowContext.flowId}/${exactFlowContext.stepId}`);
   if (!activeStep) die("record-gate-claim requires an active flow step in current.json (set via ensure-session --flow-id or advance-state --flow-definition)");
@@ -6243,6 +6249,29 @@ async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
   return 0;
 }
 
+/**
+ * Refuse an `active_step_id` write that the canonical Flow run does not support.
+ *
+ * Sessions with no canonical run bound are untouched: there is nothing to diverge from, and the
+ * pointer is the only cursor they have.
+ */
+function assertPointerMatchesCanonicalRun(dir: string, flow: string, repoRoot: string, phase: string, stepId: string): void {
+  const state = loadJson(path.join(dir, "state.json"));
+  const flowRun = state && typeof state === "object" && !Array.isArray(state.flow_run) && typeof state.flow_run === "object" && state.flow_run !== null
+    ? state.flow_run as Record<string, unknown> : null;
+  const boundFlowId = typeof flowRun?.definition_id === "string" ? flowRun.definition_id : null;
+  const canonicalStep = typeof flowRun?.current_step === "string" ? flowRun.current_step : null;
+  if (!boundFlowId || !canonicalStep) return;
+  if (boundFlowId !== flow) {
+    diagnostic(dir, "flow_definition_mismatch", `advance-state --flow-definition ${flow} does not match the canonical Flow run this session is bound to (${boundFlowId}). Refusing to move the active_step_id pointer under a different definition.`);
+  }
+  const actionable = resolveActionableFlowStep(boundFlowId, canonicalStep, repoRoot);
+  const actionableStepId = actionable?.stepId ?? canonicalStep;
+  if (stepId !== actionableStepId) {
+    diagnostic(dir, "canonical_step_divergence", `advance-state --phase ${phase} would point active_step_id at "${stepId}", but the canonical Flow run for ${boundFlowId} is at "${canonicalStep}" and its next gate is at "${actionableStepId}". The pointer cannot advance past the canonical run: record the evidence its current gate declares (flow-agents workflow evidence / workflow-sidecar record-gate-claim), then re-synchronize.`);
+  }
+}
+
 async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const status = opt(p, "status");
@@ -6336,6 +6365,16 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     // repoRoot already computed above when flow is present
     const phaseMap = resolvePhaseMap(flow, repoRoot);
     const stepId = phaseMap?.[phase] ?? undefined;
+    // #1335: the pointer must never claim a step the canonical run is not at. This used to write
+    // whatever the phase map named and exit 0, so `--phase execution` on a run parked at
+    // `design-probe` reported success while leaving current.json saying "execute" and the canonical
+    // run saying "design-probe" — a split-brain manufactured by a command that said it worked. The
+    // canonical run is the authority; when it cannot be moved, this refuses instead of pretending.
+    //
+    // The comparison is against the ACTIONABLE step, not the parked one, because a run resting on a
+    // gateless passthrough is legitimately working toward the next gated step (see
+    // resolveActionableFlowStep) — that is agreement, not divergence.
+    if (stepId) assertPointerMatchesCanonicalRun(dir, flow, repoRoot, phase, stepId);
     if (stepId) {
       // #291 Wave 2 Task 2.1 (§5): thread the calling actor through so this second writeCurrent()
       // call site ALSO dual-writes the per-actor projection, not only ensure-session's call site —
