@@ -121,7 +121,6 @@ test("both arms refuse a bogus provider AssignmentStatus at ensure-session", () 
   }));
   const codes = {};
   for (const flowId of [CONTROL, VARIANT]) {
-    const slug = `arm-own-${flowId.replace(/[^a-z]/g, "")}`;
     codes[flowId] = spawnSync(process.execPath, [SIDECAR, "ensure-session",
       "--artifact-root", path.join(project, ".kontourai", "flow-agents"),
       "--work-item", "acme/widgets#1", "--flow-id", flowId,

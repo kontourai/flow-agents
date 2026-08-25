@@ -768,44 +768,6 @@ export function resolveActionableFlowStep(flowId: string, stepId: string, repoRo
  * a FlowDefinition (across every step — see resolveAllFlowGateExpects below), not just the
  * currently-active one.
  */
-/**
- * True when a flow is WORK-ITEM DRIVEN — i.e. it declares a gate expecting `selected-work`, the
- * expectation a pull-work producer satisfies by selecting a Work Item (#1341).
- *
- * This exists to replace `flowId === "builder.build"` at the three sites that used a flow NAME to
- * decide whether a run gets provider-ownership validation, selection-evidence checking, and a
- * machine-readable next_action. None of those are properties of the name: they are properties of
- * "does this flow select a Work Item at all". Deriving them made the gate-value ablation's two arms
- * differ in four ways beyond their gate set, any of which could have been misread as an effect of
- * gate removal.
- *
- * Derived from the EFFECTIVE definition so a `uses_flow` step that declares the expectation in a
- * child flow is seen — judging against the raw file would read a composed step as declaring nothing.
- *
- * FAILS CLOSED. An unreadable or unresolvable definition returns `true`, so a flow we cannot
- * classify keeps the stricter behaviour. Silently granting weaker checks to an unclassifiable flow
- * is the exact defect this replaces.
- */
-export function flowSelectsWorkItem(definition: unknown): boolean {
-  if (!definition || typeof definition !== "object") return true;
-  const gates = (definition as { gates?: Record<string, unknown> }).gates;
-  if (!gates || typeof gates !== "object") return true;
-  for (const gate of Object.values(gates)) {
-    const expects = (gate as { expects?: unknown[] })?.expects;
-    // A gate whose expects cannot be read makes the whole definition UNCLASSIFIABLE, which is not
-    // the same as "read it and found no selected-work". Skipping it would silently downgrade an
-    // unreadable definition to the weaker behaviour — the defect this function replaces.
-    if (expects === undefined) continue;
-    if (!Array.isArray(expects)) return true;
-    for (const expectation of expects) {
-      const id = (expectation as { id?: unknown; expectation_id?: unknown })?.id
-        ?? (expectation as { expectation_id?: unknown })?.expectation_id;
-      if (id === "selected-work") return true;
-    }
-  }
-  return false;
-}
-
 export type FlowGateExpectsEntry = {
   stepId: string;
   gateId: string;
@@ -1167,4 +1129,42 @@ export function resolveRouteBackPolicy(
     };
   }
   return null;
+}
+
+/**
+ * True when a flow is WORK-ITEM DRIVEN — i.e. it declares a gate expecting `selected-work`, the
+ * expectation a pull-work producer satisfies by selecting a Work Item (#1341).
+ *
+ * This exists to replace `flowId === "builder.build"` at the three sites that used a flow NAME to
+ * decide whether a run gets provider-ownership validation, selection-evidence checking, and a
+ * machine-readable next_action. None of those are properties of the name: they are properties of
+ * "does this flow select a Work Item at all". Deriving them made the gate-value ablation's two arms
+ * differ in four ways beyond their gate set, any of which could have been misread as an effect of
+ * gate removal.
+ *
+ * Derived from the EFFECTIVE definition so a `uses_flow` step that declares the expectation in a
+ * child flow is seen — judging against the raw file would read a composed step as declaring nothing.
+ *
+ * FAILS CLOSED. An unreadable or unresolvable definition returns `true`, so a flow we cannot
+ * classify keeps the stricter behaviour. Silently granting weaker checks to an unclassifiable flow
+ * is the exact defect this replaces.
+ */
+export function flowSelectsWorkItem(definition: unknown): boolean {
+  if (!definition || typeof definition !== "object") return true;
+  const gates = (definition as { gates?: Record<string, unknown> }).gates;
+  if (!gates || typeof gates !== "object") return true;
+  for (const gate of Object.values(gates)) {
+    const expects = (gate as { expects?: unknown[] })?.expects;
+    // A gate whose expects cannot be read makes the whole definition UNCLASSIFIABLE, which is not
+    // the same as "read it and found no selected-work". Skipping it would silently downgrade an
+    // unreadable definition to the weaker behaviour — the defect this function replaces.
+    if (expects === undefined) continue;
+    if (!Array.isArray(expects)) return true;
+    for (const expectation of expects) {
+      const id = (expectation as { id?: unknown; expectation_id?: unknown })?.id
+        ?? (expectation as { expectation_id?: unknown })?.expectation_id;
+      if (id === "selected-work") return true;
+    }
+  }
+  return false;
 }
