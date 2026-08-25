@@ -3017,7 +3017,15 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
   // gate-value ablation that meant the treatment arm ran with the ownership guard OFF, so an
   // outcome difference caused by weaker validation would have been attributed to gate removal.
   // flowSelectsWorkItem FAILS CLOSED: an unresolvable definition keeps validation on.
-  const selectionWorkItemRef = flowSelectsWorkItem(resolveEffectiveFlowDefinition(entry.flowId ?? "", flowRepoRootForOwnership(root)))
+  // A session with NO flow is not "unclassifiable" — it is a session with no flow, and on main it
+  // never took this path. Without the `entry.flowId &&` guard, `resolveEffectiveFlowDefinition("")`
+  // returns null, `flowSelectsWorkItem(null)` correctly fails closed to true, and a flow-less
+  // `ensure-session --work-item <ref>` (a documented invocation) suddenly acquires the whole
+  // ownership machinery — which regressed two shipped integration suites. The sibling next_action
+  // site below already carries this guard; both need it. Fail-closed protects flows we cannot
+  // classify, not callers who declared no flow.
+  const selectionWorkItemRef = Boolean(entry.flowId)
+    && flowSelectsWorkItem(resolveEffectiveFlowDefinition(entry.flowId, flowRepoRootForOwnership(root)))
     && assignmentSubjectMatchesWorkItem(slug, workItem.ref)
     ? workItem.ref
     : undefined;

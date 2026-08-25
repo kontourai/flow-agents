@@ -65,3 +65,64 @@ test("the derivation reads the expectation, not the gate or step name", () => {
   assert.equal(flowSelectsWorkItem({ gates: { "pull-work-gate": { expects: [] } } }), false);
   assert.equal(flowSelectsWorkItem({ gates: { "anything-at-all": { expects: [{ id: "selected-work" }] } } }), true);
 });
+
+// ─── The derivation is not the point; the three CALL SITES are ────────────────────────────────
+//
+// Independent review proved the tests above cannot fail if the fix regresses: with
+// `flow-resolver.js` byte-identical but all three call sites reverted to
+// `flowId === "builder.build"`, they still passed 4/4. They pin the derivation, and nothing bound
+// the derivation to the behaviours it was extracted to control — which is the regression this
+// file's own header names.
+//
+// So these drive the real entry points and assert the ARMS BEHAVE IDENTICALLY, which is the
+// property kontourai/evals#193 actually depends on.
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+
+const CLI = path.resolve(REPO_ROOT, "build/src/cli.js");
+const SIDECAR = path.resolve(REPO_ROOT, "build/src/cli/workflow-sidecar.js");
+
+function scratchProject(prefix) {
+  const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  spawnSync("git", ["init", "-q", "."], { cwd: project });
+  spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });
+  return project;
+}
+
+test("both arms refuse a bogus provider AssignmentStatus at ensure-session", () => {
+  // The ownership guard. Before the fix the variant sailed past this with exit 0 because
+  // `selectionWorkItemRef` was undefined for any flow not literally named `builder.build`.
+  const project = scratchProject("flow-agents-arm-own-");
+  const bogus = path.join(project, "bogus-state.json");
+  fs.writeFileSync(bogus, JSON.stringify({ role: "AssignmentStatus", provider: "github", assignment: {} }));
+  const codes = {};
+  for (const flowId of [CONTROL, VARIANT]) {
+    const slug = `arm-own-${flowId.replace(/[^a-z]/g, "")}`;
+    codes[flowId] = spawnSync(process.execPath, [SIDECAR, "ensure-session",
+      "--artifact-root", path.join(project, ".kontourai", "flow-agents"),
+      "--work-item", "acme/widgets#1", "--flow-id", flowId,
+      "--assignment-provider", "github", "--effective-state-json", bogus,
+      "--source-request", "arm parity", "--summary", "arm parity",
+    ], { cwd: project, encoding: "utf8" }).status;
+  }
+  assert.equal(codes[VARIANT], codes[CONTROL],
+    `both arms must reach the same verdict on a bogus AssignmentStatus (control=${codes[CONTROL]}, variant=${codes[VARIANT]}) — a variant that starts where the control refuses is running with the ownership guard off`);
+  assert.notEqual(codes[CONTROL], 0, "the control must refuse a bogus AssignmentStatus, or this asserts nothing");
+});
+
+test("both arms refuse to start without pull-work selection evidence", () => {
+  // The selection-evidence check. Before the fix the variant started with no `--pull-work.md`.
+  const project = scratchProject("flow-agents-arm-sel-");
+  const codes = {};
+  for (const flowId of [CONTROL, VARIANT]) {
+    codes[flowId] = spawnSync(process.execPath, [CLI, "workflow", "start",
+      "--artifact-root", path.join(project, ".kontourai", "flow-agents"),
+      "--work-item", "acme/widgets#2", "--flow", flowId,
+      "--source-request", "arm parity", "--summary", "arm parity",
+    ], { cwd: project, encoding: "utf8" }).status;
+  }
+  assert.equal(codes[VARIANT], codes[CONTROL],
+    `both arms must reach the same verdict when selection evidence is absent (control=${codes[CONTROL]}, variant=${codes[VARIANT]})`);
+  assert.notEqual(codes[CONTROL], 0, "the control must refuse without selection evidence, or this asserts nothing");
+});
