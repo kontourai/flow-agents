@@ -394,9 +394,22 @@ function statusCommand(argv: string[]): number {
   return 0;
 }
 
+function mutationUsageLines(): string[] {
+  return [
+    "Usage: work-item-mutation-provider <render|apply|status> [args]",
+    "  render --request-json <file|-> --target-json <file|-> [--observed-json <file|->]   (GitHub: render gh argv, never execute)",
+    "  apply  --request-json <file|-> --file <local-backlog.json>                          (local-file: real read-modify-write)",
+    "  status --file <local-backlog.json> --id <work-item-id>                              (local-file: read current observed state)",
+  ];
+}
+
 export function main(argv = process.argv.slice(2)): number {
   const [command, ...rest] = argv;
   try {
+    if (argv.includes("--help") || argv.includes("-h")) {
+      for (const line of mutationUsageLines()) console.log(line);
+      return 0;
+    }
     switch (command) {
       case "render":
         return renderCommand(rest);
@@ -405,10 +418,7 @@ export function main(argv = process.argv.slice(2)): number {
       case "status":
         return statusCommand(rest);
       default:
-        console.error("Usage: work-item-mutation-provider <render|apply|status> [args]");
-        console.error("  render --request-json <file|-> --target-json <file|-> [--observed-json <file|->]   (GitHub: render gh argv, never execute)");
-        console.error("  apply  --request-json <file|-> --file <local-backlog.json>                          (local-file: real read-modify-write)");
-        console.error("  status --file <local-backlog.json> --id <work-item-id>                              (local-file: read current observed state)");
+        for (const line of mutationUsageLines()) console.error(line);
         return command ? 64 : 0;
     }
   } catch (error) {
