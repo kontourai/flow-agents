@@ -273,11 +273,14 @@ export {
   GROUNDED_NARRATIVE_REF_SCHEMA_VERSION,
   RETAINED_NARRATIVE_PROCESS_PROJECTION_SCHEMA_VERSION,
   decodeGroundedNarrativeRef,
+  decodeRetainedNarrativeProcessProjection,
 } from "./narrative/retained-codecs.js";
 export { projectRetainedNarrativeProcess } from "./narrative/retained-process-projection.js";
 export { readGroundedNarrative } from "./narrative/retained-reader.js";
 export type {
   GroundedNarrativeRef,
+  RetainedNarrativeProcessAction,
+  RetainedNarrativeProcessActionKind,
   RetainedNarrativeProcessProjection,
 } from "./narrative/retained-codecs.js";
 export type {

@@ -105,3 +105,16 @@ test('unsupported versions remain distinguishable from malformed references and 
   assert.notEqual(unsupportedRef.reason,'invalid_reference','an unsupported reference version is not a malformed v1 reference');
   assert.notEqual(unsupportedEnvelope.reason,'corrupt','an unsupported retained envelope version is not corrupt bytes');
 });
+
+test('browser process codec is strict and exposes only typed runtime action outcomes', t => {
+  const f = fixture(t);
+  const sourceRef = f.manifest.sources[0].source_id;
+  f.runtime.embedded.document_statements = [{
+    id: 'b'.repeat(16), class: 'observed', proposition: 'Command `PRIVATE_COMMAND_CANARY` was observed to fail (exit 1)', source_refs: [sourceRef],
+  }];
+  f.runtime.embedded.coverage.cited = 1;
+  const projected = api.projectRetainedNarrativeProcess({schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)},f.envelope);
+  assert.deepEqual(projected?.runtime.documentActions,[{kind:'command',outcome:'fail'}]);
+  assert.equal(api.decodeRetainedNarrativeProcessProjection({...projected,private_path:'/private/CODEC_LEAK'}),undefined);
+  assert.doesNotMatch(JSON.stringify(projected),/PRIVATE_COMMAND_CANARY|source_refs|statements/);
+});

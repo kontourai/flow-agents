@@ -8,6 +8,7 @@ import {
 import { stableStringify, validateNarrativeRuntimeProjection } from "./projection.js";
 import { validateNarrativeSourceManifest, type NarrativeSourceManifest } from "./snapshot.js";
 import { decodeGroundedNarrativeRef, type GroundedNarrativeRef } from "./retained-codecs.js";
+import { parseSourceId } from "./source-ids.js";
 
 export interface RetainedNarrativeScope {
   /** Server-owned retained snapshot root. This is deliberately absent from the reference. */
@@ -30,7 +31,8 @@ export type RetainedNarrativeReadFailure =
   | "authorization_revoked"
   | "not_captured"
   | "corrupt"
-  | "limits_exceeded";
+  | "limits_exceeded"
+  | "unsupported_version";
 
 export type ReadGroundedNarrativeResult =
   | { status: "available"; ref: GroundedNarrativeRef; envelope: GroundedExecutionNarrative; manifest: NarrativeSourceManifest }
@@ -70,27 +72,55 @@ function limitsFor(input: RetainedNarrativeReadLimits | undefined): Required<Ret
   return result;
 }
 
-function safeRoot(root: string): string {
+interface DirectoryFence {
+  readonly path: string;
+  readonly real: string;
+  readonly dev: number;
+  readonly ino: number;
+}
+
+function safeRoot(root: string): DirectoryFence {
   try {
     const stat = fs.lstatSync(root);
     if (stat.isSymbolicLink() || !stat.isDirectory()) fail("unauthorized");
-    return fs.realpathSync(root);
+    const real = fs.realpathSync(root);
+    // Canonicalize an otherwise safe supplied directory once. macOS exposes /var
+    // through /private/var, so comparing its spelling would reject safe owner scope.
+    // From here on every operation uses and fences the canonical directory itself.
+    const canonical = fs.lstatSync(real);
+    if (canonical.isSymbolicLink() || !canonical.isDirectory()) fail("unauthorized");
+    return { path: real, real, dev: canonical.dev, ino: canonical.ino };
   } catch (error) {
     if (error instanceof ReadFailure) throw error;
     fail("not_captured");
   }
 }
 
+function assertDirectoryFence(fence: DirectoryFence): void {
+  try {
+    const stat = fs.lstatSync(fence.path);
+    if (stat.isSymbolicLink() || !stat.isDirectory() || stat.dev !== fence.dev || stat.ino !== fence.ino || fs.realpathSync(fence.path) !== fence.real) {
+      fail("corrupt");
+    }
+  } catch (error) {
+    if (error instanceof ReadFailure) throw error;
+    fail("corrupt");
+  }
+}
+
 /** Read one regular file under an explicit root without following components or accepting swaps. */
-function readBoundedFile(root: string, relative: string, maxBytes: number): Buffer {
+function readBoundedFile(root: DirectoryFence, relative: string, maxBytes: number): Buffer {
   if (!relative || path.isAbsolute(relative) || relative.split(path.sep).some((part) => !part || part === "." || part === "..")) fail("unauthorized");
-  const file = path.join(root, relative);
-  let cursor = root;
+  assertDirectoryFence(root);
+  const file = path.join(root.path, relative);
+  let cursor = root.path;
+  const parents: DirectoryFence[] = [];
   for (const part of relative.split(path.sep).slice(0, -1)) {
     cursor = path.join(cursor, part);
     try {
       const stat = fs.lstatSync(cursor);
       if (stat.isSymbolicLink() || !stat.isDirectory()) fail("corrupt");
+      parents.push({ path: cursor, real: fs.realpathSync(cursor), dev: stat.dev, ino: stat.ino });
     } catch (error) {
       if (error instanceof ReadFailure) throw error;
       fail("not_captured");
@@ -119,6 +149,8 @@ function readBoundedFile(root: string, relative: string, maxBytes: number): Buff
     const after = fs.fstatSync(descriptor);
     const pathAfter = fs.lstatSync(file);
     if (!after.isFile() || after.dev !== before.dev || after.ino !== before.ino || pathAfter.dev !== before.dev || pathAfter.ino !== before.ino) fail("corrupt");
+    assertDirectoryFence(root);
+    for (const parent of parents) assertDirectoryFence(parent);
     if (after.size > maxBytes || bytesRead > maxBytes || bytesRead !== after.size) fail("limits_exceeded");
     return bounded.subarray(0, bytesRead);
   } finally { fs.closeSync(descriptor); }
@@ -130,6 +162,24 @@ function parseJson(bytes: Buffer): unknown {
 }
 
 function sameJson(left: unknown, right: unknown): boolean { return stableStringify(left) === stableStringify(right); }
+
+function assertRuntimeIntegrity(runtime: GroundedExecutionNarrative["sections"][number], manifest: NarrativeSourceManifest, manifestBytes: Buffer): void {
+  if (runtime.authority !== "flow-agents") fail("corrupt");
+  const embedded = runtime.embedded;
+  if (sha256(Buffer.from(stableStringify(embedded))) !== runtime.sha256 || validateNarrativeRuntimeProjection(embedded).length) fail("corrupt");
+  if (embedded.narrative_id !== manifest.narrative_id || embedded.provenance.manifest_sha256 !== sha256(manifestBytes)
+    || !sameJson(embedded.capture_completeness, manifest.capture_completeness)
+    || embedded.coverage.sources !== manifest.sources.length) fail("corrupt");
+  const references = new Set<string>();
+  for (const statement of [...embedded.document_statements, ...embedded.turns.flatMap((turn) => turn.statements)]) {
+    for (const sourceRef of statement.source_refs) references.add(sourceRef);
+    for (const sourceRef of statement.rule?.inputs ?? []) references.add(sourceRef);
+  }
+  const manifestIds = new Set(manifest.sources.map((entry) => entry.source_id));
+  if ([...references].some((sourceRef) => !manifestIds.has(sourceRef))) fail("corrupt");
+  if (embedded.coverage.cited !== references.size
+    || embedded.coverage.unavailable !== manifest.sources.filter((entry) => entry.status === "unavailable").length) fail("corrupt");
+}
 
 function assertEnvelopeIntegrity(envelope: GroundedExecutionNarrative, manifest: NarrativeSourceManifest, manifestBytes: Buffer, sourceBytes: ReadonlyMap<string, Buffer>): void {
   if (envelope.narrative_id !== manifest.narrative_id || sha256(manifestBytes) !== envelope.provenance.manifest_sha256) fail("corrupt");
@@ -150,19 +200,43 @@ function assertEnvelopeIntegrity(envelope: GroundedExecutionNarrative, manifest:
   const unavailable = manifest.sources.filter((entry) => entry.status === "unavailable")
     .map((entry) => ({ source_ref: entry.source_id, reason: entry.unavailable_reason }));
   if (envelope.coverage.sources !== manifest.sources.length || envelope.coverage.unavailable !== unavailable.length || !sameJson(envelope.unavailable_sources, unavailable)) fail("corrupt");
+  const runtime = envelope.sections.filter((section) => section.authority === "flow-agents");
+  if (runtime.length !== 1) fail("corrupt");
+  assertRuntimeIntegrity(runtime[0]!, manifest, manifestBytes);
+  const expectedForeign = new Set(manifest.sources.filter((entry) => entry.status === "snapshotted"
+    && ["flow-report", "surface-explanation"].includes(parseSourceId(entry.source_id).stream)).map((entry) => entry.source_id));
+  const actualForeign = new Set<string>();
   let embedded = 0;
   for (const section of envelope.sections) {
     if (section.authority === "flow-agents") {
-      if (sha256(Buffer.from(stableStringify(section.embedded))) !== section.sha256 || validateNarrativeRuntimeProjection(section.embedded).length) fail("corrupt");
       continue;
     }
+    const sourceRef = section.source_refs[0];
+    const parsed = parseSourceId(sourceRef);
+    if ((section.authority === "flow" && parsed.stream !== "flow-report")
+      || (section.authority === "surface" && parsed.stream !== "surface-explanation") || actualForeign.has(sourceRef)) fail("corrupt");
+    actualForeign.add(sourceRef);
     embedded += 1;
     const bytes = Buffer.from(section.embedded_bytes, "utf8");
     if (sha256(bytes) !== section.sha256) fail("corrupt");
     const source = manifest.sources.find((entry) => entry.source_id === section.source_refs[0]);
     if (!source || source.status !== "snapshotted" || !sourceBytes.get(source.source_id)?.equals(bytes)) fail("corrupt");
   }
-  if (envelope.coverage.embedded !== embedded) fail("corrupt");
+  if (envelope.coverage.embedded !== embedded || !sameJson([...actualForeign].sort(), [...expectedForeign].sort())) fail("corrupt");
+}
+
+function unsupportedRefVersion(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const schemaVersion = (value as Record<string, unknown>).schemaVersion;
+  return typeof schemaVersion === "string" && /^grounded-narrative-ref\/v[0-9]+$/.test(schemaVersion)
+    && schemaVersion !== "grounded-narrative-ref/v1";
+}
+
+function unsupportedEnvelopeVersion(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const schemaVersion = (value as Record<string, unknown>).schema_version;
+  return typeof schemaVersion === "string" && /^grounded-execution-narrative\/v[0-9]+$/.test(schemaVersion)
+    && schemaVersion !== "grounded-execution-narrative/v1";
 }
 
 /**
@@ -177,14 +251,15 @@ export async function readGroundedNarrative(input: ReadGroundedNarrativeInput): 
     const ref = decodeGroundedNarrativeRef(input.ref);
     const authorize = input.authorize;
     if (typeof authorize !== "function") fail("unauthorized");
-    if (!ref) fail("invalid_reference");
+    if (!ref) fail(unsupportedRefVersion(input.ref) ? "unsupported_version" : "invalid_reference");
     const limits = limitsFor(input.limits);
     if (!(await authorize())) return { status: "unavailable", reason: "unauthorized" };
     const narrativeRoot = safeRoot(scope.narrativeDir);
-    const envelopeRoot = safeRoot(scope.envelopeOutDir ?? path.join(narrativeRoot, "envelopes"));
+    const envelopeRoot = safeRoot(scope.envelopeOutDir ?? path.join(narrativeRoot.path, "envelopes"));
     const envelopeBytes = readBoundedFile(envelopeRoot, `${ref.envelopeSha256}.json`, limits.maxEnvelopeBytes);
     if (sha256(envelopeBytes) !== ref.envelopeSha256) fail("corrupt");
     const parsedEnvelope = parseJson(envelopeBytes);
+    if (unsupportedEnvelopeVersion(parsedEnvelope)) fail("unsupported_version");
     if (validateGroundedNarrative(parsedEnvelope).length) fail("corrupt");
     const envelope = parsedEnvelope as GroundedExecutionNarrative;
     if (envelope.narrative_id !== ref.narrativeId) fail("corrupt");
@@ -198,12 +273,15 @@ export async function readGroundedNarrative(input: ReadGroundedNarrativeInput): 
     for (const source of manifest.sources) {
       if (source.status !== "snapshotted") continue; // declared capture gaps are not later corruption.
       if (source.bytes > limits.maxSourceBytes || aggregate + source.bytes > limits.maxAggregateSourceBytes) fail("limits_exceeded");
-      const bytes = readBoundedFile(narrativeRoot, path.join("sources", source.sha256), limits.maxSourceBytes);
+      const remainingAggregate = limits.maxAggregateSourceBytes - aggregate;
+      const bytes = readBoundedFile(narrativeRoot, path.join("sources", source.sha256), Math.min(limits.maxSourceBytes, remainingAggregate, source.bytes));
       if (bytes.length !== source.bytes || sha256(bytes) !== source.sha256) fail("corrupt");
       aggregate += bytes.length;
       sourceBytes.set(source.source_id, bytes);
     }
     assertEnvelopeIntegrity(envelope, manifest, manifestBytes, sourceBytes);
+    assertDirectoryFence(narrativeRoot);
+    assertDirectoryFence(envelopeRoot);
     if (!(await authorize())) return { status: "unavailable", reason: "authorization_revoked" };
     return { status: "available", ref, envelope, manifest };
   } catch (error) {
