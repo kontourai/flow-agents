@@ -12,13 +12,14 @@ import {
 import {
   withNarrativeFlowRunRecoveryFenceRead,
 } from "../../build/src/narrative/recovery-fence.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require = createRequire(import.meta.url);
 const hookFence = require("../../scripts/hooks/lib/flow-recovery-fence.js");
 const contextHookFence = require("../../context/scripts/hooks/lib/flow-recovery-fence.js");
 
 function fixture() {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-recovery-fence-"));
+  const projectRoot = makeFixtureDir("flow-agents-recovery-fence-");
   const runId = "run-1";
   const runRoot = path.join(projectRoot, ".kontourai", "flow", "runs", runId);
   fs.mkdirSync(runRoot, { recursive: true });
@@ -270,8 +271,8 @@ test("all asynchronous fence wrappers preserve a callback error while the fence 
 });
 
 test("fence readers reject symlinked fixed Flow ancestry before treating the fence as absent", () => {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-fence-ancestry-"));
-  const foreign = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-fence-foreign-"));
+  const projectRoot = makeFixtureDir("flow-agents-fence-ancestry-");
+  const foreign = makeFixtureDir("flow-agents-fence-foreign-");
   try {
     fs.mkdirSync(path.join(projectRoot, ".kontourai"), { recursive: true });
     fs.symlinkSync(foreign, path.join(projectRoot, ".kontourai", "flow"));

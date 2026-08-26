@@ -272,7 +272,14 @@ function fsyncStateParent(file: string, parentIdentity: FileIdentity): void {
     if (!stat.isDirectory() || !sameIdentity(stat, parentIdentity)) {
       throw new Error(`state file parent changed before directory fsync: ${path.dirname(file)}`);
     }
-    fs.fsyncSync(descriptor);
+    // Directory fsync is a POSIX durability step (ensures the preceding
+    // rename's directory-entry update survives a crash); Windows has no
+    // equivalent and fsyncSync on a directory descriptor fails there with
+    // EPERM. The identity re-check above still runs on every platform -
+    // only the fsync itself is skipped.
+    if (process.platform !== "win32") {
+      fs.fsyncSync(descriptor);
+    }
   } finally {
     fs.closeSync(descriptor);
   }

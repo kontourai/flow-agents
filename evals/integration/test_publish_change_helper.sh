@@ -134,6 +134,13 @@ for risk in runtime schema package hook security; do
 done
 
 mkdir -p "$TMPDIR_EVAL/final-state"
+git -C "$TMPDIR_EVAL/final-state" init -q
+git -C "$TMPDIR_EVAL/final-state" config user.email "eval@example.invalid"
+git -C "$TMPDIR_EVAL/final-state" config user.name "Publish Helper Eval"
+printf 'evidence.json\nrelease.json\ntrust.bundle\n' > "$TMPDIR_EVAL/final-state/.gitignore"
+printf 'tracked fixture\n' > "$TMPDIR_EVAL/final-state/tracked.txt"
+git -C "$TMPDIR_EVAL/final-state" add .gitignore tracked.txt
+git -C "$TMPDIR_EVAL/final-state" commit -qm "seed clean reconciliation fixture"
 cat > "$TMPDIR_EVAL/final-state/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
@@ -162,10 +169,298 @@ cat > "$TMPDIR_EVAL/final-state/release.json" <<'JSON'
 }
 JSON
 
+if node "$SCRIPT" reconcile-final-state "$TMPDIR_EVAL/final-state" > "$TMPDIR_EVAL/reconcile-without-bundle.out"; then
+  fail "schema 1.0 evidence without trust.bundle must not confirm reconciliation"
+elif [[ "$(json_query "$TMPDIR_EVAL/reconcile-without-bundle.out" "status")" == "not_verified" ]] \
+  && rg -q 'trust\.bundle is required' "$TMPDIR_EVAL/reconcile-without-bundle.out"; then
+  pass "schema 1.0 evidence without trust.bundle is non-confirming"
+else
+  fail "missing trust.bundle result was not explicit"
+fi
+
+cat > "$TMPDIR_EVAL/final-state/trust.bundle" <<'JSON'
+{
+  "schemaVersion": 2,
+  "source": "publish-change-helper-fixture",
+  "claims": [{
+    "id": "focused-tests",
+    "subjectType": "flow",
+    "subjectId": "final-state",
+    "claimType": "workflow.check.test",
+    "fieldOrBehavior": "focused tests",
+    "value": "pass",
+    "status": "verified",
+    "createdAt": "2026-05-29T00:00:00Z",
+    "updatedAt": "2026-05-29T00:00:00Z",
+    "metadata": {
+      "origin": "check",
+      "check_kind": "test",
+      "observed_commands": [{
+        "command": "npm test",
+        "exit_code": 0,
+        "output_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "observed_at_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "worktree_clean": true,
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "worktree_clean": true
+        }
+      }, {
+        "command": "npm run lint",
+        "exit_code": 0,
+        "output_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "observed_at_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "worktree_clean": true,
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "worktree_clean": true
+        }
+      }],
+      "verification_workspace_snapshot": {
+        "version": 1,
+        "kind": "git-worktree",
+        "algorithm": "sha256",
+        "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "worktree_clean": true
+      }
+    }
+  }],
+  "evidence": [{
+    "id": "focused-tests-output",
+    "claimId": "focused-tests",
+    "evidenceType": "test_output",
+    "method": "validation",
+    "sourceRef": "run:focused-tests",
+    "excerptOrSummary": "npm test",
+    "observedAt": "2026-05-29T00:00:00Z",
+    "collectedBy": "ci",
+    "passing": true,
+    "execution": {"runner": "bash", "label": "npm test", "exitCode": 0}
+  }, {
+    "id": "focused-lint-output",
+    "claimId": "focused-tests",
+    "evidenceType": "test_output",
+    "method": "validation",
+    "sourceRef": "run:focused-lint",
+    "excerptOrSummary": "npm run lint",
+    "observedAt": "2026-05-29T00:00:00Z",
+    "collectedBy": "ci",
+    "passing": true,
+    "execution": {"runner": "bash", "label": "npm run lint", "exitCode": 0}
+  }],
+  "policies": [],
+  "events": []
+}
+JSON
+
+node --input-type=module - "$ROOT/build/src/builder-flow-runtime.js" "$TMPDIR_EVAL/final-state" "$TMPDIR_EVAL/final-state/trust.bundle" <<'NODE'
+const [modulePath, projectRoot, bundleFile] = process.argv.slice(2);
+const { captureReviewWorkspaceSnapshot } = await import(modulePath);
+const fs = await import('node:fs');
+const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
+const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+bundle.claims[0].metadata.verification_workspace_snapshot = snapshot;
+for (const observation of bundle.claims[0].metadata.observed_commands) {
+  observation.observed_at_commit = snapshot.head_sha;
+  observation.worktree_clean = true;
+  observation.verification_workspace_snapshot = snapshot;
+}
+fs.writeFileSync(bundleFile, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+
 node "$SCRIPT" reconcile-final-state "$TMPDIR_EVAL/final-state" > "$TMPDIR_EVAL/reconcile.out"
 status=$?
-[[ "$status" -eq 0 ]] && pass "final reconciled evidence and release sidecars pass" || fail "final reconciled evidence and release sidecars pass"
+[[ "$status" -eq 0 ]] && pass "valid trust.bundle and release sidecars pass" || fail "valid trust.bundle and release sidecars pass"
 [[ "$(json_query "$TMPDIR_EVAL/reconcile.out" "status")" == "pass" ]] && pass "final reconciliation result is explicit" || fail "final reconciliation result is explicit"
+[[ "$(json_query "$TMPDIR_EVAL/reconcile.out" "authoritative_refs.0")" == "$TMPDIR_EVAL/final-state/trust.bundle" ]] && pass "trust.bundle is the confirming reconciliation authority" || fail "trust.bundle is the confirming reconciliation authority"
+
+cp -a "$TMPDIR_EVAL/final-state" "$TMPDIR_EVAL/final-state-dirty"
+printf 'dirty bytes\n' >> "$TMPDIR_EVAL/final-state-dirty/tracked.txt"
+cp -a "$TMPDIR_EVAL/final-state" "$TMPDIR_EVAL/final-state-stale"
+printf 'new committed bytes\n' >> "$TMPDIR_EVAL/final-state-stale/tracked.txt"
+git -C "$TMPDIR_EVAL/final-state-stale" add tracked.txt
+git -C "$TMPDIR_EVAL/final-state-stale" commit -qm "advance current workspace"
+cp -a "$TMPDIR_EVAL/final-state" "$TMPDIR_EVAL/final-state-unrelated"
+git -C "$TMPDIR_EVAL/final-state-unrelated" checkout --orphan unrelated -q
+git -C "$TMPDIR_EVAL/final-state-unrelated" rm -qr --cached .
+printf 'unrelated root\n' > "$TMPDIR_EVAL/final-state-unrelated/tracked.txt"
+git -C "$TMPDIR_EVAL/final-state-unrelated" add tracked.txt
+git -C "$TMPDIR_EVAL/final-state-unrelated" commit -qm "unrelated workspace"
+mkdir -p "$TMPDIR_EVAL/final-state-missing-git"
+cp "$TMPDIR_EVAL/final-state/release.json" "$TMPDIR_EVAL/final-state-missing-git/release.json"
+cp "$TMPDIR_EVAL/final-state/trust.bundle" "$TMPDIR_EVAL/final-state-missing-git/trust.bundle"
+for current_state_case in dirty stale unrelated missing-git; do
+  if node "$SCRIPT" reconcile-final-state "$TMPDIR_EVAL/final-state-$current_state_case" > "$TMPDIR_EVAL/reconcile-$current_state_case.out"; then
+    fail "$current_state_case workspace must not confirm reconciliation"
+  elif [[ "$(json_query "$TMPDIR_EVAL/reconcile-$current_state_case.out" "status")" == "not_verified" ]]; then
+    pass "$current_state_case workspace is non-confirming"
+  else
+    fail "$current_state_case workspace result was not explicit"
+  fi
+done
+
+for reconciliation_case in mixed non-check missing-command-provenance false-evidence nonzero-observation uppercase-output-hash missing-observation extra-observation mismatched-command missing-digest bad-digest bad-version bad-algorithm explicit-command-kind claimtype-command artifact-command-mismatch missing-execution extra-declared-command reordered-declared-command duplicate-declared-command summary-only-command-ref url-only-command-ref; do
+  mkdir -p "$TMPDIR_EVAL/final-state-$reconciliation_case"
+  cp "$TMPDIR_EVAL/final-state/release.json" "$TMPDIR_EVAL/final-state-$reconciliation_case/release.json"
+  cp "$TMPDIR_EVAL/final-state/trust.bundle" "$TMPDIR_EVAL/final-state-$reconciliation_case/trust.bundle"
+done
+node - "$TMPDIR_EVAL/final-state-mixed/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims.push({ id: 'failing-check', subjectType: 'flow', subjectId: 'final-state', claimType: 'workflow.check.test', fieldOrBehavior: 'failing check', value: 'fail', status: 'disputed', createdAt: '2026-05-29T00:00:00Z', updatedAt: '2026-05-29T00:00:00Z', metadata: { origin: 'check', check_kind: 'test' } });
+bundle.evidence.push({ id: 'failing-check-output', claimId: 'failing-check', evidenceType: 'test_output', method: 'validation', sourceRef: 'run:failing-check', excerptOrSummary: 'npm test', observedAt: '2026-05-29T00:00:00Z', collectedBy: 'ci', passing: false, execution: { runner: 'bash', label: 'npm test', exitCode: 1 } });
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-non-check/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+delete bundle.claims[0].metadata; fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-missing-command-provenance/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+delete bundle.claims[0].metadata.observed_commands;
+delete bundle.claims[0].metadata.verification_workspace_snapshot;
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-false-evidence/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.evidence[0].passing = false; fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-nonzero-observation/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.observed_commands[0].exit_code = 1; fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-uppercase-output-hash/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.observed_commands[0].output_sha256 = 'A'.repeat(64); fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-missing-observation/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.observed_commands.pop(); fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-extra-observation/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.observed_commands.push({ ...bundle.claims[0].metadata.observed_commands[1], command: 'npm run unrelated' });
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-mismatched-command/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.observed_commands[0].command = 'npm run unrelated'; fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+for snapshot_case in missing-digest bad-digest bad-version bad-algorithm; do
+  node - "$TMPDIR_EVAL/final-state-$snapshot_case/trust.bundle" "$snapshot_case" <<'NODE'
+const fs = require('node:fs');
+const [file, kind] = process.argv.slice(2); const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+const snapshot = bundle.claims[0].metadata.verification_workspace_snapshot;
+if (kind === 'missing-digest') delete snapshot.digest;
+if (kind === 'bad-digest') snapshot.digest = 'D'.repeat(64);
+if (kind === 'bad-version') snapshot.version = 2;
+if (kind === 'bad-algorithm') snapshot.algorithm = 'sha512';
+for (const observation of bundle.claims[0].metadata.observed_commands) observation.verification_workspace_snapshot = structuredClone(snapshot);
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+done
+node - "$TMPDIR_EVAL/final-state-explicit-command-kind/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.check_kind = 'command';
+delete bundle.claims[0].metadata.observed_commands;
+delete bundle.claims[0].metadata.verification_workspace_snapshot;
+for (const evidence of bundle.evidence) delete evidence.execution;
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-claimtype-command/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].claimType = 'workflow.check.command';
+delete bundle.claims[0].metadata.check_kind;
+delete bundle.claims[0].metadata.observed_commands;
+delete bundle.claims[0].metadata.verification_workspace_snapshot;
+for (const evidence of bundle.evidence) delete evidence.execution;
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-artifact-command-mismatch/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.artifact_refs = [{ kind: 'command', excerpt: 'npm run unrelated', summary: 'Declared command.' }];
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-missing-execution/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.artifact_refs = [{ kind: 'command', excerpt: 'npm test', summary: 'Declared command.' }];
+for (const evidence of bundle.evidence) delete evidence.execution;
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-extra-declared-command/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.artifact_refs = [{ kind: 'command', excerpt: 'npm test' }, { kind: 'command', excerpt: 'npm run lint' }, { kind: 'command', excerpt: 'npm run unrelated' }];
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-reordered-declared-command/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.artifact_refs = [{ kind: 'command', excerpt: 'npm run lint' }, { kind: 'command', excerpt: 'npm test' }];
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+node - "$TMPDIR_EVAL/final-state-duplicate-declared-command/trust.bundle" <<'NODE'
+const fs = require('node:fs'); const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.artifact_refs = [{ kind: 'command', excerpt: 'npm test' }, { kind: 'command', excerpt: 'npm test' }];
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+for command_ref_case in summary-only-command-ref url-only-command-ref; do
+  node - "$TMPDIR_EVAL/final-state-$command_ref_case/trust.bundle" "$command_ref_case" <<'NODE'
+const fs = require('node:fs');
+const [file, kind] = process.argv.slice(2); const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims[0].metadata.check_kind = 'external';
+bundle.claims[0].metadata.artifact_refs = [kind === 'summary-only-command-ref'
+  ? { kind: 'command', summary: 'A command ran.' }
+  : { kind: 'command', url: 'https://example.invalid/command-log' }];
+delete bundle.claims[0].metadata.observed_commands;
+delete bundle.claims[0].metadata.verification_workspace_snapshot;
+for (const evidence of bundle.evidence) delete evidence.execution;
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+done
+for reconciliation_case in mixed non-check missing-command-provenance false-evidence nonzero-observation uppercase-output-hash missing-observation extra-observation mismatched-command missing-digest bad-digest bad-version bad-algorithm explicit-command-kind claimtype-command artifact-command-mismatch missing-execution extra-declared-command reordered-declared-command duplicate-declared-command summary-only-command-ref url-only-command-ref; do
+  if node "$SCRIPT" reconcile-final-state "$TMPDIR_EVAL/final-state-$reconciliation_case" > "$TMPDIR_EVAL/reconcile-$reconciliation_case.out"; then
+    fail "$reconciliation_case trust.bundle must not confirm reconciliation"
+  elif [[ "$(json_query "$TMPDIR_EVAL/reconcile-$reconciliation_case.out" "status")" == "not_verified" ]]; then
+    pass "$reconciliation_case trust.bundle is non-confirming"
+  else
+    fail "$reconciliation_case trust.bundle result was not explicit"
+  fi
+done
+
+cp -a "$TMPDIR_EVAL/final-state" "$TMPDIR_EVAL/final-state-superseded-failure"
+node - "$TMPDIR_EVAL/final-state-superseded-failure/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2]; const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+bundle.claims.push({ id: 'superseded-failing-check', subjectType: 'flow', subjectId: 'final-state', claimType: 'workflow.check.test', fieldOrBehavior: 'historical failing check', value: 'fail', status: 'disputed', producerStatus: 'superseded', createdAt: '2026-05-29T00:00:00Z', updatedAt: '2026-05-29T00:00:00Z', metadata: { origin: 'check', check_kind: 'test' } });
+bundle.evidence.push({ id: 'superseded-failing-output', claimId: 'superseded-failing-check', evidenceType: 'test_output', method: 'validation', sourceRef: 'run:superseded-failing-check', excerptOrSummary: 'npm test', observedAt: '2026-05-29T00:00:00Z', collectedBy: 'ci', passing: false, execution: { runner: 'bash', label: 'npm test', exitCode: 1 } });
+fs.writeFileSync(file, `${JSON.stringify(bundle, null, 2)}\n`);
+NODE
+if node "$SCRIPT" reconcile-final-state "$TMPDIR_EVAL/final-state-superseded-failure" > "$TMPDIR_EVAL/reconcile-superseded-failure.out" \
+  && [[ "$(json_query "$TMPDIR_EVAL/reconcile-superseded-failure.out" "status")" == "pass" ]]; then
+  pass "superseded historical failure does not poison current passing checks"
+else
+  fail "superseded historical failure should not poison current passing checks"
+fi
+
+mkdir -p "$TMPDIR_EVAL/final-state-malformed"
+cp "$TMPDIR_EVAL/final-state/release.json" "$TMPDIR_EVAL/final-state-malformed/release.json"
+printf '{not json\n' > "$TMPDIR_EVAL/final-state-malformed/trust.bundle"
+if node "$SCRIPT" reconcile-final-state "$TMPDIR_EVAL/final-state-malformed" > "$TMPDIR_EVAL/reconcile-malformed.out"; then
+  fail "malformed trust.bundle must not confirm reconciliation"
+elif [[ "$(json_query "$TMPDIR_EVAL/reconcile-malformed.out" "status")" == "not_verified" ]] \
+  && rg -q 'trust\.bundle is not valid' "$TMPDIR_EVAL/reconcile-malformed.out"; then
+  pass "malformed trust.bundle is non-confirming with an actionable result"
+else
+  fail "malformed trust.bundle result was not explicit"
+fi
 
 if [[ "$errors" -eq 0 ]]; then
   echo "Publish change helper checks passed"

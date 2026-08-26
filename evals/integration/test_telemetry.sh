@@ -47,6 +47,11 @@ _run_telemetry() {
   if [[ -n "${FLOW_AGENTS_TELEMETRY_RUNTIME:-}" ]]; then
     env_vars+=(FLOW_AGENTS_TELEMETRY_RUNTIME="$FLOW_AGENTS_TELEMETRY_RUNTIME")
   fi
+  # #1180: lets a caller point install_identity() at a fixture package root so the
+  # stamp / git-checkout / neither resolution branches are all exercisable.
+  if [[ -n "${FLOW_AGENTS_INSTALL_IDENTITY_ROOT:-}" ]]; then
+    env_vars+=(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$FLOW_AGENTS_INSTALL_IDENTITY_ROOT")
+  fi
   mkdir -p "$TMPDIR_EVAL/sessions"
   echo "$input" | env "${env_vars[@]}" bash "$TELEMETRY_SH" "$hook_type" "$agent" 2>/dev/null
   # Wait for background process to append new line(s)
@@ -571,7 +576,7 @@ echo ""
 echo "--- Schema Fields ---"
 output=$(_run_telemetry "agentSpawn" "eval-test" '{"cwd":"/tmp/eval-test"}')
 
-for field in schema_version timestamp session_id event_id event_type agent; do
+for field in schema_version timestamp session_id event_id event_type agent install_identity; do
   val=$(echo "$output" | jq -r ".${field} // empty" 2>/dev/null)
   if [[ -n "$val" ]]; then
     _pass "agentSpawn has .$field = $val"
@@ -589,6 +594,176 @@ for field in name runtime version; do
     _fail "agentSpawn missing .agent.$field"
   fi
 done
+
+# --- 3b. Producer install identity (#1180) ---
+# The per-release effectiveness join key is a TUPLE {package_version, content_fingerprint}, not a
+# bare semver: a tarball packed from post-release main installs under the OLD version number while
+# containing the NEW code, so a version-only key misattributes behavior across releases. The block
+# is a TOP-LEVEL SIBLING of run_correlation (the envelope is contractually closed in v1), and every
+# event carries it — the `source` label states how the identity was resolved so a consumer can
+# never mistake a fallback for a shipped stamp.
+echo ""
+echo "--- Install Identity (#1180) ---"
+
+for field in package_version content_fingerprint source; do
+  val=$(echo "$output" | jq -r ".install_identity.${field} // empty" 2>/dev/null)
+  if [[ -n "$val" ]]; then
+    _pass "agentSpawn has .install_identity.$field"
+  else
+    _fail "agentSpawn missing .install_identity.$field"
+  fi
+done
+
+identity_source=$(echo "$output" | jq -r '.install_identity.source // empty' 2>/dev/null)
+case "$identity_source" in
+  stamp|git|unknown) _pass "install_identity.source is a declared value ('$identity_source')" ;;
+  *) _fail "install_identity.source must be stamp|git|unknown, got '$identity_source'" ;;
+esac
+
+# install_identity must never leak into the closed run correlation envelope.
+if echo "$output" | jq -e '(.run_correlation // {}) | has("install_identity") | not' >/dev/null 2>&1; then
+  _pass "install_identity stays outside the run_correlation envelope"
+else
+  _fail "install_identity leaked into .run_correlation (the envelope is closed in v1)"
+fi
+
+# Fixture cases: one temp package root per resolution branch, so all three are exercised on every
+# host regardless of how this repo happens to be checked out.
+IDENTITY_FIXTURES="$TMPDIR_EVAL/install-identity"
+mkdir -p "$IDENTITY_FIXTURES/stamped/build/generated" "$IDENTITY_FIXTURES/checkout" "$IDENTITY_FIXTURES/consumer"
+
+# (a) stamp — a shipped build/generated/install-identity.json wins outright.
+cat > "$IDENTITY_FIXTURES/stamped/build/generated/install-identity.json" <<'STAMP'
+{
+  "schema_version": "1.0",
+  "package_name": "@kontourai/flow-agents",
+  "package_version": "9.9.9-fixture",
+  "content_fingerprint": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "git_sha": null,
+  "git_dirty": null,
+  "built_at": "2026-01-01T00:00:00.000Z"
+}
+STAMP
+stamp_output=$(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$IDENTITY_FIXTURES/stamped" _run_telemetry "agentSpawn" "eval-test" '{"cwd":"/tmp/eval-test"}')
+stamp_identity=$(echo "$stamp_output" | jq -c '.install_identity // {}' 2>/dev/null)
+if [[ "$stamp_identity" == '{"package_version":"9.9.9-fixture","content_fingerprint":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","source":"stamp"}' ]]; then
+  _pass "install_identity reads the shipped stamp verbatim (source=stamp)"
+else
+  _fail "install_identity stamp case: got $stamp_identity"
+fi
+
+# (b) git — no stamp, but the package root is a Flow Agents source checkout.
+printf '{"name":"@kontourai/flow-agents","version":"0.0.0-checkout"}\n' > "$IDENTITY_FIXTURES/checkout/package.json"
+git -C "$IDENTITY_FIXTURES/checkout" init -q >/dev/null 2>&1
+git -C "$IDENTITY_FIXTURES/checkout" add -A >/dev/null 2>&1
+git -C "$IDENTITY_FIXTURES/checkout" -c user.email=eval@example.invalid -c user.name=eval commit -qm "fixture" >/dev/null 2>&1
+checkout_sha=$(git -C "$IDENTITY_FIXTURES/checkout" rev-parse HEAD 2>/dev/null)
+git_output=$(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$IDENTITY_FIXTURES/checkout" _run_telemetry "agentSpawn" "eval-test" '{"cwd":"/tmp/eval-test"}')
+git_identity=$(echo "$git_output" | jq -c '.install_identity // {}' 2>/dev/null)
+if [[ -n "$checkout_sha" && "$git_identity" == "{\"package_version\":\"0.0.0-checkout\",\"content_fingerprint\":\"git:${checkout_sha}\",\"source\":\"git\"}" ]]; then
+  _pass "install_identity falls back to the checkout HEAD (source=git)"
+else
+  _fail "install_identity git case: got $git_identity (expected git:$checkout_sha)"
+fi
+
+# (c) unknown — a git tree that is NOT Flow Agents. This is the claude-code project-bundle layout:
+# scripts/ lands inside the CONSUMER's repository, so an unguarded `git rev-parse` would stamp the
+# consumer's commit as Flow Agents' producer identity. Labeled unknown beats a fabricated join key.
+printf '{"name":"some-consumer-app","version":"1.2.3"}\n' > "$IDENTITY_FIXTURES/consumer/package.json"
+git -C "$IDENTITY_FIXTURES/consumer" init -q >/dev/null 2>&1
+git -C "$IDENTITY_FIXTURES/consumer" add -A >/dev/null 2>&1
+git -C "$IDENTITY_FIXTURES/consumer" -c user.email=eval@example.invalid -c user.name=eval commit -qm "fixture" >/dev/null 2>&1
+unknown_output=$(FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$IDENTITY_FIXTURES/consumer" _run_telemetry "agentSpawn" "eval-test" '{"cwd":"/tmp/eval-test"}')
+unknown_identity=$(echo "$unknown_output" | jq -c '.install_identity // {}' 2>/dev/null)
+if [[ "$unknown_identity" == '{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}' ]]; then
+  _pass "install_identity refuses a foreign checkout and reports unknown"
+else
+  _fail "install_identity unknown case: got $unknown_identity"
+fi
+
+# SHIPPED-COPY PARITY. telemetry.sh ships in two byte-identical copies at DIFFERENT depths —
+# scripts/telemetry/ (two levels below the package root) and the context/scripts/telemetry/ mirror
+# (three) — so any fixed path arithmetic is right for one and silently wrong for the other. An
+# earlier revision hardcoded "../.." and resolved the mirror's root to the context directory,
+# reporting source:"unknown" on a fully stamped tree; nothing caught it, because the assertions
+# above run with an explicit root override and the harness's default copy is the mirror. These two
+# run each shipped copy with NO override at all, on the real repository layout.
+run_shipped_copy() {
+  local script="$1" out="$2" dir
+  dir=$(mktemp -d)
+  mkdir -p "$dir/sessions"; : > "$dir/telemetry.conf"
+  : > "$out"
+  echo '{"cwd":"/tmp/eval-test"}' | env \
+    TELEMETRY_ENABLED=true TELEMETRY_CHANNELS=full \
+    TELEMETRY_CHANNEL_FULL_LOG_FILE="$out" TELEMETRY_CHANNEL_FULL_REDACT=none \
+    FLOW_AGENTS_TELEMETRY_FOREGROUND=true TELEMETRY_CONFIG_FILE="$dir/telemetry.conf" \
+    TELEMETRY_DATA_DIR="$dir" TELEMETRY_SESSION_DIR="$dir/sessions" \
+    bash "$script" agentSpawn eval-test 2>/dev/null
+  tail -1 "$out" 2>/dev/null | jq -c '.install_identity // {}' 2>/dev/null
+  rm -rf "$dir"
+}
+
+if [[ -f "$ROOT_DIR/scripts/telemetry/telemetry.sh" && -f "$ROOT_DIR/context/scripts/telemetry/telemetry.sh" ]]; then
+  # The stamp is what makes this assertion discriminating: without it both copies would agree on a
+  # git-derived identity and a depth bug would hide.
+  [[ -f "$ROOT_DIR/build/generated/install-identity.json" ]] || (cd "$ROOT_DIR" && npm run build) >/dev/null 2>&1
+  source_copy_identity=$(run_shipped_copy "$ROOT_DIR/scripts/telemetry/telemetry.sh" "$TMPDIR_EVAL/copy-source.jsonl")
+  mirror_copy_identity=$(run_shipped_copy "$ROOT_DIR/context/scripts/telemetry/telemetry.sh" "$TMPDIR_EVAL/copy-mirror.jsonl")
+
+  if [[ "$(echo "$mirror_copy_identity" | jq -r '.source // empty')" == "stamp" ]]; then
+    _pass "context/ mirror copy resolves the package root and reads the stamp (source=stamp)"
+  else
+    _fail "context/ mirror copy did not reach the stamp: got $mirror_copy_identity"
+  fi
+
+  if [[ "$(echo "$source_copy_identity" | jq -r '.source // empty')" == "stamp" ]]; then
+    _pass "scripts/ copy resolves the package root and reads the stamp (source=stamp)"
+  else
+    _fail "scripts/ copy did not reach the stamp: got $source_copy_identity"
+  fi
+
+  if [[ -n "$source_copy_identity" && "$source_copy_identity" == "$mirror_copy_identity" ]]; then
+    _pass "both shipped telemetry.sh copies report an identical install identity"
+  else
+    _fail "shipped copies disagree: scripts=$source_copy_identity mirror=$mirror_copy_identity"
+  fi
+
+  # NO ANCESTOR ADOPTION. Installing a bundle into a scratch directory nested under a Flow Agents
+  # checkout is an entirely ordinary thing to do, and it is the shape that breaks any "search upward
+  # for a package.json" resolution: the search passes the bundle's own stampless root and the
+  # scratch directory, reaches the surrounding checkout, and reports THAT checkout's version and
+  # fingerprint as the bundle's identity. A confidently wrong tuple attributed to a different
+  # install copy is strictly worse than no identity — "unknown" is at least honest. This fixture
+  # replicates the bundle layout faithfully (telemetry.sh under scripts/telemetry, the bare
+  # {"type":"commonjs"} scripts/package.json marker the bundle really ships, and NO package.json at
+  # the bundle root) beneath a deliberately distinctive stamped ancestor, so an adoption shows up as
+  # the ancestor's own literal values rather than a vague mismatch.
+  ANCESTOR="$TMPDIR_EVAL/adoption/ancestor"
+  NESTED_BUNDLE="$ANCESTOR/scratch/bundle"
+  mkdir -p "$ANCESTOR/build/generated" "$NESTED_BUNDLE/scripts"
+  printf '{"name":"@kontourai/flow-agents","version":"0.0.0-ANCESTOR"}\n' > "$ANCESTOR/package.json"
+  cat > "$ANCESTOR/build/generated/install-identity.json" <<'ANCESTOR_STAMP'
+{
+  "schema_version": "1.0",
+  "package_name": "@kontourai/flow-agents",
+  "package_version": "0.0.0-ANCESTOR",
+  "content_fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "git_sha": null,
+  "git_dirty": null,
+  "built_at": "2026-01-01T00:00:00.000Z"
+}
+ANCESTOR_STAMP
+  cp -R "$ROOT_DIR/scripts/telemetry" "$NESTED_BUNDLE/scripts/telemetry"
+  cp "$ROOT_DIR/scripts/package.json" "$NESTED_BUNDLE/scripts/package.json"
+  nested_identity=$(run_shipped_copy "$NESTED_BUNDLE/scripts/telemetry/telemetry.sh" "$TMPDIR_EVAL/nested-bundle.jsonl")
+  if [[ "$nested_identity" == '{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}' ]]; then
+    _pass "a bundle nested under a stamped checkout reports unknown, never the ancestor's identity"
+  else
+    _fail "nested bundle adopted a foreign install identity: got $nested_identity"
+  fi
+else
+  _fail "expected both shipped telemetry.sh copies to exist for the parity check"
+fi
 
 # --- 4. userPromptSubmit captures prompt ---
 echo ""

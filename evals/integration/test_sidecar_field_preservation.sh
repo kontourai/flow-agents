@@ -203,7 +203,7 @@ fi
 # ─── 4. record-evidence (one check) ───────────────────────────────────────────────────────────
 if flow_agents_node "$WRITER" record-evidence "$SESSION_DIR" \
   --verdict pass \
-  --check-json '{"id":"sweep-check","kind":"command","status":"pass","summary":"Sweep fixture command check."}' \
+  --check-json '{"id":"sweep-check","kind":"external","status":"pass","summary":"Sweep fixture descriptive external check."}' \
   --timestamp "2026-06-20T08:20:00Z" >"$TMPDIR_EVAL/evidence.out" 2>"$TMPDIR_EVAL/evidence.err"; then
   _assert_preserved "record-evidence"
 else

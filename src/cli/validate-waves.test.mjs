@@ -19,12 +19,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const validator = path.join(repoRoot, "build", "src", "cli", "validate-workflow-artifacts.js");
 
 function runValidator(wavesPayload) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "waves-unit-"));
+  const dir = makeFixtureDir("waves-unit-");
   try {
     fs.writeFileSync(path.join(dir, "waves.json"), JSON.stringify(wavesPayload, null, 2));
     const result = spawnSync(process.execPath, [validator, dir], { encoding: "utf8" });

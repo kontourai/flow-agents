@@ -112,6 +112,10 @@ export function validateSchemaValue(
     const props = schema.properties ?? {};
     if (schema.additionalProperties === false) {
       for (const key of Object.keys(obj).filter((k) => !(k in props)).sort()) issues.push({ path: file, message: `${loc}.${key} is not allowed` });
+    } else if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
+      for (const key of Object.keys(obj).filter((key) => !(key in props))) {
+        validateSchemaValue(file, obj[key], schema.additionalProperties, `${loc}.${key}`, issues, rootSchema, registry);
+      }
     }
     for (const [key, sub] of Object.entries<any>(props)) if (key in obj) validateSchemaValue(file, obj[key], sub, `${loc}.${key}`, issues, rootSchema, registry);
   }

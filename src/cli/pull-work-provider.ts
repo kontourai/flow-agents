@@ -855,7 +855,21 @@ function resolveSettings(doc: Record<string, unknown>): Record<string, unknown> 
   throw new Error("settings JSON must be an effective settings object or backlog-provider-settings document");
 }
 
+function usage(): void {
+  console.log(`usage: flow-agents pull-work-provider --settings-json <path> [--items-json <path> | --issues-json <path>]
+  [--now <datetime>] [--current-ref <ref>] [--current-sha <sha>]
+  [--changed-file <path>...] [--commits-since <expr>...] [--resolved-ref <ref=val>...]
+
+Reads effective settings + a board/issues document and emits pull-work items with
+dependency impacts and revision freshness. --items-json or a live board document
+(in lieu of --issues-json) produces a board view; --issues-json produces per-issue items.`);
+}
+
 export function main(argv = process.argv.slice(2)): number {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    usage();
+    return 0;
+  }
   const args = parseArgs(argv);
   const settingsJson = flagString(args.flags, "settings-json");
   const issuesJson = flagString(args.flags, "issues-json");

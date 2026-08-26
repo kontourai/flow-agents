@@ -602,6 +602,43 @@ node "$CLI" assignment-provider status --provider github \
   && pass "wrong-repository status preserves the trusted provider repository mismatch" \
   || fail "wrong-repository status did not preserve the provider repository mismatch"
 
+# ---------------------------------------------------------------------------------------------
+# ACCEPT PATH. Everything below this point in the original file proves the guard REFUSES bad
+# ownership evidence -- 56 assertions, all negative. Nothing proved it ACCEPTS good evidence.
+#
+# A guard that fails closed and is only ever tested for firing is indistinguishable from a guard
+# that refuses everything: both produce a fully green suite. This is the inverse of the rule this
+# repo already knows (a rejection path that never executes is unproven), and it is harder to see
+# because the failure mode looks like safety.
+#
+# `github-status.json` is the valid, unmutated status this file already builds above and asserts
+# is held/self_is_holder. If `workflow start` will ever accept anything, it must accept this.
+#
+# The well-formed environment has TWO requirements beyond the status file, learned from this
+# test's own first red run (the refusals below are the guard's, verbatim):
+#   1. a Git worktree on the claim's named agent branch — "ensure-session requires a named Git
+#      worktree branch for a provider-backed AssignmentStatus record";
+#   2. the caller's identity must be the SAME canonical identity the claim was rendered with
+#      (here: the explicit-override actor the render-claim actor-json declared).
+POSITIVE_PROJECT="$TMPDIR_EVAL/github-positive"
+POSITIVE_ROOT="$POSITIVE_PROJECT/.kontourai/flow-agents"
+mkdir -p "$POSITIVE_ROOT/$GITHUB_SLUG"
+printf '# Pull Work\n\nSelected Work Item: %s\n' "$GITHUB_WORK_ITEM" > "$POSITIVE_ROOT/$GITHUB_SLUG/$GITHUB_SLUG--pull-work.md"
+git -C "$POSITIVE_PROJECT" init -q
+git -C "$POSITIVE_PROJECT" symbolic-ref HEAD "refs/heads/agent/$GITHUB_ACTOR_KEY/$GITHUB_SLUG"
+if FLOW_AGENTS_ACTOR="$GITHUB_ACTOR_KEY" node "$CLI" workflow start \
+  --artifact-root "$POSITIVE_ROOT" --flow builder.build --work-item "$GITHUB_WORK_ITEM" \
+  --assignment-provider github --effective-state-json "$TMPDIR_EVAL/github-status.json" \
+  > "$TMPDIR_EVAL/github-positive.out" 2> "$TMPDIR_EVAL/github-positive.err"; then
+  if [[ -f "$POSITIVE_ROOT/$GITHUB_SLUG/state.json" ]]; then
+    pass "workflow start ACCEPTS well-formed GitHub ownership evidence and creates the session"
+  else
+    fail "workflow start exited 0 on valid GitHub ownership evidence but created no session state"
+  fi
+else
+  fail "workflow start REJECTED well-formed GitHub ownership evidence -- the same status this file asserts is held/self_is_holder: $(cat "$TMPDIR_EVAL/github-positive.err")"
+fi
+
 for variant in actor work_item effective forged_author newer_forged_author missing_author missing_label missing_assignee other_assignee wrong_number wrong_repository; do
   NEGATIVE_PROJECT="$TMPDIR_EVAL/github-negative-$variant"
   NEGATIVE_ROOT="$NEGATIVE_PROJECT/.kontourai/flow-agents"
@@ -614,10 +651,29 @@ for variant in actor work_item effective forged_author newer_forged_author missi
     fail "workflow start accepted mismatched GitHub $variant ownership evidence"
   elif [[ ! -f "$NEGATIVE_ROOT/$GITHUB_SLUG/state.json" ]]; then
     pass "workflow start rejects mismatched GitHub $variant evidence before session mutation"
+    # The refusal must NAME its failing clauses (#1293). Before this existed, every one of these
+    # eleven distinct defects produced the same single sentence, and the only way to find the
+    # failing clause was to re-derive a ~15-clause conjunction from source.
+    if grep -q "failing condition(s):" "$TMPDIR_EVAL/github-negative-$variant.err"; then
+      pass "the $variant refusal names its failing condition(s) instead of one opaque sentence"
+    else
+      fail "the $variant refusal does not name any failing condition: $(head -c 300 "$TMPDIR_EVAL/github-negative-$variant.err")"
+    fi
   else
     fail "workflow start rejected mismatched GitHub $variant evidence only after mutating session state"
   fi
 done
+
+# One variant checked by name, not just by presence: the wrong_repository refusal must point at
+# the repository clause and carry the producing-verb hint, because "assignment.repository is null
+# since --repo was never passed to assignment-provider status" is the exact live trap this
+# diagnostic exists to kill.
+if grep -q "assignment.repository" "$TMPDIR_EVAL/github-negative-wrong_repository.err" \
+  && grep -q -- "--repo <owner>/<name>" "$TMPDIR_EVAL/github-negative-wrong_repository.err"; then
+  pass "the wrong_repository refusal names the repository clause and its producing verb"
+else
+  fail "the wrong_repository refusal does not name the repository clause with its producing-verb hint: $(head -c 300 "$TMPDIR_EVAL/github-negative-wrong_repository.err")"
+fi
 
 if [[ "$errors" -eq 0 ]]; then
   echo "test_ensure_session_ownership_guard: all checks passed."

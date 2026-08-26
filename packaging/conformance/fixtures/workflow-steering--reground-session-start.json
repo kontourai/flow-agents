@@ -12,7 +12,7 @@
   },
   "workspace_setup": {
     "AGENTS.md": "# Test Repo\n",
-    ".flow-agents/build-feature/state.json": {
+    ".kontourai/flow-agents/build-feature/state.json": {
       "task_slug": "build-feature",
       "status": "in_progress",
       "phase": "execution",
@@ -21,10 +21,18 @@
         "status": "in_progress",
         "target_phase": "verification"
       }
+    },
+    ".kontourai/flow-agents/current/conformance-6c1d6cedf276ea3f.json": {
+      "active_slug": "build-feature",
+      "artifact_dir": "build-feature"
     }
+  },
+  "workspace_git": true,
+  "env": {
+    "FLOW_AGENTS_ACTOR": "conformance"
   },
   "expected": {
     "exit_code": 0,
-    "stdout_contains": ["WORKFLOW STATE:", "STATE:", "build-feature"]
+    "stdout_contains": ["RESUME:", "build-feature", "in_progress"]
   }
 }

@@ -18,9 +18,10 @@ import {
   detectRuntimeFromFilesystem,
   detectDefaultRuntime,
 } from "../../build/src/cli/init.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 function fakeHome() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "init-detect-home-"));
+  return makeFixtureDir("init-detect-home-");
 }
 
 function installRecord(dest) {
@@ -88,7 +89,7 @@ test("detectRuntimeFromFilesystem: no candidate dirs present returns unknown", (
 test("detectRuntimeFromFilesystem: CODEX_HOME override takes precedence over ~/.codex presence", () => {
   const home = fakeHome();
   // ~/.codex does NOT exist; CODEX_HOME points at a directory that DOES exist.
-  const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "init-detect-codexhome-"));
+  const codexHome = makeFixtureDir("init-detect-codexhome-");
   assert.equal(detectRuntimeFromFilesystem(home, { CODEX_HOME: codexHome }), "codex");
 });
 
@@ -125,7 +126,7 @@ test("detectDefaultRuntime: ambiguous filesystem (2+ dirs) and no env signal fal
 });
 
 test("init headless: no kit selection records zero active kits", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-init-no-kits-"));
+  const dest = makeFixtureDir("flow-agents-init-no-kits-");
   const result = spawnSync(process.execPath, ["build/src/cli.js", "init", "--runtime", "base", "--dest", dest, "--telemetry-sink", "local-files", "--yes"], {
     encoding: "utf8",
   });
@@ -134,7 +135,7 @@ test("init headless: no kit selection records zero active kits", () => {
 });
 
 test("init headless: --activate-kit selects a non-Builder catalog kit without activating Builder", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-init-one-kit-"));
+  const dest = makeFixtureDir("flow-agents-init-one-kit-");
   const result = spawnSync(process.execPath, ["build/src/cli.js", "init", "--runtime", "codex", "--dest", dest, "--telemetry-sink", "local-files", "--activate-kit", "release-evidence", "--yes"], {
     encoding: "utf8",
   });
@@ -147,7 +148,7 @@ test("init headless: --activate-kit selects a non-Builder catalog kit without ac
 });
 
 test("init headless: --activate-kit auto-includes declared kit dependencies", () => {
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-init-kit-deps-"));
+  const dest = makeFixtureDir("flow-agents-init-kit-deps-");
   const result = spawnSync(process.execPath, ["build/src/cli.js", "init", "--runtime", "codex", "--dest", dest, "--telemetry-sink", "local-files", "--activate-kit", "builder", "--yes"], {
     encoding: "utf8",
   });

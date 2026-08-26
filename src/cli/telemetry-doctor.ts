@@ -34,10 +34,37 @@ export type DoctorReport = {
     endpointAllowed: boolean;
     tokenConfigured: boolean;
     tenantConfigured: boolean;
+    /**
+     * WHERE each Console value came from, not merely whether one exists.
+     *
+     * `tokenConfigured: true` alone cannot answer "did this install configure Console?" --
+     * it is equally true of an ambient machine-wide credential in
+     * ~/.flow-agents/telemetry-console.conf or an exported environment variable. That
+     * conflation is what made `init` print "Console: connected + verified / token
+     * configured / tenant configured" for an install run with `--telemetry-sink
+     * local-files` into a repo whose own telemetry.conf had both values commented out
+     * (kontourai/flow-agents#1344): the doctor resolved the user-global conf, and the
+     * summary reported that resolution as this install's outcome.
+     *
+     * Callers that report on a specific install must combine these with `configFile` (see
+     * `configFileScope`) rather than reading a bare boolean.
+     */
+    tokenSource: ConsoleValueSource;
+    tenantSource: ConsoleValueSource;
+    urlSource: ConsoleValueSource;
     reachability: Reachability;
   };
   warnings: string[];
 };
+
+/** Provenance of a resolved Console value. "absent" means nothing set it anywhere. */
+export type ConsoleValueSource = "environment" | "config-file" | "absent";
+
+function valueSource(envValue: string | undefined, configValue: string | undefined): ConsoleValueSource {
+  if (envValue !== undefined && envValue !== "") return "environment";
+  if (configValue !== undefined && configValue !== "") return "config-file";
+  return "absent";
+}
 
 const defaultChannels = "full";
 const sensitiveQueryKeys = new Set(["token", "api_key", "apikey", "key", "secret", "password", "auth", "authorization", "access_token"]);
@@ -166,13 +193,9 @@ function isLocalHostname(hostname: string): boolean {
 }
 
 // TS mirror of scripts/telemetry/lib/config.sh's telemetry_conf_trusted
-// (mode-600 + owner-uid + no-symlink gate). Used only to WARN that a
-// candidate telemetry-console.conf exists but would be silently ignored by
-// the real bash runtime pipeline -- this doctor still reads the shipped
-// scripts/telemetry/telemetry.conf default for its own report (accepted,
-// explicitly out-of-scope gap; see install-flow-foundations plan Thread C).
-// Symlink-then-existence guard order mirrors console-learning-projection.ts
-// and workflow-sidecar.ts's existing lstatSync-before-statSync precedent.
+// (mode-600 + owner-uid + no-symlink gate). Symlink-then-existence guard order
+// mirrors console-learning-projection.ts and workflow-sidecar.ts's existing
+// lstatSync-before-statSync precedent.
 function isConfTrusted(file: string): boolean {
   try {
     if (fs.lstatSync(file).isSymbolicLink()) return false;
@@ -184,6 +207,30 @@ function isConfTrusted(file: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve the config file the bash runtime would actually load, in
+ * scripts/telemetry/lib/config.sh's order: explicit TELEMETRY_CONFIG_FILE, a
+ * trusted per-workspace .kontourai/telemetry-console.conf, a trusted
+ * user-global ~/.flow-agents/telemetry-console.conf, then the shipped default.
+ *
+ * This doctor used to report the shipped default unconditionally, which made a
+ * perfectly good machine-wide install read as unconfigured: "Console endpoint:
+ * not configured" while the hooks were resolving a URL, token and tenant from
+ * ~/.flow-agents/telemetry-console.conf and mirroring happily. A diagnostic
+ * that answers "is my telemetry configured?" with the wrong answer sends
+ * people to rewrite config that was never broken, which is worse than having
+ * no diagnostic at all.
+ */
+export function resolveTelemetryConfigFile(dest: string, telemetryDir: string): string {
+  const explicit = process.env.TELEMETRY_CONFIG_FILE;
+  if (explicit) return path.resolve(explicit);
+  const localConf = path.join(dest, ".kontourai", "telemetry-console.conf");
+  if (isConfTrusted(localConf)) return localConf;
+  const globalConf = path.join(os.homedir(), ".flow-agents", "telemetry-console.conf");
+  if (isConfTrusted(globalConf)) return globalConf;
+  return path.join(telemetryDir, "telemetry.conf");
 }
 
 function safeReportUrl(value: string): string | undefined {
@@ -203,7 +250,7 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
   const allowNetwork = flagBool(args.flags, "allow-network");
   const dest = path.resolve(flagString(args.flags, "dest", process.cwd()) ?? process.cwd());
   const telemetryDir = path.join(dest, "scripts", "telemetry");
-  const configFile = path.join(telemetryDir, "telemetry.conf");
+  const configFile = resolveTelemetryConfigFile(dest, telemetryDir);
   const config = readConfig(configFile);
   const enabled = configValue(config, "TELEMETRY_ENABLED", "enabled", "true") !== "false";
   const dataDir = telemetryDataDir(dest);
@@ -241,6 +288,12 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
       endpointAllowed: allowed,
       tokenConfigured: Boolean(process.env.CONSOLE_TELEMETRY_TOKEN ?? process.env.CONSOLE_AUTH_TOKEN ?? config.console_telemetry_token),
       tenantConfigured: Boolean(process.env.CONSOLE_TENANT_ID ?? config.console_tenant_id),
+      tokenSource: valueSource(process.env.CONSOLE_TELEMETRY_TOKEN ?? process.env.CONSOLE_AUTH_TOKEN, config.console_telemetry_token),
+      tenantSource: valueSource(process.env.CONSOLE_TENANT_ID, config.console_tenant_id),
+      urlSource: valueSource(
+        process.env.CONSOLE_TELEMETRY_URL ?? process.env.CONSOLE_URL ?? process.env.CONSOLE_TELEMETRY_ENDPOINT_URL,
+        config.console_telemetry_url ?? config.console_url ?? config.console_telemetry_endpoint_url,
+      ),
       reachability,
     },
     warnings,
@@ -249,7 +302,10 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
 
 function reportWarnings(configFile: string, endpointUrl: string, allowed: boolean, allowNetwork: boolean, dest: string): string[] {
   const warnings: string[] = [];
-  if (!fs.existsSync(configFile)) warnings.push("telemetry.conf was not found under destination scripts/telemetry");
+  // Only meaningful when the shipped default is the resolved file; a workspace
+  // or user-global conf living elsewhere is the normal, supported case.
+  if (!fs.existsSync(configFile) && configFile.startsWith(path.join(dest, "scripts", "telemetry")))
+    warnings.push("telemetry.conf was not found under destination scripts/telemetry");
   if (endpointUrl && !allowed) warnings.push(allowNetwork ? "Console endpoint is malformed or contains credentials" : "Console endpoint is not allowed without --allow-network; local http(s) endpoints and the known hosted Console host are allowed by default");
   // Mirrors config.sh's local-before-global precedence for the warning only
   // (see isConfTrusted's doc comment for the accepted config-resolution-parity gap).

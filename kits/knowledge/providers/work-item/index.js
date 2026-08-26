@@ -7,28 +7,57 @@
  *   - flow-agents:work-item-metadata `blockers` -> `blocks` edges.
  *   - prose "blocked by #N"          -> `blocks` edges; other #N refs -> `relates`.
  *
- * Reads via an INJECTABLE runner so tests drive it from recorded fixtures and
+ * Reads via an INJECTED runner so tests drive it from recorded fixtures and
  * never touch the real board. Write side is proposals-only: proposeWrite renders
  * a draft issue comment / label change for an operator to file — it never calls
  * a mutating gh command.
  *
+ * A runner MUST be provided — there is no default. This enforces the unidirectional
+ * provider boundary (Surface must not import producer runtime code).
+ *
+ * **Runner contract**: `(args: string[], conditional?: { validators?: {etag?,
+ * lastModified?}, headers?: Record<string,string> }) => Promise<string | any[] |
+ * { issues: any[], etag?: string, lastModified?: string, notModified?: boolean }>`.
+ * `args` is the read-only `gh` argv the runner would execute (or interpret).
+ * `conditional` — present when a prior fetch cached validators — carries them
+ * both as structured `validators` and as pre-built `headers` (If-None-Match /
+ * If-Modified-Since) for runners that speak HTTP directly; a runner that
+ * ignores the second argument keeps working exactly as before (legacy
+ * single-arg fixture runners are unaffected).
+ *
+ * **Conditional GET support (opt-in)**: If the runner returns `{ issues, etag, lastModified }`
+ * the provider will send `If-None-Match`/`If-Modified-Since` on subsequent fetches.
+ * A `304 Not Modified` returns cached issues with `notModified: true`. A runner
+ * that reports `notModified` on the FIRST fetch (no cache to revalidate against)
+ * is a contract violation and raises a clear error — never a TypeError.
+ * GitHub's REST API does not reliably support ETag on list endpoints; this is for
+ * providers that do. Uses shared conditional-get utilities. A legacy runner
+ * (plain string or plain array, no `{ issues }` wrapper) carries no ETag/
+ * Last-Modified channel at all, but still benefits from the shared module's
+ * sha256 body-hash fallback: a byte-identical re-fetch is detected and served
+ * from cache without a re-parse.
+ *
+ * `capabilities().conditional_get` REFLECTS OBSERVED RUNNER SUPPORT — it is
+ * `false` until a structured, validator-bearing response (`{ issues, etag }`
+ * or `{ issues, lastModified }`) has actually been seen from the injected
+ * runner. A legacy string/array runner can never produce one, so
+ * `conditional_get` correctly stays `false` for that provider instance for
+ * its entire lifetime — it is not a static claim independent of the runner.
+ *
  * @module providers/work-item
  */
 
-import { execFile } from "node:child_process";
 import { node, edge, proposal, provenance } from "../lib/model.js";
+import {
+  buildConditionalHeaders,
+  processConditionalResponse,
+  createCacheEntry,
+  isCacheFresh,
+  isBodyUnchanged,
+  computeBodyHash,
+} from "../../adapters/shared/conditional-get.js";
 
 const PROVIDER_ID = "work-item";
-
-/** Default runner: shells out to `gh` (read-only list). */
-function defaultRunner(args) {
-  return new Promise((resolve, reject) => {
-    execFile("gh", args, { maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(`gh ${args.join(" ")} failed: ${stderr || err.message}`));
-      resolve(stdout);
-    });
-  });
-}
 
 /** Parse the flow-agents:work-item-metadata JSON block from an issue body. */
 export function parseWorkItemMetadata(body) {
@@ -64,12 +93,29 @@ function blockerNumber(entry) {
 }
 
 export class WorkItemProvider {
-  constructor({ repo, runner, agent } = {}) {
+  /**
+   * @param {{ repo?: string, runner: Function, agent?: string, cacheTtlMs?: number }} options
+   *   `cacheTtlMs` (optional): when set, a cache entry older than this is
+   *   treated as expired and triggers a refresh even without `forceRefresh`.
+   *   Default (unset): cache for the provider instance's lifetime, matching
+   *   prior behavior.
+   */
+  constructor({ repo, runner, agent, cacheTtlMs } = {}) {
+    if (!runner) {
+      throw new Error("WorkItemProvider requires an injected `runner` function — no default. Provide a function(args: string[]) => Promise<{ issues: any[], etag?: string, lastModified?: string }> that executes read-only gh commands or returns fixture data.");
+    }
     this.repo = repo || "";
-    this.runner = runner || defaultRunner;
+    this.runner = runner;
     this.agent = agent;
+    this.cacheTtlMs = cacheTtlMs;
     this.id = PROVIDER_ID;
     this._cache = null;
+    this._cacheEntry = null; // { data, validators, cachedAt }
+    // capabilities().conditional_get is derived from this, not a static claim
+    // (see module docstring) — flips true only once a structured,
+    // validator-bearing response has actually been observed.
+    this._observedValidatorSupport = false;
+    this._inFlightFetch = null; // single-flight guard, see _issues()
   }
 
   capabilities() {
@@ -80,18 +126,84 @@ export class WorkItemProvider {
       writable: false,
       write_mode: "proposals-only",
       proposal_targets: ["comment", "label"],
-      source_of_truth: "GitHub issues (read via gh; write = draft comments/labels)",
+      source_of_truth: "GitHub issues (read via injected runner; write = draft comments/labels)",
+      // Derived, not static: true only once a structured validator-bearing
+      // response has actually been observed from the injected runner.
+      conditional_get: Boolean(this._observedValidatorSupport),
     };
   }
 
-  async _issues() {
-    if (this._cache) return this._cache;
+  async _issues(options = {}) {
+    const { forceRefresh = false } = options;
+    const cacheExpired =
+      this.cacheTtlMs != null && this._cacheEntry && !isCacheFresh(this._cacheEntry, this.cacheTtlMs);
+    if (this._cacheEntry && !forceRefresh && !cacheExpired) return this._cacheEntry.data;
+
+    // Single-flight: concurrent callers on a cold/expired cache (e.g.
+    // readGraph()'s Promise.all(readNodes(), readEdges())) must share ONE
+    // underlying fetch, not each independently issue one. This entire method
+    // body up to here and up to the assignment below runs synchronously (no
+    // `await` yet), so a second concurrent call always observes the in-flight
+    // promise already set by the first. Cleared on rejection (via .finally())
+    // so the next call retries rather than being permanently stuck.
+    if (this._inFlightFetch) return this._inFlightFetch;
+
+    this._inFlightFetch = this._fetchIssues().finally(() => {
+      this._inFlightFetch = null;
+    });
+    return this._inFlightFetch;
+  }
+
+  async _fetchIssues() {
     const args = ["issue", "list"];
     if (this.repo) args.push("--repo", this.repo);
     args.push("--state", "all", "--json", "number,title,state,labels,body", "--limit", "200");
-    const out = await this.runner(args);
-    const parsed = JSON.parse(out);
-    this._cache = Array.isArray(parsed) ? parsed : [];
+
+    // Close the validator loop: pass cached validators to the runner both as
+    // structured data and as pre-built conditional headers, so a runner that
+    // wraps the GitHub API directly (or a fixture runner) can send
+    // If-None-Match / If-Modified-Since on a re-fetch. `gh issue list` itself
+    // has no --header flag; this is for runners that speak HTTP.
+    const validators = this._cacheEntry?.validators;
+    const conditional = { validators, headers: buildConditionalHeaders(validators) };
+
+    const out = await this.runner(args, conditional);
+
+    // Runner may return { issues: [...], etag, lastModified, notModified }
+    let result;
+    if (typeof out === "string") {
+      // Legacy runner: plain JSON array string. No ETag/Last-Modified channel
+      // at all, but a byte-identical re-fetch still benefits from the shared
+      // module's sha256 body-hash fallback (this module's docstring "no
+      // validators -> body-hash compare" path — wired here, not dead code).
+      if (isBodyUnchanged(this._cacheEntry, out)) {
+        result = { data: this._cacheEntry.data, notModified: true, validators: this._cacheEntry.validators };
+      } else {
+        result = { data: JSON.parse(out), notModified: false, validators: { bodyHash: computeBodyHash(out) } };
+      }
+    } else if (out && Array.isArray(out.issues)) {
+      // Structured response with validators
+      if (out.etag || out.lastModified) this._observedValidatorSupport = true;
+      result = processConditionalResponse(
+        { status: out.notModified ? 304 : 200, body: JSON.stringify(out.issues), headers: { etag: out.etag, "last-modified": out.lastModified } },
+        this._cacheEntry
+      );
+    } else {
+      // Legacy runner: plain array (or other JS value) with no wrapper. Same
+      // body-hash fallback as the string branch, hashed over its JSON form.
+      const raw = JSON.stringify(out) ?? String(out);
+      if (isBodyUnchanged(this._cacheEntry, raw)) {
+        result = { data: this._cacheEntry.data, notModified: true, validators: this._cacheEntry.validators };
+      } else {
+        result = { data: out, notModified: false, validators: { bodyHash: computeBodyHash(raw) } };
+      }
+    }
+
+    // Update cache entry with new validators
+    if (!result.notModified) {
+      this._cacheEntry = createCacheEntry(result.data, result.validators);
+    }
+    this._cache = this._cacheEntry.data;
     return this._cache;
   }
 
@@ -202,3 +314,22 @@ export class WorkItemProvider {
 }
 
 export default WorkItemProvider;
+
+/**
+ * Create a production runner that shells out to `gh` CLI.
+ * Use this explicitly in production code — it is NOT the default.
+ *
+ * @param {{ maxBuffer?: number }=} options
+ * @returns {(args: string[]) => Promise<string>}
+ */
+export function createGhRunner({ maxBuffer = 32 * 1024 * 1024 } = {}) {
+  return async function ghRunner(args) {
+    const { execFile } = await import("node:child_process");
+    return new Promise((resolve, reject) => {
+      execFile("gh", args, { maxBuffer }, (err, stdout, stderr) => {
+        if (err) return reject(new Error(`gh ${args.join(" ")} failed: ${stderr || err.message}`));
+        resolve(stdout);
+      });
+    });
+  };
+}

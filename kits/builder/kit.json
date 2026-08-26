@@ -1,5 +1,6 @@
 {
   "schema_version": "1.0",
+  "observability_contribution": { "path": "kit-observability.contribution.json" },
   "id": "builder",
   "name": "Builder Kit",
   "product_name": "Builder Kit",
@@ -14,6 +15,11 @@
       "id": "builder.build",
       "path": "flows/build.flow.json",
       "description": "Pull ready provider-backed work through design probing, planning, implementation, verification, provider change readiness, merge readiness, and learning."
+    },
+    {
+      "id": "builder.build-lean",
+      "path": "flows/build-lean.flow.json",
+      "description": "REDUCED-GATE ABLATION VARIANT of builder.build: the same steps and terminal behaviour with design-probe-gate and plan-gate removed. The design-probe and plan steps survive only as unenforced sequencing passthroughs -- they declare NO producer skill and demand no artifact, so this variant removes the gate AND the instruction to do that step's work. That is deliberate (it models the realistic post-cut world, where nothing consumes those artifacts and nothing compels the work), but it means the independent variable is the gate TOGETHER WITH its step's demanded work, never the gate alone; a verdict drawn from these runs must be stated that way. Note also that verify-gate's plan_gap and merge-ready-gate's decision_gap route-backs still resolve structurally, but route to steps that demand nothing here and a re-satisfiable gate in the control. It enforces strictly fewer gates than builder.build and must not be used as a substitute for it; it exists so the gate-value ablation has an independent variable whose runs are distinguishable by flow_id and definition_digest."
     },
     {
       "id": "builder.publish-learn",
@@ -158,6 +164,115 @@
       "artifact_bindings": []
     },
     {
+      "flow_id": "builder.build-lean",
+      "step_id": "pull-work",
+      "skills": ["pull-work"],
+      "implementation_allowed": false,
+      "artifacts": ["<slug>--pull-work.md", "trust.bundle#selected-work"],
+      "expectation_ids": ["selected-work"],
+      "expectation_bindings": [{ "expectation_id": "selected-work", "interface": "workflow.evidence" }],
+      "artifact_bindings": [{ "artifact": "<slug>--pull-work.md", "expectation_ids": ["selected-work"] }, { "artifact": "trust.bundle#selected-work", "expectation_ids": ["selected-work"] }]
+    },
+    {
+      "flow_id": "builder.build-lean",
+      "step_id": "design-probe",
+      "skills": [],
+      "implementation_allowed": false,
+      "artifacts": [],
+      "expectation_ids": [],
+      "expectation_bindings": [],
+      "artifact_bindings": []
+    },
+    {
+      "flow_id": "builder.build-lean",
+      "step_id": "plan",
+      "skills": [],
+      "implementation_allowed": false,
+      "artifacts": [],
+      "expectation_ids": [],
+      "expectation_bindings": [],
+      "artifact_bindings": []
+    },
+    {
+      "flow_id": "builder.build-lean",
+      "step_id": "execute",
+      "skills": ["execute-plan"],
+      "implementation_allowed": true,
+      "artifacts": ["<slug>--deliver.md", "trust.bundle#implementation-scope"],
+      "expectation_ids": ["implementation-scope"],
+      "expectation_bindings": [{ "expectation_id": "implementation-scope", "interface": "workflow.evidence" }],
+      "artifact_bindings": [{ "artifact": "<slug>--deliver.md", "expectation_ids": ["implementation-scope"] }, { "artifact": "trust.bundle#implementation-scope", "expectation_ids": ["implementation-scope"] }]
+    },
+    {
+      "flow_id": "builder.build-lean",
+      "step_id": "verify",
+      "skills": ["review-work", "verify-work"],
+      "implementation_allowed": false,
+      "artifacts": ["trust.bundle#critique", "trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"],
+      "expectation_ids": ["clean-critique", "acceptance-criteria", "tests-evidence", "policy-compliance"],
+      "expectation_bindings": [
+        { "expectation_id": "clean-critique", "interface": "workflow.critique" },
+        { "expectation_id": "acceptance-criteria", "interface": "workflow.evidence" },
+        { "expectation_id": "tests-evidence", "interface": "workflow.evidence" },
+        { "expectation_id": "policy-compliance", "interface": "workflow.evidence" }
+      ],
+      "artifact_bindings": [{ "artifact": "trust.bundle#critique", "expectation_ids": ["clean-critique"] }, { "artifact": "trust.bundle#acceptance-criteria", "expectation_ids": ["acceptance-criteria"] }, { "artifact": "trust.bundle#tests-evidence", "expectation_ids": ["tests-evidence"] }, { "artifact": "trust.bundle#policy-compliance", "expectation_ids": ["policy-compliance"] }]
+    },
+    {
+      "flow_id": "builder.build-lean",
+      "step_id": "merge-ready",
+      "skills": ["evidence-gate"],
+      "implementation_allowed": false,
+      "artifacts": ["<slug>--evidence-gate.md", "trust.bundle#merge-readiness"],
+      "expectation_ids": ["merge-readiness"],
+      "expectation_bindings": [{ "expectation_id": "merge-readiness", "interface": "workflow.evidence" }],
+      "artifact_bindings": [{ "artifact": "<slug>--evidence-gate.md", "expectation_ids": ["merge-readiness"] }, { "artifact": "trust.bundle#merge-readiness", "expectation_ids": ["merge-readiness"] }]
+    },
+    {
+      "flow_id": "builder.build-lean",
+      "step_id": "pr-open",
+      "skills": [],
+      "operations": ["publish-change"],
+      "implementation_allowed": false,
+      "expectation_ids": ["pull-request-opened"],
+      "artifacts": ["publish-change.result.json"],
+      "expectation_bindings": [{ "expectation_id": "pull-request-opened", "interface": "operation", "operation": "publish-change" }],
+      "artifact_bindings": [{ "artifact": "publish-change.result.json", "expectation_ids": ["pull-request-opened"] }]
+    },
+    {
+      "flow_id": "builder.build-lean",
+      "step_id": "merge-ready-ci",
+      "skills": ["release-readiness"],
+      "implementation_allowed": false,
+      "artifacts": ["release.json", "trust.bundle#ci-merge-readiness"],
+      "expectation_ids": ["ci-merge-readiness"],
+      "expectation_bindings": [{ "expectation_id": "ci-merge-readiness", "interface": "workflow.evidence" }],
+      "artifact_bindings": [{ "artifact": "release.json", "expectation_ids": ["ci-merge-readiness"] }, { "artifact": "trust.bundle#ci-merge-readiness", "expectation_ids": ["ci-merge-readiness"] }]
+    },
+    {
+      "flow_id": "builder.build-lean",
+      "step_id": "learn",
+      "skills": ["learning-review"],
+      "implementation_allowed": false,
+      "artifacts": ["learning.json", "trust.bundle#decision-evidence", "trust.bundle#learning-evidence"],
+      "expectation_ids": ["decision-evidence", "learning-evidence"],
+      "expectation_bindings": [
+        { "expectation_id": "decision-evidence", "interface": "workflow.evidence" },
+        { "expectation_id": "learning-evidence", "interface": "workflow.evidence" }
+      ],
+      "artifact_bindings": [{ "artifact": "learning.json", "expectation_ids": ["decision-evidence", "learning-evidence"] }, { "artifact": "trust.bundle#decision-evidence", "expectation_ids": ["decision-evidence"] }, { "artifact": "trust.bundle#learning-evidence", "expectation_ids": ["learning-evidence"] }]
+    },
+    {
+      "flow_id": "builder.build-lean",
+      "step_id": "done",
+      "skills": [],
+      "implementation_allowed": false,
+      "artifacts": [],
+      "expectation_ids": [],
+      "expectation_bindings": [],
+      "artifact_bindings": []
+    },
+    {
       "flow_id": "builder.shape",
       "step_id": "shape",
       "skills": ["idea-to-backlog"],
@@ -222,21 +337,6 @@
       ]
     },
     {
-      "id": "dev-builder-review-before-verify-after-execute",
-      "description": "review-before-verify after execute",
-      "tier": "adapter",
-      "event": "PostToolUse",
-      "must_include_guidance": [
-        "Next: review",
-        "then verify",
-        "report only"
-      ],
-      "must_include_actions": [
-        "review-work for report-only critique before verify-work",
-        "not count report-only critique as verification evidence"
-      ]
-    },
-    {
       "id": "dev-builder-route-fresh-coding-prompt",
       "description": "fresh coding prompt routes into Builder workflow",
       "tier": "adapter",
@@ -262,13 +362,13 @@
     { "skill_id": "builder.fix-bug", "role": "profile", "flow_id": "builder.build", "step_ids": [], "artifacts": [], "expectation_ids": [] },
     { "skill_id": "builder.tdd-workflow", "role": "profile", "flow_id": "builder.build", "step_ids": [], "artifacts": [], "expectation_ids": [] },
     { "skill_id": "builder.idea-to-backlog", "role": "step", "flow_id": "builder.shape", "step_ids": ["shape", "breakdown", "file-issues"], "artifacts": ["<slug>--idea-to-backlog.md", "trust.bundle#builder.shape"], "expectation_ids": ["shaped-problem", "shaped-outcome", "shaped-constraints", "shaped-non-goals", "shaped-success", "shaped-risk", "open-decisions", "slices-defined", "work-items-filed"] },
-    { "skill_id": "builder.pull-work", "role": "step", "flow_id": "builder.build", "step_ids": ["pull-work"], "artifacts": ["<slug>--pull-work.md", "trust.bundle#selected-work"], "expectation_ids": ["selected-work"] },
+    { "skill_id": "builder.pull-work", "role": "step", "flow_id": "builder.build", "flow_ids": ["builder.build-lean"], "step_ids": ["pull-work"], "artifacts": ["<slug>--pull-work.md", "trust.bundle#selected-work"], "expectation_ids": ["selected-work"] },
     { "skill_id": "builder.pickup-probe", "role": "step", "flow_id": "builder.build", "step_ids": ["design-probe"], "artifacts": ["<slug>--pull-work.md", "trust.bundle#pickup-probe"], "expectation_ids": ["pickup-probe-readiness", "probe-decisions-or-accepted-gaps"] },
     { "skill_id": "builder.plan-work", "role": "step", "flow_id": "builder.build", "step_ids": ["plan"], "artifacts": ["<slug>--plan-work.md", "acceptance.json", "handoff.json", "trust.bundle#implementation-plan"], "expectation_ids": ["implementation-plan"] },
-    { "skill_id": "builder.execute-plan", "role": "step", "flow_id": "builder.build", "step_ids": ["execute"], "artifacts": ["<slug>--deliver.md", "trust.bundle#implementation-scope"], "expectation_ids": ["implementation-scope"] },
-    { "skill_id": "builder.review-work", "role": "step", "flow_id": "builder.build", "step_ids": ["verify"], "artifacts": ["trust.bundle#critique"], "expectation_ids": ["clean-critique"] },
-    { "skill_id": "builder.verify-work", "role": "step", "flow_id": "builder.build", "step_ids": ["verify"], "artifacts": ["trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"], "expectation_ids": ["acceptance-criteria", "tests-evidence", "policy-compliance"] },
-    { "skill_id": "builder.evidence-gate", "role": "step", "flow_id": "builder.build", "step_ids": ["merge-ready"], "artifacts": ["<slug>--evidence-gate.md", "trust.bundle#merge-readiness"], "expectation_ids": ["merge-readiness"] },
+    { "skill_id": "builder.execute-plan", "role": "step", "flow_id": "builder.build", "flow_ids": ["builder.build-lean"], "step_ids": ["execute"], "artifacts": ["<slug>--deliver.md", "trust.bundle#implementation-scope"], "expectation_ids": ["implementation-scope"] },
+    { "skill_id": "builder.review-work", "role": "step", "flow_id": "builder.build", "flow_ids": ["builder.build-lean"], "step_ids": ["verify"], "artifacts": ["trust.bundle#critique"], "expectation_ids": ["clean-critique"] },
+    { "skill_id": "builder.verify-work", "role": "step", "flow_id": "builder.build", "flow_ids": ["builder.build-lean"], "step_ids": ["verify"], "artifacts": ["trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"], "expectation_ids": ["acceptance-criteria", "tests-evidence", "policy-compliance"] },
+    { "skill_id": "builder.evidence-gate", "role": "step", "flow_id": "builder.build", "flow_ids": ["builder.build-lean"], "step_ids": ["merge-ready"], "artifacts": ["<slug>--evidence-gate.md", "trust.bundle#merge-readiness"], "expectation_ids": ["merge-readiness"] },
     { "skill_id": "builder.release-readiness", "role": "step", "flow_id": "builder.publish-learn", "step_ids": ["merge-ready-ci"], "artifacts": ["release.json", "trust.bundle#ci-merge-readiness"], "expectation_ids": ["ci-merge-readiness"] },
     { "skill_id": "builder.learning-review", "role": "step", "flow_id": "builder.publish-learn", "step_ids": ["learn"], "artifacts": ["learning.json", "trust.bundle#decision-evidence", "trust.bundle#learning-evidence"], "expectation_ids": ["decision-evidence", "learning-evidence"] },
     { "skill_id": "builder.design-probe", "role": "shared-primitive", "step_ids": [], "artifacts": ["ephemeral decision record"], "expectation_ids": [] },

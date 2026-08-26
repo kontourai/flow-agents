@@ -8,7 +8,8 @@
  *     --managed-hooks <path-to-flow-agents-hooks-snippet.json> \
  *     --version <version-string> \
  *     --install-record <path-to-install.json> \
- *     --runtime <claude-code|codex|opencode|pi|kiro|base>
+ *     --runtime <claude-code|codex|opencode|pi|kiro|base> \
+ *     [--omit-managed-key <top-level-key>]...
  *
  * Usage (CLI — stamp only, no config merge):
  *   node scripts/install-merge.js \
@@ -37,6 +38,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const path = require("node:path");
 const os = require("node:os");
 
@@ -81,6 +83,24 @@ function emitConflict(onConflict, item) {
 }
 
 /**
+ * Returns true if a single INNER hook object (one entry of a hook group's `hooks` array --
+ * `{ type, command, timeout, statusMessage }`) is owned by flow-agents, by checking whether its
+ * `statusMessage` contains one of the FA_MARKERS strings. This is the single source of truth for
+ * "is this hook FA-owned" at entry granularity -- `isManagedHookGroup` below (whole-group,
+ * consumed by mergeSettings' hooks step) and src/cli/uninstall.ts's entry-granular settings
+ * stripping are both defined in terms of this function (uninstall.ts imports it directly), so
+ * the two can never independently drift on which hooks count as FA-owned.
+ *
+ * @param {unknown} innerHook
+ * @returns {boolean}
+ */
+function isManagedInnerHook(innerHook) {
+  if (typeof innerHook !== "object" || innerHook === null) return false;
+  const sm = typeof innerHook.statusMessage === "string" ? innerHook.statusMessage : "";
+  return FA_MARKERS.some((marker) => sm.includes(marker));
+}
+
+/**
  * Returns true if a hook-group entry is owned by flow-agents.
  * A hook-group in Claude Code settings looks like:
  *   { hooks: [ { type, command, timeout, statusMessage } ] }
@@ -96,11 +116,7 @@ function emitConflict(onConflict, item) {
 function isManagedHookGroup(hookGroup) {
   if (typeof hookGroup !== "object" || hookGroup === null) return false;
   const innerHooks = Array.isArray(hookGroup.hooks) ? hookGroup.hooks : [];
-  return innerHooks.some((innerHook) => {
-    if (typeof innerHook !== "object" || innerHook === null) return false;
-    const sm = typeof innerHook.statusMessage === "string" ? innerHook.statusMessage : "";
-    return FA_MARKERS.some((marker) => sm.includes(marker));
-  });
+  return innerHooks.some((innerHook) => isManagedInnerHook(innerHook));
 }
 
 /**
@@ -229,10 +245,25 @@ function mergeSettings(existing, managed, options = {}) {
       ? managedHooks[eventKey]
       : [];
 
-    // Keep user-owned (non-FA) groups from existing.
-    const userGroups = existingGroups.filter(
-      (group) => !isManagedHookGroup(group)
-    );
+    // Keep user-owned content from existing groups at ENTRY granularity, not group
+    // granularity: the Claude Code settings schema allows multiple entries in one group's
+    // `hooks` array, and nothing prevents a user (or another tool) appending its own hook into
+    // a group flow-agents also writes into. Stripping the whole group the moment ANY inner
+    // entry matched an FA marker silently deleted that co-located user hook on every ordinary
+    // re-install/upgrade (#findings: uninstall r1 HIGH, r2 delta HIGH -- this is the same
+    // classifier, now fixed at its one source instead of only on the uninstall path). A group
+    // survives, with every other group-level field (`matcher`, etc.) preserved via the spread,
+    // whenever at least one of its inner hooks is not FA-owned; it is dropped entirely only when
+    // every inner hook was FA-owned, exactly as before.
+    const userGroups = [];
+    for (const group of existingGroups) {
+      if (typeof group !== "object" || group === null || !Array.isArray(group.hooks)) {
+        if (!isManagedHookGroup(group)) userGroups.push(group);
+        continue;
+      }
+      const keptInner = group.hooks.filter((hook) => !isManagedInnerHook(hook));
+      if (keptInner.length > 0) userGroups.push(Object.assign({}, group, { hooks: keptInner }));
+    }
 
     // Append the new FA groups from managed (may be empty if event not in managed).
     mergedHooks[eventKey] = [...userGroups, ...managedGroups];
@@ -275,17 +306,125 @@ function atomicWriteJson(filePath, data) {
  * @param {string} version
  * @param {string} runtime
  */
-function writeInstallRecord(installRecordPath, version, runtime) {
+function captureConfigPremerge(configPath) {
+  if (!fs.existsSync(configPath)) return { schema_version: "1.0", existed: false, bytes_base64: "", parsed: {}, config_path: path.resolve(configPath) };
+  const bytes = fs.readFileSync(configPath);
+  return {
+    schema_version: "1.0",
+    existed: true,
+    bytes_base64: bytes.toString("base64"),
+    parsed: JSON.parse(bytes.toString("utf8")),
+    config_path: path.resolve(configPath),
+  };
+}
+
+function normalizeV1ConfigPremergeSnapshot(value, runtime, configPath) {
+  if (!value || typeof value !== "object" || value.schema_version !== "1.0") return value;
+  // Released v1 records predate snapshot-local identity. Their enclosing install
+  // record and the config path being operated on were the identity contract.
+  // Preserve explicit fields so a contradictory record still fails validation.
+  return {
+    ...value,
+    ...(value.runtime === undefined ? { runtime } : {}),
+    ...(value.config_path === undefined && configPath ? { config_path: path.resolve(configPath) } : {}),
+  };
+}
+
+function validConfigPremergeSnapshot(value, runtime, configPath) {
+  value = normalizeV1ConfigPremergeSnapshot(value, runtime, configPath);
+  if (!value || typeof value !== "object" || value.schema_version !== "1.0"
+    || typeof value.existed !== "boolean" || typeof value.bytes_base64 !== "string"
+    || typeof value.post_install_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(value.post_install_sha256)
+    || typeof value.config_path !== "string" || value.runtime !== runtime
+    || !value.parsed || typeof value.parsed !== "object" || Array.isArray(value.parsed)) return false;
+  if (!value.existed) return value.bytes_base64 === "" && Object.keys(value.parsed).length === 0;
+  try {
+    const bytes = Buffer.from(value.bytes_base64, "base64");
+    return bytes.toString("base64") === value.bytes_base64
+      && JSON.stringify(JSON.parse(bytes.toString("utf8"))) === JSON.stringify(value.parsed);
+  } catch { return false; }
+}
+
+function priorOrigin(installRecordPath, runtime, configPath) {
+  if (!fs.existsSync(installRecordPath)) return { state: "absent" };
+  try {
+    const record = JSON.parse(fs.readFileSync(installRecordPath, "utf8"));
+    if (record.runtime !== runtime) return { state: "invalid" };
+    const premerge = record.config_premerge;
+    if (premerge?.schema_version === "2.0") {
+      if (!validConfigPremergeSnapshot(premerge.origin, runtime, configPath)) return { state: "invalid" };
+      return { state: "valid", origin: normalizeV1ConfigPremergeSnapshot(premerge.origin, runtime, configPath) };
+    }
+    // Version 1 had one snapshot serving both purposes. It is the best available
+    // lineage origin when upgrading; new records split the responsibilities.
+    return validConfigPremergeSnapshot(premerge, runtime, configPath)
+      ? { state: "valid", origin: normalizeV1ConfigPremergeSnapshot(premerge, runtime, configPath) }
+      : { state: "invalid" };
+  } catch { return { state: "invalid" }; }
+}
+
+function installedValues(configPath, merged, managed) {
+  const hooks = [];
+  for (const groups of Object.values(managed.hooks || {})) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) if (group && Array.isArray(group.hooks)) hooks.push(...group.hooks);
+  }
+  const values = { hooks };
+  if (valueContainsManagedMarker(merged.statusLine)) values.statusLine = merged.statusLine;
+  if (Array.isArray(managed.instructions)) values.instructions = managed.instructions;
+  return { [path.resolve(configPath)]: values };
+}
+
+/**
+ * Return the original bytes only when config surgery fully restored the
+ * pre-merge JSON value. Formatting is user data too, so a structural round
+ * trip must not silently reformat a config that otherwise came back intact.
+ */
+function restoreConfigPremergeBytes(premerge, nextContent, currentBytes) {
+  if (!premerge || premerge.schema_version !== "1.0") return null;
+  if (!premerge.existed || typeof premerge.bytes_base64 !== "string") return null;
+  if (typeof premerge.post_install_sha256 !== "string" || !Buffer.isBuffer(currentBytes)) return null;
+  if (crypto.createHash("sha256").update(currentBytes).digest("hex") !== premerge.post_install_sha256) return null;
+  if (!valuesEqual(premerge.parsed, nextContent)) return null;
+  return Buffer.from(premerge.bytes_base64, "base64");
+}
+
+function stampConfigPremergePostInstallHash(premerge, configPath) {
+  if (!premerge || typeof premerge !== "object") return premerge;
+  return { ...premerge, post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(configPath)).digest("hex") };
+}
+
+function writeInstallRecord(installRecordPath, version, runtime, configPremerge, installed_values) {
   const record = {
     version,
     installedAt: new Date().toISOString(),
     runtime,
+    ...(configPremerge ? { config_premerge: configPremerge } : {}),
+    ...(installed_values ? { installed_values } : {}),
   };
-  atomicWriteJson(installRecordPath, record);
+  const dir = path.dirname(installRecordPath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${installRecordPath}.tmp.${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, installRecordPath);
+    fs.chmodSync(installRecordPath, 0o600);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
 }
 
 /**
  * runMerge — perform the full merge (read, merge, write, stamp).
+ *
+ * `omitManagedKeys` drops top-level keys from the managed config BEFORE the merge, so the
+ * install never writes them and `installedValues()` never records them as ours. It is the
+ * mechanism behind `flow-agents init`'s default strip of the permissive Claude Code
+ * permission keys (kontourai/flow-agents#1345): the bundle stays the dedicated-workspace
+ * artifact, and a project install subtracts what a shared repository must not inherit.
+ * Deliberately applied to `managed`, not to the merged result -- a key the USER already set
+ * in their own settings file is theirs and must survive untouched.
  *
  * @param {{
  *   configPath: string,
@@ -293,10 +432,13 @@ function writeInstallRecord(installRecordPath, version, runtime) {
  *   version: string,
  *   installRecordPath: string,
  *   runtime: string,
+ *   omitManagedKeys?: string[],
  * }} opts
  */
-function runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime }) {
+function runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime, omitManagedKeys = [] }) {
   // (a) Read dest JSON (or {} if absent).
+  const capturedPremerge = { ...captureConfigPremerge(configPath), runtime };
+  const carriedOrigin = priorOrigin(installRecordPath, runtime, configPath);
   let existing = {};
   if (fs.existsSync(configPath)) {
     try {
@@ -321,6 +463,14 @@ function runMerge({ configPath, managedHooksPath, version, installRecordPath, ru
     return;
   }
 
+  // (a2) Subtract caller-omitted managed keys. Only whole top-level keys are supported: the
+  // one caller today mirrors the dogfood/--global strip exactly (`delete managed[key]`), and a
+  // dotted-path variant would need its own conflict semantics inside mergePermissions().
+  for (const key of omitManagedKeys) {
+    if (key.includes(".")) throw new Error(`install-merge: --omit-managed-key expects a top-level key, got '${key}'`);
+    delete managed[key];
+  }
+
   // (b) + (c) + (d) Merge.
   const conflicts = [];
   const merged = mergeSettings(existing, managed, { onConflict: (item) => conflicts.push(item) });
@@ -334,16 +484,30 @@ function runMerge({ configPath, managedHooksPath, version, installRecordPath, ru
   atomicWriteJson(configPath, merged);
 
   // (f) Write version stamp.
-  writeInstallRecord(installRecordPath, version, runtime);
+  const previous = stampConfigPremergePostInstallHash(capturedPremerge, configPath);
+  // `origin` answers ownership provenance (before Flow Agents first touched this
+  // path); `previous` answers byte-fidelity restore (before this install). They
+  // must not be conflated: a reinstall otherwise either loses user edits or
+  // mistakes our first install's values for user-owned values forever.
+  const origin = carriedOrigin.state === "valid" ? carriedOrigin.origin
+    : carriedOrigin.state === "invalid" ? { schema_version: "unknown" }
+      : previous;
+  writeInstallRecord(installRecordPath, version, runtime, { schema_version: "2.0", origin, previous }, installedValues(configPath, merged, managed));
 }
 
 // ─── CLI wrapper ──────────────────────────────────────────────────────────────
 if (require.main === module) {
   const args = process.argv.slice(2);
   const flags = {};
+  // Repeatable: the naive `flags[key] = value` loop below would keep only the last
+  // occurrence, and the caller passes one per key to omit.
+  const omitManagedKeys = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--stamp-only") {
       flags["stamp-only"] = "1";
+    } else if (args[i] === "--omit-managed-key" && i + 1 < args.length) {
+      omitManagedKeys.push(args[i + 1]);
+      i++;
     } else if (args[i].startsWith("--") && i + 1 < args.length) {
       flags[args[i].slice(2)] = args[i + 1];
       i++;
@@ -380,7 +544,7 @@ if (require.main === module) {
     process.exitCode = 2;
   } else {
     try {
-      runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime });
+      runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime, omitManagedKeys });
     } catch (err) {
       process.stderr.write(`install-merge: error: ${err.message}\n`);
       process.exitCode = 1;
@@ -388,4 +552,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { mergeSettings, isManagedHookGroup, FA_MARKERS };
+module.exports = { mergeSettings, isManagedHookGroup, isManagedInnerHook, FA_MARKERS, captureConfigPremerge, installedValues, restoreConfigPremergeBytes };

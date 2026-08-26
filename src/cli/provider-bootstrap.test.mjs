@@ -7,9 +7,10 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 import { bootstrapProviders, detectGitHubRepo, setProviderBootstrapTestHooksForTest } from "../../build/src/cli/provider-bootstrap.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 function repoFixture(owner = "example", name = "product") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-repo-"));
+  const root = makeFixtureDir("provider-bootstrap-repo-");
   execFileSync("git", ["init", "-q", root]);
   execFileSync("git", ["-C", root, "remote", "add", "origin", `git@github.com:${owner}/${name}.git`]);
   return root;
@@ -504,7 +505,7 @@ test("incompatible provider pickup rejects before settings or online provider co
     actor: { actorKey: "different-actor" },
     claim: { record: { claimed_at: "2026-07-25T00:00:00.000Z" } },
   })}\n`);
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-rejection-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-rejection-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 1\n`);
@@ -536,7 +537,7 @@ test("pickup transaction rejects an injected race before remote commands and pre
   const settings = path.join(repo, "context", "settings");
   const session = path.join(repo, ".kontourai", "flow-agents", "example-product-44");
   const conflictingActor = path.join(session, "provider-pickup.actor.json");
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-race-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-race-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 1\n`);
@@ -605,7 +606,7 @@ test("provider pickup rejects a branch change by the remote label callback befor
   const repo = repoFixture();
   execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
   const settings = path.join(repo, "context", "settings");
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-branch-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-branch-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
@@ -691,14 +692,14 @@ test("pickup transaction restores exact local preimages when commit fails after 
   const settings = path.join(repo, "context", "settings");
   bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
   const before = snapshotTree(path.join(repo, "context"));
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-commit-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-commit-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
 set -eu
 printf '\\x1f%s' "$@" >> ${JSON.stringify(log)}
 printf '\\n' >> ${JSON.stringify(log)}
-if [[ "$1 $2" == "project list" ]]; then printf '{"projects":[{"number":7}]}'
+if [[ "$1 $2" == "project list" ]]; then printf '{"projects":[{"number":8}]}'
 elif [[ "$1 $2" == "label list" ]]; then printf '[]'
 fi
 `);
@@ -707,7 +708,8 @@ fi
   process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
   setProviderBootstrapTestHooksForTest({
     beforeCommit(_file, index) {
-      if (index === 5) throw new Error("injected pickup commit failure");
+      // Items: [changed backlog settings, 4 pickup artifacts]; fail on the last commit.
+      if (index === 4) throw new Error("injected pickup commit failure");
     },
   });
   try {
@@ -717,7 +719,7 @@ fi
       projectSettingsRoot: settings,
       online: true,
       ghBin: gh,
-      projectNumber: 7,
+      projectNumber: 8,
       providerLogin: "provider-login",
       workItemRef: "example/product#44",
       providerBranch: "agent/provider-pickup",
@@ -737,7 +739,9 @@ test("pickup transaction rejects a late foreign write, preserves it, and restore
   execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
   const settings = path.join(repo, "context", "settings");
   const backlog = path.join(settings, "backlog-provider-settings.json");
-  const assignment = path.join(settings, "assignment-provider-settings.json");
+  // Items during the rerun: [changed backlog settings, 4 pickup artifacts]; the
+  // foreign write lands on items[1], the pickup actor artifact.
+  const foreignTarget = path.join(repo, ".kontourai", "flow-agents", "example-product-44", "provider-pickup.actor.json");
   const foreignBytes = "FOREIGN-WRITE\\n";
   const previousActor = process.env.FLOW_AGENTS_ACTOR;
   process.env.FLOW_AGENTS_ACTOR = "pickup-runtime-actor";
@@ -773,7 +777,7 @@ test("pickup transaction rejects a late foreign write, preserves it, and restore
     }), /publication target changed while the transaction lock was held/);
     assert.equal(injected, true, "the late write must occur after the first transaction-owned commit");
     assert.deepEqual(fs.readFileSync(backlog), backlogPreimage, "rollback must restore the earlier transaction-owned commit");
-    assert.equal(fs.readFileSync(assignment, "utf8"), foreignBytes, "rollback must preserve the foreign current target");
+    assert.equal(fs.readFileSync(foreignTarget, "utf8"), foreignBytes, "rollback must preserve the foreign current target");
   } finally {
     setProviderBootstrapTestHooksForTest(null);
     if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
@@ -832,7 +836,7 @@ test("bootstrap, public workflow start, and sidecar share the GitHub Work Item r
 
 test("global bootstrap replaces only the matching repository entry", () => {
   const repo = repoFixture();
-  const settings = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-global-"));
+  const settings = makeFixtureDir("provider-bootstrap-global-");
   const file = path.join(settings, "assignment-provider-settings.json");
   fs.writeFileSync(file, JSON.stringify({
     schema_version: "1.0",
@@ -861,8 +865,8 @@ test("global bootstrap replaces only the matching repository entry", () => {
 test("global bootstrap serializes the full read-modify-write transaction", async () => {
   const repoA = repoFixture("example", "product-a");
   const repoB = repoFixture("example", "product-b");
-  const settings = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-serialized-"));
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-lock-gh-"));
+  const settings = makeFixtureDir("provider-bootstrap-serialized-");
+  const fakeBin = makeFixtureDir("provider-bootstrap-lock-gh-");
   const gh = path.join(fakeBin, "gh");
   const entered = path.join(settings, "first-bootstrap-entered");
   const release = path.join(settings, "release-first-bootstrap");
@@ -947,7 +951,7 @@ test("bootstrap refuses to follow an existing settings symlink", () => {
 
 test("project bootstrap rejects a settings parent symlink that escapes the repository", () => {
   const repo = repoFixture();
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-parent-symlink-"));
+  const outside = makeFixtureDir("provider-bootstrap-parent-symlink-");
   fs.symlinkSync(outside, path.join(repo, "context"));
   assert.throws(() => bootstrapProviders({
     scope: "project",
@@ -1009,6 +1013,149 @@ test("rerunning bootstrap preserves consumer-owned policy and selection", () => 
   assert.equal(JSON.parse(scopedAssignmentEffective.stdout).settings.policy.label_name, "automation:held");
 });
 
+test("bootstrap leaves tracked settings byte-identical when they already carry the target configuration", () => {
+  const repo = repoFixture();
+  const settings = path.join(repo, "context", "settings");
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
+  // Reshape the tracked files the way a consumer legitimately can: non-default
+  // formatting, a board url the offline generator cannot produce, and a field
+  // this tool does not model at all (#1305).
+  const backlogFile = path.join(settings, "backlog-provider-settings.json");
+  const backlog = read(backlogFile);
+  backlog.projects[0].board_provider.board.url = "https://github.com/orgs/example/projects/7";
+  backlog.projects[0].team_notes = "consumer-owned field the generator does not model";
+  fs.writeFileSync(backlogFile, `${JSON.stringify(backlog, null, 4)}\n`);
+  const assignmentFile = path.join(settings, "assignment-provider-settings.json");
+  fs.writeFileSync(assignmentFile, `${JSON.stringify(read(assignmentFile), null, "\t")}\n`);
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  const before = snapshotTree(settings);
+  const result = bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
+  assert.deepEqual(result.files, []);
+  assert.equal(result.unchanged.length, 3);
+  assert.deepEqual(snapshotTree(settings), before, "settings already carrying the configuration must stay byte-identical");
+});
+
+test("bootstrap refuses to rewrite tracked settings without consent and never silently drops fields", () => {
+  const repo = repoFixture();
+  const settings = path.join(repo, "context", "settings");
+  const backlogFile = path.join(settings, "backlog-provider-settings.json");
+  const assignmentFile = path.join(settings, "assignment-provider-settings.json");
+  const changeFile = path.join(settings, "change-provider-settings.json");
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
+  const backlog = read(backlogFile);
+  backlog.projects[0].board_provider.board.url = "https://github.com/orgs/example/projects/7";
+  fs.writeFileSync(backlogFile, `${JSON.stringify(backlog, null, 2)}\n`);
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  const before = snapshotTree(settings);
+  // Pointing at a different project is a genuine content change: tracked files
+  // refuse without the explicit flag, and the refusal previews the diff.
+  assert.throws(
+    () => bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 9 }),
+    /re-run with --rewrite-settings[\s\S]*\+\s+"number": 9/,
+  );
+  assert.deepEqual(snapshotTree(settings), before, "refusal must leave every settings file untouched");
+
+  // An unknown field is never silently dropped: even an authorized rewrite fails
+  // loudly when preserving it cannot produce a schema-valid document.
+  const withUnknown = read(backlogFile);
+  withUnknown.projects[0].team_notes = "consumer-owned";
+  fs.writeFileSync(backlogFile, `${JSON.stringify(withUnknown, null, 2)}\n`);
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  const beforeUnknown = snapshotTree(settings);
+  assert.throws(
+    () => bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 9, rewriteSettings: true }),
+    /failed schema validation/,
+  );
+  assert.deepEqual(snapshotTree(settings), beforeUnknown, "a rewrite that cannot preserve unknown fields must not write");
+
+  // Without the unknown field the authorized rewrite proceeds and only touches the
+  // file whose content actually changes.
+  fs.writeFileSync(backlogFile, `${JSON.stringify(backlog, null, 2)}\n`);
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  const assignmentBytes = fs.readFileSync(assignmentFile);
+  const changeBytes = fs.readFileSync(changeFile);
+  const result = bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 9, rewriteSettings: true });
+  assert.deepEqual(result.files.map((file) => path.basename(file)), ["backlog-provider-settings.json"]);
+  assert.deepEqual(result.unchanged.map((file) => path.basename(file)), ["assignment-provider-settings.json", "change-provider-settings.json"]);
+  const rewrittenBoard = read(backlogFile).projects[0].board_provider.board;
+  assert.equal(rewrittenBoard.number, 9);
+  // Deliberate design choice: a url recorded for board 7 is stale for board 9 and
+  // must NOT be carried over (it is preserved only for the same board identity).
+  assert.equal(rewrittenBoard.url, undefined, "a prior board url must not survive a board identity change");
+  assert.deepEqual(fs.readFileSync(assignmentFile), assignmentBytes, "an authorized rewrite must not touch files without content changes");
+  assert.deepEqual(fs.readFileSync(changeFile), changeBytes, "an authorized rewrite must not touch files without content changes");
+});
+
+test("a failed git tracking probe refuses the rewrite instead of bypassing consent", () => {
+  const repo = repoFixture();
+  const settings = path.join(repo, "context", "settings");
+  const backlogFile = path.join(settings, "backlog-provider-settings.json");
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  // A corrupt index makes `git ls-files` fail without touching the probes bootstrap
+  // runs earlier (remote lookup and branch resolution read no index).
+  fs.writeFileSync(path.join(repo, ".git", "index"), "corrupt");
+  const before = snapshotTree(settings);
+  assert.throws(
+    () => bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 9 }),
+    /cannot determine the git tracking state/,
+  );
+  assert.deepEqual(snapshotTree(settings), before, "an unknown tracking state must refuse, not rewrite");
+  // Explicit consent does not depend on the probe and still proceeds.
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 9, rewriteSettings: true });
+  assert.equal(read(backlogFile).projects[0].board_provider.board.number, 9);
+});
+
+test("the provider-bootstrap CLI exits 2 on a tracked-settings refusal and prescribes the consent command", () => {
+  const repo = repoFixture();
+  const settings = path.join(repo, "context", "settings");
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 7 });
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  const refused = spawnSync(process.execPath, [
+    "build/src/cli.js", "provider-bootstrap",
+    "--scope", "project",
+    "--repo-path", repo,
+    "--project-settings-root", settings,
+    "--provider-project", "9",
+  ], { encoding: "utf8" });
+  assert.equal(refused.status, 2, `${refused.stdout}\n${refused.stderr}`);
+  assert.match(refused.stderr, /re-run with --rewrite-settings/);
+  assert.match(refused.stderr, /standalone: flow-agents provider-bootstrap --scope project/);
+  const accepted = spawnSync(process.execPath, [
+    "build/src/cli.js", "provider-bootstrap",
+    "--scope", "project",
+    "--repo-path", repo,
+    "--project-settings-root", settings,
+    "--provider-project", "9",
+    "--rewrite-settings",
+  ], { encoding: "utf8" });
+  assert.equal(accepted.status, 0, `${accepted.stdout}\n${accepted.stderr}`);
+});
+
+test("init --configure-providers carries --rewrite-settings through to provider bootstrap", () => {
+  const repo = repoFixture();
+  const settings = path.join(repo, "context", "settings");
+  const backlogFile = path.join(settings, "backlog-provider-settings.json");
+  bootstrapProviders({ scope: "project", repoPath: repo, projectSettingsRoot: settings, projectNumber: 4 });
+  execFileSync("git", ["-C", repo, "add", "context"]);
+  const common = [
+    "build/src/cli.js", "init",
+    "--runtime", "base",
+    "--dest", repo,
+    "--telemetry-sink", "local-files",
+    "--configure-providers",
+    "--provider-project", "5",
+    "--yes",
+  ];
+  const refused = spawnSync(process.execPath, common, { encoding: "utf8" });
+  assert.notEqual(refused.status, 0, `${refused.stdout}\n${refused.stderr}`);
+  assert.match(refused.stderr, /--rewrite-settings/);
+  assert.equal(read(backlogFile).projects[0].board_provider.board.number, 4, "a refused init must not rewrite settings");
+  const accepted = spawnSync(process.execPath, [...common, "--rewrite-settings"], { encoding: "utf8" });
+  assert.equal(accepted.status, 0, `${accepted.stdout}\n${accepted.stderr}`);
+  assert.equal(read(backlogFile).projects[0].board_provider.board.number, 5, "init --rewrite-settings must reach provider bootstrap");
+});
+
 test("online bootstrap verifies auth, discovers a sole project, and creates a missing claim label", () => {
   const repo = repoFixture();
   const settings = path.join(repo, "online-settings");
@@ -1017,7 +1164,7 @@ test("online bootstrap verifies auth, discovers a sole project, and creates a mi
   const assignment = read(assignmentFile);
   assignment.projects[0].policy.label_name = "-automation";
   fs.writeFileSync(assignmentFile, JSON.stringify(assignment));
-  const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-gh-"));
+  const fakeBin = makeFixtureDir("provider-bootstrap-gh-");
   const log = path.join(fakeBin, "calls.log");
   const gh = path.join(fakeBin, "gh");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
@@ -1272,7 +1419,7 @@ test("headless init can establish all provider settings in the installed project
 });
 
 test("universal bundles do not contain Flow Agents dogfood provider bindings", (t) => {
-  const bundleRoot = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-bundles-"));
+  const bundleRoot = makeFixtureDir("provider-bootstrap-bundles-");
   t.after(() => fs.rmSync(bundleRoot, { recursive: true, force: true }));
   const built = spawnSync(process.execPath, ["build/src/cli.js", "build-bundles"], {
     encoding: "utf8",
@@ -1288,8 +1435,7 @@ test("universal bundles do not contain Flow Agents dogfood provider bindings", (
       assert.equal(fs.existsSync(path.join(bundleRoot, runtime, "context", "settings", name)), false, `${runtime}/${name}`);
     }
   }
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "provider-bootstrap-kiro-upgrade-"));
-  t.after(() => fs.rmSync(dest, { recursive: true, force: true }));
+  const dest = makeFixtureDir("provider-bootstrap-kiro-upgrade-");
   const consumerSettings = path.join(dest, "context", "settings", "backlog-provider-settings.json");
   const consumerBytes = '{"consumer_owned":true}\n';
   fs.mkdirSync(path.dirname(consumerSettings), { recursive: true });

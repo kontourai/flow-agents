@@ -20,7 +20,14 @@ assert(deterministic.action.beforeReview.outcome === "refused" && deterministic.
 assert(deterministic.action.afterReview.outcome === "allowed", "reviewed grounding did not allow the action");
 assert(deterministic.action.drifted.outcome === "refused" && deterministic.action.drifted.gaps.some((gap) => gap.kind === "source-not-current") && deterministic.action.drifted.dimensions[0].sourceState.extractedValueChanged === false, "unchanged-value drift was not a typed visible refusal");
 assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && deterministic.failures.tamperedPreparedContent.diagnostics[0].kind === "digest-mismatch", "tampered content did not fail at a typed boundary");
-assert(Object.values(deterministic.revisions).join(",") === "0.19.1,2.0.0,0.3.2,2.13.0", "public revisions are not pinned");
+// traverse,survey,lookout,surface -- pinned so that moving a public dependency is a
+// deliberate edit here rather than a silent drift. surface: 2.13.0 -> 2.17.0 with
+// kontourai/flow-agents#1362, which collapsed its duplicate devDependencies/
+// optionalDependencies declarations into one exact dependencies entry. Safe for this
+// reference workflow on evidence, not on assertion: all nine published surface schemas
+// are byte-identical across 2.13.0..2.17.0, and the only export-surface change is
+// additive, so the envelope/digest contract this file exercises is unchanged.
+assert(Object.values(deterministic.revisions).join(",") === "0.19.1,2.0.0,0.3.2,2.17.0", "public revisions are not pinned");
 assert(live.liveTelemetry.provider === "reference-provider-adapter" && live.liveTelemetry.model === "reference-provider-model" && live.liveTelemetry.taskDigest === deterministic.extraction.taskDigest && live.liveTelemetry.usageTokens === 42 && live.liveTelemetry.latencyMs >= 0 && live.liveTelemetry.fixtureRevision === "reviewed-grounding-fixture/v1", "optional live execution telemetry is incomplete or unbound");
 NODE
 node --input-type=module -e "import('$RUNNER').then((module) => { if (typeof module.runReviewedGroundingReference !== 'function') process.exit(1); })"

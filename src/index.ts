@@ -26,9 +26,25 @@ import * as path from "node:path";
 import { loadJson as _loadJson, writeJson as _writeJson } from "./cli/workflow-sidecar.js";
 
 export {
+  SEALED_EXECUTION_API_REVISION,
+  buildUnsignedSealedExecutionRequest,
+  buildUnsignedSealedWorkloadAuthorization,
+  invokeExternalLifecycleAuthority,
+  invokeExternalSealedLifecycleAuthority,
+  lifecycleAuthorityResultDigest,
+  validateSealedExecutionSafeResult,
+  verifySealedExecutionCompletion,
+} from "./external-lifecycle-authority.js";
+export type { ExternalLifecycleAuthorityRequest, ExternalLifecycleMutationResult, SealedExecutionSafeResult } from "./external-lifecycle-authority.js";
+
+export { inspectEffectiveFlowAgentsConfig } from "./lib/effective-flow-agents-config.js";
+export type { EffectiveFlowAgentsConfigReport, GoalFitConfig } from "./lib/effective-flow-agents-config.js";
+
+export {
   RUN_CORRELATION_IDENTITY_KEYS,
   RUN_CORRELATION_IDENTITY_STATUSES,
   RUN_CORRELATION_SCHEMA_VERSION,
+  CREDENTIAL_PATTERN_SOURCES,
   RunCorrelationValidationError,
   RUNTIME_CORRELATION_IDENTITY_DECLARATIONS,
   attachRunCorrelation,
@@ -52,6 +68,24 @@ export type {
   RuntimeCorrelationIdentityDeclaration,
   RuntimeCorrelationIdentitySupport,
 } from "./run-correlation.js";
+export {
+  DELEGATION_ENVELOPE_SCHEMA_VERSION,
+  assertDelegationEnvelopeActiveAt,
+  DelegationEnvelopeNarrowingError,
+  DelegationEnvelopeValidationError,
+  narrowDelegationEnvelope,
+  validateDelegationEnvelope,
+} from "./delegation-envelope.js";
+export type {
+  DelegationApprovalPosture,
+  DelegationAuthority,
+  DelegationBudget,
+  DelegationEnvelope,
+  DelegationEscalationPosture,
+  DelegationFlowBinding,
+  DelegationPosture,
+  DelegationSourceBinding,
+} from "./delegation-envelope.js";
 export {
   TOOL_RESULT_STATUSES,
   USAGE_METRICS,
@@ -123,6 +157,43 @@ export type {
   UsageSemantics,
   ValidatedTelemetryRecord,
 } from "./telemetry-semantics.js";
+
+export {
+  KIT_OBSERVABILITY_API_VERSION,
+  KIT_OBSERVABILITY_AUTHORITIES,
+  KIT_OBSERVABILITY_CONTRACT_VERSION,
+  KIT_OBSERVABILITY_DESCRIPTOR_KIND,
+  KIT_OBSERVABILITY_HOST_CAPABILITIES,
+  KIT_OBSERVABILITY_OPERATOR_INTENTS,
+  KIT_OBSERVABILITY_PROJECTION_KINDS,
+  KIT_OBSERVABILITY_RECORD_KIND,
+  loadKitObservabilityContribution,
+  kitObservabilityDescriptorDigest,
+  kitObservabilityProvenance,
+  negotiateKitObservabilityContribution,
+  validateKitObservabilityContribution,
+  validateKitObservabilityRecord,
+} from "./kit-observability-contract.js";
+export type {
+  KitObservabilityAuthority,
+  KitObservabilityAuthorityRefs,
+  KitObservabilityContribution,
+  KitObservabilityContributionLoadResult,
+  KitObservabilityDiagnostic,
+  KitObservabilityDiagnosticCode,
+  KitObservabilityHostCapability,
+  KitObservabilityHostState,
+  KitObservabilityMcpAppsBridgeDeclaration,
+  KitObservabilityMcpAppsBridgeResult,
+  KitObservabilityMcpAppsResource,
+  KitObservabilityNegotiation,
+  KitObservabilityOperatorAction,
+  KitObservabilityOperatorIntent,
+  KitObservabilityProjection,
+  KitObservabilityPresentation,
+  KitObservabilityProjectionKind,
+  KitObservabilityRecord,
+} from "./kit-observability-contract.js";
 
 export {
   NARRATIVE_SOURCE_ID_VERSION,
@@ -474,6 +545,9 @@ export {
 export {
   verifyContinuationEvidenceCheckpoints,
 } from "./continuation-evidence-checkpoints.js";
+export {
+  continuationAdapterCommandIdentity,
+} from "./cli/continuation-adapter.js";
 export type {
   ContinuationEvidenceCheckpoint,
   VerifiedContinuationEvidenceCheckpoints,

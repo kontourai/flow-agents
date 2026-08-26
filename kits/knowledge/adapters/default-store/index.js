@@ -378,7 +378,38 @@ export class DefaultKnowledgeStore {
     this._recordsDir = path.join(this._root, "records");
     this._graphPath = path.join(this._root, "graph-index.json");
     this._aliasPath = path.join(this._root, "alias-index.json");
+    this._cacheVersionPath = path.join(this._root, "cache-version.json");
     fs.mkdirSync(this._recordsDir, { recursive: true });
+    this._initCacheVersion();
+  }
+
+  _initCacheVersion() {
+    if (!fs.existsSync(this._cacheVersionPath)) {
+      this._writeCacheVersion(1);
+    }
+  }
+
+  _readCacheVersion() {
+    try {
+      const text = fs.readFileSync(this._cacheVersionPath, "utf8");
+      return JSON.parse(text).version || 1;
+    } catch {
+      return 1;
+    }
+  }
+
+  _writeCacheVersion(version) {
+    fs.writeFileSync(this._cacheVersionPath, JSON.stringify({ version, updatedAt: new Date().toISOString() }), "utf8");
+  }
+
+  _incrementCacheVersion() {
+    const v = this._readCacheVersion() + 1;
+    this._writeCacheVersion(v);
+    return v;
+  }
+
+  getCacheVersion() {
+    return this._readCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -476,7 +507,10 @@ export class DefaultKnowledgeStore {
 
     // Merge explicit links + wikilinks from body
     const explicitLinks = input.links || [];
-    const wikilinks = extractWikilinks(input.body || "");
+    // parse_wikilinks: false suppresses body-derived links — for ingested
+    // content whose body text is untrusted (provider issue bodies must not
+    // inject graph edges via [[...]]; #1214 review F3).
+    const wikilinks = input.parse_wikilinks === false ? [] : extractWikilinks(input.body || "");
     const links = mergeLinks(explicitLinks, wikilinks);
 
     const record = {
@@ -510,6 +544,9 @@ export class DefaultKnowledgeStore {
 
     // Persist the alias map only after the record is on disk.
     if (aliasIndex) saveAliasIndex(this._aliasPath, aliasIndex);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
 
     return id;
   }
@@ -553,11 +590,12 @@ export class DefaultKnowledgeStore {
 
     // Merge links if updated
     let newLinks = record.links || [];
+    const parseWikilinks = fields.parse_wikilinks !== false;
     if (fields.links !== undefined) {
-      const wikilinks = extractWikilinks(fields.body !== undefined ? fields.body : record.body);
+      const wikilinks = parseWikilinks ? extractWikilinks(fields.body !== undefined ? fields.body : record.body) : [];
       newLinks = mergeLinks(fields.links, wikilinks);
     } else if (fields.body !== undefined) {
-      const wikilinks = extractWikilinks(fields.body);
+      const wikilinks = parseWikilinks ? extractWikilinks(fields.body) : [];
       newLinks = mergeLinks(record.links || [], wikilinks);
     }
 
@@ -592,6 +630,9 @@ export class DefaultKnowledgeStore {
     this._writeRecord(updated);
 
     if (aliasIndex) saveAliasIndex(this._aliasPath, aliasIndex);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -647,6 +688,9 @@ export class DefaultKnowledgeStore {
     saveGraph(this._graphPath, graph);
 
     this._writeRecord(updated);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -710,6 +754,9 @@ export class DefaultKnowledgeStore {
       ],
     };
     this._writeRecord(updatedConcept);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -756,6 +803,9 @@ export class DefaultKnowledgeStore {
       ],
     };
     this._writeRecord(updatedConcept);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -797,6 +847,9 @@ export class DefaultKnowledgeStore {
       ],
     };
     this._writeRecord(updatedConcept);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
 
@@ -888,6 +941,9 @@ export class DefaultKnowledgeStore {
       };
       this._writeRecord(updatedSuperseded);
     }
+
+    // Invalidate cache (once per supersede operation)
+    this._incrementCacheVersion();
   }
 
 
@@ -942,6 +998,9 @@ export class DefaultKnowledgeStore {
       ],
     };
     this._writeRecord(updated);
+
+    // Invalidate cache
+    this._incrementCacheVersion();
   }
 
   // -------------------------------------------------------------------------
@@ -1039,6 +1098,14 @@ export class DefaultKnowledgeStore {
       if (slugs.length) registerAliases(rebuiltAliases, record.id, slugs);
     }
     saveAliasIndex(this._aliasPath, rebuiltAliases);
+
+    // Invalidate cache only when the rebuilt graph differs from what was on
+    // disk (recovery path — a no-op reindex must not bump readers off a
+    // still-valid cache). The alias index is derived from the same record
+    // set as the graph, so in practice a drifted alias index accompanies a
+    // drifted graph; this does not independently detect an alias-only drift
+    // (disclosed; covered by cache-version.test.js).
+    if (changed) this._incrementCacheVersion();
 
     return {
       records: records.length,

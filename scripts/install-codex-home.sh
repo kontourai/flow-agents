@@ -328,11 +328,32 @@ for bundle_file in README.md console.telemetry.json install.sh; do
   fi
 done
 
+# Generated Codex config/profile seeds are ordinary owned files whenever this
+# install creates or refreshes them. Stage exactly those safe-to-refresh files
+# into the same overlay as every other owned file so the synchronizer records
+# them in codex-install-manifest.json; a user-owned config without the generated
+# marker remains outside the overlay and is never claimed.
+GENERATED_SEED_MARKER='# Generated from packaging/manifest.json. Edit the manifest, not this file.'
+has_generated_seed_marker() {
+  local first_line
+  [[ -f "$1" ]] || return 1
+  IFS= read -r first_line < "$1" || true
+  [[ "$first_line" == "$GENERATED_SEED_MARKER" ]]
+}
+for seed_source in "$BUNDLE_SOURCE/.codex/config.toml" "$BUNDLE_SOURCE"/.codex/*.config.toml; do
+  [[ -f "$seed_source" ]] || continue
+  seed_file="$(basename "$seed_source")"
+  if [[ ! -e "$DEST_REAL/$seed_file" ]] || has_generated_seed_marker "$DEST_REAL/$seed_file"; then
+    cp "$seed_source" "$FA_OWNED_OVERLAY/$seed_file"
+  fi
+done
+
 # Check both destinations with the exact synchronizer before either can mutate.
 node "$BUNDLE_SOURCE/scripts/install-owned-files.js" \
   --check "$FA_SKILLS_OVERLAY" "$SKILLS_DIR_REAL" ".flow-agents/codex-universal-skills-install-manifest.json"
 node "$BUNDLE_SOURCE/scripts/install-owned-files.js" \
-  --check "$FA_OWNED_OVERLAY" "$DEST_REAL" ".flow-agents/codex-install-manifest.json"
+  --check --adopt-generated-seed-marker "$GENERATED_SEED_MARKER" \
+  "$FA_OWNED_OVERLAY" "$DEST_REAL" ".flow-agents/codex-install-manifest.json"
 
 # Refuse an exact historical Flow Agents global instruction file after both
 # install destinations pass read-only preflight and before any install write.
@@ -349,6 +370,7 @@ mkdir -p "$DEST"
 DEST="$(cd "$DEST" && pwd -P)"
 DEST_REAL="$DEST"
 node "$BUNDLE_SOURCE/scripts/install-owned-files.js" \
+  --adopt-generated-seed-marker "$GENERATED_SEED_MARKER" \
   "$FA_OWNED_OVERLAY" "$DEST" ".flow-agents/codex-install-manifest.json"
 
 # Stash the user's existing hooks.json (if any), so the merge step below can
@@ -385,7 +407,7 @@ for seed_source in "$BUNDLE_SOURCE/.codex/config.toml" "$BUNDLE_SOURCE"/.codex/*
     generated_profile_files+=("$seed_file")
     profile_names+=("${seed_file%.config.toml}")
   fi
-  if [[ ! -e "$DEST/$seed_file" ]] || grep -q 'Generated from packaging/manifest.json' "$DEST/$seed_file"; then
+  if [[ ! -e "$DEST/$seed_file" ]] || has_generated_seed_marker "$DEST/$seed_file"; then
     atomic_copy "$seed_source" "$seed_file"
   fi
 done
@@ -399,7 +421,7 @@ for profile_path in "$DEST"/*.config.toml; do
       break
     fi
   done
-  if [[ "$keep_generated" -eq 0 ]] && grep -q 'Generated from packaging/manifest.json' "$profile_path"; then
+  if [[ "$keep_generated" -eq 0 ]] && has_generated_seed_marker "$profile_path"; then
     assert_safe_dest_path "$profile_file"
     rm -f "$profile_path"
   fi

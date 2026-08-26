@@ -17,6 +17,46 @@ if (JSON.stringify(executeGate?.route_back_policy) !== JSON.stringify({ max_atte
   throw new Error('execute-gate must bound plan_gap with the Flow-owned 3-attempt block policy');
 }
 
+// ─── #1280 gate-value ablation: the control and its reduced-gate variant ─────────────────────
+// builder.build is the CONTROL and builder.build-lean is the TREATMENT, so the difference
+// between them IS the experiment's independent variable. Pinned in both directions: the control
+// must keep every gate (an ablation whose control silently loses a gate measures nothing), and
+// the variant must remove EXACTLY design-probe-gate and plan-gate while keeping the gates that
+// have demonstrably caught defects. Anything else is a confound, not a change.
+const leanFlow = JSON.parse(fs.readFileSync(path.join(root, 'kits/builder/flows/build-lean.flow.json'), 'utf8'));
+const CONTROL_GATES = ['design-probe-gate', 'execute-gate', 'merge-ready-gate', 'plan-gate', 'pull-work-gate', 'verify-gate'];
+const ABLATED_GATES = ['design-probe-gate', 'plan-gate'];
+const VARIANT_GATES = CONTROL_GATES.filter((gate) => !ABLATED_GATES.includes(gate));
+if (JSON.stringify(Object.keys(buildFlow.gates || {}).sort()) !== JSON.stringify(CONTROL_GATES)) {
+  throw new Error(`builder.build is the ablation control and must keep exactly ${CONTROL_GATES.join(', ')}`);
+}
+if (JSON.stringify(Object.keys(leanFlow.gates || {}).sort()) !== JSON.stringify(VARIANT_GATES)) {
+  throw new Error(`builder.build-lean must declare exactly ${VARIANT_GATES.join(', ')} — it ablates ${ABLATED_GATES.join(' and ')} and nothing else`);
+}
+if (leanFlow.id !== 'builder.build-lean') throw new Error('build-lean.flow.json must declare id builder.build-lean');
+// The GATES are ablated, not the steps: sequencing, versioning and phase mapping must stay
+// identical or the two arms differ in more than the one variable under test.
+if (JSON.stringify(leanFlow.steps) !== JSON.stringify(buildFlow.steps)) throw new Error('builder.build-lean must keep builder.build steps and sequencing verbatim; only gates are ablated');
+if (JSON.stringify(leanFlow.phase_map) !== JSON.stringify(buildFlow.phase_map)) throw new Error('builder.build-lean must keep the builder.build phase_map verbatim');
+if (leanFlow.version !== buildFlow.version) throw new Error('builder.build-lean must share the builder.build definition version');
+// Every gate the variant KEEPS must be byte-identical to the control's, so a kept gate cannot be
+// quietly weakened and reported as "same gates, fewer of them".
+for (const gate of VARIANT_GATES) {
+  if (JSON.stringify(leanFlow.gates[gate]) !== JSON.stringify(buildFlow.gates[gate])) throw new Error(`builder.build-lean ${gate} must be identical to the builder.build gate it retains`);
+}
+// Honest naming: nothing reading the declaration may mistake the variant for the full flow.
+const leanDeclaration = (kit.flows || []).find((entry) => entry.id === 'builder.build-lean');
+if (!leanDeclaration || leanDeclaration.path !== 'flows/build-lean.flow.json') throw new Error('kit.json must declare builder.build-lean at flows/build-lean.flow.json');
+for (const [label, text] of [['kit.json flows[] description', leanDeclaration.description], ['flow definition description', leanFlow.description]]) {
+  if (!/reduced-gate/i.test(text || '')) throw new Error(`builder.build-lean ${label} must name itself as a reduced-gate variant`);
+  for (const gate of ABLATED_GATES) {
+    const term = gate.replace(/-gate$/, '');
+    if (!new RegExp(term, 'i').test(text || '')) throw new Error(`builder.build-lean ${label} must disclose that ${term} is ungated`);
+  }
+}
+const buildDeclaration = (kit.flows || []).find((entry) => entry.id === 'builder.build');
+if (/reduced-gate/i.test(buildDeclaration?.description || '')) throw new Error('builder.build is the full flow and must not describe itself as reduced-gate');
+
 const expected = {
   'builder-shape': ['entrypoint', 'builder.shape', []],
   deliver: ['entrypoint', 'builder.build', []],
@@ -76,6 +116,21 @@ const expectedActions = {
   'builder.shape/breakdown': { skills: ['idea-to-backlog'], expectation_ids: ['slices-defined'] },
   'builder.shape/file-issues': { skills: ['idea-to-backlog'], expectation_ids: ['work-items-filed'] },
   'builder.shape/shape-done': { skills: [], expectation_ids: [] },
+  // #1280 ablation variant. Same steps and the same producers as builder.build; the ONLY
+  // difference is that design-probe and plan bind no expectations, because the variant removes
+  // their gates. The rows are pinned here so the variant can never quietly grow or lose a
+  // producer relative to the control it is measured against.
+  'builder.build-lean/pull-work': { skills: ['pull-work'], expectation_ids: ['selected-work'] },
+  // Ablated steps survive as pure sequencing passthroughs: no skill, no artifact, no expectation.
+  'builder.build-lean/design-probe': { skills: [], expectation_ids: [] },
+  'builder.build-lean/plan': { skills: [], expectation_ids: [] },
+  'builder.build-lean/execute': { skills: ['execute-plan'], expectation_ids: ['implementation-scope'] },
+  'builder.build-lean/verify': { skills: ['review-work', 'verify-work'], expectation_ids: ['clean-critique', 'acceptance-criteria', 'tests-evidence', 'policy-compliance'] },
+  'builder.build-lean/merge-ready': { skills: ['evidence-gate'], expectation_ids: ['merge-readiness'] },
+  'builder.build-lean/pr-open': { skills: [], operations: ['publish-change'], expectation_ids: ['pull-request-opened'] },
+  'builder.build-lean/merge-ready-ci': { skills: ['release-readiness'], expectation_ids: ['ci-merge-readiness'] },
+  'builder.build-lean/learn': { skills: ['learning-review'], expectation_ids: ['decision-evidence', 'learning-evidence'] },
+  'builder.build-lean/done': { skills: [], expectation_ids: [] },
 };
 
 const failures = [];
@@ -163,7 +218,7 @@ for (const [key, expectedAction] of Object.entries(expectedActions)) {
     failures.push(`${key}: operations differ from the canonical producer matrix`);
   }
 }
-if ((kit.flow_step_actions || []).length !== Object.keys(expectedActions).length) failures.push('flow_step_actions must declare every builder.build and builder.shape step exactly once');
+if ((kit.flow_step_actions || []).length !== Object.keys(expectedActions).length) failures.push('flow_step_actions must declare every builder.build, builder.build-lean and builder.shape step exactly once');
 const publishAction = (kit.flow_step_actions || []).find((entry) => entry.flow_id === 'builder.build' && entry.step_id === 'pr-open');
 if (!publishAction || JSON.stringify(publishAction.operations) !== JSON.stringify(['publish-change']) || JSON.stringify(publishAction.expectation_ids) !== JSON.stringify(['pull-request-opened'])) failures.push('publish-change must explicitly own pull-request-opened');
 

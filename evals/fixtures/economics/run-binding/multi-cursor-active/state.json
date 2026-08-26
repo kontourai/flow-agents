@@ -1,0 +1,56 @@
+{
+  "schema_version": "0.1",
+  "run_id": "econ-fixture-multi-cursor-active",
+  "definition_id": "builder.build",
+  "definition_version": "1.4",
+  "subject": "econ-fixture/multi-cursor-active",
+  "status": "active",
+  "current_step": "execute",
+  "params": {},
+  "next_action": "continue",
+  "updated_at": "2026-02-04T00:00:00.000Z",
+  "gate_outcomes": [],
+  "transitions": [
+    {
+      "from_step": "pull-work",
+      "to_step": "design-probe",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "pull-work-gate",
+      "at": "2026-02-04T00:00:00.000Z"
+    }
+  ],
+  "lifecycle": [],
+  "multi_cursor": {
+    "schema_version": "1",
+    "active_claims": [
+      {
+        "schema_version": "1",
+        "claim_id": "claim-1",
+        "liveness_id": "liveness-1",
+        "run_id": "econ-fixture-multi-cursor-active",
+        "definition": {
+          "id": "builder.build",
+          "version": "1.4",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "claim_base": {
+          "schema_version": "1",
+          "step_id": "execute",
+          "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "step_id": "execute",
+        "actor": {
+          "key": "agent-1"
+        },
+        "mutable_resources": [],
+        "issued_at": "2026-02-04T00:00:00.000Z",
+        "renewed_at": "2026-02-04T00:00:00.000Z",
+        "expires_at": "2026-02-04T01:00:00.000Z"
+      }
+    ],
+    "blocked_steps": [],
+    "claim_history": []
+  },
+  "exceptions": []
+}

@@ -1,0 +1,17 @@
+{
+  "run_id": "econ-fixture-paused-mid-execute",
+  "terminal_status": "paused",
+  "note": "mirrors the real, live kontourai-flow-agents-944 production run (review finding 2): execute is entered, ~58s of real activity happens, then the run pauses and is never resumed. execute.wall_clock_s (ACTIVE time) must be ~58s, NOT the full multi-day calendar span; the pause must show up as execute.human_wait_s / time.human_wait_s instead.",
+  "phase_wall_clock_s": {
+    "design-probe": 20,
+    "plan": 30,
+    "execute": 58
+  },
+  "phase_human_wait_s": {
+    "design-probe": 0,
+    "plan": 0,
+    "execute": 1000000
+  },
+  "human_wait_s": 1000000,
+  "total_wall_clock_s": 108
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Flow Agents committed core configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "goal_fit"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "goal_fit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "max_blocks", "recheck", "backstop", "backstop_timeout_ms", "require_sidecars", "require_critique"],
+      "properties": {
+        "mode": { "enum": ["off", "warn", "block"] },
+        "max_blocks": { "type": "integer", "minimum": 1 },
+        "recheck": { "type": "boolean" },
+        "backstop": { "enum": ["skip", "off", "block"] },
+        "backstop_timeout_ms": { "type": "integer", "minimum": 1 },
+        "require_sidecars": { "type": "boolean" },
+        "require_critique": { "type": "boolean" }
+      }
+    }
+  }
+}

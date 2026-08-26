@@ -30,7 +30,7 @@
 # Deterministic (a fake flow-agents CLI + a fake npx stand-in on PATH; no real network / npm
 # registry access). Uses ONLY scratch tmp dirs -- never the running machine's durable
 # .kontourai roots or ~/.flow-agents conf.
-# Usage: bash evals/integration/test_console_board_sync.sh
+# Usage: evals/integration/test_console_board_sync.sh
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -40,7 +40,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 errors=0
-pass() { echo "  [PASS] $1"; }
+passes=0
+pass() { passes=$((passes + 1)); echo "  [PASS] $1"; }
 fail() { echo "  [FAIL] $1"; errors=$((errors + 1)); }
 
 populate_bin_without() {
@@ -76,6 +77,7 @@ path_without_executable() {
 }
 
 if ! command -v jq >/dev/null 2>&1; then echo "jq not available; skipping console board sync tests"; exit 0; fi
+BASH_BIN="$(command -v bash)"
 
 echo "=== console board sync (#919) ==="
 
@@ -186,7 +188,7 @@ run_sync() {
   TELEMETRY_SESSION_DIR="$data_dir/sessions" \
   FAKE_CLI_LOG="$CLI_LOG" \
   NPX_LOG="$NPX_LOG" \
-  bash "$SCRIPT"
+  "$BASH_BIN" "$SCRIPT"
 }
 
 # ── gating: no config at all -> exit 0, zero side effects ──────────────────────────────────
@@ -522,7 +524,9 @@ rc=$?
 LOG_H="$DATA_H/console-board-sync.log"
 [[ -f "$LOG_H" ]] && grep -q 'SKIP: no flow-agents CLI found' "$LOG_H" && pass "no-cli: logged as a SKIP naming the CLI search" || fail "no-cli: expected SKIP log not found: $(cat "$LOG_H" 2>/dev/null)"
 [[ ! -s "$NPX_LOG" ]] && pass "no-cli: npx never invoked (nothing to bridge)" || fail "no-cli: npx was invoked despite no CLI"
-[[ ! -e "$PLANTED_FLOW_AGENTS_MARKER" ]] && pass "no-cli: planted global flow-agents canary was never invoked" || fail "no-cli: planted global flow-agents canary was invoked"
+[[ ! -e "$PLANTED_FLOW_AGENTS_MARKER" ]] \
+  && pass "no-cli: an operator/global flow-agents planted on the inherited PATH was never invoked" \
+  || fail "no-cli: planted operator/global flow-agents escaped the hermetic fixture"
 
 # ── npx unavailable -> both bridges log-skipped, projections still ran ─────────────────────
 echo "--- npx unavailable -> bridge steps log-skipped; projections still ran ---"
@@ -605,6 +609,9 @@ grep -q 'RUN start' "$LOG_STALE" 2>/dev/null \
   || fail "HIGH-4 stale takeover: the pipeline never ran despite the stale lock takeover"
 
 echo ""
+echo "# tests $((passes + errors))"
+echo "# pass $passes"
+echo "# fail $errors"
 if [[ "$errors" -eq 0 ]]; then
   echo "test_console_board_sync: all checks passed."
   exit 0

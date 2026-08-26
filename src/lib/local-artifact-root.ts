@@ -22,6 +22,22 @@ export function defaultCodexHome(env: NodeJS.ProcessEnv = process.env, homedir: 
 }
 
 /**
+ * Default claude-code global install destination: `~/.claude`, honoring
+ * `FLOW_AGENTS_USER_CLAUDE_SETTINGS` (points at the settings.json FILE) for test isolation --
+ * the same override `checkScopeCollision`/`globalDest` (src/cli/init.ts) already use. Kept in
+ * this dependency-light module (no esbuild/build-tooling imports) rather than only inline in
+ * init.ts's `globalDest`, so `src/cli/kit.ts`'s built-in kit activation verbs can resolve the
+ * same destination without importing init.ts's module graph (which pulls in
+ * build-universal-bundles.ts's esbuild dependency -- unavailable in a stripped install
+ * destination, e.g. a Codex home install that ships kit.js standalone with no node_modules).
+ */
+export function claudeCodeGlobalDest(env: NodeJS.ProcessEnv = process.env, homedir: string = os.homedir()): string {
+  const override = env["FLOW_AGENTS_USER_CLAUDE_SETTINGS"];
+  if (override) return path.dirname(override);
+  return path.join(homedir, ".claude");
+}
+
+/**
  * #357: resolve the SHARED, git-common-dir-anchored `.kontourai/flow-agents` root for `cwd`.
  *
  * `git rev-parse --git-common-dir` returns the ONE `.git` directory shared by every worktree
@@ -63,7 +79,59 @@ export function resolveSharedRepoRoot(cwd: string): string | null {
     }).trim();
     if (!out) return null;
     const absoluteCommonDir = path.resolve(cwd, out);
+
+    // #1055: `path.dirname(commonDir)` strips exactly ONE segment. That is right when the common
+    // dir is `<repo>/.git` — a primary checkout, or a linked worktree, whose common dir points at
+    // the primary's `.git`. It is wrong inside a git SUBMODULE, where the common dir is
+    // `<superproject>/.git/modules/<name>`, so stripping one segment lands on
+    // `<superproject>/.git/modules`: git internals, no working tree, nothing that reads
+    // `.kontourai/`. And it lands there SILENTLY, because resolution technically succeeded, so the
+    // fail-open warning never fires. That is the same silent-coordination-loss this resolver exists
+    // to prevent, reached through ordinary git usage.
+    //
+    // Git already knows the answer. A submodule's common dir carries `core.worktree` pointing back
+    // at its working tree; a plain repo's does not. Ask, rather than doing path arithmetic on a
+    // shape assumption:
+    //
+    //   primary checkout        common=<repo>/.git                      core.worktree unset -> <repo>
+    //   subdirectory of one     common=<repo>/.git                      core.worktree unset -> <repo>
+    //   linked worktree         common=<repo>/.git                      core.worktree unset -> <repo>
+    //   submodule               common=<super>/.git/modules/<n>         core.worktree set   -> <super>/<n>
+    //   linked wt of submodule  common=<super>/.git/modules/<n>         core.worktree set   -> <super>/<n>
+    //
+    // Every row yields the ONE working tree whose `.kontourai/flow-agents` all worktrees of that
+    // repository share — which is the property #357 was after.
+    // NOT symlink-resolved, deliberately. #1055 also reports that an ABSOLUTE cwd traversing a
+    // depth-changing symlink makes this lexical `path.resolve` disagree with git's OS-resolved
+    // answer. `fs.realpathSync` here would fix that — and would also silently MOVE every existing
+    // store on any host where the repo path crosses a symlink, which on macOS is every path under
+    // `/var` (a symlink to `/private/var`). AC6's byte-identical-to-plain-cwd guarantee catches
+    // exactly that, and it caught it here. Relocating live coordination state is a migration, not a
+    // bug fix, so it stays out of this change and open on #1055.
+    const coreWorktree = gitCoreWorktree(absoluteCommonDir, env);
+    if (coreWorktree) return path.resolve(absoluteCommonDir, coreWorktree);
     return path.dirname(absoluteCommonDir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `core.worktree` recorded in a git common dir, or null when unset/unavailable.
+ *
+ * Set for a submodule (pointing back at the submodule's working tree) and unset for a plain
+ * repository or linked worktree, which is exactly the discriminator `resolveSharedRepoRoot` needs.
+ * Never throws: git absent, an unreadable config, or an unset key all yield null so the caller
+ * falls back to the historical `path.dirname` behaviour rather than failing.
+ */
+function gitCoreWorktree(commonDir: string, env: NodeJS.ProcessEnv): string | null {
+  try {
+    const value = execFileSync("git", ["--git-dir", commonDir, "config", "--get", "core.worktree"], {
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return value || null;
   } catch {
     return null;
   }
@@ -111,13 +179,24 @@ function isInsideGitWorkingTree(cwd: string): boolean {
  * gives an operator the signal needed to pass `--artifact-root` explicitly instead of silently
  * losing coordination visibility.
  */
-function warnIfFailingOpenInsideGitTree(cwd: string, fallbackPath: string): void {
+/**
+ * Default remediation. Accurate for the callers that actually READ `--artifact-root`
+ * (`liveness`, `ensure-session`, `current`); overridden by callers that do not, so the advice a
+ * warning gives is always something the operator can act on at that call site.
+ */
+const ARTIFACT_ROOT_REMEDIATION = "Pass --artifact-root explicitly to fix.";
+
+export function warnIfFailingOpenInsideGitTree(
+  cwd: string,
+  fallbackPath: string,
+  remediation: string = ARTIFACT_ROOT_REMEDIATION,
+): void {
   if (!isInsideGitWorkingTree(cwd)) return;
   process.stderr.write(
     `[artifact-root] WARNING: inside a git working tree but could not resolve the shared repo root ` +
       `(git rev-parse --git-common-dir failed or returned nothing from ${cwd}); falling back to a ` +
       `cwd-local store at ${fallbackPath} — coordination claims may be invisible to other ` +
-      `worktrees/actors. Pass --artifact-root explicitly to fix.\n`
+      `worktrees/actors. ${remediation}\n`
   );
 }
 
@@ -156,6 +235,16 @@ export function durableInstallRecordPath(cwd = process.cwd()): string {
 /** Path to the per-skill-file content-hash drift manifest, a sibling of `install.json` under the same durable root. */
 export function skillsManifestPath(cwd = process.cwd()): string {
   return path.join(durableFlowAgentsRoot(cwd), "skills-manifest.json");
+}
+
+/**
+ * Path to the ownership manifest recording every file a claude-code install wrote (path +
+ * sha256), a sibling of `install.json` under the same durable root. Used by `flow-agents init
+ * --uninstall` to remove exactly the files an install owns while preserving anything a user
+ * has since modified (content hash no longer matches).
+ */
+export function ownedFilesManifestPath(cwd = process.cwd()): string {
+  return path.join(durableFlowAgentsRoot(cwd), "owned-files.json");
 }
 
 export function telemetryDataDir(cwd = process.cwd()): string {

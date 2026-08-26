@@ -11,6 +11,7 @@ import {
   githubIssueUrl,
   readWorkflowTrustSources,
 } from "../../build/src/lib/workflow-trust-projection.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const GENERATED_AT = "2026-07-20T12:00:00Z";
 
@@ -75,7 +76,7 @@ function state(slug, overrides = {}) {
 }
 
 function fixtureRoot(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "console-trust-projection-"));
+  const root = makeFixtureDir("console-trust-projection-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }

@@ -355,6 +355,10 @@ The default Console view when launched from a workspace. It shows effective sett
 
 The Console overview for global setup, registered projects, cross-project usage, global providers, and system-wide improvement opportunities.
 
+### Console record delivery
+
+How Flow Agents gets facts to a Console and what delivery guarantee each class of fact carries. Two record shapes exist on the same `POST /records` ingest: an append-only **event** (each fact independently meaningful) and an upserted **projection** (a fold of current state, keyed by producer and scope). Delivery class is a declared property of the record class — not an accident of which transport a caller happened to reach for.
+
 ### Control API
 
 The shared tool layer used by the Console, CLI, AI agents, and automation. The Control API owns operations such as reading effective settings, explaining provider resolution, testing provider health, previewing config changes, writing config, inspecting workflow state, and reporting usage or eval outcomes.

@@ -16,6 +16,7 @@ import {
   validateHostWorkflowAuthority,
 } from "../../build/src/index.js";
 import { recoverHostWorkflowSessionActor, withHostWorkflowSessionActorBinding } from "../../build/src/lib/host-workflow-binding.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require = createRequire(import.meta.url);
 const pointers = require("../../scripts/hooks/lib/current-pointer.js");
@@ -95,7 +96,7 @@ test("host evidence authority uses one canonical exact-preimage signing contract
 });
 
 test("bindHostWorkflowSession writes the canonical actor-scoped pointer", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-binding-"));
+  const workspace = makeFixtureDir("flow-agents-host-binding-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const task = path.join(root, "runtime-switch");
@@ -127,7 +128,7 @@ test("bindHostWorkflowSession writes the canonical actor-scoped pointer", () => 
 });
 
 test("bindHostWorkflowSession rejects unsafe actor and task boundaries", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-binding-invalid-"));
+  const workspace = makeFixtureDir("flow-agents-host-binding-invalid-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const task = path.join(root, "task");
@@ -219,7 +220,7 @@ test("bindHostWorkflowSession rejects unsafe actor and task boundaries", () => {
 });
 
 test("recovery-capable host bindings preserve an exact, expiring actor pair", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-binding-"));
+  const workspace = makeFixtureDir("flow-agents-host-recovery-binding-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const task = path.join(root, "runtime-switch");
@@ -294,7 +295,7 @@ test("recovery-capable host bindings preserve an exact, expiring actor pair", ()
 });
 
 test("canonical host recovery lock delays retirement until the protected mutation completes", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-lock-"));
+  const workspace = makeFixtureDir("flow-agents-host-recovery-lock-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const task = path.join(root, "runtime-switch");
@@ -343,7 +344,7 @@ test("canonical host recovery lock delays retirement until the protected mutatio
 });
 
 test("async pointer lock refuses a same-process contender without blocking the event loop", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-local-contender-"));
+  const workspace = makeFixtureDir("flow-agents-host-recovery-local-contender-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const actorKey = "codex:thread-local-contender:Kontour";
@@ -372,7 +373,7 @@ test("async pointer lock refuses a same-process contender without blocking the e
 });
 
 test("async pointer lock heartbeats while long-running canonical work is active", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-lock-heartbeat-"));
+  const workspace = makeFixtureDir("flow-agents-host-recovery-lock-heartbeat-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const actorKey = "codex:thread-lock-heartbeat:Kontour";
@@ -392,7 +393,7 @@ test("async pointer lock heartbeats while long-running canonical work is active"
 });
 
 test("detached async descendants cannot reuse an invalidated pointer-lock ownership token", async () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-stale-context-"));
+  const workspace = makeFixtureDir("flow-agents-host-recovery-stale-context-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const actorKey = "codex:thread-stale-context:Kontour";
@@ -419,7 +420,7 @@ test("detached async descendants cannot reuse an invalidated pointer-lock owners
 });
 
 test("recovery bindings reject already-expired creation and path-replaced task directories", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-recovery-invalid-"));
+  const workspace = makeFixtureDir("flow-agents-host-recovery-invalid-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const task = path.join(root, "runtime-switch");
@@ -458,7 +459,7 @@ test("recovery bindings reject already-expired creation and path-replaced task d
 });
 
 test("bindHostWorkflowSession rejects a task symlink escaping the artifact root", (t) => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-binding-symlink-"));
+  const workspace = makeFixtureDir("flow-agents-host-binding-symlink-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const outside = path.join(workspace, "outside-task");
@@ -491,7 +492,7 @@ test("bindHostWorkflowSession rejects a task symlink escaping the artifact root"
 });
 
 test("bindHostWorkflowSession rejects a symlinked actor-pointer directory", (t) => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-binding-current-symlink-"));
+  const workspace = makeFixtureDir("flow-agents-host-binding-current-symlink-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const task = path.join(root, "task");
@@ -534,7 +535,7 @@ test("bindHostWorkflowSession rejects a symlinked actor-pointer directory", (t) 
 });
 
 test("bindHostWorkflowSession rejects task-directory replacement after state read", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-task-swap-"));
+  const workspace = makeFixtureDir("flow-agents-host-task-swap-");
   const realOpenSync = fs.openSync;
   const realReadFileSync = fs.readFileSync;
   let task;
@@ -590,7 +591,7 @@ test("bindHostWorkflowSession rejects task-directory replacement after state rea
 });
 
 test("bindHostWorkflowSession revalidates task identity inside the pointer lock", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-task-lock-swap-"));
+  const workspace = makeFixtureDir("flow-agents-host-task-lock-swap-");
   const realMkdirSync = fs.mkdirSync;
   let task;
   let savedTask;
@@ -631,7 +632,7 @@ test("bindHostWorkflowSession revalidates task identity inside the pointer lock"
 });
 
 test("current pointer publication rolls back the actor binding when shared publication fails", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-publication-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-publication-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     fs.mkdirSync(path.join(root, "current"), { recursive: true });
@@ -652,7 +653,7 @@ test("current pointer publication rolls back the actor binding when shared publi
 });
 
 test("actor pointer reads reject a directory swapped only during descriptor open", (t) => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-read-swap-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-read-swap-");
   const realOpenSync = fs.openSync;
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
@@ -708,7 +709,7 @@ test("actor pointer reads reject a directory swapped only during descriptor open
 });
 
 test("pointer validation completes before an agent-event append is staged", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-event-stage-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-event-stage-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     fs.mkdirSync(root, { recursive: true });
@@ -734,7 +735,7 @@ test("pointer validation completes before an agent-event append is staged", () =
 });
 
 test("failed staged-event commit restores every current pointer", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-event-rollback-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-event-rollback-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const actor = "station.thread-rollback";
@@ -775,7 +776,7 @@ test("failed staged-event commit restores every current pointer", () => {
 });
 
 test("pointer mutation rejects a lock created under a transiently swapped actor directory", (t) => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-lock-detached-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-lock-detached-");
   const realMkdirSync = fs.mkdirSync;
   const realWriteFileSync = fs.writeFileSync;
   try {
@@ -826,7 +827,7 @@ test("pointer mutation rejects a lock created under a transiently swapped actor 
 });
 
 test("pointer transaction restores every pointer when its state commit fails", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-transaction-rollback-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-transaction-rollback-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const actor = "station.thread-123";
@@ -869,7 +870,7 @@ test("pointer transaction restores every pointer when its state commit fails", (
 });
 
 test("pointer transaction rolls back its projection commit when pointer publication fails", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-projection-rollback-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-projection-rollback-");
   const realRenameSync = fs.renameSync;
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
@@ -904,7 +905,7 @@ test("pointer transaction rolls back its projection commit when pointer publicat
 });
 
 test("binding-scoped pointer updates reject a newer generation under the lock", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-generation-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-generation-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const actor = "station.thread-generation";
@@ -938,7 +939,7 @@ test("binding-scoped pointer updates reject a newer generation under the lock", 
 });
 
 test("pointer mutation rejects actor-directory replacement after lock acquisition", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-parent-replacement-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-parent-replacement-");
   const realOpenSync = fs.openSync;
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
@@ -984,7 +985,7 @@ test("pointer mutation rejects actor-directory replacement after lock acquisitio
 });
 
 test("failed pointer-lock initialization never deletes a successor lock", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-lock-successor-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-lock-successor-");
   const realWriteFileSync = fs.writeFileSync;
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
@@ -1016,7 +1017,7 @@ test("failed pointer-lock initialization never deletes a successor lock", () => 
 });
 
 test("failed pointer-lock owner creation removes its own empty lock", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-lock-owner-failure-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-lock-owner-failure-");
   const realWriteFileSync = fs.writeFileSync;
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
@@ -1041,7 +1042,7 @@ test("failed pointer-lock owner creation removes its own empty lock", () => {
 });
 
 test("pointer transaction rejects a binding added after discovery", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-pointer-discovery-race-"));
+  const workspace = makeFixtureDir("flow-agents-pointer-discovery-race-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const actorRoot = path.join(root, "current");
@@ -1074,7 +1075,7 @@ test("pointer transaction rejects a binding added after discovery", () => {
 });
 
 test("retirement uses root-relative task identity when basenames collide", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-binding-relative-identity-"));
+  const workspace = makeFixtureDir("flow-agents-binding-relative-identity-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const first = path.join(root, "first", "task");
@@ -1108,7 +1109,7 @@ test("retirement uses root-relative task identity when basenames collide", () =>
 });
 
 test("retireHostWorkflowSession supersedes only the actor's matching task binding", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-retire-"));
+  const workspace = makeFixtureDir("flow-agents-host-retire-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const task = path.join(root, "runtime-switch");
@@ -1184,7 +1185,7 @@ test("retireHostWorkflowSession supersedes only the actor's matching task bindin
 });
 
 test("stale retirement cannot retire a newer binding of the same task", () => {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-host-stale-retire-"));
+  const workspace = makeFixtureDir("flow-agents-host-stale-retire-");
   try {
     const root = path.join(workspace, ".kontourai", "flow-agents");
     const task = path.join(root, "same-task");

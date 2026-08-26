@@ -100,7 +100,8 @@ write_bundle "$BUNDLE1" "node -e 'process.exit(1)'" "true"
 
 # canonical command is "node -e 'process.exit(1)'" — it fails
 # bundle claims that same command passed → divergence
-out1=$(TRUST_RECONCILE_COMMANDS="node -e 'process.exit(1)'" \
+GITHUB_OUTPUT_FILE="$TMP/github-output"
+out1=$(GITHUB_OUTPUT="$GITHUB_OUTPUT_FILE" TRUST_RECONCILE_COMMANDS="node -e 'process.exit(1)'" \
   node "$RECONCILE" \
     --bundle "$BUNDLE1" \
     --repo-root "$TMP" 2>&1)
@@ -123,6 +124,13 @@ if echo "$out1" | grep -q "process.exit(1)"; then
   _pass "DIVERGENCE-CAUGHT: output names the divergent command"
 else
   _fail "DIVERGENCE-CAUGHT: expected command name in output, got: $out1"
+fi
+
+if grep -q '^failure-summary<<trust_reconcile_' "$GITHUB_OUTPUT_FILE" &&
+   grep -q '\[fresh-fail\] verification failed in CI' "$GITHUB_OUTPUT_FILE"; then
+  _pass "DIVERGENCE-CAUGHT: exposes structured failure-summary output"
+else
+  _fail "DIVERGENCE-CAUGHT: expected structured failure-summary output, got: $(cat "$GITHUB_OUTPUT_FILE" 2>/dev/null)"
 fi
 
 # ─── TEST 2: MATCHING-PASSES ──────────────────────────────────────────────────
@@ -228,6 +236,7 @@ echo ""
 echo "=== YAML-VALID: .github/workflows/trust-reconcile.yml parses ==="
 
 WORKFLOW_FILE="$ROOT/.github/workflows/trust-reconcile.yml"
+ACTION_FILE="$ROOT/.github/actions/trust-verify/action.yml"
 
 if [[ ! -f "$WORKFLOW_FILE" ]]; then
   _fail "YAML-VALID: workflow file not found at $WORKFLOW_FILE"
@@ -280,6 +289,14 @@ PY
       _fail "YAML-VALID: trust-reconcile.yml missing expected structural fields"
     fi
   fi
+fi
+
+if grep -q '^outputs:' "$ACTION_FILE" &&
+   grep -q 'failure-summary:' "$ACTION_FILE" &&
+   grep -q 'steps.trust-verify.outputs.failure-summary' "$ACTION_FILE"; then
+  _pass "ACTION-OUTPUT: Trust Verify exposes the reconciler failure summary"
+else
+  _fail "ACTION-OUTPUT: Trust Verify does not expose failure-summary"
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────

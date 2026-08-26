@@ -26,12 +26,13 @@ import {
 // "name" + "exports"), mirroring work-item-vocabulary.test.mjs's guard against the src/index.ts
 // re-export silently drifting from the internal module (#775 precedent).
 import { workItemMutationOperations as workItemMutationOperationsFromPackageRoot } from "@kontourai/flow-agents";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = path.resolve(__dirname, "../../build/src/cli.js");
 
 function withTempDir(run) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "work-item-mutation-provider-"));
+  const dir = makeFixtureDir("work-item-mutation-provider-");
   try {
     const result = run(dir);
     if (result && typeof result.then === "function") {

@@ -24,6 +24,12 @@ import {
 export const PROTOCOL_VERSION = "1.0";
 export const CONFIG_ROOT = "/etc/kontourai/flow-agents-lifecycle-authority-v1";
 export const STATE_ROOT = "/var/lib/kontourai/flow-agents-lifecycle-authority-v1";
+// State is intentionally not traversable by the unprivileged controller.  A
+// separate root-owned execution parent is traversable but not listable, and a
+// root-owned operation leaf is the only part exposed to the dropped uid. This
+// is an integrity boundary; the invoking OS account remains trusted TCB.
+export const EXECUTION_ROOT = "/var/lib/kontourai/flow-agents-lifecycle-execution-v1";
+export const PRIVILEGE_DROP_LAUNCHER = "/usr/local/libexec/kontourai/flow-agents-lifecycle-drop-v1";
 export const REGISTRY_FILE = `${CONFIG_ROOT}/keys.json`;
 export const COMPLETION_PRIVATE_KEY_FILE = `${CONFIG_ROOT}/completion-signing-key.pem`;
 export const COMPLETION_PUBLIC_KEY_FILE = `${CONFIG_ROOT}/completion-verification-key.pem`;
@@ -44,7 +50,39 @@ const ACTION_FIELDS = {
   "publish-provisional-delivery": ["action", "project_root", "session_dir", "authorization_file"],
   "recover-exact-current-completion": ["action", "project_root", "session_dir", "authorization_file"],
   "authorize-workflow-evidence": ["action", "project_root", "session_dir", "authorization_file"],
+  "execute-sealed-workload": ["action", "project_root", "session_dir", "authorization_file", "sealed_workload_file"],
+  "merge-change": ["action", "project_root", "session_dir", "authorization_file", "issued_action_id"],
 };
+// This is deliberately a closed launcher contract.  The caller supplies a
+// convenient request file, but every byte which can affect execution is
+// covered by this authorization and re-read through an O_NOFOLLOW descriptor
+// before the coordinator creates its root-owned stage.
+const SEALED_EXECUTION_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject", "workload_sha256",
+  "runner_kind", "runner_schema_version", "runner_entrypoint", "max_staged_bytes",
+  "max_runtime_ms", "max_output_bytes", "max_provider_calls", "max_cost_microusd", "max_tokens", "issued_at", "expires_at", "nonce", "signature",
+];
+const SEALED_EXECUTION_WORKLOAD_FIELDS = [
+  "schema_version", "kind", "runtime", "controller", "provider", "inputs", "argv", "environment",
+];
+const SEALED_EXECUTION_SOURCE_FIELDS = ["path", "sha256", "bytes"];
+const SEALED_EXECUTION_BUNDLE_SOURCE_FIELDS = ["path", "sha256", "bytes", "logical_path"];
+const SEALED_EXECUTION_HARD_MAX_STAGE_BYTES = 384 * 1024 * 1024;
+const SEALED_EXECUTION_HARD_MAX_RUNTIME_MS = 30 * 60_000;
+const SEALED_EXECUTION_HARD_MAX_OUTPUT_BYTES = 256 * 1024;
+const SEALED_EXECUTION_HARD_MAX_PROVIDER_CALLS = 64;
+const SEALED_EXECUTION_HARD_MAX_COST_MICROUSD = 5_000_000;
+const SEALED_EXECUTION_HARD_MAX_TOKENS = 750_000;
+// These are the same canonical snapshot resource limits used by the public
+// command observer. An authorization comparison must never be weaker than the
+// snapshot it is intended to bind.
+const MAX_TRACKED_DIFF_BYTES = 16 * 1024 * 1024;
+const MAX_UNTRACKED_LIST_BYTES = 4 * 1024 * 1024;
+const MAX_TRACKED_INDEX_BYTES = 4 * 1024 * 1024;
+const MAX_UNTRACKED_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_UNTRACKED_TOTAL_BYTES = 64 * 1024 * 1024;
+const HASH_READ_CHUNK_BYTES = 64 * 1024;
+const EXACT_COMMIT_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const PROVISIONAL_DELIVERY_AUTHORIZATION_FIELDS = [
   "schema_version", "operation", "project_root", "run_id", "subject", "work_item", "assignment_actor_key", "assignment_generation",
   "published_head_sha", "provider_record_id", "provider_observation_sha256",
@@ -93,8 +131,46 @@ const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
   "current_claim_id", "current_claim_status", "current_claim_sha256", "current_claim_index", "claim_delta",
   "nonce", "expires_at", "requested_at", "signature",
 ];
+const MERGE_CHANGE_AUTHORIZATION_FIELDS = [
+  "schema_version", "operation", "project_root", "run_id", "subject",
+  "flow_definition_id", "flow_definition_version", "flow_definition_digest", "flow_run_head", "flow_manifest_sha256",
+  "issued_action", "issued_action_sha256", "nonce", "requested_at", "expires_at", "signature",
+];
 
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * The single gate a definition declares as requiring CURRENT verification — the freshness
+ * turnstile that a provisional delivery exists to satisfy, and the one merge-change requires
+ * evidence-refresh control on.
+ *
+ * #1336: replaces the composed gate-id literal `builder.publish-learn:merge-ready-ci-gate` and the
+ * `builder.build` / `merge-ready-ci` name pins. The coordinator deliberately reads only the
+ * canonical Flow run files, never kit metadata, so the derivation is over the DEFINITION the run is
+ * pinned to — which is the same declared property the unprivileged side now asks about. Returns
+ * null unless exactly one gate declares it, so an ambiguous definition refuses rather than picks.
+ */
+export function freshnessTurnstileGateEntry(definition) {
+  if (!record(definition) || !record(definition.gates)) return null;
+  const matches = Object.entries(definition.gates)
+    .filter(([, gate]) => record(gate) && gate.requires_current_verification === true);
+  return matches.length === 1 ? { id: matches[0][0], gate: matches[0][1] } : null;
+}
+/**
+ * #1307: this was the THIRD independent encoding of the route-map contract (after #1300's in
+ * merge-change and the static eval's). The semantic requirement is that the refresh entries are
+ * PRESENT with the bounded blocking policy; additional repair routes (implementation_defect)
+ * and the #1302 requires_current_verification declaration are the flow definition's business.
+ * Exported as a pure predicate so conformance tests drive it with the real shipped definition
+ * rather than grepping this file's text.
+ */
+export function mergeReadyCiRefreshRoutesSatisfied(gate) {
+  if (!record(gate)) return false;
+  const routes = gate.on_route_back;
+  if (!record(routes)) return false;
+  return routes.missing_evidence === "verify" && routes.default === "verify"
+    && canonicalJson(gate.route_back_policy) === canonicalJson({ max_attempts: 3, on_exceeded: "block" });
+}
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (record(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
@@ -115,35 +191,137 @@ function within(candidate, root) {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
-function provisionalWorkspaceSnapshot(projectRoot, runId) {
-  const excluded = `delivery/${runId}`;
-  const git = (args, encoding = "utf8") => {
-    const result = spawnSync("git", args, { cwd: projectRoot, encoding, maxBuffer: 32 * 1024 * 1024 });
-    if (result.status !== 0) throw new Error("provisional delivery could not inspect the signed Git workspace");
-    return result.stdout;
+function provisionalTrustedGitEnvironment() {
+  return {
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_NO_REPLACE_OBJECTS: "1",
+    LANG: "C",
+    LC_ALL: "C",
+    PATH: process.platform === "win32" ? "C:\\Program Files\\Git\\cmd;C:\\Windows\\System32;C:\\Windows" : "/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    ...(process.platform === "win32" ? { SystemRoot: "C:\\Windows", WINDIR: "C:\\Windows" } : {}),
   };
-  const root = String(git(["rev-parse", "--show-toplevel"])).trim();
-  if (fs.realpathSync(root) !== projectRoot) throw new Error("provisional delivery project root is not the Git worktree root");
-  const head = String(git(["rev-parse", "HEAD"])).trim();
-  const tracked = git(["diff", "--binary", "--no-ext-diff", "HEAD", "--", ".", `:(exclude)${excluded}/**`], null);
-  const untracked = Buffer.from(git(["ls-files", "--others", "--exclude-standard", "-z"], null))
-    .toString("utf8").split("\0").filter(Boolean)
+}
+function provisionalTrustedGitCandidates() {
+  if (process.platform === "darwin") return ["/usr/bin/git", "/run/current-system/sw/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"];
+  if (process.platform === "win32") return ["C:\\Program Files\\Git\\cmd\\git.exe"];
+  return ["/usr/bin/git", "/run/current-system/sw/bin/git", "/usr/local/bin/git"];
+}
+function provisionalTrustedGitIdentity(candidate) {
+  const resolved = fs.realpathSync(candidate);
+  const stat = fs.statSync(resolved);
+  if (!path.isAbsolute(resolved) || !stat.isFile() || (process.platform !== "win32" && (stat.mode & 0o111) === 0)) throw new Error("untrusted Git executable");
+  if (process.platform !== "win32") {
+    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("untrusted Git executable ownership");
+    for (let cursor = path.dirname(resolved);;) {
+      const parent = fs.statSync(cursor);
+      if (!parent.isDirectory() || parent.uid !== 0 || (parent.mode & 0o022) !== 0) throw new Error("untrusted Git executable parent");
+      const next = path.dirname(cursor);
+      if (next === cursor) break;
+      cursor = next;
+    }
+  }
+  return { candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode };
+}
+export function resolveProvisionalTrustedGitExecutable() {
+  for (const candidate of provisionalTrustedGitCandidates()) {
+    try { return provisionalTrustedGitIdentity(candidate); } catch {}
+  }
+  throw new Error("trusted Git executable is unavailable");
+}
+function revalidateProvisionalTrustedGit(identity) {
+  const current = provisionalTrustedGitIdentity(identity.candidate);
+  return current.device === identity.device && current.inode === identity.inode && current.size === identity.size
+    && current.mtimeMs === identity.mtimeMs && current.mode === identity.mode;
+}
+function provisionalTrustedGit(root, args, maxBytes, label) {
+  let executable;
+  try { executable = resolveProvisionalTrustedGitExecutable(); } catch {
+    throw new Error(`provisional delivery could not inspect the signed Git workspace (${label})`);
+  }
+  const result = spawnSync(executable.path, [
+    "--no-replace-objects",
+    "-c", "core.fsmonitor=false",
+    "-c", `core.hooksPath=${process.platform === "win32" ? "NUL" : "/dev/null"}`,
+    "-c", "diff.external=",
+    "-C", root,
+    ...args,
+  ], {
+    encoding: "buffer",
+    env: provisionalTrustedGitEnvironment(),
+    stdio: ["ignore", "pipe", "ignore"],
+    maxBuffer: maxBytes + 1,
+  });
+  if (!result || result.error || result.signal || result.status !== 0 || !Buffer.isBuffer(result.stdout) || result.stdout.length > maxBytes || !revalidateProvisionalTrustedGit(executable)) {
+    throw new Error(`provisional delivery could not inspect the signed Git workspace (${label})`);
+  }
+  return result.stdout;
+}
+function provisionalHead(root) {
+  const head = provisionalTrustedGit(root, ["rev-parse", "--verify", "HEAD^{commit}"], 256, "HEAD").toString("utf8").trim().toLowerCase();
+  if (!EXACT_COMMIT_SHA.test(head)) throw new Error("provisional delivery Git HEAD is invalid");
+  return head;
+}
+function assertProvisionalOrdinaryTrackedIndex(root) {
+  const entries = provisionalTrustedGit(root, ["ls-files", "-v", "-z"], MAX_TRACKED_INDEX_BYTES, "tracked-index list").toString("utf8").split("\0");
+  for (const entry of entries) if (entry && !entry.startsWith("H ")) throw new Error("provisional delivery tracked index contains a nonordinary ls-files tag");
+}
+function sameProvisionalFileIdentity(before, after) {
+  return before.dev === after.dev && before.ino === after.ino && before.size === after.size
+    && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs;
+}
+function hashProvisionalUntrackedFile(hash, file, absolute, totalBytes) {
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  const descriptor = fs.openSync(absolute, fs.constants.O_RDONLY | noFollow);
+  try {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile()) throw new Error("provisional delivery untracked entry is not a regular file");
+    if (before.size > MAX_UNTRACKED_FILE_BYTES) throw new Error("provisional delivery untracked file exceeds the per-file snapshot limit");
+    if (totalBytes + before.size > MAX_UNTRACKED_TOTAL_BYTES) throw new Error("provisional delivery untracked files exceed the total snapshot limit");
+    hash.update(file).update("\0");
+    const buffer = Buffer.allocUnsafe(HASH_READ_CHUNK_BYTES);
+    let remaining = before.size;
+    let position = 0;
+    while (remaining > 0) {
+      const bytesRead = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, remaining), position);
+      if (bytesRead <= 0) throw new Error("provisional delivery untracked file changed during workspace snapshot capture");
+      hash.update(buffer.subarray(0, bytesRead));
+      remaining -= bytesRead;
+      position += bytesRead;
+    }
+    if (!sameProvisionalFileIdentity(before, fs.fstatSync(descriptor))) throw new Error("provisional delivery untracked file changed during workspace snapshot capture");
+    hash.update("\0");
+    return totalBytes + before.size;
+  } finally { fs.closeSync(descriptor); }
+}
+export function provisionalWorkspaceSnapshot(projectRoot, runId, hooks = {}) {
+  const canonicalRoot = fs.realpathSync(projectRoot);
+  const excluded = `delivery/${runId}`;
+  const root = provisionalTrustedGit(canonicalRoot, ["rev-parse", "--show-toplevel"], 64 * 1024, "worktree root").toString("utf8").trim();
+  if (fs.realpathSync(root) !== canonicalRoot) throw new Error("provisional delivery project root is not the Git worktree root");
+  const head = provisionalHead(canonicalRoot);
+  assertProvisionalOrdinaryTrackedIndex(canonicalRoot);
+  const tracked = provisionalTrustedGit(canonicalRoot, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ".", `:(exclude)${excluded}/**`], MAX_TRACKED_DIFF_BYTES, "tracked diff");
+  const untrackedBytes = provisionalTrustedGit(canonicalRoot, ["ls-files", "--others", "--exclude-standard", "-z"], MAX_UNTRACKED_LIST_BYTES, "untracked-file list");
+  const untracked = untrackedBytes.toString("utf8").split("\0").filter(Boolean)
     .filter((file) => file !== excluded && !file.startsWith(`${excluded}/`)).sort();
   const hash = crypto.createHash("sha256");
   hash.update("flow-agents:git-worktree:v1\0").update(head).update("\0");
   hash.update("exclude\0").update(excluded).update("\0");
   hash.update(tracked).update("\0");
+  let untrackedTotalBytes = 0;
   for (const file of untracked) {
-    const absolute = path.resolve(projectRoot, file);
-    if (!within(absolute, projectRoot)) throw new Error("provisional delivery untracked file escapes the project root");
-    const descriptor = fs.openSync(absolute, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    try {
-      const stat = fs.fstatSync(descriptor);
-      if (!stat.isFile()) throw new Error("provisional delivery untracked entry is not a regular file");
-      hash.update(file).update("\0").update(fs.readFileSync(descriptor)).update("\0");
-    } finally { fs.closeSync(descriptor); }
+    const absolute = path.resolve(canonicalRoot, file);
+    if (!within(absolute, canonicalRoot)) throw new Error("provisional delivery untracked file escapes the project root");
+    untrackedTotalBytes = hashProvisionalUntrackedFile(hash, file, absolute, untrackedTotalBytes);
   }
-  return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: head };
+  hooks.afterInitialInputsRead?.();
+  const settledTracked = provisionalTrustedGit(canonicalRoot, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ".", `:(exclude)${excluded}/**`], MAX_TRACKED_DIFF_BYTES, "settled tracked diff");
+  const settledUntrackedBytes = provisionalTrustedGit(canonicalRoot, ["ls-files", "--others", "--exclude-standard", "-z"], MAX_UNTRACKED_LIST_BYTES, "settled untracked-file list");
+  if (!settledTracked.equals(tracked) || !settledUntrackedBytes.equals(untrackedBytes)) throw new Error("provisional delivery workspace inputs changed while collecting the snapshot");
+  assertProvisionalOrdinaryTrackedIndex(canonicalRoot);
+  if (provisionalHead(canonicalRoot) !== head) throw new Error("provisional delivery Git HEAD changed while collecting the workspace snapshot");
+  return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: head, worktree_clean: tracked.length === 0 && untracked.length === 0 };
 }
 function protectedRegularFile(file, label, maxBytes = 64 * 1024) {
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
@@ -152,6 +330,32 @@ function protectedRegularFile(file, label, maxBytes = 64 * 1024) {
     if (!stat.isFile() || stat.size > maxBytes || (stat.mode & 0o022) !== 0) throw new Error(`${label} must be a protected regular file`);
     return fs.readFileSync(descriptor);
   } finally { fs.closeSync(descriptor); }
+}
+function protectedRootTrustFile(file, label, maxBytes = 64 * 1024) {
+  // Fixture roots are deliberately injectable.  The fixed production trust
+  // roots additionally require root ownership and protected parents; on
+  // Darwin /etc is the documented alias for /private/etc.
+  const productionFiles = new Set([
+    "/etc/kontourai/flow-agents-lifecycle-authority-v1/keys.json",
+    "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-signing-key.pem",
+    "/etc/kontourai/flow-agents-lifecycle-authority-v1/completion-verification-key.pem",
+  ]);
+  const production = productionFiles.has(file);
+  if (production) {
+    let resolved = file;
+    if (process.platform === "darwin" && fs.lstatSync("/etc").isSymbolicLink()) {
+      if (path.resolve("/", fs.readlinkSync("/etc")) !== "/private/etc") throw new Error(`${label} Darwin /etc alias is invalid`);
+      resolved = path.join("/private/etc", file.slice("/etc".length));
+    }
+    let cursor = path.parse(resolved).root;
+    for (const component of resolved.slice(cursor.length).split(path.sep).filter(Boolean)) {
+      cursor = path.join(cursor, component);
+      const stat = fs.lstatSync(cursor);
+      if (stat.isSymbolicLink() || stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error(`${label} must have root-owned protected path components`);
+    }
+    file = resolved;
+  }
+  return protectedRegularFile(file, label, maxBytes);
 }
 const ABSENT_HOST_EVIDENCE_TRUST_BUNDLE_SHA256 = sha256("kontourai.host-workflow.absent-trust-bundle.v1");
 function hostEvidenceTrustBundleSha256(file) {
@@ -185,9 +389,29 @@ export function validateEnvelope(value) {
   return value;
 }
 function authorityRegistry() {
-  const parsed = JSON.parse(protectedRegularFile(REGISTRY_FILE, "authority registry").toString("utf8"));
+  const parsed = JSON.parse(protectedRootTrustFile(REGISTRY_FILE, "authority registry").toString("utf8"));
   exact(parsed, ["schema_version", "keys"], "authority registry");
   if (parsed.schema_version !== PROTOCOL_VERSION || !Array.isArray(parsed.keys)) throw new Error("authority registry is invalid");
+  const ids = new Set();
+  const fingerprints = new Set();
+  for (const candidate of parsed.keys) {
+    if (!record(candidate)) throw new Error("authority registry key is invalid");
+    exact(candidate, ["id", "algorithm", "public_key_pem"], "authority registry key");
+    if (typeof candidate.id !== "string" || !candidate.id || candidate.algorithm !== "ed25519" || typeof candidate.public_key_pem !== "string" || /PRIVATE KEY/.test(candidate.public_key_pem)) {
+      throw new Error("authority registry key is invalid");
+    }
+    let fingerprint;
+    try {
+      fingerprint = crypto.createHash("sha256").update(crypto.createPublicKey(candidate.public_key_pem).export({ type: "spki", format: "der" })).digest("hex");
+    } catch {
+      throw new Error("authority registry key is invalid");
+    }
+    if (ids.has(candidate.id) || fingerprints.has(fingerprint)) {
+      throw new Error("authority registry contains duplicate key ids or cryptographic identities");
+    }
+    ids.add(candidate.id);
+    fingerprints.add(fingerprint);
+  }
   return parsed;
 }
 function verifySignedAuthorization(authorization, { projectRoot = null, requireCurrentExpiry = true } = {}) {
@@ -195,7 +419,11 @@ function verifySignedAuthorization(authorization, { projectRoot = null, requireC
   const key = authorityRegistry().keys.find((candidate) => record(candidate) && candidate.id === authorization.signature.key_id);
   if (!record(key) || key.algorithm !== "ed25519" || typeof key.public_key_pem !== "string" || /PRIVATE KEY/.test(key.public_key_pem)) throw new Error("authorization key is not trusted");
   const { signature, ...unsigned } = authorization;
-  const payload = authorization.operation === "authorize-workflow-evidence" ? canonicalJson(unsigned) : JSON.stringify(unsigned);
+  // Sealed execution version 1 explicitly standardizes canonical JSON across
+  // request builders and offline signers. Existing lifecycle operations retain
+  // their published byte contract for historical authorization replay.
+  const payload = authorization.operation === "authorize-workflow-evidence" || authorization.operation === "execute-sealed-workload"
+    ? canonicalJson(unsigned) : JSON.stringify(unsigned);
   if (signature.algorithm !== "ed25519" || typeof signature.value !== "string" || !crypto.verify(null, Buffer.from(payload), crypto.createPublicKey(key.public_key_pem), Buffer.from(signature.value, "base64"))) throw new Error("authorization signature is invalid");
   if (projectRoot !== null && authorization.project_root !== projectRoot) throw new Error("authorization does not bind the canonical project root");
   if (requireCurrentExpiry && (typeof authorization.expires_at !== "string" || !Number.isFinite(Date.parse(authorization.expires_at)) || Date.now() > Date.parse(authorization.expires_at))) throw new Error("authorization is expired");
@@ -222,13 +450,17 @@ function assertPrivilegedAuthorizationShape(authorization) {
         ? EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS
       : authorization.operation === "authorize-workflow-evidence"
         ? HOST_WORKFLOW_AUTHORIZATION_FIELDS
-      : null;
+        : authorization.operation === "execute-sealed-workload"
+          ? SEALED_EXECUTION_AUTHORIZATION_FIELDS
+        : authorization.operation === "merge-change"
+          ? MERGE_CHANGE_AUTHORIZATION_FIELDS
+        : null;
   if (!fields) return authorization;
   exact(authorization, fields, `privileged ${authorization.operation} authorization`);
   exact(authorization.signature, ["algorithm", "key_id", "value"], `privileged ${authorization.operation} authorization signature`);
   if (authorization.operation !== "recover-exact-current-completion") {
     const issuedAt = Date.parse(
-      authorization.operation === "authorize-workflow-evidence"
+      authorization.operation === "authorize-workflow-evidence" || authorization.operation === "execute-sealed-workload"
         ? authorization.issued_at
         : authorization.requested_at,
     );
@@ -247,6 +479,48 @@ function assertPrivilegedAuthorizationShape(authorization) {
       if (typeof authorization[field] !== "string" || !authorization[field]) throw new Error(`host workflow authorization ${field} is invalid`);
     }
   }
+  if (authorization.operation === "execute-sealed-workload") {
+    if (authorization.schema_version !== PROTOCOL_VERSION || authorization.operation !== "execute-sealed-workload"
+        || !["project_root", "run_id", "subject", "nonce"].every((field) => typeof authorization[field] === "string" && authorization[field])) {
+      throw new Error("sealed execution authorization identity is invalid");
+    }
+    if (authorization.runner_kind !== "flow-agents.sealed-exec.v1"
+        || authorization.runner_schema_version !== "1.0"
+        || authorization.runner_entrypoint !== "coordinator:sealed-runner-v1") {
+      throw new Error("sealed execution authorization selects an unsupported runner");
+    }
+    for (const field of ["workload_sha256"]) if (!/^[a-f0-9]{64}$/.test(String(authorization[field]))) {
+      throw new Error(`sealed execution authorization ${field} is invalid`);
+    }
+    for (const field of ["max_staged_bytes", "max_runtime_ms", "max_output_bytes", "max_provider_calls", "max_cost_microusd", "max_tokens"]) {
+      if (!Number.isSafeInteger(authorization[field]) || authorization[field] <= 0) throw new Error(`sealed execution authorization ${field} is invalid`);
+    }
+    if (authorization.max_staged_bytes > SEALED_EXECUTION_HARD_MAX_STAGE_BYTES
+        || authorization.max_runtime_ms > SEALED_EXECUTION_HARD_MAX_RUNTIME_MS
+        || authorization.max_output_bytes > SEALED_EXECUTION_HARD_MAX_OUTPUT_BYTES
+        || authorization.max_provider_calls > SEALED_EXECUTION_HARD_MAX_PROVIDER_CALLS
+        || authorization.max_cost_microusd > SEALED_EXECUTION_HARD_MAX_COST_MICROUSD
+        || authorization.max_tokens > SEALED_EXECUTION_HARD_MAX_TOKENS) {
+      throw new Error("sealed execution authorization exceeds coordinator safety caps");
+    }
+    const issued = Date.parse(authorization.issued_at), expires = Date.parse(authorization.expires_at);
+    if (!Number.isFinite(issued) || !Number.isFinite(expires) || expires < issued || issued > Date.now() + 5 * 60_000
+        || expires - issued > 60 * 60_000 || Date.now() > expires) {
+      throw new Error("sealed execution authorization time window is invalid");
+    }
+  }
+  if (authorization.operation === "merge-change") {
+    for (const field of ["flow_definition_digest", "flow_run_head", "flow_manifest_sha256", "issued_action_sha256"]) {
+      if (!/^[a-f0-9]{64}$/.test(String(authorization[field]))) throw new Error(`merge-change authorization ${field} is invalid`);
+    }
+    for (const field of ["project_root", "run_id", "subject", "flow_definition_id", "flow_definition_version", "nonce", "requested_at", "expires_at"]) {
+      if (typeof authorization[field] !== "string" || !authorization[field]) throw new Error(`merge-change authorization ${field} is invalid`);
+    }
+    const requestedAt = Date.parse(authorization.requested_at), expiresAt = Date.parse(authorization.expires_at);
+    if (!Number.isFinite(requestedAt) || !Number.isFinite(expiresAt) || expiresAt < requestedAt || requestedAt > Date.now() + 5 * 60_000) {
+      throw new Error("merge-change authorization time window is invalid");
+    }
+  }
   return authorization;
 }
 export function validateProvisionalDeliveryAuthorizationBinding(authorization, expected) {
@@ -258,13 +532,24 @@ export function validateProvisionalDeliveryAuthorizationBinding(authorization, e
     if (expected[field] !== undefined && authorization[field] !== expected[field]) throw new Error(`provisional delivery authorization ${field} does not match the current session`);
   }
   for (const field of ["flow_definition_digest", "flow_run_head", "published_head_sha", "checkpoint_commit_sha", "provider_observation_sha256", "checkpoint_sha256", "bundle_sha256", "attestation_sha256"]) {
-    const pattern = field === "checkpoint_commit_sha" || field === "published_head_sha" ? /^[a-f0-9]{40}$/ : /^[a-f0-9]{64}$/;
+    const pattern = field === "checkpoint_commit_sha" || field === "published_head_sha" ? EXACT_COMMIT_SHA : /^[a-f0-9]{64}$/;
     if (!pattern.test(String(authorization[field]))) throw new Error(`provisional delivery authorization ${field} is invalid`);
     if (expected[field] !== undefined && authorization[field] !== expected[field]) throw new Error(`provisional delivery authorization ${field} does not match the current session`);
   }
-  if (!record(authorization.workspace_snapshot) || (expected.workspace_snapshot !== undefined && canonicalJson(authorization.workspace_snapshot) !== canonicalJson(expected.workspace_snapshot))) throw new Error("provisional delivery authorization workspace snapshot does not match the current session");
+  if (!record(authorization.workspace_snapshot)
+      || authorization.workspace_snapshot.version !== 1
+      || authorization.workspace_snapshot.kind !== "git-worktree"
+      || authorization.workspace_snapshot.algorithm !== "sha256"
+      || !EXACT_COMMIT_SHA.test(String(authorization.workspace_snapshot.head_sha))
+      || !/^[a-f0-9]{64}$/.test(String(authorization.workspace_snapshot.digest))
+      || typeof authorization.workspace_snapshot.worktree_clean !== "boolean"
+      || (expected.workspace_snapshot !== undefined && canonicalJson(authorization.workspace_snapshot) !== canonicalJson(expected.workspace_snapshot))) throw new Error("provisional delivery authorization workspace snapshot does not match the current session");
   if (!Array.isArray(authorization.companions) || (expected.companions !== undefined && canonicalJson(authorization.companions) !== canonicalJson(expected.companions))) throw new Error("provisional delivery authorization companions do not match the current session");
-  if (authorization.subject !== authorization.work_item || authorization.checkpoint_slug !== authorization.run_id || authorization.flow_definition_id !== "builder.build") throw new Error("provisional delivery authorization cross-binding is invalid");
+  // #1336: the flow identity is already pinned above by exact comparison against
+  // `expected.flow_definition_id`, which the caller derives from the canonical run's own
+  // definition. A second literal pin here refused every kit-declared flow while adding no binding
+  // the exact comparison does not already make.
+  if (authorization.subject !== authorization.work_item || authorization.checkpoint_slug !== authorization.run_id) throw new Error("provisional delivery authorization cross-binding is invalid");
   const requested = Date.parse(authorization.requested_at), expires = Date.parse(authorization.expires_at);
   if (!Number.isFinite(requested) || !Number.isFinite(expires) || expires < requested || Date.now() > expires) throw new Error("provisional delivery authorization time window is invalid");
   return authorization;
@@ -596,10 +881,11 @@ async function assertExactCurrentCompletionRecoveryPreimages(paths, authorizatio
   }
   const files = canonicalFlowPaths(paths);
   const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
-  const state = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
-  const definition = protectedJson(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
-  const gatePolicy = currentGatePolicy(definition, state);
+  const stateInput = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
+  const startDefinition = protectedJson(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
   const { flow } = await loadPinnedFlowReducer();
+  const { definition, state } = resolveCanonicalFlowRunIdentity(flow, startDefinition, stateInput, paths.runId);
+  const gatePolicy = currentGatePolicy(definition, state);
   const preimage = { run_head: flow.flowRunHead(state), manifest_sha256: sha256(manifestBytes) };
   const definitionSha256 = sha256(protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024));
   const gatePolicySha256 = flowGatePolicyDigest(gatePolicy);
@@ -628,13 +914,13 @@ function exactObject(value, expected, label) {
 async function loadPinnedFlowReducer() {
   const pin = protectedJson(FLOW_REDUCER_PIN_FILE, "Flow reducer pin", 16 * 1024);
   exact(pin, ["package", "package_version", "release_commit", "closure_sha256", "reducer"], "Flow reducer pin");
-  if (pin.package !== "@kontourai/flow" || pin.package_version !== "3.9.0" || pin.release_commit !== "a7c101f" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
+  if (pin.package !== "@kontourai/flow" || pin.package_version !== "5.0.0" || pin.release_commit !== "99f139b" || typeof pin.closure_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(pin.closure_sha256) || !record(pin.reducer)) throw new Error("Flow reducer pin is invalid");
   const packageJson = protectedJson(path.join(FLOW_REDUCER_PACKAGE_ROOT, "package.json"), "pinned Flow package metadata", 64 * 1024);
   if (packageJson.name !== pin.package || packageJson.version !== pin.package_version) throw new Error("installed Flow package does not match the pinned reducer package identity");
   const entry = path.join(FLOW_REDUCER_PACKAGE_ROOT, "dist", "index.js");
   protectedRegularFile(entry, "pinned Flow reducer artifact", 8 * 1024 * 1024);
   const flow = await import(pathToFileURL(entry).href);
-  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "definitionDigest", "flowRunHead", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
+  for (const name of ["reduceTrustAttachment", "trustAttachmentReducerIdentity", "definitionDigest", "flowRunHead", "validateRunStateConsistency", "FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES", "withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
     if (typeof flow[name] !== "function" && !record(flow[name])) throw new Error(`pinned Flow reducer artifact does not export ${name}`);
   }
   const identity = flow.trustAttachmentReducerIdentity(flow.FLOW_TRUST_ATTACHMENT_REDUCER_DEPENDENCIES);
@@ -648,6 +934,16 @@ async function loadPinnedFlowReducer() {
     pin,
     artifact_sha256: sha256File(entry, "pinned Flow reducer artifact"),
   };
+}
+export function resolveCanonicalFlowRunIdentity(flow, startDefinition, state, runId) {
+  if (typeof flow?.validateRunStateConsistency !== "function") {
+    throw new Error("pinned Flow reducer does not expose canonical run consistency validation");
+  }
+  const validated = flow.validateRunStateConsistency(startDefinition, state, { runId });
+  if (!record(validated) || !record(validated.definition) || !record(validated.state)) {
+    throw new Error("pinned Flow reducer returned an invalid canonical run identity");
+  }
+  return { definition: validated.definition, state: validated.state };
 }
 export function assertVerificationResealFlowCapabilities(runStore) {
   for (const name of ["withRunMutationLock", "withRunRecoveryLock", "writeRunRecoveryFence", "finalizeRunRecoveryFence"]) {
@@ -1098,8 +1394,9 @@ async function prepareCanonicalFlowSynchronization(paths, bundle, envelope, expe
   const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
   const stateBytes = protectedRegularFile(files.state, "canonical Flow state", 4 * 1024 * 1024);
   const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
-  const definition = JSON.parse(definitionBytes.toString("utf8"));
-  const state = JSON.parse(stateBytes.toString("utf8"));
+  const startDefinition = JSON.parse(definitionBytes.toString("utf8"));
+  const stateInput = JSON.parse(stateBytes.toString("utf8"));
+  const { definition, state } = resolveCanonicalFlowRunIdentity(flow, startDefinition, stateInput, paths.runId);
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   if (definition.id !== "builder.build" || state.definition_id !== "builder.build" || state.current_step !== "verify") {
     throw new Error("critique resolution is authorized only for the canonical builder.build verify step");
@@ -1159,6 +1456,98 @@ function sessionSubject(paths) {
     throw new Error("workflow session must bind exactly one Work Item");
   }
   return state.work_item_refs[0];
+}
+
+/**
+ * Root-owned preflight for the destructive provider boundary.  This is not a
+ * package-side signature check: the coordinator independently reads canonical
+ * Flow/assignment artifacts and consumes the protected nonce only after every
+ * binding still matches the exact signed merge action.
+ */
+function assertMergeChangeRequestAction(envelope, authorization) {
+  const actionId = envelope.request.issued_action_id;
+  if (typeof actionId !== "string" || !/^[a-f0-9]{64}$/.test(actionId)
+      || !record(authorization.issued_action) || authorization.issued_action.action_id !== actionId) {
+    throw new Error("merge-change request does not bind the signed exact issued action");
+  }
+  return actionId;
+}
+
+function assertMergeChangeVerificationRefreshProvenance(state, definition, definitionDigest) {
+  const amendments = Array.isArray(state.definition_amendments) ? state.definition_amendments : [];
+  const adopted = amendments.filter((entry) => record(entry) && entry.type === "definition_amended"
+    && record(entry.successor_definition)
+    && entry.successor_definition.id === definition.id
+    && entry.successor_definition.version === definition.version
+    && entry.successor_definition.digest === definitionDigest);
+  if (amendments.length === 0) {
+    // #1307: @kontourai/flow's writer has never stamped state.definition_digest; the identity the
+    // stamp would prove is already established by the caller's deep-equal of the persisted start
+    // definition against the resolved effective definition. Accept the derived proof when the
+    // stamp is absent (the validator-derived identity established upstream is the proof; this
+    // function does not itself perform that comparison); refuse only a PRESENT mismatched stamp.
+    if (state.definition_digest !== undefined && state.definition_digest !== definitionDigest) throw new Error("merge-change requires start-definition proof for the canonical evidence-refresh definition");
+    return;
+  }
+  if (adopted.length !== 1) throw new Error("merge-change requires one authenticated definition amendment adopting the canonical evidence-refresh definition");
+  const amendedAt = Date.parse(String(adopted[0].at));
+  const history = Array.isArray(state.gate_outcome_history) ? state.gate_outcome_history : [];
+  const refreshedPass = history.some((outcome) => record(outcome) && outcome.gate_id === "verify-gate" && outcome.status === "pass"
+    && record(outcome.transition_validation) && record(outcome.transition_validation.transition)
+    && Number.isFinite(amendedAt) && Date.parse(String(outcome.transition_validation.transition.at)) > amendedAt);
+  if (!refreshedPass) throw new Error("merge-change requires an accepted verify-gate pass ordered after the definition amendment that adopted evidence refresh");
+}
+
+async function assertMergeChangeAuthorizationBinding(paths, authorization, requestedActionId = null) {
+  exact(authorization, MERGE_CHANGE_AUTHORIZATION_FIELDS, "privileged merge-change authorization");
+  exact(authorization.signature, ["algorithm", "key_id", "value"], "merge-change authorization signature");
+  if (authorization.schema_version !== PROTOCOL_VERSION || authorization.operation !== "merge-change"
+      || authorization.project_root !== paths.projectRoot || authorization.run_id !== paths.runId
+      || authorization.subject !== sessionSubject(paths)) {
+    throw new Error("merge-change authorization does not bind the canonical project, run, and subject");
+  }
+  const action = authorization.issued_action;
+  if (!record(action)) throw new Error("merge-change authorization issued action is invalid");
+  exact(action, ["schema_version", "operation", "binding", "repository", "intent", "assignment_actor", "expected_provider_actor", "provider", "action_id"], "merge-change issued action");
+  if (action.schema_version !== PROTOCOL_VERSION || action.operation !== "merge-change" || authorization.issued_action_sha256 !== jsonSha256(action)) {
+    throw new Error("merge-change authorization does not bind the exact issued action");
+  }
+  if (!record(action.binding) || !record(action.repository) || !record(action.intent) || !record(action.provider)
+      || typeof action.assignment_actor !== "string" || !action.assignment_actor
+      || typeof action.expected_provider_actor !== "string" || !action.expected_provider_actor
+      || typeof action.action_id !== "string" || !/^[a-f0-9]{64}$/.test(action.action_id)) {
+    throw new Error("merge-change authorization issued action shape is invalid");
+  }
+  const unsignedAction = { ...action }; delete unsignedAction.action_id;
+  if (action.action_id !== jsonSha256(unsignedAction)) throw new Error("merge-change authorization issued action digest is invalid");
+  if (requestedActionId !== null && action.action_id !== requestedActionId) throw new Error("merge-change request action changed before authorization consumption");
+  const files = canonicalFlowPaths(paths);
+  const definitionBytes = protectedRegularFile(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
+  const startDefinition = JSON.parse(definitionBytes.toString("utf8"));
+  const stateInput = protectedJson(files.state, "canonical Flow state", 4 * 1024 * 1024);
+  const manifestBytes = protectedRegularFile(files.manifest, "canonical Flow evidence manifest", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const { flow } = await loadPinnedFlowReducer();
+  const { definition, state } = resolveCanonicalFlowRunIdentity(flow, startDefinition, stateInput, paths.runId);
+  if (definition.id !== authorization.flow_definition_id
+      || definition.version !== authorization.flow_definition_version
+      || flow.definitionDigest(definition) !== authorization.flow_definition_digest
+      || flow.flowRunHead(state) !== authorization.flow_run_head
+      || sha256(manifestBytes) !== authorization.flow_manifest_sha256
+      || state.status !== "completed" || !["learn", "done"].includes(state.current_step)
+      || action.binding.run_id !== paths.runId || action.binding.definition_id !== definition.id
+      || action.binding.definition_version !== definition.version) {
+    throw new Error("merge-change authorization canonical Flow binding changed");
+  }
+  const mergeReadyCi = freshnessTurnstileGateEntry(definition)?.gate;
+  if (!mergeReadyCiRefreshRoutesSatisfied(mergeReadyCi)) {
+    throw new Error("merge-change requires semantic evidence-refresh control on the gate its definition declares requires_current_verification");
+  }
+  assertMergeChangeVerificationRefreshProvenance(state, definition, flow.definitionDigest(definition));
+  const assignment = protectedJson(assignmentFile(paths), "canonical assignment", 256 * 1024);
+  if (assignment.status !== "claimed" || assignment.artifact_dir !== paths.runId || assignment.actor_key !== action.assignment_actor) {
+    throw new Error("merge-change authorization assignment actor is no longer current");
+  }
+  return authorization;
 }
 function assignmentFile(paths) { return path.join(paths.projectRoot, ".kontourai", "flow-agents", "assignment", `${paths.runId}.json`); }
 function assignmentLockDir(paths) {
@@ -1300,27 +1689,88 @@ async function archiveCanonicalSession(paths, authorization) {
   return { result_core_sha256: sha256({ canonical_status: run.state.status, archived_session: path.relative(paths.projectRoot, destination) }) };
 }
 function completion(envelope, paths, operationStatus, resultCoreSha256) {
-  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString() };
-  const privateKey = crypto.createPrivateKey(protectedRegularFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
+  const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.completion", action: envelope.action, request_sha256: envelope.request_sha256, run_id: paths.runId, operation_status: operationStatus, result_core_sha256: resultCoreSha256, coordinator_runtime_sha256: coordinatorRuntimeSha256(), completed_at: new Date().toISOString(), ...(envelope.action === "merge-change" ? { authorized_action_id: envelope.request.issued_action_id } : {}) };
+  const privateKey = crypto.createPrivateKey(protectedRootTrustFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
   return { ...unsigned, signature: { algorithm: "ed25519", value: crypto.sign(null, Buffer.from(canonicalJson(unsigned)), privateKey).toString("base64") } };
 }
 function signedCapability(kind, value) {
   const unsigned = { schema_version: PROTOCOL_VERSION, kind: `kontourai.lifecycle-authority.${kind}`, value };
-  const privateKey = crypto.createPrivateKey(protectedRegularFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
+  const privateKey = crypto.createPrivateKey(protectedRootTrustFile(COMPLETION_PRIVATE_KEY_FILE, "completion signing key", 16 * 1024));
   return { ...unsigned, signature: { algorithm: "ed25519", value: crypto.sign(null, Buffer.from(canonicalJson(unsigned)), privateKey).toString("base64") } };
 }
 function verifiedCapability(capability, kind) {
   if (!record(capability) || capability.schema_version !== PROTOCOL_VERSION || capability.kind !== `kontourai.lifecycle-authority.${kind}` || !record(capability.value) || !record(capability.signature) || capability.signature.algorithm !== "ed25519" || typeof capability.signature.value !== "string") throw new Error("mutation worker capability is invalid");
   const { signature, ...unsigned } = capability;
-  const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
+  const publicKey = crypto.createPublicKey(protectedRootTrustFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
   if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("mutation worker capability signature is invalid");
   return capability.value;
 }
+function processBootIdentity() {
+  try {
+    if (process.platform === "linux") return fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
+    return String(spawnSync("sysctl", ["-n", "kern.boottime"], { encoding: "utf8" }).stdout || "").trim();
+  } catch { return "unavailable"; }
+}
+function processStartIdentity(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  try {
+    process.kill(pid, 0);
+    const started = String(spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).stdout || "").trim();
+    return started || null;
+  } catch { return null; }
+}
+function staleLeaseOwner(file) {
+  try {
+    const owner = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!record(owner) || !Number.isSafeInteger(owner.pid) || typeof owner.start !== "string" || typeof owner.boot !== "string") return false;
+    // Never steal based on time alone: PID absence, a reused PID, or reboot is
+    // required. A malformed owner is operator-visible rather than stealable.
+    return owner.boot !== processBootIdentity() || processStartIdentity(owner.pid) !== owner.start;
+  } catch { return false; }
+}
+function reclaimStaleDurableLock(lock, ownerFile) {
+  if (!staleLeaseOwner(ownerFile)) return false;
+  const quarantine = `${lock}.stale-${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
+  try {
+    // Atomic rename is the compare-and-claim step: a second contender can no
+    // longer remove the newly acquired lock at the original path.
+    fs.renameSync(lock, quarantine);
+    fs.rmSync(quarantine, { recursive: true, force: true, maxRetries: 2 });
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "EEXIST") return false;
+    throw error;
+  }
+}
+export function globalNonceLockId(keyId, nonce) {
+  if (typeof keyId !== "string" || !keyId || typeof nonce !== "string" || !nonce) throw new Error("durable lifecycle nonce identity is invalid");
+  return sha256({ lifecycle_nonce_key: keyId, nonce });
+}
 async function withDurableLock(requestSha256, callback) {
   const lock = path.join(STATE_ROOT, "locks", requestSha256);
+  const ownerFile = path.join(lock, "lease.json");
+  const token = crypto.randomBytes(16).toString("hex");
+  const deadline = Date.now() + 30_000;
   fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
-  fs.mkdirSync(lock, { mode: 0o700 });
-  try { return await callback(); } finally { fs.rmdirSync(lock); }
+  while (true) {
+    try {
+      fs.mkdirSync(lock, { mode: 0o700 });
+      atomicWrite(ownerFile, `${JSON.stringify({ token, pid: process.pid, start: processStartIdentity(process.pid), boot: processBootIdentity() })}\n`);
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (reclaimStaleDurableLock(lock, ownerFile)) continue;
+      if (Date.now() > deadline) throw new Error("timed out waiting for durable lifecycle lock");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  try { return await callback(); }
+  finally {
+    try {
+      const owner = JSON.parse(fs.readFileSync(ownerFile, "utf8"));
+      if (owner?.token === token) fs.rmSync(lock, { recursive: true, force: true, maxRetries: 2 });
+    } catch { /* a recovered lock owner owns its own cleanup */ }
+  }
 }
 function publicBridge(bridge) {
   return { digest: bridge.digest, completion_sha256: bridge.completion_sha256, durable_operation_id: bridge.durable_operation_id, durable_key_id: bridge.durable_key_id, durable_nonce: bridge.durable_nonce };
@@ -1690,13 +2140,16 @@ function assertProvisionalAuthorizationContext(paths, authorization, context) {
     subject, work_item: subject, assignment_actor_key: assignment.actor_key, assignment_generation: assignment.claimed_at,
     published_head_sha: changeRef.head_sha, provider_record_id: changeRef.provider_record_id,
     provider_observation_sha256: sha256(providerObservationBytes),
-    flow_definition_id: "builder.build", flow_definition_version: state.definition_version,
+    flow_definition_id: definition.id, flow_definition_version: state.definition_version,
     flow_definition_digest: flow.definitionDigest(definition), flow_run_head: flow.flowRunHead(state),
     flow_gate_id: openGateId(definition, state), flow_gate_visit: provisionalGateVisit(state),
   });
-  if (authorization.run_id !== paths.runId || authorization.flow_definition_id !== "builder.build" || definition.id !== "builder.build"
-      || state.current_step !== "merge-ready-ci" || state.status !== "active") {
-    throw new Error("provisional delivery authorization does not bind the active builder.build merge-ready-ci gate");
+  // #1336: the gate the run must be held at is the one the DEFINITION declares as requiring
+  // current verification, not a step named "merge-ready-ci" in a flow named "builder.build".
+  const turnstile = freshnessTurnstileGateEntry(definition);
+  if (authorization.run_id !== paths.runId || authorization.flow_definition_id !== definition.id
+      || turnstile === null || turnstile.gate.step !== state.current_step || state.status !== "active") {
+    throw new Error("provisional delivery authorization does not bind an active canonical run held at the gate its definition declares requires_current_verification");
   }
   if (assignment.status !== "claimed" || authorization.checkpoint_commit_sha !== authorization.workspace_snapshot.head_sha
       || authorization.published_head_sha !== authorization.checkpoint_commit_sha) {
@@ -1728,9 +2181,10 @@ function assertProvisionalAuthorizationShape(paths, authorization) {
       || !record(authorization.workspace_snapshot)) throw new Error("provisional delivery authorization binding is invalid");
 }
 async function prepareProvisionalDeliveryMutation(paths, authorization) {
-  const definition = protectedJson(canonicalFlowPaths(paths).definition, "canonical Flow definition", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
-  const state = protectedJson(canonicalFlowPaths(paths).state, "canonical Flow state", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const startDefinition = protectedJson(canonicalFlowPaths(paths).definition, "canonical Flow definition", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
+  const stateInput = protectedJson(canonicalFlowPaths(paths).state, "canonical Flow state", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
   const { flow } = await loadPinnedFlowReducer();
+  const { definition, state } = resolveCanonicalFlowRunIdentity(flow, startDefinition, stateInput, paths.runId);
   const assignment = protectedJson(assignmentFile(paths), "canonical assignment", 256 * 1024);
   const subject = sessionSubject(paths);
   const providerObservationBytes = protectedRegularFile(path.join(paths.sessionDir, "publish-change.result.json"), "authenticated publish-change result", 256 * 1024);
@@ -2087,6 +2541,16 @@ async function executeMutation(envelope, paths, authorization, completionRecord 
     if (envelope.action === "reseal-verification-evidence") throw new Error("verification evidence reseal requires the signed prepare/publish protocol");
     if (envelope.action === "recover-exact-current-completion") throw new Error("exact-current completion recovery requires the signed prepare/publish protocol");
     if (envelope.action === "publish-provisional-delivery") return executeProvisionalDeliveryMutation(paths, authorization, resumePrepared);
+    if (envelope.action === "merge-change") {
+      await assertMergeChangeAuthorizationBinding(paths, authorization, assertMergeChangeRequestAction(envelope, authorization));
+      return {
+        // The root-owned nonce record is the single-use permit.  The provider
+        // mutation remains in the caller, under its subject lock, so a crash
+        // can replay only this exact action and never a substituted one.
+        result_core_sha256: sha256({ authorization_sha256: sha256(canonicalJson(authorization)), issued_action_sha256: authorization.issued_action_sha256 }),
+        run_id: paths.runId,
+      };
+    }
     if (envelope.action === "authorize-workflow-evidence") {
       const assignmentBytes = protectedRegularFile(assignmentFile(paths), "canonical assignment", 256 * 1024);
       const assignment = JSON.parse(assignmentBytes.toString("utf8"));
@@ -2141,12 +2605,14 @@ function operationIdentity(envelope, authorization) {
 }
 function durableJson(file, label) { return JSON.parse(protectedRegularFile(file, label, 256 * 1024).toString("utf8")); }
 function durableCompletionRecord(prior, envelope, identity, authorizationSha256) {
-  exact(prior, ["authorization_sha256", "request_sha256", "result_core_sha256", "completion"], "completion record");
+  exact(prior, envelope.action === "execute-sealed-workload"
+    ? ["authorization_sha256", "request_sha256", "result_core_sha256", "safe_result", "completion"]
+    : ["authorization_sha256", "request_sha256", "result_core_sha256", "completion"], "completion record");
   if (prior.authorization_sha256 !== authorizationSha256 || prior.request_sha256 !== envelope.request_sha256 || !/^[a-f0-9]{64}$/.test(String(prior.result_core_sha256))) throw new Error("consumed lifecycle authorization record does not match the exact request");
   const completionRecord = prior.completion;
-  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature"];
+  const fields = ["schema_version", "kind", "action", "request_sha256", "run_id", "operation_status", "result_core_sha256", "coordinator_runtime_sha256", "completed_at", "signature", ...(envelope.action === "merge-change" ? ["authorized_action_id"] : [])];
   exact(completionRecord, fields, "durable lifecycle completion");
-  if (completionRecord.schema_version !== PROTOCOL_VERSION || completionRecord.kind !== "kontourai.lifecycle-authority.completion" || completionRecord.run_id !== identity.runId || completionRecord.action !== envelope.action || !ACTION_FIELDS[completionRecord.action] || completionRecord.request_sha256 !== envelope.request_sha256 || completionRecord.operation_status !== "applied" || completionRecord.result_core_sha256 !== prior.result_core_sha256 || !/^[a-f0-9]{64}$/.test(completionRecord.result_core_sha256) || !record(completionRecord.signature) || completionRecord.signature.algorithm !== "ed25519" || typeof completionRecord.signature.value !== "string") throw new Error("durable lifecycle completion record does not match the exact request");
+  if (completionRecord.schema_version !== PROTOCOL_VERSION || completionRecord.kind !== "kontourai.lifecycle-authority.completion" || completionRecord.run_id !== identity.runId || completionRecord.action !== envelope.action || !ACTION_FIELDS[completionRecord.action] || completionRecord.request_sha256 !== envelope.request_sha256 || completionRecord.operation_status !== "applied" || completionRecord.result_core_sha256 !== prior.result_core_sha256 || !/^[a-f0-9]{64}$/.test(completionRecord.result_core_sha256) || (envelope.action === "merge-change" && completionRecord.authorized_action_id !== envelope.request.issued_action_id) || !record(completionRecord.signature) || completionRecord.signature.algorithm !== "ed25519" || typeof completionRecord.signature.value !== "string") throw new Error("durable lifecycle completion record does not match the exact request");
   const { signature, ...unsigned } = completionRecord;
   const publicKey = crypto.createPublicKey(protectedRegularFile(COMPLETION_PUBLIC_KEY_FILE, "completion verification key", 16 * 1024));
   if (!crypto.verify(null, Buffer.from(canonicalJson(unsigned)), publicKey, Buffer.from(signature.value, "base64"))) throw new Error("durable lifecycle completion signature is invalid");
@@ -2288,13 +2754,311 @@ async function interactiveExactCurrentRecoveryInvocation(payload, identity, sign
     throw error;
   }
 }
+function sealedSource(value, label) {
+  exact(value, SEALED_EXECUTION_SOURCE_FIELDS, `sealed execution ${label}`);
+  if (typeof value.path !== "string" || !path.isAbsolute(value.path) || value.path.includes("\0")
+      || !/^[a-f0-9]{64}$/.test(value.sha256) || !Number.isSafeInteger(value.bytes) || value.bytes < 0) {
+    throw new Error(`sealed execution ${label} is invalid`);
+  }
+  return value;
+}
+function sealedBundleSource(value, label) {
+  exact(value, SEALED_EXECUTION_BUNDLE_SOURCE_FIELDS, `sealed execution ${label}`);
+  const source = { path: value.path, sha256: value.sha256, bytes: value.bytes };
+  sealedSource(source, label);
+  const logicalPath = value.logical_path;
+  if (typeof logicalPath !== "string" || logicalPath.includes("\0") || path.posix.isAbsolute(logicalPath)
+      || path.posix.normalize(logicalPath) !== logicalPath || logicalPath.split("/").some((part) => !part || part === "." || part === "..")
+      || !/^[A-Za-z0-9._/-]{1,512}$/.test(logicalPath)) throw new Error(`sealed execution ${label} logical path is invalid`);
+  return { ...source, logical_path: logicalPath };
+}
+export function sealedWorkload(bytes, authorization) {
+  if (bytes.length > 1024 * 1024 || sha256(bytes) !== authorization.workload_sha256) {
+    throw new Error("sealed execution workload digest is invalid");
+  }
+  const value = JSON.parse(bytes.toString("utf8"));
+  exact(value, SEALED_EXECUTION_WORKLOAD_FIELDS, "sealed execution workload");
+  if (value.schema_version !== "1.0" || value.kind !== "flow-agents.sealed-workload.v1"
+      || !Array.isArray(value.inputs) || !Array.isArray(value.argv) || !record(value.environment)) {
+    throw new Error("sealed execution workload identity is invalid");
+  }
+  const runtime = sealedSource(value.runtime, "runtime");
+  const controller = sealedBundleSource(value.controller, "controller");
+  const provider = sealedSource(value.provider, "provider");
+  const inputs = value.inputs.map((input, index) => {
+    if (!record(input) || canonicalJson(Object.keys(input).sort()) !== canonicalJson(["id", "source"].sort())
+        || typeof input.id !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/.test(input.id)) throw new Error(`sealed execution input ${index} is invalid`);
+    return { id: input.id, source: sealedBundleSource(input.source, `input ${input.id}`) };
+  });
+  if (new Set(inputs.map((input) => input.id)).size !== inputs.length
+      || new Set([controller.logical_path, ...inputs.map((input) => input.source.logical_path)]).size !== inputs.length + 1
+      || value.argv.some((argument) => typeof argument !== "string" || Buffer.byteLength(argument) > 4096)
+      || Object.keys(value.environment).length !== 0) {
+    throw new Error("sealed execution workload arguments or environment are invalid");
+  }
+  const declaredBytes = [runtime, controller, provider, ...inputs.map((input) => input.source)].reduce((sum, source) => sum + source.bytes, 0);
+  if (!Number.isSafeInteger(declaredBytes) || declaredBytes > authorization.max_staged_bytes) {
+    throw new Error("sealed execution workload exceeds its signed staging budget");
+  }
+  return { runtime, controller, provider, inputs, argv: value.argv, environment: value.environment, declaredBytes };
+}
+function readSealedSource(source, label) {
+  const descriptor = fs.openSync(source.path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size !== source.bytes || stat.size > SEALED_EXECUTION_HARD_MAX_STAGE_BYTES) {
+      throw new Error(`sealed execution ${label} source is not the authorized regular file`);
+    }
+    const bytes = fs.readFileSync(descriptor);
+    if (sha256(bytes) !== source.sha256) throw new Error(`sealed execution ${label} source digest changed`);
+    return bytes;
+  } finally { fs.closeSync(descriptor); }
+}
+function stageSealedDirectory(stage, relative, identity) {
+  const target = path.join(stage, relative);
+  fs.mkdirSync(target, { recursive: false, mode: 0o750 });
+  fs.chownSync(target, 0, identity.gid); fs.chmodSync(target, 0o750);
+  return target;
+}
+function stageSealedSource(stage, relative, source, label, mode, identity) {
+  const bytes = readSealedSource(source, label);
+  const target = path.join(stage, relative);
+  if (path.dirname(target) !== stage) {
+    let parent = "";
+    for (const component of path.relative(stage, path.dirname(target)).split(path.sep)) {
+      parent = parent ? path.join(parent, component) : component;
+      if (!fs.existsSync(path.join(stage, parent))) stageSealedDirectory(stage, parent, identity);
+    }
+  }
+  const descriptor = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, mode);
+  try { fs.writeFileSync(descriptor, bytes); fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+  fs.chownSync(target, 0, identity.gid);
+  fs.chmodSync(target, mode);
+  return target;
+}
+function sealedArgv(argv, controller, provider, inputs) {
+  return argv.map((argument) => {
+    if (argument === "${SEALED_CONTROLLER}") return controller;
+    if (argument === "${SEALED_PROVIDER}") return provider;
+    const match = /^\$\{SEALED_INPUT:([a-z][a-z0-9_-]{0,63})\}$/.exec(argument);
+    if (!match) return argument;
+    const input = inputs.get(match[1]);
+    if (!input) throw new Error("sealed execution argument references an undeclared input");
+    return input;
+  });
+}
+const SEALED_ARTIFACT_ENUMS = new Set(["ok", "threshold_fail", "invalid", "execution_error", "pass", "fail", "unknown", "accepted", "rejected", "not_observed", "not_verified"]);
+function sealedSafeArtifactJson(value, depth = 0) {
+  if (depth > 32) throw new Error("sealed execution artifact nesting exceeds its bounded limit");
+  if (value === null || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return;
+  if (typeof value === "string") {
+    if (/^[a-f0-9]{64}$/.test(value) || SEALED_ARTIFACT_ENUMS.has(value)) return;
+    throw new Error("sealed execution artifact contains free-form text");
+  }
+  if (Array.isArray(value)) { value.forEach((item) => sealedSafeArtifactJson(item, depth + 1)); return; }
+  if (!record(value)) throw new Error("sealed execution artifact has an unsupported value");
+  for (const [key, nested] of Object.entries(value)) {
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(key)) throw new Error("sealed execution artifact key is invalid");
+    sealedSafeArtifactJson(nested, depth + 1);
+  }
+}
+function assertInstalledPrivilegeDropLauncher() {
+  // Test fixtures substitute a private launcher with the fixed constant. The
+  // production launcher itself is part of the root-installed execution TCB.
+  if (PRIVILEGE_DROP_LAUNCHER !== "/usr/local/libexec/kontourai/flow-agents-lifecycle-drop-v1") return;
+  let cursor = path.parse(PRIVILEGE_DROP_LAUNCHER).root;
+  for (const component of PRIVILEGE_DROP_LAUNCHER.slice(cursor.length).split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, component);
+    const stat = fs.lstatSync(cursor);
+    if (stat.isSymbolicLink() || stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("installed privilege-drop launcher path is not root-owned and protected");
+  }
+  const descriptor = fs.openSync(PRIVILEGE_DROP_LAUNCHER, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || (stat.mode & 0o111) === 0 || stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error("installed privilege-drop launcher is not a protected executable");
+  } finally { fs.closeSync(descriptor); }
+}
+export function sealedProjection(value) {
+  exact(value, ["schema_version", "kind", "outcome", "metrics", "artifacts", "policy_chain"], "sealed execution projection");
+  if (value.schema_version !== "1.0" || value.kind !== "flow-agents.sealed-result.v1"
+      || !["ok", "threshold_fail", "invalid", "execution_error"].includes(value.outcome)
+      || !record(value.metrics) || !Array.isArray(value.artifacts) || !Array.isArray(value.policy_chain)) {
+    throw new Error("sealed execution projection identity is invalid");
+  }
+  for (const [key, metric] of Object.entries(value.metrics)) {
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(key) || !(typeof metric === "boolean" || (typeof metric === "number" && Number.isFinite(metric)))) {
+      throw new Error("sealed execution projection metrics must be finite numeric or boolean values");
+    }
+  }
+  if (Object.keys(value.metrics).length > 128 || value.artifacts.length > 128 || value.policy_chain.length > 128) throw new Error("sealed execution projection exceeds its bounded shape");
+  let artifactBytes = 0;
+  for (const [label, values] of [["artifact", value.artifacts], ["policy", value.policy_chain]]) for (const item of values) {
+    exact(item, label === "artifact" ? ["id", "sha256", "bytes", "media_type", "content_base64"] : ["id", "sha256"], `sealed execution ${label}`);
+    if (typeof item.id !== "string" || !/^[a-z][a-z0-9_.-]{0,127}$/.test(item.id) || !/^[a-f0-9]{64}$/.test(item.sha256)
+        || (label === "artifact" && (!Number.isSafeInteger(item.bytes) || item.bytes < 0 || item.bytes > 64 * 1024
+          || item.media_type !== "application/json" || typeof item.content_base64 !== "string"))) {
+      throw new Error(`sealed execution ${label} is invalid`);
+    }
+    if (label === "artifact") {
+      const bytes = Buffer.from(item.content_base64, "base64");
+      if (bytes.toString("base64") !== item.content_base64 || bytes.length !== item.bytes || sha256(bytes) !== item.sha256) throw new Error("sealed execution artifact content does not match its address");
+      artifactBytes += bytes.length;
+      let parsed;
+      try { parsed = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("sealed execution artifact content must be JSON"); }
+      if (!record(parsed) && !Array.isArray(parsed)) throw new Error("sealed execution artifact content must be a structured value");
+      sealedSafeArtifactJson(parsed);
+    }
+  }
+  if (artifactBytes > 128 * 1024) throw new Error("sealed execution projection artifact content exceeds its bounded limit");
+  return value;
+}
+function controllerStateSha256(projection) {
+  const matches = Array.isArray(projection?.policy_chain) ? projection.policy_chain.filter((entry) => entry?.id === "controller_state") : [];
+  return matches.length === 1 && /^[a-f0-9]{64}$/.test(matches[0].sha256) ? matches[0].sha256 : null;
+}
+function sealedCancellationScope() {
+  let cancelled = false; let terminate = null;
+  const signals = ["SIGTERM", "SIGINT", "SIGHUP"];
+  const interrupt = () => { cancelled = true; if (terminate) terminate(); };
+  for (const signal of signals) process.on(signal, interrupt);
+  return {
+    get cancelled() { return cancelled; },
+    bind(nextTerminate) { terminate = nextTerminate; if (cancelled && terminate) terminate(); },
+    unbind() { terminate = null; },
+    close() { terminate = null; for (const signal of signals) process.removeListener(signal, interrupt); },
+  };
+}
+async function runSealedStage(runtime, argv, environment, identity, authorization, cancellation) {
+  const started = Date.now(); let timedOut = false; let limited = false; let interrupted = false;
+  const stdout = []; const stderr = []; let stdoutBytes = 0; let stderrBytes = 0;
+  const append = (target, chunk) => {
+    const available = authorization.max_output_bytes - stdoutBytes - stderrBytes;
+    if (available <= 0) { limited = true; return; }
+    const kept = Buffer.from(chunk).subarray(0, available); target.push(kept);
+    if (target === stdout) stdoutBytes += kept.length; else stderrBytes += kept.length;
+    if (kept.length !== chunk.length) limited = true;
+  };
+  const result = await new Promise((resolve) => {
+    let child;
+    try {
+      // Node's uid/gid options leave supplementary groups intact.  The pinned
+      // native launcher clears them before setgid/setuid and execs this exact
+      // staged runtime.
+      assertInstalledPrivilegeDropLauncher();
+      child = spawn(PRIVILEGE_DROP_LAUNCHER, [String(identity.uid), String(identity.gid), runtime, ...argv], { cwd: path.dirname(runtime), detached: process.platform !== "win32",
+        env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C", ...environment }, stdio: ["ignore", "pipe", "pipe"] });
+    } catch { resolve({ status: "spawn_error", exit_code: null }); return; }
+    const terminate = () => {
+      try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL"); else child.kill("SIGKILL"); }
+      catch { child.kill("SIGKILL"); }
+    };
+    cancellation.bind(() => { interrupted = true; terminate(); });
+    const timer = setTimeout(() => { timedOut = true; terminate(); }, authorization.max_runtime_ms);
+    child.stdout.on("data", (chunk) => { append(stdout, chunk); if (limited) terminate(); });
+    child.stderr.on("data", (chunk) => { append(stderr, chunk); if (limited) terminate(); });
+    child.once("error", () => { clearTimeout(timer); cancellation.unbind(); terminate(); resolve({ status: "spawn_error", exit_code: null }); });
+    // A controller can exit while a descendant still owns the pipes.  Always
+    // kill and await its initial detached group before accepting any terminal
+    // outcome or allowing stage cleanup. setsid escapes by a trusted signed
+    // controller are outside this proportional local-TCB threat model.
+    child.once("exit", (code) => { clearTimeout(timer); terminate(); });
+    child.once("close", (code) => { clearTimeout(timer); cancellation.unbind(); resolve({ status: interrupted ? "interrupted" : timedOut ? "timeout" : limited ? "output_limit" : code === 0 ? "ok" : "exit_nonzero", exit_code: Number.isInteger(code) ? code : null }); });
+  });
+  const stdoutValue = Buffer.concat(stdout);
+  let projection = null; let status = result.status;
+  if (status === "ok") {
+    try {
+      const text = stdoutValue.toString("utf8");
+      if (!text.endsWith("\n") || text.slice(0, -1).includes("\n") || text.slice(0, -1).includes("\r")) throw new Error("sealed result must be one JSON line");
+      projection = sealedProjection(JSON.parse(text.slice(0, -1)));
+    } catch { status = "malformed_result"; }
+  }
+  const safe = { ...result, status, runtime_ms: Math.min(Date.now() - started, authorization.max_runtime_ms), stdout_bytes: stdoutBytes, stderr_bytes: stderrBytes,
+    projection, projection_sha256: projection === null ? null : sha256(projection), stdout_sha256: sha256(stdoutValue), stderr_sha256: sha256(Buffer.concat(stderr)) };
+  for (const chunk of [...stdout, ...stderr]) chunk.fill(0);
+  return safe;
+}
+async function processSealedExecution(envelope) {
+  const authorization = verifyAuthorization(path.resolve(envelope.request.authorization_file), { requireCurrentExpiry: true });
+  const paths = canonicalMutationPaths(envelope.request);
+  const identity = operationIdentity(envelope, authorization);
+  if (authorization.operation !== envelope.action || fs.realpathSync(authorization.project_root) !== paths.projectRoot || authorization.run_id !== identity.runId
+      || authorization.run_id !== paths.runId || authorization.subject !== sessionSubject(paths)) {
+    throw new Error("sealed execution authorization does not bind the requested workload");
+  }
+  const workloadBytes = protectedRegularFile(path.resolve(envelope.request.sealed_workload_file), "sealed execution workload", 1024 * 1024);
+  const workload = sealedWorkload(workloadBytes, authorization);
+  const authorizationSha256 = sha256(canonicalJson(authorization));
+  const completionFile = path.join(STATE_ROOT, "completions", `${identity.id}.json`);
+  const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
+  const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
+  const stage = path.join(EXECUTION_ROOT, identity.id);
+  const cancellation = sealedCancellationScope();
+  // The nonce is global to its signing key, not to a workflow run.  Acquire it
+  // before the per-run lock so two sessions cannot both observe an absent
+  // nonce and rename over one another's prepared record.
+  const nonceLockId = globalNonceLockId(identity.keyId, identity.nonce);
+  try { return await withDurableLock(nonceLockId, () => withDurableLock(sha256({ project: identity.project, run_id: identity.runId }), async () => {
+    if (fs.existsSync(completionFile)) {
+      const prior = durableJson(completionFile, "sealed execution completion record");
+      const completionRecord = durableCompletionRecord(prior, envelope, identity, authorizationSha256);
+      reconcileCompletedNonce(nonceFile, prepared, prior.result_core_sha256);
+      return { completionRecord, replayed: true, safeResult: prior.safe_result };
+    }
+    if (fs.existsSync(nonceFile)) {
+      const prior = durableJson(nonceFile, "sealed execution nonce record");
+      assertPreparedNonceRecord(prior, prepared);
+      // A power loss after prepare is terminal: never replay a provider call.
+      // Remove the abandoned root stage and seal an indeterminate receipt.
+      fs.rmSync(stage, { recursive: true, force: true, maxRetries: 2 });
+      const safeResult = { status: "interrupted", exit_code: null, runtime_ms: 0, stdout_bytes: 0, stderr_bytes: 0, projection: null, projection_sha256: null, stdout_sha256: sha256(Buffer.alloc(0)), stderr_sha256: sha256(Buffer.alloc(0)), execution_provenance: { invocation_manifest_sha256: null, controller_state_sha256: null } };
+      const resultCoreSha256 = sha256({ authorization_sha256: authorizationSha256, safe_result: safeResult });
+      const completionRecord = completion(envelope, { runId: identity.runId }, "applied", resultCoreSha256);
+      atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: resultCoreSha256, safe_result: safeResult, completion: completionRecord })}\n`);
+      atomicWrite(nonceFile, `${JSON.stringify(appliedNonceRecord(prepared, resultCoreSha256))}\n`);
+      return { completionRecord, replayed: false, safeResult };
+    }
+    // Every validation above is intentionally before this mutation: malformed
+    // authorizations cannot allocate a stage or consume a one-shot nonce.
+    if (cancellation.cancelled) throw new Error("sealed execution was cancelled before nonce consumption");
+    atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
+    const caller = callerIdentity();
+    let safeResult;
+    try {
+      fs.mkdirSync(stage, { recursive: false, mode: 0o750 }); fs.chownSync(stage, 0, caller.gid); fs.chmodSync(stage, 0o750);
+      const runtime = stageSealedSource(stage, "runtime", workload.runtime, "runtime", 0o550, caller);
+      const controller = stageSealedSource(stage, path.posix.join("bundle", workload.controller.logical_path), workload.controller, "controller", 0o440, caller);
+      const provider = stageSealedSource(stage, "provider", workload.provider, "provider", 0o550, caller);
+      const inputs = new Map(workload.inputs.map((input) => [input.id, stageSealedSource(stage, path.posix.join("bundle", input.source.logical_path), input.source, `input ${input.id}`, 0o440, caller)]));
+      const manifest = path.join(stage, "invocation-manifest.json");
+      const manifestBytes = Buffer.from(`${canonicalJson({ schema_version: "1.0", kind: "flow-agents.sealed-invocation.v1", authorization_sha256: authorizationSha256, runner: authorization.runner_entrypoint, budgets: { max_runtime_ms: authorization.max_runtime_ms, max_output_bytes: authorization.max_output_bytes, max_provider_calls: authorization.max_provider_calls, max_cost_microusd: authorization.max_cost_microusd, max_tokens: authorization.max_tokens }, runtime_sha256: workload.runtime.sha256, controller: { logical_path: workload.controller.logical_path, sha256: workload.controller.sha256 }, provider_sha256: workload.provider.sha256, inputs: workload.inputs.map((input) => ({ id: input.id, logical_path: input.source.logical_path, sha256: input.source.sha256 })) })}\n`);
+      const manifestFd = fs.openSync(manifest, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o440);
+      try { fs.writeFileSync(manifestFd, manifestBytes); fs.fsyncSync(manifestFd); } finally { fs.closeSync(manifestFd); }
+      fs.chownSync(manifest, 0, caller.gid); fs.chmodSync(manifest, 0o440);
+      safeResult = await runSealedStage(runtime, sealedArgv(workload.argv, controller, provider, inputs), { ...workload.environment, SEALED_PROVIDER_PATH: provider, SEALED_INVOCATION_MANIFEST: manifest }, caller, authorization, cancellation);
+      safeResult.execution_provenance = { invocation_manifest_sha256: sha256(manifestBytes), controller_state_sha256: controllerStateSha256(safeResult.projection) };
+    } finally {
+      // The stage is never evidence.  Completion and nonce state retain only
+      // bounded metadata/digests, and cleanup runs for success, failure, and
+      // launch errors alike.
+      fs.rmSync(stage, { recursive: true, force: true, maxRetries: 2 });
+    }
+    const resultCoreSha256 = sha256({ authorization_sha256: authorizationSha256, safe_result: safeResult });
+    const completionRecord = completion(envelope, { runId: identity.runId }, "applied", resultCoreSha256);
+    atomicWrite(completionFile, `${JSON.stringify({ authorization_sha256: authorizationSha256, request_sha256: envelope.request_sha256, result_core_sha256: resultCoreSha256, safe_result: safeResult, completion: completionRecord })}\n`);
+    atomicWrite(nonceFile, `${JSON.stringify(appliedNonceRecord(prepared, resultCoreSha256))}\n`);
+    return { completionRecord, replayed: false, safeResult };
+  })); } finally { cancellation.close(); }
+}
 async function processRootOperation(envelope) {
+  if (envelope.action === "execute-sealed-workload") return processSealedExecution(envelope);
   const authorizationPath = path.resolve(envelope.request.authorization_file);
   // Authenticate and bind before consulting durable state. Expiry is a live
   // permission check, not a reason to lose an exact completed/prepared recovery.
   const authorization = verifyAuthorization(authorizationPath, { requireCurrentExpiry: false });
   const identity = operationIdentity(envelope, authorization);
   if (authorization.operation !== envelope.action || authorization.run_id !== identity.runId) throw new Error("authorization does not bind the requested operation and run");
+  if (envelope.action === "merge-change") assertMergeChangeRequestAction(envelope, authorization);
   if (envelope.action === "reseal-verification-evidence") {
     assertVerificationResealAtomicReplaceCapabilityArtifact();
     const caller = callerIdentity();
@@ -2311,7 +3075,11 @@ async function processRootOperation(envelope) {
   const nonceFile = path.join(STATE_ROOT, "nonces", `${sha256(`${identity.keyId}\u0000${identity.nonce}`)}.json`);
   const prepared = { schema_version: PROTOCOL_VERSION, operation_id: identity.id, authorization_sha256: authorizationSha256, key_id: identity.keyId, nonce: identity.nonce, request_sha256: envelope.request_sha256, status: "prepared" };
   const runLockId = sha256({ project: identity.project, run_id: identity.runId });
-  return withDurableLock(runLockId, async () => {
+  // Every lifecycle action shares the signing-key nonce namespace.  Maintain
+  // the same global-key+nonce then run order as sealed execution to prevent a
+  // cross-action AB/BA deadlock or nonce split-brain.
+  const nonceLockId = globalNonceLockId(identity.keyId, identity.nonce);
+  return withDurableLock(nonceLockId, () => withDurableLock(runLockId, async () => {
     const caller = callerIdentity();
     if (fs.existsSync(completionFile)) {
       const prior = durableJson(completionFile, "completion record");
@@ -2328,6 +3096,7 @@ async function processRootOperation(envelope) {
     if (fs.existsSync(nonceFile)) {
       const prior = durableJson(nonceFile, "nonce record");
       assertPreparedNonceRecord(prior, prepared);
+      assertPreparedMergeAuthorizationCurrent(envelope, authorization);
       resumePrepared = true;
       if (["resolve-critique", "repair-critique-resolution-history"].includes(envelope.action)) {
         const recovery = childInvocation({ kind: "rollback", capability: signedCapability("rollback-capability", { request: envelope.request, binding: transactionBinding }) }, caller);
@@ -2354,7 +3123,11 @@ async function processRootOperation(envelope) {
           throw new Error("unprivileged verification reseal capability preflight returned an invalid response");
         }
       }
+      if (envelope.action === "merge-change") await assertMergeChangeAuthorizationBinding(canonicalMutationPaths(envelope.request), authorization, assertMergeChangeRequestAction(envelope, authorization));
       atomicWrite(nonceFile, `${JSON.stringify(prepared)}\n`);
+    }
+    if (resumePrepared && envelope.action === "merge-change") {
+      await assertMergeChangeAuthorizationBinding(canonicalMutationPaths(envelope.request), authorization, assertMergeChangeRequestAction(envelope, authorization));
     }
     if (envelope.action === "repair-critique-resolution-history" && verifiedBridge === null) verifiedBridge = verifyRootHistoricalBridge(canonicalMutationPaths(envelope.request), authorization);
     if (envelope.action === "recover-exact-current-completion" && !resumePrepared) await assertExactCurrentCompletionRecoveryPreimages(canonicalMutationPaths(envelope.request), authorization, envelope);
@@ -2438,10 +3211,23 @@ async function processRootOperation(envelope) {
     if (envelope.action === "reseal-verification-evidence") childInvocation({ kind: "finalize-reseal", capability: signedCapability("finalize-reseal-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     if (envelope.action === "recover-exact-current-completion") childInvocation({ kind: "finalize-exact-current-recovery", capability: signedCapability("finalize-exact-current-recovery-capability", { request: envelope.request, completion: completionRecord }) }, caller);
     return { completionRecord, replayed: false };
-  });
+  }));
+}
+function assertPreparedMergeAuthorizationCurrent(envelope, authorization) {
+  if (envelope.action === "merge-change") {
+    // Unlike Flow artifact recovery, merge-change has no coordinator-owned
+    // mutation to finish. A prepared nonce only proves an interrupted authority
+    // handoff, so it must never outlive the signed permission window.
+    verifySignedAuthorization(authorization, { requireCurrentExpiry: true });
+  }
+  return authorization;
 }
 function response(envelope, outcome) {
-  return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: { run_id: outcome.completionRecord.run_id, operation_status: outcome.replayed ? "replayed" : "applied", completion: outcome.completionRecord } };
+  return { schema_version: PROTOCOL_VERSION, action: envelope.action, request_sha256: envelope.request_sha256, status: "accepted", result: {
+    run_id: outcome.completionRecord.run_id, operation_status: outcome.replayed ? "replayed" : "applied", completion: outcome.completionRecord,
+    ...(envelope.action === "execute-sealed-workload" ? { safe_result: outcome.safeResult } : {}),
+    ...(envelope.action === "merge-change" ? { authorized_action_id: outcome.completionRecord.authorized_action_id } : {}),
+  } };
 }
 function provisionalReceiptEventIndex(events, paths, completion, label) {
   const index = events.findIndex((event) =>
