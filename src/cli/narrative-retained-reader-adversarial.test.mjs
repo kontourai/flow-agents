@@ -95,3 +95,13 @@ test('browser projection rejects malformed inputs instead of forwarding private 
 test('reference codec is bounded and total for malformed public inputs', () => {
   assert.ok(api.decodeGroundedNarrativeRef({schemaVersion:'grounded-narrative-ref/v1',narrativeId:'x'.repeat(1024*1024),envelopeSha256:'a'.repeat(64)})===undefined,'accepted an unbounded 1 MiB reference identifier');
 });
+
+test('unsupported versions remain distinguishable from malformed references and corrupt bytes', async t => {
+  const f = fixture(t);
+  const input = f.persist();
+  const unsupportedRef = await api.readGroundedNarrative({...input,ref:{...input.ref,schemaVersion:'grounded-narrative-ref/v2'}});
+  f.envelope.schema_version = 'grounded-execution-narrative/v2';
+  const unsupportedEnvelope = await api.readGroundedNarrative(f.persist());
+  assert.notEqual(unsupportedRef.reason,'invalid_reference','an unsupported reference version is not a malformed v1 reference');
+  assert.notEqual(unsupportedEnvelope.reason,'corrupt','an unsupported retained envelope version is not corrupt bytes');
+});
