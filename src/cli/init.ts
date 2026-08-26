@@ -1495,12 +1495,36 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // process happened to launch from (see vendorClaudeCodeGlobalRuntime). This must
       // succeed first -- if it fails, abort without touching settings.json.
       // Placed AFTER the dry-run early return above: --dry-run must not write to dest.
+      const destSettingsPath = path.join(options.dest, "settings.json");
+      // #1288 round-3 HIGH-2: FAIL CLOSED before anything else reads, snapshots, or
+      // WRITES. Merging over an unparseable settings file would replace the user's
+      // (possibly recoverable) content with managed-only settings. --force deliberately
+      // does not apply: this is a parse failure, not an overwrite decision.
+      //
+      // This guard must also precede the #945 runtime vendoring below. #945 requires
+      // vendoring to happen before settings.json is MERGED OR WRITTEN (so a persisted
+      // hook command can never point at a runtime that failed to vendor); #1288 requires
+      // a refused install to leave the destination byte-identical. Reading and validating
+      // the file first satisfies both -- the vendoring still precedes every write -- while
+      // vendoring first would spray ~800 runtime files into a destination whose install
+      // is about to be refused.
+      let existing: Record<string, unknown> = {};
+      if (fs.existsSync(destSettingsPath)) {
+        try {
+          existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>;
+        } catch (error) {
+          throw new Error(
+            `existing Claude settings at ${destSettingsPath} are not valid JSON (${error instanceof Error ? error.message : String(error)}); ` +
+            "fix or move the file and re-run (--force does not override a parse failure)"
+          );
+        }
+      }
       fs.mkdirSync(options.dest, { recursive: true });
       try {
         vendorClaudeCodeGlobalRuntime(options.dest, bundle);
       } catch (error) {
         console.error(`flow-agents init: could not vendor the claude-code hook runtime into ${options.dest}: ${(error as Error).message}`);
-        console.error(`flow-agents init: global claude-code install aborted; ${path.join(options.dest, "settings.json")} was not modified.`);
+        console.error(`flow-agents init: global claude-code install aborted; ${destSettingsPath} was not modified.`);
         return 1;
       }
       const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
@@ -1514,22 +1538,6 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // (see vendorClaudeCodeGlobalRuntime, kontourai/flow-agents#945).
       const vendorRoot = path.join(durableFlowAgentsRoot(options.dest), "runtime");
       rewriteCommandsForGlobalInstall(managed, vendorRoot);
-      const destSettingsPath = path.join(options.dest, "settings.json");
-      // #1288 round-3 HIGH-2: FAIL CLOSED before anything else reads or snapshots the
-      // file. Merging over an unparseable settings file would replace the user's
-      // (possibly recoverable) content with managed-only settings. --force deliberately
-      // does not apply: this is a parse failure, not an overwrite decision.
-      let existing: Record<string, unknown> = {};
-      if (fs.existsSync(destSettingsPath)) {
-        try {
-          existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>;
-        } catch (error) {
-          throw new Error(
-            `existing Claude settings at ${destSettingsPath} are not valid JSON (${error instanceof Error ? error.message : String(error)}); ` +
-            "fix or move the file and re-run (--force does not override a parse failure)"
-          );
-        }
-      }
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
       const { mergeSettings, captureConfigPremerge, installedValues } = _require(installMergePath) as { mergeSettings: MergeSettingsFn; captureConfigPremerge: (configPath: string) => unknown; installedValues: (configPath: string, merged: Record<string, unknown>, managed: Record<string, unknown>) => unknown };
