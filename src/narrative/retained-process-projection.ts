@@ -21,12 +21,21 @@ const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 function record(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function exact(value: Record<string, unknown> | undefined, keys: readonly string[]): value is Record<string, unknown> { return !!value && Object.keys(value).length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key)); }
+function denseArray(value: unknown, maximum: number): value is unknown[] {
+  if (!Array.isArray(value) || value.length > maximum) return false;
+  for (let index = 0; index < value.length; index += 1) if (!Object.prototype.hasOwnProperty.call(value, index)) return false;
+  return true;
+}
 function text(value: unknown): value is string { return typeof value === "string" && value.length > 0 && value.length <= MAX_SAFE_TEXT; }
 function statementText(value: unknown): value is string { return typeof value === "string" && value.length > 0 && value.length <= MAX_STATEMENT_TEXT; }
 function version(value: unknown): value is string { return typeof value === "string" && value.length <= MAX_RETAINED_PROCESS_VERSION_LENGTH && SEMVER.test(value); }
 function dateTime(value: unknown): value is string { return typeof value === "string" && value.length <= MAX_RETAINED_PROCESS_DATETIME_LENGTH && DATE_TIME.test(value) && !Number.isNaN(Date.parse(value)); }
 function nonNegativeInteger(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
-function sourceRefs(value: unknown): boolean { return Array.isArray(value) && value.length > 0 && value.length <= MAX_RETAINED_PROCESS_ACTIONS && value.every(text); }
+function sourceRefs(value: unknown): boolean {
+  if (!denseArray(value, MAX_RETAINED_PROCESS_ACTIONS) || value.length === 0) return false;
+  for (let index = 0; index < value.length; index += 1) if (!text(value[index])) return false;
+  return true;
+}
 function statementWithinBound(value: unknown): boolean { const item = record(value); return !!item && statementText(item.proposition); }
 function boundary(value: unknown): { derived: boolean; rule_id?: "turn-spine/v1" } | undefined {
   const item = record(value);
@@ -55,14 +64,15 @@ function actionForStatement(value: unknown): RetainedNarrativeProcessAction | un
   const ruleVersion = rule.version;
   if (!text(ruleId) || !text(ruleVersion)) return undefined;
   const byRule: Record<string, Exclude<RetainedNarrativeProcessAction["kind"], "unsupported">> = { "retry-detection": "retry", "timeout-detection": "timeout", "no-op-turn": "no_op", "unavailable-source": "source_unavailable" };
-  return ruleVersion === "v1" && byRule[ruleId]
+  return ruleVersion === "v1" && Object.hasOwn(byRule, ruleId)
     ? { kind: byRule[ruleId] }
     : { kind: "unsupported", owner: "flow-agents", category: "deterministic_rule" };
 }
-function actionsFor(values: readonly unknown[]): RetainedNarrativeProcessAction[] | undefined {
+function actionsFor(values: unknown): RetainedNarrativeProcessAction[] | undefined {
+  if (!denseArray(values, MAX_RETAINED_PROCESS_ACTIONS)) return undefined;
   const actions: RetainedNarrativeProcessAction[] = [];
-  for (const value of values) {
-    const action = actionForStatement(value);
+  for (let index = 0; index < values.length; index += 1) {
+    const action = actionForStatement(values[index]);
     if (!action) return undefined;
     actions.push(action);
   }
@@ -70,12 +80,12 @@ function actionsFor(values: readonly unknown[]): RetainedNarrativeProcessAction[
 }
 function capture(value: unknown): { channels: { active: number; inactive: number; unknown: number }; knownGapClasses: RetainedNarrativeProcessProjection["capture"]["knownGapClasses"] } | undefined {
   const item = record(value); const channels = record(item?.channels);
-  if (!exact(item, ["channels", "known_gaps"]) || !channels || Object.keys(channels).length > 128 || !Array.isArray(item.known_gaps) || item.known_gaps.length > 128) return undefined;
+  if (!exact(item, ["channels", "known_gaps"]) || !channels || Object.keys(channels).length > 128 || !denseArray(item.known_gaps, 128)) return undefined;
   const counts = { active: 0, inactive: 0, unknown: 0 };
   for (const status of Object.values(channels)) { if (status !== "active" && status !== "inactive" && status !== "unknown") return undefined; counts[status] += 1; }
   const knownGapClasses: RetainedNarrativeProcessProjection["capture"]["knownGapClasses"] = [];
-  for (const gapValue of item.known_gaps) {
-    const gap = record(gapValue);
+  for (let index = 0; index < item.known_gaps.length; index += 1) {
+    const gap = record(item.known_gaps[index]);
     const gapClass = gap?.class;
     if (!gap || Object.keys(gap).some((key) => !["class", "ref", "note"].includes(key)) || typeof gapClass !== "string" || !GAP_CLASSES.includes(gapClass as typeof GAP_CLASSES[number]) || !text(gap.ref) || (gap.note !== undefined && !text(gap.note))) return undefined;
     const typedGap = gapClass as RetainedNarrativeProcessProjection["capture"]["knownGapClasses"][number];
@@ -89,22 +99,34 @@ function capture(value: unknown): { channels: { active: number; inactive: number
  * owner-defined categories; it never reads storage or forwards foreign/private payloads.
  */
 export function projectRetainedNarrativeProcess(ref: GroundedNarrativeRef, envelope: GroundedExecutionNarrative): RetainedNarrativeProcessProjection | undefined {
+  try { return projectRetainedNarrativeProcessInner(ref, envelope); }
+  catch { return undefined; }
+}
+
+function projectRetainedNarrativeProcessInner(ref: GroundedNarrativeRef, envelope: GroundedExecutionNarrative): RetainedNarrativeProcessProjection | undefined {
   const decoded = decodeGroundedNarrativeRef(ref); const input = record(envelope);
   if (!decoded || !input || input.schema_version !== "grounded-execution-narrative/v1" || !text(input.narrative_id) || input.narrative_id !== decoded.narrativeId) return undefined;
   const provenance = record(input.provenance); const compiler = record(provenance?.compiler); const captureProjection = capture(input.capture_completeness);
-  if (!exact(provenance, ["compiler", "compiled_at", "manifest_sha256", "schema_sha256", "config_sha256", "compiler_sha256"]) || !exact(compiler, ["name", "version"]) || compiler.name !== "flow-agents-narrative-composer" || !version(compiler.version) || !dateTime(provenance.compiled_at) || !text(provenance.manifest_sha256) || !captureProjection || !Array.isArray(input.sections) || input.sections.length > MAX_ENVELOPE_SECTIONS) return undefined;
-  const runtime = input.sections.filter((section): section is Record<string, unknown> => record(section)?.authority === "flow-agents");
+  if (!exact(provenance, ["compiler", "compiled_at", "manifest_sha256", "schema_sha256", "config_sha256", "compiler_sha256"]) || !exact(compiler, ["name", "version"]) || compiler.name !== "flow-agents-narrative-composer" || !version(compiler.version) || !dateTime(provenance.compiled_at) || !text(provenance.manifest_sha256) || !captureProjection || !denseArray(input.sections, MAX_ENVELOPE_SECTIONS)) return undefined;
+  const runtime: Record<string, unknown>[] = [];
+  for (let index = 0; index < input.sections.length; index += 1) {
+    const section = record(input.sections[index]);
+    if (section?.authority === "flow-agents") runtime.push(section);
+  }
   if (runtime.length !== 1 || !exact(runtime[0], ["authority", "kind", "sha256", "embedded"]) || runtime[0].kind !== "runtime-projection") return undefined;
   const embedded = record(runtime[0].embedded); const coverage = record(embedded?.coverage);
-  if (!exact(embedded, ["schema_version", "narrative_id", "provenance", "capture_completeness", "turns", "document_statements", "coverage"]) || embedded.schema_version !== "grounded-runtime-projection/v1" || embedded.narrative_id !== decoded.narrativeId || !Array.isArray(embedded.turns) || embedded.turns.length > MAX_RETAINED_PROCESS_TURNS || !Array.isArray(embedded.document_statements) || embedded.document_statements.length > MAX_RETAINED_PROCESS_ACTIONS || !embedded.document_statements.every(statementWithinBound) || !exact(coverage, ["sources", "cited", "unavailable"]) || !nonNegativeInteger(coverage.sources) || !nonNegativeInteger(coverage.cited) || !nonNegativeInteger(coverage.unavailable)) return undefined;
+  if (!exact(embedded, ["schema_version", "narrative_id", "provenance", "capture_completeness", "turns", "document_statements", "coverage"]) || embedded.schema_version !== "grounded-runtime-projection/v1" || embedded.narrative_id !== decoded.narrativeId || !denseArray(embedded.turns, MAX_RETAINED_PROCESS_TURNS) || !denseArray(embedded.document_statements, MAX_RETAINED_PROCESS_ACTIONS) || !exact(coverage, ["sources", "cited", "unavailable"]) || !nonNegativeInteger(coverage.sources) || !nonNegativeInteger(coverage.cited) || !nonNegativeInteger(coverage.unavailable)) return undefined;
+  for (let index = 0; index < embedded.document_statements.length; index += 1) if (!statementWithinBound(embedded.document_statements[index])) return undefined;
   const documentActions = actionsFor(embedded.document_statements);
   if (!documentActions) return undefined;
   const turns: RetainedNarrativeProcessProjection["runtime"]["turns"] = []; let inputActionCount = embedded.document_statements.length;
-  for (const turnValue of embedded.turns) {
-    const turn = record(turnValue); const turnBoundary = boundary(turn?.boundary);
+  for (let index = 0; index < embedded.turns.length; index += 1) {
+    const turn = record(embedded.turns[index]); const turnBoundary = boundary(turn?.boundary);
     const keys = turn ? Object.keys(turn) : [];
     const ordinal = turn?.ordinal;
-    if (!turn || ![5, 6, 7].includes(keys.length) || keys.some((key) => !["ordinal", "sessionId", "turnId", "boundary", "purpose", "known_gap_refs", "statements"].includes(key)) || typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < -1 || !text(turn.sessionId) || !turnBoundary || !Array.isArray(turn.known_gap_refs) || turn.known_gap_refs.length > MAX_TURN_GAP_REFS || !turn.known_gap_refs.every(text) || !Array.isArray(turn.statements) || turn.statements.length > MAX_RETAINED_PROCESS_ACTIONS || !turn.statements.every(statementWithinBound) || inputActionCount + turn.statements.length > MAX_RETAINED_PROCESS_ACTIONS) return undefined;
+    if (!turn || ![5, 6, 7].includes(keys.length) || keys.some((key) => !["ordinal", "sessionId", "turnId", "boundary", "purpose", "known_gap_refs", "statements"].includes(key)) || typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < -1 || !text(turn.sessionId) || !turnBoundary || !denseArray(turn.known_gap_refs, MAX_TURN_GAP_REFS) || !denseArray(turn.statements, MAX_RETAINED_PROCESS_ACTIONS) || inputActionCount + turn.statements.length > MAX_RETAINED_PROCESS_ACTIONS) return undefined;
+    for (let gapIndex = 0; gapIndex < turn.known_gap_refs.length; gapIndex += 1) if (!text(turn.known_gap_refs[gapIndex])) return undefined;
+    for (let statementIndex = 0; statementIndex < turn.statements.length; statementIndex += 1) if (!statementWithinBound(turn.statements[statementIndex])) return undefined;
     inputActionCount += turn.statements.length;
     const actions = actionsFor(turn.statements);
     if (!actions) return undefined;

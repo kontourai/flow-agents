@@ -189,12 +189,18 @@ test('browser process categories never infer activity from observed prose', t =>
     {id:'4'.repeat(16),class:'deterministic_derived',proposition:'retry-shaped prose is irrelevant',source_refs:[sourceRef],rule:{id:'retry-detection',version:'v1',inputs:[sourceRef]}},
     {id:'5'.repeat(16),class:'deterministic_derived',proposition:'a known rule with a newer version',source_refs:[sourceRef],rule:{id:'retry-detection',version:'v2',inputs:[sourceRef]}},
     {id:'6'.repeat(16),class:'deterministic_derived',proposition:'an unknown rule',source_refs:[sourceRef],rule:{id:'future-rule',version:'v1',inputs:[sourceRef]}},
-    {id:'7'.repeat(16),class:'historical',proposition:'a future statement class',source_refs:[sourceRef]},
+    {id:'7'.repeat(16),class:'deterministic_derived',proposition:'an inherited object member is not a rule',source_refs:[sourceRef],rule:{id:'constructor',version:'v1',inputs:[sourceRef]}},
+    {id:'8'.repeat(16),class:'deterministic_derived',proposition:'another inherited member is not a rule',source_refs:[sourceRef],rule:{id:'toString',version:'v1',inputs:[sourceRef]}},
+    {id:'9'.repeat(16),class:'deterministic_derived',proposition:'the prototype member is not a rule',source_refs:[sourceRef],rule:{id:'__proto__',version:'v1',inputs:[sourceRef]}},
+    {id:'a'.repeat(16),class:'historical',proposition:'a future statement class',source_refs:[sourceRef]},
   ];
   f.runtime.embedded.coverage.cited = 1;
   const projected = api.projectRetainedNarrativeProcess({schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)},f.envelope);
   assert.deepEqual(projected?.runtime.documentActions,[
     {kind:'recorded_observation'},{kind:'recorded_observation'},{kind:'recorded_observation'},{kind:'retry'},
+    {kind:'unsupported',owner:'flow-agents',category:'deterministic_rule'},
+    {kind:'unsupported',owner:'flow-agents',category:'deterministic_rule'},
+    {kind:'unsupported',owner:'flow-agents',category:'deterministic_rule'},
     {kind:'unsupported',owner:'flow-agents',category:'deterministic_rule'},
     {kind:'unsupported',owner:'flow-agents',category:'deterministic_rule'},
     {kind:'unsupported',owner:'flow-agents',category:'statement_class'},
@@ -210,4 +216,20 @@ test('process decoder rejects coercion and returns defensive copies', t => {
   const decoded = api.decodeRetainedNarrativeProcessProjection(projected);
   projected.capture.knownGapClasses.push('mcp_non_native_tools');
   assert.deepEqual(decoded?.capture.knownGapClasses,[]);
+  const sparse = [];
+  sparse.length = 1;
+  assert.equal(api.decodeRetainedNarrativeProcessProjection({...projected,runtime:{...projected.runtime,documentActions:sparse}}),undefined);
+  const sparseGaps = [];
+  sparseGaps.length = 1;
+  assert.equal(api.decodeRetainedNarrativeProcessProjection({...projected,capture:{...projected.capture,knownGapClasses:sparseGaps}}),undefined);
+  const sparseTurnActions = [];
+  sparseTurnActions.length = 1;
+  assert.equal(api.decodeRetainedNarrativeProcessProjection({...projected,runtime:{...projected.runtime,turns:[{ordinal:0,boundary:{derived:false},actions:sparseTurnActions}]}}),undefined);
+  const overridden = [{kind:'recorded_observation'}];
+  overridden.map = () => { throw new Error('attacker map must not run'); };
+  const copied = api.decodeRetainedNarrativeProcessProjection({...projected,runtime:{...projected.runtime,documentActions:overridden}});
+  assert.deepEqual(copied?.runtime.documentActions,[{kind:'recorded_observation'}]);
+  const hostile = {};
+  Object.defineProperty(hostile,'schemaVersion',{get(){throw new Error('getter must be rejected');}});
+  assert.equal(api.decodeRetainedNarrativeProcessProjection(hostile),undefined);
 });
