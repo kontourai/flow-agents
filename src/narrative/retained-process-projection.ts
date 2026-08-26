@@ -14,6 +14,8 @@ import {
 
 const MAX_SAFE_TEXT = 512;
 const MAX_STATEMENT_TEXT = 16 * 1024;
+const MAX_ENVELOPE_SECTIONS = 512;
+const MAX_TURN_GAP_REFS = 128;
 const GAP_CLASSES = ["mcp_non_native_tools", "actor_attribution_conflation", "cross_session_event_contamination"] as const;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -25,6 +27,7 @@ function version(value: unknown): value is string { return typeof value === "str
 function dateTime(value: unknown): value is string { return typeof value === "string" && value.length <= MAX_RETAINED_PROCESS_DATETIME_LENGTH && DATE_TIME.test(value) && !Number.isNaN(Date.parse(value)); }
 function nonNegativeInteger(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
 function sourceRefs(value: unknown): boolean { return Array.isArray(value) && value.length > 0 && value.length <= MAX_RETAINED_PROCESS_ACTIONS && value.every(text); }
+function statementWithinBound(value: unknown): boolean { const item = record(value); return !!item && statementText(item.proposition); }
 function boundary(value: unknown): { derived: boolean; rule_id?: "turn-spine/v1" } | undefined {
   const item = record(value);
   if (!item || typeof item.derived !== "boolean") return undefined;
@@ -78,18 +81,18 @@ export function projectRetainedNarrativeProcess(ref: GroundedNarrativeRef, envel
   const decoded = decodeGroundedNarrativeRef(ref); const input = record(envelope);
   if (!decoded || !input || input.schema_version !== "grounded-execution-narrative/v1" || !text(input.narrative_id) || input.narrative_id !== decoded.narrativeId) return undefined;
   const provenance = record(input.provenance); const compiler = record(provenance?.compiler); const captureProjection = capture(input.capture_completeness);
-  if (!exact(provenance, ["compiler", "compiled_at", "manifest_sha256", "schema_sha256", "config_sha256", "compiler_sha256"]) || !exact(compiler, ["name", "version"]) || compiler.name !== "flow-agents-narrative-composer" || !version(compiler.version) || !dateTime(provenance.compiled_at) || !text(provenance.manifest_sha256) || !captureProjection || !Array.isArray(input.sections)) return undefined;
+  if (!exact(provenance, ["compiler", "compiled_at", "manifest_sha256", "schema_sha256", "config_sha256", "compiler_sha256"]) || !exact(compiler, ["name", "version"]) || compiler.name !== "flow-agents-narrative-composer" || !version(compiler.version) || !dateTime(provenance.compiled_at) || !text(provenance.manifest_sha256) || !captureProjection || !Array.isArray(input.sections) || input.sections.length > MAX_ENVELOPE_SECTIONS) return undefined;
   const runtime = input.sections.filter((section): section is Record<string, unknown> => record(section)?.authority === "flow-agents");
   if (runtime.length !== 1 || !exact(runtime[0], ["authority", "kind", "sha256", "embedded"]) || runtime[0].kind !== "runtime-projection") return undefined;
   const embedded = record(runtime[0].embedded); const coverage = record(embedded?.coverage);
-  if (!exact(embedded, ["schema_version", "narrative_id", "provenance", "capture_completeness", "turns", "document_statements", "coverage"]) || embedded.schema_version !== "grounded-runtime-projection/v1" || embedded.narrative_id !== decoded.narrativeId || !Array.isArray(embedded.turns) || embedded.turns.length > MAX_RETAINED_PROCESS_TURNS || !Array.isArray(embedded.document_statements) || embedded.document_statements.length > MAX_RETAINED_PROCESS_ACTIONS || !exact(coverage, ["sources", "cited", "unavailable"]) || !nonNegativeInteger(coverage.sources) || !nonNegativeInteger(coverage.cited) || !nonNegativeInteger(coverage.unavailable)) return undefined;
+  if (!exact(embedded, ["schema_version", "narrative_id", "provenance", "capture_completeness", "turns", "document_statements", "coverage"]) || embedded.schema_version !== "grounded-runtime-projection/v1" || embedded.narrative_id !== decoded.narrativeId || !Array.isArray(embedded.turns) || embedded.turns.length > MAX_RETAINED_PROCESS_TURNS || !Array.isArray(embedded.document_statements) || embedded.document_statements.length > MAX_RETAINED_PROCESS_ACTIONS || !embedded.document_statements.every(statementWithinBound) || !exact(coverage, ["sources", "cited", "unavailable"]) || !nonNegativeInteger(coverage.sources) || !nonNegativeInteger(coverage.cited) || !nonNegativeInteger(coverage.unavailable)) return undefined;
   const documentActions = embedded.document_statements.map(actionForStatement).filter((item): item is RetainedNarrativeProcessAction => item !== undefined);
   const turns: RetainedNarrativeProcessProjection["runtime"]["turns"] = []; let inputActionCount = embedded.document_statements.length;
   for (const turnValue of embedded.turns) {
     const turn = record(turnValue); const turnBoundary = boundary(turn?.boundary);
     const keys = turn ? Object.keys(turn) : [];
     const ordinal = turn?.ordinal;
-    if (!turn || ![5, 6, 7].includes(keys.length) || keys.some((key) => !["ordinal", "sessionId", "turnId", "boundary", "purpose", "known_gap_refs", "statements"].includes(key)) || typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < -1 || !text(turn.sessionId) || !turnBoundary || !Array.isArray(turn.known_gap_refs) || !turn.known_gap_refs.every(text) || !Array.isArray(turn.statements) || turn.statements.length > MAX_RETAINED_PROCESS_ACTIONS || inputActionCount + turn.statements.length > MAX_RETAINED_PROCESS_ACTIONS) return undefined;
+    if (!turn || ![5, 6, 7].includes(keys.length) || keys.some((key) => !["ordinal", "sessionId", "turnId", "boundary", "purpose", "known_gap_refs", "statements"].includes(key)) || typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < -1 || !text(turn.sessionId) || !turnBoundary || !Array.isArray(turn.known_gap_refs) || turn.known_gap_refs.length > MAX_TURN_GAP_REFS || !turn.known_gap_refs.every(text) || !Array.isArray(turn.statements) || turn.statements.length > MAX_RETAINED_PROCESS_ACTIONS || !turn.statements.every(statementWithinBound) || inputActionCount + turn.statements.length > MAX_RETAINED_PROCESS_ACTIONS) return undefined;
     inputActionCount += turn.statements.length;
     const actions = turn.statements.map(actionForStatement).filter((item): item is RetainedNarrativeProcessAction => item !== undefined);
     turns.push({ ordinal, boundary: turnBoundary, actions });

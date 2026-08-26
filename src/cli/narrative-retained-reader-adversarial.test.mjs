@@ -164,3 +164,17 @@ test('unsafe retained compiler provenance remains available natively but is with
   assert.equal(read.status,'available');
   assert.equal(api.projectRetainedNarrativeProcess(read.ref,read.envelope),undefined);
 });
+
+test('browser projection rejects over-limit process input instead of silently omitting it', t => {
+  const f = fixture(t);
+  const ref = {schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)};
+  const sourceRef = f.manifest.sources[0].source_id;
+  f.runtime.embedded.document_statements = [{id:'e'.repeat(16),class:'observed',proposition:`Command \`${'x'.repeat(17_005)}\` was observed to fail (exit 1)`,source_refs:[sourceRef]}];
+  assert.equal(api.projectRetainedNarrativeProcess(ref,f.envelope),undefined);
+  const sections = structuredClone(f.envelope);
+  sections.sections = Array(513).fill({authority:'foreign'});
+  assert.equal(api.projectRetainedNarrativeProcess(ref,sections),undefined);
+  f.runtime.embedded.document_statements = [];
+  f.runtime.embedded.turns = [{ordinal:0,sessionId:'fixture',boundary:{derived:false},known_gap_refs:Array(129).fill('gap'),statements:[]}];
+  assert.equal(api.projectRetainedNarrativeProcess(ref,f.envelope),undefined);
+});
