@@ -35,27 +35,38 @@ function boundary(value: unknown): { derived: boolean; rule_id?: "turn-spine/v1"
   return exact(item, ["derived", "rule_id"]) && item.rule_id === "turn-spine/v1" ? { derived: item.derived, rule_id: "turn-spine/v1" } : undefined;
 }
 
-/** Maps only structured runtime templates to safe categories; raw statement values never cross this seam. */
+/** Maps only typed statement/rule metadata; proposition text never crosses this seam. */
 function actionForStatement(value: unknown): RetainedNarrativeProcessAction | undefined {
   const statement = record(value);
   if (!statement || !text(statement.id) || !text(statement.class) || !statementText(statement.proposition) || !sourceRefs(statement.source_refs)) return undefined;
-  if (Object.keys(statement).some((key) => !["id", "class", "proposition", "source_refs", "turn_ref", "actor", "rule"].includes(key))) return undefined;
+  if (Object.keys(statement).some((key) => !["id", "class", "proposition", "source_refs", "turn_ref", "actor", "rule", "self_report"].includes(key))) return undefined;
   const turnRef = statement.turn_ref;
   if (turnRef !== undefined && (typeof turnRef !== "number" || !Number.isSafeInteger(turnRef) || turnRef < -1)) return undefined;
   if (statement.actor !== undefined && !text(statement.actor)) return undefined;
   const rule = record(statement.rule);
+  if (statement.rule !== undefined && (!exact(rule, ["id", "version", "inputs"]) || !text(rule.id) || !text(rule.version) || !sourceRefs(rule.inputs))) return undefined;
+  if (statement.self_report !== undefined && statement.self_report !== true) return undefined;
   if (statement.class === "observed") {
-    if (statement.rule !== undefined) return undefined;
-    if (statement.proposition.startsWith("Tool ")) return { kind: "tool_event" };
-    const command = /^Command `[^`]*` was observed to (pass|fail|complete ambiguously) \(exit (?:-?[0-9]+|unknown)\)$/.exec(statement.proposition);
-    if (command) return { kind: "command", outcome: command[1] === "complete ambiguously" ? "ambiguous" : command[1] as "pass" | "fail" };
-    if (statement.proposition.startsWith("Agent ")) return { kind: "delegation" };
-    if (statement.proposition.startsWith("File `")) return { kind: "file_created" };
-    return undefined;
+    return statement.rule === undefined && statement.self_report === undefined ? { kind: "recorded_observation" } : undefined;
   }
-  if (statement.class !== "deterministic_derived" || !exact(rule, ["id", "version", "inputs"]) || !text(rule.id) || !text(rule.version) || !sourceRefs(rule.inputs)) return undefined;
-  const byRule: Record<string, RetainedNarrativeProcessAction["kind"]> = { "retry-detection": "retry", "timeout-detection": "timeout", "no-op-turn": "no_op", "unavailable-source": "source_unavailable" };
-  return byRule[rule.id] ? { kind: byRule[rule.id] } : undefined;
+  if (statement.class !== "deterministic_derived") return { kind: "unsupported", owner: "flow-agents", category: "statement_class" };
+  if (!rule || statement.self_report !== undefined) return undefined;
+  const ruleId = rule.id;
+  const ruleVersion = rule.version;
+  if (!text(ruleId) || !text(ruleVersion)) return undefined;
+  const byRule: Record<string, Exclude<RetainedNarrativeProcessAction["kind"], "unsupported">> = { "retry-detection": "retry", "timeout-detection": "timeout", "no-op-turn": "no_op", "unavailable-source": "source_unavailable" };
+  return ruleVersion === "v1" && byRule[ruleId]
+    ? { kind: byRule[ruleId] }
+    : { kind: "unsupported", owner: "flow-agents", category: "deterministic_rule" };
+}
+function actionsFor(values: readonly unknown[]): RetainedNarrativeProcessAction[] | undefined {
+  const actions: RetainedNarrativeProcessAction[] = [];
+  for (const value of values) {
+    const action = actionForStatement(value);
+    if (!action) return undefined;
+    actions.push(action);
+  }
+  return actions;
 }
 function capture(value: unknown): { channels: { active: number; inactive: number; unknown: number }; knownGapClasses: RetainedNarrativeProcessProjection["capture"]["knownGapClasses"] } | undefined {
   const item = record(value); const channels = record(item?.channels);
@@ -86,7 +97,8 @@ export function projectRetainedNarrativeProcess(ref: GroundedNarrativeRef, envel
   if (runtime.length !== 1 || !exact(runtime[0], ["authority", "kind", "sha256", "embedded"]) || runtime[0].kind !== "runtime-projection") return undefined;
   const embedded = record(runtime[0].embedded); const coverage = record(embedded?.coverage);
   if (!exact(embedded, ["schema_version", "narrative_id", "provenance", "capture_completeness", "turns", "document_statements", "coverage"]) || embedded.schema_version !== "grounded-runtime-projection/v1" || embedded.narrative_id !== decoded.narrativeId || !Array.isArray(embedded.turns) || embedded.turns.length > MAX_RETAINED_PROCESS_TURNS || !Array.isArray(embedded.document_statements) || embedded.document_statements.length > MAX_RETAINED_PROCESS_ACTIONS || !embedded.document_statements.every(statementWithinBound) || !exact(coverage, ["sources", "cited", "unavailable"]) || !nonNegativeInteger(coverage.sources) || !nonNegativeInteger(coverage.cited) || !nonNegativeInteger(coverage.unavailable)) return undefined;
-  const documentActions = embedded.document_statements.map(actionForStatement).filter((item): item is RetainedNarrativeProcessAction => item !== undefined);
+  const documentActions = actionsFor(embedded.document_statements);
+  if (!documentActions) return undefined;
   const turns: RetainedNarrativeProcessProjection["runtime"]["turns"] = []; let inputActionCount = embedded.document_statements.length;
   for (const turnValue of embedded.turns) {
     const turn = record(turnValue); const turnBoundary = boundary(turn?.boundary);
@@ -94,7 +106,8 @@ export function projectRetainedNarrativeProcess(ref: GroundedNarrativeRef, envel
     const ordinal = turn?.ordinal;
     if (!turn || ![5, 6, 7].includes(keys.length) || keys.some((key) => !["ordinal", "sessionId", "turnId", "boundary", "purpose", "known_gap_refs", "statements"].includes(key)) || typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < -1 || !text(turn.sessionId) || !turnBoundary || !Array.isArray(turn.known_gap_refs) || turn.known_gap_refs.length > MAX_TURN_GAP_REFS || !turn.known_gap_refs.every(text) || !Array.isArray(turn.statements) || turn.statements.length > MAX_RETAINED_PROCESS_ACTIONS || !turn.statements.every(statementWithinBound) || inputActionCount + turn.statements.length > MAX_RETAINED_PROCESS_ACTIONS) return undefined;
     inputActionCount += turn.statements.length;
-    const actions = turn.statements.map(actionForStatement).filter((item): item is RetainedNarrativeProcessAction => item !== undefined);
+    const actions = actionsFor(turn.statements);
+    if (!actions) return undefined;
     turns.push({ ordinal, boundary: turnBoundary, actions });
   }
   return decodeRetainedNarrativeProcessProjection({ schemaVersion: RETAINED_NARRATIVE_PROCESS_PROJECTION_SCHEMA_VERSION, ref: decoded, narrativeId: decoded.narrativeId, provenance: { compiler: { name: "flow-agents-narrative-composer", version: compiler.version }, compiled_at: provenance.compiled_at, manifest_sha256: provenance.manifest_sha256 }, capture: captureProjection, runtime: { coverage: { sources: coverage.sources, cited: coverage.cited, unavailable: coverage.unavailable }, turns, documentActions } });

@@ -128,7 +128,7 @@ test('unsupported versions remain distinguishable from malformed references and 
   assert.notEqual(unsupportedEnvelope.reason,'corrupt','an unsupported retained envelope version is not corrupt bytes');
 });
 
-test('browser process codec is strict and exposes only typed runtime action outcomes', t => {
+test('browser process codec is strict and exposes only typed process categories', t => {
   const f = fixture(t);
   const sourceRef = f.manifest.sources[0].source_id;
   f.runtime.embedded.document_statements = [{
@@ -136,12 +136,12 @@ test('browser process codec is strict and exposes only typed runtime action outc
   }];
   f.runtime.embedded.coverage.cited = 1;
   const projected = api.projectRetainedNarrativeProcess({schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)},f.envelope);
-  assert.deepEqual(projected?.runtime.documentActions,[{kind:'command',outcome:'fail'}]);
+  assert.deepEqual(projected?.runtime.documentActions,[{kind:'recorded_observation'}]);
   assert.equal(api.decodeRetainedNarrativeProcessProjection({...projected,private_path:'/private/CODEC_LEAK'}),undefined);
   assert.doesNotMatch(JSON.stringify(projected),/PRIVATE_COMMAND_CANARY|source_refs|statements/);
 });
 
-test('browser codecs bound serialized provenance and preserve safe long command outcomes', t => {
+test('browser codecs bound serialized provenance and preserve safe long observations', t => {
   const f = fixture(t);
   const sourceRef = f.manifest.sources[0].source_id;
   const projection = api.projectRetainedNarrativeProcess({schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)},f.envelope);
@@ -154,7 +154,7 @@ test('browser codecs bound serialized provenance and preserve safe long command 
   ];
   f.runtime.embedded.coverage.cited = 1;
   const longProjection = api.projectRetainedNarrativeProcess({schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)},f.envelope);
-  assert.deepEqual(longProjection?.runtime.documentActions,[{kind:'command',outcome:'fail'},{kind:'command',outcome:'fail'}]);
+  assert.deepEqual(longProjection?.runtime.documentActions,[{kind:'recorded_observation'},{kind:'recorded_observation'}]);
 });
 
 test('unsafe retained compiler provenance remains available natively but is withheld from browser projection', async t => {
@@ -177,4 +177,37 @@ test('browser projection rejects over-limit process input instead of silently om
   f.runtime.embedded.document_statements = [];
   f.runtime.embedded.turns = [{ordinal:0,sessionId:'fixture',boundary:{derived:false},known_gap_refs:Array(129).fill('gap'),statements:[]}];
   assert.equal(api.projectRetainedNarrativeProcess(ref,f.envelope),undefined);
+});
+
+test('browser process categories never infer activity from observed prose', t => {
+  const f = fixture(t);
+  const sourceRef = f.manifest.sources[0].source_id;
+  f.runtime.embedded.document_statements = [
+    {id:'1'.repeat(16),class:'observed',proposition:'Tool session emitted event turn.user',source_refs:[sourceRef]},
+    {id:'2'.repeat(16),class:'observed',proposition:'File `report.txt` was observed not to be created',source_refs:[sourceRef]},
+    {id:'3'.repeat(16),class:'observed',proposition:'A historical observation used an unrecognized template',source_refs:[sourceRef]},
+    {id:'4'.repeat(16),class:'deterministic_derived',proposition:'retry-shaped prose is irrelevant',source_refs:[sourceRef],rule:{id:'retry-detection',version:'v1',inputs:[sourceRef]}},
+    {id:'5'.repeat(16),class:'deterministic_derived',proposition:'a known rule with a newer version',source_refs:[sourceRef],rule:{id:'retry-detection',version:'v2',inputs:[sourceRef]}},
+    {id:'6'.repeat(16),class:'deterministic_derived',proposition:'an unknown rule',source_refs:[sourceRef],rule:{id:'future-rule',version:'v1',inputs:[sourceRef]}},
+    {id:'7'.repeat(16),class:'historical',proposition:'a future statement class',source_refs:[sourceRef]},
+  ];
+  f.runtime.embedded.coverage.cited = 1;
+  const projected = api.projectRetainedNarrativeProcess({schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)},f.envelope);
+  assert.deepEqual(projected?.runtime.documentActions,[
+    {kind:'recorded_observation'},{kind:'recorded_observation'},{kind:'recorded_observation'},{kind:'retry'},
+    {kind:'unsupported',owner:'flow-agents',category:'deterministic_rule'},
+    {kind:'unsupported',owner:'flow-agents',category:'deterministic_rule'},
+    {kind:'unsupported',owner:'flow-agents',category:'statement_class'},
+  ]);
+});
+
+test('process decoder rejects coercion and returns defensive copies', t => {
+  const f = fixture(t);
+  const ref = {schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)};
+  const projected = api.projectRetainedNarrativeProcess(ref,f.envelope);
+  assert.ok(projected);
+  assert.equal(api.decodeRetainedNarrativeProcessProjection({...projected,runtime:{...projected.runtime,documentActions:[{kind:'recorded_observation',outcome:{toString:()=> 'pass',sentinel:'unexpected-object'}}]}}),undefined);
+  const decoded = api.decodeRetainedNarrativeProcessProjection(projected);
+  projected.capture.knownGapClasses.push('mcp_non_native_tools');
+  assert.deepEqual(decoded?.capture.knownGapClasses,[]);
 });

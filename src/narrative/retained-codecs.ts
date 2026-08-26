@@ -16,19 +16,16 @@ export const MAX_RETAINED_PROCESS_VERSION_LENGTH = 128;
 export const MAX_RETAINED_PROCESS_DATETIME_LENGTH = 64;
 
 export type RetainedNarrativeProcessActionKind =
-  | "tool_event"
-  | "command"
-  | "delegation"
-  | "file_created"
+  | "recorded_observation"
   | "retry"
   | "timeout"
   | "no_op"
-  | "source_unavailable";
+  | "source_unavailable"
+  | "unsupported";
 
-export interface RetainedNarrativeProcessAction {
-  kind: RetainedNarrativeProcessActionKind;
-  outcome?: "pass" | "fail" | "ambiguous";
-}
+export type RetainedNarrativeProcessAction =
+  | { kind: Exclude<RetainedNarrativeProcessActionKind, "unsupported"> }
+  | { kind: "unsupported"; owner: "flow-agents"; category: "statement_class" | "deterministic_rule" };
 
 export interface RetainedNarrativeProcessProjection {
   schemaVersion: typeof RETAINED_NARRATIVE_PROCESS_PROJECTION_SCHEMA_VERSION;
@@ -76,11 +73,13 @@ function safeVersion(value: unknown): value is string { return typeof value === 
 function dateTime(value: unknown): value is string { return typeof value === "string" && value.length <= MAX_RETAINED_PROCESS_DATETIME_LENGTH && DATE_TIME.test(value) && !Number.isNaN(Date.parse(value)); }
 function action(value: unknown): RetainedNarrativeProcessAction | undefined {
   const record = object(value);
-  if (!record || typeof record.kind !== "string"
-    || !["tool_event", "command", "delegation", "file_created", "retry", "timeout", "no_op", "source_unavailable"].includes(record.kind)) return undefined;
-  if (record.outcome === undefined) return exact(record, ["kind"]) ? { kind: record.kind as RetainedNarrativeProcessActionKind } : undefined;
-  if (!exact(record, ["kind", "outcome"]) || !["pass", "fail", "ambiguous"].includes(String(record.outcome))) return undefined;
-  return { kind: record.kind as RetainedNarrativeProcessActionKind, outcome: record.outcome as "pass" | "fail" | "ambiguous" };
+  if (!record || typeof record.kind !== "string") return undefined;
+  if (["recorded_observation", "retry", "timeout", "no_op", "source_unavailable"].includes(record.kind)) {
+    return exact(record, ["kind"]) ? { kind: record.kind as Exclude<RetainedNarrativeProcessActionKind, "unsupported"> } : undefined;
+  }
+  if (!exact(record, ["kind", "owner", "category"]) || record.kind !== "unsupported" || record.owner !== "flow-agents"
+    || (record.category !== "statement_class" && record.category !== "deterministic_rule")) return undefined;
+  return { kind: "unsupported", owner: "flow-agents", category: record.category };
 }
 
 /** Strict, bounded decoder for serialized browser-safe process projections. */
@@ -129,7 +128,7 @@ export function decodeRetainedNarrativeProcessProjection(value: unknown): Retain
   return {
     schemaVersion: RETAINED_NARRATIVE_PROCESS_PROJECTION_SCHEMA_VERSION, ref, narrativeId: record.narrativeId,
     provenance: { compiler: { name: "flow-agents-narrative-composer", version: compiler.version }, compiled_at: provenance.compiled_at, manifest_sha256: provenance.manifest_sha256 },
-    capture: { channels: { active: channels.active as number, inactive: channels.inactive as number, unknown: channels.unknown as number }, knownGapClasses: capture.knownGapClasses as KnownGapClass[] },
+    capture: { channels: { active: channels.active as number, inactive: channels.inactive as number, unknown: channels.unknown as number }, knownGapClasses: [...capture.knownGapClasses] as KnownGapClass[] },
     runtime: { coverage: { sources: coverage.sources, cited: coverage.cited, unavailable: coverage.unavailable }, turns, documentActions: documentActions as RetainedNarrativeProcessAction[] },
   };
 }
