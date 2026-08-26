@@ -174,7 +174,22 @@ export async function runConsoleConnectWizard(
   return { telemetrySinks: sinks, consoleUrl, consoleTokenValue, consoleTenant, warnings };
 }
 
-export type ConsoleStatus = "connected-verified" | "connected-unverified" | "local-only";
+/**
+ * Four distinguishable outcomes, deliberately NOT collapsed (kontourai/flow-agents#1344).
+ *
+ * The precedent this follows is `cost_availability`, which distinguishes `unavailable` from
+ * `activity_only` from `floor` rather than flattening them into one number, and
+ * `output_tokens`, which is present iff attributed rather than defaulting to zero. "A
+ * connection was attempted and it worked" and "no connection was ever attempted" are
+ * different facts about the world; a summary that prints the same check mark for both is
+ * asserting an observation nothing made.
+ *
+ *   verified                  -- a reachability check ran against the endpoint and succeeded.
+ *   unverified-failed         -- a check ran and failed (detail carries the error/status).
+ *   unverified-not-attempted  -- an endpoint is configured; no check was attempted (detail says why).
+ *   not-configured            -- no Console endpoint resolved at all. Absent reads as absent.
+ */
+export type ConsoleStatus = "verified" | "unverified-failed" | "unverified-not-attempted" | "not-configured";
 
 type DoctorConsoleShape = {
   sink: "local-only" | "console";
@@ -201,17 +216,22 @@ const NOT_CHECKED_DETAIL =
 
 export function describeConsoleStatus(doctor: { console: DoctorConsoleShape }): { status: ConsoleStatus; detail?: string } {
   const { sink, reachability } = doctor.console;
-  if (sink === "local-only") return { status: "local-only" };
-  if (reachability.checked && reachability.ok === true) return { status: "connected-verified" };
+  if (sink === "local-only") return { status: "not-configured" };
+  if (reachability.checked && reachability.ok === true) return { status: "verified" };
   if (reachability.checked && reachability.ok === false) {
     const detail = reachability.error ?? (reachability.statusCode !== undefined ? `HTTP ${reachability.statusCode}` : "reachability check failed");
-    return { status: "connected-unverified", detail };
+    return { status: "unverified-failed", detail };
   }
   // reachability.checked === false: never attempted (see NOT_CHECKED_DETAIL's
   // doc comment for why this is always the not-allowed/skipped reason here,
   // never an attempted-and-failed check).
-  return { status: "connected-unverified", detail: NOT_CHECKED_DETAIL };
+  return { status: "unverified-not-attempted", detail: NOT_CHECKED_DETAIL };
 }
+
+/** Where the telemetry configuration the summary describes was actually resolved from. */
+export type ResolvedConfigScope = "destination" | "workspace" | "user-global" | "explicit" | "absent";
+
+export type ConsoleValueProvenance = "environment" | "config-file" | "absent";
 
 export type PostInstallSummaryInput = {
   runtime: string;
@@ -219,25 +239,51 @@ export type PostInstallSummaryInput = {
   dest: string;
   telemetrySinks: string[];
   consoleStatus: { status: ConsoleStatus; detail?: string };
-  tokenConfigured: boolean;
-  tenantConfigured: boolean;
+  /** Absolute path of the telemetry config file the resolution actually read. */
+  resolvedConfigFile?: string;
+  /** Whether that file belongs to this install's destination, or came from somewhere else. */
+  resolvedConfigScope?: ResolvedConfigScope;
+  tokenSource?: ConsoleValueProvenance;
+  tenantSource?: ConsoleValueProvenance;
   nextSteps: string[];
 };
 
+const SCOPE_NOTE: Readonly<Record<ResolvedConfigScope, string>> = {
+  destination: "",
+  workspace: " (workspace override, not written by this install)",
+  "user-global": " (user-global, not written by this install)",
+  explicit: " (TELEMETRY_CONFIG_FILE override, not written by this install)",
+  absent: "",
+};
+
 function consoleStatusLine(consoleStatus: { status: ConsoleStatus; detail?: string }): string {
-  if (consoleStatus.status === "connected-verified") return "✓ Console: connected + verified";
-  if (consoleStatus.status === "connected-unverified") {
-    return `✗ Console: connected, unverified${consoleStatus.detail ? `: ${consoleStatus.detail}` : ""}`;
+  const detail = consoleStatus.detail ? `: ${consoleStatus.detail}` : "";
+  switch (consoleStatus.status) {
+    // "verified" is claimed ONLY here, where a reachability check actually ran and returned ok.
+    case "verified": return "✓ Console: reachability checked and verified";
+    case "unverified-failed": return `✗ Console: endpoint configured, reachability check FAILED${detail}`;
+    case "unverified-not-attempted": return `- Console: endpoint configured, reachability not attempted${detail}`;
+    case "not-configured": return "- Console: not configured (no Console endpoint in the resolved telemetry configuration)";
   }
-  return "- Console: local-only";
+}
+
+function valueLine(label: string, source: ConsoleValueProvenance | undefined): string {
+  if (source === "environment") return `    ${label}: configured (from the environment, not from a config file)`;
+  if (source === "config-file") return `    ${label}: configured`;
+  return `    ${label}: not configured`;
 }
 
 /**
- * Pure string[]-builder for the post-install summary block: one array entry
- * per line, so callers `console.log` each entry and tests assert on array
- * contents rather than scraping stdout. Never receives or emits the raw
- * console token value -- only the `tokenConfigured`/`tenantConfigured`
- * booleans are shown.
+ * Pure string[]-builder for the post-install summary block: one array entry per line, so
+ * callers `console.log` each entry and tests assert on array contents rather than scraping
+ * stdout. Never receives or emits the raw console token value -- only provenance labels.
+ *
+ * Every Console line here is DERIVED from the resolved configuration the caller measured,
+ * never from install intent (kontourai/flow-agents#1344). The selected sink is printed as
+ * the primary fact; the resolved configuration FILE is named, with a note when it is not the
+ * one this install wrote; "verified" appears only for a connection that was attempted and
+ * succeeded; and an absent token or tenant reads as "not configured" rather than being
+ * omitted, so absence is visible instead of merely unstated.
  */
 export function buildPostInstallSummaryLines(input: PostInstallSummaryInput): string[] {
   const lines: string[] = [];
@@ -246,12 +292,16 @@ export function buildPostInstallSummaryLines(input: PostInstallSummaryInput): st
   const runtimeLine = input.runtimeAutoDetected ? `${input.runtime} (auto-detected)` : input.runtime;
   lines.push(`  ✓ Runtime: ${runtimeLine}`);
   lines.push(`  ✓ Destination: ${input.dest}`);
-  lines.push(`  ✓ Telemetry sink: ${input.telemetrySinks.length ? input.telemetrySinks.join(", ") : "local-files"}`);
+  lines.push(`  ✓ Telemetry sink (selected): ${input.telemetrySinks.length ? input.telemetrySinks.join(", ") : "local-files"}`);
+  const scope = input.resolvedConfigScope ?? "absent";
+  lines.push(
+    input.resolvedConfigFile && scope !== "absent"
+      ? `  ${scope === "destination" ? "✓" : "!"} Telemetry config resolved from: ${input.resolvedConfigFile}${SCOPE_NOTE[scope]}`
+      : "  - Telemetry config resolved from: no telemetry config file found",
+  );
   lines.push(`  ${consoleStatusLine(input.consoleStatus)}`);
-  if (input.consoleStatus.status !== "local-only") {
-    lines.push(`    Console token: ${input.tokenConfigured ? "configured" : "not configured"}`);
-    lines.push(`    Console tenant: ${input.tenantConfigured ? "configured" : "not configured"}`);
-  }
+  lines.push(valueLine("Console token", input.tokenSource));
+  lines.push(valueLine("Console tenant", input.tenantSource));
   if (input.nextSteps.length) {
     lines.push("");
     lines.push("Next steps:");

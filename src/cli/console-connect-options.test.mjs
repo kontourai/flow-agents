@@ -223,40 +223,44 @@ test("runConsoleConnectWizard: invalid (malformed but non-blank) self-hosted URL
 });
 
 // --- describeConsoleStatus ---
+//
+// #1344: four distinguishable outcomes. "a check ran and passed", "a check ran and failed",
+// "no check was attempted" and "there is no endpoint at all" are different facts; the
+// classifier must not collapse any pair of them.
 
-test("describeConsoleStatus: checked+ok=true -> connected-verified", () => {
+test("describeConsoleStatus: checked+ok=true -> verified", () => {
   const result = describeConsoleStatus({ console: { sink: "console", reachability: { checked: true, ok: true } } });
-  assert.equal(result.status, "connected-verified");
+  assert.equal(result.status, "verified");
 });
 
-test("describeConsoleStatus: attempted-and-failed (checked=true, ok=false) -> connected-unverified, detail still surfaces the error", () => {
+test("describeConsoleStatus: attempted-and-failed (checked=true, ok=false) -> unverified-failed, detail still surfaces the error", () => {
   const result = describeConsoleStatus({
     console: { sink: "console", reachability: { checked: true, ok: false, error: "timeout after 2000ms" } },
   });
-  assert.equal(result.status, "connected-unverified");
+  assert.equal(result.status, "unverified-failed");
   assert.equal(result.detail, "timeout after 2000ms");
   assert.ok(!result.detail.includes("allow-network"), "attempted-and-failed detail must not be replaced by the not-checked hint");
 });
 
-test("describeConsoleStatus: attempted-and-failed (checked=true, ok=false, no error) -> connected-unverified, detail still surfaces the statusCode", () => {
+test("describeConsoleStatus: attempted-and-failed (checked=true, ok=false, no error) -> unverified-failed, detail still surfaces the statusCode", () => {
   const result = describeConsoleStatus({
     console: { sink: "console", reachability: { checked: true, ok: false, statusCode: 503 } },
   });
-  assert.equal(result.status, "connected-unverified");
+  assert.equal(result.status, "unverified-failed");
   assert.ok(result.detail.includes("503"));
   assert.ok(!result.detail.includes("allow-network"), "attempted-and-failed detail must not be replaced by the not-checked hint");
 });
 
-test("describeConsoleStatus: sink=local-only -> local-only regardless of reachability shape", () => {
+test("describeConsoleStatus: sink=local-only -> not-configured regardless of reachability shape", () => {
   const result1 = describeConsoleStatus({ console: { sink: "local-only", reachability: { checked: false, ok: null } } });
-  assert.equal(result1.status, "local-only");
+  assert.equal(result1.status, "not-configured");
   const result2 = describeConsoleStatus({ console: { sink: "local-only", reachability: { checked: true, ok: true } } });
-  assert.equal(result2.status, "local-only");
+  assert.equal(result2.status, "not-configured");
 });
 
-test("describeConsoleStatus: sink=console but not checked -> connected-unverified (honestly not verified) with an actionable self-hosted/BYO hint", () => {
+test("describeConsoleStatus: sink=console but not checked -> unverified-not-attempted, never collapsed into the attempted-and-failed verdict", () => {
   const result = describeConsoleStatus({ console: { sink: "console", reachability: { checked: false, ok: null } } });
-  assert.equal(result.status, "connected-unverified");
+  assert.equal(result.status, "unverified-not-attempted");
   assert.ok(result.detail.startsWith("not checked"), "must not silently drop the honest 'not checked' verdict");
   assert.ok(result.detail.includes("flow-agents telemetry-doctor --allow-network"), "must point at the flag that unblocks self-hosted/BYO reachability checks");
 });
@@ -265,7 +269,7 @@ test("describeConsoleStatus: not-checked-via-not-allowed-guard (checked=false wi
   const result = describeConsoleStatus({
     console: { sink: "console", reachability: { checked: false, ok: null, error: "endpoint is not allowed" } },
   });
-  assert.equal(result.status, "connected-unverified");
+  assert.equal(result.status, "unverified-not-attempted");
   assert.ok(result.detail.includes("--allow-network"));
 });
 
@@ -277,9 +281,11 @@ test("buildPostInstallSummaryLines: never contains the literal token/secret valu
     runtimeAutoDetected: false,
     dest: "/tmp/some-dest",
     telemetrySinks: ["kontour-hosted-console"],
-    consoleStatus: { status: "connected-verified" },
-    tokenConfigured: true,
-    tenantConfigured: true,
+    consoleStatus: { status: "verified" },
+    resolvedConfigFile: "/tmp/some-dest/scripts/telemetry/telemetry.conf",
+    resolvedConfigScope: "destination",
+    tokenSource: "config-file",
+    tenantSource: "config-file",
     nextSteps: ["step one"],
   });
   const joined = lines.join("\n");
@@ -288,42 +294,107 @@ test("buildPostInstallSummaryLines: never contains the literal token/secret valu
 });
 
 test("buildPostInstallSummaryLines: runtime annotated (auto-detected) only when the flag is set", () => {
-  const detected = buildPostInstallSummaryLines({
+  const base = {
     runtime: "codex",
-    runtimeAutoDetected: true,
     dest: "/tmp/dest",
     telemetrySinks: ["local-files"],
-    consoleStatus: { status: "local-only" },
-    tokenConfigured: false,
-    tenantConfigured: false,
+    consoleStatus: { status: "not-configured" },
+    resolvedConfigScope: "absent",
+    tokenSource: "absent",
+    tenantSource: "absent",
     nextSteps: [],
-  });
+  };
+  const detected = buildPostInstallSummaryLines({ ...base, runtimeAutoDetected: true });
   assert.ok(detected.some((line) => line.includes("codex (auto-detected)")));
 
-  const notDetected = buildPostInstallSummaryLines({
+  const notDetected = buildPostInstallSummaryLines({ ...base, runtimeAutoDetected: false });
+  assert.ok(notDetected.some((line) => line.includes("Runtime: codex") && !line.includes("auto-detected")));
+});
+
+// #1344 regression, stated as the exact observed reality: `--telemetry-sink local-files`
+// into a repo whose telemetry.conf has token and tenant commented out. Every one of the
+// three lines the bug printed ("connected + verified", "token: configured",
+// "tenant: configured") must now read as absence, and the SELECTED sink must be present as
+// the primary fact.
+test("buildPostInstallSummaryLines: local-files with nothing configured reports absence on every Console line", () => {
+  const lines = buildPostInstallSummaryLines({
     runtime: "codex",
     runtimeAutoDetected: false,
     dest: "/tmp/dest",
     telemetrySinks: ["local-files"],
-    consoleStatus: { status: "local-only" },
-    tokenConfigured: false,
-    tenantConfigured: false,
+    consoleStatus: { status: "not-configured" },
+    resolvedConfigFile: "/tmp/dest/scripts/telemetry/telemetry.conf",
+    resolvedConfigScope: "destination",
+    tokenSource: "absent",
+    tenantSource: "absent",
     nextSteps: [],
   });
-  assert.ok(notDetected.some((line) => line.includes("Runtime: codex") && !line.includes("auto-detected")));
+  const joined = lines.join("\n");
+  assert.ok(joined.includes("Telemetry sink (selected): local-files"), "the selected sink is the primary fact");
+  assert.ok(!/verified/.test(joined), `no line may claim verification: ${joined}`);
+  assert.ok(!joined.includes("connected"), "nothing connected, so nothing may say connected");
+  assert.ok(lines.some((line) => /Console token: not configured$/.test(line)), "absent token must read as absent");
+  assert.ok(lines.some((line) => /Console tenant: not configured$/.test(line)), "absent tenant must read as absent");
+  assert.ok(lines.some((line) => line.includes("Console: not configured")));
 });
 
-test("buildPostInstallSummaryLines: local-only status includes 'local-only' marker and omits token/tenant lines", () => {
+// The token/tenant lines are ALWAYS emitted -- an omitted line is a fact the reader has to
+// infer, and the bug this replaces was exactly a reader inferring the wrong thing.
+test("buildPostInstallSummaryLines: token/tenant lines are emitted even when Console is not configured", () => {
   const lines = buildPostInstallSummaryLines({
     runtime: "base",
     runtimeAutoDetected: false,
     dest: "/tmp/dest",
     telemetrySinks: ["local-files"],
-    consoleStatus: { status: "local-only" },
-    tokenConfigured: false,
-    tenantConfigured: false,
+    consoleStatus: { status: "not-configured" },
+    resolvedConfigScope: "absent",
+    tokenSource: "absent",
+    tenantSource: "absent",
     nextSteps: [],
   });
-  assert.ok(lines.some((line) => line.includes("Console:") && line.includes("local-only")));
-  assert.ok(!lines.some((line) => line.includes("Console token")));
+  assert.ok(lines.some((line) => line.includes("Console token")));
+  assert.ok(lines.some((line) => line.includes("Console tenant")));
+  assert.ok(lines.some((line) => line.includes("no telemetry config file found")));
+});
+
+// The specific mechanism behind #1344: the resolved config was ~/.flow-agents/
+// telemetry-console.conf, which the install never wrote. The summary must say so rather
+// than presenting an ambient machine-wide credential as this install's outcome.
+test("buildPostInstallSummaryLines: a config resolved outside the destination is flagged as not written by this install", () => {
+  const lines = buildPostInstallSummaryLines({
+    runtime: "codex",
+    runtimeAutoDetected: false,
+    dest: "/tmp/dest",
+    telemetrySinks: ["local-files"],
+    consoleStatus: { status: "verified" },
+    resolvedConfigFile: "/home/someone/.flow-agents/telemetry-console.conf",
+    resolvedConfigScope: "user-global",
+    tokenSource: "config-file",
+    tenantSource: "config-file",
+    nextSteps: [],
+  });
+  const provenance = lines.find((line) => line.includes("Telemetry config resolved from"));
+  assert.ok(provenance, "the resolved config file must be named");
+  assert.ok(provenance.includes("/home/someone/.flow-agents/telemetry-console.conf"));
+  assert.ok(provenance.includes("not written by this install"));
+  assert.ok(!provenance.startsWith("  ✓"), "a config this install did not write must not carry a check mark");
+});
+
+test("buildPostInstallSummaryLines: a value sourced from the environment says so rather than implying a config file", () => {
+  const lines = buildPostInstallSummaryLines({
+    runtime: "base",
+    runtimeAutoDetected: false,
+    dest: "/tmp/dest",
+    telemetrySinks: ["kontour-hosted-console"],
+    consoleStatus: { status: "unverified-not-attempted", detail: "not checked" },
+    resolvedConfigFile: "/tmp/dest/scripts/telemetry/telemetry.conf",
+    resolvedConfigScope: "destination",
+    tokenSource: "environment",
+    tenantSource: "absent",
+    nextSteps: [],
+  });
+  assert.ok(lines.some((line) => line.includes("Console token: configured (from the environment")));
+  assert.ok(lines.some((line) => line.includes("Console tenant: not configured")));
+  assert.ok(lines.some((line) => line.includes("reachability not attempted")));
+  assert.ok(!lines.some((line) => line.includes("verified")), "not-attempted must never render as verified");
 });

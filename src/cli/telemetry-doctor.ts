@@ -34,10 +34,37 @@ export type DoctorReport = {
     endpointAllowed: boolean;
     tokenConfigured: boolean;
     tenantConfigured: boolean;
+    /**
+     * WHERE each Console value came from, not merely whether one exists.
+     *
+     * `tokenConfigured: true` alone cannot answer "did this install configure Console?" --
+     * it is equally true of an ambient machine-wide credential in
+     * ~/.flow-agents/telemetry-console.conf or an exported environment variable. That
+     * conflation is what made `init` print "Console: connected + verified / token
+     * configured / tenant configured" for an install run with `--telemetry-sink
+     * local-files` into a repo whose own telemetry.conf had both values commented out
+     * (kontourai/flow-agents#1344): the doctor resolved the user-global conf, and the
+     * summary reported that resolution as this install's outcome.
+     *
+     * Callers that report on a specific install must combine these with `configFile` (see
+     * `configFileScope`) rather than reading a bare boolean.
+     */
+    tokenSource: ConsoleValueSource;
+    tenantSource: ConsoleValueSource;
+    urlSource: ConsoleValueSource;
     reachability: Reachability;
   };
   warnings: string[];
 };
+
+/** Provenance of a resolved Console value. "absent" means nothing set it anywhere. */
+export type ConsoleValueSource = "environment" | "config-file" | "absent";
+
+function valueSource(envValue: string | undefined, configValue: string | undefined): ConsoleValueSource {
+  if (envValue !== undefined && envValue !== "") return "environment";
+  if (configValue !== undefined && configValue !== "") return "config-file";
+  return "absent";
+}
 
 const defaultChannels = "full";
 const sensitiveQueryKeys = new Set(["token", "api_key", "apikey", "key", "secret", "password", "auth", "authorization", "access_token"]);
@@ -261,6 +288,12 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
       endpointAllowed: allowed,
       tokenConfigured: Boolean(process.env.CONSOLE_TELEMETRY_TOKEN ?? process.env.CONSOLE_AUTH_TOKEN ?? config.console_telemetry_token),
       tenantConfigured: Boolean(process.env.CONSOLE_TENANT_ID ?? config.console_tenant_id),
+      tokenSource: valueSource(process.env.CONSOLE_TELEMETRY_TOKEN ?? process.env.CONSOLE_AUTH_TOKEN, config.console_telemetry_token),
+      tenantSource: valueSource(process.env.CONSOLE_TENANT_ID, config.console_tenant_id),
+      urlSource: valueSource(
+        process.env.CONSOLE_TELEMETRY_URL ?? process.env.CONSOLE_URL ?? process.env.CONSOLE_TELEMETRY_ENDPOINT_URL,
+        config.console_telemetry_url ?? config.console_url ?? config.console_telemetry_endpoint_url,
+      ),
       reachability,
     },
     warnings,
