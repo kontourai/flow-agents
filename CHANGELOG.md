@@ -1,5 +1,36 @@
 # Changelog
 
+## [6.2.0](https://github.com/kontourai/flow-agents/compare/v6.1.0...v6.2.0) (2026-08-26)
+
+
+### Features
+
+* **builder:** add builder.build-lean, the gate-value ablation's reduced-gate variant ([#1329](https://github.com/kontourai/flow-agents/issues/1329)) ([671e84c](https://github.com/kontourai/flow-agents/commit/671e84c93a37d93f5a80aa3c9fa80ea4dceb4e8d))
+* **flow-admission:** one admission rule at every door; kit-declared flows runnable with provenance ([#1280](https://github.com/kontourai/flow-agents/issues/1280), [#1314](https://github.com/kontourai/flow-agents/issues/1314), [#1316](https://github.com/kontourai/flow-agents/issues/1316)) ([#1324](https://github.com/kontourai/flow-agents/issues/1324)) ([93c73cf](https://github.com/kontourai/flow-agents/commit/93c73cff8642d5805caddd4c319138dfd15a3224))
+* **narrative:** read exact retained envelopes with bounded safe process projections ([#1386](https://github.com/kontourai/flow-agents/issues/1386)) ([5ff152a](https://github.com/kontourai/flow-agents/commit/5ff152a1a0ab186552b13418be4db402793a1856))
+* **telemetry:** attribute transition records to the executing model ([#1327](https://github.com/kontourai/flow-agents/issues/1327)) ([#1353](https://github.com/kontourai/flow-agents/issues/1353)) ([e147574](https://github.com/kontourai/flow-agents/commit/e14757412abe618cc32987dfa8d48968da290bf7))
+* **telemetry:** share one output-token attribution rule between producer and fold ([#1320](https://github.com/kontourai/flow-agents/issues/1320)) ([#1323](https://github.com/kontourai/flow-agents/issues/1323)) ([48d3ba7](https://github.com/kontourai/flow-agents/commit/48d3ba78d6a90f3c009b3f59989d6ba0716b601f))
+
+
+### Fixes
+
+* **bundle:** record the verifying actor and execution source in the fields surface reads ([#1363](https://github.com/kontourai/flow-agents/issues/1363), [#1365](https://github.com/kontourai/flow-agents/issues/1365)) ([#1368](https://github.com/kontourai/flow-agents/issues/1368)) ([a5729f9](https://github.com/kontourai/flow-agents/commit/a5729f9338ea8bcfda202c6e45643a2f12f3931c))
+* **ci:** make check registration self-verifying, and reconcile the surface dependency ([#1362](https://github.com/kontourai/flow-agents/issues/1362)) ([#1367](https://github.com/kontourai/flow-agents/issues/1367)) ([105367b](https://github.com/kontourai/flow-agents/commit/105367b02f724bca7bf58424d5aa01375b168ff2))
+* **cli:** emit accepted shapes on demand and validate inputs in one pass ([#1358](https://github.com/kontourai/flow-agents/issues/1358), [#1359](https://github.com/kontourai/flow-agents/issues/1359)) ([#1366](https://github.com/kontourai/flow-agents/issues/1366)) ([8b2fd6e](https://github.com/kontourai/flow-agents/commit/8b2fd6ef78804ee884169e90551e4ce2390623cf))
+* **cli:** print full --help usage regardless of required-arg validation ([#1195](https://github.com/kontourai/flow-agents/issues/1195)) ([#1201](https://github.com/kontourai/flow-agents/issues/1201)) ([9403077](https://github.com/kontourai/flow-agents/commit/94030774d70ffdd4d81e0b4f837ee7fc773dbc5d))
+* **envelope:** derive gate requirements and the kit action from the gates the run must act on ([#1350](https://github.com/kontourai/flow-agents/issues/1350)) ([#1356](https://github.com/kontourai/flow-agents/issues/1356)) ([e673033](https://github.com/kontourai/flow-agents/commit/e67303323845ce34a98d40a254bc3848a2a8554a))
+* **evals:** add required expectation descriptions to kit-identity fixture flows ([51d086e](https://github.com/kontourai/flow-agents/commit/51d086e77ef27eb482380563c36bb675552c2659)), closes [#1330](https://github.com/kontourai/flow-agents/issues/1330)
+* **evals:** fail closed when the fixture temp dir cannot be canonicalized ([b3611e7](https://github.com/kontourai/flow-agents/commit/b3611e7ca9768185fd468f6b1c3d45ba9756b7cf)), closes [#1330](https://github.com/kontourai/flow-agents/issues/1330)
+* **evals:** give the kit-identity route-back fixtures a real kit, not an env override ([9142bdd](https://github.com/kontourai/flow-agents/commit/9142bdde6465e304c0b95e09de32c477b8f9b272)), closes [#1330](https://github.com/kontourai/flow-agents/issues/1330)
+* **evals:** unbreak main — give the kit-identity route-back fixtures a real kit, not an env override ([#1331](https://github.com/kontourai/flow-agents/issues/1331)) ([36bc17c](https://github.com/kontourai/flow-agents/commit/36bc17c4f620bc47ca506726378ef07ce36eff2a))
+* **flow:** derive work-item-driven behaviour instead of matching a flow name ([#1341](https://github.com/kontourai/flow-agents/issues/1341)) ([#1357](https://github.com/kontourai/flow-agents/issues/1357)) ([aab7013](https://github.com/kontourai/flow-agents/commit/aab701374cd9145e01757b0a98df3607d9e1a86a))
+* **hooks:** remove the shell from the hook invocation path ([#1101](https://github.com/kontourai/flow-agents/issues/1101)) ([a0511fb](https://github.com/kontourai/flow-agents/commit/a0511fbf44f7dd65ad5ca59d17d4156092b73ce1))
+* **init:** project install stops writing permissive defaults, owns CLAUDE.md, and derives its Console summary ([#1343](https://github.com/kontourai/flow-agents/issues/1343), [#1344](https://github.com/kontourai/flow-agents/issues/1344), [#1345](https://github.com/kontourai/flow-agents/issues/1345)) ([#1354](https://github.com/kontourai/flow-agents/issues/1354)) ([821935b](https://github.com/kontourai/flow-agents/commit/821935b30c87b862635cce4c6507651ace8e7c2a))
+* **kit:** stop describing builder.build-lean as leaving probing and planning ungated ([#1337](https://github.com/kontourai/flow-agents/issues/1337)) ([#1339](https://github.com/kontourai/flow-agents/issues/1339)) ([296c9fd](https://github.com/kontourai/flow-agents/commit/296c9fd70d5f936284ddc4f301476504ce3f2ff4))
+* **merge-change:** diagnose, preflight, and document the target-branch approval precondition ([#1318](https://github.com/kontourai/flow-agents/issues/1318)) ([#1322](https://github.com/kontourai/flow-agents/issues/1322)) ([dab2b04](https://github.com/kontourai/flow-agents/commit/dab2b04c73e73f42253d99b01bd697c6550dc473))
+* **observed-command:** treat EPERM like ESRCH in process-group teardown ([#1369](https://github.com/kontourai/flow-agents/issues/1369)) ([#1370](https://github.com/kontourai/flow-agents/issues/1370)) ([abde51a](https://github.com/kontourai/flow-agents/commit/abde51a53d2cfc31c6c7800ac0d382124e146c34))
+* **runtime:** make kit-declared flows runnable beyond builder.build ([#1335](https://github.com/kontourai/flow-agents/issues/1335), [#1336](https://github.com/kontourai/flow-agents/issues/1336)) ([#1346](https://github.com/kontourai/flow-agents/issues/1346)) ([0830bf6](https://github.com/kontourai/flow-agents/commit/0830bf6ab0c92ddb7a2e08ecaf05788b16e9d16f))
+
 ## [6.1.0](https://github.com/kontourai/flow-agents/compare/v6.0.0...v6.1.0) (2026-08-24)
 
 
