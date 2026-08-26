@@ -224,8 +224,15 @@ function renderShape(heading: string, shape: JsonFlagShape, renderExample: (exam
   console.log(`\n${heading}`);
   console.log(`  ${description}`);
   console.log(`  Accepted fields: ${shape.fields.join(", ")}`);
-  console.log(`  Rules (each is refused verbatim if violated):`);
-  for (const rule of shape.rules) console.log(`    - ${rule}`);
+  // Round-1 review byte-checked the old header and found it false for 9 of 26 rules: the refusal
+  // prefixes the body with the offending object's label. The header now says exactly that, and
+  // every line below IS a body the collectors emit (workflow-explain.test.mjs asserts set-equality
+  // over a generated corpus, so a rule that is not emitted cannot be printed and vice versa).
+  console.log(`  Rules — a refusal is "<label> <rule>", where <label> names the offending object:`);
+  for (const rule of shape.rules) {
+    const note = rule.enforced_by === "object-shape" ? "" : `  [${rule.enforced_by}]`;
+    console.log(`    - ${rule.body}${note}`);
+  }
   console.log(`  Accepted examples:`);
   for (const example of shape.examples) console.log(`    ${renderExample(example)}`);
 }

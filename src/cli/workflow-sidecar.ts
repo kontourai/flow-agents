@@ -33,9 +33,11 @@ import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } fr
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
 import { validateRunCorrelationPresence } from "../run-correlation.js";
 import {
+  commandTextFromEvidenceRef,
   criterionShapeViolations,
   critiqueLaneShapeViolations,
   CRITIQUE_LANE_ID_PATTERN,
+  evidenceRefListShapeViolations,
   evidenceRefShapeViolations,
   NARRATIVE_PROMOTE_OPERATION,
   WORKFLOW_ACCEPTANCE_STATUSES,
@@ -3364,17 +3366,10 @@ function dieOnViolations(violations: readonly string[]): void {
   if (violations.length === 1) die(violations[0]!);
   die(`${violations.length} problems must be fixed together:\n  - ${violations.join("\n  - ")}`);
 }
-/** Shape problems with one candidate evidence ref, including "this is not an object at all". */
-function evidenceRefViolations(raw: unknown, label: string): string[] {
-  if (typeof raw === "string") return [`${label} entries must be structured evidence reference objects; legacy string refs are not supported`];
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [`${label} entries must be objects`];
-  return evidenceRefShapeViolations(raw as AnyObj, label);
-}
-/** Shape problems across a whole `evidence_refs` array, each carrying its own entry index. */
-function evidenceRefListViolations(raw: unknown, label: string): string[] {
-  if (!Array.isArray(raw)) return [`${label} must be an array`];
-  return raw.flatMap((ref, index) => evidenceRefViolations(ref, `${label}[${index}]`));
-}
+// Array- and entry-level rule bodies live with every other rule body in public-contracts, so the
+// corpus the drift test walks is the complete set. Re-deriving them here is exactly the drift the
+// round-1 review demonstrated: a rule one function over that --explain cannot see.
+const evidenceRefListViolations = evidenceRefListShapeViolations;
 export function validateEvidenceRef(ref: AnyObj, label: string, projectRoot = process.cwd()): AnyObj {
   // Shape rules are enforced from the SAME constants `workflow <verb> --explain` prints (#1358);
   // a rule hand-written here would be a rule the accepted-shape output cannot know about.
@@ -3706,9 +3701,10 @@ function validateReviewableGateEvidence(dir: string, slug: string, refs: AnyObj[
   if (issues.length > 1) die(`${label}: ${issues.length} evidence requirement(s) unmet:\n${issues.map((issue, index) => `  [${index + 1}] ${issue}`).join("\n")}`);
 }
 
-function commandFromEvidenceRef(ref: AnyObj): string {
-  return typeof ref.excerpt === "string" ? ref.excerpt.trim() : (typeof ref.url === "string" ? ref.url.trim() : "");
-}
+// The matcher, the printed rule, and the printed example all read CRITERION_COMMAND_MATCH_FIELDS.
+// Round-1 review found the example keyed on `summary` while the rule named `excerpt`; a shared
+// precedence constant is what stops that recurring.
+const commandFromEvidenceRef = commandTextFromEvidenceRef;
 
 function hasTestIntent(name: string): boolean {
   return /(?:^|[-_.\/])(test|tests|check|checks|verify|verification|spec|specs|eval|evals)(?:$|[-_.\/])/i.test(name) || /(?:test|check|verify|spec|eval)/i.test(path.basename(name));
@@ -4333,7 +4329,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
  * parsed (today: the current-clean-critique requirement, #1359 step 8), so a caller whose payload
  * is also malformed learns both in the same refusal instead of after four shape round-trips.
  */
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string, preconditionProblems: readonly string[] = []): AnyObj[] {
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string, preconditionProblems: readonly string[]): AnyObj[] {
   const problems: string[] = [...preconditionProblems];
   if (raw.length === 0) {
     problems.push("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
@@ -4351,11 +4347,9 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
     problems.push(`--criterion-json must cover every declared acceptance criterion exactly once (expected: ${expectedIds.join(", ") || "none"}; received: ${ids.join(", ") || "none"})`);
   }
   const labels = ids.map((id, index) => id.length > 0 ? id : `#${index}`);
-  incoming.forEach((criterion, index) => {
-    problems.push(...criterionShapeViolations(criterion, labels[index]!));
-    problems.push(...evidenceRefListViolations(criterion.evidence_refs, `criterion ${labels[index]} evidence_refs`));
-    if (Array.isArray(criterion.evidence_refs) && criterion.evidence_refs.length === 0) problems.push(`criterion ${labels[index]} requires reviewable evidence_refs`);
-  });
+  // One collector, every body: the nested evidence_refs rules and the "requires reviewable"
+  // rule are produced inside criterionShapeViolations so --explain's table is their only source.
+  incoming.forEach((criterion, index) => problems.push(...criterionShapeViolations(criterion, labels[index]!)));
   dieOnViolations(problems);
   const observedCommandNames = new Set(observedCommands.map((observation) => observation.command));
   const normalized = incoming.map((criterion, index) => normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot));
@@ -4376,11 +4370,7 @@ function normalizeCritiqueLanes(raw: string[], projectRoot: string): AnyObj[] {
   if (raw.length === 0) die("record-critique requires at least one --lane-json");
   const parsed = raw.map((value) => parseJson(value, "--lane-json"));
   const problems: string[] = [];
-  parsed.forEach((lane, index) => {
-    problems.push(...critiqueLaneShapeViolations(lane, index));
-    problems.push(...evidenceRefListViolations(lane.evidence_refs, `--lane-json ${index} evidence_refs`));
-    if (Array.isArray(lane.evidence_refs) && lane.evidence_refs.length === 0) problems.push(`--lane-json ${index} requires structured reviewable evidence_refs`);
-  });
+  parsed.forEach((lane, index) => problems.push(...critiqueLaneShapeViolations(lane, index)));
   const ids = parsed.map((lane) => lane.id);
   if (new Set(ids).size !== ids.length) problems.push("--lane-json ids must be unique");
   dieOnViolations(problems);
