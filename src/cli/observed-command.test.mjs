@@ -169,6 +169,12 @@ for (const code of ["EPERM", "ESRCH"]) {
     // The stub must have fired on the GROUP kill, or this test proves nothing about the catch.
     assert.ok(calls.length > 0, `process.kill was never called with a negative pid — the ${code} injection did not reach terminateProcessGroup`);
     assert.ok(calls.every((call) => call.pid < 0), "the injection must target the process group, not a bare pid");
+    // PINS false-vs-true, LOGICALLY rather than by timing. Round-2 review showed that returning
+    // `true` here is 11/11 green: the only observable difference was the test taking killGraceMs
+    // (230ms -> 5231ms) and nothing asserted on it. `false` means "already gone, finish now" and
+    // must skip the SIGKILL escalation, so exactly one signal is attempted; `true` arms the grace
+    // timer and produces a second call.
+    assert.equal(calls.length, 1, `a ${code} teardown must not escalate to SIGKILL — got ${calls.map((call) => call.signal).join(", ")}`);
 
     // The observation is completed, not abandoned: real exit code and real captured output.
     assert.equal(result.exit_code, 0, `a ${code} teardown race must not change the observed exit code`);
