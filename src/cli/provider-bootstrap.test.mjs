@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 
 import { bootstrapProviders, detectGitHubRepo, setProviderBootstrapTestHooksForTest } from "../../build/src/cli/provider-bootstrap.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
@@ -45,12 +46,273 @@ async function waitForPath(file, timeoutMs = 5000) {
   throw new Error(`timed out waiting for ${file}`);
 }
 
-function waitForExit(child) {
+function waitForExit(child, {
+  timeoutMs = 10_000,
+  killGraceMs = 1_000,
+  reapTimeoutMs = 1_000,
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
+} = {}) {
   return new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", (code) => resolve(code));
+    let settled = false;
+    let timeout;
+    let killGrace;
+    let reapTimeout;
+    let timeoutError;
+    const termination = [];
+
+    const cleanup = () => {
+      clearTimeoutFn(timeout);
+      clearTimeoutFn(killGrace);
+      clearTimeoutFn(reapTimeout);
+      child.removeListener("error", onError);
+      child.removeListener("exit", onExit);
+    };
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+    const signal = (name) => {
+      try {
+        const sent = child.kill(name);
+        termination.push(sent ? `sent ${name}` : `${name} reported an already-terminal child`);
+      } catch (error) {
+        if (error?.code === "ESRCH") {
+          termination.push(`${name} raced with an already-terminal child (ESRCH)`);
+          return;
+        }
+        termination.push(`${name} failed: ${error?.message ?? String(error)}`);
+      }
+    };
+    const onExit = (code, signalCode) => {
+      if (timeoutError) {
+        timeoutError.message = `${timeoutError.message}; ${termination.join(", ")}; terminal exit code=${code ?? "null"}, signal=${signalCode ?? "none"}`;
+        settle(reject, timeoutError);
+        return;
+      }
+      settle(resolve, code);
+    };
+    const onError = (error) => {
+      if (timeoutError && child.pid !== undefined) {
+        termination.push(`child error while waiting to reap: ${error.message}`);
+        return;
+      }
+      settle(reject, error);
+    };
+
+    child.once("exit", onExit);
+    child.on("error", onError);
+    timeout = setTimeoutFn(() => {
+      if (settled) return;
+      timeoutError = new Error(`timed out waiting ${timeoutMs}ms for provider-bootstrap child pid ${child.pid ?? "unknown"}`);
+      signal("SIGTERM");
+      if (settled) return;
+      killGrace = setTimeoutFn(() => {
+        if (settled) return;
+        if (child.exitCode === null && child.signalCode === null) {
+          signal("SIGKILL");
+        } else {
+          termination.push("SIGKILL skipped because the child reported a terminal status");
+        }
+        if (settled) return;
+        reapTimeout = setTimeoutFn(() => {
+          if (settled) return;
+          try {
+            child.unref();
+            termination.push("unrefed unreaped child");
+          } catch (error) {
+            termination.push(`unref failed: ${error?.message ?? String(error)}`);
+          }
+          timeoutError.message = `${timeoutError.message}; ${termination.join(", ")}; hard reap deadline expired after ${reapTimeoutMs}ms without a terminal exit event; unreaped child pid ${child.pid ?? "unknown"} (exitCode=${child.exitCode ?? "null"}, signal=${child.signalCode ?? "none"})`;
+          settle(reject, timeoutError);
+        }, reapTimeoutMs);
+      }, killGraceMs);
+    }, timeoutMs);
   });
 }
+
+function waitForExitChild(options = {}) {
+  const child = new EventEmitter();
+  child.pid = Object.hasOwn(options, "pid") ? options.pid : 1234;
+  child.exitCode = null;
+  child.signalCode = null;
+  child.kill = options.kill ?? (() => true);
+  child.unrefCalls = 0;
+  child.unref = () => {
+    child.unrefCalls += 1;
+    return options.unref?.();
+  };
+  return child;
+}
+
+test("waitForExit preserves a normal exit code and removes listeners and timers", async () => {
+  const signals = [];
+  const timers = new Set();
+  const setTimeoutFn = (callback, delay) => {
+    const timer = { callback, delay };
+    timers.add(timer);
+    return timer;
+  };
+  const clearTimeoutFn = (timer) => timers.delete(timer);
+  const child = waitForExitChild({ kill: (signal) => {
+    signals.push(signal);
+    return true;
+  } });
+  const result = waitForExit(child, {
+    timeoutMs: 20,
+    killGraceMs: 10,
+    reapTimeoutMs: 10,
+    setTimeoutFn,
+    clearTimeoutFn,
+  });
+  assert.equal(timers.size, 1);
+  child.exitCode = 7;
+  child.emit("exit", 7, null);
+
+  assert.equal(await result, 7);
+  assert.equal(timers.size, 0);
+  assert.equal(child.listenerCount("exit"), 0);
+  assert.equal(child.listenerCount("error"), 0);
+  assert.deepEqual(signals, []);
+});
+
+test("waitForExit rejects a spawn error once and removes listeners and timers", async () => {
+  const signals = [];
+  const child = waitForExitChild({
+    pid: undefined,
+    kill: (signal) => {
+      signals.push(signal);
+      return true;
+    },
+  });
+  const spawnError = Object.assign(new Error("spawn missing-command ENOENT"), { code: "ENOENT" });
+  const result = waitForExit(child, {
+    timeoutMs: 20,
+    killGraceMs: 10,
+    reapTimeoutMs: 10,
+  });
+  child.emit("error", spawnError);
+
+  await assert.rejects(result, (error) => error === spawnError);
+  assert.equal(child.listenerCount("exit"), 0);
+  assert.equal(child.listenerCount("error"), 0);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(signals, [], "spawn-error settlement clears the timeout before it can signal");
+});
+
+test("waitForExit escalates TERM to KILL and reports timeout only after terminal exit", { timeout: 1_000 }, async () => {
+  const signals = [];
+  let child;
+  child = waitForExitChild({ kill: (signal) => {
+    signals.push(signal);
+    if (signal === "SIGKILL") {
+      setImmediate(() => {
+        child.signalCode = "SIGKILL";
+        child.emit("exit", null, "SIGKILL");
+      });
+    }
+    return true;
+  } });
+
+  await assert.rejects(
+    waitForExit(child, {
+      timeoutMs: 5,
+      killGraceMs: 5,
+      reapTimeoutMs: 20,
+    }),
+    (error) => {
+      assert.match(error.message, /timed out waiting 5ms/);
+      assert.match(error.message, /sent SIGTERM, sent SIGKILL/);
+      assert.match(error.message, /terminal exit code=null, signal=SIGKILL/);
+      assert.doesNotMatch(error.message, /unreaped child/);
+      return true;
+    },
+  );
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  assert.equal(child.listenerCount("exit"), 0);
+  assert.equal(child.listenerCount("error"), 0);
+});
+
+test("waitForExit rejects at the hard reap deadline when kill delivery fails", { timeout: 1_000 }, async () => {
+  const signals = [];
+  let child;
+  child = waitForExitChild({
+    kill: (signal) => {
+      signals.push(signal);
+      child.emit("error", Object.assign(new Error(`cannot deliver ${signal}`), { code: "EPERM" }));
+      return false;
+    },
+    unref: () => {
+      throw new Error("cannot unref child");
+    },
+  });
+  await assert.rejects(
+    waitForExit(child, {
+      timeoutMs: 5,
+      killGraceMs: 5,
+      reapTimeoutMs: 15,
+    }),
+    (error) => {
+      assert.match(error.message, /child error while waiting to reap: cannot deliver SIGTERM/);
+      assert.match(error.message, /child error while waiting to reap: cannot deliver SIGKILL/);
+      assert.match(error.message, /SIGTERM reported an already-terminal child/);
+      assert.match(error.message, /SIGKILL reported an already-terminal child/);
+      assert.match(error.message, /unref failed: cannot unref child/);
+      assert.match(error.message, /hard reap deadline expired after 15ms/);
+      assert.match(error.message, /unreaped child pid 1234/);
+      return true;
+    },
+  );
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+  assert.equal(child.unrefCalls, 1);
+  assert.equal(child.listenerCount("exit"), 0);
+  assert.equal(child.listenerCount("error"), 0);
+  child.emit("exit", null, "SIGKILL");
+});
+
+test("waitForExit hard-bounds a real child after repeated kill-delivery errors", { timeout: 2_000 }, async () => {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  await new Promise((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", reject);
+  });
+  const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
+  const realKill = child.kill;
+  const startedAt = Date.now();
+  child.kill = (signal) => {
+    child.emit("error", Object.assign(new Error(`forced ${signal} delivery failure`), { code: "EPERM" }));
+    return false;
+  };
+
+  try {
+    await assert.rejects(
+      waitForExit(child, {
+        timeoutMs: 10,
+        killGraceMs: 10,
+        reapTimeoutMs: 20,
+      }),
+      (error) => {
+        assert.match(error.message, /forced SIGTERM delivery failure/);
+        assert.match(error.message, /forced SIGKILL delivery failure/);
+        assert.match(error.message, /unrefed unreaped child/);
+        assert.match(error.message, /hard reap deadline expired after 20ms/);
+        return true;
+      },
+    );
+    assert.ok(Date.now() - startedAt < 1_000, "real-child rejection completes within the hard bound");
+    assert.equal(child.listenerCount("error"), 0);
+  } finally {
+    child.kill = realKill;
+    child.ref();
+    if (child.exitCode === null && child.signalCode === null) {
+      realKill.call(child, "SIGKILL");
+    }
+    const terminal = await exited;
+    assert.equal(terminal.signal, "SIGKILL");
+  }
+});
 
 test("detectGitHubRepo accepts SSH origin and returns a canonical HTTPS URL", () => {
   const repo = repoFixture("acme", "widgets");
@@ -606,12 +868,24 @@ test("global bootstrap serializes the full read-modify-write transaction", async
   const settings = makeFixtureDir("provider-bootstrap-serialized-");
   const fakeBin = makeFixtureDir("provider-bootstrap-lock-gh-");
   const gh = path.join(fakeBin, "gh");
+  const entered = path.join(settings, "first-bootstrap-entered");
+  const release = path.join(settings, "release-first-bootstrap");
   fs.writeFileSync(gh, `#!/usr/bin/env bash
 set -euo pipefail
 if [[ "$1 $2" == "project list" ]]; then
   printf '{"projects":[{"number":9,"url":"https://github.com/orgs/example/projects/9"}]}'
 elif [[ "$1 $2" == "label list" ]]; then
-  sleep 1
+  if mkdir "$PROVIDER_BOOTSTRAP_ENTERED" 2>/dev/null; then
+    attempts=0
+    while [[ ! -e "$PROVIDER_BOOTSTRAP_RELEASE" ]]; do
+      attempts=$((attempts + 1))
+      if [[ "$attempts" -ge 600 ]]; then
+        printf 'timed out waiting for provider-bootstrap test release\\n' >&2
+        exit 98
+      fi
+      sleep 0.05
+    done
+  fi
   printf '[{"name":"agent:claimed"}]'
 fi
 `);
@@ -623,20 +897,34 @@ fi
     "--provider-project", "9",
     "--online",
   ];
+  const env = {
+    ...process.env,
+    PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`,
+    PROVIDER_BOOTSTRAP_ENTERED: entered,
+    PROVIDER_BOOTSTRAP_RELEASE: release,
+  };
   const first = spawn(process.execPath, [...common, "--repo-path", repoA], {
-    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` },
+    env,
     stdio: "ignore",
   });
-  await waitForPath(path.join(settings, ".provider-bootstrap.lock"));
-  const blocked = spawnSync(process.execPath, [...common, "--repo-path", repoB], {
-    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` },
-    encoding: "utf8",
-  });
-  assert.equal(blocked.status, 2);
-  assert.match(blocked.stderr, /locked by another setup/);
-  assert.equal(await waitForExit(first), 0);
+  const firstExit = waitForExit(first);
+  let firstStatus;
+  try {
+    await waitForPath(path.join(settings, ".provider-bootstrap.lock"));
+    await waitForPath(entered);
+    const blocked = spawnSync(process.execPath, [...common, "--repo-path", repoB], {
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(blocked.status, 2);
+    assert.match(blocked.stderr, /locked by another setup/);
+  } finally {
+    fs.writeFileSync(release, "release\n");
+    firstStatus = await firstExit;
+  }
+  assert.equal(firstStatus, 0);
   const second = spawnSync(process.execPath, [...common, "--repo-path", repoB], {
-    env: { ...process.env, PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` },
+    env,
     encoding: "utf8",
   });
   assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
@@ -1130,8 +1418,13 @@ test("headless init can establish all provider settings in the installed project
   assert.equal(fs.existsSync(path.join(conflictingRoot, "current")), false);
 });
 
-test("universal bundles do not contain Flow Agents dogfood provider bindings", () => {
-  const built = spawnSync(process.execPath, ["build/src/cli.js", "build-bundles"], { encoding: "utf8" });
+test("universal bundles do not contain Flow Agents dogfood provider bindings", (t) => {
+  const bundleRoot = makeFixtureDir("provider-bootstrap-bundles-");
+  t.after(() => fs.rmSync(bundleRoot, { recursive: true, force: true }));
+  const built = spawnSync(process.execPath, ["build/src/cli.js", "build-bundles"], {
+    encoding: "utf8",
+    env: { ...process.env, FLOW_AGENTS_DIST_DIR: bundleRoot },
+  });
   assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`);
   for (const runtime of ["base", "codex", "claude-code", "kiro", "opencode", "pi"]) {
     for (const name of [
@@ -1139,7 +1432,7 @@ test("universal bundles do not contain Flow Agents dogfood provider bindings", (
       "assignment-provider-settings.json",
       "change-provider-settings.json",
     ]) {
-      assert.equal(fs.existsSync(path.join("dist", runtime, "context", "settings", name)), false, `${runtime}/${name}`);
+      assert.equal(fs.existsSync(path.join(bundleRoot, runtime, "context", "settings", name)), false, `${runtime}/${name}`);
     }
   }
   const dest = makeFixtureDir("provider-bootstrap-kiro-upgrade-");
@@ -1147,7 +1440,7 @@ test("universal bundles do not contain Flow Agents dogfood provider bindings", (
   const consumerBytes = '{"consumer_owned":true}\n';
   fs.mkdirSync(path.dirname(consumerSettings), { recursive: true });
   fs.writeFileSync(consumerSettings, consumerBytes);
-  const installed = spawnSync("bash", ["dist/kiro/install.sh", dest], { encoding: "utf8" });
+  const installed = spawnSync("bash", [path.join(bundleRoot, "kiro", "install.sh"), dest], { encoding: "utf8" });
   assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`);
   assert.equal(fs.readFileSync(consumerSettings, "utf8"), consumerBytes);
 });
