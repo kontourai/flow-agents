@@ -61,30 +61,37 @@ export async function runObservedCommand(command: string, projectRoot: string): 
         // fault in the command being observed — so both return false rather than throwing.
         //
         // beginCleanup runs from the child's own `exit` event, so this fires on every successful
-        // command against a group whose leader has just died. MEASURED, because the first two
-        // versions of this comment guessed and guessed wrong — and the measurement conditions
-        // turn out to matter more than the rate, so they are recorded with it:
+        // command against a group whose leader has just died.
         //
-        //   sequential, single-member group,  300 teardowns : ESRCH 300, EPERM   0
-        //   concurrent 8x200, single-member, 1600 teardowns : ESRCH 1600, EPERM  0
-        //   concurrent 16x100, single-member,1600 teardowns : ESRCH 1600, EPERM  0
-        //   concurrent 8x100, TWO-member group, 800        : ESRCH 30,  EPERM   2  (2 of 8 workers)
+        // WHEN DOES kill(-pgid) RETURN EPERM? When the group still holds a child that has EXITED
+        // BUT NOT YET BEEN REAPED — a zombie's credentials are cleared, so it cannot be signalled.
+        // Not load, not concurrency. Measured here, sequentially, on an otherwise ordinary host:
         //
-        // So EPERM is not a function of machine load, and a loop over `bash -lc true` will never
-        // show it however hard the box is working. It appears when the group has MORE THAN ONE
-        // member — when the observed command spawned children, which every real evidence command
-        // does — because the leader can be reaped while the group is not yet empty. A naive probe
-        // reporting 0/1600 therefore proves nothing about real workloads; that is the trap this
-        // comment exists to stop the next reader falling into.
+        //   bash -c "printf x"             leader only          x200 : ESRCH 200                      EPERM  0%
+        //   bash -c "sleep 0.05 & printf x" leader + LIVE child x200 : SIGNALLED 200                  EPERM  0%
+        //   bash -c "true & printf x"      leader + ZOMBIE      x200 : ESRCH 143, EPERM 48, SIG 9     EPERM 24%
         //
-        // (Independent review measured 28/1600 = 1.75% on an 8x200 concurrent probe. That shape
-        // is not reproducible here — single-member groups gave 0/1600 — so the rates differ and
-        // only the conclusion is shared: it is real, and it is not reachable by a simple loop.)
+        // A group whose extra member is LIVE never shows it; a group with no children never shows
+        // it. That is why simple probes read clean while real evidence commands — which all spawn
+        // AND reap children — hit it routinely, and it is why this failed a live aggregate lane.
         //
-        // It is worth handling because it was observed in the wild failing an aggregate verify
-        // lane, and because its consequence is severe out of proportion to its frequency: the
-        // rethrow reached beginCleanup's catch and rejected a completed observation whose exit
-        // code and output had already been captured.
+        // THIS COMMENT HAS BEEN WRONG THREE TIMES, so the retractions are kept rather than tidied
+        // away. It claimed EPERM was "the common case" (it is not); it claimed the leader was
+        // reaped "between the liveness check and the signal" (there is no liveness check, and the
+        // causality is inverted — it is the CHILD going unreaped); it claimed EPERM appears
+        // whenever the group has "more than one member" (a live second member gives 0/200); and it
+        // asserted a loop over `bash -lc true` "will never show it", which is exactly the sentence
+        // a future reader would cite to dismiss a valid probe. Independent review measured that
+        // very command at 3/3200 (~0.09%); this run got 0/1600, which at that rate is unremarkable
+        // and does NOT contradict it. Neither observation supports the word "never".
+        //
+        // Earlier rate figures (1.75% from review, 2/800 from here) are retracted AS RATES — both
+        // were shapes that only incidentally produced zombies. The phenomenon and the mechanism
+        // above are what survive, and `bash -c "true & printf x"` is the reproducer to use.
+        //
+        // It is worth handling because its consequence is severe out of proportion to its
+        // frequency: the rethrow reached beginCleanup's catch and rejected a completed observation
+        // whose exit code and output had already been captured.
         //
         // There is no liveness check to race against — the only guard above is `child.pid` being
         // truthy — so EPERM here means the process group id can no longer be signalled by this
