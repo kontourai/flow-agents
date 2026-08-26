@@ -488,23 +488,28 @@ else
 fi
 
 # Regression guard: --global hook commands must resolve regardless of which
-# project is open. The bundle template resolves scripts/ via
-# ${CLAUDE_PROJECT_DIR:-$(pwd)}, which only exists for project-scoped installs
-# (installBundle rsyncs scripts/ alongside .claude/). A --global install must
-# rewrite that to an absolute path, or every FA hook silently MODULE_NOT_FOUNDs
-# in any project other than this package's own checkout.
+# project is open. The bundle template anchors script paths to
+# ${CLAUDE_PROJECT_DIR} (exec-form args elements substituted by Claude Code),
+# which only points at scripts/ for project-scoped installs (installBundle
+# rsyncs scripts/ alongside .claude/). A --global install must rewrite that to
+# an absolute path, or every FA hook silently MODULE_NOT_FOUNDs in any project
+# other than this package's own checkout.
 if [[ -f "$GLOBAL_SETTINGS_JSON" ]] && node - "$GLOBAL_SETTINGS_JSON" << 'NODE'
 const fs = require("node:fs");
 const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const hooks = s.hooks || {};
-const commands = Object.values(hooks).flat().flatMap((g) => (g.hooks || []).map((h) => String(h.command || "")));
-const faCommands = commands.filter((c) => c.includes("claude-hook-adapter.js") || c.includes("claude-telemetry-hook.js"));
-if (faCommands.length === 0) throw new Error("no FA hook commands found to check");
-for (const c of faCommands) {
-  if (c.includes("CLAUDE_PROJECT_DIR")) throw new Error("FA hook command still depends on CLAUDE_PROJECT_DIR (breaks outside this package's own project): " + c);
-  const m = c.match(/node "([^"]+\/scripts\/hooks\/[^"]+\.js)"/);
-  if (!m) throw new Error("FA hook command has no absolute scripts/hooks path: " + c);
-  if (!fs.existsSync(m[1])) throw new Error("FA hook command points at a path that does not exist: " + m[1]);
+const entries = Object.values(hooks).flat().flatMap((g) => (g.hooks || []));
+const faEntries = entries.filter((h) => {
+  const haystack = [String(h.command || ""), ...(Array.isArray(h.args) ? h.args.map(String) : [])].join(" ");
+  return haystack.includes("claude-hook-adapter.js") || haystack.includes("claude-telemetry-hook.js");
+});
+if (faEntries.length === 0) throw new Error("no FA hook entries found to check");
+for (const h of faEntries) {
+  if (!Array.isArray(h.args) || h.args.length === 0) throw new Error("FA hook entry is not exec form (no args): " + JSON.stringify(h));
+  const scriptPath = String(h.args[0]);
+  if (scriptPath.includes("CLAUDE_PROJECT_DIR")) throw new Error("FA hook args still depend on CLAUDE_PROJECT_DIR (breaks outside this package's own project): " + scriptPath);
+  if (!/\/scripts\/hooks\/[^/]+\.js$/.test(scriptPath)) throw new Error("FA hook args[0] is not a scripts/hooks path: " + scriptPath);
+  if (!fs.existsSync(scriptPath)) throw new Error("FA hook args[0] points at a path that does not exist: " + scriptPath);
 }
 console.log("ok");
 NODE

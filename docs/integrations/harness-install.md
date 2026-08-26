@@ -27,14 +27,19 @@ Claude Code is the L2 reference implementation. All four policy classes are wire
 npx @kontourai/flow-agents init --runtime claude-code --dest /path/to/workspace --yes
 ```
 
-The install script writes hook wiring into `.claude/settings.json` inside the destination workspace. The hooks object in `settings.json` maps Claude Code lifecycle events (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) to shell commands invoking the adapter:
+The install script writes hook wiring into `.claude/settings.json` inside the destination workspace. The hooks object in `settings.json` maps Claude Code lifecycle events (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) to exec-form command hooks — `command` is spawned directly with `args` as the argument vector, no shell on any platform, and Claude Code substitutes `${CLAUDE_PROJECT_DIR}` into each args element (requires Claude Code >= 2.1.139):
 
-```bash
-bash -lc 'root="${FLOW_AGENTS_CLAUDE_CODE_ROOT:-$(pwd)}"; \
-  node "$root/scripts/hooks/claude-telemetry-hook.js" UserPromptSubmit dev'
-bash -lc 'root="${FLOW_AGENTS_CLAUDE_CODE_ROOT:-$(pwd)}"; \
-  node "$root/scripts/hooks/claude-hook-adapter.js" UserPromptSubmit \
-    workflow-steering workflow-steering.js default'
+```json
+{
+  "type": "command",
+  "command": "node",
+  "args": ["${CLAUDE_PROJECT_DIR}/scripts/hooks/claude-telemetry-hook.js", "UserPromptSubmit", "dev"]
+}
+{
+  "type": "command",
+  "command": "node",
+  "args": ["${CLAUDE_PROJECT_DIR}/scripts/hooks/claude-hook-adapter.js", "UserPromptSubmit", "workflow-steering", "workflow-steering.js", "default"]
+}
 ```
 
 Telemetry always fires first and is always non-blocking (timeout: 10 s). Policy hooks fire second and may block on `PreToolUse` (timeout: 30 s). Both fail open on hook runtime errors.
