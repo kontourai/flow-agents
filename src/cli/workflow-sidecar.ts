@@ -766,6 +766,53 @@ async function tryLoadSurface(): Promise<SurfaceModule | null> {
   }
 }
 
+/**
+ * #1363: the writing TOOL, recorded as `VerificationEvent.actor` / `Evidence.collectedBy` only
+ * when no verifying identity was derived for the claim. It is deliberately not an actor key
+ * (no `resolveActor` output can contain "/"), so a reader can tell "the sidecar wrote this and
+ * no verifier was recorded" apart from "this actor verified it" without consulting metadata.
+ */
+const SIDECAR_TOOL_ACTOR = "flow-agents/workflow-sidecar";
+/** The PostToolUse capture hook, as an evidence collector. Also a tool, never an actor key. */
+const CAPTURE_HOOK_COLLECTOR = "flow-agents/evidence-capture";
+
+/**
+ * #1363 review F2: record-critique's `--reviewer` DEFAULT. It is applied in four places
+ * (recordCritique's flag default, import-critique's synthesized argv, critiquesFromBundle's
+ * restore, and buildTrustBundle's own fold default), so `metadata.reviewer` is NEVER absent —
+ * which means a critique recorded without `--reviewer` carries this string indistinguishably
+ * from one whose reviewer really is the `tool-code-reviewer` agent.
+ *
+ * It is therefore NOT a derived identity, and must never be published as `VerificationEvent.actor`:
+ * doing so asserts a named agent in this ecosystem as the verifier of a review nobody claimed —
+ * the exact false-provenance failure #1363 exists to prevent. The string stays in
+ * `metadata.reviewer` (its meaning there is unchanged, and supersession scoping still keys on it);
+ * only the derived actor field abstains. Single-sourced here so the four sites cannot drift apart
+ * and silently make the sentinel unrecognisable to the fold.
+ */
+const DEFAULT_CRITIQUE_REVIEWER = "tool-code-reviewer";
+
+/**
+ * #1363: the verifying identity a claim actually carries, or null when none was derived.
+ *
+ * Present iff derived: an empty or retired-"local" actor key is NOT an identity, and a failure
+ * to load the single-sourced predicate records nothing rather than guessing. Callers fall back
+ * to SIDECAR_TOOL_ACTOR, which is the honest "no verifier recorded" marker — never a placeholder
+ * standing in for an actor we could not resolve.
+ *
+ * The predicate is `scripts/hooks/lib/actor-identity.js`'s `isUnresolvedActor` (the same one the
+ * liveness/lifecycle paths use), consumed rather than re-implemented.
+ */
+function recordedActorOrNull(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const actor = value.trim();
+  if (actor.length === 0) return null;
+  try {
+    if (loadActorIdentityHelper().isUnresolvedActor(actor)) return null;
+  } catch { return null; }
+  return actor;
+}
+
 /** Map a workflow check status to the Surface VerificationEvent status. */
 function checkStatusToEventStatus(status: string): string | null {
   if (status === "pass") return "verified";
@@ -1334,6 +1381,13 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
           command: entry.command,
           exit_code: entry.exit_code,
           output_sha256: entry.output_sha256,
+          // #1365: `canonical-writer-execution` vs `postToolUse-capture` is the distinction
+          // docs/decisions/writer-observed-execution.md calls "permanent and auditable". It is
+          // permanent in command-log.jsonl, and this is the line that carries it across the fold
+          // so a reader of the delivered bundle can tell a process the writer spawned apart from
+          // a command an agent chose to run. Copied verbatim, never re-stamped: an observation
+          // restored from a bundle written before this change carries no source, and gets none.
+          ...(typeof entry.source === "string" && entry.source.length > 0 ? { source: entry.source } : {}),
           ...(typeof entry.observed_at_commit === "string" ? { observed_at_commit: entry.observed_at_commit } : {}),
           ...(typeof entry.worktree_clean === "boolean" ? { worktree_clean: entry.worktree_clean } : {}),
           ...(entry.verification_workspace_snapshot && typeof entry.verification_workspace_snapshot === "object" ? { verification_workspace_snapshot: entry.verification_workspace_snapshot } : {}),
@@ -1415,6 +1469,15 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
         ? { acceptance_contract_history: check._acceptance_contract_history } : {}),
     };
 
+    // #1363: the identity that recorded this check — record-gate-claim's resolved actor key,
+    // stamped at record time (`check._recorded_by`, written at recordGateClaim and restored
+    // across rebuilds by checksFromBundle's applyProducerStamp). This is the value the private
+    // `metadata.recorded_by` already carried and that the delivered bundle dropped; it is the
+    // verifying identity for a check claim, and the collecting actor for that check's evidence.
+    // Null when the check carries no usable actor (record-check, legacy claims, an unresolved
+    // runtime) — the fields then keep SIDECAR_TOOL_ACTOR, which states that no verifier was
+    // recorded rather than inventing one.
+    const checkActor = recordedActorOrNull(check._recorded_by);
     // A multi-command gate claim has one check but multiple real executions. Preserve each
     // execution as separately linked evidence so consumers can bind every observed command
     // without accepting unrepresented extras.
@@ -1427,15 +1490,36 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
         sourceRef: `${slug}/command-log.jsonl`,
         excerptOrSummary: fieldOrBehavior,
         observedAt: ts,
-        collectedBy: "flow-agents/workflow-sidecar",
+        collectedBy: checkActor ?? SIDECAR_TOOL_ACTOR,
+        // #1363/#1365: `entails` is what Surface's corroboration.minActors counts (it requires
+        // the literal value — an omitted supportStrength does not count), so it is set ONLY
+        // where the support relation is a process the canonical writer itself spawned and whose
+        // recorded outcome agrees with the claim value. An attestation, a hook-captured
+        // observation, or a writer observation that disagrees with the claim is left unset:
+        // marking those `entails` would let a self-report be counted as an independent
+        // verification, which is precisely the thing #1363 exists to prevent. Leaving them unset
+        // (rather than `cited`) is also status-neutral — Surface reads an absent supportStrength
+        // as entails for claim-status derivation, so no existing claim's status moves.
+        // #1363 review F5: `entails` additionally requires a DERIVED collector. "No verifier was
+        // recorded" and "this evidence entails the claim" cannot both be asserted of the same
+        // item — and corroboration counts (collectedBy, entails) pairs, so an entailing item
+        // collected by the tool constant would let the TOOL be counted as an actor.
+        ...(checkActor !== null
+          && observation.source === WRITER_OBSERVATION_SOURCE
+          && (observation.exit_code === 0 ? effectiveStatus === "pass" : effectiveStatus === "fail")
+          ? { supportStrength: "entails" } : {}),
         passing: effectiveStatus === "pass" && observation.exit_code === 0,
         execution: { runner: "bash", label: observation.command, isError: observation.exit_code !== 0, exitCode: observation.exit_code },
       }))
       : (() => {
-        const evItem: AnyObj = { id: evId, claimId, evidenceType: evClass.evidenceType, method: evClass.method, sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: effectiveStatus === "pass" };
+        const evItem: AnyObj = { id: evId, claimId, evidenceType: evClass.evidenceType, method: evClass.method, sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: checkActor ?? SIDECAR_TOOL_ACTOR, passing: effectiveStatus === "pass" };
         if (captured) {
           evItem.sourceRef = `${slug}/command-log.jsonl`;
-          evItem.collectedBy = "flow-agents/evidence-capture";
+          // A hook-captured observation was collected by the hook, not by the recording actor:
+          // the agent chose the command, the hook wrote the record. Keeping the tool constant
+          // here is the honest attribution and keeps corroboration from counting the recorder
+          // as a verifier of something they did not execute under the writer's protocol.
+          evItem.collectedBy = CAPTURE_HOOK_COLLECTOR;
           evItem.execution = { runner: "bash", label: cmd, isError: captured.observedResult === "fail", ...(captured.exitCode != null ? { exitCode: captured.exitCode } : {}) };
         } else if (cmd && !waiver) {
           evItem.execution = { runner: "bash", label: cmd, isError: effectiveStatus !== "pass" };
@@ -1444,7 +1528,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       })();
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
-      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: evItems.map((item) => item.id), createdAt: ts, verifiedAt: ts };
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: checkActor ?? SIDECAR_TOOL_ACTOR, method: "validation", evidenceIds: evItems.map((item) => item.id), createdAt: ts, verifiedAt: ts };
       events.push(evt);
       claimEvents.push(evt);
     }
@@ -1574,6 +1658,13 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const criterionClaimTimestamp = criterionStatus === "pass" && criterionVerifiedAt ? criterionVerifiedAt : ts;
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", criterionVerifiedAt ? `${fieldOrBehavior}::verified::${criterionVerifiedAt}` : fieldOrBehavior);
     const claimType = "workflow.acceptance.criterion";
+    // #1363: an acceptance-origin claim recorded NO actor at all. It has one, and only one:
+    // `completePassingCriteria` is the sole path that ever moves a criterion to `pass` with
+    // observed commands, it runs inside record-gate-claim, and the identity that ran it is
+    // stamped onto the criterion as `verified_by` (restored across rebuilds by
+    // criteriaFromBundle). A criterion in any other state was never verified by anyone, so it
+    // carries nothing and its event keeps SIDECAR_TOOL_ACTOR.
+    const criterionActor = recordedActorOrNull(criterion._verified_by);
     const criterionEvidenceIds: string[] = [];
     if (criterionStatus === "pass") {
       for (const observation of observedCommands) {
@@ -1587,7 +1678,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
           sourceRef: `${slug}/observed-command`,
           excerptOrSummary: observation.command,
           observedAt: criterionVerifiedAt,
-          collectedBy: "flow-agents/workflow-sidecar",
+          collectedBy: criterionActor ?? SIDECAR_TOOL_ACTOR,
+          // Same rule as the check-origin items above: `entails` only for a writer-spawned
+          // process. Reaching here already requires exit 0 + clean Git provenance for every
+          // observation (hasObservedCommandProvenance), so the outcome agrees with the claim by
+          // construction; the remaining question is only whether the writer ran it.
+          ...(criterionActor !== null && observation.source === WRITER_OBSERVATION_SOURCE ? { supportStrength: "entails" } : {}),
           passing: true,
           execution: { runner: "bash", label: observation.command, isError: false, exitCode: 0 },
         });
@@ -1597,7 +1693,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const evStatus = criterionStatusToEventStatus(criterionStatus);
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
-      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: criterionEvidenceIds, createdAt: criterionClaimTimestamp, verifiedAt: criterionClaimTimestamp };
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: criterionActor ?? SIDECAR_TOOL_ACTOR, method: "validation", evidenceIds: criterionEvidenceIds, createdAt: criterionClaimTimestamp, verifiedAt: criterionClaimTimestamp };
       events.push(evt);
       claimEvents.push(evt);
     }
@@ -1606,7 +1702,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // bundle is rebuilt at a different active gate. Missing or invalid status is conservatively
     // projected as pending so direct artifact edits can never manufacture a pass or invalidate
     // the Hachure claim shape.
-    const claimObj: AnyObj = { id: claimId, subjectType: "flow-step", subjectId, facet: "flow-agents.workflow", claimType, fieldOrBehavior, value: criterionStatus, createdAt: criterionClaimTimestamp, updatedAt: criterionClaimTimestamp, impactLevel: "high", verificationPolicyId: policy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterionStatus, evidence_refs: criterionEvidenceRefs, ...(observedCommands.length > 0 ? { observed_commands: observedCommands } : {}), ...(criterionIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(criterionVerifiedAt ? { verified_at: criterionVerifiedAt } : {}) }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
+    const claimObj: AnyObj = { id: claimId, subjectType: "flow-step", subjectId, facet: "flow-agents.workflow", claimType, fieldOrBehavior, value: criterionStatus, createdAt: criterionClaimTimestamp, updatedAt: criterionClaimTimestamp, impactLevel: "high", verificationPolicyId: policy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterionStatus, evidence_refs: criterionEvidenceRefs, ...(observedCommands.length > 0 ? { observed_commands: observedCommands } : {}), ...(criterionIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(criterionVerifiedAt ? { verified_at: criterionVerifiedAt } : {}), ...(criterionActor ? { verified_by: criterionActor } : {}) }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
     const criterionEvidence = evidenceItems.filter((evidence) => evidence.claimId === claimId);
     const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: criterionEvidence as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
     claims.push({ ...claimObj, status: derivedStatus });
@@ -1622,7 +1718,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // (status "superseded" + first-class metadata.superseded_by), but is excluded from reconcile
     // evaluation and from the "critique pass cannot include fail members" validator rule.
     const supersededBy = typeof c.superseded_by === "string" && c.superseded_by.length > 0 ? c.superseded_by : null;
-    const critiqueReviewer = String(c.reviewer ?? "tool-code-reviewer");
+    const critiqueReviewer = String(c.reviewer ?? DEFAULT_CRITIQUE_REVIEWER);
+    const critiqueReviewerSource = c.reviewer_source === "explicit" || c.reviewer_source === "default"
+      ? String(c.reviewer_source)
+      : null;
     const critiqueReviewedAt = String(c.reviewed_at ?? ts);
     const critiqueIdentityVersion = c.identity_version === 2 ? 2 : 1;
     const reconstructedMetadata = c._source_claim_metadata
@@ -1633,6 +1732,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const critMeta: AnyObj = reconstructedMetadata ?? {
       origin: "critique",
       reviewer: critiqueReviewer,
+      // #1363 review round 3: carried so a rebuild can still tell "named" from "defaulted".
+      // Absent on any bundle written before this change — those critiques are treated as
+      // unnamed, which is exactly what they were: no verifier was ever recorded for them.
+      ...(critiqueReviewerSource ? { reviewer_source: critiqueReviewerSource } : {}),
       reviewed_at: critiqueReviewedAt,
       ...(critiqueIdentityVersion === 2 ? { identity_version: 2 } : {}),
       critique_sequence: c.critique_sequence,
@@ -1676,9 +1779,23 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const policy = ensurePolicy(legacyClaimType, "medium", []);
     // A superseded write emits NO verification event (its status is "superseded" directly).
     const evStatus = supersededBy ? null : critiqueToEventStatus(String(c.verdict ?? ""), c.findings ?? []);
+    // #1363: the reviewer IS the verifying identity of a critique claim, and the bundle already
+    // records it — in private `metadata.reviewer`, which deriveClaimStatus cannot see and a
+    // Surface consumer has no reason to look at. Read it off critMeta (not the raw critique) so
+    // a claim reconstructed from a prior write reports the reviewer it was recorded under, not
+    // whoever triggered the rebuild.
+    //
+    // Round-3 correction: this keys on `reviewer_source`, NOT on comparing the string against the
+    // default. A sentinel comparison cannot distinguish "nobody was named" from "the caller named
+    // tool-code-reviewer" — and the latter is the MODAL case, since packaging/manifest.json makes
+    // delegating review-work to tool-code-reviewer a mandate and 22 evals pass it explicitly. The
+    // sentinel therefore made the flow's prescribed reviewer the one identity the bundle could
+    // never name: a false negative traded for a false positive. The discriminator is derived at
+    // record time from the flag's presence, which is the only moment the difference exists.
+    const critiqueActor = critMeta.reviewer_source === "explicit" ? recordedActorOrNull(critMeta.reviewer) : null;
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
-      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: critiqueActor ?? SIDECAR_TOOL_ACTOR, method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
       events.push(evt);
       claimEvents.push(evt);
     }
@@ -4028,6 +4145,15 @@ type ObservedCommand = {
   command: string;
   exit_code: number;
   output_sha256: string;
+  /**
+   * #1365: how this command came to be observed — the same attribution
+   * `command-log.jsonl` carries. Only `WRITER_OBSERVATION_SOURCE` is ever produced here,
+   * because both producers below spawn the process themselves; the field exists so the fold
+   * can carry the distinction into the delivered bundle instead of rendering a writer-spawned
+   * execution and a hook-captured one identically. Optional because an observation restored
+   * from a bundle written before this change has no source, and must not be given one.
+   */
+  source?: string;
   observed_at_commit?: string;
   worktree_clean?: boolean;
   verification_workspace_snapshot?: AnyObj;
@@ -4092,6 +4218,11 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
         command,
         exit_code: result.exit_code,
         output_sha256: result.output_sha256,
+        // #1365: this observation is a process runObservedCommand spawned — the same fact
+        // appendWriterObservedCommands stamps into command-log.jsonl. Stamping it here too is
+        // what lets the trust-bundle fold carry it; it is derived from the code path, not
+        // accepted from a caller (record-gate-claim has no --observed-command-json).
+        source: WRITER_OBSERVATION_SOURCE,
         ...(result.observation.status === "captured" ? {
           observed_at_commit: result.observation.observed_at_commit,
           worktree_clean: result.observation.worktree_clean,
@@ -4106,6 +4237,7 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
       command,
       exit_code: result.exit_code,
       output_sha256: result.output_sha256,
+      source: WRITER_OBSERVATION_SOURCE,
       ...(result.observation.status === "captured" ? {
         observed_at_commit: result.observation.observed_at_commit,
         worktree_clean: result.observation.worktree_clean,
@@ -4372,7 +4504,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
  * parsed (today: the current-clean-critique requirement, #1359 step 8), so a caller whose payload
  * is also malformed learns both in the same refusal instead of after four shape round-trips.
  */
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string, preconditionProblems: readonly string[]): AnyObj[] {
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string, preconditionProblems: readonly string[], verifiedBy: string): AnyObj[] {
   const problems: string[] = [...preconditionProblems];
   if (raw.length === 0) {
     problems.push("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
@@ -4400,7 +4532,10 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   return normalized.map((refs, index) => {
     const referencedCommands = new Set(refs.filter((ref) => ref.kind === "command").map(commandFromEvidenceRef));
     const criterionObservedCommands = observedCommands.filter((observation) => referencedCommands.has(observation.command));
-    return markCanonicallyObservedCriterion({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _observed_commands: criterionObservedCommands });
+    // #1363: this is the only path that moves a criterion to `pass`, so the actor running
+    // record-gate-claim right now IS the criterion's verifying identity. Stamp it alongside
+    // verified_at (buildTrustBundle persists it as metadata.criterion.verified_by).
+    return markCanonicallyObservedCriterion({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _verified_by: verifiedBy, _observed_commands: criterionObservedCommands });
   });
 }
 
@@ -4662,6 +4797,26 @@ export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existi
     check._waiver = { ...(check._waiver as AnyObj) };
     delete (check._waiver as AnyObj).skip_learning;
   }
+  // #1363 review F3: `_recorded_by` and `_observed_commands` are TRUST-BEARING — the fold
+  // publishes the first as VerificationEvent.actor / Evidence.collectedBy and derives
+  // supportStrength "entails" from the second's `source`. They are minted by the writer that
+  // actually resolved an actor and actually spawned a process (recordGateClaim, recordCheck),
+  // both of which stamp them AFTER this call, exactly like `_output_sha256`. Every
+  // caller-supplied check (record-evidence/record-check/dogfood-pass --check-json) flows through
+  // here, and this spread previously carried them straight into the bundle — so a --check-json
+  // could name any actor as the verifier of a command that never ran, and it validated.
+  //
+  // SCOPE, HONESTLY (round-3 correction): this is a DENYLIST covering exactly the two fields the
+  // fold publishes into Surface trust fields. It is not a general defence of `{ ...raw }`, and a
+  // denylist is a thing a future field gets forgotten from — seven other underscore-prefixed
+  // caller fields still ride this spread into claim metadata (`_output_sha256`,
+  // `_verification_workspace_snapshot`, `_acceptance_contract` and its history, `_waiver_history`,
+  // the `_gate_claim_*` family, `_producer`, `_producer_self_produced_trust_slices`). Inverting
+  // to an allowlist means every legitimate producer stamps after this call; that is the right
+  // shape and is tracked in #1373 rather than done here, because it moves ordering for a dozen
+  // fields on a change whose subject is the actor fold.
+  delete check._recorded_by;
+  delete check._observed_commands;
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
   if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {
     const existingHasStamp = existingCheckStampById?.get(check.id);
@@ -5405,7 +5560,15 @@ export function critiquesFromBundle(dir: string): AnyObj[] {
       findings: Array.isArray(md.findings) ? md.findings : [],
       lanes: Array.isArray(md.lanes) ? md.lanes : [],
       review_target: md.review_target && typeof md.review_target === "object" && !Array.isArray(md.review_target) ? md.review_target : { artifacts: [] },
-      reviewer: typeof md.reviewer === "string" ? md.reviewer : "tool-code-reviewer",
+      reviewer: typeof md.reviewer === "string" ? md.reviewer : DEFAULT_CRITIQUE_REVIEWER,
+      // #1363 review round 3: `reviewer_source` is deliberately NOT restored onto this object.
+      // Deleting a restore here is UNOBSERVABLE — proven by injection — because the fold reads the
+      // reconstructed metadata wholesale via `_source_claim_metadata` (attached below), which
+      // already carries the discriminator from the original write. A line whose removal nothing
+      // can detect is not defence in depth, it is a second source of truth waiting to disagree
+      // with the first. The property that matters — a named reviewer surviving a rebuild — is
+      // asserted end-to-end in test_workflow_sidecar_writer.sh after a real record-evidence
+      // rebuild, and that assertion reds when the discriminator is stripped from this metadata.
       reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
       ...(md.identity_version === 2 ? { identity_version: 2 } : {}),
       critique_record_id: typeof md.critique_record_id === "string" && md.critique_record_id.length > 0 ? md.critique_record_id : c.id,
@@ -5452,6 +5615,10 @@ function criteriaFromBundle(dir: string): AnyObj[] {
         evidence_refs: Array.isArray(saved.evidence_refs) ? saved.evidence_refs : [],
         ...(Array.isArray(saved.observed_commands) ? { _observed_commands: saved.observed_commands } : {}),
         ...(typeof saved.verified_at === "string" ? { verified_at: saved.verified_at } : {}),
+        // #1363: restore the recorded verifying identity so a rebuild (record-critique,
+        // record-learning, record-evidence) reports the actor who verified the criterion rather
+        // than silently downgrading it to the tool constant on the next write.
+        ...(typeof saved.verified_by === "string" ? { _verified_by: saved.verified_by } : {}),
         ...(saved.identity_version === 2 ? { identity_version: 2 } : {}),
       };
       const observedCommands = Array.isArray(saved.observed_commands) ? saved.observed_commands as AnyObj[] : [];
@@ -5703,12 +5870,30 @@ ${stderr}` : ""}`.trim());
     summary,
     command: displayCommand,
   }, false, _existingCheckStampById, repoRoot);
+  // #1363 review F5: record-check EXECUTES the command itself under this process's privileges
+  // (see this function's trust-posture note above), so the actor that invoked it is the real
+  // collector of the observation below — the same identity, from the same helper, that
+  // recordGateClaim stamps one function away. Without this the observation would be published
+  // as "entails" with no named collector, which is incoherent: nothing can be said to entail a
+  // claim on nobody's authority.
+  //
+  // ORDERING IS LOAD-BEARING AND FRAGILE: this MUST stay below the normalizeCheck call above,
+  // which scrubs `_recorded_by` unconditionally (F3). Moving it up to sit with the other check
+  // fields — the natural tidy-up, since everything else is set there — silently erases the stamp
+  // and reverts every record-check claim to the tool constant with no test failing. That is why
+  // test_record_check.sh asserts the recorded actor reaches the delivered bundle; the assertion
+  // reds on deletion AND on that reordering.
+  const recordCheckActorKey = resolveReadActorKey(p);
+  if (!loadActorIdentityHelper().isUnresolvedActor(recordCheckActorKey)) check._recorded_by = recordCheckActorKey;
   check._output_sha256 = outputSha256;
   if (exitCode !== null) {
     const observed: ObservedCommand = {
       command: displayCommand,
       exit_code: exitCode,
       output_sha256: outputSha256,
+      // #1365: record-check ran this command itself (the same observation it appends to
+      // command-log.jsonl immediately below), so it is a canonical writer execution.
+      source: WRITER_OBSERVATION_SOURCE,
       ...(observedAtCommit ? { observed_at_commit: observedAtCommit } : {}),
       ...(typeof worktreeClean === "boolean" ? { worktree_clean: worktreeClean } : {}),
       ...(observedSnapshot ? { verification_workspace_snapshot: observedSnapshot } : {}),
@@ -6167,7 +6352,6 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     check.artifact_refs = evidenceRefs;
   }
   check._producer = producer.id;
-  check._recorded_by = gateClaimActorKey;
   if (producer.selfProducedTrustSlices.length > 0) check._producer_self_produced_trust_slices = producer.selfProducedTrustSlices;
 
   // #270(b)/#412: --command gives a gate claim a real, runnable execution.label distinct from
@@ -6177,9 +6361,20 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // FLOW_AGENTS_GOAL_FIT_RECHECK. Validated at record time with the same isRunnableCommandText
   // heuristic the Stop-hook backstop uses (single-sourced — see loadRunnableCommandHelper).
   if (gateCommand) check.command = gateCommand;
-  if (observedCommands.length > 0) check._observed_commands = observedCommands;
 
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
+  // #1363 review F3: the trust-bearing stamps are applied AFTER normalizeCheck, which scrubs
+  // both unconditionally (see its note). Same ordering `_output_sha256` already uses.
+  //
+  // WHAT THIS DEFENDS, stated precisely (round-3 correction — the first version of this comment
+  // claimed "never anything a caller supplied", which is false): a caller cannot smuggle these
+  // stamps INSIDE THE CHECK PAYLOAD, so a `--check-json` can no longer name a verifier for a
+  // command that never ran. It does NOT authenticate the actor. `resolveReadActorKey` returns
+  // `--actor` verbatim when the flag is present, so the identity here remains SELF-ASSERTED,
+  // exactly as it already was before this change. The observations are different in kind: they
+  // are produced by this invocation's own writer and cannot be supplied at all.
+  checkNormalized._recorded_by = gateClaimActorKey;
+  if (observedCommands.length > 0) checkNormalized._observed_commands = observedCommands;
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
   if (mustRunTests && publicWorkflowAuthority) {
     // The public tests-evidence claim must use the exact snapshot returned by the observed
@@ -6228,7 +6423,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // so a caller with four criterion faults paid four round-trips before even hearing about it.
   // It is now collected first and refused TOGETHER with any payload faults.
   const criteria = mustRunTests
-    ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot, passingTestsCritiquePreconditionProblems(dir, _existingState.critiques))
+    ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot, passingTestsCritiquePreconditionProblems(dir, _existingState.critiques), gateClaimActorKey)
     : _existingState.criteria;
   if (mustRunTests) {
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
@@ -6538,7 +6733,14 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   }
   const critique: AnyObj = {
     id: critiqueId,
-    reviewer: opt(p, "reviewer", "tool-code-reviewer"),
+    reviewer: opt(p, "reviewer", DEFAULT_CRITIQUE_REVIEWER),
+    // #1363 review round 3: WHETHER THE CALLER NAMED THIS REVIEWER, derived from the flag's
+    // presence at the only moment it is knowable. Without it the fold cannot tell an explicit
+    // `--reviewer tool-code-reviewer` — the reviewer builder.build MANDATES for review-work —
+    // from the default applied when nobody was named, and any sentinel check must therefore
+    // discard the prescribed reviewer to avoid publishing an unclaimed one. Not part of
+    // critiqueRecordHash's field list, so the critique chain is unaffected.
+    reviewer_source: opts(p, "reviewer").length > 0 ? "explicit" : "default",
     reviewed_at: opt(p, "timestamp", new Date().toISOString()),
     identity_version: 2,
     verdict,
@@ -6599,7 +6801,7 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   };
   const _mergedCritiques = bundleCritiques.map((e: AnyObj) => {
     const eSuperseded = typeof e.superseded_by === "string" && e.superseded_by.length > 0;
-    const eReviewer = String(e.reviewer ?? "tool-code-reviewer");
+    const eReviewer = String(e.reviewer ?? DEFAULT_CRITIQUE_REVIEWER);
     if (critique.verdict === "pass" && e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) {
       return { ...e, superseded_by: _supersedeMarker, critique_resolution: sameReviewerResolution(e) };
     }
@@ -6796,7 +6998,10 @@ async function importCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     opts: {
       ...p.opts,
       id: [slugify(path.basename(review).replace(/\.md$/, ""), "review")],
-      reviewer: ["tool-code-reviewer"],
+      // #1363 review round 3: deliberately NOT set. import-critique adopts a review artifact
+      // whose author it does not know, so it must fall through to recordCritique's default and
+      // be recorded as reviewer_source "default" — synthesizing the flag here would assert that
+      // someone named this reviewer.
       verdict: [verdict],
       summary: [`Imported critique from ${path.basename(review)}`],
       "artifact-ref": [importedArtifact],

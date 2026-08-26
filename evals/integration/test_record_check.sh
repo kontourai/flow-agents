@@ -369,6 +369,99 @@ else
   _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate for the recordCheck ambiguous branch (ran 'npm run build' first?)"
 fi
 
+# ─── #1363 review round 3: the recorded VERIFYING ACTOR must reach the delivered bundle ──────
+# record-check executes the command under this process's privileges, so the invoking actor is the
+# real collector of the observation. That stamp is applied AFTER normalizeCheck, which scrubs
+# `_recorded_by` unconditionally — so BOTH deleting the stamp AND moving it up to sit with the
+# other check fields (the natural tidy-up) silently revert every record-check claim to the tool
+# constant and drop `entails`, with nothing else failing. This assertion is what reds on either.
+#
+# DELIBERATELY INDEPENDENT OF PROVENANCE CLEANLINESS. This eval's fixture is not a git repo, so
+# record-check resolves provenance from the CHECKOUT RUNNING THE EVAL — one untracked file there
+# turns every confirming pass into not_verified and reds the pass-path assertions above. An
+# injection necessarily dirties that checkout, so an assertion that needed a passing claim could
+# never discriminate under the only condition in which it is tested: it would red identically
+# whether or not the stamp survived. `recorded_by` and `collectedBy` are emitted regardless of
+# claim value and are therefore asserted unconditionally; the event and `entails` are asserted as
+# biconditionals against the claim's actual value, which is a real assertion in both worlds.
+if flow_agents_node "$WRITER" record-check "$SESSION_DIR" \
+  --actor record-check-verifier --id actor-stamp-check --timestamp "2026-07-05T09:20:00Z" \
+  -- echo record-check-actor-stamp \
+  >"$TMPDIR_EVAL/rc-actor.out" 2>"$TMPDIR_EVAL/rc-actor.err" \
+  && node - "$SESSION_DIR/trust.bundle" 2>"$TMPDIR_EVAL/rc-actor-assert.err" <<'NODE'
+const fs = require('node:fs');
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const claim = bundle.claims.find((c) => String(c.subjectId || '').endsWith('/actor-stamp-check'));
+if (!claim) { process.stderr.write('no claim recorded for actor-stamp-check\n'); process.exit(1); }
+const passed = claim.value === 'pass';
+
+if (claim.metadata.recorded_by !== 'record-check-verifier') {
+  process.stderr.write('metadata.recorded_by=' + JSON.stringify(claim.metadata.recorded_by)
+    + ' (expected "record-check-verifier") — the record-check actor stamp was deleted, or moved above the normalizeCheck call that scrubs it\n');
+  process.exit(2);
+}
+const evidence = bundle.evidence.filter((e) => e.claimId === claim.id);
+if (evidence.length === 0 || !evidence.every((e) => e.collectedBy === 'record-check-verifier')) {
+  process.stderr.write('evidence collectedBy=' + JSON.stringify(evidence.map((e) => e.collectedBy))
+    + ' (expected all "record-check-verifier")\n');
+  process.exit(3);
+}
+const event = bundle.events.find((e) => e.claimId === claim.id);
+if (passed !== Boolean(event)) {
+  process.stderr.write('claim.value=' + claim.value + ' but event ' + (event ? 'present' : 'absent') + '\n');
+  process.exit(4);
+}
+if (event && event.actor !== 'record-check-verifier') {
+  process.stderr.write('events[].actor=' + JSON.stringify(event.actor) + ' (expected "record-check-verifier")\n');
+  process.exit(5);
+}
+// entails iff the writer-executed observation actually confirmed the claim AND a collector is
+// named. Asserted as a biconditional so the not_verified branch is a real assertion too.
+const entailing = evidence.filter((e) => e.supportStrength === 'entails').length;
+if (entailing !== (passed ? evidence.length : 0)) {
+  process.stderr.write('claim.value=' + claim.value + ' but ' + entailing + '/' + evidence.length
+    + ' evidence items carry entails\n');
+  process.exit(6);
+}
+if (!claim.metadata.observed_commands.every((o) => o.source === 'canonical-writer-execution')) {
+  process.stderr.write('observed_commands source=' + JSON.stringify(claim.metadata.observed_commands.map((o) => o.source)) + '\n');
+  process.exit(7);
+}
+NODE
+then
+  _pass "#1363: record-check publishes the actor it resolved as the event actor and evidence collector, and entails tracks whether the observation confirmed the claim"
+else
+  _fail "#1363: record-check did not publish its resolved actor into the delivered bundle: $(cat "$TMPDIR_EVAL/rc-actor-assert.err" "$TMPDIR_EVAL/rc-actor.err")"
+fi
+
+# Superseding that check through record-evidence --check-json (which attests rather than executes,
+# and resolves no actor of its own) must DROP the verifier and the entails rather than carry them
+# forward onto an attestation nobody signed. Asserted so a later "fix" cannot quietly inherit them.
+if flow_agents_node "$WRITER" record-evidence "$SESSION_DIR" \
+  --verdict not_verified \
+  --check-json '{"id":"actor-stamp-check","kind":"external","status":"not_verified","summary":"Superseded by an attestation that names nobody."}' \
+  --timestamp "2026-07-05T09:21:00Z" >"$TMPDIR_EVAL/rc-supersede.out" 2>"$TMPDIR_EVAL/rc-supersede.err" \
+  && node - "$SESSION_DIR/trust.bundle" 2>"$TMPDIR_EVAL/rc-supersede-assert.err" <<'NODE'
+const fs = require('node:fs');
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const claims = bundle.claims.filter((c) => String(c.subjectId || '').endsWith('/actor-stamp-check'));
+if (claims.length !== 1) { process.stderr.write('expected exactly one surviving claim, got ' + claims.length + '\n'); process.exit(1); }
+const claim = claims[0];
+if (claim.metadata.recorded_by !== undefined) {
+  process.stderr.write('an attestation inherited the superseded check\'s verifier: ' + JSON.stringify(claim.metadata.recorded_by) + '\n');
+  process.exit(2);
+}
+if (bundle.evidence.some((e) => e.claimId === claim.id && e.supportStrength === 'entails')) {
+  process.stderr.write('an attestation inherited "entails" from the command it superseded\n');
+  process.exit(3);
+}
+NODE
+then
+  _pass "#1363: superseding a record-check claim with a record-evidence attestation drops the verifier and the entails rather than inheriting them"
+else
+  _fail "#1363: same-id supersession by attestation mishandled the verifier: $(cat "$TMPDIR_EVAL/rc-supersede-assert.err" "$TMPDIR_EVAL/rc-supersede.err")"
+fi
+
 if [[ "$errors" -eq 0 ]]; then
   echo "record-check integration passed."
   exit 0
