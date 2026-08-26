@@ -246,7 +246,15 @@ mkdir -p "$INJECT_CWD"
 # recursive mkdir) treat its slashes as separators, building a nested tree instead of the
 # single weirdly-named directory this scenario needs -- which in turn left the tree deep
 # enough that cleanup failed and clobbered the exit code (flaky false FAIL in a required lane).
-INJECT_DEST="$INJECT_ROOT/o'brien; touch INJECTED; echo 'x"
+# The payload must break the quoting layer that ACTUALLY exists. Pre-#1101 that was the
+# outer single-quoted `bash -lc '...'` argument, so an apostrophe sufficed. Post-#1101 the
+# only shell-form entry is statusLine's `node "<root>/..."` -- a DOUBLE-quoted region, in
+# which an apostrophe is inert. A payload proven against the old shape silently stops
+# discriminating: with the escaper neutered to the identity function this scenario still
+# passed 10/10 until the payload was updated. It now carries a double-quote break-out and a
+# command substitution (the two things that still expand inside "..."), plus a leading
+# apostrophe so the legitimate /Users/o'brien case stays covered.
+INJECT_DEST="$INJECT_ROOT/o'brien\"; touch INJECTED; echo \"\$(touch INJECTED)x"
 mkdir -p "$INJECT_DEST"
 
 if FLOW_AGENTS_USER_CLAUDE_SETTINGS="$INJECT_DEST/settings.json" \
