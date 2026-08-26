@@ -423,6 +423,6 @@
     "scope": "author:briananderson1222 ref:codex/1384-retained-narrative-reader",
     "reason": "Agent-delivered #1386 changes lack a pre-change Builder delivery record; owner authorized this one Step 2 exception at https://github.com/kontourai/flow-agents/issues/1387#issuecomment-5428351453. Step 1 canonical verification remains required.",
     "approved_by": "briananderson1222",
-    "declared_at": "2026-08-26T16:36:00Z"
+    "declared_at": "2026-08-26T16:58:59Z"
   }
 ]
