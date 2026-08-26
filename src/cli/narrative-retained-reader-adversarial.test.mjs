@@ -232,4 +232,12 @@ test('process decoder rejects coercion and returns defensive copies', t => {
   const hostile = {};
   Object.defineProperty(hostile,'schemaVersion',{get(){throw new Error('getter must be rejected');}});
   assert.equal(api.decodeRetainedNarrativeProcessProjection(hostile),undefined);
+  const changingAction = {};
+  let reads = 0;
+  Object.defineProperty(changingAction,'kind',{enumerable:true,get(){reads += 1; return reads < 3 ? 'recorded_observation' : {private_path:'/private/GETTER_CANARY'};}});
+  assert.equal(api.decodeRetainedNarrativeProcessProjection({...projected,runtime:{...projected.runtime,documentActions:[changingAction]}}),undefined);
+  const growing = [];
+  Object.defineProperty(growing,'0',{enumerable:true,get(){growing.push({kind:'recorded_observation'});return {kind:'recorded_observation'};}});
+  growing.length = 1;
+  assert.equal(api.decodeRetainedNarrativeProcessProjection({...projected,runtime:{...projected.runtime,documentActions:growing}}),undefined);
 });

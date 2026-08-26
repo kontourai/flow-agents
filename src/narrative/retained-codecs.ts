@@ -52,7 +52,14 @@ const NARRATIVE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 function object(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result = Object.create(null) as Record<string, unknown>;
+  for (const key of Object.keys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor)) return undefined;
+    result[key] = descriptor.value;
+  }
+  return result;
 }
 
 /** Pure codec: it accepts only the versioned, path-free public reference shape. */
@@ -70,12 +77,17 @@ export function decodeGroundedNarrativeRef(value: unknown): GroundedNarrativeRef
 function exact(record: Record<string, unknown> | undefined, keys: readonly string[]): record is Record<string, unknown> {
   return !!record && Object.keys(record).length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(record, key));
 }
-function denseArray(value: unknown, maximum: number): value is unknown[] {
-  if (!Array.isArray(value) || value.length > maximum) return false;
-  for (let index = 0; index < value.length; index += 1) {
-    if (!Object.prototype.hasOwnProperty.call(value, index)) return false;
+function denseArray(value: unknown, maximum: number): unknown[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const length = Object.getOwnPropertyDescriptor(value, "length")?.value;
+  if (!Number.isSafeInteger(length) || length < 0 || length > maximum) return undefined;
+  const result: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || !("value" in descriptor)) return undefined;
+    result.push(descriptor.value);
   }
-  return true;
+  return result;
 }
 function nonNegativeInteger(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
 function safeVersion(value: unknown): value is string { return typeof value === "string" && value.length <= MAX_RETAINED_PROCESS_VERSION_LENGTH && SEMVER.test(value); }
@@ -105,43 +117,46 @@ export function decodeRetainedNarrativeProcessProjection(value: unknown): Retain
   const channels = object(capture?.channels);
   const runtime = object(record.runtime);
   const coverage = object(runtime?.coverage);
+  const inputGaps = denseArray(capture?.knownGapClasses, 128);
+  const inputTurns = denseArray(runtime?.turns, MAX_RETAINED_PROCESS_TURNS);
+  const inputDocumentActions = denseArray(runtime?.documentActions, MAX_RETAINED_PROCESS_ACTIONS);
   if (!ref || ref.narrativeId !== record.narrativeId || !exact(provenance, ["compiler", "compiled_at", "manifest_sha256"])
     || !exact(compiler, ["name", "version"]) || compiler.name !== "flow-agents-narrative-composer" || !safeVersion(compiler.version)
     || !dateTime(provenance.compiled_at) || typeof provenance.manifest_sha256 !== "string" || !SHA256.test(provenance.manifest_sha256)
     || !exact(capture, ["channels", "knownGapClasses"]) || !exact(channels, ["active", "inactive", "unknown"])
-    || !nonNegativeInteger(channels.active) || !nonNegativeInteger(channels.inactive) || !nonNegativeInteger(channels.unknown) || !denseArray(capture.knownGapClasses, 128)
+    || !nonNegativeInteger(channels.active) || !nonNegativeInteger(channels.inactive) || !nonNegativeInteger(channels.unknown) || !inputGaps
     || !runtime || !exact(runtime, ["coverage", "turns", "documentActions"]) || !exact(coverage, ["sources", "cited", "unavailable"])
     || !nonNegativeInteger(coverage.sources) || !nonNegativeInteger(coverage.cited) || !nonNegativeInteger(coverage.unavailable)
-    || !denseArray(runtime.turns, MAX_RETAINED_PROCESS_TURNS)
-    || !denseArray(runtime.documentActions, MAX_RETAINED_PROCESS_ACTIONS)) return undefined;
+    || !inputTurns || !inputDocumentActions) return undefined;
   const allowedGaps: KnownGapClass[] = ["mcp_non_native_tools", "actor_attribution_conflation", "cross_session_event_contamination"];
   const knownGapClasses: KnownGapClass[] = [];
-  for (let index = 0; index < capture.knownGapClasses.length; index += 1) {
-    const gap = capture.knownGapClasses[index];
+  for (let index = 0; index < inputGaps.length; index += 1) {
+    const gap = inputGaps[index];
     if (typeof gap !== "string" || !allowedGaps.includes(gap as KnownGapClass) || knownGapClasses.includes(gap as KnownGapClass)) return undefined;
     knownGapClasses.push(gap as KnownGapClass);
   }
-  let actionCount = runtime.documentActions.length;
+  let actionCount = inputDocumentActions.length;
   const documentActions: RetainedNarrativeProcessAction[] = [];
-  for (let index = 0; index < runtime.documentActions.length; index += 1) {
-    const decoded = action(runtime.documentActions[index]);
+  for (let index = 0; index < inputDocumentActions.length; index += 1) {
+    const decoded = action(inputDocumentActions[index]);
     if (!decoded) return undefined;
     documentActions.push(decoded);
   }
   const turns: RetainedNarrativeProcessProjection["runtime"]["turns"] = [];
-  for (let index = 0; index < runtime.turns.length; index += 1) {
-    const turnValue = runtime.turns[index];
+  for (let index = 0; index < inputTurns.length; index += 1) {
+    const turnValue = inputTurns[index];
     const turn = object(turnValue);
     const boundary = object(turn?.boundary);
     const ordinal = turn?.ordinal;
+    const inputActions = denseArray(turn?.actions, MAX_RETAINED_PROCESS_ACTIONS);
     if (!exact(turn, ["ordinal", "boundary", "actions"]) || typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < -1
       || !exact(boundary, boundary?.rule_id === undefined ? ["derived"] : ["derived", "rule_id"])
-      || typeof boundary.derived !== "boolean" || (boundary.rule_id !== undefined && boundary.rule_id !== "turn-spine/v1") || !denseArray(turn.actions, MAX_RETAINED_PROCESS_ACTIONS)
-      || actionCount + turn.actions.length > MAX_RETAINED_PROCESS_ACTIONS) return undefined;
-    actionCount += turn.actions.length;
+      || typeof boundary.derived !== "boolean" || (boundary.rule_id !== undefined && boundary.rule_id !== "turn-spine/v1") || !inputActions
+      || actionCount + inputActions.length > MAX_RETAINED_PROCESS_ACTIONS) return undefined;
+    actionCount += inputActions.length;
     const actions: RetainedNarrativeProcessAction[] = [];
-    for (let actionIndex = 0; actionIndex < turn.actions.length; actionIndex += 1) {
-      const decoded = action(turn.actions[actionIndex]);
+    for (let actionIndex = 0; actionIndex < inputActions.length; actionIndex += 1) {
+      const decoded = action(inputActions[actionIndex]);
       if (!decoded) return undefined;
       actions.push(decoded);
     }
