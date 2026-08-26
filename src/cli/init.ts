@@ -60,6 +60,26 @@ type InitOptions = {
   // "(auto-detected)" annotation. headlessOptions() itself never sets this
   // (untouched) -- main() merges it onto the headless result separately.
   runtimeAutoDetected?: boolean;
+  /**
+   * Opt in to the permissive Claude Code permission defaults the bundle carries
+   * (`permissions.defaultMode: "auto"`, `skipDangerousModePermissionPrompt: true`).
+   *
+   * Default OFF (kontourai/flow-agents#1345). Those keys were designed for a DEDICATED agent
+   * workspace -- a directory whose only purpose is agent work. `init --dest <repo>` installs
+   * into ordinary product repositories, and `.claude/settings.json` is a PROJECT-level file:
+   * it travels to every clone, machine and person, it takes precedence over the user-level
+   * settings in Claude Code's hierarchy, and nobody who asked for gates and skills asked to
+   * have their permission model changed. Worst of the three: a user who later tightens their
+   * global default finds every kit-installed repo silently overriding that decision, in N
+   * places, each invisible until someone opens the repo's settings file.
+   *
+   * So the permissive posture is now named and recorded rather than implied. `--global` and
+   * `dogfood` already stripped these keys; this makes the project path agree with them, and
+   * leaves the dedicated-workspace behaviour reachable by asking for it. The uninstall-side
+   * removal registration (uninstall.ts's `removeOwnedValues`) is unchanged either way, so
+   * repos that already received the keys still get them cleaned up on `--uninstall`.
+   */
+  permissiveWorkspace?: boolean;
   configureProviders?: boolean;
   providerScope?: ProviderScope;
   providerRepoPath?: string;
@@ -164,6 +184,13 @@ Options:
                          bundle-owned content. Without --force such files are always
                          preserved and reported. Supported for project (bundle)
                          installs and --global claude-code.
+  --permissive-workspace  claude-code only. Install the permissive permission defaults
+                          (permissions.defaultMode=auto, skipDangerousModePermission-
+                          Prompt=true) into the destination's .claude/settings.json.
+                          OFF by default: those are dedicated-agent-workspace settings,
+                          and a project settings file travels to every clone and
+                          overrides the user's own global posture. Recorded in
+                          .flow-agents/install.json when used.
   --rewrite-settings      Allow provider bootstrap to rewrite an existing git-tracked
                           settings file whose content would change (otherwise it
                           refuses with a diff preview).
@@ -263,7 +290,7 @@ function computeActiveKits(runtime: Runtime, global: boolean | undefined, active
  * its durable run artifacts still can.
  */
 
-function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = [], configPremerge?: unknown, authorizedBackingRoots: string[] = [], installedValues?: unknown): void {
+function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = [], configPremerge?: unknown, authorizedBackingRoots: string[] = [], installedValues?: unknown, permissiveWorkspace = false): void {
   const recordPath = durableInstallRecordPath(dest);
   const installRecordDir = path.dirname(recordPath);
   fs.mkdirSync(installRecordDir, { recursive: true });
@@ -289,7 +316,7 @@ function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | un
   if (normalizedPremerge && typeof normalizedPremerge === "object" && (normalizedPremerge as Record<string, unknown>)["schema_version"] === "1.0") {
     normalizedPremerge = { schema_version: "2.0", origin: normalizedPremerge, previous: normalizedPremerge };
   }
-  const record = { version, installedAt, runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds, active_kits: activeKits, ...(normalizedPremerge ? { config_premerge: normalizedPremerge } : {}), ...(installedValues ? { installed_values: installedValues } : {}), ...(authorizedBackingRoots.length > 0 ? { authorized_backing_roots: authorizedBackingRoots } : {}) };
+  const record = { version, installedAt, runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds, active_kits: activeKits, ...(normalizedPremerge ? { config_premerge: normalizedPremerge } : {}), ...(installedValues ? { installed_values: installedValues } : {}), ...(authorizedBackingRoots.length > 0 ? { authorized_backing_roots: authorizedBackingRoots } : {}), ...(permissiveWorkspace ? { permissive_workspace: true } : {}) };
   const recordTmp = `${recordPath}.tmp.${process.pid}`;
   fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
   fs.chmodSync(recordTmp, 0o600);
@@ -653,6 +680,7 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
       providerProjectNumber: parseProviderProject(providerProjectAnswer?.trim() || undefined),
       providerOnline,
       providerRewriteSettings: flagBool(args.flags, "rewrite-settings"),
+      permissiveWorkspace: flagBool(args.flags, "permissive-workspace"),
     };
   } finally {
     rl.close();
@@ -681,6 +709,7 @@ function headlessOptions(argv: string[]): InitOptions {
     providerProjectNumber: parseProviderProject(flagString(args.flags, "provider-project")),
     providerOnline: flagBool(args.flags, "online"),
     providerRewriteSettings: flagBool(args.flags, "rewrite-settings"),
+    permissiveWorkspace: flagBool(args.flags, "permissive-workspace"),
   };
 }
 
@@ -1087,12 +1116,25 @@ async function installOpencodeGlobalAssets(dest: string, bundle: string, runtime
  * Replaces are applied by the caller's Node executor BEFORE install.sh runs, so token
  * substitution still covers them.
  */
+/**
+ * Managed top-level keys a project install subtracts from the bundle's claude-code
+ * settings before install-merge.js merges it. See InitOptions.permissiveWorkspace for
+ * why (kontourai/flow-agents#1345); these are exactly the two keys the `--global` path
+ * (init.ts) and `dogfood` (dogfoodClaudeCode) already delete.
+ */
+export const PERMISSIVE_WORKSPACE_MANAGED_KEYS: readonly string[] = ["permissions", "skipDangerousModePermissionPrompt"];
+
 export function installBundleArgs(
-  options: Pick<InitOptions, "dest" | "telemetrySinks" | "consoleUrl" | "consoleEndpoint" | "consoleTenant">,
+  options: Pick<InitOptions, "dest" | "telemetrySinks" | "consoleUrl" | "consoleEndpoint" | "consoleTenant" | "permissiveWorkspace"> & { runtime?: Runtime },
   preservedRelPaths: string[],
 ): string[] {
   const args = ["install.sh", options.dest];
   args.push("--only-absent");
+  // Only claude-code's managed config carries these keys at all; passing the flags for
+  // other runtimes would be inert but would misreport intent in the installer's argv.
+  if (options.runtime === "claude-code" && !options.permissiveWorkspace) {
+    for (const key of PERMISSIVE_WORKSPACE_MANAGED_KEYS) args.push("--omit-managed-key", key);
+  }
   for (const rel of preservedRelPaths) args.push("--exclude-path", rel);
   for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
   if (options.consoleUrl) args.push("--console-url", options.consoleUrl);
@@ -1207,34 +1249,62 @@ function headlessRuntimeAutoDetected(argv: string[]): boolean {
  * reachability timeout (2000ms unless overridden), and any thrown/rejected
  * error here is caught and downgraded to a warning line only.
  */
+/**
+ * Classify the telemetry config file the doctor actually resolved, relative to THIS install.
+ *
+ * #1344: `resolveTelemetryConfigFile` deliberately searches beyond the destination --
+ * TELEMETRY_CONFIG_FILE, then a trusted `<dest>/.kontourai/telemetry-console.conf`, then a
+ * trusted `~/.flow-agents/telemetry-console.conf`, then the destination's shipped default --
+ * because a machine-wide install IS the supported configuration for the hooks. That is right
+ * for a diagnostic and wrong for an install summary that says nothing about which file it
+ * read: on the reported install the resolved file was the user-global conf, whose token,
+ * tenant and Console URL had nothing to do with the `--telemetry-sink local-files` run being
+ * summarised. Naming the file and its scope is what makes the difference visible.
+ */
+export function classifyResolvedTelemetryConfig(configFile: string, dest: string, configExists: boolean): "destination" | "workspace" | "user-global" | "explicit" | "absent" {
+  if (!configExists) return "absent";
+  const resolved = path.resolve(configFile);
+  const workspaceConf = path.join(path.resolve(dest), ".kontourai", "telemetry-console.conf");
+  if (resolved === workspaceConf) return "workspace";
+  if (resolved === path.join(os.homedir(), ".flow-agents", "telemetry-console.conf")) return "user-global";
+  const destPrefix = `${path.resolve(dest)}${path.sep}`;
+  if (resolved.startsWith(destPrefix)) return "destination";
+  return "explicit";
+}
+
 async function printPostInstallSummary(options: InitOptions): Promise<void> {
   let doctorConsole: {
     sink: "local-only" | "console";
     reachability: { checked: boolean; ok: boolean | null; error?: string; statusCode?: number };
   } = { sink: "local-only", reachability: { checked: false, ok: null } };
-  let tokenConfigured = false;
-  let tenantConfigured = false;
+  let tokenSource: "environment" | "config-file" | "absent" = "absent";
+  let tenantSource: "environment" | "config-file" | "absent" = "absent";
+  let resolvedConfigFile: string | undefined;
+  let resolvedConfigScope: "destination" | "workspace" | "user-global" | "explicit" | "absent" = "absent";
   try {
     const report = await buildReport(["--dest", options.dest]);
     doctorConsole = report.console;
-    tokenConfigured = report.console.tokenConfigured;
-    tenantConfigured = report.console.tenantConfigured;
+    tokenSource = report.console.tokenSource;
+    tenantSource = report.console.tenantSource;
+    resolvedConfigFile = report.telemetry.configFile;
+    resolvedConfigScope = classifyResolvedTelemetryConfig(report.telemetry.configFile, options.dest, report.telemetry.configExists);
   } catch (error) {
-    console.warn(`flow-agents init: WARNING: could not verify the Console connection: ${(error as Error).message} (telemetry still installed; run 'flow-agents telemetry-doctor' to re-check).`);
+    console.warn(`flow-agents init: WARNING: could not resolve the telemetry configuration to report on: ${(error as Error).message} (telemetry still installed; run 'flow-agents telemetry-doctor' to re-check).`);
   }
   const consoleStatus = describeConsoleStatus({ console: doctorConsole });
   const nextSteps = [`Run your agent inside ${options.dest} -- Flow Agents hooks are already wired.`];
-  if (consoleStatus.status !== "local-only") {
+  if (consoleStatus.status !== "not-configured") {
     nextSteps.push("Telemetry now flows to Kontour Console; visit the Console for ROI/economics views.");
   }
-  // Only for the "reachability was never attempted" case (self-hosted/BYO
-  // HTTPS hosts default to not-allowed without --allow-network) -- never for
-  // local-only (nothing to verify) or the already-verified case (nothing left
-  // to do). doctorConsole.reachability.checked is the same raw signal
-  // describeConsoleStatus used to pick its NOT_CHECKED_DETAIL branch, so this
-  // stays in sync with that classifier without re-parsing its detail string.
-  if (consoleStatus.status === "connected-unverified" && doctorConsole.reachability.checked === false) {
+  // Actionable only when an endpoint IS configured and no check was attempted (self-hosted/
+  // BYO HTTPS hosts default to not-allowed without --allow-network). Never for
+  // not-configured (nothing to verify), never for verified (nothing left to do), and never
+  // for a check that ran and failed (--allow-network would not change that answer).
+  if (consoleStatus.status === "unverified-not-attempted") {
     nextSteps.push("Self-hosted/BYO Console reachability was not checked; run `flow-agents telemetry-doctor --allow-network` to verify it.");
+  }
+  if (resolvedConfigScope !== "destination" && resolvedConfigScope !== "absent") {
+    nextSteps.push(`The Console lines above describe ${resolvedConfigFile}, which this install did not write; run \`flow-agents telemetry-doctor --dest ${options.dest}\` to re-check at any time.`);
   }
   nextSteps.push("Re-run `flow-agents init` anytime to reconfigure runtime, destination, or Console connection.");
   const summaryLines = buildPostInstallSummaryLines({
@@ -1243,8 +1313,10 @@ async function printPostInstallSummary(options: InitOptions): Promise<void> {
     dest: options.dest,
     telemetrySinks: options.telemetrySinks,
     consoleStatus,
-    tokenConfigured,
-    tenantConfigured,
+    resolvedConfigFile,
+    resolvedConfigScope,
+    tokenSource,
+    tenantSource,
     nextSteps,
   });
   for (const line of summaryLines) console.log(line);
@@ -1623,7 +1695,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       installedValues = generated["installed_values"];
     } catch { /* runtimes without a merged config have no snapshot */ }
     ensureArtifactResidueIgnored(options.dest);
-    writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? [], configPremerge, [], installedValues);
+    writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? [], configPremerge, [], installedValues, options.runtime === "claude-code" && Boolean(options.permissiveWorkspace));
     // Every project bundle install writes the ownership manifest `flow-agents init
     // --uninstall` (claude-code) reads back -- and, since #1288, the manifest is ALSO what
     // lets the NEXT init recognize stale bundle-owned files and update them without

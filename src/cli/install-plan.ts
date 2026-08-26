@@ -99,6 +99,10 @@ export class InstallPlanDriftError extends Error {
 // runtime -- the merge-owned config file install-merge.js merges rather than copies.
 // Mirrored here (not imported) because installScript() builds a bash script, not a
 // reusable list; this set must stay in lockstep with that generator.
+//
+// NOTE: an rsync exclude is NOT the same thing as "outside the install". The runtime's own
+// instruction file is removed from this set again by bundleInstallExcludeRel() so it is
+// planned and owned -- see BUNDLE_INSTRUCTION_REL below (#1343).
 const BUNDLE_INSTALL_COMMON_EXCLUDE_REL: readonly string[] = [
   "AGENTS.md",
   "CLAUDE.md",
@@ -113,11 +117,44 @@ const BUNDLE_MERGE_CONFIG_REL: Readonly<Record<string, string>> = {
   opencode: "opencode.json",
 };
 
+/**
+ * The ONE instruction file each runtime's bundle actually ships, mirrored from
+ * build-universal-bundles.ts's BUNDLE_CAPABILITIES.instructionPath. (Codex ships none.)
+ *
+ * kontourai/flow-agents#1343: this file used to be excluded from the plan outright, which
+ * meant install created it (install.sh's no-overwrite instructionBlock) while the ownership
+ * manifest disclaimed it and `--uninstall` could not see it -- so a durable instruction file
+ * a coding agent reads every session survived the removal path a user runs specifically to
+ * undo the install, under a summary reading `Preserved -- modified or unknown (0)`.
+ *
+ * #1238 established that REMOVAL requires positive provenance. The other half of that
+ * contract is that CREATION requires manifest registration: anything the installer writes
+ * must be owned, or the manifest stops being a truthful account of the install. Keeping the
+ * runtime's own instruction file IN the plan gives it the normal ownership semantics for
+ * free -- created when absent, preserved and reported when the destination's copy is the
+ * user's, updated only when it hash-matches a previous install's manifest entry -- with no
+ * change to install.sh, whose rsync still excludes it and whose instructionBlock still
+ * refuses to overwrite anything that already exists.
+ *
+ * The OTHER runtime's instruction filename stays excluded: the rsync excludes both
+ * unconditionally, and no bundle ships both, so planning a path the bundle does not contain
+ * would be meaningless.
+ */
+const BUNDLE_INSTRUCTION_REL: Readonly<Record<string, string>> = {
+  base: "AGENTS.md",
+  kiro: "AGENTS.md",
+  "claude-code": "CLAUDE.md",
+  opencode: "AGENTS.md",
+  pi: "AGENTS.md",
+};
+
 /** The set of bundle-relative paths install.sh's rsync never unconditionally copies for `runtime`. */
 export function bundleInstallExcludeRel(runtime: string): Set<string> {
   const set = new Set(BUNDLE_INSTALL_COMMON_EXCLUDE_REL);
   const mergeConfig = BUNDLE_MERGE_CONFIG_REL[runtime];
   if (mergeConfig) set.add(mergeConfig);
+  const instruction = BUNDLE_INSTRUCTION_REL[runtime];
+  if (instruction) set.delete(instruction);
   return set;
 }
 
