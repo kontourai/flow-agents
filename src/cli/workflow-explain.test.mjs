@@ -68,7 +68,10 @@ const laneAccepted = (lane) => !/--lane-json/.test(laneRefusal(lane));
 // Generation is driven by the CONSTANTS, so a newly declared field or kind is covered the day it
 // is added rather than the day someone remembers to extend a hand-written list.
 function evidenceRefCorpus() {
-  const bad = [0, -1, "", null, {}, [], true];
+  // Boundary and length values matter: the reviewer's 4th injection keyed on a >200-character
+  // summary, and a corpus of short strings could never provoke it. A corpus that cannot produce
+  // the discriminating value proves nothing about rules keyed on that value.
+  const bad = [0, -1, "", null, {}, [], true, "x".repeat(201), "x".repeat(4097), Number.MAX_SAFE_INTEGER, 1.5, -0];
   const refs = [];
   for (const kind of [...EVIDENCE_REF_KINDS, "not-a-kind", undefined]) {
     const base = EVIDENCE_REF_KINDS.includes(kind) ? exampleEvidenceRef(kind) : { kind };
@@ -115,6 +118,28 @@ test("the rule tables are pinned, so deleting a rule from BOTH sides still redde
   assert.equal(printedBodies(criterionShape).size, 3, "criterion object-shape rule count changed");
   assert.equal(printedBodies(laneShape).size, 5, "lane object-shape rule count changed");
   assert.equal(observedEvidenceRefBodies().size, 17, "the corpus stopped provoking every evidence-ref rule — it lost discriminating power");
+});
+
+test("SOURCE SCAN: every rule body the collectors can push is a body --explain prints", () => {
+  // The corpus net has a hole no corpus can close: a rule keyed on a value the generator never
+  // produces is never provoked, so set-equality holds vacuously. The reviewer's 4th injection
+  // (summary > 200 characters) walked straight through the first version of this file's
+  // set-equality guard for exactly that reason.
+  //
+  // This net does not depend on coverage. It reads every violation template in the module where
+  // rule bodies live, turns each into a pattern, and requires a printed body to match it. A rule
+  // that is unreachable for the corpus is still a rule in the source, so it is still caught.
+  const source = fs.readFileSync(path.join(__dirname, "public-contracts.ts"), "utf8");
+  const templates = [...source.matchAll(/violations\.push\(`([^`]*)`\)/g)].map((match) => match[1]);
+  assert.ok(templates.length >= 10, `only ${templates.length} violation templates found — the scan anchor moved and this guard is scanning nothing`);
+  const printed = [...printedBodies(evidenceRefShape), ...printedBodies(criterionShape), ...printedBodies(laneShape)];
+  const unmatched = [];
+  for (const template of templates) {
+    const body = template.replace(/^\$\{label\} /, "");
+    const pattern = new RegExp(`^${body.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\$\\\{[^}]*\\\}/g, ".*")}$`);
+    if (!printed.some((candidate) => pattern.test(candidate))) unmatched.push(template);
+  }
+  assert.deepEqual(unmatched, [], `these refusal bodies exist in the collectors but --explain prints nothing matching them:\n  ${unmatched.join("\n  ")}`);
 });
 
 test("SET-EQUALITY: the bodies the evidence-ref collectors emit are exactly the bodies --explain prints", () => {
