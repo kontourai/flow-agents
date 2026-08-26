@@ -1444,9 +1444,17 @@ EOF
   printf '%s' "$sha" > "$dir/.fixture-sha"
 }
 
-# run_1371 <label> <dir> <canonical-command> <expected-exit> <needle> [forbidden]
+# run_1371 <label> <dir> <canonical-command> <expected-exit> <needle> [forbidden] [needle2]
+#
+# `needle2` exists because the EXIT CODE CANNOT DISCRIMINATE in case 1371b: a diverging claim
+# already pushes its own `divergence` issue, so the run reds whether or not the provisional gate
+# also fires. A fault injection that counted a CI-FAILED claim as "reconciled"
+# (`reconciledCommandClaims += 1` inside the !ciResult.passed branch) was therefore NOT CAUGHT by
+# the first version of these assertions — measured, not assumed. That injection corrupts the very
+# counter this whole gate rests on, so the invariant "a claim CI failed is never a confirmation"
+# is now pinned explicitly rather than left to an exit code that cannot see it.
 run_1371() {
-  local label="$1" dir="$2" cmd="$3" expected="$4" needle="$5" forbidden="${6:-}"
+  local label="$1" dir="$2" cmd="$3" expected="$4" needle="$5" forbidden="${6:-}" needle2="${7:-}"
   local sha out code
   sha="$(cat "$dir/.fixture-sha")"
   out="$(TRUST_RECONCILE_SHA="$sha" TRUST_RECONCILE_EVENT="pull_request" TRUST_RECONCILE_COMMANDS="$cmd" \
@@ -1461,6 +1469,13 @@ run_1371() {
     _pass "$label: emitted \"$needle\""
   else
     _fail "$label: expected \"$needle\" — output: $out"
+  fi
+  if [[ -n "$needle2" ]] ; then
+    if echo "$out" | grep -qF "$needle2"; then
+      _pass "$label: emitted \"$needle2\""
+    else
+      _fail "$label: expected \"$needle2\" — output: $out"
+    fi
   fi
   if [[ -n "$forbidden" ]] ; then
     if echo "$out" | grep -qF "$forbidden"; then
@@ -1489,8 +1504,12 @@ run_1371 "1371a provisional-reconciles" "$P1371_ROOT/accept" "$P1371_PASSCMD" 0 
 
 # 10b. REFUSE: claimed pass, CI fresh run FAIL — the genuine divergence branch (asserted by
 #      needle, not by exit code alone, because a fresh-fail would redden this run anyway).
+#      The second needle pins the counter: a claim CI FAILED is never counted as a confirmation,
+#      so the provisional gate fires here too. Without it the exit code alone cannot tell a
+#      correct counter from a corrupted one (proven by an uncaught injection).
 run_1371 "1371b provisional-diverges" "$P1371_ROOT/diverge" "$P1371_FAILCMD" 1 \
-  "[divergence] trust divergence: agent claimed 'node -e \"process.exit(3)\"' passed; CI fresh run = FAIL"
+  "[divergence] trust divergence: agent claimed 'node -e \"process.exit(3)\"' passed; CI fresh run = FAIL" \
+  "" "[provisional-unreconciled] trust divergence: provisional delivery reconciled 0 command claim(s)"
 
 # 10c. REFUSE: a provisional delivery that confirmed nothing. This is the #1371 exploit.
 run_1371 "1371c provisional-vacuous" "$P1371_ROOT/vacuous" "$P1371_PASSCMD" 1 \
