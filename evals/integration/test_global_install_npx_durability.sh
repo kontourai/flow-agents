@@ -102,20 +102,29 @@ const { spawnSync } = require("node:child_process");
 const settingsPath = process.argv[2];
 const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
 
+// Post-#1101 hooks are exec form (`command: "node"` + an `args` argv vector spawned with
+// no shell); only statusLine is still a shell string. Matching on `h.command` alone would
+// match the bare string "node" for every hook and prove nothing about the vendored path,
+// so exec-form entries are identified by their args and spawned as argv.
 const targets = [];
 for (const [event, groups] of Object.entries(settings.hooks || {})) {
   for (const group of groups || []) {
     for (const h of (group.hooks || [])) {
-      if (typeof h.command === "string" && (h.command.includes("claude-hook-adapter.js") || h.command.includes("claude-telemetry-hook.js"))) {
-        targets.push({ label: `${event} hook (${h.statusMessage || "unlabeled"})`, command: h.command, event, isStatusLine: false });
+      const args = Array.isArray(h.args) ? h.args.map(String) : [];
+      const haystack = [String(h.command || ""), ...args].join(" ");
+      if (haystack.includes("claude-hook-adapter.js") || haystack.includes("claude-telemetry-hook.js")) {
+        targets.push({ label: `${event} hook (${h.statusMessage || "unlabeled"})`, command: h.command, args, event, isStatusLine: false });
       }
     }
   }
 }
+const execFormCount = targets.filter((t) => t.args.length > 0).length;
+if (execFormCount === 0) throw new Error("no exec-form FA hook entries found in settings.json to exercise");
 if (settings.statusLine && typeof settings.statusLine.command === "string") {
-  targets.push({ label: "statusLine", command: settings.statusLine.command, event: "SessionStart", isStatusLine: true });
+  targets.push({ label: "statusLine", command: settings.statusLine.command, args: [], event: "SessionStart", isStatusLine: true });
+} else {
+  throw new Error("no statusLine command found in settings.json to exercise");
 }
-if (targets.length === 0) throw new Error("no FA hook/statusLine commands found in settings.json to exercise");
 
 const env = { ...process.env };
 delete env.CLAUDE_PROJECT_DIR; // must not depend on this -- that is the entire point of #945
@@ -125,13 +134,10 @@ env.FLOW_AGENTS_CLAUDE_TELEMETRY_FOREGROUND = "true";
 const failures = [];
 for (const target of targets) {
   const payload = JSON.stringify({ hook_event_name: target.event, cwd: process.cwd() });
-  const result = spawnSync(target.command, {
-    input: payload,
-    env,
-    shell: true,
-    encoding: "utf8",
-    timeout: 30000,
-  });
+  // Exec form spawns argv directly (no shell); statusLine goes through a shell, as the host does.
+  const result = target.args.length > 0
+    ? spawnSync(target.command, target.args, { input: payload, env, encoding: "utf8", timeout: 30000 })
+    : spawnSync(target.command, { input: payload, env, shell: true, encoding: "utf8", timeout: 30000 });
   const stderr = String(result.stderr || "");
   const stdout = String(result.stdout || "");
   if (result.status !== 0) {
@@ -220,10 +226,13 @@ fi
 # ---------------------------------------------------------------------------
 # SEC: shell-metacharacter destination must not become command injection.
 #
-# The emitted hook command is `bash -lc '... node "<root>/scripts/..." ...'` -- the
-# substituted root sits inside double quotes nested in an outer single-quoted argument.
-# An unescaped apostrophe in the destination terminates that single-quoted string and
-# injects arbitrary shell that Claude Code would then execute on EVERY hook event.
+# Post-#1101 the claude-code hooks are exec form (`command: "node"` + an `args` argv
+# vector, never shell-parsed) and `statusLine` is the only shell-form entry left:
+# `node "<root>/scripts/statusline/..."`, with the substituted root inside double quotes.
+# An unescaped `$`, backtick or `"` in the destination breaks out of that quoted region
+# and injects arbitrary shell that the host would then execute on every session.
+# This scenario executes EVERY persisted FA entry (both forms) and asserts the marker
+# is never created.
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- SEC: metacharacter destination does not inject shell into hook commands ---"
@@ -249,43 +258,73 @@ else
   tail -5 "$TMPDIR_EVAL/inject-init.log"
 fi
 
-# Execute every persisted FA command exactly as a shell would; the marker must never appear.
-INJECT_SETTINGS="$INJECT_DEST/settings.json" node - "$TMPDIR_EVAL/inject-cmds.txt" <<'NODE'
+# Execute every persisted FA entry the way its host would, and assert BOTH directions:
+# nothing injected, and every script path still resolves.
+#
+# Post-#1101 there are two entry shapes and they must be driven differently, or this
+# scenario silently loses its teeth: exec-form hooks carry `command: "node"` plus an
+# `args` argv vector (spawned directly, NEVER shell-parsed), so feeding `hook.command`
+# to a shell would just run a bare `node` REPL and prove nothing about the substituted
+# path. `statusLine` is the only shell-form entry left, and is therefore the only
+# injection-relevant one -- it is run through `sh -c` exactly as the host does.
+INJECT_RESOLVE_STATUS=0
+INJECT_SETTINGS="$INJECT_DEST/settings.json" \
+INJECT_CWD="$INJECT_CWD" \
+node - > "$TMPDIR_EVAL/inject-run.err" 2>&1 <<'NODE' || INJECT_RESOLVE_STATUS=$?
 const fs = require("fs");
+const { spawnSync } = require("child_process");
+
 const settings = JSON.parse(fs.readFileSync(process.env.INJECT_SETTINGS, "utf8"));
-const commands = [];
+const cwd = process.env.INJECT_CWD;
+const env = { ...process.env, FLOW_AGENTS_CLAUDE_TELEMETRY_FOREGROUND: "true" };
+delete env.CLAUDE_PROJECT_DIR;
+const payload = JSON.stringify({ hook_event_name: "SessionStart" });
+
+const execForm = [];
 for (const groups of Object.values(settings.hooks ?? {})) {
-  for (const group of groups) for (const hook of group.hooks ?? []) if (hook.command) commands.push(hook.command);
+  for (const group of groups ?? []) {
+    for (const hook of group.hooks ?? []) {
+      if (Array.isArray(hook.args) && hook.args.length > 0) execForm.push(hook);
+    }
+  }
 }
-if (settings.statusLine?.command) commands.push(settings.statusLine.command);
-fs.writeFileSync(process.argv[2], commands.join("\n") + "\n");
+if (execForm.length === 0) throw new Error("no exec-form FA hook entries found to exercise");
+const statusLine = settings.statusLine?.command;
+if (!statusLine) throw new Error("no statusLine command found to exercise");
+
+const unresolved = [];
+// Exec form: spawn directly, no shell. Proves args[0] (the substituted vendored path)
+// really resolves for a destination full of shell metacharacters.
+for (const hook of execForm) {
+  const r = spawnSync(hook.command, hook.args, { input: payload, cwd, env, encoding: "utf8", timeout: 30000 });
+  const stderr = String(r.stderr || "");
+  if (/Cannot find module|MODULE_NOT_FOUND/.test(stderr)) {
+    unresolved.push(`exec-form ${hook.args[0]}: ${stderr.slice(0, 300)}`);
+  }
+}
+// Shell form: run statusLine exactly as the host does. This is the injection surface.
+const sl = spawnSync(statusLine, { shell: true, input: payload, cwd, env, encoding: "utf8", timeout: 30000 });
+const slErr = String(sl.stderr || "");
+if (/Cannot find module|MODULE_NOT_FOUND/.test(slErr)) {
+  unresolved.push(`statusLine: ${slErr.slice(0, 300)}`);
+}
+if (unresolved.length > 0) throw new Error(`escaped destination did not resolve:\n${unresolved.join("\n")}`);
+console.log(`ok: exercised ${execForm.length} exec-form entr(ies) + statusLine`);
 NODE
 
-INJECT_EXEC_FAILURES=0
-while IFS= read -r command; do
-  [[ -z "$command" ]] && continue
-  printf '{"hook_event_name":"SessionStart"}' | (cd "$INJECT_CWD" && FLOW_AGENTS_CLAUDE_TELEMETRY_FOREGROUND=true sh -c "$command") >/dev/null 2>&1 || INJECT_EXEC_FAILURES=$((INJECT_EXEC_FAILURES + 1))
-done < "$TMPDIR_EVAL/inject-cmds.txt"
-
 if [[ -e "$INJECT_MARKER" ]]; then
-  _fail "SEC: INJECTION -- executing the persisted hook commands ran attacker-supplied shell"
+  _fail "SEC: INJECTION -- executing the persisted entries ran attacker-supplied shell"
 else
-  _pass "SEC: executing every persisted hook command ran no injected shell"
+  _pass "SEC: executing every persisted FA entry (exec-form hooks + statusLine) ran no injected shell"
 fi
 
 # Neutralizing the metacharacters is not enough: the escaped path must still resolve,
 # or a legitimate apostrophe home directory would silently break every hook.
-if grep -q "Cannot find module\|MODULE_NOT_FOUND" "$TMPDIR_EVAL/inject-run.err" 2>/dev/null; then
-  _fail "SEC: escaped path did not resolve (hooks broken for apostrophe home directories)"
+if [[ "$INJECT_RESOLVE_STATUS" -eq 0 ]]; then
+  _pass "SEC: the escaped destination still resolves and the entries run"
 else
-  FIRST_INJECT_CMD="$(head -1 "$TMPDIR_EVAL/inject-cmds.txt")"
-  if printf '{"hook_event_name":"SessionStart"}' | (cd "$INJECT_CWD" && FLOW_AGENTS_CLAUDE_TELEMETRY_FOREGROUND=true sh -c "$FIRST_INJECT_CMD") 2>"$TMPDIR_EVAL/inject-run.err" >/dev/null \
-     && ! grep -q "Cannot find module\|MODULE_NOT_FOUND" "$TMPDIR_EVAL/inject-run.err"; then
-    _pass "SEC: the escaped destination still resolves and the hook runs"
-  else
-    _fail "SEC: escaped destination did not resolve; hook could not load its runtime"
-    head -3 "$TMPDIR_EVAL/inject-run.err"
-  fi
+  _fail "SEC: escaped destination did not resolve; entries could not load their runtime"
+  head -8 "$TMPDIR_EVAL/inject-run.err"
 fi
 
 echo ""

@@ -7,11 +7,16 @@
 # Coverage gap this closes: test_codex_harness.sh only runs when a `codex`
 # binary is on PATH (it skips-as-pass otherwise, and no CI workflow installs
 # one), and every other hook eval calls the underlying script directly
-# (e.g. `node scripts/hooks/stop-goal-fit.js`), bypassing the bash -lc
+# (e.g. `node scripts/hooks/stop-goal-fit.js`), bypassing the emitted
 # CODEX_HOME resolver in hooks.json entirely. Neither ever caught a resolver
 # bug, which is exactly what shipped: every hook exited 1 in real usage
 # whenever CODEX_HOME wasn't exported into the hook's process and the
 # project cwd didn't happen to vendor scripts/hooks itself.
+#
+# The emitted command is now a `node -e` trampoline instead of `bash -lc`
+# (#1098: `bash` on stock Windows is the WSL2 shim, so every bash-wrapped
+# hook exited 127 there). These cases run it through plain POSIX `sh -c` —
+# NOT bash — so a bashism creeping back into the emitted string fails here.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -69,7 +74,7 @@ mkdir -p "$HOME_EMPTY"
 
 echo ""
 echo "--- CODEX_HOME set correctly (baseline) ---"
-OUT="$(cd "$PROJECT" && CODEX_HOME="$HOME_WITH_INSTALL/.codex" bash -lc "$SESSION_START_CMD" <<<'{"hook_event_name":"SessionStart"}' 2>"$TMPDIR_EVAL/stderr.baseline")"
+OUT="$(cd "$PROJECT" && CODEX_HOME="$HOME_WITH_INSTALL/.codex" sh -c "$SESSION_START_CMD" <<<'{"hook_event_name":"SessionStart"}' 2>"$TMPDIR_EVAL/stderr.baseline")"
 STATUS=$?
 if [[ $STATUS -eq 0 ]] && [[ "$OUT" == *'"continue":true'* ]]; then
   _pass "hook succeeds when CODEX_HOME is set and correct"
@@ -79,7 +84,7 @@ fi
 
 echo ""
 echo "--- CODEX_HOME unset, unrelated cwd, install lives under \$HOME/.codex ---"
-OUT="$(cd "$PROJECT" && unset CODEX_HOME && HOME="$HOME_WITH_INSTALL" bash -lc "$SESSION_START_CMD" <<<'{"hook_event_name":"SessionStart"}' 2>"$TMPDIR_EVAL/stderr.fallback")"
+OUT="$(cd "$PROJECT" && unset CODEX_HOME && HOME="$HOME_WITH_INSTALL" sh -c "$SESSION_START_CMD" <<<'{"hook_event_name":"SessionStart"}' 2>"$TMPDIR_EVAL/stderr.fallback")"
 STATUS=$?
 if [[ $STATUS -eq 0 ]] && [[ "$OUT" == *'"continue":true'* ]]; then
   _pass "hook falls back to \$HOME/.codex and succeeds when CODEX_HOME is unset"
@@ -90,7 +95,7 @@ fi
 echo ""
 echo "--- CODEX_HOME unset, unrelated cwd, no install anywhere (fail open) ---"
 set +e
-OUT="$(cd "$PROJECT" && unset CODEX_HOME && HOME="$HOME_EMPTY" bash -lc "$SESSION_START_CMD" <<<'{"hook_event_name":"SessionStart"}' 2>"$TMPDIR_EVAL/stderr.missing")"
+OUT="$(cd "$PROJECT" && unset CODEX_HOME && HOME="$HOME_EMPTY" sh -c "$SESSION_START_CMD" <<<'{"hook_event_name":"SessionStart"}' 2>"$TMPDIR_EVAL/stderr.missing")"
 STATUS=$?
 set -e
 if [[ $STATUS -eq 0 ]]; then

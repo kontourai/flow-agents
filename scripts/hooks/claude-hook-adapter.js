@@ -78,6 +78,7 @@
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { buildDenialResponse } = require('./lib/denial-escalation');
+const { extractEnvDefaults, applyEnvDefaults } = require('./lib/env-defaults');
 const { resolveActor } = require('./lib/actor-identity');
 const { parseStopControl, stripStopControl, recordStopBlock, clearStopBlocks, stopTurnDecision } = require('./lib/stop-escalation');
 
@@ -262,7 +263,8 @@ function resolveStopBlock(input, rawMessage) {
 }
 
 async function main() {
-  const [, , eventArg = 'unknown', hookId, relScriptPath, profilesCsv] = process.argv;
+  const { argv, defaults: envDefaults } = extractEnvDefaults(process.argv);
+  const [, , eventArg = 'unknown', hookId, relScriptPath, profilesCsv] = argv;
   const { raw, truncated } = await readStdinRaw();
   const input = parseInput(raw);
   const event = eventFrom(input, eventArg);
@@ -283,7 +285,7 @@ async function main() {
     encoding: 'utf8',
     cwd: process.cwd(),
     env: {
-      ...process.env,
+      ...applyEnvDefaults(process.env, envDefaults),
       SA_HOOK_INPUT_TRUNCATED: truncated ? '1' : '0',
       SA_HOOK_INPUT_MAX_BYTES: String(MAX_STDIN),
       FLOW_AGENTS_HOOK_RUNTIME: 'claude-code',

@@ -780,14 +780,21 @@ export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebui
 // the install destination). It is NOT correct for a --global install: there
 // is no per-destination copy of scripts/, and CLAUDE_PROJECT_DIR varies with
 // whichever project happens to be open, so the hook resolves to a path that
-// exists in at most one project (and never for most sessions). Global installs
-// need a durable, session-independent path instead -- NOT the source-checkout/
-// npx-cache `root` this process launched from, which npx may evict at any time
+// exists in at most one project (and never for most sessions). Global
+// installs need an absolute, session-independent path instead.
+// Bundle hook commands anchor script paths to the project via
+// `${CLAUDE_PROJECT_DIR}` — exec-form `args` elements use the literal
+// placeholder (substituted by Claude Code, no shell), and the statusLine shell
+// string uses `"$CLAUDE_PROJECT_DIR/…"`. A global install vendors the runtime
+// outside any project, so both forms are rewritten to the absolute source root.
+//
+// That absolute root must also be DURABLE -- not the source-checkout/npx-cache
+// path this process launched from, which npx may evict at any time
 // (kontourai/flow-agents#945). vendorClaudeCodeGlobalRuntime() copies the hook
-// runtime into <dest>/.flow-agents/runtime/ and that path is substituted in
-// via rewriteCommandsForGlobalInstall below.
-const GLOBAL_INSTALL_PROJECT_DIR_PREFIX = /root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g;
-const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$root\//g;
+// runtime into <dest>/.flow-agents/runtime/, and that is the root substituted
+// in by rewriteCommandsForGlobalInstall below.
+const GLOBAL_INSTALL_ARGS_PLACEHOLDER_PREFIX = "${CLAUDE_PROJECT_DIR}/";
+const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$CLAUDE_PROJECT_DIR\//g;
 
 // Relative paths install.sh's rsync excludes per runtime now live in install-plan.ts
 // (bundleInstallExcludeRel), shared between the overwrite guard's plan walk and the
@@ -824,35 +831,28 @@ function mergeInstallSettings(
 }
 
 /**
- * Escape an absolute path for the shell quoting context the substitution site sits in.
+ * Escape an absolute path for substitution into a double-quoted region of a shell-form
+ * command (`node "<root>/..."`): neutralize what a shell still expands inside `"..."`.
  *
- * Every rewrite target substitutes into a double-quoted region (`node "<root>/..."`), so the
- * value must always survive what a shell still expands inside `"..."` (`\ " $` and backtick).
- * Some emitted commands wrap that double-quoted region in a single-quoted `bash -lc '...'`
- * argument; those carry a SECOND quoting layer, and a value containing an apostrophe would
- * terminate the outer single-quoted string and inject arbitrary shell into every hook command
- * persisted to settings.json (kontourai/flow-agents#945 review finding). A legitimate
- * /Users/o'brien home triggers the same break with no adversary.
+ * Why this exists at all (kontourai/flow-agents#945 review finding): `sourceRoot` derives
+ * from user-supplied `--dest`, and the result is PERSISTED into settings.json and then run
+ * by the host on every session. An unescaped `$`/backtick/`"` is command injection, and a
+ * legitimate /Users/o'brien home breaks the same quoting with no adversary involved.
  *
- * `nestedInSingleQuotes` is DERIVED from the command being rewritten rather than assumed,
- * because the emitted shape is changing: #1101 removes the `bash -lc` wrapper from the hook
- * path (hooks become exec-form `args` vectors, which never reach a shell at all), leaving
- * `statusLine` as the one remaining shell string — a bare `node "$CLAUDE_PROJECT_DIR/..."`
- * with only ONE quoting layer. Applying the outer `'\''` transform to a single-layer string
- * would not be inert: it would write literal quote characters into the path and silently
- * break the statusline for exactly the apostrophe homes this escaping exists to protect.
+ * Scope note — this handles exactly ONE quoting layer, deliberately. #1101 removed the
+ * `bash -lc '...'` wrapper from the claude-code path: hooks are now exec-form `args`
+ * vectors that never reach a shell (see the `args` branch in rewriteCommandsForGlobalInstall
+ * — those must NOT be escaped, an argv element is not shell-parsed), leaving `statusLine`
+ * as the only shell-form string, with a single double-quoted layer. An outer single-quote
+ * transform (`'` -> `'\''`) would be wrong here, not merely redundant: it writes literal
+ * quote characters into the path and silently breaks the statusline for exactly the
+ * apostrophe homes this escaping protects. The no-shell-wrapper invariant is enforced by
+ * #1101's own gates (evals/static/test_universal_bundles.sh asserts statusLine does not
+ * route through bash; scripts/ci/windows-hook-smoke.mjs asserts no undeclared bash in any
+ * emitted hook), so a second layer cannot silently reappear unnoticed.
  */
-function shellEscapeForHookCommand(sourceRoot: string, nestedInSingleQuotes: boolean): string {
-  // Inner: neutralize what the inner shell would still expand inside "..." .
-  const innerSafe = sourceRoot.replace(/([\\"$`])/g, "\\$1");
-  if (!nestedInSingleQuotes) return innerSafe;
-  // Outer: close, escape, and reopen the single-quoted bash -lc argument around each quote.
-  return innerSafe.replace(/'/g, "'\\''");
-}
-
-/** True when the command's double-quoted substitution site is itself inside `bash -lc '...'`. */
-function hasOuterSingleQuoteLayer(command: string): boolean {
-  return /^\s*\S*bash\s+-lc\s+'/.test(command);
+function shellEscapeForHookCommand(sourceRoot: string): string {
+  return sourceRoot.replace(/([\\"$`])/g, "\\$1");
 }
 
 export type OpenCodeConfigBinding = {
@@ -959,14 +959,19 @@ function stampConfigPremergePostInstallHash(premerge: unknown, configPath: strin
   };
 }
 
-/** Exported for unit tests: both quoting branches must be exercised directly (#945 SEC). */
+/**
+ * Rewrite a shell-form `command` string. Post-#1101 the only claude-code entry that still
+ * reaches a shell is `statusLine` (exec-form hooks go through the `args` branch below and
+ * never touch one), but `sourceRoot` here derives from user-supplied `--dest`, so the
+ * substituted value is escaped for the double-quoted context it lands in (#945 SEC).
+ *
+ * Exported so the escaping is unit-testable directly against a hostile path.
+ */
 export function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
-  const stripped = command.replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "");
-  const escaped = shellEscapeForHookCommand(sourceRoot, hasOuterSingleQuoteLayer(stripped));
-  return stripped.replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${escaped}/`);
+  return command.replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${shellEscapeForHookCommand(sourceRoot)}/`);
 }
 
-/** Recursively rewrite every `command` string found under `value` in place. */
+/** Recursively rewrite every `command` string and exec-form `args` element found under `value` in place. */
 function rewriteCommandsForGlobalInstall(value: unknown, sourceRoot: string): void {
   if (Array.isArray(value)) {
     for (const item of value) rewriteCommandsForGlobalInstall(item, sourceRoot);
@@ -977,6 +982,14 @@ function rewriteCommandsForGlobalInstall(value: unknown, sourceRoot: string): vo
   for (const key of Object.keys(obj)) {
     if (key === "command" && typeof obj[key] === "string") {
       obj[key] = rewriteCommandForGlobalInstall(obj[key] as string, sourceRoot);
+      continue;
+    }
+    if (key === "args" && Array.isArray(obj[key])) {
+      obj[key] = (obj[key] as unknown[]).map((arg) =>
+        typeof arg === "string" && arg.startsWith(GLOBAL_INSTALL_ARGS_PLACEHOLDER_PREFIX)
+          ? `${sourceRoot}/${arg.slice(GLOBAL_INSTALL_ARGS_PLACEHOLDER_PREFIX.length)}`
+          : arg,
+      );
       continue;
     }
     rewriteCommandsForGlobalInstall(obj[key], sourceRoot);

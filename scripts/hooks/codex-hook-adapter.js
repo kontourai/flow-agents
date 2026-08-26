@@ -21,6 +21,7 @@ const { spawnSync } = require('child_process');
 const { buildDenialResponse } = require('./lib/denial-escalation');
 const { resolveActor } = require('./lib/actor-identity');
 const { extractExitCodeFromBanner, readExitCodeFromRollout } = require('./lib/codex-exit-code');
+const { extractEnvDefaults, applyEnvDefaults } = require('./lib/env-defaults');
 
 const MAX_STDIN = 1024 * 1024;
 
@@ -217,7 +218,8 @@ function enrichEvidenceCapturePayload(raw, hookId, event) {
 }
 
 async function main() {
-  const [, , hookId, relScriptPath, profilesCsv] = process.argv;
+  const { argv, defaults: envDefaults } = extractEnvDefaults(process.argv);
+  const [, , hookId, relScriptPath, profilesCsv] = argv;
   const { raw, truncated } = await readStdinRaw();
   const event = eventName(raw);
 
@@ -240,7 +242,7 @@ async function main() {
     encoding: 'utf8',
     cwd: process.cwd(),
     env: {
-      ...process.env,
+      ...applyEnvDefaults(process.env, envDefaults),
       SA_HOOK_INPUT_TRUNCATED: truncated ? '1' : '0',
       SA_HOOK_INPUT_MAX_BYTES: String(MAX_STDIN),
       FLOW_AGENTS_HOOK_RUNTIME: 'codex',
