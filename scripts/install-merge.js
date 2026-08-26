@@ -8,7 +8,8 @@
  *     --managed-hooks <path-to-flow-agents-hooks-snippet.json> \
  *     --version <version-string> \
  *     --install-record <path-to-install.json> \
- *     --runtime <claude-code|codex|opencode|pi|kiro|base>
+ *     --runtime <claude-code|codex|opencode|pi|kiro|base> \
+ *     [--omit-managed-key <top-level-key>]...
  *
  * Usage (CLI — stamp only, no config merge):
  *   node scripts/install-merge.js \
@@ -417,15 +418,24 @@ function writeInstallRecord(installRecordPath, version, runtime, configPremerge,
 /**
  * runMerge — perform the full merge (read, merge, write, stamp).
  *
+ * `omitManagedKeys` drops top-level keys from the managed config BEFORE the merge, so the
+ * install never writes them and `installedValues()` never records them as ours. It is the
+ * mechanism behind `flow-agents init`'s default strip of the permissive Claude Code
+ * permission keys (kontourai/flow-agents#1345): the bundle stays the dedicated-workspace
+ * artifact, and a project install subtracts what a shared repository must not inherit.
+ * Deliberately applied to `managed`, not to the merged result -- a key the USER already set
+ * in their own settings file is theirs and must survive untouched.
+ *
  * @param {{
  *   configPath: string,
  *   managedHooksPath: string,
  *   version: string,
  *   installRecordPath: string,
  *   runtime: string,
+ *   omitManagedKeys?: string[],
  * }} opts
  */
-function runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime }) {
+function runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime, omitManagedKeys = [] }) {
   // (a) Read dest JSON (or {} if absent).
   const capturedPremerge = { ...captureConfigPremerge(configPath), runtime };
   const carriedOrigin = priorOrigin(installRecordPath, runtime, configPath);
@@ -451,6 +461,14 @@ function runMerge({ configPath, managedHooksPath, version, installRecordPath, ru
     );
     process.exitCode = 1;
     return;
+  }
+
+  // (a2) Subtract caller-omitted managed keys. Only whole top-level keys are supported: the
+  // one caller today mirrors the dogfood/--global strip exactly (`delete managed[key]`), and a
+  // dotted-path variant would need its own conflict semantics inside mergePermissions().
+  for (const key of omitManagedKeys) {
+    if (key.includes(".")) throw new Error(`install-merge: --omit-managed-key expects a top-level key, got '${key}'`);
+    delete managed[key];
   }
 
   // (b) + (c) + (d) Merge.
@@ -481,9 +499,15 @@ function runMerge({ configPath, managedHooksPath, version, installRecordPath, ru
 if (require.main === module) {
   const args = process.argv.slice(2);
   const flags = {};
+  // Repeatable: the naive `flags[key] = value` loop below would keep only the last
+  // occurrence, and the caller passes one per key to omit.
+  const omitManagedKeys = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--stamp-only") {
       flags["stamp-only"] = "1";
+    } else if (args[i] === "--omit-managed-key" && i + 1 < args.length) {
+      omitManagedKeys.push(args[i + 1]);
+      i++;
     } else if (args[i].startsWith("--") && i + 1 < args.length) {
       flags[args[i].slice(2)] = args[i + 1];
       i++;
@@ -520,7 +544,7 @@ if (require.main === module) {
     process.exitCode = 2;
   } else {
     try {
-      runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime });
+      runMerge({ configPath, managedHooksPath, version, installRecordPath, runtime, omitManagedKeys });
     } catch (err) {
       process.stderr.write(`install-merge: error: ${err.message}\n`);
       process.exitCode = 1;

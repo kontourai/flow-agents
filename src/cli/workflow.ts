@@ -20,6 +20,7 @@ import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthori
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
+import { publicJsonFlagShapes, WORKFLOW_CRITIQUE_PARAMETERS, WORKFLOW_EVIDENCE_PARAMETERS, type ParameterSpec } from "./public-contracts.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
@@ -88,6 +89,8 @@ Public workflow verbs:
   archive             Archive a terminal session through a signed authorization record.
   reclaim             Remove a clean linked worktree after learning and confirmed merge.
   doctor              Report CLI, install, Kit, Flow, and artifact compatibility.
+
+Add --explain to any verb to print the exact accepted shape of its JSON flags, with examples.
 
 Use the isolated exact-package command emitted by workflow status and doctor in automation.`);
 }
@@ -171,6 +174,117 @@ function verbSpecOptions(verb: string): Set<string> {
   if (!spec || spec.options === null) throw new Error(`no declared option set for workflow ${verb}`);
   return spec.options;
 }
+// ─── `--explain`: the accepted JSON shapes, derived from the enforcing constants (#1358) ────────
+//
+// Nine of a live run's CLI round-trips were spent learning shapes the kit already held as data.
+// This prints them. A verb explains a JSON flag IFF its own enforcing option set accepts that
+// flag, and the shape text comes from `publicJsonFlagShapes()` — the same constants the sidecar
+// validators refuse from — so `--explain` cannot advertise a flag the verb rejects, nor a shape
+// the validator does not enforce. workflow-explain.test.mjs binds both directions executably.
+type JsonFlagShape = ReturnType<typeof publicJsonFlagShapes>[string];
+/**
+ * Round-2 MEDIUM: the verbs' own parameter tables already declared `required`, `allowed_values`,
+ * `repeatable` and `required_when`, and nothing read them — so a caller learned the flags one
+ * refusal at a time before the payload was even parsed. `--explain` prints them and
+ * `parameterViolations` enforces them, from the one declaration.
+ */
+const VERB_PARAMETERS: Record<string, readonly ParameterSpec[]> = {
+  critique: WORKFLOW_CRITIQUE_PARAMETERS,
+  evidence: WORKFLOW_EVIDENCE_PARAMETERS,
+};
+export type ExplainSpec = {
+  verb: string;
+  summary: string;
+  parameters: ParameterSpec[];
+  json_flags: JsonFlagShape[];
+  /** Shapes nested INSIDE an accepted flag's payload. Never advertised as flags: `workflow
+   *  critique` embeds evidence refs in `--lane-json` but rejects `--evidence-ref-json` itself. */
+  referenced_shapes: { name: string; shape: JsonFlagShape }[];
+  preconditions: string[];
+};
+/**
+ * State-level requirements that are knowable before any payload is parsed. Stating them here is
+ * the #1359 "surface preconditions up front" half: the live run discovered the clean-critique
+ * requirement at invocation 8, after four shape round-trips.
+ */
+const VERB_PRECONDITIONS: Record<string, string[]> = {
+  evidence: [
+    "a passing tests-evidence claim requires a current clean critique first — record one with `workflow critique` under a reviewer identity distinct from the implementation actor (FLOW_AGENTS_ACTOR=<reviewer-id>)",
+    "a passing tests-evidence claim requires captured clean Git provenance — the working tree must be clean at record time",
+    "each --command must resolve through a known test/check/verify/eval runner and must reconcile against the CI manifest",
+  ],
+  critique: [
+    "the run's current step must be one whose declaring kit binds an expectation to the workflow.critique interface",
+    "the reviewer identity must be distinct from the implementation actor (set FLOW_AGENTS_ACTOR=<reviewer-id>)",
+  ],
+};
+export function explainSpec(verb: string): ExplainSpec {
+  const spec = verbSpecs().get(verb);
+  const options = spec?.options;
+  const shapes = publicJsonFlagShapes();
+  const accepted = Object.entries(shapes).filter(([flag]) => options?.has(flag) === true);
+  const embedded = new Set(accepted.flatMap(([, shape]) => shape.embeds).filter((key) => options?.has(key) !== true));
+  return {
+    verb,
+    summary: spec?.summary ?? "",
+    parameters: [...(VERB_PARAMETERS[verb] ?? [])].map((parameter) => ({ ...parameter })),
+    json_flags: accepted.map(([, shape]) => shape),
+    referenced_shapes: [...embedded].filter((key) => shapes[key]).map((key) => ({ name: `evidence_refs[] entry (the ${shapes[key]!.flag} shape; this verb does not accept that flag directly)`, shape: shapes[key]! })),
+    preconditions: VERB_PRECONDITIONS[verb] ?? [],
+  };
+}
+function renderShape(heading: string, shape: JsonFlagShape, renderExample: (example: Record<string, unknown>) => string, description = shape.description): void {
+  console.log(`\n${heading}`);
+  console.log(`  ${description}`);
+  console.log(`  Accepted fields: ${shape.fields.join(", ")}`);
+  // Round-1 review byte-checked the old header and found it false for 9 of 26 rules: the refusal
+  // prefixes the body with the offending object's label. The header now says exactly that, and
+  // every line below IS a body the collectors emit (workflow-explain.test.mjs asserts set-equality
+  // over a generated corpus, so a rule that is not emitted cannot be printed and vice versa).
+  console.log(`  Rules — a refusal is "<label> <rule>", where <label> names the offending object:`);
+  for (const rule of shape.rules) {
+    const note = rule.enforced_by === "object-shape" ? "" : `  [${rule.enforced_by}]`;
+    console.log(`    - ${rule.body}${note}`);
+  }
+  console.log(`  Accepted examples:`);
+  for (const example of shape.examples) console.log(`    ${renderExample(example)}`);
+}
+function renderVerbExplain(verb: string, asJson: boolean): void {
+  const spec = explainSpec(verb);
+  if (asJson) {
+    console.log(JSON.stringify(spec, null, 2));
+    return;
+  }
+  console.log(`Accepted input shapes for: flow-agents workflow ${verb}`);
+  if (spec.summary) console.log(`\n${spec.summary}`);
+  if (spec.json_flags.length === 0) {
+    console.log(`\nThis verb accepts no structured JSON flags. Run \`flow-agents workflow ${verb} --help\` for its options.`);
+  }
+  if (spec.parameters.length > 0) {
+    console.log(`\nFlags (refused together in one pass, before any payload is parsed):`);
+    for (const parameter of spec.parameters) {
+      const notes: string[] = [];
+      if (parameter.required) notes.push(parameter.repeatable ? "required, repeatable" : "required");
+      else if (parameter.repeatable) notes.push("optional, repeatable");
+      else notes.push("optional");
+      if (parameter.allowed_values) notes.push(`one of: ${parameter.allowed_values.join(", ")}`);
+      if (parameter.required_when) {
+        const other = spec.parameters.find((candidate) => candidate.name === parameter.required_when!.parameter);
+        notes.push(`required when ${other?.flag ?? parameter.required_when.parameter} is ${parameter.required_when.equals}`);
+      }
+      console.log(`  ${parameter.flag}  (${notes.join("; ")})`);
+    }
+  }
+  for (const shape of spec.json_flags) renderShape(shape.flag, shape, (example) => `${shape.flag} ${JSON.stringify(JSON.stringify(example))}`);
+  for (const referenced of spec.referenced_shapes) {
+    renderShape(referenced.name, referenced.shape, (example) => JSON.stringify(example), "One structured evidence reference, nested in the payload above.");
+  }
+  if (spec.preconditions.length > 0) {
+    console.log(`\nPreconditions checked before the payload is accepted:`);
+    for (const precondition of spec.preconditions) console.log(`  - ${precondition}`);
+  }
+  console.log(`\nRun \`flow-agents workflow ${verb} --help\` for the full option list, or add --json for machine-readable shapes.`);
+}
 function renderVerbHelp(verb: string, asJson: boolean): void {
   const spec = verbSpecs().get(verb);
   const summary = spec?.summary ?? "";
@@ -186,6 +300,9 @@ function renderVerbHelp(verb: string, asJson: boolean): void {
     for (const option of options) console.log(`  --${option}`);
   } else {
     console.log(`\nOptions: not yet declared for this verb (see kontourai/flow-agents#1293, #1294); run \`flow-agents workflow\` for the verb list.`);
+  }
+  if (explainSpec(verb).json_flags.length > 0) {
+    console.log(`\nRun \`flow-agents workflow ${verb} --explain\` for the accepted shape of each JSON flag, with examples.`);
   }
 }
 
@@ -212,6 +329,13 @@ export async function main(argv: string[]): Promise<number> {
   // flags (parseArgs only consumes `--`-prefixed arguments), so it is checked as a positional.
   if (parsed.flags["help"] !== undefined || parsed.positionals.includes("-h")) {
     renderVerbHelp(verb, flagBool(parsed.flags, "json"));
+    return 0;
+  }
+  // `--explain` is a documentation request with the same no-mutation contract as `--help`, and is
+  // intercepted at the same point for the same reason (#1290/#1292): a request for the accepted
+  // shape must never fall through to a mutating verb. Presence is the signal, not flagBool.
+  if (parsed.flags["explain"] !== undefined) {
+    renderVerbExplain(verb, flagBool(parsed.flags, "json"));
     return 0;
   }
   if (verb === "start") return start(argv.slice(1));

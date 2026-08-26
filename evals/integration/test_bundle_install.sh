@@ -204,6 +204,18 @@ echo "--- Guided Console-Connect Wizard (G2/G3): headless regression + summary/v
 # post-install summary block (regardless of the guided wizard, which only
 # fires for interactive installs) -- the summary/verify tail is shared by
 # both install paths.
+#
+# kontourai/flow-agents#1344 renamed what this block asserts. The summary used
+# to collapse "this install selected local files" and "the resolved telemetry
+# configuration names no Console endpoint" into one unexplained token,
+# `Console: local-only` -- a label with no stated derivation. The Console line
+# is now derived from the resolved configuration (`not-configured`, which says
+# WHY), and the selected sink is printed separately as its own primary fact. So
+# the same two requirements are asserted below against both lines instead of
+# one: the sink the operator chose, and the Console outcome derived from what
+# was actually resolved. Assert the whole rendered line, not a bare substring:
+# `local-only` used to match the sink line too, so the Console half of this
+# check could pass without a Console line existing at all.
 BASE_SUMMARY_LOCAL_DEST="$TMPDIR_EVAL/base-summary-local-workspace"
 BASE_SUMMARY_LOCAL_STDOUT="$TMPDIR_EVAL/base-summary-local-stdout.txt"
 if TELEMETRY_CONFIG_FILE="$BASE_SUMMARY_LOCAL_DEST/scripts/telemetry/telemetry.conf" node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_LOCAL_DEST" --telemetry-sink local-files --yes >"$BASE_SUMMARY_LOCAL_STDOUT" 2>&1; then
@@ -212,7 +224,9 @@ else
   _fail "flow-agents init headless local-files install failed (G3 summary case)"
 fi
 
-if rg -q 'Console:' "$BASE_SUMMARY_LOCAL_STDOUT"   && rg -q 'local-only' "$BASE_SUMMARY_LOCAL_STDOUT"   && rg -F -q "$BASE_SUMMARY_LOCAL_DEST" "$BASE_SUMMARY_LOCAL_STDOUT"; then
+if rg -F -q -e '- Console: not configured (no Console endpoint in the resolved telemetry configuration)' "$BASE_SUMMARY_LOCAL_STDOUT" \
+  && rg -F -q -e 'Telemetry sink (selected): local-files' "$BASE_SUMMARY_LOCAL_STDOUT" \
+  && rg -F -q "$BASE_SUMMARY_LOCAL_DEST" "$BASE_SUMMARY_LOCAL_STDOUT"; then
   _pass "flow-agents init prints G3 post-install summary block for a local-files headless install"
 else
   _fail "flow-agents init did not print G3 post-install summary block for a local-files headless install"
@@ -268,10 +282,18 @@ else
 fi
 
 # New (review fix FIX 1): a self-hosted/BYO Console (non-local https, not the
-# known hosted host) headless install stays honest -- connected-unverified,
-# exit 0, reachability.checked stays false because --allow-network was not
-# passed -- but the summary now includes an actionable next-step hint instead
-# of leaving the operator with a bare "not checked". Never for local-only.
+# known hosted host) headless install stays honest -- an endpoint is
+# configured and its reachability was never attempted, exit 0,
+# reachability.checked stays false because --allow-network was not passed --
+# but the summary now includes an actionable next-step hint instead of leaving
+# the operator with a bare "not checked". Never for a not-configured Console.
+#
+# kontourai/flow-agents#1344: this state used to render as `connected,
+# unverified`, which claimed a connection nothing had established -- exactly
+# the thing the "not attempted" wording below now refuses to assert. The
+# requirement is unchanged (say that an endpoint is configured, say that
+# reachability was NOT established, say how to establish it, never print the
+# token); only the derived name for the state moved.
 BASE_SUMMARY_SELFHOSTED_DEST="$TMPDIR_EVAL/base-summary-selfhosted-workspace"
 BASE_SUMMARY_SELFHOSTED_STDOUT="$TMPDIR_EVAL/base-summary-selfhosted-stdout.txt"
 if TELEMETRY_CONFIG_FILE="$BASE_SUMMARY_SELFHOSTED_DEST/scripts/telemetry/telemetry.conf" node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_SELFHOSTED_DEST" --telemetry-sink user-hosted-console --console-url https://console.example.test --console-tenant tenant-selfhosted --console-token-file "$CONSOLE_TOKEN_FILE" --yes >"$BASE_SUMMARY_SELFHOSTED_STDOUT" 2>&1; then
@@ -280,7 +302,7 @@ else
   _fail "flow-agents init headless self-hosted/BYO Console install unexpectedly failed"
 fi
 
-if rg -q 'connected, unverified' "$BASE_SUMMARY_SELFHOSTED_STDOUT" \
+if rg -F -q -e '- Console: endpoint configured, reachability not attempted' "$BASE_SUMMARY_SELFHOSTED_STDOUT" \
   && rg -F -q 'flow-agents telemetry-doctor --allow-network' "$BASE_SUMMARY_SELFHOSTED_STDOUT" \
   && ! rg -F -q 'test-token' "$BASE_SUMMARY_SELFHOSTED_STDOUT"; then
   _pass "flow-agents init summary discloses WHY self-hosted reachability is unverified with an actionable --allow-network hint, and never prints the raw token"
