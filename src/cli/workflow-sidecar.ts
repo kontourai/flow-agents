@@ -790,14 +790,10 @@ const DEFAULT_CRITIQUE_REVIEWER = "tool-code-reviewer";
  * The predicate is `scripts/hooks/lib/actor-identity.js`'s `isUnresolvedActor` (the same one the
  * liveness/lifecycle paths use), consumed rather than re-implemented.
  */
-function recordedActorOrNull(value: unknown, unresolvedSentinel?: string): string | null {
+function recordedActorOrNull(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const actor = value.trim();
   if (actor.length === 0) return null;
-  // A caller-defaulted sentinel is indistinguishable from a real identity once stored, so it is
-  // treated as "not derived" — abstaining is the safe direction, since the recorded string is
-  // still readable in claim.metadata for anyone who wants it.
-  if (unresolvedSentinel !== undefined && actor === unresolvedSentinel) return null;
   try {
     if (loadActorIdentityHelper().isUnresolvedActor(actor)) return null;
   } catch { return null; }
@@ -1710,6 +1706,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // evaluation and from the "critique pass cannot include fail members" validator rule.
     const supersededBy = typeof c.superseded_by === "string" && c.superseded_by.length > 0 ? c.superseded_by : null;
     const critiqueReviewer = String(c.reviewer ?? DEFAULT_CRITIQUE_REVIEWER);
+    const critiqueReviewerSource = c.reviewer_source === "explicit" || c.reviewer_source === "default"
+      ? String(c.reviewer_source)
+      : null;
     const critiqueReviewedAt = String(c.reviewed_at ?? ts);
     const critiqueIdentityVersion = c.identity_version === 2 ? 2 : 1;
     const reconstructedMetadata = c._source_claim_metadata
@@ -1720,6 +1719,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const critMeta: AnyObj = reconstructedMetadata ?? {
       origin: "critique",
       reviewer: critiqueReviewer,
+      // #1363 review round 3: carried so a rebuild can still tell "named" from "defaulted".
+      // Absent on any bundle written before this change — those critiques are treated as
+      // unnamed, which is exactly what they were: no verifier was ever recorded for them.
+      ...(critiqueReviewerSource ? { reviewer_source: critiqueReviewerSource } : {}),
       reviewed_at: critiqueReviewedAt,
       ...(critiqueIdentityVersion === 2 ? { identity_version: 2 } : {}),
       critique_sequence: c.critique_sequence,
@@ -1767,9 +1770,16 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // records it — in private `metadata.reviewer`, which deriveClaimStatus cannot see and a
     // Surface consumer has no reason to look at. Read it off critMeta (not the raw critique) so
     // a claim reconstructed from a prior write reports the reviewer it was recorded under, not
-    // whoever triggered the rebuild. This surfaces an identity that was already recorded; it
-    // does not manufacture one — a critique with no reviewer string keeps SIDECAR_TOOL_ACTOR.
-    const critiqueActor = recordedActorOrNull(critMeta.reviewer, DEFAULT_CRITIQUE_REVIEWER);
+    // whoever triggered the rebuild.
+    //
+    // Round-3 correction: this keys on `reviewer_source`, NOT on comparing the string against the
+    // default. A sentinel comparison cannot distinguish "nobody was named" from "the caller named
+    // tool-code-reviewer" — and the latter is the MODAL case, since packaging/manifest.json makes
+    // delegating review-work to tool-code-reviewer a mandate and 22 evals pass it explicitly. The
+    // sentinel therefore made the flow's prescribed reviewer the one identity the bundle could
+    // never name: a false negative traded for a false positive. The discriminator is derived at
+    // record time from the flag's presence, which is the only moment the difference exists.
+    const critiqueActor = critMeta.reviewer_source === "explicit" ? recordedActorOrNull(critMeta.reviewer) : null;
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
       const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: critiqueActor ?? SIDECAR_TOOL_ACTOR, method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
@@ -4683,9 +4693,17 @@ export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existi
   // both of which stamp them AFTER this call, exactly like `_output_sha256`. Every
   // caller-supplied check (record-evidence/record-check/dogfood-pass --check-json) flows through
   // here, and this spread previously carried them straight into the bundle — so a --check-json
-  // could name any actor as the verifier of a command that never ran, and it validated. Scrubbed
-  // unconditionally at this single choke point: there is deliberately no opt-in flag, because an
-  // opt-in is a thing a future caller can get wrong.
+  // could name any actor as the verifier of a command that never ran, and it validated.
+  //
+  // SCOPE, HONESTLY (round-3 correction): this is a DENYLIST covering exactly the two fields the
+  // fold publishes into Surface trust fields. It is not a general defence of `{ ...raw }`, and a
+  // denylist is a thing a future field gets forgotten from — seven other underscore-prefixed
+  // caller fields still ride this spread into claim metadata (`_output_sha256`,
+  // `_verification_workspace_snapshot`, `_acceptance_contract` and its history, `_waiver_history`,
+  // the `_gate_claim_*` family, `_producer`, `_producer_self_produced_trust_slices`). Inverting
+  // to an allowlist means every legitimate producer stamps after this call; that is the right
+  // shape and is tracked in #1373 rather than done here, because it moves ordering for a dozen
+  // fields on a change whose subject is the actor fold.
   delete check._recorded_by;
   delete check._observed_commands;
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
@@ -5432,6 +5450,10 @@ export function critiquesFromBundle(dir: string): AnyObj[] {
       lanes: Array.isArray(md.lanes) ? md.lanes : [],
       review_target: md.review_target && typeof md.review_target === "object" && !Array.isArray(md.review_target) ? md.review_target : { artifacts: [] },
       reviewer: typeof md.reviewer === "string" ? md.reviewer : DEFAULT_CRITIQUE_REVIEWER,
+      // #1363 review round 3: restore the named-vs-defaulted discriminator, or the first rebuild
+      // silently demotes an explicitly named reviewer to "nobody was named" and the claim reverts
+      // to the tool constant — the same uncovered-restore shape F1 was convened for.
+      ...(md.reviewer_source === "explicit" || md.reviewer_source === "default" ? { reviewer_source: md.reviewer_source } : {}),
       reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
       ...(md.identity_version === 2 ? { identity_version: 2 } : {}),
       critique_record_id: typeof md.critique_record_id === "string" && md.critique_record_id.length > 0 ? md.critique_record_id : c.id,
@@ -5738,8 +5760,14 @@ ${stderr}` : ""}`.trim());
   // collector of the observation below — the same identity, from the same helper, that
   // recordGateClaim stamps one function away. Without this the observation would be published
   // as "entails" with no named collector, which is incoherent: nothing can be said to entail a
-  // claim on nobody's authority. Stamped AFTER normalizeCheck, which scrubs the field so a
-  // caller can never supply it (F3).
+  // claim on nobody's authority.
+  //
+  // ORDERING IS LOAD-BEARING AND FRAGILE: this MUST stay below the normalizeCheck call above,
+  // which scrubs `_recorded_by` unconditionally (F3). Moving it up to sit with the other check
+  // fields — the natural tidy-up, since everything else is set there — silently erases the stamp
+  // and reverts every record-check claim to the tool constant with no test failing. That is why
+  // test_record_check.sh asserts the recorded actor reaches the delivered bundle; the assertion
+  // reds on deletion AND on that reordering.
   const recordCheckActorKey = resolveReadActorKey(p);
   if (!loadActorIdentityHelper().isUnresolvedActor(recordCheckActorKey)) check._recorded_by = recordCheckActorKey;
   check._output_sha256 = outputSha256;
@@ -6221,10 +6249,15 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
 
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   // #1363 review F3: the trust-bearing stamps are applied AFTER normalizeCheck, which scrubs
-  // both unconditionally (see its note). This is the same ordering `_output_sha256` already
-  // uses, and it is what makes the scrub absolute — the only values that reach the bundle are
-  // the actor THIS invocation resolved and the observations THIS invocation's writer produced,
-  // never anything a caller supplied.
+  // both unconditionally (see its note). Same ordering `_output_sha256` already uses.
+  //
+  // WHAT THIS DEFENDS, stated precisely (round-3 correction — the first version of this comment
+  // claimed "never anything a caller supplied", which is false): a caller cannot smuggle these
+  // stamps INSIDE THE CHECK PAYLOAD, so a `--check-json` can no longer name a verifier for a
+  // command that never ran. It does NOT authenticate the actor. `resolveReadActorKey` returns
+  // `--actor` verbatim when the flag is present, so the identity here remains SELF-ASSERTED,
+  // exactly as it already was before this change. The observations are different in kind: they
+  // are produced by this invocation's own writer and cannot be supplied at all.
   checkNormalized._recorded_by = gateClaimActorKey;
   if (observedCommands.length > 0) checkNormalized._observed_commands = observedCommands;
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
@@ -6598,6 +6631,13 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const critique: AnyObj = {
     id: critiqueId,
     reviewer: opt(p, "reviewer", DEFAULT_CRITIQUE_REVIEWER),
+    // #1363 review round 3: WHETHER THE CALLER NAMED THIS REVIEWER, derived from the flag's
+    // presence at the only moment it is knowable. Without it the fold cannot tell an explicit
+    // `--reviewer tool-code-reviewer` — the reviewer builder.build MANDATES for review-work —
+    // from the default applied when nobody was named, and any sentinel check must therefore
+    // discard the prescribed reviewer to avoid publishing an unclaimed one. Not part of
+    // critiqueRecordHash's field list, so the critique chain is unaffected.
+    reviewer_source: opts(p, "reviewer").length > 0 ? "explicit" : "default",
     reviewed_at: opt(p, "timestamp", new Date().toISOString()),
     identity_version: 2,
     verdict,
@@ -6855,7 +6895,10 @@ async function importCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     opts: {
       ...p.opts,
       id: [slugify(path.basename(review).replace(/\.md$/, ""), "review")],
-      reviewer: [DEFAULT_CRITIQUE_REVIEWER],
+      // #1363 review round 3: deliberately NOT set. import-critique adopts a review artifact
+      // whose author it does not know, so it must fall through to recordCritique's default and
+      // be recorded as reviewer_source "default" — synthesizing the flag here would assert that
+      // someone named this reviewer.
       verdict: [verdict],
       summary: [`Imported critique from ${path.basename(review)}`],
       "artifact-ref": [importedArtifact],

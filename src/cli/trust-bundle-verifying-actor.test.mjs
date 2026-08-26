@@ -30,6 +30,7 @@ const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const SNAPSHOT = { version: 1, kind: "git-worktree", algorithm: "sha256", digest: "c".repeat(64), head_sha: COMMIT, worktree_clean: true };
 const TOOL_ACTOR = "flow-agents/workflow-sidecar";
 const CAPTURE_COLLECTOR = "flow-agents/evidence-capture";
+const DEFAULT_REVIEWER = "tool-code-reviewer";
 
 /**
  * A command-log line in the shape appendWriterObservedCommands really appends: clean Git
@@ -74,6 +75,9 @@ function critique(overrides = {}) {
   return {
     id: "review",
     reviewer: "reviewer-beta",
+    // recordCritique derives this from whether --reviewer was actually passed; a critique the
+    // caller named carries "explicit".
+    reviewer_source: "explicit",
     reviewed_at: TS,
     verdict: "pass",
     summary: "independent review",
@@ -152,22 +156,39 @@ test("#1363 critique origin: the reviewer becomes the event actor", async () => 
   assert.equal(eventFor(bundle, claim.id).actor, "reviewer-beta");
 });
 
-test("#1363: the DEFAULT reviewer string is not a verifier — a review nobody claimed names no actor", async () => {
-  // record-critique defaults --reviewer to "tool-code-reviewer", and three further sites re-apply
-  // that default (import-critique, the bundle restore, and the fold itself), so metadata.reviewer
-  // is never absent. Publishing it as the event actor would assert a real agent in this ecosystem
-  // as the verifier of a review nobody claimed — the exact false provenance #1363 exists to stop.
-  const bundle = await buildTrustBundle("actor", TS, [], [], [critique({ reviewer: "tool-code-reviewer" })]);
-  const claim = bundle.claims.find((c) => c.metadata?.origin === "critique");
-  assert.equal(claim.metadata.reviewer, "tool-code-reviewer", "the recorded string is preserved in metadata — only the derived field abstains");
-  assert.equal(eventFor(bundle, claim.id).actor, TOOL_ACTOR);
+test("#1363: a reviewer nobody named is not a verifier — but an explicitly named one always is", async () => {
+  // record-critique defaults --reviewer to "tool-code-reviewer". Publishing that default as the
+  // event actor would assert a named agent as the verifier of a review nobody claimed. But the
+  // SAME string is the reviewer builder.build mandates for review-work, so a sentinel comparison
+  // would discard the prescribed reviewer on the modal path. The discriminator is recorded at the
+  // only moment the difference exists — whether the caller passed the flag.
+  const defaulted = await buildTrustBundle("actor", TS, [], [], [critique({ reviewer: DEFAULT_REVIEWER, reviewer_source: "default" })]);
+  const defaultedClaim = defaulted.claims.find((c) => c.metadata?.origin === "critique");
+  assert.equal(defaultedClaim.metadata.reviewer, DEFAULT_REVIEWER, "the recorded string is preserved in metadata — only the derived field abstains");
+  assert.equal(eventFor(defaulted, defaultedClaim.id).actor, TOOL_ACTOR);
 
-  // Same for a critique whose reviewer field is missing entirely (the fold re-defaults it).
-  const missing = critique();
-  delete missing.reviewer;
-  const bundle2 = await buildTrustBundle("actor", TS, [], [], [missing]);
-  const claim2 = bundle2.claims.find((c) => c.metadata?.origin === "critique");
-  assert.equal(eventFor(bundle2, claim2.id).actor, TOOL_ACTOR);
+  // The regression this replaced a sentinel to avoid: an explicit --reviewer tool-code-reviewer
+  // must be published, byte-identical string, different provenance.
+  const named = await buildTrustBundle("actor", TS, [], [], [critique({ reviewer: DEFAULT_REVIEWER, reviewer_source: "explicit" })]);
+  const namedClaim = named.claims.find((c) => c.metadata?.origin === "critique");
+  assert.equal(eventFor(named, namedClaim.id).actor, DEFAULT_REVIEWER,
+    "an explicitly named tool-code-reviewer is a real verifier — the flow MANDATES it for review-work, so discarding it under-reports the modal case");
+
+  // A critique from a bundle written before the discriminator existed: provenance unknown, so
+  // abstain. That is what those critiques always were — no verifier was ever recorded for them.
+  const legacy = critique({ reviewer: "reviewer-beta" });
+  delete legacy.reviewer_source;
+  const legacyBundle = await buildTrustBundle("actor", TS, [], [], [legacy]);
+  const legacyClaim = legacyBundle.claims.find((c) => c.metadata?.origin === "critique");
+  assert.equal(eventFor(legacyBundle, legacyClaim.id).actor, TOOL_ACTOR);
+  assert.equal("reviewer_source" in legacyClaim.metadata, false, "no discriminator is invented for a claim that never carried one");
+});
+
+test("#1363: the named-vs-defaulted discriminator survives into claim metadata for the rebuild to restore", async () => {
+  const bundle = await buildTrustBundle("actor", TS, [], [], [critique()]);
+  const claim = bundle.claims.find((c) => c.metadata?.origin === "critique");
+  assert.equal(claim.metadata.reviewer_source, "explicit",
+    "without this on the claim, the first rebuild demotes a named reviewer to 'nobody named' and the actor reverts to the tool constant");
 });
 
 test("#1363: `entails` is never asserted on nobody's authority", async () => {
