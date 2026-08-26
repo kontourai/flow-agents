@@ -45,6 +45,14 @@
       "types": "./build/src/sealed-execution.d.ts",
       "import": "./build/src/sealed-execution.js"
     },
+    "./narrative-retained-codecs": {
+      "types": "./build/src/narrative/retained-codecs.d.ts",
+      "import": "./build/src/narrative/retained-codecs.js"
+    },
+    "./narrative-retained-process-projection": {
+      "types": "./build/src/narrative/retained-process-projection.d.ts",
+      "import": "./build/src/narrative/retained-process-projection.js"
+    },
     "./package.json": "./package.json",
     "./schemas/*.json": "./schemas/*.json"
   },

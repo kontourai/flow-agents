@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { generateKeyPairSync, sign } from "node:crypto";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { sealedProjection, sealedWorkload } from "../../packaging/lifecycle-authority/coordinator.mjs";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
@@ -16,6 +16,138 @@ const adminSource = fs.readFileSync(path.resolve("scripts/lifecycle-authority-ad
 const operation = coordinator.slice(coordinator.indexOf("async function processSealedExecution"), coordinator.indexOf("async function processRootOperation"));
 const sourceRead = coordinator.slice(coordinator.indexOf("function readSealedSource"), coordinator.indexOf("function stageSealedDirectory"));
 const staging = coordinator.slice(coordinator.indexOf("function stageSealedDirectory"), coordinator.indexOf("function sealedArgv"));
+
+const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+// `kill(pid, 0)` is deliberately the liveness authority here.  In particular, EPERM proves a
+// process still exists but is not ours to signal; only ESRCH proves this exact PID is gone.
+function observePid(pid, stateForPid = readPidState) {
+  try {
+    process.kill(pid, 0);
+    return { status: "live", state: stateForPid(pid) };
+  } catch (error) {
+    if (error?.code === "ESRCH") return { status: "gone" };
+    return { status: "error", code: error?.code ?? "UNKNOWN", state: stateForPid(pid) };
+  }
+}
+
+// This asks the OS only about the fixture PID being asserted.  Do not add command arguments or
+// a process-table scan here: failure diagnostics must not expose unrelated commands or secrets.
+function readPidState(pid) {
+  const result = spawnSync("ps", ["-o", "pid=,ppid=,pgid=,stat=,lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 1_000 });
+  if (result.status !== 0) return null;
+  const fields = result.stdout.trim().split(/\s+/);
+  if (fields.length < 9 || Number(fields[0]) !== pid) return null;
+  return {
+    pid: Number(fields[0]), ppid: Number(fields[1]), pgid: Number(fields[2]), state: fields[3],
+    started: fields.slice(4).join(" "),
+  };
+}
+
+function sameOwnedPid(identity, current) {
+  return identity !== null && current !== null
+    && identity.pid === current.pid && identity.ppid === current.ppid
+    && identity.pgid === current.pgid && identity.started === current.started;
+}
+
+function readFixturePid(file) {
+  try {
+    const pid = Number(fs.readFileSync(file, "utf8").trim());
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function pidObservationDiagnostic(pid, elapsedMs, deadlineMs, observation) {
+  const state = observation.state === null || observation.state === undefined ? "unavailable" : JSON.stringify(observation.state);
+  if (observation.status === "error") return `owned fixture pid ${pid} liveness observation failed with ${observation.code}; elapsed_ms=${elapsedMs}; deadline_ms=${deadlineMs}; state=${state}`;
+  if (observation.status === "gone") return `owned fixture pid ${pid} was absent only after its exit deadline; elapsed_ms=${elapsedMs}; deadline_ms=${deadlineMs}; state=${state}`;
+  return `owned fixture pid ${pid} remained live past its exit deadline; elapsed_ms=${elapsedMs}; deadline_ms=${deadlineMs}; state=${state}`;
+}
+
+async function waitForOwnedPidExit(pid, { deadlineMs = 30_000, pollMs = 10, observe = observePid, now = Date.now, sleep = delay } = {}) {
+  const started = now();
+  let observation;
+  do {
+    observation = observe(pid);
+    const elapsedMs = now() - started;
+    if (observation.status === "error" || elapsedMs >= deadlineMs) throw new Error(pidObservationDiagnostic(pid, elapsedMs, deadlineMs, observation));
+    if (observation.status === "gone") return observation;
+    await sleep(Math.min(pollMs, deadlineMs - elapsedMs));
+  } while (true);
+}
+
+// Cleanup is intentionally narrower than observation: only a process whose recorded start and
+// process-group identities still match the fixture may be signalled.  A reused PID is left alone.
+function terminateOwnedFixturePid(identity, { stateForPid = readPidState, signal = process.kill } = {}) {
+  const current = identity === null ? null : stateForPid(identity.pid);
+  if (!sameOwnedPid(identity, current)) return false;
+  try {
+    signal(identity.pid, "SIGKILL");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("owned PID exit observation accepts delayed ESRCH before its wall-clock deadline", async () => {
+  let clock = 0;
+  let observations = 0;
+  const result = await waitForOwnedPidExit(7001, {
+    deadlineMs: 30,
+    pollMs: 10,
+    now: () => clock,
+    sleep: async (milliseconds) => { clock += milliseconds; },
+    observe: () => {
+      observations += 1;
+      return observations === 3 ? { status: "gone" } : { status: "live", state: { pid: 7001, ppid: 7000, pgid: 7000, state: "R", started: "fixture" } };
+    },
+  });
+  assert.deepEqual(result, { status: "gone" });
+  assert.equal(observations, 3, "the observer waits for ESRCH instead of accepting a transient live PID");
+});
+
+test("owned PID exit observation fails strictly when the PID stays live past its deadline", async () => {
+  let clock = 0;
+  let observations = 0;
+  await assert.rejects(waitForOwnedPidExit(7002, {
+    deadlineMs: 30,
+    pollMs: 10,
+    now: () => clock,
+    sleep: async (milliseconds) => { clock += milliseconds; },
+    observe: () => {
+      observations += 1;
+      return { status: "live", state: { pid: 7002, ppid: 7000, pgid: 7000, state: "R", started: "fixture" } };
+    },
+  }), /owned fixture pid 7002 remained live past its exit deadline; elapsed_ms=30; deadline_ms=30; state=.*"pgid":7000/);
+  assert.equal(observations, 4, "a deadline failure is not repaired by a green retry");
+});
+
+test("owned PID exit observation rejects ESRCH first observed after its deadline", async () => {
+  let clock = 0;
+  await assert.rejects(waitForOwnedPidExit(7005, {
+    deadlineMs: 30,
+    now: () => clock,
+    observe: () => { clock = 31; return { status: "gone" }; },
+  }), /owned fixture pid 7005 was absent only after its exit deadline; elapsed_ms=31; deadline_ms=30/);
+});
+
+test("owned PID exit observation treats non-ESRCH liveness errors as failures", async () => {
+  await assert.rejects(waitForOwnedPidExit(7003, {
+    observe: () => ({ status: "error", code: "EPERM", state: { pid: 7003, ppid: 7000, pgid: 7000, state: "R", started: "fixture" } }),
+  }), /owned fixture pid 7003 liveness observation failed with EPERM/);
+});
+
+test("fixture cleanup refuses a PID whose recorded parent or process identity changed", () => {
+  const identity = { pid: 7004, ppid: 7000, pgid: 7000, state: "R", started: "fixture" };
+  let signals = 0;
+  assert.equal(terminateOwnedFixturePid(identity, {
+    stateForPid: () => ({ ...identity, ppid: 1 }),
+    signal: () => { signals += 1; },
+  }), false);
+  assert.equal(signals, 0, "a possibly reused PID is never signalled during fixture cleanup");
+});
 
 test("sealed execution authenticates and validates its capped closure before nonce or stage allocation", () => {
   assert.ok(operation.indexOf("verifyAuthorization(") < operation.indexOf("sealedWorkload("));
@@ -240,16 +372,30 @@ for (const [label, controllerScript, options] of [
 test("sealed timeout kills the detached process group including a provider descendant", async () => {
   await withFixtureCaller(async () => {
     const pidFile = path.join(os.tmpdir(), `sealed-descendant-${process.pid}-${Date.now()}`);
-    const cleanupMarker = "      fs.rmSync(stage, { recursive: true, force: true, maxRetries: 2 });";
-    const fixture = await sealedCoordinatorFixture({ runtimeBytes: fs.readFileSync(process.execPath), controllerScript: `import { spawn } from 'node:child_process'; import fs from 'node:fs'; import path from 'node:path'; const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); fs.writeFileSync(path.join(path.dirname(process.env.SEALED_INVOCATION_MANIFEST), 'descendant.pid'), String(child.pid)); setInterval(() => {}, 1000);`, maxRuntimeMs: 3_000, instrumentSource: (source) => { const at = source.lastIndexOf(cleanupMarker); assert.notEqual(at, -1); return `${source.slice(0, at)}      { const pid = path.join(stage, "descendant.pid"); if (fs.existsSync(pid)) fs.copyFileSync(pid, ${JSON.stringify(pidFile)}); }\n${source.slice(at)}`; } });
+    const fixture = await sealedCoordinatorFixture({ runtimeBytes: fs.readFileSync(process.execPath), controllerScript: `import { spawn } from 'node:child_process'; import fs from 'node:fs'; const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setInterval(() => {}, 1000);`, maxRuntimeMs: 3_000 });
+    let descendantIdentity = null;
+    let invocation = null;
     try {
-      const result = await fixture.invoke("group-kill", fixture.signAuthorization("group-kill", "group-kill-nonce"));
+      invocation = fixture.invoke("group-kill", fixture.signAuthorization("group-kill", "group-kill-nonce"));
+      const pidDeadline = Date.now() + 30_000;
+      let descendant = null;
+      while (descendant === null && Date.now() < pidDeadline) {
+        descendant = readFixturePid(pidFile);
+        if (descendant === null) await delay(10);
+      }
+      assert.ok(descendant, "timeout fixture descendant did not report a PID before its wall-clock deadline");
+      // A slow observer can reach this durable PID after the timeout group has
+      // already exited. That is the success condition; identity is needed only
+      // to constrain finally-cleanup if it remains live.
+      descendantIdentity = readPidState(descendant);
+      const result = await invocation;
       assert.equal(result.result.safe_result.status, "timeout");
-      for (let attempt = 0; !fs.existsSync(pidFile) && attempt < 20; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
-      const descendant = Number(fs.readFileSync(pidFile, "utf8").trim());
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      assert.throws(() => process.kill(descendant, 0), /ESRCH/, "the detached process group leaves no provider descendant alive");
-    } finally { fs.rmSync(pidFile, { force: true }); }
+      await waitForOwnedPidExit(descendant);
+    } finally {
+      terminateOwnedFixturePid(descendantIdentity);
+      await invocation?.catch(() => undefined);
+      fs.rmSync(pidFile, { force: true });
+    }
   });
 });
 
@@ -272,29 +418,37 @@ test("sealed coordinator SIGTERM kills its descendant, seals interruption, and c
   child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
   child.stdin.end(`${JSON.stringify(envelope)}\n`);
   let descendant = null;
-  // #1259: a fixed 200x10ms attempt count is a 2s budget for process startup, which a
-  // loaded host routinely exceeds (observed FAIL/PASS/PASS at load 51). Wait against a
-  // wall-clock deadline instead: a slow host waits longer, a fast host stays fast, and
-  // expiry distinguishes "too slow" from "never started".
-  const descendantDeadline = Date.now() + 30_000;
-  while (descendant === null && Date.now() < descendantDeadline) {
-    const stages = fs.readdirSync(fixture.execution);
-    if (stages.length === 1) {
-      const pidFile = path.join(fixture.execution, stages[0], "descendant.pid");
-      if (fs.existsSync(pidFile)) descendant = Number(fs.readFileSync(pidFile, "utf8"));
+  const coordinatorIdentity = readPidState(child.pid);
+  let descendantIdentity = null;
+  try {
+    // #1259: a fixed 200x10ms attempt count is a 2s budget for process startup, which a
+    // loaded host routinely exceeds (observed FAIL/PASS/PASS at load 51). Wait against a
+    // wall-clock deadline instead: a slow host waits longer, a fast host stays fast, and
+    // expiry distinguishes "too slow" from "never started".
+    const descendantDeadline = Date.now() + 30_000;
+    while (descendant === null && Date.now() < descendantDeadline) {
+      const stages = fs.readdirSync(fixture.execution);
+      if (stages.length === 1) {
+        const pidFile = path.join(fixture.execution, stages[0], "descendant.pid");
+        descendant = readFixturePid(pidFile);
+      }
+      if (descendant === null) await delay(10);
     }
-    if (descendant === null) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(Number.isSafeInteger(descendant), `controller descendant did not start within the 30s deadline: exit=${child.exitCode} files=${JSON.stringify(fs.readdirSync(fixture.execution, { recursive: true }))} stdout=${Buffer.concat(stdout).toString("utf8")} stderr=${Buffer.concat(stderr).toString("utf8")}`);
+    descendantIdentity = readPidState(descendant);
+    assert.ok(descendantIdentity, `signal fixture descendant is not a readable owned PID: ${descendant}`);
+    child.kill("SIGTERM");
+    child.kill("SIGTERM");
+    const exit = await new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
+    assert.deepEqual(exit, { code: 0, signal: null }, Buffer.concat(stderr).toString("utf8"));
+    const response = JSON.parse(Buffer.concat(stdout).toString("utf8"));
+    assert.equal(response.result.safe_result.status, "interrupted");
+    assert.deepEqual(fs.readdirSync(fixture.execution), [], "signal cancellation removes the protected stage");
+    await waitForOwnedPidExit(descendant);
+  } finally {
+    terminateOwnedFixturePid(descendantIdentity);
+    terminateOwnedFixturePid(coordinatorIdentity);
   }
-  assert.ok(Number.isSafeInteger(descendant), `controller descendant did not start within the 30s deadline: exit=${child.exitCode} files=${JSON.stringify(fs.readdirSync(fixture.execution, { recursive: true }))} stdout=${Buffer.concat(stdout).toString("utf8")} stderr=${Buffer.concat(stderr).toString("utf8")}`);
-  child.kill("SIGTERM");
-  child.kill("SIGTERM");
-  const exit = await new Promise((resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
-  assert.deepEqual(exit, { code: 0, signal: null }, Buffer.concat(stderr).toString("utf8"));
-  const response = JSON.parse(Buffer.concat(stdout).toString("utf8"));
-  assert.equal(response.result.safe_result.status, "interrupted");
-  assert.deepEqual(fs.readdirSync(fixture.execution), [], "signal cancellation removes the protected stage");
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.throws(() => process.kill(descendant, 0), /ESRCH/, "signal cancellation leaves no provider descendant alive");
 });
 
 test("sealed cancellation during prepared staging remains owned through a durable interrupted receipt", async () => {
