@@ -193,3 +193,35 @@ test("an errno the teardown does not understand still fails loudly", async () =>
     "an unrecognised kill errno must still surface rather than be swallowed",
   );
 });
+
+test("a timeout against an unsignalable process group settles instead of hanging forever", async () => {
+  // Round-2 review: widening the errno list without this converts a loud 400ms rejection into a
+  // SILENT UNBOUNDED WAIT on the timeout path — the one mechanism bounding a runaway evidence
+  // command. `complete()` requires streamsClosed, which is false while the child still runs, so
+  // `cleanupComplete = true` can never settle the promise and nothing else was armed.
+  //
+  // Asserted for BOTH errnos: the hang already existed for ESRCH pre-fix, so this closes that too
+  // rather than only restoring parity for EPERM.
+  for (const code of ["EPERM", "ESRCH"]) {
+    const root = gitFixture();
+    const previousTimeout = process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS;
+    const previousGrace = process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
+    process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS = "300";
+    process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = "300";
+    try {
+      const started = Date.now();
+      await assert.rejects(
+        withKillErrno(code, () => runObservedCommand("sleep 25", root)),
+        (error) => /could not be signalled/.test(String(error?.message ?? error)),
+        `a ${code} timeout must settle with a typed refusal, not hang`,
+      );
+      // Bounded, and bounded by the CONFIGURED budget rather than by luck.
+      assert.ok(Date.now() - started < 5000, `settling took ${Date.now() - started}ms — the bound is not the configured timeout + grace`);
+    } finally {
+      process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS = previousTimeout ?? "";
+      process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = previousGrace ?? "";
+      if (!previousTimeout) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS;
+      if (!previousGrace) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
+    }
+  }
+});

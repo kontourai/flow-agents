@@ -88,6 +88,7 @@ export async function runObservedCommand(command: string, projectRoot: string): 
       if (settled || !cleanupComplete || !streamsClosed) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
       const outputHash = createHash("sha256")
         .update("stdout\0").update(stdoutHash.digest())
         .update("stderr\0").update(stderrHash.digest());
@@ -100,6 +101,19 @@ export async function runObservedCommand(command: string, projectRoot: string): 
         if (!terminateProcessGroup("SIGTERM")) {
           cleanupComplete = true;
           complete();
+          if (!settled) {
+            // #1369 round 2: the group could not be signalled AND the streams are still open, so
+            // the child is still running -- this is the TIMEOUT path, not the exit path. complete()
+            // can never fire (it needs streamsClosed) and no other timer is armed, so the promise
+            // would hang forever on the one mechanism that exists to bound a runaway evidence
+            // command. Pre-fix, the EPERM rethrow masked this by rejecting; widening the errno list
+            // without this would have converted a loud 400ms failure into a silent unbounded wait.
+            // The same hang already existed for ESRCH, so this closes that too rather than only
+            // restoring parity.
+            killTimer = setTimeout(() => fail(new Error(
+              `observed command exceeded ${timeoutMs}ms, its process group could not be signalled, and it did not close its streams within a further ${killGraceMs}ms`,
+            )), killGraceMs);
+          }
           return;
         }
         killTimer = setTimeout(() => {
