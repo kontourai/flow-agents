@@ -340,6 +340,59 @@ export function publicJsonFlagShapes(): Record<string, JsonFlagShape> {
   };
 }
 
+/**
+ * FLAG-LEVEL one-pass validation (#1358/#1359, round-2 MEDIUM).
+ *
+ * The payload one-pass was real but stopped at the payload boundary: `record-critique` still
+ * laddered `--verdict` -> `--summary` -> `--lane-json` -> payload, three round-trips before the
+ * payload was read at all — the exact burn #1358 names. The requirements were already DATA in
+ * WORKFLOW_CRITIQUE_PARAMETERS (`required`, `allowed_values`, `repeatable`, `required_when`);
+ * nothing read them. This reads them, so the declaration is the enforcement and `--explain` can
+ * print the same table.
+ */
+export type ParameterSpec = {
+  name: string;
+  flag: string;
+  required?: boolean;
+  repeatable?: boolean;
+  allowed_values?: readonly string[];
+  required_when?: { parameter: string; equals: string };
+};
+
+export function parameterViolations(
+  parameters: readonly ParameterSpec[],
+  valuesFor: (flag: string) => string[],
+  subject: string,
+): string[] {
+  const violations: string[] = [];
+  const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+  for (const parameter of parameters) {
+    const values = valuesFor(parameter.flag);
+    const supplied = values.filter((value) => value.length > 0);
+    if (parameter.required && supplied.length === 0) {
+      violations.push(parameter.repeatable
+        ? `${subject} requires at least one ${parameter.flag}`
+        : `${subject} requires ${parameter.flag}`);
+    }
+    if (parameter.allowed_values) {
+      for (const value of supplied) {
+        if (!parameter.allowed_values.includes(value)) {
+          violations.push(`${subject} ${parameter.flag} must be one of: ${parameter.allowed_values.join(", ")}`);
+          break;
+        }
+      }
+    }
+    const dependency = parameter.required_when;
+    if (dependency && supplied.length === 0) {
+      const other = byName.get(dependency.parameter);
+      if (other && valuesFor(other.flag).includes(dependency.equals)) {
+        violations.push(`${subject} requires ${parameter.flag} when ${other.flag} is ${dependency.equals}`);
+      }
+    }
+  }
+  return violations;
+}
+
 export const WORKFLOW_EVIDENCE_PARAMETERS = [
   { name: "status", flag: "--status", required: true, allowed_values: ["pass", "fail", "not_verified"] },
   { name: "summary", flag: "--summary", required: true },

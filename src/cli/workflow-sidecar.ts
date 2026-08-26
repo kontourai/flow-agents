@@ -36,12 +36,13 @@ import {
   commandTextFromEvidenceRef,
   criterionShapeViolations,
   critiqueLaneShapeViolations,
+  parameterViolations,
+  WORKFLOW_CRITIQUE_PARAMETERS,
   CRITIQUE_LANE_ID_PATTERN,
   evidenceRefListShapeViolations,
   evidenceRefShapeViolations,
   NARRATIVE_PROMOTE_OPERATION,
   WORKFLOW_ACCEPTANCE_STATUSES,
-  WORKFLOW_CRITIQUE_STATUSES,
 } from "./public-contracts.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
@@ -3371,12 +3372,25 @@ function dieOnViolations(violations: readonly string[]): void {
 // round-1 review demonstrated: a rule one function over that --explain cannot see.
 const evidenceRefListViolations = evidenceRefListShapeViolations;
 export function validateEvidenceRef(ref: AnyObj, label: string, projectRoot = process.cwd()): AnyObj {
-  // Shape rules are enforced from the SAME constants `workflow <verb> --explain` prints (#1358);
-  // a rule hand-written here would be a rule the accepted-shape output cannot know about.
-  dieOnViolations(evidenceRefShapeViolations(ref, label));
+  // ORDER IS THE CONTRACT, NOT AN ACCIDENT. #619 narrative trust isolation runs FIRST, before any
+  // shape rule, because AC5 requires #619 to be the REFUSING AUTHORITY on every (kind, channel)
+  // pair. Round-2 review caught #1358's first cut reordering these below dieOnViolations: nothing
+  // was admitted -- all 15 pairs still refused -- but 8 of 15 answered with a shape rule instead
+  // of the isolation diagnostic, so the guard stopped being the thing that spoke. A security
+  // refusal that is merely reachable is not the same as one that is authoritative.
+  //
+  // Consequence, accepted deliberately: a ref that is BOTH narrative-poisoned and malformed
+  // reports only the isolation refusal, so #1359's one-pass property yields to #619 here. That is
+  // the right precedence -- the caller's next move is to stop citing narrative content, not to
+  // fix a field -- and evidence-ref-narrative-isolation-precedence in workflow-explain.test.mjs
+  // pins it so a future reorder fails loudly instead of silently downgrading the guard.
+  // rejectNarrativeReference ignores non-strings, so it is safe ahead of the type checks.
   rejectNarrativeReference(projectRoot, ref.file, `${label} entry file`);
   rejectNarrativeReference(projectRoot, ref.url, `${label} entry url`);
   rejectNarrativeReference(projectRoot, ref.excerpt, `${label} entry excerpt`);
+  // Shape rules are enforced from the SAME constants `workflow <verb> --explain` prints (#1358);
+  // a rule hand-written here would be a rule the accepted-shape output cannot know about.
+  dieOnViolations(evidenceRefShapeViolations(ref, label));
   return ref;
 }
 export function normalizeEvidenceRefs(raw: unknown, label: string, projectRoot = process.cwd()): AnyObj[] {
@@ -4361,17 +4375,41 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   });
 }
 
-// The verdict vocabulary and the id grammar `record-critique` enforces are the SAME constants
-// `--explain` prints for `--lane-json`; a second local copy is a second thing to drift.
-const critiqueStatuses = new Set<string>(WORKFLOW_CRITIQUE_STATUSES);
+// The id grammar `record-critique` enforces is the SAME constant `--explain` prints for
+// `--lane-json`; a second local copy is a second thing to drift. (The verdict vocabulary is now
+// enforced straight from WORKFLOW_CRITIQUE_PARAMETERS' allowed_values, so the local Set is gone.)
 const safeCritiqueId = new RegExp(CRITIQUE_LANE_ID_PATTERN);
+
+/** Lane payload violations WITHOUT dying, so they can join the flag-level refusal. */
+function critiqueLaneViolations(raw: string[]): string[] {
+  const problems: string[] = [];
+  const parsed: AnyObj[] = [];
+  raw.forEach((value, index) => {
+    let lane: AnyObj | null = null;
+    try {
+      const candidate = JSON.parse(value) as unknown;
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new Error("object expected");
+      lane = candidate as AnyObj;
+    } catch {
+      problems.push(`--lane-json ${index} must be valid JSON object`);
+    }
+    if (lane) { parsed.push(lane); problems.push(...critiqueLaneShapeViolations(lane, index)); }
+  });
+  const ids = parsed.map((lane) => lane.id);
+  if (ids.some((id) => typeof id === "string") && new Set(ids).size !== ids.length) problems.push("--lane-json ids must be unique");
+  return problems;
+}
 
 function normalizeCritiqueLanes(raw: string[], projectRoot: string): AnyObj[] {
   if (raw.length === 0) die("record-critique requires at least one --lane-json");
   const parsed = raw.map((value) => parseJson(value, "--lane-json"));
   const problems: string[] = [];
   parsed.forEach((lane, index) => problems.push(...critiqueLaneShapeViolations(lane, index)));
-  const ids = parsed.map((lane) => lane.id);
+  // Round-2 LOW: ids were taken from RAW lanes before validation, so two lanes both MISSING an id
+  // collapsed to a single `undefined` and emitted "ids must be unique" when no two ids were equal
+  // -- a false statement inside a refusal whose whole purpose is being actionable. Only compare
+  // ids that actually exist; the missing ones are already reported by the id-grammar rule.
+  const ids = parsed.map((lane) => lane.id).filter((id): id is string => typeof id === "string");
   if (new Set(ids).size !== ids.length) problems.push("--lane-json ids must be unique");
   dieOnViolations(problems);
   return parsed.map((lane, index) => ({
@@ -6426,11 +6464,22 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const projectRoot = canonicalProjectRootForSession(dir);
+  // #1359 round 2: the flag ladder. This used to refuse --verdict, then --summary, then
+  // --lane-json, then the payload -- three round-trips before a caller's payload was even read,
+  // which is the burn #1358 exists to remove. Flag requirements come from the SAME declaration
+  // `--explain` prints (WORKFLOW_CRITIQUE_PARAMETERS), and the lane payload's own violations are
+  // collected into the same refusal, so one invocation reports everything wrong.
+  const laneRaw = opts(p, "lane-json");
   const verdict = opt(p, "verdict");
-  if (!critiqueStatuses.has(verdict)) die("record-critique requires --verdict pass, fail, or not_verified");
   const summary = opt(p, "summary");
-  if (!hasNonEmptyString(summary)) die("record-critique requires --summary");
-  const lanes = normalizeCritiqueLanes(opts(p, "lane-json"), projectRoot);
+  dieOnViolations([
+    ...parameterViolations(WORKFLOW_CRITIQUE_PARAMETERS, (flag) => opts(p, flag.replace(/^--/, "")), "record-critique"),
+    ...(laneRaw.length > 0 ? critiqueLaneViolations(laneRaw) : []),
+  ]);
+  // Already validated above; normalizeCritiqueLanes stays as the single construction path and as
+  // defence in depth, so a payload that somehow reaches it malformed still refuses rather than
+  // being built.
+  const lanes = normalizeCritiqueLanes(laneRaw, projectRoot);
   const reviewArtifacts = reviewTargetArtifacts(dir, opts(p, "artifact-ref"), "record-critique review_target");
   if (verdict === "pass" && (lanes.some((lane) => lane.status !== "pass") || reviewArtifacts.length === 0)) {
     die("a passing critique requires every lane to pass and at least one local reviewed --artifact-ref");

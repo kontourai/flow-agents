@@ -20,7 +20,7 @@ import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthori
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
-import { publicJsonFlagShapes } from "./public-contracts.js";
+import { publicJsonFlagShapes, WORKFLOW_CRITIQUE_PARAMETERS, WORKFLOW_EVIDENCE_PARAMETERS, type ParameterSpec } from "./public-contracts.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
@@ -181,9 +181,20 @@ function verbSpecOptions(verb: string): Set<string> {
 // validators refuse from — so `--explain` cannot advertise a flag the verb rejects, nor a shape
 // the validator does not enforce. workflow-explain.test.mjs binds both directions executably.
 type JsonFlagShape = ReturnType<typeof publicJsonFlagShapes>[string];
+/**
+ * Round-2 MEDIUM: the verbs' own parameter tables already declared `required`, `allowed_values`,
+ * `repeatable` and `required_when`, and nothing read them — so a caller learned the flags one
+ * refusal at a time before the payload was even parsed. `--explain` prints them and
+ * `parameterViolations` enforces them, from the one declaration.
+ */
+const VERB_PARAMETERS: Record<string, readonly ParameterSpec[]> = {
+  critique: WORKFLOW_CRITIQUE_PARAMETERS,
+  evidence: WORKFLOW_EVIDENCE_PARAMETERS,
+};
 export type ExplainSpec = {
   verb: string;
   summary: string;
+  parameters: ParameterSpec[];
   json_flags: JsonFlagShape[];
   /** Shapes nested INSIDE an accepted flag's payload. Never advertised as flags: `workflow
    *  critique` embeds evidence refs in `--lane-json` but rejects `--evidence-ref-json` itself. */
@@ -215,6 +226,7 @@ export function explainSpec(verb: string): ExplainSpec {
   return {
     verb,
     summary: spec?.summary ?? "",
+    parameters: [...(VERB_PARAMETERS[verb] ?? [])].map((parameter) => ({ ...parameter })),
     json_flags: accepted.map(([, shape]) => shape),
     referenced_shapes: [...embedded].filter((key) => shapes[key]).map((key) => ({ name: `evidence_refs[] entry (the ${shapes[key]!.flag} shape; this verb does not accept that flag directly)`, shape: shapes[key]! })),
     preconditions: VERB_PRECONDITIONS[verb] ?? [],
@@ -246,6 +258,21 @@ function renderVerbExplain(verb: string, asJson: boolean): void {
   if (spec.summary) console.log(`\n${spec.summary}`);
   if (spec.json_flags.length === 0) {
     console.log(`\nThis verb accepts no structured JSON flags. Run \`flow-agents workflow ${verb} --help\` for its options.`);
+  }
+  if (spec.parameters.length > 0) {
+    console.log(`\nFlags (refused together in one pass, before any payload is parsed):`);
+    for (const parameter of spec.parameters) {
+      const notes: string[] = [];
+      if (parameter.required) notes.push(parameter.repeatable ? "required, repeatable" : "required");
+      else if (parameter.repeatable) notes.push("optional, repeatable");
+      else notes.push("optional");
+      if (parameter.allowed_values) notes.push(`one of: ${parameter.allowed_values.join(", ")}`);
+      if (parameter.required_when) {
+        const other = spec.parameters.find((candidate) => candidate.name === parameter.required_when!.parameter);
+        notes.push(`required when ${other?.flag ?? parameter.required_when.parameter} is ${parameter.required_when.equals}`);
+      }
+      console.log(`  ${parameter.flag}  (${notes.join("; ")})`);
+    }
   }
   for (const shape of spec.json_flags) renderShape(shape.flag, shape, (example) => `${shape.flag} ${JSON.stringify(JSON.stringify(example))}`);
   for (const referenced of spec.referenced_shapes) {

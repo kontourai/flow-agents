@@ -29,11 +29,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, "../../build/src/cli.js");
 const SIDECAR = path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js");
 const { explainSpec } = await import(path.resolve(__dirname, "../../build/src/cli/workflow.js"));
-const { validateEvidenceRef } = await import(path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js"));
+const { validateEvidenceRef, normalizeEvidenceRefs } = await import(path.resolve(__dirname, "../../build/src/cli/workflow-sidecar.js"));
 const contracts = await import(path.resolve(__dirname, "../../build/src/cli/public-contracts.js"));
 const {
   criterionShapeViolations, critiqueLaneShapeViolations, evidenceRefListShapeViolations,
-  commandTextFromEvidenceRef, refusalBody, publicJsonFlagShapes,
+  commandTextFromEvidenceRef, refusalBody, publicJsonFlagShapes, parameterViolations,
+  WORKFLOW_CRITIQUE_PARAMETERS, WORKFLOW_EVIDENCE_PARAMETERS,
   EVIDENCE_REF_KINDS, EVIDENCE_REF_FIELDS, CRITERION_COMMAND_MATCH_FIELDS, exampleEvidenceRef,
 } = contracts;
 
@@ -61,6 +62,18 @@ function laneRefusal(lane, extra = []) {
   }
 }
 const laneAccepted = (lane) => !/--lane-json/.test(laneRefusal(lane));
+/** Drive record-critique with arbitrary argv, for the FLAG-level assertions. */
+laneRefusal.raw = (args) => {
+  const root = makeFixtureDir("wf-explain-");
+  const dir = path.join(root, ".kontourai", "flow-agents", "demo");
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    const result = spawnSync(process.execPath, [SIDECAR, "record-critique", dir, ...args], { cwd: root, encoding: "utf8" });
+    return `${result.stdout}${result.stderr}`;
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+};
 
 // ── the corpus ────────────────────────────────────────────────────────────────────────────────
 // Systematic, not random: for every kind (plus an unknown one) and every declared field, produce
@@ -86,17 +99,45 @@ function evidenceRefCorpus() {
 }
 const NON_OBJECT_ENTRIES = ["legacy-string-ref.md", 1, null, true, ["nested"]];
 
-/** Every body the evidence-ref collectors emit over the corpus, in canonical form. */
+/**
+ * Every body the SHIPPED validator emits over the corpus, in canonical form.
+ *
+ * ROUND 2 FOUND THE HOLE THIS CLOSES. The previous version called
+ * `evidenceRefListShapeViolations` from public-contracts DIRECTLY, so it never traversed
+ * `validateEvidenceRef` at all — a live `die(...)` written INSIDE the shipped validator was
+ * enforced by the CLI, printed by `--explain` zero times, and this net went green. That is a PATH
+ * gap, not a coverage gap: no amount of corpus strengthening reaches a function the corpus never
+ * calls. The corpus now runs through `normalizeEvidenceRefs`, which is the function the sidecar
+ * actually uses, so every rule on that path is observable here regardless of which module or
+ * function it lives in.
+ *
+ * Refusals arrive as a throw, so the bodies are parsed back out of dieOnViolations' own format —
+ * which incidentally makes that format load-bearing and therefore tested.
+ */
+function violationsFromRefusal(error) {
+  const message = String(error?.message ?? error);
+  const aggregate = /^\d+ problems must be fixed together:\n {2}- /.exec(message);
+  return aggregate ? message.slice(aggregate[0].length).split("\n  - ") : [message];
+}
 function observedEvidenceRefBodies() {
   const label = "REFS";
   const bodies = new Set();
-  const record = (messages) => {
-    for (const message of messages) bodies.add(refusalBody(message.replace(/^REFS\[\d+\] /, "REFS "), label));
+  const root = makeFixtureDir("wf-explain-corpus-");
+  const record = (value) => {
+    try { normalizeEvidenceRefs(value, label, root); return; } catch (error) {
+      for (const message of violationsFromRefusal(error)) {
+        bodies.add(refusalBody(message.replace(/^REFS\[\d+\] /, "REFS "), label));
+      }
+    }
   };
-  record(evidenceRefListShapeViolations("not-an-array", label));
-  record(evidenceRefListShapeViolations({ nope: true }, label));
-  record(evidenceRefListShapeViolations(NON_OBJECT_ENTRIES, label));
-  for (const ref of evidenceRefCorpus()) record(evidenceRefListShapeViolations([ref], label));
+  try {
+    record("not-an-array");
+    record({ nope: true });
+    record(NON_OBJECT_ENTRIES);
+    for (const ref of evidenceRefCorpus()) record([ref]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
   return bodies;
 }
 
@@ -130,12 +171,43 @@ test("SOURCE SCAN: every rule body the collectors can push is a body --explain p
   // rule bodies live, turns each into a pattern, and requires a printed body to match it. A rule
   // that is unreachable for the corpus is still a rule in the source, so it is still caught.
   const source = fs.readFileSync(path.join(__dirname, "public-contracts.ts"), "utf8");
-  const templates = [...source.matchAll(/violations\.push\(`([^`]*)`\)/g)].map((match) => match[1]);
-  assert.ok(templates.length >= 10, `only ${templates.length} violation templates found — the scan anchor moved and this guard is scanning nothing`);
-  const printed = [...printedBodies(evidenceRefShape), ...printedBodies(criterionShape), ...printedBodies(laneShape)];
+  // Round 2: the old anchor read `violations.push(`…`)` ONLY, and was blind to the three bodies
+  // written `return [`…`]` in this same file — a purely syntactic boundary that a new rule could
+  // cross without moving. Both forms are read, and the expected count is DERIVED from the
+  // body-producing sites rather than given slack, so partial drift reds instead of only total
+  // anchor loss (`>= 10` had two spare against twelve).
+  const templates = [
+    ...[...source.matchAll(/violations\.push\(`([^`]*)`\)/g)].map((match) => match[1]),
+    ...[...source.matchAll(/return \[`([^`]*)`\]/g)].map((match) => match[1]),
+  ];
+  const bodySites = (source.match(/violations\.push\(`/g) ?? []).length + (source.match(/return \[`/g) ?? []).length;
+  assert.equal(templates.length, bodySites, `the scan read ${templates.length} templates but the file has ${bodySites} body-producing sites — the anchor is missing a syntax`);
+  assert.ok(bodySites > 0, "no body-producing sites found — the anchor moved and this guard is scanning nothing");
+  // The module now carries TWO printed surfaces: JSON-flag rule bodies, and the flag-level
+  // parameter bodies rendered in the "Flags" section. Both sides of this comparison are derived
+  // from real OUTPUT — the parameter bodies are generated by calling parameterViolations over the
+  // declared tables with lookups that trigger every branch, not transcribed by hand — so a new
+  // parameter constraint that nothing prints still reds.
+  const parameterBodies = [];
+  for (const table of [WORKFLOW_CRITIQUE_PARAMETERS, WORKFLOW_EVIDENCE_PARAMETERS]) {
+    for (const lookup of [
+      () => [],                                                                             // required
+      (flag) => (flag === "--verdict" || flag === "--status" ? ["not-a-declared-value"] : []), // allowed_values
+      (flag) => (flag === "--verdict" ? ["pass"] : []),                                     // required_when
+    ]) {
+      for (const body of parameterViolations(table, lookup, "SUBJ")) parameterBodies.push(refusalBody(body, "SUBJ"));
+    }
+  }
+  assert.ok(parameterBodies.length > 0, "parameterViolations produced no bodies — the generator stopped exercising it");
+  const printed = [
+    ...printedBodies(evidenceRefShape), ...printedBodies(criterionShape), ...printedBodies(laneShape),
+    ...parameterBodies,
+  ];
   const unmatched = [];
   for (const template of templates) {
-    const body = template.replace(/^\$\{label\} /, "");
+    // Bodies are prefixed by the offending object's label OR by the command subject, depending on
+    // which surface emits them; strip whichever this template carries before comparing.
+    const body = template.replace(/^\$\{(?:label|subject)\} /, "");
     const pattern = new RegExp(`^${body.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\$\\\{[^}]*\\\}/g, ".*")}$`);
     if (!printed.some((candidate) => pattern.test(candidate))) unmatched.push(template);
   }
@@ -314,13 +386,16 @@ test("the lane id grammar and status vocabulary --explain prints are the ones en
 test("one payload with N faults produces ONE refusal naming all N (#1359)", () => {
   const output = laneRefusal({ id: "Bad Lane", status: "met", summary: "", evidence_refs: "nope", extra: 1 });
   for (const expected of [
+    // The flag-level requirement now joins the payload faults in the SAME refusal instead of
+    // being a further round-trip after the payload is finally accepted (round-2 MEDIUM).
+    /record-critique requires --artifact-ref when --verdict is pass/,
     /--lane-json 0 contains unsupported fields: extra/,
     /--lane-json 0 id must be a unique safe identifier/,
     /--lane-json 0 status must be one of/,
     /--lane-json 0 summary must be non-empty/,
     /--lane-json 0 evidence_refs must be an array/,
   ]) assert.match(output, expected, "the refusal dropped a problem — callers are back to one fact per invocation");
-  assert.match(output, /5 problems must be fixed together/);
+  assert.match(output, /6 problems must be fixed together/);
 });
 
 test("evidence-ref violations are reported per entry index, across every entry", () => {
@@ -349,4 +424,88 @@ test("--explain performs no mutation, exits 0, and agrees with --explain --json"
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
+});
+
+test("no hand-written refusal lives in the shipped validator itself", () => {
+  // RESTORED after round 2. Commit 5c355ad had this guard; the round-1 rewrite of this file
+  // DELETED it and replaced it with nets over public-contracts, so the finding read as closed
+  // while the hole moved into validateEvidenceRef. The union was never checked.
+  //
+  // Kept ALONGSIDE the shipped-path corpus rather than instead of it, because the two miss
+  // different things: the corpus catches a rule only if some generated input reaches it (an
+  // absolute-path rule is invisible to a corpus that generates no absolute paths), while this
+  // catches any hand-written refusal regardless of reachability, but only in this one function.
+  // Neither subsumes the other, and both injections are proven separately.
+  const source = fs.readFileSync(path.join(__dirname, "workflow-sidecar.ts"), "utf8");
+  const body = /export function validateEvidenceRef\([\s\S]*?\n}/.exec(source);
+  assert.ok(body, "validateEvidenceRef not found — the enforcement anchor moved");
+  assert.equal((body[0].match(/\bdie\(/g) ?? []).length, 0, "validateEvidenceRef carries a hand-written refusal that --explain cannot derive");
+});
+
+test("#619 narrative isolation is the refusing AUTHORITY on every channel, not merely reachable", () => {
+  // Round-2 BLOCKER. Reordering the guard below dieOnViolations admitted nothing — all 15
+  // (kind x channel) pairs still refused — but 8 of 15 answered with a shape rule, so AC5's real
+  // subject (that #619 is the thing that speaks) silently stopped holding. Asserted per pair, so
+  // a reorder names the pairs it downgraded instead of reporting one opaque failure.
+  const channels = {
+    file: ".kontourai/narrative/run/n1/envelope.json",
+    url: "file:///.kontourai/narrative/run/n1/envelope.json",
+    excerpt: "see .kontourai/narrative/run/n1/envelope.json",
+  };
+  const downgraded = [];
+  for (const kind of EVIDENCE_REF_KINDS) {
+    for (const [channel, value] of Object.entries(channels)) {
+      let message = null;
+      try { validateEvidenceRef({ kind, [channel]: value }, "refs"); } catch (error) { message = error.message; }
+      assert.ok(message !== null, `${kind}/${channel} narrative reference was ACCEPTED`);
+      if (!/narrative trust isolation \(#619\)/.test(message)) downgraded.push(`${kind}/${channel} -> ${message.split("\n")[0]}`);
+    }
+  }
+  assert.deepEqual(downgraded, [], `#619 was shadowed by a shape rule on ${downgraded.length} of 15 pairs`);
+});
+
+test("every flag --explain declares required is actually enforced, in ONE pass", () => {
+  // Round-2 MEDIUM. The parameter table declared required/allowed_values/required_when and
+  // nothing read it, so the CLI laddered three round-trips before parsing a payload. Bound here
+  // by DRIVING the CLI: each printed requirement must appear in a single refusal, together.
+  const parameters = CRITIQUE_SPEC.parameters;
+  assert.ok(parameters.length > 0, "--explain prints no flag table for critique");
+  const bare = laneRefusal.raw([]);
+  for (const parameter of parameters.filter((entry) => entry.required)) {
+    const expected = parameter.repeatable
+      ? `requires at least one ${parameter.flag}`
+      : `requires ${parameter.flag}`;
+    assert.ok(bare.includes(expected), `--explain marks ${parameter.flag} required but the CLI never says "${expected}"; it said:\n${bare}`);
+  }
+  // ...and they arrive together, not one per invocation.
+  const requiredCount = parameters.filter((entry) => entry.required).length;
+  assert.match(bare, new RegExp(`${requiredCount} problems must be fixed together`), "required flags are still laddering one refusal at a time");
+
+  // allowed_values is enforced from the same declaration.
+  const verdict = parameters.find((entry) => entry.allowed_values);
+  assert.ok(verdict, "--explain prints no allowed_values for critique");
+  assert.match(laneRefusal.raw(["--verdict", "met"]), new RegExp(`${verdict.flag} must be one of: ${verdict.allowed_values.join(", ")}`));
+
+  // required_when is enforced from the same declaration.
+  const conditional = parameters.find((entry) => entry.required_when);
+  assert.ok(conditional, "--explain prints no required_when for critique");
+  const other = parameters.find((entry) => entry.name === conditional.required_when.parameter);
+  const valid = JSON.stringify({ id: "ok", status: "pass", summary: "s", evidence_refs: [{ kind: "command", summary: "x" }] });
+  assert.match(
+    laneRefusal.raw([other.flag, conditional.required_when.equals, "--summary", "s", "--lane-json", valid]),
+    new RegExp(`requires ${conditional.flag} when ${other.flag} is ${conditional.required_when.equals}`),
+  );
+});
+
+test("two lanes that both OMIT an id are not told their ids collide", () => {
+  // Round-2 LOW: ids were read from raw lanes before validation, so two missing ids collapsed to
+  // one `undefined` and produced a refusal stating something false.
+  const laneWithout = (summary) => ({ status: "pass", summary, evidence_refs: [{ kind: "command", summary: "x" }] });
+  const output = laneRefusal(laneWithout("a"), [laneWithout("b")]);
+  assert.doesNotMatch(output, /ids must be unique/, "a refusal claimed two ids collide when neither lane has an id");
+  assert.match(output, /--lane-json 0 id must be a unique safe identifier/);
+  assert.match(output, /--lane-json 1 id must be a unique safe identifier/);
+  // The real collision must still be caught.
+  const dup = { id: "same", status: "pass", summary: "s", evidence_refs: [{ kind: "command", summary: "x" }] };
+  assert.match(laneRefusal(dup, [{ ...dup }]), /ids must be unique/);
 });
