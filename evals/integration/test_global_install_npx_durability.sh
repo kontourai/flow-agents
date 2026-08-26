@@ -189,12 +189,23 @@ else
 fi
 
 # The actionable init.ts-level message must wrap install-owned-files.js's own clean
-# fail() line ("destination component is not a directory: ..."), not a raw multi-line
-# V8 stack trace (plan §5 Risk 4) -- a stack trace has "\n    at " frame lines.
-if grep -q "destination component is not a directory" "$POISON_STDERR" && ! grep -qE '^\s+at ' "$POISON_STDERR"; then
-  _pass "AC5: underlying failure is install-owned-files.js's clean fail() message, not a raw stack trace"
+# fail() line, not a raw multi-line V8 stack trace (plan §5 Risk 4) -- a stack trace has
+# "\n    at " frame lines.
+#
+# Asserted structurally rather than by pinning one literal: install-owned-files.js has
+# several fail() sites that can legitimately catch a poisoned .flow-agents first (it
+# moved from ensureSafeParent's "destination component is not a directory" to the
+# manifest read's "unable to inspect destination entry" when #1231 added an earlier
+# manifest lstat). What must hold is that the surfaced text IS one of the installer's
+# own `install-owned-files: ` fail() lines AND names the offending path -- if init.ts
+# fell back to its bare "failed with exit code N" message, or dumped a stack, neither
+# the prefix nor the path would be there.
+if grep -q "install-owned-files: " "$POISON_STDERR" \
+   && grep -q "claude-global-poisoned/\.flow-agents" "$POISON_STDERR" \
+   && ! grep -qE '^\s+at ' "$POISON_STDERR"; then
+  _pass "AC5: underlying failure is install-owned-files.js's clean fail() message naming the path, not a raw stack trace"
 else
-  _fail "AC5: underlying failure message is missing or looks like a raw stack trace"
+  _fail "AC5: underlying failure message is missing, unattributed, or looks like a raw stack trace"
   cat "$POISON_STDERR"
 fi
 

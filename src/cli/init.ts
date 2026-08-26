@@ -959,7 +959,8 @@ function stampConfigPremergePostInstallHash(premerge: unknown, configPath: strin
   };
 }
 
-function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
+/** Exported for unit tests: both quoting branches must be exercised directly (#945 SEC). */
+export function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
   const stripped = command.replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "");
   const escaped = shellEscapeForHookCommand(sourceRoot, hasOuterSingleQuoteLayer(stripped));
   return stripped.replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${escaped}/`);
