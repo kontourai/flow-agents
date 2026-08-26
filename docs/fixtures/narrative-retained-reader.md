@@ -9,7 +9,8 @@ fingerprint, and the narrow browser process projection.
 
 The browser-safe projection exposes only recorded compiler provenance,
 aggregate capture-channel status counts, known capture-gap classes, runtime
-coverage counts, and turn ordinals/boundary derivation. It omits foreign
+coverage counts, bounded typed action categories, and turn ordinals/boundary
+derivation. It omits foreign
 Flow/Surface payloads, source ids, paths, commands, session ids, statement
 text, capture notes/refs, and tool-result drill-down. Flow Agents does not use
 this projection to assert semantic answer support or current gate validity;
