@@ -5450,10 +5450,14 @@ export function critiquesFromBundle(dir: string): AnyObj[] {
       lanes: Array.isArray(md.lanes) ? md.lanes : [],
       review_target: md.review_target && typeof md.review_target === "object" && !Array.isArray(md.review_target) ? md.review_target : { artifacts: [] },
       reviewer: typeof md.reviewer === "string" ? md.reviewer : DEFAULT_CRITIQUE_REVIEWER,
-      // #1363 review round 3: restore the named-vs-defaulted discriminator, or the first rebuild
-      // silently demotes an explicitly named reviewer to "nobody was named" and the claim reverts
-      // to the tool constant — the same uncovered-restore shape F1 was convened for.
-      ...(md.reviewer_source === "explicit" || md.reviewer_source === "default" ? { reviewer_source: md.reviewer_source } : {}),
+      // #1363 review round 3: `reviewer_source` is deliberately NOT restored onto this object.
+      // Deleting a restore here is UNOBSERVABLE — proven by injection — because the fold reads the
+      // reconstructed metadata wholesale via `_source_claim_metadata` (attached below), which
+      // already carries the discriminator from the original write. A line whose removal nothing
+      // can detect is not defence in depth, it is a second source of truth waiting to disagree
+      // with the first. The property that matters — a named reviewer surviving a rebuild — is
+      // asserted end-to-end in test_workflow_sidecar_writer.sh after a real record-evidence
+      // rebuild, and that assertion reds when the discriminator is stripped from this metadata.
       reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
       ...(md.identity_version === 2 ? { identity_version: 2 } : {}),
       critique_record_id: typeof md.critique_record_id === "string" && md.critique_record_id.length > 0 ? md.critique_record_id : c.id,
