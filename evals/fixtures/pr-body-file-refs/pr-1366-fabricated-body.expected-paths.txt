@@ -1,0 +1,7 @@
+docs/decisions/writer-observed-execution.md
+evals/integration/test_workflow_sidecar_writer.sh
+evals/static/test_unit_helpers.sh
+scripts/ci/trust-reconcile.js
+scripts/hooks/lib/actor-identity.js
+src/cli/trust-bundle-verifying-actor.test.mjs
+src/lib/observed-command.ts

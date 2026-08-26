@@ -46,6 +46,25 @@ For example, `fix: normalize legacy lifecycle assignment actors`, `fix(scope)!: 
 
 This contract applies to the pull request title rather than replacing local commit-message guidance. Squash merges make the pull request title the release commit subject that Release Please reads, so use a title such as `fix(ci): require conventional pull request titles` when a patch fix should be released.
 
+### Pull request body file references
+
+`scripts/ci/validate-pr-body-file-refs.mjs` fails a pull request when its body names a repo-rooted file path that does not resolve at the **PR head**. It exists because #1366's body carried a verification table naming a test file that lived on a sibling branch and appeared zero times in its own diff, while opening `Closes #1363` / `Closes #1365` — two issues that change does not touch. A body is a provenance record: it is what a reviewer reads instead of re-running the evidence, and `Closes #N` mutates issue state on merge.
+
+What counts as a file reference is deliberately narrow, and every rule below was measured against the last 120 merged pull requests in this repository (180 extracted path claims):
+
+- A candidate is `<top-level-directory>/<segments>.<ext>`. The set of top-level directories is **derived from the PR head's own tree**, not hand-listed, so it cannot drift — and generated roots are excluded for free, since `build/` is not tracked and `node build/src/cli.js` is therefore never read as a claim. Requiring a file extension keeps globs (`src/**`), bare directory mentions (`scripts/ci/`), issue references, and prose out; a preceding-character rule keeps URLs and absolute paths out.
+- **Code fences and inline code are not exempt.** The fabricated evidence in #1366 was inside a fenced block. That is where evidence claims live, so that is exactly where the check has to look.
+- A path passes when it exists in the PR head tree **or** appears among the files the PR changes. The second oracle is what lets a body name a file the branch **deletes**, or a file's pre-rename path.
+- A gitignored path is skipped: it is by construction never tracked, so its absence from the tree carries no information. `delivery/trust.bundle` is the live case — force-added per delivery, ignored otherwise, and named in bodies that never carry it.
+
+For a path that is deliberately not in this tree — one that is relative to a fixture root rather than the repo root, one a follow-up will add, or a historical reference to a file that has since been removed — record the reason in the body instead of removing the claim:
+
+```
+<!-- pr-body-paths: allow kits/example/kit.json — path is relative to the eval's fixture root, not the repo root -->
+```
+
+The reason is required; a directive without one fails. Across those 120 merged pull requests exactly one would have needed a directive (two paths in #1331, both relative to a temporary fixture tree), so the measured false-positive rate is 2 of 180 path claims. There are no bot exceptions and no soft failures.
+
 ## Validation
 
 - `npm run validate:source` — source-tree integrity (paths, packs, manifests)

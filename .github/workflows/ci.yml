@@ -51,6 +51,18 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node scripts/ci/validate-pr-title.mjs
 
+      # #1375: a PR body naming a file that resolves nowhere on its own branch is
+      # evidence from somewhere else. Needs the unshallowed history above to reach the
+      # PR head tree and the merge base; body and SHAs cross the boundary as env, never
+      # as shell arguments.
+      - name: Validate pull request body file references
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/ci/validate-pr-body-file-refs.mjs
+
       - name: Install Node dependencies
         run: npm ci
 

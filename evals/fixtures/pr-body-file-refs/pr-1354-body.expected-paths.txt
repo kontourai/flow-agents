@@ -1,0 +1,2 @@
+evals/integration/test_init_uninstall.sh
+src/cli/console-connect-options.test.mjs
