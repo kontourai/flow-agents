@@ -120,6 +120,213 @@ the `session.usage` event.
 | `delegations[]` | array | per-sub-agent delegation facts + derived outcome (#415) — see below; `[]` when `--agents-dir` is absent |
 | `signals` | object | harness-capability declaration — what telemetry this runtime exposed (see below + `harness-capability-matrix.md`) |
 | `tenant_id` | string\|null | self-description only; the `ApiSink` stamps the authoritative tenant (ADR 0003 call 2) |
+| `terminal_status` | enum\|absent | honest run-termination taxonomy (#925) — see below. Present only on `flow_run_record`-produced records today; optional/additive on `0.2`. |
+| `tokens_unattributed` | boolean\|absent | `true` when one or more `phases[]` entries carry `null` token fields (no attribution source available for them). Optional/additive on `0.2`. |
+
+## The economics log is a MULTI-PRODUCER stream — select by producer, never by position
+
+**Hard requirement for every consumer.** A single Builder Stop appends **two** records to the same
+`economics.jsonl`: the legacy session.usage-derived record and the canonical Flow-run-derived one.
+They are written by two independent detached processes, so **their append order is a race** — there
+is no "the last record" to read.
+
+A consumer MUST select the record family it means by `producer_authority` before reading any field:
+
+```sh
+# the legacy authenticated-session record
+jq -c 'select(.producer_authority != "flow_run_record")' economics.jsonl | tail -1
+# the canonical Flow-run-derived record
+jq -c 'select(.producer_authority == "flow_run_record")' economics.jsonl | tail -1
+```
+
+`tail -1` / `.at(-1)` on the raw file was only ever correct while exactly one producer wrote here.
+This was not hypothetical: enabling the second producer turned three positional consumers red at
+once (two integration evals and the effectiveness-loop demo report), each silently reading the
+wrong record family — a `run_correlation.correlation_id` that reads `null` because the record it
+landed on never carried one. The `producer_authority` field exists precisely to make this
+selection explicit; a consumer that ignores it is reading whichever process happened to finish
+first.
+
+Aggregating consumers have a second obligation: the two records describe the SAME run from
+incompatible vantage points (unknown vs attributed cost; pause-subtracted active duration vs
+session duration). Counting both inflates run counts and corrupts every average. See
+`docs/specs/learning-review-proposals-contract.md` for how that analyzer scopes its population.
+
+## `flow_run_record` mode — deriving from the canonical Flow run store (#922/#925 phase A)
+
+**Problem this repairs.** Every historical record before this change carried `run_id: "unknown"`
+(a runtime *session* id, not a Flow run id — unjoinable to `.kontourai/flow/runs/<run-id>/`),
+`producer_authority: "unavailable"`, and exactly one `{"phase":"unattributed", ...}` phase entry —
+zero of the ~1,180 records on record ever attributed real per-phase cost or an honest terminal
+outcome. Root cause: the emitter only ever read the `session.usage` event and the Builder
+workflow *sidecar* (`--state`/`--critique`, a task-slug-directory JSON distinct from Flow's own run
+store) — it never read the Flow run's own `state.json`, which is the one place a run's real
+step-by-step transition history, route-backs, and lifecycle (pause/resume/cancel) actually live.
+
+**The new source.** `economics-record.sh --flow-run-dir <path/to/.kontourai/flow/runs/RUN_ID>`
+bypasses the `session.usage`-event path entirely (no positional event / stdin required) and calls
+`scripts/telemetry/flow-run-economics.mjs`, which reads `state.json` (validated against
+`schemas/flow-run.schema.json`'s shape: `schema_version`, `run_id`, `status`, `current_step`,
+`transitions[]`, optionally `lifecycle[]` / `gate_outcome_history[]`) plus checks for
+`evidence/manifest.json`. Everything below is **derived, never fabricated**; an unreadable or
+malformed run directory yields **no record at all** (fail-open no-op, consistent with the rest of
+this emitter), never a guessed one.
+
+- **`run_id`** — the Flow run id (`state.run_id`, the run directory's own basename) — joinable to
+  `.kontourai/flow/runs/<run-id>/` directly. `run_correlation` stays an explicit
+  `{"status":"incomplete","reason":"..."}` in this mode: no runtime session is known here, and this
+  mode never conflates the Flow run id with a session id (per #922's boundary). Binding a real
+  session identity into `run_correlation.identities.runtime_session` alongside `flow_run` is
+  **out of scope for phase A** — see "What phase A does NOT do" below.
+- **`terminal_status`** (#925 taxonomy) — the canonical Flow `status` observed at record time.
+  All recognized values map straight across: `completed`, `canceled`, `failed`,
+  `accepted_by_exception`, `active`, `blocked`, `needs_decision`, and `paused`. In particular, an
+  active run records `terminal_status: "active"`, never `active_abandoned`: a snapshot cannot
+  establish that nobody intends to continue the run. `active_abandoned` is not emitted unless a
+  future producer declares and proves a staleness-at-run-close derivation. This mode never reports
+  a non-terminal run as `completed`.
+- **`phases[]`** — one bucket per Builder step actually visited, walked from `transitions[].at`
+  timestamps: the interval between transition *i-1* and transition *i* is attributed to the step
+  transition *i-1* moved the run **into** (`to_step`, or the unchanged step when a transition
+  blocked in place). Route-back re-entries into the same step accumulate onto the **same** bucket
+  (a real run's `execute` phase, for example, sums every execute↔verify route-back loop into one
+  total). The step active **before the first transition** is never attributed a duration — there is
+  no observed entry timestamp for it, and this tool does not estimate one from filesystem metadata
+  or a run "start" convention Flow does not itself record. A zero-duration interval (two transitions
+  sharing the identical timestamp) is excluded from `phases[]` entirely rather than emitted as a
+  phantom `0`-duration entry (`endMs > startMs`, strictly). `input_tokens`/`output_tokens`/
+  `cache_creation_input_tokens`/`cache_read_input_tokens`/`estimated_cost_usd` are `null` (not `0`)
+  on every phase in this mode, tagged `source: "flow-run-record"` — token attribution is a wholly
+  separate, explicit step (see `economics-enrich-tokens.mjs` below), never auto-run here. The
+  top-level `tokens_unattributed` is `true` whenever any phase has `null` tokens (always true today,
+  since this mode never merges in transcript-derived tokens automatically).
+  - **`wall_clock_s` is ACTIVE time, not raw calendar time (#925 review finding 2).** Every raw
+    inter-transition window is intersected against the run's real lifecycle pause intervals
+    (`derivePauseIntervals`, the same intervals `time.human_wait_s` sums below) and the overlap is
+    **subtracted** before attribution. This was confirmed live against a currently-paused production
+    run (`kontourai-flow-agents-944`): its `execute` phase's raw calendar span was ~1,256,160s
+    (≈14.5 days), of which ~1,256,102s (99.995%) was a single unresumed pause — the genuine execute
+    activity before that pause was ~58s. Reporting the raw span as `wall_clock_s` would have told a
+    dashboard "the execute phase took 14.5 days," which is not a measurement of work, it is a
+    measurement of how long an operator left the run paused. **`phases[].human_wait_s`** is the
+    subtracted portion, attributed to whichever phase(s) it overlapped — a per-phase breakdown of
+    the same total `time.human_wait_s` reports; it may sum to slightly less than that top-level
+    total in the one disclosed edge case where a pause falls in the undropped pre-first-transition
+    gap above (no phase window exists yet to attribute it to). `time.wall_clock_s` is the sum of
+    `phases[].wall_clock_s` (now genuinely active time), preserving the phase-sum invariant on the
+    *active* total, not the raw one.
+- **`iterations.route_backs`** — count of `transitions[]` entries with `type == "route_back"`
+  (Flow's own route-back ledger entry, `schemas/flow-run.schema.json` transition `$defs`).
+  **`iterations.count`** — `route_backs + 1` (the initial pass, plus one additional pass per
+  route-back), per this contract's "deliver-loop passes" definition.
+- **`defects.gate_fires`** — from the append-only `gate_outcome_history[]` ledger (entries with
+  `status` `block`/`route-back`) when the run has one; legacy runs that predate that ledger fall
+  back to counting `transitions[]` entries with `status == "blocked"` (every route-back or in-place
+  block is itself a gate firing against the run). Both paths are exercised by dedicated fixtures
+  (`evals/fixtures/economics/run-binding/routeback-completed` carries a real-shaped
+  `gate_outcome_history`, mirroring production run `kontourai-flow-agents-1206`'s ledger, so the
+  `gate_outcome_history`-preferred branch is not just reachable but actually reached by the eval).
+- **`defects.verification_verdict`** — the **last** transition departing the `verify` step, bounded
+  by whether the run ever reached a terminal state: `PASS` if that last transition is `allowed`;
+  `FAIL` only if it is `blocked` **and** the run has since terminated without a later pass (a block
+  that is still open on a non-terminal run is `NOT_VERIFIED`, not `FAIL` — the run has
+  not finished attempting verification); `NOT_VERIFIED` if `verify` was never reached.
+- **`time.human_wait_s`** — real pause→resume (and pause→cancel, and an still-open pause→`now`)
+  intervals summed from the run's `lifecycle[]` ledger. This is the TRUE total, independent of
+  phase-window attribution (see `phases[].human_wait_s` above).
+- **`producer_authority: "flow_run_record"`** — a new enum value distinct from
+  `authenticated_runtime_binding`. This mode reads real on-disk Flow run state (not a
+  caller-fabricated event pretending to be validated), so it does **not** require
+  `FLOW_AGENTS_ECONOMICS_FIXTURE_MODE`; it is, however, **local-only** — `economics-record.sh` never
+  attempts a console relay for a `flow_run_record` producer regardless of
+  `FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY`, since that authority level is not (yet) an authenticated
+  runtime binding console can trust as a de-duplicable per-run fact. The production Stop hook
+  automatically emits this local-only record when its authenticated Builder snapshot identifies a
+  matching canonical Flow run; it remains separate from the legacy session.usage record and is not
+  relayable. To avoid appending a terminal run forever on later Stops, the emitter suppresses an
+  identical matching `flow_run_record` for the same `run_id` found in the log's last 1000 lines;
+  records outside that bounded tail may duplicate benignly rather than causing an unbounded scan.
+- **Top-level `cost.*` preserves `null`, never coalesces to a fabricated `0` (#925 review finding
+  3).** Scope honesty: this holds at the EMITTER. At least one downstream aggregate
+  (`learning-review-proposals.sh`) still coalesces `null // 0` when consuming `economics.jsonl` —
+  tracked in #1225; the never-fabricate property is not yet system-wide. When `tokens_unattributed` is `true` (any phase has `null` tokens — always true today, since
+  this mode never auto-merges transcript-derived tokens), every top-level `cost.input_tokens` /
+  `output_tokens` / `cache_creation_input_tokens` / `cache_read_input_tokens` /
+  `estimated_cost_usd` is **`null`**, not a summed-with-nulls-as-zero `0`. `cost` stays a *required*
+  key (present as an object) even when every leaf is `null` — the leaves were widened to allow
+  `null` (matching `phases[]`) rather than making the whole `cost` block optional/absent, because
+  (a) it keeps the R7 Goodhart guard's "cost and defects are co-required" structurally intact (see
+  below), and (b) an existing consumer keeps the same `.cost.input_tokens` access path and only
+  needs to add a `null` check — the same pattern `phases[]` already teaches — rather than also
+  needing an existence check on `cost` itself. `estimated_cost_usd` is unconditionally `null` in
+  this mode regardless of token attribution: pricing is never attempted here (see "What phase A does
+  NOT do" below).
+- **Unrecognized `status` values are REFUSED, never silently bucketed (#925 review finding 5).** The
+  Flow `status` enum has already grown once between an earlier working copy and the pinned
+  `@kontourai/flow@3.9.0` dependency (`paused`/`canceled`/`lifecycle`/`gate_outcome_history`/
+  `multi_cursor` are all new). A `state.status` value outside the eight known values
+  (`active`/`blocked`/`needs_decision`/`paused`/`canceled`/`completed`/`failed`/
+  `accepted_by_exception`) makes `deriveFlowRunEconomics` return `{ok:false, reason:"..."}` — no
+  record is produced — rather than silently guessing a status.
+- **Active `multi_cursor` concurrent step claims are REFUSED, never silently mis-windowed (#925
+  review finding 5 / finding 10).** The installed Flow schema supports durable concurrent step
+  claims (`multi_cursor.active_claims`/`claim_history`) for hosts running more than one cursor
+  through a run. This tool's single-cursor, one-phase-active-between-any-two-transitions model has
+  no awareness of concurrency — if a claim ledger is genuinely non-empty, phase-window derivation
+  would silently attribute wrong, overlapping windows. `deriveFlowRunEconomics` refuses
+  (`ok:false`) whenever `multi_cursor.active_claims` or `multi_cursor.claim_history` is non-empty.
+  Every real run inspected to date carries an empty, inert `multi_cursor` ledger, so this has never
+  fired in production; it is a forward guard, not a retrofit for an observed failure.
+
+**Token attribution — `economics-enrich-tokens.mjs` (optional, separate tool).**
+`scripts/telemetry/economics-enrich-tokens.mjs --transcript <path> --windows-json <path>` streams a
+runtime transcript (JSONL, one `{"type":"assistant","timestamp":...,"message":{"usage":{...}}}` line
+per turn — the same shape `scripts/telemetry/lib/usage.sh`'s `usage_parse_transcript` already reads)
+with `node:readline` (constant memory regardless of transcript size) and sums each assistant turn's
+real `.message.usage` block into whichever phase window (`{phase, start, end}` — the exact
+`phase_windows` `flow-run-economics.mjs` already computed from transition timestamps) its
+`timestamp` falls inside. Malformed lines are counted (`malformed_lines_skipped`) and skipped, never
+fatal. A transcript is **never auto-discovered** — the caller passes `--transcript` explicitly (no
+cwd/path/time/"most recent" heuristic — see #922's boundary on heuristic joins). A phase window with
+no matching lines, or a missing/unreadable transcript, is absence of a signal and is **never**
+reported as a real zero: token fields for phases the slicer could not attribute stay out of its
+output entirely, leaving the caller's `null` + `tokens_unattributed:true` in place.
+
+**`isSidechain` (subagent turns) — explicit, disclosed design decision (#925 review finding 6).**
+Real transcripts carry an `isSidechain` boolean on every assistant turn (subagent/delegated turns).
+`economics-enrich-tokens.mjs` does **not** filter on it — sidechain turns are **included** in phase
+sums, matching `/Users/brian/dev/github/kontourai/builder-rebuild/baseline/BASELINE.md`'s Phase-0
+burn definition (burn = total token consumption regardless of orchestrator-vs-delegated turn, not an
+orchestrator-only subset). The output's `duplicate_usage_lines_skipped` (responses seen on more than one transcript line and counted once — see #1275), `sidechain_usage_lines_included` count discloses how many of
+the matched lines were sidechain turns, so a consumer can see the inclusion rather than infer it.
+This is a deliberate choice for *this* producer's burn accounting, distinct from — and not a
+substitute for — the `delegations[]` per-sub-agent routing facts elsewhere in this record, which
+still carry no per-delegation cost (`signals.per_delegation_tokens`).
+
+**What phase A does NOT do (deferred to #922/#925 phase B).** `economics-record.sh`'s
+`--flow-run-dir` mode does not itself invoke `economics-enrich-tokens.mjs` or merge its output in —
+the two tools are independently runnable and independently tested; gluing them together
+automatically (and replacing today's session.usage-event path with a Flow-run-derived one
+end-to-end) is explicit phase-B follow-up. The Stop hook now emits both records when authenticated:
+the legacy record remains session.usage-derived, while this local-only Flow snapshot stays separate.
+Phase A also does not bind a real runtime session identity into this mode's `run_correlation` (it
+stays `incomplete`), and does not attempt cost pricing for flow-run-record-mode tokens
+(`cost.estimated_cost_usd` stays `null` — see "Top-level `cost.*` preserves `null`" above — not a
+fabricated `0`).
+
+**Schema additivity is one-directional, not bidirectional (#925 review finding 7).** "Additive on
+v0.2" in this contract means: an **old-shape record still validates under the NEW schema** (forward
+compatible — a v0.2 consumer reading historical records is unaffected), and old **readers** of the
+record stream are unaffected because nothing required was removed or narrowed. It does **not** mean
+a **new-shape record** (e.g. `producer_authority: "flow_run_record"`, `phases[].input_tokens: null`)
+validates under any schema consumer still pinning the **pre-this-change** `economics-record.schema.json`
+— widening an enum or a type is inherently one-directional. This is expected, not a defect;
+`evals/integration/test_economics_run_binding.sh` pins the forward-compatible direction as a
+regression guard (the pre-existing golden fixture record validates under the new schema). If another
+repo (e.g. console) vendors its own copy of this schema file and validates incoming/archived records
+against it independently, that copy must be updated to accept `flow_run_record`-mode records before
+it starts receiving them — today it cannot, because this producer never reaches the console (see
+"local-only" above).
 
 ## `delegations[]` — per-sub-agent routing facts + outcome (#415)
 

@@ -48,7 +48,7 @@ parse_runtime_args() {
     case "$1" in
       --runtime)
         if [[ -z "${2:-}" ]]; then
-          echo "--runtime requires kiro or codex" >&2
+          echo "--runtime requires kiro, codex, claude, opencode, pi, or strands" >&2
           exit 1
         fi
         RUNTIME="$2"
@@ -60,7 +60,7 @@ parse_runtime_args() {
         ;;
       --judge-runtime)
         if [[ -z "${2:-}" ]]; then
-          echo "--judge-runtime requires kiro, codex, or claude" >&2
+          echo "--judge-runtime requires kiro, codex, claude, opencode, pi, or strands" >&2
           exit 1
         fi
         JUDGE_RUNTIME="$2"
@@ -89,17 +89,17 @@ parse_runtime_args() {
     esac
   done
   case "$RUNTIME" in
-    kiro|Claude\ Code|codex|claude|claude-code) ;;
+    kiro|Claude\ Code|codex|claude|claude-code|opencode|pi|strands|strands-local) ;;
     *)
-      echo "Unsupported eval runtime '$RUNTIME' (expected kiro, codex, or claude)" >&2
+      echo "Unsupported eval runtime '$RUNTIME' (expected kiro, codex, claude, opencode, pi, strands)" >&2
       exit 1
       ;;
   esac
   JUDGE_RUNTIME="${JUDGE_RUNTIME:-$RUNTIME}"
   case "$JUDGE_RUNTIME" in
-    kiro|Claude\ Code|codex|claude|claude-code) ;;
+    kiro|Claude\ Code|codex|claude|claude-code|opencode|pi|strands|strands-local) ;;
     *)
-      echo "Unsupported judge runtime '$JUDGE_RUNTIME' (expected kiro, codex, or claude)" >&2
+      echo "Unsupported judge runtime '$JUDGE_RUNTIME' (expected kiro, codex, claude, opencode, pi, strands)" >&2
       exit 1
       ;;
   esac
@@ -130,6 +130,7 @@ run_static() {
   echo "╚══════════════════════════════════════╝"
   local result=0
   bash "$EVAL_DIR/static/test_package.sh" || result=1
+  bash "$EVAL_DIR/static/test_eval_console_isolation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_universal_bundles.sh" || result=1
   echo ""
@@ -150,6 +151,8 @@ run_static() {
   bash "$EVAL_DIR/static/test_flowdef_codeowners_coverage.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_ci_integration_coverage.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/static/test_ci_check_registration.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_pr_title_validation.sh" || result=1
   echo ""
@@ -207,11 +210,25 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_hook.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_stop_gate_summary_record.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_goal_fit_config.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_escape_hatch.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_rederive.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_evidence_capture_hook.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_hook_certification_matrix.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_gate_certification_matrix.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_artifact_residue_ignored.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_cli_diagnostic_quality.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_measurement_trend.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_hook_category_behaviors.sh" || result=1
   echo ""
@@ -257,7 +274,11 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_economics_record.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_economics_run_binding.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_console_board_sync.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_console_declared_projection.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_learning_review_proposals.sh" || result=1
   echo ""
@@ -299,6 +320,10 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_bundle_lifecycle.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_init_uninstall.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_kit_activation.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_kit_conformance_levels.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_dual_emit_flow_step.sh" || result=1
@@ -309,9 +334,17 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_builder_step_producers.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_builder_flow_completion.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_golden_run_e2e.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_effectiveness_loop_demo.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_flowdef_session_history_preservation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_critique_supersession_roundtrip.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_wedge_830_squash_critique.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_flowdef_session_activation.sh" || result=1
   bash "$EVAL_DIR/integration/test_builder_entry_enforcement.sh" || result=1

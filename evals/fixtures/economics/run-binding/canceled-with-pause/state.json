@@ -1,0 +1,76 @@
+{
+  "schema_version": "0.1",
+  "run_id": "econ-fixture-canceled-with-pause",
+  "definition_id": "builder.build",
+  "definition_version": "1.4",
+  "subject": "econ-fixture/canceled-with-pause",
+  "status": "canceled",
+  "current_step": "plan",
+  "params": {},
+  "next_action": "none",
+  "updated_at": "2026-02-03T00:01:45.000Z",
+  "gate_outcomes": [],
+  "transitions": [
+    {
+      "from_step": "pull-work",
+      "to_step": "design-probe",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "pull-work-gate",
+      "at": "2026-02-03T00:00:00.000Z"
+    },
+    {
+      "from_step": "design-probe",
+      "to_step": "plan",
+      "status": "allowed",
+      "reason": "required evidence present",
+      "gate_id": "design-probe-gate",
+      "at": "2026-02-03T00:00:50.000Z"
+    }
+  ],
+  "lifecycle": [
+    {
+      "action": "pause",
+      "from_status": "active",
+      "to_status": "paused",
+      "prior_status": "active",
+      "reason": "operator paused the run",
+      "at": "2026-02-03T00:01:00.000Z",
+      "authority": {
+        "kind": "user_request",
+        "actor": "econ-fixture",
+        "request_ref": "fixture://pause-1",
+        "requested_at": "2026-02-03T00:01:00.000Z"
+      }
+    },
+    {
+      "action": "resume",
+      "from_status": "paused",
+      "to_status": "active",
+      "prior_status": "active",
+      "reason": "operator resumed the run",
+      "at": "2026-02-03T00:01:40.000Z",
+      "authority": {
+        "kind": "user_request",
+        "actor": "econ-fixture",
+        "request_ref": "fixture://resume-1",
+        "requested_at": "2026-02-03T00:01:40.000Z"
+      }
+    },
+    {
+      "action": "cancel",
+      "from_status": "active",
+      "to_status": "canceled",
+      "prior_status": "active",
+      "reason": "fixture cancel: exercising the canceled terminal_status mapping",
+      "at": "2026-02-03T00:01:45.000Z",
+      "authority": {
+        "kind": "user_request",
+        "actor": "econ-fixture",
+        "request_ref": "fixture://cancel-1",
+        "requested_at": "2026-02-03T00:01:45.000Z"
+      }
+    }
+  ],
+  "exceptions": []
+}

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { assertPreparedNonceRecord, assignmentActorsMatch, canonicalJson, inProjectTransaction, recoverMatchingTransaction, recoverTransaction, restoreTree, sha256, snapshotTree, validateEnvelope } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const request = { action: "cancel", project_root: "/srv/project", session_dir: "/srv/project/.kontourai/flow-agents/run-1", authorization_file: "/etc/kontourai/request.json" };
 const envelope = { schema_version: "1.0", action: "cancel", request_sha256: sha256(request), request };
@@ -36,19 +37,27 @@ test("reference coordinator pins the published Flow reducer identity rather than
   const pin = JSON.parse(fs.readFileSync(new URL("../../packaging/lifecycle-authority/flow-reducer-v1.json", import.meta.url), "utf8"));
   assert.deepEqual(pin, {
     package: "@kontourai/flow",
-    package_version: "3.9.0",
-    release_commit: "a7c101f",
-    closure_sha256: "244c750836148bd3f5a43681a712f86d8eb24f29238bd44b4fceb9636151f1a1",
+    package_version: "5.0.0",
+    release_commit: "99f139b",
+    closure_sha256: "fc514563c79e01ef9087e1e5650c8d10892faa6b5b2fd342a9e5c14d7f838e69",
     reducer: {
       artifact_id: "kontourai.flow.trust-attachment-reducer",
-      version: "1.0.0",
-      dependency_versions: { hachure: "0.15.0", surface: "2.12.0" },
-      hash: "sha256:389ef9d5d0995adcd74a8d51780b438e43d16a46dfb6d0882aad6010a1a2e0bd",
+      version: "1.3.7",
+      dependency_versions: { hachure: "0.15.0", surface: "2.14.0" },
+      dependency_integrities: {
+        hachure: { validate: "sha256:596c2a02b6e60e52ad4378a97c40b1d84d217dfc203a7a3beb7cfe732c68951d" },
+        surface: {
+          validate: "sha256:b92aeb5f9c43d8d1d7fd811184dae6bf3f3fdc1297e833a8a0fb89a0e88d4299",
+          buildReport: "sha256:f6171f742231ac4eb9181ac7b5cbbed767802abd609447af465a7c53773e4e36",
+          checkAuthorityActive: "sha256:a178202300849b421527fb0972d2fc2b98b0340fb9332578556e206046e49b04",
+        },
+      },
+      hash: "sha256:66979295847695639e21a8d563544c2f03a5107616712ddabab748db0f3ea97d",
     },
   });
 });
 test("transaction snapshot restores an interrupted unprivileged artifact update", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-transaction-"));
+  const root = makeFixtureDir("lifecycle-transaction-");
   try {
     fs.mkdirSync(path.join(root, "nested"));
     fs.writeFileSync(path.join(root, "bundle.json"), "before\n");
@@ -63,7 +72,7 @@ test("transaction snapshot restores an interrupted unprivileged artifact update"
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 test("transaction snapshots preserve Flow's published lock and pending-ticket namespaces", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-flow-lock-namespace-"));
+  const root = makeFixtureDir("lifecycle-flow-lock-namespace-");
   const pendingName = "..mutation.lock.pending-12345678-1234-4123-8123-123456789abc";
   try {
     fs.mkdirSync(path.join(root, ".mutation.lock"));
@@ -89,7 +98,7 @@ test("transaction snapshots preserve Flow's published lock and pending-ticket na
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 test("prepared root retry rolls a committed child transaction back to its signed preimage", () => {
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-committed-retry-"));
+  const project = makeFixtureDir("lifecycle-committed-retry-");
   try {
     const sessionDir = path.join(project, ".kontourai", "flow-agents", "run-1");
     const flowDir = path.join(project, ".kontourai", "flow", "runs", "run-1");
@@ -105,7 +114,7 @@ test("prepared root retry rolls a committed child transaction back to its signed
   } finally { fs.rmSync(project, { recursive: true, force: true }); }
 });
 test("a committed journal from operation A is inert when ordinary operation B starts", async () => {
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-successor-operation-"));
+  const project = makeFixtureDir("lifecycle-successor-operation-");
   try {
     const sessionDir = path.join(project, ".kontourai", "flow-agents", "run-1");
     const flowDir = path.join(project, ".kontourai", "flow", "runs", "run-1");
@@ -127,7 +136,7 @@ test("a committed journal from operation A is inert when ordinary operation B st
   } finally { fs.rmSync(project, { recursive: true, force: true }); }
 });
 test("crash-window recovery authenticates the exact prepared nonce before rolling back the matching commit", () => {
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-crash-window-"));
+  const project = makeFixtureDir("lifecycle-crash-window-");
   try {
     const sessionDir = path.join(project, ".kontourai", "flow-agents", "run-1");
     const flowDir = path.join(project, ".kontourai", "flow", "runs", "run-1");
@@ -150,7 +159,7 @@ test("crash-window recovery authenticates the exact prepared nonce before rollin
   } finally { fs.rmSync(project, { recursive: true, force: true }); }
 });
 test("a later prepared operation never rolls back an earlier committed journal", () => {
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-distinct-retry-"));
+  const project = makeFixtureDir("lifecycle-distinct-retry-");
   try {
     const sessionDir = path.join(project, ".kontourai", "flow-agents", "run-1"), flowDir = path.join(project, ".kontourai", "flow", "runs", "run-1");
     fs.mkdirSync(sessionDir, { recursive: true }); fs.mkdirSync(flowDir, { recursive: true });
@@ -169,14 +178,14 @@ test("a later prepared operation never rolls back an earlier committed journal",
   } finally { fs.rmSync(project, { recursive: true, force: true }); }
 });
 test("transaction snapshot rejects symlink swap paths", () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-symlink-"));
+  const root = makeFixtureDir("lifecycle-symlink-");
   try {
     fs.symlinkSync("/etc/passwd", path.join(root, "escape"));
     assert.throws(() => snapshotTree(root), /refuses symlinked artifact paths/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 test("prepared transaction journal deterministically recovers both session and Flow artifacts", () => {
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), "lifecycle-recovery-"));
+  const project = makeFixtureDir("lifecycle-recovery-");
   const sessionDir = path.join(project, ".kontourai", "flow-agents", "run-1");
   const flowRoot = path.join(project, ".kontourai", "flow", "runs", "run-1");
   try {

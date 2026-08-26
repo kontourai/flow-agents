@@ -4,8 +4,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { flagBool, flagString, parseArgs } from "../lib/args.js";
 import { validateSchemaValue, type Issue } from "../lib/mini-json-schema.js";
+import { githubWorkItemIdentity } from "../lib/work-item-identity.js";
+import { renderGithubClaim, resolveCurrentAssignmentActor, type AssignmentRenderResult } from "./assignment-provider.js";
 
 export type ProviderScope = "project" | "global";
 
@@ -17,10 +20,79 @@ export type ProviderBootstrapOptions = {
   projectNumber?: number;
   online?: boolean;
   ghBin?: string;
+  workItemRef?: string;
+  providerLogin?: string;
+  providerBranch?: string;
+  artifactRoot?: string;
+  rewriteSettings?: boolean;
 };
 
 type Repo = { owner: string; name: string; url: string };
 type Project = { number: number; title?: string; url?: string };
+type ProviderPickupPreflight = {
+  identity: ReturnType<typeof githubWorkItemIdentity>;
+  branch: string;
+  actor: ReturnType<typeof resolveCurrentAssignmentActor>;
+  login?: string;
+  requestedArtifactRoot: string;
+};
+
+export type ProviderPickupPlan = {
+  schema_version: "1.0";
+  role: "ProviderPickupPlan";
+  work_item_ref: string;
+  slug: string;
+  artifact_root: string;
+  session_dir: string;
+  provider_branch: string;
+  actor: ReturnType<typeof resolveCurrentAssignmentActor>;
+  claim: AssignmentRenderResult;
+  artifacts: {
+    plan_file: string;
+    actor_file: string;
+    claim_input_file: string;
+    issue_snapshot_file: string;
+    liveness_events_file: string;
+    effective_state_file: string;
+  };
+  operations: {
+    claim: string[][];
+    observe_issue: { argv: string[]; stdout_file: string };
+    derive_effective_state: { argv: string[]; stdout_file: string };
+    start_workflow: { argv: string[] };
+  };
+};
+
+type PreparedProviderPickup = {
+  plan: ProviderPickupPlan;
+  claimInput: {
+    repo: { owner: string; name: string };
+    issue_number: number;
+    assignee_login: string;
+    label_name: string;
+    claim_comment_marker: string;
+    actor_key: string;
+    work_item_ref: string;
+    branch: string;
+    artifact_dir: string;
+  };
+};
+
+type ProviderBootstrapTestHooks = {
+  afterLocksAcquired?: () => void;
+  beforeStageWrite?: (file: string, index: number) => void;
+  beforeCommit?: (file: string, index: number) => void;
+};
+
+let providerBootstrapTestHooks: ProviderBootstrapTestHooks | null = null;
+
+export function setProviderBootstrapTestHooksForTest(hooks: ProviderBootstrapTestHooks | null): void {
+  providerBootstrapTestHooks = hooks;
+}
+
+type PublicationRoot = { root: string; lock: string; rootStat: fs.Stats };
+type PublicationItem = { file: string; value: unknown; guard: PublicationRoot };
+type FilePreimage = { bytes: Buffer; mode: number } | null;
 
 const SETTINGS = [
   ["backlog-provider-settings.json", "backlog-provider-settings.schema.json"],
@@ -82,6 +154,229 @@ function ensureGhAuth(ghBin: string): void {
   }
 }
 
+function currentGitBranch(repoPath: string): string {
+  let branch: string;
+  try {
+    branch = execFileSync("git", ["-C", repoPath, "symbolic-ref", "--quiet", "--short", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    throw new Error("provider pickup requires a named Git worktree branch; detached HEAD is not a safe assignment authority");
+  }
+  if (!branch || branch === "HEAD") throw new Error("provider pickup requires a named Git worktree branch");
+  return branch;
+}
+
+function currentGitHubLogin(ghBin: string): string {
+  const value = ghJson(ghBin, ["api", "user"]) as Record<string, unknown>;
+  if (typeof value.login !== "string" || !value.login) throw new Error("GitHub provider discovery did not return the authenticated login");
+  return value.login;
+}
+
+function assertJsonAbsentOrExact(file: string, value: unknown): void {
+  if (!fs.existsSync(file)) return;
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${file}: provider pickup artifact must be a regular file`);
+  const bytes = `${JSON.stringify(value, null, 2)}\n`;
+  if (fs.readFileSync(file, "utf8") !== bytes) throw new Error(`${file}: existing provider pickup artifact does not match the exact canonical inputs`);
+}
+
+function preflightProviderPickup(options: ProviderBootstrapOptions, repo: Repo): ProviderPickupPreflight | null {
+  if (!options.workItemRef) return null;
+  const identity = githubWorkItemIdentity(options.workItemRef);
+  if (identity.owner !== repo.owner || identity.name !== repo.name) {
+    throw new Error(`Work Item ${options.workItemRef} does not belong to detected repository ${repo.owner}/${repo.name}`);
+  }
+  const branch = currentGitBranch(options.repoPath);
+  if (options.providerBranch !== undefined && options.providerBranch !== branch) {
+    throw new Error(`provider branch ${JSON.stringify(options.providerBranch)} does not match the actual Git worktree branch ${JSON.stringify(branch)}`);
+  }
+  const actor = resolveCurrentAssignmentActor();
+  const requestedArtifactRoot = path.resolve(options.artifactRoot ?? path.join(options.repoPath, ".kontourai", "flow-agents"));
+  const repository = path.resolve(options.repoPath);
+  const canonicalArtifactRoot = path.join(repository, ".kontourai", "flow-agents");
+  if (requestedArtifactRoot !== canonicalArtifactRoot) {
+    throw new Error("provider pickup artifact root must be the canonical <repository>/.kontourai/flow-agents path");
+  }
+  const relative = path.relative(repository, requestedArtifactRoot);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("provider pickup artifact root must stay inside the repository");
+  }
+  let cursor = repository;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, segment);
+    if (!fs.existsSync(cursor)) break;
+    if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error(`provider pickup artifact path contains a symbolic link: ${cursor}`);
+  }
+  const sessionDir = path.join(requestedArtifactRoot, identity.slug);
+  if (fs.existsSync(sessionDir)) {
+    const stat = fs.lstatSync(sessionDir);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("provider pickup session target must be a regular directory");
+  }
+  return { identity, branch, actor, login: options.providerLogin, requestedArtifactRoot };
+}
+
+function completeProviderPickupPreflight(options: ProviderBootstrapOptions, preflight: ProviderPickupPreflight | null): ProviderPickupPreflight | null {
+  if (!preflight) return null;
+  const login = preflight.login ?? (options.online ? currentGitHubLogin(options.ghBin ?? "gh") : undefined);
+  if (!login) throw new Error("provider pickup requires --provider-login when --online is not enabled");
+  return { ...preflight, login };
+}
+
+function assertCurrentProviderWorktreeBranch(repoPath: string, expectedBranch: string): void {
+  const actualBranch = currentGitBranch(repoPath);
+  if (actualBranch !== expectedBranch) {
+    throw new Error(`actual Git worktree branch ${JSON.stringify(actualBranch)} no longer matches provider pickup branch ${JSON.stringify(expectedBranch)}`);
+  }
+}
+
+function assertExistingProviderPickupPlanIdentity(preflight: ProviderPickupPreflight): void {
+  const planFile = path.join(preflight.requestedArtifactRoot, preflight.identity.slug, "provider-pickup.json");
+  if (!fs.existsSync(planFile)) return;
+  const stat = fs.lstatSync(planFile);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${planFile}: provider pickup artifact must be a regular file`);
+  const existing = JSON.parse(fs.readFileSync(planFile, "utf8")) as Partial<ProviderPickupPlan>;
+  if (existing.role !== "ProviderPickupPlan"
+      || existing.work_item_ref !== preflight.identity.ref
+      || existing.provider_branch !== preflight.branch
+      || existing.actor?.actorKey !== preflight.actor.actorKey
+      || typeof existing.claim?.record?.claimed_at !== "string") {
+    throw new Error("existing provider pickup plan does not match the current Work Item, branch, and actor");
+  }
+}
+
+function providerPickupPlan(repo: Repo, preflight: ProviderPickupPreflight): PreparedProviderPickup {
+  const { identity, branch, actor, login } = preflight;
+  if (!login) throw new Error("provider pickup requires a resolved provider login");
+  const artifactRoot = preflight.requestedArtifactRoot;
+  const sessionDir = path.join(artifactRoot, identity.slug);
+  const artifacts = {
+    plan_file: path.join(sessionDir, "provider-pickup.json"),
+    actor_file: path.join(sessionDir, "provider-pickup.actor.json"),
+    claim_input_file: path.join(sessionDir, "provider-pickup.claim-input.json"),
+    issue_snapshot_file: path.join(sessionDir, "provider-pickup.issue.json"),
+    liveness_events_file: path.join(sessionDir, "provider-pickup.liveness.json"),
+    effective_state_file: path.join(sessionDir, "provider-pickup.effective-state.json"),
+  };
+  const claimInput = {
+    repo: { owner: repo.owner, name: repo.name },
+    issue_number: identity.issueNumber,
+    assignee_login: login,
+    label_name: "agent:claimed",
+    claim_comment_marker: "<!-- flow-agents:assignment-claim -->",
+    actor_key: actor.actorKey,
+    work_item_ref: identity.ref,
+    branch,
+    artifact_dir: `.kontourai/flow-agents/${identity.slug}`,
+  };
+  let claimedAt: string | undefined;
+  if (fs.existsSync(artifacts.plan_file)) {
+    const stat = fs.lstatSync(artifacts.plan_file);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${artifacts.plan_file}: provider pickup artifact must be a regular file`);
+    const existing = JSON.parse(fs.readFileSync(artifacts.plan_file, "utf8")) as Partial<ProviderPickupPlan>;
+    if (existing.role !== "ProviderPickupPlan"
+        || existing.work_item_ref !== identity.ref
+        || existing.provider_branch !== branch
+        || existing.actor?.actorKey !== actor.actorKey
+        || typeof existing.claim?.record?.claimed_at !== "string") {
+      throw new Error("existing provider pickup plan does not match the current Work Item, branch, and actor");
+    }
+    claimedAt = existing.claim.record.claimed_at;
+  }
+  const claim = renderGithubClaim(identity.slug, claimInput, actor.actor, claimedAt);
+  const flowAgents = "flow-agents";
+  const plan: ProviderPickupPlan = {
+    schema_version: "1.0",
+    role: "ProviderPickupPlan",
+    work_item_ref: identity.ref,
+    slug: identity.slug,
+    artifact_root: artifactRoot,
+    session_dir: sessionDir,
+    provider_branch: branch,
+    actor,
+    claim,
+    artifacts,
+    operations: {
+      claim: claim.gh_commands,
+      observe_issue: {
+        argv: ["gh", "issue", "view", String(identity.issueNumber), "--repo", `${repo.owner}/${repo.name}`, "--json", "number,state,assignees,labels,comments"],
+        stdout_file: artifacts.issue_snapshot_file,
+      },
+      derive_effective_state: {
+        argv: [
+          flowAgents, "assignment-provider", "status",
+          "--provider", "github",
+          "--repo", `${repo.owner}/${repo.name}`,
+          "--issue-json", artifacts.issue_snapshot_file,
+          "--subject-id", identity.slug,
+          "--liveness-events-json", artifacts.liveness_events_file,
+          "--self-actor", actor.actorKey,
+        ],
+        stdout_file: artifacts.effective_state_file,
+      },
+      start_workflow: {
+        argv: [
+          flowAgents, "workflow", "start",
+          "--artifact-root", artifactRoot,
+          "--flow", "builder.build",
+          "--work-item", identity.ref,
+          "--assignment-provider", "github",
+          "--effective-state-json", artifacts.effective_state_file,
+        ],
+      },
+    },
+  };
+  return { plan, claimInput };
+}
+
+function assertProviderPickupArtifactCompatibility(prepared: PreparedProviderPickup): void {
+  const { plan, claimInput } = prepared;
+  assertJsonAbsentOrExact(plan.artifacts.actor_file, plan.actor.actor);
+  assertJsonAbsentOrExact(plan.artifacts.claim_input_file, claimInput);
+  assertJsonAbsentOrExact(plan.artifacts.liveness_events_file, []);
+  assertJsonAbsentOrExact(plan.artifacts.plan_file, plan);
+}
+
+function pickupPublicationItems(prepared: PreparedProviderPickup, guard: PublicationRoot): PublicationItem[] {
+  const { plan, claimInput } = prepared;
+  return [
+    { file: plan.artifacts.actor_file, value: plan.actor.actor, guard },
+    { file: plan.artifacts.claim_input_file, value: claimInput, guard },
+    { file: plan.artifacts.liveness_events_file, value: [], guard },
+    { file: plan.artifacts.plan_file, value: plan, guard },
+  ];
+}
+
+function pickupTransactionTargets(preflight: ProviderPickupPreflight, guard: PublicationRoot): PublicationItem[] {
+  const sessionDir = path.join(preflight.requestedArtifactRoot, preflight.identity.slug);
+  return ["provider-pickup.actor.json", "provider-pickup.claim-input.json", "provider-pickup.liveness.json", "provider-pickup.json"]
+    .map((name) => ({ file: path.join(sessionDir, name), value: null, guard }));
+}
+
+export function prepareProviderPickup(options: ProviderBootstrapOptions, repo: Repo): ProviderPickupPlan | null {
+  const initial = preflightProviderPickup(options, repo);
+  if (!initial) return null;
+  const createdDirectories = publicationDirectoryCandidates(options.repoPath, initial.requestedArtifactRoot, path.join(initial.requestedArtifactRoot, initial.identity.slug));
+  const sessionGuard = acquireProviderLock(path.join(initial.requestedArtifactRoot, initial.identity.slug));
+  const targets = pickupTransactionTargets(initial, sessionGuard);
+  const preimages = capturePublicationPreimages(targets);
+  const assertCurrentBranch = () => assertCurrentProviderWorktreeBranch(options.repoPath, initial.branch);
+  try {
+    providerBootstrapTestHooks?.afterLocksAcquired?.();
+    assertCurrentBranch();
+    assertPublicationPreimagesUnchanged(targets, preimages);
+    const preflight = completeProviderPickupPreflight(options, initial)!;
+    const prepared = providerPickupPlan(repo, preflight);
+    assertProviderPickupArtifactCompatibility(prepared);
+    publishLocalTransaction(pickupPublicationItems(prepared, sessionGuard), undefined, preimages, assertCurrentBranch);
+    return prepared.plan;
+  } finally {
+    releaseProviderLock(sessionGuard);
+    removeEmptyPublicationDirectories(createdDirectories);
+  }
+}
+
 function discoverProject(ghBin: string, owner: string, requested?: number): Project {
   const result = ghJson(ghBin, ["project", "list", "--owner", owner, "--limit", "100", "--format", "json"]) as { projects?: unknown };
   const projects = Array.isArray(result.projects)
@@ -123,11 +418,14 @@ function validateLabelName(value: unknown): string {
   return value;
 }
 
-function ensureClaimLabel(ghBin: string, repo: Repo, labelName: string): void {
+function claimLabelExists(ghBin: string, repo: Repo, labelName: string): boolean {
   const repository = `${repo.owner}/${repo.name}`;
   const labels = ghJson(ghBin, ["label", "list", "--repo", repository, `--search=${labelName}`, "--limit", "100", "--json", "name"]) as unknown[];
-  const exists = Array.isArray(labels) && labels.some((label) => label && typeof label === "object" && (label as Record<string, unknown>).name === labelName);
-  if (exists) return;
+  return Array.isArray(labels) && labels.some((label) => label && typeof label === "object" && (label as Record<string, unknown>).name === labelName);
+}
+
+function createClaimLabel(ghBin: string, repo: Repo, labelName: string): void {
+  const repository = `${repo.owner}/${repo.name}`;
   try {
     execFileSync(ghBin, [
       "label", "create",
@@ -196,14 +494,77 @@ function changeEntry(repo: Repo): Record<string, unknown> {
   };
 }
 
-function readDocument(file: string): Record<string, unknown> {
-  if (!fs.existsSync(file)) return { schema_version: "1.0", projects: [] };
+function readDocument(file: string): { document: Record<string, unknown>; raw: string | null } {
+  if (!fs.existsSync(file)) return { document: { schema_version: "1.0", projects: [] }, raw: null };
   const stat = fs.lstatSync(file);
   if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${file}: settings target must be a regular file; refusing to follow or replace it`);
-  const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+  const raw = fs.readFileSync(file, "utf8");
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
   if (parsed.schema_version !== "1.0") throw new Error(`${file}: expected schema_version 1.0; refusing to overwrite`);
   if (parsed.projects !== undefined && !Array.isArray(parsed.projects)) throw new Error(`${file}: projects must be an array; refusing to overwrite`);
-  return { ...parsed, projects: parsed.projects ?? [] };
+  return { document: { ...parsed, projects: parsed.projects ?? [] }, raw };
+}
+
+// Distinguishes "cleanly not tracked" (git exits 1) from a failed probe. An
+// unknown tracking state must fail the consent gate closed, not bypass it.
+function gitTrackingState(repoPath: string, file: string): "tracked" | "untracked" {
+  try {
+    execFileSync("git", ["-C", repoPath, "ls-files", "--error-unmatch", "--", file], { stdio: ["ignore", "ignore", "pipe"] });
+    return "tracked";
+  } catch (error) {
+    if ((error as { status?: unknown }).status === 1) return "untracked";
+    const stderr = (error as { stderr?: Buffer | string }).stderr?.toString().trim();
+    throw new Error(`${file}: cannot determine the git tracking state before a settings rewrite (${stderr || (error as Error).message}); fix the git failure, or pass --rewrite-settings to consent to the rewrite explicitly`);
+  }
+}
+
+// Line-level LCS diff limited to removed/added lines; enough for a refusal preview.
+// A common prefix/suffix trim bounds the quadratic LCS to the changed region, and
+// inputs still larger than PREVIEW_LCS_MAX_LINES fall back to a plain truncated
+// listing so the refusal path cannot exhaust memory on a huge settings file.
+const PREVIEW_LCS_MAX_LINES = 500;
+
+function previewSettingsDiff(beforeText: string, afterText: string, limit = 40): string {
+  const beforeAll = beforeText.split("\n");
+  const afterAll = afterText.split("\n");
+  let start = 0;
+  while (start < beforeAll.length && start < afterAll.length && beforeAll[start] === afterAll[start]) start += 1;
+  let beforeEnd = beforeAll.length;
+  let afterEnd = afterAll.length;
+  while (beforeEnd > start && afterEnd > start && beforeAll[beforeEnd - 1] === afterAll[afterEnd - 1]) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
+  const before = beforeAll.slice(start, beforeEnd);
+  const after = afterAll.slice(start, afterEnd);
+  if (before.length > PREVIEW_LCS_MAX_LINES || after.length > PREVIEW_LCS_MAX_LINES) {
+    const lines = [...before.map((line) => `- ${line}`), ...after.map((line) => `+ ${line}`)];
+    if (lines.length <= limit) return lines.join("\n");
+    return [...lines.slice(0, limit), `… ${lines.length - limit} more changed lines (diff truncated)`].join("\n");
+  }
+  const lcs: Uint32Array[] = Array.from({ length: before.length + 1 }, () => new Uint32Array(after.length + 1));
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    for (let j = after.length - 1; j >= 0; j -= 1) {
+      lcs[i]![j] = before[i] === after[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+    }
+  }
+  const lines: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < before.length || j < after.length) {
+    if (i < before.length && j < after.length && before[i] === after[j]) {
+      i += 1;
+      j += 1;
+    } else if (j >= after.length || (i < before.length && lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) {
+      lines.push(`- ${before[i]}`);
+      i += 1;
+    } else {
+      lines.push(`+ ${after[j]}`);
+      j += 1;
+    }
+  }
+  if (lines.length > limit) return [...lines.slice(0, limit), `… ${lines.length - limit} more changed lines`].join("\n");
+  return lines.join("\n");
 }
 
 function matchingRepo(candidate: unknown, repo: Repo): candidate is Record<string, unknown> {
@@ -219,42 +580,69 @@ function matchingRootRepo(candidate: unknown, repo: Repo): candidate is Record<s
   return !Array.isArray(project.paths) || project.paths.length === 0;
 }
 
+// Merges the generated entry over the prior matching entry, starting from the prior
+// object so fields the generator does not model survive the rewrite (#1305). The
+// generator only overwrites the fields it owns; consumer-owned fields (selection,
+// mutation_policy, policy, capabilities) keep their prior values.
+function mergeEntry(prior: Record<string, unknown>, entry: Record<string, unknown>, kind: typeof SETTINGS[number][0]): Record<string, unknown> {
+  const merged: Record<string, unknown> = {
+    ...prior,
+    ...entry,
+    project: { ...(prior.project as Record<string, unknown> | undefined), ...(entry.project as Record<string, unknown>) },
+  };
+  if (kind === "backlog-provider-settings.json") {
+    const priorWorkItem = prior.work_item_provider as Record<string, unknown> | undefined;
+    const priorBoard = prior.board_provider as Record<string, unknown> | undefined;
+    const entryBoard = entry.board_provider as Record<string, unknown>;
+    const priorBoardRef = priorBoard?.board as Record<string, unknown> | undefined;
+    const entryBoardRef = entryBoard.board as Record<string, unknown>;
+    // Prior board enrichments (like url) only remain valid for the same board identity.
+    const sameBoard = priorBoardRef !== undefined
+      && priorBoardRef.type === entryBoardRef.type
+      && priorBoardRef.owner === entryBoardRef.owner
+      && priorBoardRef.number === entryBoardRef.number;
+    merged.work_item_provider = {
+      ...priorWorkItem,
+      ...(entry.work_item_provider as Record<string, unknown>),
+      ...(priorWorkItem?.capabilities ? { capabilities: priorWorkItem.capabilities } : {}),
+    };
+    merged.board_provider = {
+      ...priorBoard,
+      ...entryBoard,
+      board: sameBoard ? { ...priorBoardRef, ...entryBoardRef } : entryBoardRef,
+      ...(priorBoard?.capabilities ? { capabilities: priorBoard.capabilities } : {}),
+    };
+    if (prior.selection) merged.selection = prior.selection;
+    if (prior.mutation_policy) merged.mutation_policy = prior.mutation_policy;
+  } else if (kind === "assignment-provider-settings.json") {
+    const priorProvider = prior.provider as Record<string, unknown> | undefined;
+    merged.provider = {
+      ...priorProvider,
+      ...(entry.provider as Record<string, unknown>),
+      ...(priorProvider?.capabilities ? { capabilities: priorProvider.capabilities } : {}),
+    };
+    if (prior.policy) merged.policy = prior.policy;
+  } else {
+    merged.provider = {
+      ...(prior.provider as Record<string, unknown> | undefined),
+      ...(entry.provider as Record<string, unknown>),
+    };
+  }
+  return merged;
+}
+
 function mergeProject(document: Record<string, unknown>, entry: Record<string, unknown>, repo: Repo, kind: typeof SETTINGS[number][0]): Record<string, unknown> {
   const projects = document.projects as unknown[];
   const existing = projects.find((candidate) => matchingRootRepo(candidate, repo));
-  let merged = entry;
-  if (existing) {
-    if (kind === "backlog-provider-settings.json") {
-      const prior = existing as Record<string, unknown>;
-      const priorWorkItem = prior.work_item_provider as Record<string, unknown> | undefined;
-      const priorBoard = prior.board_provider as Record<string, unknown> | undefined;
-      merged = {
-        ...entry,
-        ...(prior.selection ? { selection: prior.selection } : {}),
-        ...(prior.mutation_policy ? { mutation_policy: prior.mutation_policy } : {}),
-        work_item_provider: {
-          ...(entry.work_item_provider as Record<string, unknown>),
-          ...(priorWorkItem?.capabilities ? { capabilities: priorWorkItem.capabilities } : {}),
-        },
-        board_provider: {
-          ...(entry.board_provider as Record<string, unknown>),
-          ...(priorBoard?.capabilities ? { capabilities: priorBoard.capabilities } : {}),
-        },
-      };
-    } else if (kind === "assignment-provider-settings.json") {
-      const prior = existing as Record<string, unknown>;
-      const priorProvider = prior.provider as Record<string, unknown> | undefined;
-      merged = {
-        ...entry,
-        ...(prior.policy ? { policy: prior.policy } : {}),
-        provider: {
-          ...(entry.provider as Record<string, unknown>),
-          ...(priorProvider?.capabilities ? { capabilities: priorProvider.capabilities } : {}),
-        },
-      };
-    }
-  }
-  return { ...document, projects: [merged, ...projects.filter((candidate) => !matchingRootRepo(candidate, repo))] };
+  if (!existing) return { ...document, projects: [entry, ...projects] };
+  const merged = mergeEntry(existing, entry, kind);
+  // Replace the matched entry in place so an unchanged document round-trips exactly.
+  return {
+    ...document,
+    projects: projects.flatMap((candidate) => candidate === existing
+      ? [merged]
+      : matchingRootRepo(candidate, repo) ? [] : [candidate]),
+  };
 }
 
 function validateDocument(file: string, schemaFile: string, document: Record<string, unknown>): void {
@@ -287,7 +675,7 @@ function assertProjectSettingsRoot(repoPath: string, requestedRoot: string): str
   return canonicalRoot;
 }
 
-function acquireProviderLock(root: string): { lock: string; rootStat: fs.Stats } {
+function acquireProviderLock(root: string): PublicationRoot {
   fs.mkdirSync(root, { recursive: true });
   const rootStat = fs.lstatSync(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error(`provider settings root must be a regular directory: ${root}`);
@@ -297,96 +685,273 @@ function acquireProviderLock(root: string): { lock: string; rootStat: fs.Stats }
   } catch {
     throw new Error(`provider settings are locked by another setup or an interrupted run: ${lock}`);
   }
-  return { lock, rootStat };
+  return { root, lock, rootStat };
 }
 
-function publishDocuments(root: string, lock: string, rootStat: fs.Stats, pending: Array<{ file: string; document: Record<string, unknown> }>): void {
-  const backups = new Map<string, { bytes: Buffer; mode: number } | null>();
-  const published: string[] = [];
+function releaseProviderLock(guard: PublicationRoot): void {
   try {
-    for (const item of pending) {
-      if (fs.existsSync(item.file)) {
-        const stat = fs.lstatSync(item.file);
-        if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${item.file}: settings target must be a regular file`);
-        backups.set(item.file, { bytes: fs.readFileSync(item.file), mode: stat.mode & 0o777 });
-      } else {
-        backups.set(item.file, null);
-      }
-      const staged = path.join(lock, `${path.basename(item.file)}.${randomUUID()}`);
-      fs.writeFileSync(staged, `${JSON.stringify(item.document, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-      const currentRoot = fs.lstatSync(root);
-      if (!currentRoot.isDirectory() || currentRoot.isSymbolicLink() || currentRoot.dev !== rootStat.dev || currentRoot.ino !== rootStat.ino) {
-        throw new Error("provider settings root identity changed during publication");
-      }
-      fs.renameSync(staged, item.file);
-      published.push(item.file);
+    const currentRoot = fs.lstatSync(guard.root);
+    if (currentRoot.isDirectory() && !currentRoot.isSymbolicLink()
+        && currentRoot.dev === guard.rootStat.dev && currentRoot.ino === guard.rootStat.ino) {
+      fs.rmSync(guard.lock, { recursive: true, force: true });
     }
-  } catch (error) {
-    for (const file of published.reverse()) {
-      const backup = backups.get(file);
-      if (backup) {
-        const restore = path.join(lock, `${path.basename(file)}.restore.${randomUUID()}`);
-        fs.writeFileSync(restore, backup.bytes, { mode: backup.mode, flag: "wx" });
-        fs.renameSync(restore, file);
-      } else {
-        try { fs.unlinkSync(file); } catch {}
-      }
+  } catch {}
+}
+
+function publicationDirectoryCandidates(repoPath: string, ...leafDirectories: string[]): string[] {
+  const repository = path.resolve(repoPath);
+  const candidates = new Set<string>();
+  for (const leaf of leafDirectories) {
+    let cursor = path.resolve(leaf);
+    const relative = path.relative(repository, cursor);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      if (!fs.existsSync(cursor)) candidates.add(cursor);
+      continue;
     }
-    throw error;
+    while (cursor !== repository && path.dirname(cursor) !== cursor) {
+      if (!fs.existsSync(cursor)) candidates.add(cursor);
+      cursor = path.dirname(cursor);
+    }
+  }
+  return [...candidates].sort((left, right) => right.length - left.length);
+}
+
+function removeEmptyPublicationDirectories(candidates: string[]): void {
+  for (const directory of candidates) {
+    try { fs.rmdirSync(directory); } catch {}
   }
 }
 
-export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: Repo; project: Project; files: string[]; offlineRemediation?: string } {
+function assertPublicationRoot(guard: PublicationRoot): void {
+  const currentRoot = fs.lstatSync(guard.root);
+  if (!currentRoot.isDirectory() || currentRoot.isSymbolicLink()
+      || currentRoot.dev !== guard.rootStat.dev || currentRoot.ino !== guard.rootStat.ino) {
+    throw new Error(`provider publication root identity changed: ${guard.root}`);
+  }
+}
+
+function capturePublicationPreimages(items: PublicationItem[]): Map<string, FilePreimage> {
+  const preimages = new Map<string, FilePreimage>();
+  for (const item of items) {
+    if (preimages.has(item.file)) throw new Error(`provider publication target is duplicated: ${item.file}`);
+    if (!fs.existsSync(item.file)) {
+      preimages.set(item.file, null);
+      continue;
+    }
+    const stat = fs.lstatSync(item.file);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${item.file}: provider publication target must be a regular file`);
+    preimages.set(item.file, { bytes: fs.readFileSync(item.file), mode: stat.mode & 0o777 });
+  }
+  return preimages;
+}
+
+function assertPublicationPreimagesUnchanged(items: PublicationItem[], preimages: Map<string, FilePreimage>): void {
+  for (const item of items) {
+    const preimage = preimages.get(item.file);
+    if (!preimages.has(item.file)) throw new Error(`provider publication target was not included in the transaction: ${item.file}`);
+    if (!preimage) {
+      if (fs.existsSync(item.file)) throw new Error(`${item.file}: provider publication target changed while the transaction lock was held`);
+      continue;
+    }
+    if (!fs.existsSync(item.file)) throw new Error(`${item.file}: provider publication target changed while the transaction lock was held`);
+    const stat = fs.lstatSync(item.file);
+    if (stat.isSymbolicLink() || !stat.isFile() || (stat.mode & 0o777) !== preimage.mode
+        || !fs.readFileSync(item.file).equals(preimage.bytes)) {
+      throw new Error(`${item.file}: provider publication target changed while the transaction lock was held`);
+    }
+  }
+}
+
+function rollbackPublication(
+  committed: Array<{ item: PublicationItem; postimage: Buffer; mode: number }>,
+  preimages: Map<string, FilePreimage>,
+): void {
+  const incomplete: string[] = [];
+  for (const { item, postimage, mode } of [...committed].reverse()) {
+    const preimage = preimages.get(item.file);
+    try {
+      if (!fs.existsSync(item.file)) throw new Error("committed postimage is missing");
+      const current = fs.lstatSync(item.file);
+      if (current.isSymbolicLink() || !current.isFile() || (current.mode & 0o777) !== mode
+          || !fs.readFileSync(item.file).equals(postimage)) {
+        throw new Error("current file no longer equals this transaction's postimage");
+      }
+      if (preimage) {
+        const restore = path.join(item.guard.lock, `${path.basename(item.file)}.restore.${randomUUID()}`);
+        fs.writeFileSync(restore, preimage.bytes, { mode: preimage.mode, flag: "wx" });
+        fs.renameSync(restore, item.file);
+      } else {
+        fs.unlinkSync(item.file);
+      }
+    } catch (error) {
+      incomplete.push(`${item.file}: ${(error as Error).message}`);
+    }
+  }
+  if (incomplete.length > 0) throw new Error(`provider publication rollback incomplete; preserved conflicting current files: ${incomplete.join("; ")}`);
+}
+
+function publishLocalTransaction(
+  items: PublicationItem[],
+  beforeCommit?: () => void,
+  suppliedPreimages?: Map<string, FilePreimage>,
+  validateBeforeRename?: () => void,
+): void {
+  const preimages = suppliedPreimages ?? capturePublicationPreimages(items);
+  const staged = new Map<string, string>();
+  const postimages = new Map<string, Buffer>();
+  const committed: Array<{ item: PublicationItem; postimage: Buffer; mode: number }> = [];
+  try {
+    assertPublicationPreimagesUnchanged(items, preimages);
+    items.forEach((item, index) => {
+      assertPublicationRoot(item.guard);
+      providerBootstrapTestHooks?.beforeStageWrite?.(item.file, index);
+      const candidate = path.join(item.guard.lock, `${path.basename(item.file)}.${randomUUID()}`);
+      const postimage = Buffer.from(`${JSON.stringify(item.value, null, 2)}\n`, "utf8");
+      fs.writeFileSync(candidate, postimage, { mode: 0o600, flag: "wx" });
+      staged.set(item.file, candidate);
+      postimages.set(item.file, postimage);
+    });
+    beforeCommit?.();
+    items.forEach((item, index) => {
+      assertPublicationRoot(item.guard);
+      providerBootstrapTestHooks?.beforeCommit?.(item.file, index);
+      validateBeforeRename?.();
+      assertPublicationPreimagesUnchanged([item], preimages);
+      fs.renameSync(staged.get(item.file)!, item.file);
+      staged.delete(item.file);
+      committed.push({ item, postimage: postimages.get(item.file)!, mode: 0o600 });
+    });
+  } catch (error) {
+    try {
+      rollbackPublication(committed, preimages);
+    } catch (rollbackError) {
+      throw new Error(`${(error as Error).message}; ${(rollbackError as Error).message}`, { cause: error });
+    }
+    throw error;
+  } finally {
+    for (const candidate of staged.values()) {
+      try { fs.unlinkSync(candidate); } catch {}
+    }
+  }
+}
+
+export function bootstrapProviders(options: ProviderBootstrapOptions): { repo: Repo; project: Project; files: string[]; unchanged: string[]; offlineRemediation?: string; pickup?: ProviderPickupPlan } {
   const repoPath = path.resolve(options.repoPath);
   const repo = detectGitHubRepo(repoPath);
   const ghBin = options.ghBin ?? "gh";
-  let project: Project;
-  let offlineRemediation: string | undefined;
-  if (options.online) {
-    ensureGhAuth(ghBin);
-    project = discoverProject(ghBin, repo.owner, options.projectNumber);
-  } else {
-    if (!options.projectNumber || options.projectNumber < 1) {
-      throw new Error("offline provider setup requires --provider-project NUMBER; use --online to discover accessible projects");
-    }
-    project = { number: options.projectNumber };
-  }
-
+  const pickupIdentityPreflight = preflightProviderPickup(options, repo);
   const requestedRoot = options.scope === "global"
     ? path.resolve(options.globalSettingsRoot ?? path.join(os.homedir(), ".config", "flow-agents"))
     : path.resolve(options.projectSettingsRoot ?? path.join(repoPath, "context", "settings"));
-  const root = options.scope === "project"
-    ? assertProjectSettingsRoot(repoPath, requestedRoot)
-    : requestedRoot;
-  if (options.scope === "global") fs.mkdirSync(root, { recursive: true });
-  const { lock, rootStat } = acquireProviderLock(root);
+  const pickupSessionDir = pickupIdentityPreflight
+    ? path.join(pickupIdentityPreflight.requestedArtifactRoot, pickupIdentityPreflight.identity.slug)
+    : null;
+  const createdDirectories = publicationDirectoryCandidates(
+    repoPath,
+    requestedRoot,
+    ...(pickupIdentityPreflight ? [pickupIdentityPreflight.requestedArtifactRoot, pickupSessionDir!] : []),
+  );
+  let sessionGuard: PublicationRoot | null = null;
+  let settingsGuard: PublicationRoot | null = null;
   try {
-    const entries = [projectEntry(repo, project), assignmentEntry(repo), changeEntry(repo)];
-    const pending: Array<{ file: string; document: Record<string, unknown> }> = [];
-    for (let index = 0; index < SETTINGS.length; index += 1) {
-      const [name, schema] = SETTINGS[index]!;
-      const file = path.join(root, name);
-      const document = mergeProject(readDocument(file), entries[index]!, repo, name);
-      validateDocument(file, schema, document);
-      pending.push({ file, document });
-    }
-    // Validate every local document before the explicit online mutation so a
-    // malformed existing settings file cannot create remote state on a failed run.
-    const assignmentDocument = pending.find((item) => path.basename(item.file) === "assignment-provider-settings.json")!.document;
-    const assignmentProject = (assignmentDocument.projects as unknown[]).find((candidate) => matchingRootRepo(candidate, repo)) as Record<string, unknown>;
-    const labelName = validateLabelName((assignmentProject.policy as Record<string, unknown>).label_name);
-    if (options.online) ensureClaimLabel(ghBin, repo, labelName);
-    else offlineRemediation = `Provider settings were written without remote checks. Run ${shellQuote(ghBin)} auth status --hostname github.com, ${shellQuote(ghBin)} project view ${project.number} --owner ${shellQuote(repo.owner)}, and ${shellQuote(ghBin)} label list --repo ${shellQuote(`${repo.owner}/${repo.name}`)} ${shellQuote(`--search=${labelName}`)}; create the label only if absent.`;
-    publishDocuments(root, lock, rootStat, pending);
-    const files = pending.map((item) => item.file);
-    return { repo, project, files, offlineRemediation };
-  } finally {
-    try {
-      const currentRoot = fs.lstatSync(root);
-      if (currentRoot.isDirectory() && !currentRoot.isSymbolicLink() && currentRoot.dev === rootStat.dev && currentRoot.ino === rootStat.ino) {
-        fs.rmSync(lock, { recursive: true, force: true });
+    if (pickupSessionDir) sessionGuard = acquireProviderLock(pickupSessionDir);
+    const root = options.scope === "project"
+      ? assertProjectSettingsRoot(repoPath, requestedRoot)
+      : requestedRoot;
+    if (options.scope === "global") fs.mkdirSync(root, { recursive: true });
+    settingsGuard = acquireProviderLock(root);
+
+    const settingsTargets: PublicationItem[] = SETTINGS.map(([name]) => ({ file: path.join(root, name), value: null, guard: settingsGuard! }));
+    const pickupTargets = pickupIdentityPreflight && sessionGuard ? pickupTransactionTargets(pickupIdentityPreflight, sessionGuard) : [];
+    const transactionTargets = [...settingsTargets, ...pickupTargets];
+    const preimages = capturePublicationPreimages(transactionTargets);
+    const assertCurrentBranch = pickupIdentityPreflight
+      ? () => assertCurrentProviderWorktreeBranch(repoPath, pickupIdentityPreflight.branch)
+      : undefined;
+    providerBootstrapTestHooks?.afterLocksAcquired?.();
+      assertCurrentBranch?.();
+      assertPublicationPreimagesUnchanged(transactionTargets, preimages);
+      if (pickupIdentityPreflight) assertExistingProviderPickupPlanIdentity(pickupIdentityPreflight);
+
+      let project: Project;
+      if (options.online) {
+        ensureGhAuth(ghBin);
+        project = discoverProject(ghBin, repo.owner, options.projectNumber);
+      } else {
+        if (!options.projectNumber || options.projectNumber < 1) {
+          throw new Error("offline provider setup requires --provider-project NUMBER; use --online to discover accessible projects");
+        }
+        project = { number: options.projectNumber };
       }
-    } catch {}
+      const pickupPreflight = completeProviderPickupPreflight(options, pickupIdentityPreflight);
+      const preparedPickup = pickupPreflight ? providerPickupPlan(repo, pickupPreflight) : null;
+      if (preparedPickup) assertProviderPickupArtifactCompatibility(preparedPickup);
+
+      const entries = [projectEntry(repo, project), assignmentEntry(repo), changeEntry(repo)];
+      const pending: Array<{ file: string; document: Record<string, unknown> }> = [];
+      const unchanged: string[] = [];
+      const mergedDocuments = new Map<string, Record<string, unknown>>();
+      for (let index = 0; index < SETTINGS.length; index += 1) {
+        const [name, schema] = SETTINGS[index]!;
+        const file = path.join(root, name);
+        const { document: current, raw } = readDocument(file);
+        const document = mergeProject(current, entries[index]!, repo, name);
+        mergedDocuments.set(name, document);
+        if (raw !== null) {
+          // An existing file that already carries the target configuration is left
+          // byte-identical: no reformatting, no field-dropping rewrite (#1305).
+          if (isDeepStrictEqual(JSON.parse(raw) as unknown, document)) {
+            unchanged.push(file);
+            continue;
+          }
+          // Bootstrap did not create this tracked file; rewriting it needs explicit
+          // consent. The probe only applies to project scope: a global settings root
+          // lives outside the repository, where this repository's index cannot answer.
+          if (!options.rewriteSettings && options.scope === "project" && gitTrackingState(repoPath, file) === "tracked") {
+            // Diff against normalized formatting so the preview shows the content
+            // change instead of drowning it in whole-file reformatting noise.
+            const normalized = `${JSON.stringify(JSON.parse(raw), null, 2)}\n`;
+            const preview = previewSettingsDiff(normalized, `${JSON.stringify(document, null, 2)}\n`);
+            const note = normalized === raw ? "" : "(content changes shown with normalized formatting; the rewrite would also reformat the file)\n";
+            const consentCommand = `flow-agents provider-bootstrap --scope project --repo-path ${shellQuote(repoPath)} --provider-project ${project.number} --rewrite-settings`;
+            throw new Error(`${file}: provider bootstrap would rewrite this tracked settings file; re-run with --rewrite-settings (standalone: ${consentCommand}) to accept the update:\n${note}${preview}`);
+          }
+        }
+        validateDocument(file, schema, document);
+        pending.push({ file, document });
+      }
+      // Every document that will be written is validated before the explicit online
+      // mutation so a malformed existing settings file cannot create remote state on
+      // a failed run. Files left untouched are never re-validated or re-serialized.
+      const assignmentDocument = mergedDocuments.get("assignment-provider-settings.json")!;
+      const assignmentProject = (assignmentDocument.projects as unknown[]).find((candidate) => matchingRootRepo(candidate, repo)) as Record<string, unknown>;
+      const labelName = validateLabelName((assignmentProject.policy as Record<string, unknown>).label_name);
+      const createRemoteLabel = options.online ? !claimLabelExists(ghBin, repo, labelName) : false;
+      const offlineRemediation = options.online
+        ? undefined
+        : `Provider settings were written without remote checks. Run ${shellQuote(ghBin)} auth status --hostname github.com, ${shellQuote(ghBin)} project view ${project.number} --owner ${shellQuote(repo.owner)}, and ${shellQuote(ghBin)} label list --repo ${shellQuote(`${repo.owner}/${repo.name}`)} ${shellQuote(`--search=${labelName}`)}; create the label only if absent.`;
+
+      // Remote reads above can run arbitrary provider executables. Revalidate every exact
+      // preimage and pickup contract afterward, then stage every local write before the one
+      // allowed remote mutation. After label creation, local commit is rollback-capable only.
+      assertPublicationPreimagesUnchanged(transactionTargets, preimages);
+      if (preparedPickup) assertProviderPickupArtifactCompatibility(preparedPickup);
+      const items: PublicationItem[] = [
+        ...pending.map((item) => ({ file: item.file, value: item.document, guard: settingsGuard! })),
+        ...(preparedPickup && sessionGuard ? pickupPublicationItems(preparedPickup, sessionGuard) : []),
+      ];
+      publishLocalTransaction(
+        items,
+        createRemoteLabel ? () => createClaimLabel(ghBin, repo, labelName) : undefined,
+        preimages,
+        assertCurrentBranch,
+      );
+      const files = pending.map((item) => item.file);
+      return { repo, project, files, unchanged, offlineRemediation, ...(preparedPickup ? { pickup: preparedPickup.plan } : {}) };
+  } finally {
+    if (settingsGuard) releaseProviderLock(settingsGuard);
+    if (sessionGuard) releaseProviderLock(sessionGuard);
+    removeEmptyPublicationDirectories(createdDirectories);
   }
 }
 
@@ -399,6 +964,14 @@ Options:
   --global-settings-root    Global settings directory (default: ~/.config/flow-agents).
   --provider-project NUMBER GitHub Project number.
   --online                  Verify gh auth, discover/verify the project, and create the claim label if missing.
+  --work-item OWNER/REPO#N  Prepare exact provider claim, observation, status, and workflow-start inputs.
+  --provider-login LOGIN    Authenticated provider login (required offline with --work-item).
+  --provider-branch BRANCH  Assert the provider branch equals the actual Git worktree branch.
+  --artifact-root PATH      Runtime artifact root (default: <repo>/.kontourai/flow-agents).
+  --rewrite-settings        Allow rewriting an existing git-tracked settings file whose
+                            content would change. Without this flag bootstrap refuses
+                            with a diff preview; files already carrying the target
+                            configuration are always left byte-identical.
   --json
 `);
 }
@@ -419,11 +992,17 @@ export function main(argv = process.argv.slice(2)): number {
       globalSettingsRoot: flagString(args.flags, "global-settings-root"),
       projectNumber,
       online: flagBool(args.flags, "online"),
+      workItemRef: flagString(args.flags, "work-item"),
+      providerLogin: flagString(args.flags, "provider-login"),
+      providerBranch: flagString(args.flags, "provider-branch"),
+      artifactRoot: flagString(args.flags, "artifact-root"),
+      rewriteSettings: flagBool(args.flags, "rewrite-settings"),
     });
     if (flagBool(args.flags, "json")) console.log(JSON.stringify(result, null, 2));
     else {
       console.log(`Configured GitHub workflow providers for ${result.repo.owner}/${result.repo.name} (Project ${result.project.number})`);
       for (const file of result.files) console.log(`  ${file}`);
+      for (const file of result.unchanged) console.log(`  ${file} (unchanged)`);
       if (result.offlineRemediation) console.warn(result.offlineRemediation);
     }
     return 0;

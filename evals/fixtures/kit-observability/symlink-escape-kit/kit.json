@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "id": "symlink-escape",
+  "name": "Symlink escape fixture",
+  "description": "Test-only manifest whose descriptor link is created outside the Kit root.",
+  "flows": [],
+  "observability_contribution": { "path": "descriptor-link.json" }
+}

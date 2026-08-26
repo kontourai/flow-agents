@@ -11,6 +11,10 @@ export type ContinuationAdapterCommand = {
   integrity: Array<{ file: string; sha256: string }>;
 };
 
+export function continuationAdapterCommandIdentity(commandFileInput: string): string {
+  return loadContinuationAdapterCommand(commandFileInput).identity;
+}
+
 export function loadContinuationAdapterCommand(commandFileInput: string): ContinuationAdapterCommand {
   const commandFile = path.resolve(commandFileInput);
   const command = validateAdapterCommand(JSON.parse(readRegularFileNoFollow(commandFile, "continuation adapter command file")) as unknown);

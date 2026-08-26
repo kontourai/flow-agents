@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/knowledge/health-report.schema.json",
+  "title": "Knowledge Health Report",
+  "description": "The schema-valid output of a provider-agnostic health verb (duplicate detection, dependency-link integrity). The same report shape is produced regardless of which provider supplied the graph, which is what lets one health command run identically over vault, git-repo, and work-item.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "check", "provider", "generated_at", "summary", "findings"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "check": {
+      "type": "string",
+      "enum": ["duplicate-detection", "dependency-link-integrity"],
+      "description": "Which health verb produced the report."
+    },
+    "provider": { "type": "string", "minLength": 1, "description": "Provider id the graph was read from." },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodes_examined", "edges_examined", "finding_count"],
+      "properties": {
+        "nodes_examined": { "type": "integer" },
+        "edges_examined": { "type": "integer" },
+        "finding_count": { "type": "integer" }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "severity", "message", "evidence"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+          "node_ids": { "type": "array", "items": { "type": "string" } },
+          "edge_ids": { "type": "array", "items": { "type": "string" } },
+          "message": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "object" }
+        }
+      }
+    }
+  }
+}

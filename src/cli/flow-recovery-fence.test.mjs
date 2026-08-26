@@ -12,13 +12,14 @@ import {
 import {
   withNarrativeFlowRunRecoveryFenceRead,
 } from "../../build/src/narrative/recovery-fence.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require = createRequire(import.meta.url);
 const hookFence = require("../../scripts/hooks/lib/flow-recovery-fence.js");
 const contextHookFence = require("../../context/scripts/hooks/lib/flow-recovery-fence.js");
 
 function fixture() {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-recovery-fence-"));
+  const projectRoot = makeFixtureDir("flow-agents-recovery-fence-");
   const runId = "run-1";
   const runRoot = path.join(projectRoot, ".kontourai", "flow", "runs", runId);
   fs.mkdirSync(runRoot, { recursive: true });
@@ -56,6 +57,29 @@ test("Flow Agents recovery adapter allows absence/open and rejects active or unk
     assert.throws(() => assertFlowRunRecoveryFenceOpen(value.projectRoot, value.runId), /malformed or unsupported/);
   } finally {
     fs.rmSync(value.projectRoot, { recursive: true, force: true });
+  }
+});
+
+test("all fence readers accept a finalized open generation and reject it on an active fence", () => {
+  for (const [name, reader] of [
+    ["Flow Agents", (root, runId) => assertFlowRunRecoveryFenceOpen(root, runId)],
+    ["narrative", (root, runId) => withNarrativeFlowRunRecoveryFenceRead(root, runId, () => null)],
+    ["source hook", (root, runId) => hookFence.withFlowRecoveryFenceRead(root, runId, () => null)],
+    ["context hook", (root, runId) => contextHookFence.withFlowRecoveryFenceRead(root, runId, () => null)],
+  ]) {
+    const value = fixture();
+    try {
+      const finalized = {
+        ...fence(value.runId),
+        previous_generation: "22222222-2222-4222-8222-222222222222",
+      };
+      fs.writeFileSync(value.file, `${JSON.stringify(finalized)}\n`, { mode: 0o600 });
+      assert.doesNotThrow(() => reader(value.projectRoot, value.runId), name);
+      fs.writeFileSync(value.file, `${JSON.stringify({ ...finalized, status: "active" })}\n`, { mode: 0o600 });
+      assert.throws(() => reader(value.projectRoot, value.runId), /malformed or unsupported/, name);
+    } finally {
+      fs.rmSync(value.projectRoot, { recursive: true, force: true });
+    }
   }
 });
 
@@ -247,8 +271,8 @@ test("all asynchronous fence wrappers preserve a callback error while the fence 
 });
 
 test("fence readers reject symlinked fixed Flow ancestry before treating the fence as absent", () => {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-fence-ancestry-"));
-  const foreign = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-fence-foreign-"));
+  const projectRoot = makeFixtureDir("flow-agents-fence-ancestry-");
+  const foreign = makeFixtureDir("flow-agents-fence-foreign-");
   try {
     fs.mkdirSync(path.join(projectRoot, ".kontourai"), { recursive: true });
     fs.symlinkSync(foreign, path.join(projectRoot, ".kontourai", "flow"));

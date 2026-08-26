@@ -51,6 +51,16 @@ safe_write() {
   mv "$tmp" "$target"
 }
 
+seed_clean_git_workspace() {
+  local workspace="$1"
+  printf '.kontourai/\n' | safe_write "$workspace/.gitignore"
+  git -C "$workspace" init -q -b main
+  git -C "$workspace" config user.email 'eval@example.invalid'
+  git -C "$workspace" config user.name 'Per-actor pointer eval'
+  git -C "$workspace" add --all
+  git -C "$workspace" commit -qm 'seed clean workspace'
+}
+
 flow_agents_build_ts || { echo "build failed" >&2; exit 1; }
 
 echo "=== Per-actor current.json + legacy compat shim (#291) ==="
@@ -243,6 +253,7 @@ printf '%s' "$EVIDENCE_CURRENT_LINE" | safe_write "$EVIDENCE_REPO/.kontourai/flo
 
 EVIDENCE_STATE_LINE="{\"schema_version\":\"1.0\",\"task_slug\":\"$EVIDENCE_SLUG\",\"status\":\"in_progress\",\"phase\":\"build\",\"updated_at\":\"2026-06-23T00:00:00Z\",\"next_action\":{\"status\":\"in_progress\",\"summary\":\"work\"}}"
 printf '%s' "$EVIDENCE_STATE_LINE" | safe_write "$EVIDENCE_REPO/.kontourai/flow-agents/$EVIDENCE_SLUG/state.json"
+seed_clean_git_workspace "$EVIDENCE_REPO"
 
 EVIDENCE_EVENT_LINE="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"cwd\":\"$EVIDENCE_REPO\",\"tool_input\":{\"command\":\"echo legacy-actor-check\"},\"tool_response\":{\"exitCode\":0,\"stdout\":\"ok\"}}"
 printf '%s' "$EVIDENCE_EVENT_LINE" \
@@ -253,6 +264,20 @@ if [[ -f "$EVIDENCE_LOG_FILE" ]] && grep -qF "legacy-actor-check" "$EVIDENCE_LOG
   pass "evidence-capture.js's resolveArtifactDir resolves the legacy-only current.json's named slug under a different ambient actor (AC8)"
 else
   fail "evidence-capture.js did not resolve/write to the legacy-only fixture's named slug: $(cat "$TMPDIR_EVAL/evidence-legacy.out" "$TMPDIR_EVAL/evidence-legacy.err")"
+fi
+
+if node - "$EVIDENCE_LOG_FILE" <<'NODE' 2>"$TMPDIR_EVAL/evidence-legacy-provenance.err"
+const fs = require('fs');
+const entries = fs.readFileSync(process.argv[2], 'utf8').trim().split('\n').map(JSON.parse);
+const entry = entries.at(-1);
+if (!entry || entry.observedResult !== 'pass' || entry.worktree_clean !== true
+  || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(String(entry.observed_at_commit || ''))
+  || Object.hasOwn(entry, 'verification_workspace_snapshot')) process.exit(1);
+NODE
+then
+  pass "legacy-only pointer capture records Git observation data without a claim snapshot"
+else
+  fail "legacy-only pointer capture did not preserve nonconfirming producer shape: $(cat "$TMPDIR_EVAL/evidence-legacy-provenance.err")"
 fi
 
 # 3c. flow-agents-statusline.js -- reuses test_flow_agents_statusline.sh's fixture/assertion
@@ -568,6 +593,7 @@ AC440_ROOT="$AC440_REPO/.kontourai/flow-agents"
 mkdir -p "$AC440_REPO/docs"
 printf '# Test Repo\n' > "$AC440_REPO/AGENTS.md"
 printf '# Context Map\n' > "$AC440_REPO/docs/context-map.md"
+seed_clean_git_workspace "$AC440_REPO"
 
 # 7.0 Setup: actor B runs ensure-session on a real Work Item (establishing B's own per-actor
 # current/eval-actor-440-b.json AND the shared legacy current.json, exactly like section 2's

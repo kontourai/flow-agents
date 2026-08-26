@@ -6,12 +6,20 @@
  * exit 0 passes through, exit 2 blocks, and stdout often echoes the hook input.
  * Codex has a stricter event-specific JSON contract, so this adapter runs the
  * canonical hook and translates its result into the Codex hook protocol.
+ *
+ * Graduated denial escalation (issue #1005): a denied tool call ends THE CALL, not THE
+ * TURN. Denials are routed through lib/denial-escalation.js, which strips the incident
+ * register from the message (leaving every remediation path intact) and counts repeats of
+ * the same denial identity -- rule id plus resolved target -- within the current flow step.
+ * Only the third identical denial in one step escalates.
  */
 
 'use strict';
 
 const path = require('path');
 const { spawnSync } = require('child_process');
+const { buildDenialResponse } = require('./lib/denial-escalation');
+const { resolveActor } = require('./lib/actor-identity');
 const { extractExitCodeFromBanner, readExitCodeFromRollout } = require('./lib/codex-exit-code');
 
 const MAX_STDIN = 1024 * 1024;
@@ -91,7 +99,19 @@ function successOutput(event, additionalContext = '') {
   return null;
 }
 
-function blockedOutput(event, reason) {
+/**
+ * Actor key the denial streak is filed under. Resolution failure degrades to an
+ * unscoped key rather than an exception -- the counter must never break a denial.
+ */
+function safeActorKey() {
+  try {
+    return String((resolveActor() || {}).actor || '');
+  } catch {
+    return '';
+  }
+}
+
+function blockedOutput(event, reason, escalate = false) {
   if (event === 'PreToolUse') {
     return {
       hookSpecificOutput: {
@@ -113,9 +133,10 @@ function blockedOutput(event, reason) {
     };
   }
   if (event === 'PostToolUse') {
+    // The tool has already run; halting the turn forfeits the work without preventing
+    // anything. Only an escalated denial ends the turn.
     return {
-      continue: false,
-      stopReason: reason,
+      ...(escalate ? { continue: false, stopReason: reason } : {}),
       hookSpecificOutput: {
         hookEventName: 'PostToolUse',
         additionalContext: reason,
@@ -228,6 +249,17 @@ async function main() {
   });
 
   if (result.status === 2) {
+    // Stop keeps its own contract; only tool-call denials are graduated.
+    if (event === 'PreToolUse' || event === 'PostToolUse' || event === 'PermissionRequest') {
+      const denial = buildDenialResponse({
+        hookId,
+        message: messageFrom(result),
+        cwd: process.cwd(),
+        actorKey: safeActorKey(),
+      });
+      process.stdout.write(`${JSON.stringify(blockedOutput(event, denial.message, denial.escalate))}\n`);
+      return;
+    }
     process.stdout.write(`${JSON.stringify(blockedOutput(event, messageFrom(result)))}\n`);
     return;
   }

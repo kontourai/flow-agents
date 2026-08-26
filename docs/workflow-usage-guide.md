@@ -134,11 +134,21 @@ flow-agents init --runtime codex --dest . \
 This detects the GitHub repository from its `origin`, verifies `gh` auth,
 selects the sole accessible GitHub Project (or validates
 `--provider-project NUMBER`), creates the `agent:claimed` label when missing,
-schema-validates all three documents before atomically replacing each file:
+schema-validates every document it will write before atomically replacing that
+file:
 
 - `context/settings/backlog-provider-settings.json`
 - `context/settings/assignment-provider-settings.json`
 - `context/settings/change-provider-settings.json`
+
+An existing settings file that already carries the target configuration is left
+byte-identical: no reformatting, no re-serialization, and fields the generator
+does not model always survive. When an existing git-tracked settings file would
+actually change content, bootstrap refuses with a diff preview; pass
+`--rewrite-settings` (accepted by both `flow-agents provider-bootstrap` and
+`flow-agents init --configure-providers`) to accept the update. A git probe
+failure while checking tracking state also refuses — an unknown state never
+rewrites. Untracked or newly created files are written without the flag.
 
 For a headless offline setup, omit `--online` and provide
 `--provider-project NUMBER`. The command does not pretend remote state was
@@ -149,6 +159,41 @@ operation is available independently as `flow-agents provider-bootstrap`.
 Existing `project.paths` entries remain consumer-owned; resolution chooses the
 longest matching repository-relative path prefix and otherwise uses the
 repository-root entry.
+
+To prepare a specific provider-backed pickup without hand-authoring its
+identity or positive status documents, include the exact Work Item:
+
+```bash
+flow-agents provider-bootstrap --scope project \
+  --repo-path . \
+  --provider-project 2 \
+  --work-item owner/repository#123 \
+  --provider-login authenticated-login \
+  --provider-branch "$(git branch --show-current)" \
+  --json
+```
+
+The command derives the canonical session slug and structured runtime actor
+through the same helpers used by `workflow start` and the assignment provider.
+It refuses a Work Item from another repository, a detached checkout, a branch
+that differs from the actual worktree branch, an unresolved actor, or an
+artifact root other than `<repository>/.kontourai/flow-agents`. The public
+`workflow start` operation rechecks that the validated provider branch is still
+the current named Git worktree branch before it mirrors ownership or creates a
+session. The result contains:
+
+- exact `gh` argv arrays for the rendered assignment claim, but does not run
+  those mutations;
+- a read-only issue-observation argv and its pinned output path;
+- an assignment-status argv and immutable effective-state output path; and
+- the final `workflow start` argv bound to that status artifact.
+
+Run the emitted operations in order. Redirect only the declared
+`stdout_file` results to their named paths. Re-running setup for the same Work
+Item, actor, and branch reuses the exact prepared claim generation; a changed
+identity fails closed and requires an explicit recovery or restart decision.
+With `--online`, the authenticated GitHub login is discovered. Offline setup
+requires `--provider-login` so the command never invents provider identity.
 
 ### Assignment ownership: the third provider leg
 
@@ -341,6 +386,52 @@ flow-agents workflow critique \
   --artifact-ref "<reviewed-changed-file>" \
   --lane-json '{"id":"code-review","status":"pass","summary":"Code quality, correctness, architecture, and standards were reviewed.","evidence_refs":[{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--deliver.md","summary":"Reviewed delivery artifact and changed-scope context."}]}'
 ```
+
+### Which commands can be evidence
+
+Two independent rules govern `--command`, and a claim must satisfy both:
+
+1. **`tests-evidence` requires a recognised test runner.** A shell script scores zero test units
+   unless it contains `set -e` and matches the inline-assertion pattern, so this repository's
+   tally-style integration evals — which deliberately run every check, count failures, and exit
+   non-zero at the end — are refused. `set -e` would abort at the first failing check and destroy
+   the tally, so the suites are right and the heuristic simply does not fit them.
+2. **`publish-delivery` requires a CI-manifest command.** CI cannot self-declare an arbitrary
+   command, so any command claim whose text is not in the reconcile manifest is refused at
+   publication — long after the step that recorded it has passed, and after the run can be rebound.
+
+Taken together these once made a suite either citable or reconcilable, never both.
+
+**The pattern that satisfies both** is a thin `node --test` wrapper, registered in a CI lane as the
+lane's command:
+
+```js
+// evals/integration/<name>.test.mjs
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+
+test("<name> eval passes", () => {
+  const result = spawnSync("bash", ["evals/integration/test_<name>.sh"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+```
+
+Register the **wrapper** as the lane command, not the `.sh`:
+
+```
+"<Label>|node --test evals/integration/<name>.test.mjs"
+```
+
+It is then a recognised runner *and* a manifest entry, and the eval still runs exactly once with
+unchanged failure semantics. The CI coverage audit follows the wrapper to the `.sh` it spawns, so
+the eval stays attributed. Three suites use this today.
+
+**Do not attach `--command` to evidence that is not a test.** A measured diff is the right evidence
+for a scope claim, but `git diff --stat origin/main...HEAD` is not a manifest command and will be
+refused at publication. Put the measurement in `--summary` and reference the artifact that records
+it. `workflow evidence` warns at record time when a command will not reconcile, while the owning
+step can still fix it.
 
 Only the step skill declared for that Flow expectation should publish it.
 The requested gate verdict remains authoritative: a successful command never upgrades or replaces
@@ -608,6 +699,10 @@ npm run workflow:sidecar -- dogfood-pass \
 `dogfood-pass` is fail-closed: it refuses a clean pass without evidence and refuses required critique gaps before writing partial evidence. When the same clean pass is also merge-ready, add `--release-decision merge` and one or more `--release-doc-ref` values to write `release.json` in the same validated pass. Release decisions require passing critique.
 
 Flow Agents source changes also have a deterministic CI baseline. Run it locally before publishing a branch when the change touches workflow contracts, hooks, package/bundle output, or Builder Kit behavior:
+
+For provider-backed delivery, do not treat a passing release-readiness decision as merge authority. After learning completes, publish terminal delivery on the already reviewed source branch, commit and push only its delivery companions, and collect required provider checks for that new exact head. Obtain a signed single-use lifecycle authorization with `flow-agents merge-change request`, then provide it to `flow-agents merge-change execute --session-dir <session> --strategy squash --authorization-file <signed-file>` (or `rebase`, `merge-commit`, or `merge-queue`). The protected authority binds and consumes the exact merge operation under the subject lock; it requires the completed Builder definition's semantic `merge-ready-ci` evidence-refresh control and passing verification evidence, as well as a clean worktree and exact session/committed terminal-delivery binding. Zero required checks or provider-actor drift fails closed. A provisional CI delivery never qualifies.
+
+Automated merge requires the target branch to enforce a no-bypass pull-request approval policy (required_pull_request_reviews with required_approving_review_count >= 1, plus enforce_admins). Check this when rolling the kit out to a repository, not on the first merge attempt: `flow-agents merge-change request` observes the precondition before it mints an authorization and refuses with the specific condition, and reports `merge_policy_precondition.status: "unverified"` when it could not reach the provider. A repository whose only write-access account authors every pull request cannot satisfy the precondition, because GitHub forbids approving your own pull request — it needs a second approving reviewer with write access (or an app/bot with write access) before automated merge is possible. Enabling required reviews is a repository policy decision the kit deliberately does not make for you; see `flow-agents merge-change --help` and the `merge-change` section of `docs/public-workflow-cli.md`.
 
 ```bash
 bash evals/ci/run-baseline.sh

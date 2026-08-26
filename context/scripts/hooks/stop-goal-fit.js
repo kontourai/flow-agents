@@ -15,6 +15,16 @@
  * Code at L2) set block so the installed product enforces while the engine
  * default and conformance contract stay warn.
  *
+ * FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE (#1171) controls the tests-evidence scope check —
+ * a claimed-pass command that NARROWS the repo's declared test suite (e.g.
+ * `npx vitest run test/one.test.ts` where the repo declares `npm run test`):
+ *   - warn (default): emit a visible, non-blocking divergence line.
+ *   - block:          escalate the same finding to a hard block.
+ * Tighten-only by construction (there is no `off`). A claim may declare the narrowing via
+ * `metadata.evidence_scope = {narrowed: true, reason: "<why>"}` on the trust.bundle claim (or
+ * an `evidence_scope` field on the evidence.json check); a disclosed narrowing is clean in
+ * both modes. See the testScopeDivergence() block below for the full rationale.
+ *
  * Scope: the gate evaluates the session's current task (.kontourai/flow-agents/current.json)
  * when set, so an unrelated active workflow elsewhere in the repo does not gate
  * this stop. A pre-execution sidecar remains warning-only unless it has an active
@@ -26,6 +36,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 // Hash-chain primitives + the exit-code-laundering heuristic come from ONE shared
@@ -47,6 +58,8 @@ const { withFlowRecoveryFenceReadAsync } = require('./lib/flow-recovery-fence');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
 const { readCurrentPointer, readOwnCurrentPointer } = require('./lib/current-pointer.js');
 const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
+const { resolveGoalFitConfig } = require('./lib/effective-flow-agents-config.js');
+const { unstartedDeliveryWarning, UNSTARTED_DELIVERY_PATTERN } = require('./lib/unstarted-delivery.js');
 let validateActiveTurnAuthority = () => ({ valid: false, reason: 'continuation authority validator is unavailable' });
 let validateSignedActiveTurnAssignmentAuthority = validateActiveTurnAuthority;
 try {
@@ -57,6 +70,28 @@ try {
 }
 
 const MAX_STDIN = 1024 * 1024;
+const MAX_WORKSPACE_TRACKED_DIFF_BYTES = 16 * 1024 * 1024;
+const MAX_WORKSPACE_UNTRACKED_LIST_BYTES = 4 * 1024 * 1024;
+const MAX_WORKSPACE_TRACKED_INDEX_BYTES = 4 * 1024 * 1024;
+const MAX_WORKSPACE_UNTRACKED_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_WORKSPACE_UNTRACKED_TOTAL_BYTES = 64 * 1024 * 1024;
+const WORKSPACE_HASH_READ_CHUNK_BYTES = 64 * 1024;
+const WORKSPACE_GIT_TIMEOUT_MS = 3000;
+const WORKSPACE_HEAD_OUTPUT_BYTES = 256;
+const EXACT_COMMIT_SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+/**
+ * #1172: prefix of the machine-readable control line this hook appends to a HARD (non-releasable)
+ * block, telling the harness adapter that this gate will never release on its own and the refusal
+ * needs a human. The contract — payload shape, strip-before-display rule, and the soft default for
+ * an absent/malformed line — is owned and documented by scripts/hooks/lib/stop-escalation.js.
+ *
+ * The literal is duplicated rather than required from that module on purpose: this hook ships a
+ * byte-identical `context/scripts/hooks/` mirror whose lib set is a fixed subset, so requiring a
+ * new lib here would drag a mirror + CODEOWNERS + validate-source-tree entry along with it.
+ * test_goal_fit_hook.sh asserts the two literals are identical, so a one-sided rename fails the
+ * suite instead of silently unlatching hard-block escalation.
+ */
+const STOP_CONTROL_PREFIX = '[flow-agents:stop-control]';
 const MAX_CANONICAL_FLOW_STATE_BYTES = 1024 * 1024;
 const MAX_CANONICAL_FLOW_DEFINITION_BYTES = 1024 * 1024;
 const CANONICAL_FLOW_STATUSES = new Set(['active', 'blocked', 'needs_decision', 'paused', 'canceled', 'completed', 'failed', 'accepted_by_exception']);
@@ -212,8 +247,9 @@ function resolveArtifactValidator() {
 }
 
 function sidecarValidation(root, artifactDir) {
-  const requireSidecars = String(process.env.FLOW_AGENTS_REQUIRE_SIDECARS || '').toLowerCase() === 'true';
-  const requireCritique = String(process.env.FLOW_AGENTS_REQUIRE_CRITIQUE || '').toLowerCase() === 'true';
+  const config = resolveGoalFitConfig(root).goal_fit;
+  const requireSidecars = config.require_sidecars;
+  const requireCritique = config.require_critique;
   if (!requireSidecars && !requireCritique && !hasSidecars(artifactDir)) return [];
 
   let sidecarFiles = [];
@@ -524,7 +560,14 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
   }
 
   const checks = [];
-  const seen = new Set();
+  // #1171 (review finding 2): dedup is by normalized COMMAND TEXT, but a narrowing
+  // disclosure is a property of a CLAIM. Keying both on the command let the FIRST claim's
+  // disclosure silence every later claim naming the identical command — a disclosed claim
+  // laundering an undisclosed sibling. Dedup is retained (one re-run per command is the
+  // whole point of the economy), but every claim naming a deduped command is still
+  // recorded against the surviving check via recordScopeClaim(), so an undisclosed sibling
+  // keeps the divergence alive and is named in the warning.
+  const byCmd = new Map();
 
   // (A) Evidence items with execution.label (command captures).
   // These represent commands that actually ran — include them regardless of
@@ -537,12 +580,21 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
     if (!claim) continue;
     const claimTypeStr = String(claim.claimType || '');
     if (!claimTypeStr.startsWith('workflow.check.') && !(declaredClaimTypes != null && declaredClaimTypes.has(claimTypeStr))) continue;
-    // Deduplicate by command
-    if (seen.has(cmd)) continue;
-    seen.add(cmd);
     const id = claimCheckId(claim.subjectId);
+    const scope = claimEvidenceScope(claim);
+    // Deduplicate by command — but keep this claim's disclosure state on the surviving check.
+    const existing = byCmd.get(cmd);
+    if (existing) {
+      recordScopeClaim(existing, id, scope);
+      recordClaimWorkspaceSnapshot(existing, claim);
+      continue;
+    }
     // Use 'pass' as the nominal claimed status; cross-reference catches contradictions.
-    checks.push({ id, kind: 'command', status: 'pass', command: cmd });
+    const check = { id, kind: 'command', status: 'pass', command: cmd, evidenceScope: scope, undisclosedClaimIds: [], verificationWorkspaceSnapshots: [] };
+    recordScopeClaim(check, id, scope);
+    recordClaimWorkspaceSnapshot(check, claim);
+    byCmd.set(cmd, check);
+    checks.push(check);
   }
 
   // (B) Workflow.check.command claims with effective value "pass" but no capture
@@ -567,12 +619,46 @@ function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
       checks.push({ id, kind: 'command', status: 'pass', command: '' });
       continue;
     }
-    if (seen.has(cmd)) continue;
-    seen.add(cmd);
-    checks.push({ id, kind: 'command', status: 'pass', command: cmd });
+    const scope = claimEvidenceScope(c);
+    const existing = byCmd.get(cmd);
+    if (existing) {
+      recordScopeClaim(existing, id, scope);
+      recordClaimWorkspaceSnapshot(existing, c);
+      continue;
+    }
+    const check = { id, kind: 'command', status: 'pass', command: cmd, evidenceScope: scope, undisclosedClaimIds: [], verificationWorkspaceSnapshots: [] };
+    recordScopeClaim(check, id, scope);
+    recordClaimWorkspaceSnapshot(check, c);
+    byCmd.set(cmd, check);
+    checks.push(check);
   }
 
   return checks;
+}
+
+/**
+ * #1171 (review finding 2): record one claim's narrowing-disclosure state against the
+ * (possibly deduplicated) check that will carry it. Only UNDISCLOSED claim ids are
+ * accumulated — the divergence must survive unless EVERY claim naming that command text
+ * carries a valid disclosure, and the warning names an undisclosed one so the operator knows
+ * which claim to fix rather than being pointed at a disclosed sibling.
+ */
+function recordScopeClaim(check, claimId, scope) {
+  if (!Array.isArray(check.undisclosedClaimIds)) check.undisclosedClaimIds = [];
+  if (!isValidNarrowingDisclosure(scope)) check.undisclosedClaimIds.push(claimId);
+}
+
+/**
+ * #1171: the claim's explicit narrowing disclosure, if any
+ * (`claim.metadata.evidence_scope = {narrowed: true, reason: "<why>"}`). Carried onto the
+ * synthesized check object so captureCrossReference's scope check sees it the same way it sees
+ * an `evidence_scope` field on an evidence.json check. Shape validation lives in
+ * disclosedNarrowing() — this only extracts.
+ */
+function claimEvidenceScope(claim) {
+  const md = claim && typeof claim.metadata === 'object' && claim.metadata ? claim.metadata : null;
+  const scope = md ? md.evidence_scope : null;
+  return scope && typeof scope === 'object' ? scope : undefined;
 }
 
 /**
@@ -613,6 +699,27 @@ function bundlePendingCriteriaCount(claims, declaredClaimTypes) {
  * bundle helpers so declared-type claims (e.g. builder.verify.tests) produce the
  * same sidecar guidance signals as workflow.* claims.
  */
+/**
+ * True when a session's own recorded next_action explicitly says no further
+ * agent turn is required right now (next_action.status === "done"), even
+ * though the session's overall status/phase has not reached a terminal state.
+ * This is the SAME predicate sidecarGuidance already used inline for its own
+ * "workflow state:" line (issue #291/#440 era) — single-sourced here (#962 P1)
+ * so analyze()'s separate artifact-status warning (below) cannot drift from it.
+ * A remaining human/CI-only step (e.g. "commit the migration") must not read
+ * as an outstanding AGENT obligation; a genuinely unfinished next_action
+ * (status continue/needs_user/blocked) must still gate normally.
+ *
+ * @param {object|null} state - parsed state.json payload, or null when absent
+ * @returns {boolean}
+ */
+function nextActionIsDone(state) {
+  if (!state || typeof state !== 'object') return false;
+  const next = state.next_action && typeof state.next_action === 'object' ? state.next_action : null;
+  const nextStatus = next ? normalizedStatus(next.status || 'unknown') : 'unknown';
+  return nextStatus === 'done';
+}
+
 function sidecarGuidance(root, artifactDir, activeFlowStep) {
   // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
   // Null when no FlowDefinition is active (fallback: helpers use workflow.* prefix only).
@@ -628,15 +735,26 @@ function sidecarGuidance(root, artifactDir, activeFlowStep) {
     const nextStatus = next ? normalizedStatus(next.status || 'unknown') : 'unknown';
     // The agent's work is complete when the recorded next action is done — the
     // gate must not block the agent for a remaining human/CI step (e.g. a verified
-    // task whose only next_action is "commit the migration").
-    const agentComplete = nextStatus === 'done';
+    // task whose only next_action is "commit the migration"). Single-sourced via
+    // nextActionIsDone (#962 P1) so analyze()'s artifact-status check below shares
+    // this exact predicate instead of re-deriving (and drifting from) it.
+    const agentComplete = nextActionIsDone(state);
     if (!TERMINAL_STATUSES.has(status) && !agentComplete) {
       const nextSummary = next && next.summary ? `; next_action:${nextStatus} "${safeOneLine(next.summary)}"` : '';
       warnings.push(`${base} workflow state: status:${status} phase:${phase}${nextSummary}`);
     }
   }
 
-  if (state && state.next_action && normalizedStatus(state.next_action.status) !== 'done') {
+  // #962 P1 follow-up (review): this was the THIRD site reading next_action.status
+  // raw instead of through nextActionIsDone (analyze()'s artifact-status line and
+  // sidecarGuidance's own "workflow state:" line above both already use the shared
+  // predicate). Provably behavior-preserving for every input shape next_action can
+  // take (absent, non-object, object with/without a status field, any status value):
+  // nextActionIsDone(state) is false in exactly the same cases normalizedStatus(...)
+  // !== 'done' was true, because nextActionIsDone's own "not an object" / "no status
+  // field" branches both fold to 'unknown', never 'done'. Routed through the shared
+  // predicate so this can never independently drift from the other two sites.
+  if (state && state.next_action && !nextActionIsDone(state)) {
     const next = state.next_action;
     warnings.push(`${base} next action: ${safeOneLine(next.summary)}${next.target_phase ? ` (target phase: ${safeOneLine(next.target_phase, 80)})` : ''}`);
     if (Array.isArray(next.skills) && next.skills.length) warnings.push(`${base} required skills: ${next.skills.map(skill => safeOneLine(skill, 80)).join(' -> ')}`);
@@ -751,6 +869,227 @@ function normalizeCommand(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function canonicalWorkspaceJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalWorkspaceJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalWorkspaceJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function isCleanCanonicalWorkspaceSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false;
+  const keys = Object.keys(snapshot).sort();
+  if (keys.join(',') !== 'algorithm,digest,head_sha,kind,version,worktree_clean') return false;
+  return snapshot.version === 1 && snapshot.kind === 'git-worktree' && snapshot.algorithm === 'sha256'
+    && typeof snapshot.digest === 'string' && /^[a-f0-9]{64}$/.test(snapshot.digest)
+    && typeof snapshot.head_sha === 'string' && EXACT_COMMIT_SHA.test(snapshot.head_sha)
+    && snapshot.worktree_clean === true;
+}
+
+function trustedWorkspaceGitEnvironment() {
+  return {
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_NO_REPLACE_OBJECTS: '1',
+    LANG: 'C',
+    LC_ALL: 'C',
+    PATH: process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd;C:\\Windows\\System32' : '/usr/bin:/bin',
+  };
+}
+
+function trustedWorkspaceGitCandidates() {
+  if (process.platform === 'darwin') return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'];
+  if (process.platform === 'win32') return ['C:\\Program Files\\Git\\cmd\\git.exe'];
+  return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/usr/local/bin/git'];
+}
+
+function resolveTrustedWorkspaceGitExecutable() {
+  for (const candidate of trustedWorkspaceGitCandidates()) {
+    try { return trustedWorkspaceGitIdentity(candidate); } catch {}
+  }
+  return null;
+}
+
+function trustedWorkspaceGitIdentity(candidate) {
+  const resolved = fs.realpathSync(candidate);
+  const stat = fs.statSync(resolved);
+  if (!path.isAbsolute(resolved) || !stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) throw new Error('untrusted Git executable');
+  if (process.platform !== 'win32') {
+    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error('untrusted Git executable ownership');
+    for (let cursor = path.dirname(resolved);;) {
+      const parent = fs.statSync(cursor);
+      if (!parent.isDirectory() || parent.uid !== 0 || (parent.mode & 0o022) !== 0) throw new Error('untrusted Git executable parent');
+      const next = path.dirname(cursor);
+      if (next === cursor) break;
+      cursor = next;
+    }
+  }
+  return { candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode };
+}
+
+function revalidateTrustedWorkspaceGit(identity) {
+  const current = trustedWorkspaceGitIdentity(identity.candidate);
+  return current.device === identity.device && current.inode === identity.inode && current.size === identity.size
+    && current.mtimeMs === identity.mtimeMs && current.mode === identity.mode;
+}
+
+function runTrustedWorkspaceGit(root, args, maxOutput) {
+  try {
+    const executable = resolveTrustedWorkspaceGitExecutable();
+    if (!executable) return null;
+    const hardenedArgs = args[0] === 'diff'
+      ? ['diff', '--no-ext-diff', '--no-textconv', ...args.slice(1)]
+      : args;
+    const result = spawnSync(executable.path, [
+      '--no-replace-objects',
+      '-c', 'core.fsmonitor=false',
+      '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
+      '-c', 'diff.external=',
+      '-C', root,
+      ...hardenedArgs,
+    ], {
+      encoding: 'buffer',
+      env: trustedWorkspaceGitEnvironment(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: WORKSPACE_GIT_TIMEOUT_MS,
+      maxBuffer: maxOutput + 1,
+    });
+    if (!result || result.error || result.signal || result.status !== 0 || !Buffer.isBuffer(result.stdout) || result.stdout.length > maxOutput || !revalidateTrustedWorkspaceGit(executable)) return null;
+    return result.stdout;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the actual worktree containing the hook invocation. Artifact lookup
+ * deliberately uses the shared repository root, while snapshot provenance must
+ * describe this worktree (which may have a different HEAD in a linked worktree).
+ */
+function resolveObservedWorkspaceRoot(startDir) {
+  try {
+    const canonicalStart = fs.realpathSync(path.resolve(startDir || process.cwd()));
+    const observedRoot = runTrustedWorkspaceGit(canonicalStart, ['rev-parse', '--show-toplevel'], WORKSPACE_HEAD_OUTPUT_BYTES);
+    if (!observedRoot) return null;
+    const canonicalRoot = fs.realpathSync(observedRoot.toString('utf8').trim());
+    if (!path.isAbsolute(canonicalRoot) || !isWithinWorkspaceRoot(canonicalStart, canonicalRoot)) return null;
+    const confirmedRoot = runTrustedWorkspaceGit(canonicalRoot, ['rev-parse', '--show-toplevel'], WORKSPACE_HEAD_OUTPUT_BYTES);
+    if (!confirmedRoot || fs.realpathSync(confirmedRoot.toString('utf8').trim()) !== canonicalRoot) return null;
+    return canonicalRoot;
+  } catch {
+    return null;
+  }
+}
+
+function trustedWorkspaceHead(root) {
+  const output = runTrustedWorkspaceGit(root, ['rev-parse', '--verify', 'HEAD^{commit}'], WORKSPACE_HEAD_OUTPUT_BYTES);
+  const head = output ? output.toString('utf8').trim() : '';
+  return EXACT_COMMIT_SHA.test(head) ? head : null;
+}
+
+function hasOrdinaryWorkspaceIndex(root) {
+  const output = runTrustedWorkspaceGit(root, ['ls-files', '-v', '-z'], MAX_WORKSPACE_TRACKED_INDEX_BYTES);
+  return !!output && output.toString('utf8').split('\0').filter(Boolean).every(entry => entry.startsWith('H '));
+}
+
+function isWithinWorkspaceRoot(candidate, root) {
+  const relative = path.relative(root, candidate);
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function sameWorkspaceFileIdentity(before, after) {
+  return before.dev === after.dev && before.ino === after.ino && before.size === after.size
+    && before.mtimeMs === after.mtimeMs && before.ctimeMs === after.ctimeMs;
+}
+
+function hashWorkspaceUntrackedFile(hash, root, file, totalBytes) {
+  const absolute = path.resolve(root, file);
+  if (!isWithinWorkspaceRoot(absolute, root)) return null;
+  const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+  const descriptor = fs.openSync(absolute, fs.constants.O_RDONLY | noFollow);
+  try {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile() || before.size > MAX_WORKSPACE_UNTRACKED_FILE_BYTES || totalBytes + before.size > MAX_WORKSPACE_UNTRACKED_TOTAL_BYTES) return null;
+    hash.update(file).update('\0');
+    const buffer = Buffer.allocUnsafe(WORKSPACE_HASH_READ_CHUNK_BYTES);
+    let remaining = before.size;
+    let position = 0;
+    while (remaining > 0) {
+      const bytesRead = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, remaining), position);
+      if (bytesRead <= 0) return null;
+      hash.update(buffer.subarray(0, bytesRead));
+      remaining -= bytesRead;
+      position += bytesRead;
+    }
+    if (!sameWorkspaceFileIdentity(before, fs.fstatSync(descriptor))) return null;
+    hash.update('\0');
+    return totalBytes + before.size;
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function currentCanonicalWorkspaceSnapshot(root) {
+  try {
+    const canonicalRoot = resolveObservedWorkspaceRoot(root);
+    if (!canonicalRoot) return null;
+    const head = trustedWorkspaceHead(canonicalRoot);
+    if (!head || !hasOrdinaryWorkspaceIndex(canonicalRoot)) return null;
+    const trackedDiff = runTrustedWorkspaceGit(canonicalRoot, ['diff', '--binary', 'HEAD', '--', '.'], MAX_WORKSPACE_TRACKED_DIFF_BYTES);
+    const untrackedBytes = runTrustedWorkspaceGit(canonicalRoot, ['ls-files', '--others', '--exclude-standard', '-z'], MAX_WORKSPACE_UNTRACKED_LIST_BYTES);
+    if (!trackedDiff || !untrackedBytes) return null;
+    const untracked = untrackedBytes.toString('utf8').split('\0').filter(Boolean).sort();
+    const hash = crypto.createHash('sha256');
+    hash.update('flow-agents:git-worktree:v1\0').update(head).update('\0').update(trackedDiff).update('\0');
+    let totalBytes = 0;
+    for (const file of untracked) {
+      totalBytes = hashWorkspaceUntrackedFile(hash, canonicalRoot, file, totalBytes);
+      if (totalBytes === null) return null;
+    }
+    const settledTrackedDiff = runTrustedWorkspaceGit(canonicalRoot, ['diff', '--binary', 'HEAD', '--', '.'], MAX_WORKSPACE_TRACKED_DIFF_BYTES);
+    const settledUntrackedBytes = runTrustedWorkspaceGit(canonicalRoot, ['ls-files', '--others', '--exclude-standard', '-z'], MAX_WORKSPACE_UNTRACKED_LIST_BYTES);
+    if (!settledTrackedDiff || !settledUntrackedBytes || !settledTrackedDiff.equals(trackedDiff) || !settledUntrackedBytes.equals(untrackedBytes)
+      || !hasOrdinaryWorkspaceIndex(canonicalRoot) || trustedWorkspaceHead(canonicalRoot) !== head) return null;
+    return {
+      version: 1,
+      kind: 'git-worktree',
+      algorithm: 'sha256',
+      digest: hash.digest('hex'),
+      head_sha: head,
+      worktree_clean: trackedDiff.length === 0 && untracked.length === 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function claimWorkspaceSnapshot(claim) {
+  const metadata = claim && typeof claim.metadata === 'object' && claim.metadata && !Array.isArray(claim.metadata)
+    ? claim.metadata
+    : null;
+  return metadata ? metadata.verification_workspace_snapshot : undefined;
+}
+
+function recordClaimWorkspaceSnapshot(check, claim) {
+  if (!Array.isArray(check.verificationWorkspaceSnapshots)) check.verificationWorkspaceSnapshots = [];
+  check.verificationWorkspaceSnapshots.push(claimWorkspaceSnapshot(claim));
+}
+
+function capturedPassProvenanceIssue(workspaceRoot, logged, check, currentSnapshot) {
+  const entry = logged && logged.entry;
+  if (!entry || !EXACT_COMMIT_SHA.test(String(entry.observed_at_commit || ''))) return 'capture record has no canonical observed_at_commit';
+  if (entry.worktree_clean !== true) return 'capture record was observed with a dirty worktree';
+  const expectedSnapshots = Array.isArray(check.verificationWorkspaceSnapshots) ? check.verificationWorkspaceSnapshots : [];
+  if (expectedSnapshots.length === 0 || expectedSnapshots.some(snapshot => !isCleanCanonicalWorkspaceSnapshot(snapshot))) return 'trust.bundle claim has no clean canonical verification workspace snapshot';
+  if (expectedSnapshots.some(snapshot => snapshot.head_sha !== entry.observed_at_commit)) return 'capture record commit does not exactly bind the trust.bundle claim snapshot';
+  if (!currentSnapshot || !isCleanCanonicalWorkspaceSnapshot(currentSnapshot)) return 'current canonical workspace snapshot is unavailable or dirty';
+  if (expectedSnapshots.some(snapshot => canonicalWorkspaceJson(snapshot) !== canonicalWorkspaceJson(currentSnapshot))) return 'trust.bundle claim snapshot does not match the current canonical workspace snapshot';
+  if (!runTrustedWorkspaceGit(workspaceRoot, ['cat-file', '-e', `${entry.observed_at_commit}^{commit}`], WORKSPACE_HEAD_OUTPUT_BYTES)
+    || !runTrustedWorkspaceGit(workspaceRoot, ['merge-base', '--is-ancestor', entry.observed_at_commit, currentSnapshot.head_sha], WORKSPACE_HEAD_OUTPUT_BYTES)) return 'capture record commit is not a trusted ancestor of current HEAD';
+  return null;
+}
+
 /**
  * #362 (iteration-2 fix item 4/LOW): single-sourced human-facing remediation phrase for an
  * ambiguous bare grep/diff exit-1 command. Every emission site below (captureCrossReference's
@@ -860,6 +1199,7 @@ function readLatestCommandLog(artifactDir) {
       ambiguous,
       absenceAmbiguous,
       exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : null,
+      entry,
     });
   }
   return byCommand;
@@ -1082,7 +1422,7 @@ function resolveTrustedCommand(root, artifactDir, check, acceptance) {
   if (declared) return { argv: declared.argv, cwd: declared.cwd || root, source: 'manifest' };
 
   // (c) free-form model command — opt-in only.
-  if (String(process.env.FLOW_AGENTS_GOAL_FIT_RECHECK || '').toLowerCase() === 'true') {
+  if (resolveGoalFitConfig(root).goal_fit.recheck) {
     const cmd = normalizeCommand(check && check.command);
     if (cmd && referencesNarrativeNamespace(root, cmd)) return { refused: cmd, refusal: 'narrative trust isolation (#619)' };
     if (cmd) return { argv: ['bash', '-lc', cmd], cwd: root, source: 'model-command (FLOW_AGENTS_GOAL_FIT_RECHECK)' };
@@ -1113,6 +1453,42 @@ function acceptanceCommandFor(check, acceptance) {
 }
 
 /**
+ * WHICH declared target kind (test|build|lint) a claimed-pass command check maps to, or null.
+ * Extracted from declaredManifestTarget so the #1171 scope check can ask "is this claim
+ * tests-shaped?" without duplicating (and drifting from) this classification.
+ */
+function manifestTargetKind(check) {
+  const haystack = `${normalizeCommand(check && check.command)} ${normalizedStatus(check && check.id)} ${normalizedStatus(check && check.kind)}`.toLowerCase();
+  // Alternation binds looser than the `\b` anchor, so the original
+  // `/\btest|spec|jest|vitest|pytest\b/` meant `\btest` OR bare `spec` OR bare `jest` OR bare
+  // `vitest` OR `pytest\b` — every middle branch matched UNANCHORED, so "inspect-artifacts"
+  // and "majestic-ui" classified as tests-shaped. Tolerable when this only picked a backstop
+  // re-run target; now that it also gates the #1171 warn/block scope check, that
+  // misclassification would put a divergence line (and, under the escalation opt-in, a hard
+  // block) on unrelated checks.
+  //
+  // The fix groups the alternation under ONE LEADING `\b` and deliberately does NOT add a
+  // trailing `\b`. A trailing anchor looks tidier but is wrong here: the original first
+  // branch was `\btest` (prefix match, no trailing boundary), so `tests-evidence` — the
+  // canonical tests claim id in this repo — plus `run tests`, `unit tests`, and
+  // `testing suite` all classified as tests-shaped. Requiring a trailing boundary silently
+  // drops every one of them, which would both change backstop target resolution AND disable
+  // the #1171 check for the most idiomatic naming. Leading-anchor-only fixes exactly the
+  // reported defect and leaves every other classification byte-identical to before:
+  //   inspect-artifacts / majestic-ui  true -> false   (the defect, now fixed)
+  //   tests-evidence / run tests / unit tests / testing suite / spec coverage / pytest suite
+  //   / npx vitest run a.test.ts / node --test x.test.mjs   true -> true (unchanged)
+  //
+  // The `build` and `lint` lines below carry the identical precedence defect. They are left
+  // untouched deliberately: changing them shifts backstop target selection on paths outside
+  // this issue's reviewed scope. Disclosed as a follow-up, not silently fixed here.
+  if (/\b(?:test|spec|jest|vitest|pytest)/.test(haystack)) return 'test';
+  if (/\bbuild|compile|bundle\b/.test(haystack)) return 'build';
+  if (/\blint|format|style|typecheck\b/.test(haystack)) return 'lint';
+  return null;
+}
+
+/**
  * Map a claimed-pass command check to a project-declared, NAMED manifest target.
  * Never allowlists arbitrary strings: we only run a target the project itself
  * declared (npm script, Makefile target, cargo/tox/just/task). The check's
@@ -1121,11 +1497,7 @@ function acceptanceCommandFor(check, acceptance) {
  * special-casing.
  */
 function declaredManifestTarget(root, check) {
-  const haystack = `${normalizeCommand(check && check.command)} ${normalizedStatus(check && check.id)} ${normalizedStatus(check && check.kind)}`.toLowerCase();
-  let want = null;
-  if (/\btest|spec|jest|vitest|pytest\b/.test(haystack)) want = 'test';
-  else if (/\bbuild|compile|bundle\b/.test(haystack)) want = 'build';
-  else if (/\blint|format|style|typecheck\b/.test(haystack)) want = 'lint';
+  const want = manifestTargetKind(check);
   if (!want) return null;
 
   // package.json scripts.{test,build,lint}
@@ -1157,9 +1529,217 @@ function declaredManifestTarget(root, check) {
   return null;
 }
 
-function resolveBackstopTimeout() {
-  const raw = Number.parseInt(process.env.FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS || '', 10);
-  return Number.isInteger(raw) && raw > 0 ? raw : 120000;
+// ─── #1171: tests-evidence scope divergence (narrowed command vs declared suite) ──────────
+//
+// THE HOLE. Every check below this backstop verifies that the command a claim NAMES really
+// passed. None of them verified that the named command is the command the repo DECLARES for
+// a tests-shaped claim. So `npx vitest run test/one-trivial.test.ts` — captured, exit 0, and
+// re-runnable — satisfies the capture cross-reference AND the trusted backstop re-run, while
+// the declared suite is never re-checked. The claim is fresh, bound to the tree, and
+// materially misleading about what was verified.
+//
+// WHY THIS LAYER ONLY (deliberate, see the issue's "may be right to implement in only one
+// layer"): the CI reconciler (scripts/ci/trust-reconcile.js, via
+// scripts/lib/reconcile-shape.js's reconcilableManifestIssues) ALREADY refuses a tests-shaped
+// claim whose command is not a member of the reconcile manifest — narrowing there is a hard
+// `not-run` divergence today, and the local pre-push reconcile-preflight shares that exact
+// shape check. The unguarded surface was this Stop backstop, which re-runs the claimed text
+// and reports it confirmed. Adding a second, weaker narrowing rule to CI would be redundant
+// machinery over an already-closed path.
+//
+// WHY WARN, NOT FAIL, BY DEFAULT: the #1048 workaround INSTITUTIONALIZED recording narrowed
+// direct `npx vitest run <paths>` commands (the evidence validator rejects the npm-script
+// manifest commands those repos actually declare). Live consumers are recording exactly this
+// shape right now; a hard fail here would brick them at their Stop hook. Default is a visible
+// divergence line; `FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block` escalates it to a hard block
+// for operators who have finished migrating. The env var can only TIGHTEN (there is no `off`),
+// so it needs none of the production-downgrade guarding resolveGoalFitConfig applies.
+//
+// THE DISCLOSURE PATH: narrowing is legitimate — focused evidence lanes exist by design. What
+// must never happen is narrowing being INFERRED as full coverage. A claim may declare it, via
+// `claim.metadata.evidence_scope = {narrowed: true, reason: "<why>"}` in trust.bundle (or
+// `evidence_scope` on an evidence.json check). A disclosed narrowing reconciles clean here —
+// the narrowing is then recorded in the bundle a reviewer/CI reads, which is the point.
+// Disclosure is per CLAIM, not per command string: see recordScopeClaim().
+//
+// OPERATIONAL CAVEAT on the one-layer argument (review finding 6): "CI already closes this"
+// is a LOGICAL argument, not an operational one. During a CI outage — and this workspace has
+// had several multi-day ones — the Stop hook is the only layer a session actually experiences,
+// and its default here is warn. A repo that wants the hole genuinely closed while CI is down
+// must set FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block; the default trades that for not
+// bricking the #1048 recipe.
+//
+// ACCEPTED GAPS — named, not silently absent (review finding 4). This detector reads COMMAND
+// TEXT. Narrowing that lives anywhere else is out of reach and is NOT attempted:
+//   - config-file scoping: `vitest.config.ts` / `jest.config.js` `include`/`testMatch`
+//     restricted to a subset, so a full-suite command text runs a narrowed suite;
+//   - source-level scoping: `.only` / `test.only` / `fdescribe` / skipped suites;
+//   - runner flags that narrow by STATE rather than selection, e.g. `--onlyChanged`,
+//     `--changedSince`, `--bail`;
+//   - wrapper scripts: a declared `scripts.test` whose body itself narrows, or any shell/Make
+//     wrapper whose real command is invisible to text inspection.
+// Detecting these needs config parsing, source analysis, or per-run test-count accounting —
+// a materially different mechanism, and one whose false-positive surface would be far larger
+// than this check's. Treat a clean result here as "the command text does not admit narrowing",
+// never as "the full declared suite demonstrably ran".
+
+/** Dedicated test runners whose invocation is unambiguous from the command text alone. */
+const TEST_RUNNER_BASENAMES = new Set([
+  'vitest', 'jest', 'mocha', 'ava', 'pytest', 'py.test', 'phpunit', 'rspec',
+  'jasmine', 'karma', 'tap', 'playwright', 'cypress', 'nose2', 'ginkgo', 'testem',
+]);
+
+/** Flags that select a SUBSET of a suite (name filters, path filters, shards). */
+const TEST_SELECTION_FLAGS = new Set([
+  '-t', '--testnamepattern', '--test-name-pattern', '--grep', '-g', '-k',
+  '--testpathpattern', '--testpathpatterns', '--spec', '--filter', '--only',
+  '--shard', '-run', '--file', '--tests', '--test-name',
+]);
+
+function commandBasename(token) {
+  return String(token || '').split(/[/\\]/).pop().toLowerCase();
+}
+
+/**
+ * Does this token select a specific test file/directory? Any path-ish positional, or a
+ * conventional test-file name (`a.test.ts`, `a_spec.rb`, `test_a.py`). Flags are excluded —
+ * they are handled by TEST_SELECTION_FLAGS, so `--config vitest.config.ts` never counts.
+ */
+function looksLikeTestSelector(token) {
+  const t = String(token || '');
+  if (!t || t.startsWith('-')) return false;
+  if (/[/\\]/.test(t)) return true;
+  return /[._-](?:test|spec)\.[A-Za-z0-9]+$/.test(t) || /^test_[^\s]*\.py$/.test(t);
+}
+
+/** Does this command segment invoke a test runner (directly, via `node --test`, or via an npm test script)? */
+function invokesTestRunner(tokens) {
+  if (tokens.some(t => TEST_RUNNER_BASENAMES.has(commandBasename(t)))) return true;
+  const head = commandBasename(tokens[0]);
+  if (/^(?:node|deno|bun)$/.test(head) && tokens.includes('--test')) return true;
+  if (/^(?:npm|pnpm|yarn|bun)$/.test(head)) {
+    return tokens.slice(1).some(t => /^test(?:[:_-][A-Za-z0-9:._-]+)?$/i.test(t));
+  }
+  return false;
+}
+
+/**
+ * Is the claimed command a NARROWED test invocation — a recognized test runner carrying an
+ * explicit subset selector? Deliberately conservative: an unrecognized runner, or a runner
+ * invoked with no selector (`npx vitest run`, `npm run test:unit`), is never called narrowed.
+ * Speaking only when the shape is unmistakable is what keeps this from becoming noise.
+ */
+function isNarrowedTestInvocation(cmd) {
+  for (const segment of String(cmd || '').split(/&&|\|\||[;|]/)) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0 || !invokesTestRunner(tokens)) continue;
+    for (let i = 1; i < tokens.length; i++) {
+      if (TEST_SELECTION_FLAGS.has(tokens[i].toLowerCase().split('=')[0])) return true;
+      if (looksLikeTestSelector(tokens[i])) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The declared test suite for a tests-shaped check: the SAME project-declared target the
+ * trusted backstop would re-run (declaredManifestTarget), plus the equivalent spellings a
+ * claim may legitimately record for it (`npm test`, `npm run test`, the script body itself).
+ * Returns null when the check is not tests-shaped or the repo declares no test target — we
+ * never invent a suite to diverge from.
+ */
+function declaredTestSuite(root, check) {
+  if (manifestTargetKind(check) !== 'test') return null;
+  const declared = declaredManifestTarget(root, check);
+  if (!declared) return null;
+  const label = declared.argv.join(' ');
+  const texts = new Set([normalizeCommand(label)]);
+  if (declared.argv[0] === 'npm' && declared.argv[1] === 'run') {
+    const name = declared.argv[2];
+    texts.add(normalizeCommand(`npm run ${name}`));
+    if (name === 'test') texts.add('npm test');
+    const pkg = readJsonFile(path.join(root, 'package.json'));
+    const body = pkg && pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts[name] : null;
+    if (typeof body === 'string' && body.trim()) texts.add(normalizeCommand(body));
+  }
+  return { label, texts };
+}
+
+/**
+ * False-positive guard: the repo itself declares this exact command as one of its scripts. A
+ * narrow-LOOKING command the project declared is the project's own scope decision, not an
+ * agent narrowing a suite at claim time.
+ */
+function repoDeclaresCommand(root, cmd) {
+  const pkg = readJsonFile(path.join(root, 'package.json'));
+  if (!pkg || !pkg.scripts || typeof pkg.scripts !== 'object') return false;
+  return Object.values(pkg.scripts).some(body => typeof body === 'string' && normalizeCommand(body) === cmd);
+}
+
+/** Shape check for a single disclosure value: explicitly narrowed, with a non-empty reason. */
+function isValidNarrowingDisclosure(scope) {
+  if (!scope || typeof scope !== 'object') return false;
+  return scope.narrowed === true && typeof scope.reason === 'string' && scope.reason.trim() !== '';
+}
+
+/**
+ * Is this check's narrowing fully disclosed? For a bundle-sourced check that deduplicated
+ * several claims naming the same command, EVERY one of those claims must carry a valid
+ * disclosure (review finding 2) — one disclosed claim may not launder an undisclosed sibling.
+ * An evidence.json check carries no sibling list and is judged on its own `evidence_scope`.
+ */
+function disclosedNarrowing(check) {
+  if (check && Array.isArray(check.undisclosedClaimIds)) return check.undisclosedClaimIds.length === 0;
+  return isValidNarrowingDisclosure(check && (check.evidenceScope || check.evidence_scope));
+}
+
+/** warn (default, visible-but-non-blocking) | block (opt-in escalation). Tighten-only. */
+function resolveScopeDivergenceMode() {
+  return String(process.env.FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE || '').trim().toLowerCase() === 'block'
+    ? 'block'
+    : 'warn';
+}
+
+/**
+ * Build the scope-divergence line for an OTHERWISE-ACCEPTED claimed-pass command check, or
+ * null when there is nothing to report. Called only on the paths where the claim was let
+ * through (capture log says pass / backstop re-run says pass) — a claim that already failed or
+ * is already NOT_VERIFIED is blocked on stronger grounds and does not need this line too.
+ */
+function testScopeDivergence(root, base, check, cmd, executedCommandText) {
+  const claimed = normalizeCommand(cmd);
+  if (!claimed) return null;
+  const suite = declaredTestSuite(root, check);
+  if (!suite) return null;
+  if (suite.texts.has(claimed)) return null;
+  // Review finding 1: the divergence is about what was ACTUALLY EXECUTED, not about the
+  // command text the claim happens to name. When the backstop resolved the DECLARED manifest
+  // target (resolveTrustedCommand source (b)), the full suite genuinely just ran — asserting
+  // "the declared suite was not re-run" would be false, and under the escalation opt-in it
+  // would hard-block a session the backstop itself had fully verified.
+  if (executedCommandText && suite.texts.has(normalizeCommand(executedCommandText))) return null;
+  if (!isNarrowedTestInvocation(claimed)) return null;
+  if (repoDeclaresCommand(root, claimed)) return null;
+  if (disclosedNarrowing(check)) return null;
+
+  // Name an UNDISCLOSED claim (finding 2) rather than the deduped check's first claim, which
+  // may be a disclosed sibling — the operator needs the id that actually needs fixing.
+  const undisclosed = check && Array.isArray(check.undisclosedClaimIds) ? check.undisclosedClaimIds : [];
+  const id = safeOneLine(undisclosed[0] || (check && check.id) || claimed, 80);
+  const blocking = resolveScopeDivergenceMode() === 'block';
+  // The default lead deliberately matches NEITHER HARD_BLOCK nor FULL_BLOCK; the escalated
+  // lead carries the `tests-evidence scope divergence (blocking)` marker both patterns list.
+  const lead = blocking
+    ? 'tests-evidence scope divergence (blocking):'
+    : 'tests-evidence scope divergence —';
+  const escalationHint = blocking
+    ? ''
+    : ' Set FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block to make this a hard block.';
+  return `${base} ${lead} claim ${id} names a narrowed test command "${safeOneLine(claimed, 120)}" while this repo declares "${safeOneLine(suite.label, 120)}" as its test suite; the declared suite was not re-run, so this pass covers only the named subset. Record the declared-suite command, or disclose the narrowing (trust.bundle claim metadata.evidence_scope {"narrowed":true,"reason":"..."}, or an evidence_scope field on the evidence.json check).${escalationHint}`;
+}
+
+function resolveBackstopTimeout(root) {
+  return resolveGoalFitConfig(root).goal_fit.backstop_timeout_ms;
 }
 
 /**
@@ -1168,10 +1748,8 @@ function resolveBackstopTimeout() {
  * latency via FLOW_AGENTS_GOAL_FIT_BACKSTOP=off (re-run becomes warn-only) or
  * =skip (no re-run at all → record NOT_VERIFIED instead).
  */
-function resolveBackstopMode() {
-  const v = String(process.env.FLOW_AGENTS_GOAL_FIT_BACKSTOP || '').trim().toLowerCase();
-  if (v === 'off' || v === 'warn' || v === 'skip' || v === 'block') return v === 'warn' ? 'off' : v;
-  return 'block';
+function resolveBackstopMode(root) {
+  return resolveGoalFitConfig(root).goal_fit.backstop;
 }
 
 /**
@@ -1205,7 +1783,7 @@ function runBackstop(trusted) {
   const result = spawnSync(trusted.argv[0], trusted.argv.slice(1), {
     cwd: trusted.cwd,
     encoding: 'utf8',
-    timeout: resolveBackstopTimeout(),
+    timeout: resolveBackstopTimeout(trusted.cwd || process.cwd()),
     killSignal: 'SIGKILL',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -1227,18 +1805,30 @@ function runBackstop(trusted) {
 }
 
 /**
- * ADR 0010 Phase 4b: captureCrossReference — bundle-first command check sourcing.
- * Sources the claimed-pass command checks from trust.bundle evidence[] (execution/
- * command items) when the bundle is present, falling back to evidence.json checks
- * for bundle-less sessions. command-log.jsonl UNCHANGED — it stays the capture
- * truth source. The teeth (claimed-pass + captured-fail → block) are byte-identical.
+ * A passing backstop is an observed command only after its process exits. Bind
+ * that observation to the worktree that actually executed it, then apply the
+ * same clean snapshot and ancestry requirements as a captured command-log pass.
+ */
+function observeBackstopWorkspaceProvenance(workspaceRoot, check) {
+  const snapshot = currentCanonicalWorkspaceSnapshot(workspaceRoot);
+  const logged = snapshot
+    ? { entry: { observed_at_commit: snapshot.head_sha, worktree_clean: snapshot.worktree_clean } }
+    : null;
+  return capturedPassProvenanceIssue(workspaceRoot, logged, check, snapshot);
+}
+
+/**
+ * ADR 0010 Phase 4b: captureCrossReference — bundle-authoritative command checks.
+ * Only trust.bundle can supply a confirming command claim. evidence.json remains
+ * an auditable pessimistic signal: it can trigger capture-fail detection and a
+ * trusted backstop, but it cannot confirm a pass without a trust.bundle claim.
  *
  * ADR 0016 P-c (fix): accept activeFlowStep so declared-type sessions (e.g.
  * builder.verify.tests) are visible to the cross-reference, closing the hole
  * where captureCrossReference was the only capture consumer not threaded with
  * the FlowDefinition. Mirrors the pattern in bundleEnforcement / sidecarGuidance.
  */
-function captureCrossReference(root, artifactDir, activeFlowStep) {
+function captureCrossReference(root, artifactDir, activeFlowStep, workspaceRoot = root, summary = null) {
   // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
   // Null when no FlowDefinition is active (fallback: bundleClaimedPassCommandChecks
   // uses workflow.check.* prefix only — no regression for non-FlowDefinition sessions).
@@ -1246,11 +1836,28 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
   const log = readLatestCommandLog(artifactDir); // Fix C: latest-wins; genuine fix-then-rerun-to-pass clears the block
+  // #1266: the cross-check summary collector observes THIS derivation rather than recomputing
+  // it anywhere else (one truth source). commands_captured is DISTINCT NORMALIZED COMMANDS —
+  // the size of readLatestCommandLog's latest-wins map — NOT raw command-log.jsonl lines; a
+  // command re-run five times counts once.
+  if (summary) {
+    summary.computed = true;
+    summary.commands_captured = log.size;
+  }
   const base = relative(root, artifactDir);
-  const backstopMode = resolveBackstopMode();
+  const backstopMode = resolveBackstopMode(root);
   const warnings = [];
   const captureState = readJsonFile(path.join(artifactDir, 'state.json'));
   const terminalDelivered = isTerminalDeliveredState(captureState);
+  let currentWorkspaceSnapshot;
+  let currentWorkspaceSnapshotResolved = false;
+  const currentSnapshot = () => {
+    if (!currentWorkspaceSnapshotResolved) {
+      currentWorkspaceSnapshot = currentCanonicalWorkspaceSnapshot(workspaceRoot);
+      currentWorkspaceSnapshotResolved = true;
+    }
+    return currentWorkspaceSnapshot;
+  };
 
   // AC3 fail-closed: detect a missing command log in a post-execution session.
   // When state.json confirms the session is past the planning phase (commands should
@@ -1310,6 +1917,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   let chainBroken = false;
   {
     const chainResult = verifyCommandLogChain(artifactDir);
+    // #1266: carry verifyCommandLogChain's REAL enum (ok | legacy | forked | broken) into the
+    // summary unmapped. `legacy` means NO chain exists — a consumer must never render it as
+    // verified/ok; collapsing the enum here would be exactly that lie.
+    if (summary) summary.chain = chainResult.status;
     if (chainResult.status === 'broken') {
       chainBroken = true;
       const brokenIdx = chainResult.brokenAt !== null ? ` (entry ${chainResult.brokenAt})` : '';
@@ -1333,28 +1944,44 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
     }
   }
 
-  // Build the list of claimed-pass command checks — bundle-first, evidence.json fallback.
+  // Build claimed-pass command checks from trust.bundle. A bundle-less
+  // evidence.json check may trigger a safe negative/backstop path, never a
+  // command-log confirmation shortcut.
   let claimedPass;
+  let sidecarOnlyClaims = false;
   if (bundle && Array.isArray(bundle.claims)) {
-    // Phase 4b: source from trust.bundle evidence[] (execution/command items).
     claimedPass = bundleClaimedPassCommandChecks(bundle, declaredClaimTypes);
   } else {
-    // Fallback: no bundle — read from evidence.json (existing behavior, no regression).
     const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
     if (!evidence || !Array.isArray(evidence.checks)) return warnings;
+    sidecarOnlyClaims = true;
     claimedPass = evidence.checks.filter(check => {
       if (!check || typeof check !== 'object') return false;
       const kind = normalizedStatus(check.kind);
       const status = normalizedStatus(check.status);
       return kind === 'command' && (status === 'pass' || status === 'passed') && normalizeCommand(check.command);
     });
+    if (claimedPass.length > 0) {
+      warnings.push(`${base} evidence.json command claims are NOT_VERIFIED — trust.bundle is required for runtime confirmation; command-log records and sidecar status cannot independently confirm a pass.`);
+    }
   }
 
+  // #1266: claims_total vs claims_checked is mandatory in the summary — the loop below caps
+  // at 8 claimed-pass commands (slice(0, 8)), so zero-contradicted must never be readable as
+  // full coverage. claims_total is every claimed-pass check; claims_checked counts only the
+  // ones this loop actually cross-referenced (capped, and skipping empty-command checks).
+  if (summary) summary.claims_total = claimedPass.length;
   for (const check of claimedPass.slice(0, 8)) {
     const cmd = normalizeCommand(check.command);
     if (!cmd) continue;
+    if (summary) summary.claims_checked += 1;
     const id = safeOneLine(check.id || cmd, 80);
     const logged = log.get(cmd);
+    // #1171: emitted ONLY on the two paths that accept the claimed pass — a narrowed-but-
+    // passing claim is the misleading-green case this closes. The capture-log path executed
+    // nothing beyond the claimed command itself, so it passes no executed-command override;
+    // the backstop path below recomputes with what it ACTUALLY ran (review finding 1).
+    const scopeNote = testScopeDivergence(root, base, check, cmd);
 
     if (!chainBroken && logged && logged.ran) {
       // (1) Cross-reference the capture log first (only when chain is intact).
@@ -1362,6 +1989,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       // shortcut and fall through to the backstop/NOT_VERIFIED path below.
       if (logged.failed) {
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
+        // #1266: one contradiction identity per normalized command — capturedFailReconciliation
+        // can flag the SAME contradiction namespace-agnostically; the shared Set dedups them
+        // (one contradiction, one count), mirroring the bundleEnforcement warning dedup in analyze().
+        if (summary) summary.contradicted.add(cmd);
         warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
       } else if (logged.ambiguous && logged.absenceAmbiguous) {
         // #362: a bare grep/diff logged exit 1 — ambiguous (zero matches/no diff), not a
@@ -1384,9 +2015,30 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
         // Fix D: exit-code laundering. The captured exit-0 is not trustworthy — the command
         // baked in '|| true' / '|| :' / '; true' / '; exit 0' / '| true' to mask the real result.
         warnings.push(`${base} evidence check ${id}: claimed pass relies on an exit-code-laundered command "${safeOneLine(cmd, 120)}" — the exit code is not a trustworthy signal (laundering operators mask the real exit code).`);
+      } else if (scopeNote) {
+        // #1171: the log shows it ran and passed — but the command it ran is a narrowing of
+        // the repo's declared suite, so the pass is real and the coverage is not what it looks
+        // like. Surfaced here rather than swallowed by the "satisfied deterministically" path.
+        warnings.push(scopeNote);
       }
-      // else: log shows it ran and passed with no laundering → satisfied deterministically.
-      continue;
+      let provenanceIssue = null;
+      if (!sidecarOnlyClaims && !logged.failed && !logged.ambiguous && !hasLaunderingOperator(cmd) && !scopeNote) {
+        provenanceIssue = capturedPassProvenanceIssue(workspaceRoot, logged, check, currentSnapshot());
+        if (provenanceIssue) {
+          warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — ${provenanceIssue}. Re-record this command with a clean canonical workspace snapshot bound to the trust.bundle claim.`);
+        }
+      }
+      // A bundle claim can be confirmed by its intact capture record. A
+      // sidecar-only claim must continue to the trusted backstop and remains
+      // nonconfirming even when that backstop passes.
+      // #1266: claims_confirmed_from_capture counts ONLY this deterministic confirmation path —
+      // a bundle claim whose intact (chain-not-broken) capture record shows a clean pass with no
+      // failure, no ambiguity, no laundering, no undisclosed narrowing, and no provenance issue.
+      // A narrowed-but-passing or provenance-flagged claim is deliberately NOT "confirmed".
+      if (summary && !sidecarOnlyClaims && !logged.failed && !logged.ambiguous && !hasLaunderingOperator(cmd) && !scopeNote && !provenanceIssue) {
+        summary.claims_confirmed_from_capture += 1;
+      }
+      if (!sidecarOnlyClaims || logged.failed || logged.ambiguous || hasLaunderingOperator(cmd) || scopeNote || provenanceIssue) continue;
     }
 
     // (2) Backstop: the log has NO execution for this claimed-pass command.
@@ -1416,7 +2068,13 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       warnings.push(`${base} evidence check ${id}: malformed-evidence — terminal delivered/done session recorded model-command text asserted by FLOW_AGENTS_GOAL_FIT_RECHECK ("${safeOneLine(cmd, 120)}"); it was NOT re-run on a terminal session. Captured-execution evidence and CI/L2 checks remain the anchors.`);
       continue;
     }
-    const outcome = runBackstop(trusted);
+    // Artifact and manifest discovery use the shared authority root. The
+    // command itself must run in the observed worktree that the provenance
+    // snapshot describes, including when it is a linked worktree.
+    const outcome = runBackstop({ ...trusted, cwd: workspaceRoot });
+    // #1266: backstop_reruns counts trusted backstop re-runs that actually EXECUTED
+    // (outcome.ran); a backstop that could not start is not a re-run.
+    if (summary && outcome.ran) summary.backstop_reruns += 1;
     if (!outcome.ran) {
       warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — trusted backstop (${trusted.source}) could not run (${safeOneLine(outcome.error, 80)}).`);
       continue;
@@ -1428,11 +2086,34 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" exited 1 — for grep/diff this may mean zero matches/no differences (PASS for an absence check) or an unintended miss (FAIL for a presence check); NOT_VERIFIED (ambiguous): ${AMBIGUOUS_REMEDIATION} to remove the ambiguity.`;
       warnings.push(note);
     } else if (outcome.classification === 'fail') {
+      // #1266: a backstop FAIL contradicting a claimed pass is a contradiction from the SAME
+      // source (captureCrossReference) — same per-command dedup Set, counted even in warn mode
+      // (the count reports what was observed; `blocking` on the record reports enforcement).
+      if (summary) summary.contradicted.add(cmd);
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" FAILED with exit ${outcome.exitCode}, contradicting the claimed pass. This is a caught false-completion.`;
       if (backstopMode === 'off') warnings.push(`${note} [backstop in warn mode — not blocking]`);
       else warnings.push(note);
+    } else {
+      // #1171: the re-run confirmed something — but WHAT it re-ran decides whether this is a
+      // narrowing (review finding 1). Recompute against the command the backstop actually
+      // executed: when that is the declared suite (resolveTrustedCommand source (b), the
+      // manifest fallback), the full suite genuinely just ran and there is no divergence to
+      // report. Only when the executed command is itself the narrowed claim does re-running
+      // it re-confirm merely the subset — the path the issue names.
+      const executed = (trusted.argv.length === 3 && trusted.argv[0] === 'bash' && trusted.argv[1] === '-lc')
+        ? trusted.argv[2]
+        : trusted.argv.join(' ');
+      const backstopScopeNote = testScopeDivergence(root, base, check, cmd, executed);
+      if (backstopScopeNote) warnings.push(backstopScopeNote);
+      if (sidecarOnlyClaims) {
+        warnings.push(`${base} evidence check ${id}: NOT_VERIFIED — trusted backstop (${trusted.source}) passed, but evidence.json and command-log data cannot confirm runtime evidence without a matching trust.bundle claim.`);
+      } else {
+        const provenanceIssue = observeBackstopWorkspaceProvenance(workspaceRoot, check);
+        if (provenanceIssue) {
+          warnings.push(`${base} evidence check ${id}: trusted backstop (${trusted.source}) passed but NOT_VERIFIED — ${provenanceIssue}. Re-run it from a clean canonical workspace snapshot bound to the trust.bundle claim.`);
+        }
+      }
     }
-    // backstop classification 'pass' → claim deterministically confirmed by re-run, no warning.
   }
 
   return warnings;
@@ -1465,7 +2146,7 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
  *   - No-command session: no log → latestLog empty → no warning.
  *   - Incidental fail (grep/diff/find) with no pass-claim → no warning (Case B removed).
  */
-function capturedFailReconciliation(root, artifactDir, taskStatus) {
+function capturedFailReconciliation(root, artifactDir, taskStatus, summary = null) {
   // Fix A: removed the `completing` guard. Run on EVERY stop — status-independent.
   // A claim contradicting the capture is a false-completion whether or not the agent
   // has set state.json.status to a terminal value. (taskStatus param kept for compat.)
@@ -1565,6 +2246,12 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     if (acc && acc.passClaims.length > 0) {
       // Any-namespace claim asserts pass for a command whose latest capture is FAIL.
       // This is the namespace-agnostic false-completion signal.
+      // #1266: same contradiction identity (normalized command) as captureCrossReference's
+      // capture-log contradiction — the shared Set merges both sources into ONE count when
+      // they flag the same command, mirroring analyze()'s bundleEnforcement warning dedup.
+      // Only this Case-A bucket is a contradiction; the laundered-pass and ambiguous buckets
+      // below are NOT_VERIFIED classes, never counted as contradicted.
+      if (summary) summary.contradicted.add(cmd);
       const claim = acc.passClaims[0];
       warnings.push(
         `${base} captured command '${safeOneLine(cmd, 120)}' last ran FAIL${exitStr} ` +
@@ -2066,9 +2753,17 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
 //
 // Both are used in analyze() for blocking decisions AND in run() for the AC2
 // MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
-const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \(ambiguous\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;
+//
+// #1171: `tests-evidence scope divergence (blocking)` is the ESCALATED form of the
+// narrowed-test-command divergence, emitted only under FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block.
+// It is listed in HARD_BLOCK because the misleading-green it names is at its worst on a
+// terminal/delivered session (that is when a narrowed pass gets published as coverage). The
+// DEFAULT (warn) wording — `tests-evidence scope divergence —` — deliberately matches NEITHER
+// pattern: the #1048 recipe institutionalized narrowed commands, so existing green flows must
+// stay green until an operator opts in. Do not fold the default lead into either constant.
+const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \(ambiguous\)|tests-evidence scope divergence \(blocking\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
-const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)/;
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)|tests-evidence scope divergence \(blocking\)/;
 
 // #793: deliberately NOT folded into HARD_BLOCK/FULL_BLOCK above. Those two constants are
 // reused by isHardStopWarning() to decide whether the AC2 MAX_BLOCKS escape valve is allowed
@@ -2162,7 +2857,7 @@ function learningGateOutstandingWarning(root, artifactDir, state) {
   return `${base} learning outstanding — state ${status}/${phase} has no learning.json and no learning-evidence check in trust.bundle; run learning-review, or record an accepted skip via \`workflow-sidecar advance-state ${base} --skip-learning "<reason>" --waived-by <actor>\`.`;
 }
 
-async function analyze(root, now = Date.now(), fencedRunId = null) {
+async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot = root) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
   const { actor: actorKey } = resolveActor(process.env);
   const activeTurnScope = validatedActiveTurnScope(root);
@@ -2181,7 +2876,7 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
   // legitimately handling an authorized continuation-driver turn is never treated as "no own
   // work to scope to" here, even without its own per-actor current pointer — this check only
   // fires when NEITHER mechanism finds a scope.
-  if (!scoped && !isUnresolvedActor(actorKey)) {
+  if (!scoped && !isUnresolvedActor(actorKey) && flowAgentsDirs.length > 0) {
     const ownStale = flowAgentsDirs.map(staleCurrentSlug).find(Boolean);
     process.stderr.write(ownStale
       ? `[Hook] Goal Fit: actor "${safeOneLine(actorKey, 80)}"'s own current-pointer names slug "${safeOneLine(ownStale, 80)}" but no such session directory exists — ignoring the stale own pointer; other sessions' sidecars are informational only, not blocking (#440).\n`
@@ -2250,7 +2945,7 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
   const selectedRunId = path.basename(latestArtifactDir);
   if (fencedRunId === null) {
     try {
-      return await withFlowRecoveryFenceReadAsync(root, selectedRunId, () => analyze(root, now, selectedRunId));
+      return await withFlowRecoveryFenceReadAsync(root, selectedRunId, () => analyze(root, now, selectedRunId, workspaceRoot));
     } catch (error) {
       return {
         warnings: [`workflow recovery fence: ${String(error && error.message || error)}. Canonical workflow artifacts are unavailable until recovery completes.`],
@@ -2267,7 +2962,13 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
   const status = latest.status || 'unknown';
   const ageMinutes = Math.max(0, Math.round((now - latest.mtimeMs) / 60000));
 
-  if (ACTIVE_STATUSES.has(status)) {
+  // #962 P1: the artifact-status check below and sidecarGuidance's "workflow
+  // state:" line both answer "does an agent still owe work here?" — they must
+  // share nextActionIsDone so a session whose next_action already says "done"
+  // (no agent turn required) does not get double-gated by a second, differently
+  // sourced signal asking the same question.
+  const activeStatusState = readJsonFile(path.join(latestArtifactDir, 'state.json'));
+  if (ACTIVE_STATUSES.has(status) && !nextActionIsDone(activeStatusState)) {
     warnings.push(`${relPath} is still status:${status} (${ageMinutes}m old). Do not final-answer as complete unless the next step is explicit.`);
   }
 
@@ -2281,7 +2982,25 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
 
   warnings.push(...sidecarValidation(root, latestArtifactDir));
   warnings.push(...sidecarGuidance(root, latestArtifactDir, activeFlowStep));
-  const captureWarnings = captureCrossReference(root, latestArtifactDir, activeFlowStep);
+  // #1266: stop-gate cross-check summary collector. Populated ONLY by observing the two
+  // existing truth sources (captureCrossReference + capturedFailReconciliation) as they run —
+  // never recomputed elsewhere. `computed` flips true only when captureCrossReference actually
+  // executed for a scoped session, so absent hooks/session ⇒ absent record downstream (a
+  // fabricated zero row would be this record committing the defect it exists to kill).
+  // `contradicted` is a Set of normalized commands: both sources can flag the same
+  // contradiction; one contradiction, one count (same dedup posture as the bundleEnforcement
+  // warning suppression just below).
+  const stopGateStats = {
+    computed: false,
+    commands_captured: 0,
+    claims_total: 0,
+    claims_checked: 0,
+    claims_confirmed_from_capture: 0,
+    backstop_reruns: 0,
+    chain: 'legacy',
+    contradicted: new Set(),
+  };
+  const captureWarnings = captureCrossReference(root, latestArtifactDir, activeFlowStep, workspaceRoot, stopGateStats);
   warnings.push(...captureWarnings);
   // Dedup: bundleEnforcement and captureCrossReference can both fire "caught false-completion"
   // for the same disputed claim. Suppress the bundleEnforcement warning ONLY when
@@ -2327,7 +3046,7 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
   // Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
   // Fix A: status-independent — runs on EVERY stop. A claim contradicting the capture
   // is a false-completion whether or not the agent says the task is 'done'.
-  warnings.push(...capturedFailReconciliation(root, latestArtifactDir, taskStatus));
+  warnings.push(...capturedFailReconciliation(root, latestArtifactDir, taskStatus, stopGateStats));
 
   // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
   // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
@@ -2384,6 +3103,19 @@ async function analyze(root, now = Date.now(), fencedRunId = null) {
     gatePrefix: gateLabel(activeFlowStep),
     warningRelPath: relPath,
     latestArtifactDir,
+    // #1266: null (never a zero-filled object) when the cross-reference did not run —
+    // recordStopGateSummary() treats null as "emit nothing".
+    stopGateSummary: stopGateStats.computed
+      ? {
+        commands_captured: stopGateStats.commands_captured,
+        claims_total: stopGateStats.claims_total,
+        claims_checked: stopGateStats.claims_checked,
+        claims_confirmed_from_capture: stopGateStats.claims_confirmed_from_capture,
+        claims_contradicted: stopGateStats.contradicted.size,
+        backstop_reruns: stopGateStats.backstop_reruns,
+        chain: stopGateStats.chain,
+      }
+      : null,
   };
 }
 
@@ -2422,10 +3154,15 @@ function plainStopLead(result, gapCount) {
   const count = Number.isFinite(gapCount) && gapCount > 0
     ? (gapCount === 1 ? '1 sign-off' : `${gapCount} sign-offs`)
     : 'a few sign-offs';
+  // #1172: audience-neutral. This lead now travels on BOTH channels — to the model in `reason`
+  // on first contact, and to the operator in `stopReason` when the refusal escalates — so it
+  // may not address either one as "you". It states what is paused and what would close it,
+  // without telling the model that a human's options are its own, and without telling a human
+  // that the detail below is not for them.
   return [
     `⏸ In plain terms: the task "${name}" is paused at its ${stepPhrase}. ${count} still need recording before it can finish on its own.${needsList}`,
-    `   Two ways forward: let it finish those checks, or cancel the run to close it now. Nothing else you're doing is blocked by this.`,
-    `   (The technical detail below is for the agent/debugging.)`,
+    `   It closes either way: record the outstanding sign-offs, or cancel the run. No other work is blocked by this pause.`,
+    `   (Specifics follow.)`,
   ].join('\n');
 }
 
@@ -2452,6 +3189,11 @@ function isHardStopWarning(warning, relPath, activeTurnAuthority) {
   // remain eligible for the MAX_BLOCKS operator release valve (belt-and-braces with the
   // message wording that avoids FULL_BLOCK tokens; see learningGateOutstandingWarning).
   if (LEARNING_GATE_PATTERN.test(warning)) return false;
+  // Defense in depth for the unstarted-delivery advisory. run() injects it only with
+  // blocking:false and returns before any hard-block classification, so this branch is not
+  // reachable today — it exists so that MOVING the injection (e.g. into analyze()) cannot
+  // silently convert a "you never started a session" advisory into a non-releasable hard block.
+  if (UNSTARTED_DELIVERY_PATTERN.test(warning)) return false;
   if (!activeTurnAuthority) return HARD_BLOCK.test(warning);
   return FULL_BLOCK.test(warning) && !isOrdinaryActiveGateWarning(warning, relPath);
 }
@@ -2461,11 +3203,8 @@ function isHardStopWarning(warning, relPath, activeTurnAuthority) {
  * the legacy FLOW_AGENTS_GOAL_FIT_STRICT=true maps to block; otherwise the
  * canonical engine default is warn.
  */
-function resolveGoalFitMode() {
-  const explicit = String(process.env.FLOW_AGENTS_GOAL_FIT_MODE || '').trim().toLowerCase();
-  if (explicit === 'block' || explicit === 'warn' || explicit === 'off') return explicit;
-  const strict = String(process.env.FLOW_AGENTS_GOAL_FIT_STRICT || '').toLowerCase() === 'true';
-  return strict ? 'block' : 'warn';
+function resolveGoalFitMode(root) {
+  return resolveGoalFitConfig(root).goal_fit.mode;
 }
 
 /**
@@ -2474,9 +3213,8 @@ function resolveGoalFitMode() {
  * After this many consecutive identical blocks the hook releases (exit 0) with a
  * loud notice. Configurable via FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS (default 3).
  */
-function resolveMaxBlocks() {
-  const raw = Number.parseInt(process.env.FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS || '', 10);
-  return Number.isInteger(raw) && raw > 0 ? raw : 3;
+function resolveMaxBlocks(root) {
+  return resolveGoalFitConfig(root).goal_fit.max_blocks;
 }
 
 function blockStreakFile(root) {
@@ -2811,12 +3549,61 @@ function releaseOnNonTerminalStop(root, artifactDir) {
   }
 }
 
+// ─── #1266: stop-gate cross-check summary record (the computed heartbeat) ─────
+//
+// One machine-readable JSON line appended to .kontourai/telemetry/stop-gate-summary.jsonl
+// per Stop-gate EVALUATION, emitted alongside the economics record (which the telemetry Stop
+// flow also emits per Stop). The latest row for a session slug is that session's close
+// reading; earlier rows are the gate's honest readings at blocked stops — in block mode a
+// caught contradiction blocks the stop, so ONLY the per-evaluation rows ever carry
+// claims_contradicted > 0 (a close-only record would hide exactly the catches this record
+// exists to surface, and the economics record's self-reported defects.caught_false_completions
+// would keep having no machine-derived counterpart). `blocking` discloses whether this
+// evaluation allowed the stop.
+//
+// Delivery class: best-effort local record (#1087 slice C / economics pattern at
+// telemetry.sh:907–946). The economics emitter detaches a subshell because it runs jq/node
+// subprocesses and an opt-in network relay; this emitter is a local sub-millisecond append
+// with no subprocess and no network, so the fail-open try/catch alone provides the class
+// guarantee (can never alter the hook's verdict, output, or exit code) while keeping the
+// write deterministic for evals. Nothing is recomputed here: every number comes from the
+// analyze() collector fed by captureCrossReference + capturedFailReconciliation.
+//
+// Absent hooks ⇒ absent record: stopGateSummary is null whenever the cross-reference did not
+// run (no scoped session, mode off, analyze early-return), and null emits NOTHING — never a
+// fabricated zero row.
+function recordStopGateSummary(root, result) {
+  try {
+    const summary = result && result.stopGateSummary;
+    if (!summary) return;
+    const record = {
+      schema: 'flow-agents.stop-gate-summary',
+      version: '0.1',
+      at: new Date().toISOString(),
+      session: path.basename(result.latestArtifactDir || ''),
+      blocking: Boolean(result.blocking),
+      ...summary,
+    };
+    const file = path.join(root, '.kontourai', 'telemetry', 'stop-gate-summary.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
+  } catch { /* best-effort: the summary record must never fail or delay the Stop hook */ }
+}
+
 async function run(rawInput) {
   const input = parseJson(rawInput);
-  const root = findRepoRoot(input.cwd || process.cwd());
-  const mode = resolveGoalFitMode();
+  const inputCwd = input.cwd || process.cwd();
+  const root = findRepoRoot(inputCwd);
+  // A non-Git invocation still runs any configured backstop in its supplied
+  // working directory, but canonical observation remains unavailable and so
+  // cannot confirm the claim.
+  const workspaceRoot = resolveObservedWorkspaceRoot(inputCwd) || inputCwd;
+  const mode = resolveGoalFitMode(root);
   if (mode === 'off') return rawInput;
-  const result = await analyze(root);
+  const result = await analyze(root, Date.now(), null, workspaceRoot);
+  // #1266: additive side effect only — never changes analyze()'s contract or this function's
+  // return value (same discipline as releaseOnNonTerminalStop below).
+  recordStopGateSummary(root, result);
   // #292 Wave 2: additive side effect only — never changes analyze()'s warnings/blocking
   // contract or this function's return value. Reuses analyze()'s already-resolved
   // latestArtifactDir rather than re-deriving a second "what is the active session" path.
@@ -2824,6 +3611,31 @@ async function run(rawInput) {
   // liveness release must always be attempted on a non-terminal Stop, independent of
   // whether goal-fit found anything to warn about).
   releaseOnNonTerminalStop(root, result.latestArtifactDir || null);
+  // Unstarted-delivery advisory (never blocking). analyze() enforces ADHERENCE to a session once
+  // one exists; it has no opinion about work that never started one — both no-session paths
+  // return `{ warnings: [], blocking: false, latestArtifactDir: null }`. `latestArtifactDir ===
+  // null` is exactly that "no session to scope to" marker, so a session that merely has nothing
+  // to warn about this turn is untouched here. blocking stays false: this advisory must never
+  // gain teeth by accident, and whether it ever arms is a later decision informed by whether it
+  // catches anything real. See scripts/hooks/lib/unstarted-delivery.js for the four conditions.
+  //
+  // DISCLOSED GAP: `!result.latestArtifactDir` is not independently test-covered, because no
+  // reachable fixture separates it from `warnings.length === 0`. Measured, not assumed: a real
+  // `ensure-session --flow-id builder.build` session emits 6 warnings at its very first step, and
+  // hand-built terminal sidecars still emit 3 — a session that exists effectively always warns, so
+  // the emptiness check already implies "no session" today. Fault injection confirms it: deleting
+  // this clause changes no test outcome. It stays anyway, and deliberately: relying on "sessions
+  // always produce a warning" would make correctness depend on an unstated empirical property of
+  // an unrelated code path, which is exactly the coupling that breaks silently later. The clause
+  // states the actual intent — advise only when there is no session to scope to.
+
+  if (result.warnings.length === 0 && !result.latestArtifactDir) {
+    const advisory = unstartedDeliveryWarning({ root, cwd: input.cwd || process.cwd(), env: process.env });
+    if (advisory) {
+      result.warnings = [advisory];
+      result.blocking = false;
+    }
+  }
   if (result.warnings.length === 0) {
     clearBlockStreak(root);
     return rawInput;
@@ -2869,8 +3681,23 @@ async function run(rawInput) {
     return { stdout: rawInput, stderr: message, exitCode: 0 };
   }
 
-  const maxBlocks = resolveMaxBlocks();
+  const maxBlocks = resolveMaxBlocks(root);
   const count = bumpBlockStreak(root, reasonsHash(remediationWarnings));
+
+  // #1172: classify hard-vs-soft ONCE, for every blocking return below, not only at the
+  // max-blocks branch. A hard block is non-releasable from the very first refusal, and the
+  // harness adapter needs to know that on refusal #1 — it is the only signal that lets the
+  // adapter end the turn for this class without also truncating the soft class's release valve.
+  // Hoisting is behaviour-preserving: the predicate is pure over `result`.
+  const isHardBlock = (result.activeFlowRun && !result.activeTurnAuthority) || result.warnings.some(w => isHardStopWarning(w, relative(root, result.latestArtifactDir || root), result.activeTurnAuthority));
+  // The machine-readable half of the contract in scripts/hooks/lib/stop-escalation.js. Appended
+  // to the OUTPUT STRING only — never folded into remediationWarnings/result.warnings, so
+  // reasonsHash, block-dedup and the HARD_BLOCK/FULL_BLOCK detectors stay byte-stable (same
+  // discipline as plainStopLead above). Adapters strip it before any human or model sees it.
+  const stopControlLine = isHardBlock
+    ? `\n${STOP_CONTROL_PREFIX} ${JSON.stringify({ v: 1, terminal: true, code: result.activeFlowRun && !result.activeTurnAuthority ? 'canonical-flow-active' : 'non-releasable-hard-block' })}`
+    : '';
+
   if (count >= maxBlocks) {
     // AC2: never auto-release a HARD block (caught false-completion, capture contradiction,
     // tamper signal, gate misconfiguration, integrity failure). An agent burning through
@@ -2880,14 +3707,13 @@ async function run(rawInput) {
     // with runtime-constructed paths or by modifying the warning
     // text so the hash changes. The real anchor is external (signed checkpoints + human
     // review). This raises the cost of the burn-through-the-counter escape vector.
-    const isHardBlock = (result.activeFlowRun && !result.activeTurnAuthority) || result.warnings.some(w => isHardStopWarning(w, relative(root, result.latestArtifactDir || root), result.activeTurnAuthority));
     if (isHardBlock) {
       // Do NOT clear the streak — keep accumulating so the same hard block stays visible.
       return {
         stdout: rawInput,
-        stderr: result.activeFlowRun && !result.activeTurnAuthority
+        stderr: (result.activeFlowRun && !result.activeTurnAuthority
           ? `${message}\n${gatePrefix} max-blocks reached but canonical Flow remains active — not auto-releasing; complete or explicitly cancel the run.`
-          : `${message}\n${gatePrefix} max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`,
+          : `${message}\n${gatePrefix} max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`) + stopControlLine,
         exitCode: 2,
       };
     }
@@ -2898,9 +3724,16 @@ async function run(rawInput) {
       exitCode: 0,
     };
   }
+  // #1172: the tail of this sentence is a promise to the operator about THIS gate's own
+  // behaviour, so it must only be made when this gate is the thing that will stop blocking. A
+  // hard block never releases, and saying otherwise here is exactly the false statement an
+  // adapter-side fence would have made true-by-accident.
+  const blockTail = isHardBlock
+    ? `(block ${count}; this block is non-releasable and will not clear itself — it needs a real fix or an operator override)`
+    : `(block ${count}; after ${maxBlocks} identical blocks I stop blocking and hand this to you)`;
   return {
     stdout: rawInput,
-    stderr: `${message}\n${gatePrefix} Stop blocked — ${remediationWarnings.length} evidence gap(s) (block ${count}; after ${maxBlocks} identical blocks I stop blocking and hand this to you)`,
+    stderr: `${message}\n${gatePrefix} Stop blocked — ${remediationWarnings.length} evidence gap(s) ${blockTail}` + stopControlLine,
     exitCode: 2,
   };
 }
@@ -2936,4 +3769,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence };
+module.exports = { STOP_CONTROL_PREFIX, analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning, currentCanonicalWorkspaceSnapshot, resolveObservedWorkspaceRoot, resolveTrustedWorkspaceGitExecutable };

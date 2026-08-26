@@ -10,6 +10,7 @@ source "${TELEMETRY_DIR}/lib/session.sh"
 source "${TELEMETRY_DIR}/lib/enrich.sh"
 source "${TELEMETRY_DIR}/lib/transport.sh"
 source "${TELEMETRY_DIR}/lib/usage.sh"
+source "${TELEMETRY_DIR}/lib/install-identity.sh"
 
 normalize_tool_name() {
   case "$1" in
@@ -161,6 +162,12 @@ build_base_event() {
     claude|claude-code) runtime_name="claude-code" ;;
     kiro|kiro-cli) runtime_name="kiro-cli" ;;
   esac
+  # Fail-safe: --argjson aborts jq on malformed input, which would drop the whole event. Any
+  # resolution hiccup degrades to the explicit unknown tuple, never to a missing block.
+  local install_identity_json
+  install_identity_json=$(install_identity 2>/dev/null) || install_identity_json=""
+  printf '%s' "$install_identity_json" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || install_identity_json='{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}'
   jq -nc \
     --arg sv "0.3.0" \
     --arg ts "$(date +%s)000" \
@@ -170,6 +177,7 @@ build_base_event() {
     --arg an "$agent_name" \
     --arg rv "$(runtime_version "$runtime_name")" \
     --arg rn "$runtime_name" \
+    --argjson ii "$install_identity_json" \
     '{
       schema_version: $sv,
       timestamp: $ts,
@@ -180,7 +188,8 @@ build_base_event() {
         name: $an,
         runtime: $rn,
         version: $rv
-      }
+      },
+      install_identity: $ii
     }'
 }
 
@@ -931,6 +940,33 @@ add_stop_data_and_emit_usage() {
       fi
       (bash "$econ_script" "$usage_event") </dev/null >/dev/null 2>&1 &
       disown 2>/dev/null || true
+
+      # Canonical Flow-run economics is a separate, local-only record from the legacy
+      # session.usage-derived record above: it has producer_authority flow_run_record and derives
+      # honest phases/route-backs/terminal status from the run store. Its slug may come ONLY from
+      # the authenticated snapshot, guarded against this usage event's exact correlation; current
+      # pointers or a directly-read state file would not be an authenticated runtime join.
+      local flow_run_slug flow_run_workspace flow_run_dir
+      flow_run_slug=$(printf '%s' "$sidecar_snapshot" | jq -r \
+        --argjson correlation "$(printf '%s' "$usage_event" | jq -c '.run_correlation')" '
+          select(.run_correlation == $correlation) | .task_slug // empty
+        ' 2>/dev/null)
+      if [[ "$flow_run_slug" =~ ^[A-Za-z0-9._-]+$ && "$flow_run_slug" != "." && "$flow_run_slug" != ".." ]]; then
+        # Every filesystem lookup happens INSIDE the detached subshell. Review MEDIUM: a foreground
+        # `-d`/`-f` on the session's cwd blocks the Stop hook when that path is a stalled network or
+        # FUSE mount, and the emitter's own detachment protects nothing that runs before it. The
+        # candidate workspace is passed in unresolved; the subshell decides. TELEMETRY_DIR can be a
+        # global install location, so the workspace comes from the usage event -- like board sync
+        # below -- rather than from that install root.
+        flow_run_workspace=$(echo "$usage_event" | jq -r '.context.cwd // ""' 2>/dev/null)
+        (
+          [[ -z "$flow_run_workspace" || ! -d "$flow_run_workspace" ]] && flow_run_workspace="$PWD"
+          flow_run_dir="$flow_run_workspace/.kontourai/flow/runs/$flow_run_slug"
+          [[ -f "$flow_run_dir/state.json" ]] || exit 0
+          bash "$econ_script" --flow-run-dir "$flow_run_dir" --task-slug "$flow_run_slug"
+        ) </dev/null >/dev/null 2>&1 &
+        disown 2>/dev/null || true
+      fi
     fi
 
     # Hook-native console board sync (#919): detached, cwd-scoped projection+bridge of this

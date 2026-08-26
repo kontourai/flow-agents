@@ -11,7 +11,6 @@ import {
   evaluateGate,
   expectationsForGate,
   flowRunHead,
-  openGates,
   withRunMutationLock,
   type FlowGate,
   type FlowExpectation,
@@ -19,7 +18,7 @@ import {
   type JsonObject,
 } from "@kontourai/flow";
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
-import { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
+import { captureReviewWorkspaceSnapshot, isGitWorktreeSnapshot } from "./lib/review-workspace-snapshot.js";
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, readLocalRecord, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
@@ -28,8 +27,12 @@ import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-p
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
 import type { ChangeProviderSettings } from "./cli/public-contracts.js";
-import { resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
+import { assertTrustedGitAncestor, isExactLowercaseCommitSha, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
+// Circular at module level (workflow.ts imports this file) — safe: the binding is only
+// dereferenced inside function bodies, the same tolerated shape as the sidecar import above.
+import { assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier } from "./cli/workflow.js";
+import { verifyProvisionalDeliveryLifecycleCompletion } from "./external-lifecycle-authority.js";
 import {
   assertAuthenticatedPublishChangeObservation,
   assertIssuedPublishChangeAction,
@@ -42,7 +45,9 @@ import {
   BUILDER_BUILD_FLOW_ID,
   type BuilderFlowId,
   BuilderBuildRunInputError,
+  actionableOpenGates,
   evaluateBuilderFlowRun,
+  isCanonicalRunFlowId,
   loadBuilderFlowRun,
   pauseBuilderFlowRun,
   resumeBuilderFlowRun,
@@ -72,6 +77,13 @@ export interface BuilderFlowSessionInput {
     identity: { dev: number; ino: number };
     expectedSha256: string;
   };
+  /**
+   * Per-call authority verifier for the #1302 freshness turnstile's delivery-tolerant fallback.
+   * Defaults to the production lifecycle-authority verifier; hermetic tests pass their test
+   * authority's verifier here. Deliberately NOT module state — see
+   * gateAdvancementFreshnessSatisfied.
+   */
+  gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier;
 }
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
@@ -157,12 +169,301 @@ type TrustBundleSnapshot = {
   sha256: string;
 };
 
+// #1191: signal validation — hooks and sidecar writes against finished/terminal
+// runs must fail closed (Temporal closed-workflow signal rule). A mutation that
+// lands after the run is closed, or after the gate has advanced past the head the
+// write was stamped against, is a stale-signal write. The guard reads the CANONICAL
+// Flow state via the public interface (loadBuilderFlowRun / flowRunHead) — never a
+// sidecar-local projection, which may lag the canonical head (#1164).
+//
+// The terminal set mirrors Flow's lifecycle eligibility (flow-run-lifecycle.ts):
+// attach_evidence/evaluate reject only paused and canceled, and accepted_by_exception
+// is a CONTINUING status — the run still evaluates the excepted gate and Flow
+// reverses it to active on continuation (flow-run-store.ts claim-admission path);
+// Flow Agents' own terminal classification test calls it "continue". Only
+// completed/canceled/failed are closed for every mutation. "archived" is a
+// sidecar-level status, not a Flow run status, and is not included here.
+export const TERMINAL_FLOW_STATUSES = ["completed", "canceled", "failed"];
+
+export type SignalValidationCode = "run_closed" | "gate_advanced";
+
+export class SignalValidationError extends Error {
+  readonly code: SignalValidationCode;
+  readonly runId: string;
+  readonly runStatus: string;
+  readonly stampedHead: string | null;
+  readonly canonicalHead: string;
+
+  constructor(
+    code: SignalValidationCode,
+    details: { runId: string; runStatus: string; stampedHead: string | null; canonicalHead: string },
+  ) {
+    const headDetail = details.stampedHead
+      ? ` (stamped head ${details.stampedHead} != canonical head ${details.canonicalHead})`
+      : ` (canonical head ${details.canonicalHead})`;
+    super(
+      `signal_validation:${code}: run ${details.runId} is ${details.runStatus}${headDetail} — `
+      + `${code === "run_closed" ? "the run is terminal/closed" : "the gate has advanced"}; `
+      + `mutations against a closed Flow run are rejected (Temporal closed-workflow signal rule).`,
+    );
+    this.name = "SignalValidationError";
+    this.code = code;
+    this.runId = details.runId;
+    this.runStatus = details.runStatus;
+    this.stampedHead = details.stampedHead;
+    this.canonicalHead = details.canonicalHead;
+  }
+}
+
+// #1191 test seam for fault injection: allows tests to prove the un-guarded path
+// silently accepts a stale-head write. Never set outside tests.
+let signalValidationBypassForTest = false;
+export function setSignalValidationBypassForTest(value: boolean): void {
+  signalValidationBypassForTest = value;
+}
+
+/**
+ * Check an already-loaded canonical run for write-time signal validity (#1191).
+ * Throws `SignalValidationError` (machine-readable `code` property) when the run
+ * is terminal or the stamped head has been advanced past. Synchronous — use with
+ * a run that was already loaded via the public Flow interface.
+ */
+export function assertRunMutableForWrite(
+  run: BuilderFlowRunResult,
+  stampedFlowRunHead: string | null | undefined,
+  runId: string,
+): void {
+  if (signalValidationBypassForTest) return;
+  const status = run.state.status;
+  const canonicalHead = flowRunHead(run.state);
+  if (TERMINAL_FLOW_STATUSES.includes(status)) {
+    throw new SignalValidationError("run_closed", { runId, runStatus: status, stampedHead: stampedFlowRunHead ?? null, canonicalHead });
+  }
+  if (stampedFlowRunHead && stampedFlowRunHead.toLowerCase() !== canonicalHead) {
+    throw new SignalValidationError("gate_advanced", { runId, runStatus: status, stampedHead: stampedFlowRunHead, canonicalHead });
+  }
+}
+
+export interface AssertMutationWritableInput {
+  runId: string;
+  cwd: string;
+  /** The flow_run_head the write is stamped against, if any. */
+  stampedFlowRunHead?: string | null;
+}
+
+/**
+ * Load the canonical Flow run via the public interface and validate that a
+ * mutation against it is permitted (#1191). For sessions with no Flow run
+ * (legacy/no-Flow layout, or the run was never started), the guard is a no-op —
+ * there is no canonical run to close. This keeps legacy/tmp sessions writable.
+ *
+ * Returns the canonical `flow_run_head` when a run exists (the authoritative
+ * head the write lands against), or null when there was no run. This lets the
+ * taxonomy retry wrapper stamp the claim with the canonical head even when the
+ * caller derived its head from a (possibly lagging) projection.
+ */
+export async function assertMutationWritable(input: AssertMutationWritableInput): Promise<string | null> {
+  if (signalValidationBypassForTest) return input.stampedFlowRunHead ?? null;
+  let run: BuilderFlowRunResult;
+  try {
+    run = await loadBuilderFlowRun({ runId: input.runId, cwd: input.cwd });
+  } catch (error) {
+    if (isRunNotFound(error)) return null;
+    throw error;
+  }
+  assertRunMutableForWrite(run, input.stampedFlowRunHead, input.runId);
+  return flowRunHead(run.state);
+}
+
+// #1192: failure taxonomy — distinguish retryable infrastructure failure from
+// gate rejection. Temporal separates three classes explicitly:
+//
+//   transient — lock contention, head moved / snapshot stale, timeout.
+//               Retry posture: bounded automatic retry with re-read (max
+//               TRANSIENT_RETRY_MAX_ATTEMPTS, small linear backoff). Never
+//               consumes budgets, never wedges.
+//   domain    — evidence fails the gate, claim invalid.
+//               Retry posture: no retry, recorded and routed, budgeted.
+//   terminal  — run closed.
+//               Retry posture: no retry, fail closed with recovery instructions.
+//
+// The #1191 guard DETECTS the desync; this taxonomy decides what HAPPENS next.
+// The first application (#1164): gate_advanced head-desyncs become transient —
+// retry with re-read — not run-poisoning hard rejections.
+
+export type FailureClass = "transient" | "domain" | "terminal";
+
+export type RetryPosture = "bounded_retry_with_reread" | "no_retry_recorded" | "no_retry_fail_closed";
+
+export interface FailureClassification {
+  readonly failureClass: FailureClass;
+  readonly retryPosture: RetryPosture;
+  readonly maxAttempts?: number;
+}
+
+export const TRANSIENT_RETRY_MAX_ATTEMPTS = 3;
+export const TRANSIENT_RETRY_BASE_DELAY_MS = 50;
+
+/**
+ * Classify a `SignalValidationCode` into the failure taxonomy (#1192).
+ * `gate_advanced` is transient (head moved between stamp and write — retry with
+ * re-read); `run_closed` is terminal (run is closed — fail closed).
+ */
+export function classifySignalValidationFailure(code: SignalValidationCode): FailureClassification {
+  switch (code) {
+    case "gate_advanced":
+      return { failureClass: "transient", retryPosture: "bounded_retry_with_reread", maxAttempts: TRANSIENT_RETRY_MAX_ATTEMPTS };
+    case "run_closed":
+      return { failureClass: "terminal", retryPosture: "no_retry_fail_closed" };
+  }
+}
+
+/**
+ * Classify any write-path error into the failure taxonomy (#1192). Returns null
+ * for errors the taxonomy does not cover (unclassified — caller should surface).
+ * `SignalValidationError` is classified by code; `BuilderBuildRunInputError`
+ * (evidence content / claim shape mismatches from `bundleGateEvidence`) is
+ * domain — the evidence genuinely fails the gate, not an infrastructure fault.
+ */
+export function classifyWriteFailure(error: unknown): FailureClassification | null {
+  if (error instanceof SignalValidationError) {
+    return classifySignalValidationFailure(error.code);
+  }
+  if (error instanceof BuilderBuildRunInputError) {
+    return { failureClass: "domain", retryPosture: "no_retry_recorded" };
+  }
+  return null;
+}
+
+/**
+ * A write-path rejection classified into the failure taxonomy (#1192). Wraps the
+ * original `SignalValidationError` with the `FailureClass` and the number of
+ * attempts taken (for transient retries). The message preserves the original
+ * diagnostic and appends `[failure_class=…, attempts=…]` so existing
+ * `/signal_validation:…/` matchers still fire.
+ */
+export class ClassifiedWriteError extends Error {
+  readonly failureClass: FailureClass;
+  readonly code: SignalValidationCode;
+  readonly runId: string;
+  readonly runStatus: string;
+  readonly stampedHead: string | null;
+  readonly canonicalHead: string;
+  readonly attempts: number;
+
+  constructor(original: SignalValidationError, failureClass: FailureClass, attempts: number) {
+    const cls = failureClass === "transient" && attempts > 1 ? "transient (retry exhausted)" : failureClass;
+    super(`${original.message} [failure_class=${cls}, attempts=${attempts}]`);
+    this.name = "ClassifiedWriteError";
+    this.failureClass = failureClass;
+    this.code = original.code;
+    this.runId = original.runId;
+    this.runStatus = original.runStatus;
+    this.stampedHead = original.stampedHead;
+    this.canonicalHead = original.canonicalHead;
+    this.attempts = attempts;
+  }
+}
+
+// #1192 test seam: disables the transient retry while keeping the #1191 guard
+// active — proves the pre-taxonomy hard-rejection behavior vs post-taxonomy
+// transparent retry. Never set outside tests.
+let transientRetryBypassForTest = false;
+export function setTransientRetryBypassForTest(value: boolean): void {
+  transientRetryBypassForTest = value;
+}
+
+// #1192 test seam: called between the canonical re-read and the next guard
+// attempt during a transient retry, allowing a test to advance the canonical
+// head AGAIN (simulating persistent contention). Never set outside tests.
+let transientRetryHeadAdvancerForTest: (() => Promise<void>) | null = null;
+export function setTransientRetryHeadAdvancerForTest(fn: (() => Promise<void>) | null): void {
+  transientRetryHeadAdvancerForTest = fn;
+}
+
+export interface AssertMutationWritableWithRetryInput extends AssertMutationWritableInput {
+  /**
+   * When true, a transient (gate_advanced) head-desync triggers a bounded retry:
+   * re-read the canonical Flow head, re-stamp, and re-attempt. When false (or
+   * when `transientRetryBypassForTest` is set), the original rejection propagates
+   * immediately as a `ClassifiedWriteError` — preserving the #1191 hard-rejection
+   * behavior for callers that have not opted into the taxonomy retry.
+   */
+  enableTransientRetry?: boolean;
+}
+
+export interface AssertMutationWritableWithRetryResult {
+  /**
+   * The effective flow_run_head to stamp the write with. On a successful
+   * transient retry, this is the CANONICAL head (re-read after the desync),
+   * which may differ from the input `stampedFlowRunHead`. On a first-attempt
+   * success, it is the canonical head (the authoritative read), which equals
+   * the input when a `stampedFlowRunHead` was supplied. Null only when there is
+   * no canonical Flow run to reconcile against (legacy/no-Flow session).
+   */
+  effectiveFlowRunHead: string | null;
+  /** Number of attempts taken (1 = first attempt succeeded). */
+  attempts: number;
+}
+
+async function readCanonicalFlowHead(runId: string, cwd: string): Promise<string> {
+  const run = await loadBuilderFlowRun({ runId, cwd });
+  return flowRunHead(run.state);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Load the canonical Flow run and validate write permission with the failure
+ * taxonomy (#1192). On a transient (`gate_advanced`) head-desync, re-reads the
+ * canonical head, re-stamps, and retries up to `TRANSIENT_RETRY_MAX_ATTEMPTS`
+ * times with a small linear backoff. On terminal (`run_closed`), throws
+ * `ClassifiedWriteError` immediately — never retried. When the bound is
+ * exhausted, throws `ClassifiedWriteError` with `failureClass: "transient"` and
+ * a diagnostic naming the class and attempts taken.
+ *
+ * For sessions with no Flow run, the guard is a no-op (inherited from
+ * `assertMutationWritable`).
+ */
+export async function assertMutationWritableWithRetry(
+  input: AssertMutationWritableWithRetryInput,
+): Promise<AssertMutationWritableWithRetryResult> {
+  const enableRetry = input.enableTransientRetry === true && !transientRetryBypassForTest;
+  const maxAttempts = enableRetry ? TRANSIENT_RETRY_MAX_ATTEMPTS : 1;
+  let stampedHead = input.stampedFlowRunHead ?? null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const canonicalHead = await assertMutationWritable({ runId: input.runId, cwd: input.cwd, stampedFlowRunHead: stampedHead ?? undefined });
+      return { effectiveFlowRunHead: canonicalHead ?? stampedHead, attempts: attempt };
+    } catch (error) {
+      if (!(error instanceof SignalValidationError)) throw error;
+      const classification = classifySignalValidationFailure(error.code);
+      if (classification.failureClass === "terminal") {
+        throw new ClassifiedWriteError(error, "terminal", attempt);
+      }
+      // transient
+      if (attempt < maxAttempts) {
+        stampedHead = await readCanonicalFlowHead(input.runId, input.cwd);
+        if (transientRetryHeadAdvancerForTest) await transientRetryHeadAdvancerForTest();
+        await sleep(TRANSIENT_RETRY_BASE_DELAY_MS * attempt);
+        continue;
+      }
+      throw new ClassifiedWriteError(error, "transient", attempt);
+    }
+  }
+  // Unreachable — the loop covers all paths.
+  throw new Error("assertMutationWritableWithRetry: unreachable");
+}
+
 export async function startBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
   return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
     const sidecarSnapshot = readSidecarSnapshot(context);
     const subject = workflowSubject(sidecarSnapshot.state);
-    const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state) ?? BUILDER_BUILD_FLOW_ID;
+    const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state, context.projectRoot) ?? BUILDER_BUILD_FLOW_ID;
     let run: BuilderFlowRunResult;
     try {
       run = await loadBuilderFlowRun({
@@ -170,7 +471,7 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
         runId: context.slug,
       });
       if (run.definitionId !== requestedFlowId) {
-        throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start builder.build from a provider Work Item instead of retrying a local shape session`);
+        throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start ${requestedFlowId} from a provider Work Item instead of retrying an existing ${run.definitionId} session`);
       }
     } catch (error) {
       if (!isRunNotFound(error)) throw error;
@@ -206,7 +507,7 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
     runId: context.slug,
   });
   assertRunSubjectBinding(run, subject);
-  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead, input.stagedTrustBundle);
+  return syncAndProject(context, run, sidecarSnapshot, input.expectedRunHead, input.stagedTrustBundle, undefined, input.gateFreshnessCompletionVerifier);
 }
 
 /**
@@ -329,7 +630,10 @@ async function advancePublishChangeGate(
         expectedSha256: evidenceFile.sha256,
         expectationIds: ["pull-request-opened"],
         producer: "publish-change-operation-authority",
-        authorityTrace: issued.action_id,
+        // The action_id binding is now embedded in the attached TrustBundle's
+        // own authorityTrace record (see writePublishChangeEvidence), not
+        // passed as an attachEvidence option — Flow 5.0 throws on unknown
+        // attachment options and authorityTrace is no longer one of them.
       },
     });
     if (run.state.current_step === issued.binding.step_id && run.state.status === "active") {
@@ -354,6 +658,46 @@ function projectCompletedPublishChange(
   return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection, gateActionEnvelope, progressSnapshot, attached: true, action, observation };
 }
 
+/** Collect the `authorityRef` values from a `trust.bundle` evidence entry's embedded, Flow-5.0-shaped authorityTrace array. */
+function evidenceBundleAuthorityRefs(entry: AnyRecord): Set<string> {
+  const refs = new Set<string>();
+  const bundle = entry.bundle;
+  if (isRecord(bundle) && Array.isArray(bundle.authorityTrace)) {
+    for (const trace of bundle.authorityTrace) {
+      if (isRecord(trace) && typeof trace.authorityRef === "string") refs.add(trace.authorityRef);
+    }
+  }
+  return refs;
+}
+
+/**
+ * Authenticate that a persisted evidence entry was produced by the exact
+ * publish-change action identified by `actionId`.
+ *
+ * Primary path (Flow 5.0+): the action_id is bound as a claim-scoped
+ * `authorityRef` inside the attached TrustBundle's own `authorityTrace` array
+ * (see publishChangeAuthorityRef / writePublishChangeEvidence) — the
+ * replacement for the removed `authorityTrace` attachEvidence option.
+ *
+ * Legacy fallback: evidence attached by flow-agents before this migration
+ * wrote the binding as a flat `authority_trace` string on the evidence entry
+ * (Flow 3.9 accepted that as an attachEvidence option, though Flow itself
+ * documented it as "never used to authorize a gate" — see flow
+ * docs/migrations/5.0.0.md). A long-running builder.build session whose
+ * evidence was attached before an in-place `@kontourai/flow-agents` upgrade
+ * must still be recoverable, so an exact legacy match is still honored on
+ * read. action_id is a locally-computed SHA-256 digest of the full canonical
+ * request (publish-change-operation-authority.ts issuePublishChangeAction),
+ * never an externally-asserted authority — recognizing it here does not
+ * reopen the opaque-authority trust Flow 5.0 closed, it is flow-agents' own
+ * idempotent-replay receipt, orthogonal to Flow's gate-level producer
+ * authorization.
+ */
+function entryAuthenticatesPublishChangeAction(entry: AnyRecord, actionId: string): boolean {
+  if (evidenceBundleAuthorityRefs(entry).has(publishChangeAuthorityRef(actionId))) return true;
+  return entry.authority_trace === actionId;
+}
+
 async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext, action: IssuedPublishChangeAction): Promise<boolean> {
   const bytes = readPublishChangeResultBytes(context);
   if (!bytes) return false;
@@ -367,7 +711,7 @@ async function hasCommittedPublishChangeRecoveryReceipt(context: SessionContext,
   const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   return manifestEvidence(run.manifest).some((entry) => entry.gate_id === action.binding.gate_ids[0]
     && entry.producer === "publish-change-operation-authority"
-    && entry.authority_trace === action.action_id
+    && entryAuthenticatesPublishChangeAction(entry, action.action_id)
     && Array.isArray(entry.expectation_ids) && entry.expectation_ids.length === 1
     && entry.expectation_ids[0] === "pull-request-opened"
     && publishChangeEvidenceCarriesDigest(entry, resultDigest));
@@ -738,6 +1082,7 @@ async function syncAndProject(
   expectedRunHead?: string,
   stagedTrustBundle?: BuilderFlowSessionInput["stagedTrustBundle"],
   binding?: BuilderActorBinding,
+  gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
   assertLifecycleResolutionAttestation(context, run);
@@ -748,6 +1093,25 @@ async function syncAndProject(
     throw new BuilderBuildRunInputError("flow_run.open_gates", `expected exactly one gate for active step ${run.state.current_step}, found ${gates.length}`);
   }
   if (gates.length === 1 && (stagedTrustBundle || fs.existsSync(context.bundleFile))) {
+    // #1191: signal validation — reject mutations against terminal/closed runs or
+    // stale heads BEFORE any Flow mutation (evaluateBuilderFlowRun below). A clean
+    // rejection here means no partial state: the evidence manifest, run state, and
+    // session projection are all untouched (never-wedge guarantee).
+    // #1192: classify the throw into the failure taxonomy. gate_advanced is
+    // transient (retry with re-read in the sidecar verbs); run_closed is terminal.
+    // The retry itself is not applied on this public-workflow-evidence path —
+    // `expectedRunHead` is caller-supplied and re-derivation requires a session
+    // re-sync that is a separate change. Classification ensures no unclassified
+    // throw in this path.
+    try {
+      assertRunMutableForWrite(run, expectedRunHead, context.slug);
+    } catch (error) {
+      if (error instanceof SignalValidationError) {
+        const classification = classifySignalValidationFailure(error.code);
+        throw new ClassifiedWriteError(error, classification.failureClass, 1);
+      }
+      throw error;
+    }
     const snapshot = stagedTrustBundle ? verifiedStagedTrustBundleSnapshot(context, stagedTrustBundle) : stageTrustBundleSnapshot(context);
     try {
       const rawBundle = JSON.parse(snapshot.raw.toString("utf8"));
@@ -760,6 +1124,7 @@ async function syncAndProject(
         context.sessionDir,
         manifestEvidence(run.manifest),
         run.config,
+        gateFreshnessCompletionVerifier,
       );
       if (gateEvidence) {
         const alreadyAttached = manifestEvidence(run.manifest).some((entry) =>
@@ -785,6 +1150,7 @@ async function syncAndProject(
               ...(gateEvidence.failed ? { status: "failed" } : {}),
               ...(gateEvidence.routeReason ? { routeReason: gateEvidence.routeReason } : {}),
               expectationIds: gateEvidence.expectationIds,
+              analytics: { evidence_sha256: snapshot.sha256 },
             },
           });
           attached = true;
@@ -795,7 +1161,10 @@ async function syncAndProject(
       if (!stagedTrustBundle) removeTrustBundleSnapshot(snapshot);
     }
   }
-  if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)) {
+  if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)
+    // #1302: the no-new-evidence path is the route-back RE-ENTRY trap — a prior visit's passing
+    // claim must not advance a requires_current_verification gate while verification is stale.
+    && gateAdvancementFreshnessSatisfied(gates[0]!, context.sessionDir, context.projectRoot, gateFreshnessCompletionVerifier)) {
     run = await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   }
   assertLifecycleResolutionAttestation(context, run);
@@ -871,7 +1240,15 @@ function assertLifecycleResolutionAttestation(context: SessionContext, run: Buil
 
 function gateCanPassWithoutNewEvidence(run: BuilderFlowRunResult, gate: FlowGate & { id: string }): boolean {
   const expectations = expectationsForGate(gate, run.config) as FlowExpectation[];
-  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config);
+  // Evaluate at the actual current instant, not Flow's fallback default of
+  // `state.updated_at` (which only advances on a recorded transition, not on
+  // every evidence attachment). Flow 5.0 fails closed on any claim/event
+  // timestamped after its evaluation clock (flow-gates.ts
+  // reconciliationForClaim); using a stale `state.updated_at` here could make
+  // this pre-check under-report readiness (return false when a real
+  // evaluateRun — which does use a live clock — would pass), silently
+  // skipping the sync's real evaluate call below and leaving the run stuck.
+  const outcome = evaluateGate(run.definition, run.state, run.manifest, gate.id, run.config, new Date().toISOString());
   return outcome.status === "pass"
     && (typeof outcome.accepted_exception_id === "string" || expectations.every((expectation) => !expectation.required));
 }
@@ -930,13 +1307,14 @@ function persistPublishChangeResult(
   if (payload.byteLength > 65_536) throw new BuilderBuildRunInputError("publish-change.result", "exceeds the 65,536 byte operation bound");
   const existing = readPublishChangeResultBytes(context);
   if (existing) {
-    if (!existing.equals(payload) && !sameObservedPublishChangeResult(existing, payload, action.action_id)) {
-      throw new BuilderBuildRunInputError("publish-change.result", "already exists with different authenticated operation bytes");
-    }
     if (existing.equals(payload)) return { file, sha256: createHash("sha256").update(existing).digest("hex") };
-    // An interrupted attempt may have fsynced a valid observation before Flow
-    // committed its evidence. Never retain those unauthenticated local bytes:
-    // atomically replace them with this attempt's fresh provider observation.
+    // The existing regular file is an untrusted recovery hint, not authority.
+    // At this point the current action has been revalidated under the subject
+    // lock and the provider has been freshly authenticated and observed. This
+    // permits safe recovery from an interrupted attempt, a prior gate visit, or
+    // forged regular bytes without allowing the old file to select the result.
+    // Unsafe paths (including symlinks) were already rejected by the bounded
+    // no-follow read above.
     const temporary = path.join(context.sessionDir, `.publish-change.result-${randomBytes(16).toString("hex")}.tmp`);
     const descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
     try {
@@ -1038,6 +1416,19 @@ async function recoverCommittedPublishChange(
   };
 }
 
+/**
+ * Flow 5.0 removed the `authorityTrace` attachEvidence option (opaque, unscoped
+ * metadata); the replacement is a validated, claim-scoped `authorityTrace` record
+ * embedded directly in the attached TrustBundle (Hachure `authorityTrace` array —
+ * see @kontourai/surface schemas/trust-bundle.schema.json). This ref format is the
+ * read side's (hasCommittedPublishChangeRecoveryReceipt, merge-change.ts
+ * resultDigestClaimedByCanonicalRun) authoritative binding between a persisted
+ * evidence entry and the specific publish-change action_id that produced it.
+ */
+export function publishChangeAuthorityRef(actionId: string): string {
+  return `publish-change-operation-authority:${actionId}`;
+}
+
 async function writePublishChangeEvidence(
   context: SessionContext,
   action: IssuedPublishChangeAction,
@@ -1046,8 +1437,9 @@ async function writePublishChangeEvidence(
 ): Promise<{ file: string; sha256: string }> {
   const file = path.join(context.sessionDir, `.publish-change.evidence-${randomBytes(16).toString("hex")}.json`);
   const timestamp = observation.observed_at;
+  const checkId = `publish-change-${action.action_id}`;
   const check = {
-    id: `publish-change-${action.action_id}`,
+    id: checkId,
     kind: "external",
     status: "pass",
     summary: `Authenticated publish-change operation ${action.action_id} observed ${observation.change_ref.state} provider record ${observation.change_ref.provider_record_id}`,
@@ -1070,6 +1462,22 @@ async function writePublishChangeEvidence(
     { flowId: action.binding.definition_id, stepId: action.binding.step_id },
   );
   if (!bundle) throw new BuilderBuildRunInputError("publish-change", "could not build the required operation-bound trust bundle");
+  const boundClaim = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyRecord[]).find((claim) => claim && claim.subjectId === `${context.slug}/${checkId}`)
+    : undefined;
+  if (!boundClaim || typeof boundClaim.id !== "string" || typeof boundClaim.subjectType !== "string" || typeof boundClaim.subjectId !== "string") {
+    throw new BuilderBuildRunInputError("publish-change", "operation-bound trust bundle did not produce the expected claim to scope the authority trace to");
+  }
+  bundle.authorityTrace = [{
+    id: `authority.publish-change.${action.action_id}`,
+    subject: { subjectType: boundClaim.subjectType, subjectId: boundClaim.subjectId },
+    actorRef: "flow-agents/publish-change-operation-authority",
+    authorityType: "system",
+    authorityRef: publishChangeAuthorityRef(action.action_id),
+    sourceRef: "publish-change-operation-authority",
+    observedAt: timestamp,
+    claimIds: [boundClaim.id],
+  }];
   const validation = await validateTrustBundle(bundle);
   if (validation.available && !validation.valid) throw new BuilderBuildRunInputError("publish-change", `operation-bound trust bundle is invalid: ${validation.errors.join("; ")}`);
   const bytes = Buffer.from(`${JSON.stringify(bundle, null, 2)}\n`);
@@ -1144,17 +1552,84 @@ function workflowSubject(state: AnyRecord): string {
   return refs[0]!;
 }
 
-function persistedFlowId(state: AnyRecord): BuilderFlowId | null {
+/**
+ * The flow a resumed session is already bound to, as recorded in the sidecar projection.
+ *
+ * #1336: this used to be a two-value allowlist, so resuming a run of any OTHER kit-declared flow
+ * fell through to the `builder.build` default and then failed the identity check below against its
+ * own canonical run. The projection is agent-writable, which is why it was an allowlist at all —
+ * but the property that makes a value trustworthy is not "it is one of two names", it is "the
+ * canonical run runtime can bind it", which `isCanonicalRunFlowId` derives from what the declaring
+ * kit supplies. A wrong guess remains harmless: the loaded run's own `definitionId` is the
+ * authority, and a mismatch is refused rather than adopted.
+ */
+function persistedFlowId(state: AnyRecord, cwd: string): BuilderFlowId | null {
   const flowRun = isRecord(state.flow_run) ? state.flow_run : null;
   const flowId = flowRun?.definition_id;
-  return flowId === "builder.build" || flowId === "builder.shape" ? flowId : null;
+  return typeof flowId === "string" && flowId.length > 0 && isCanonicalRunFlowId(flowId, cwd) ? flowId : null;
 }
 
+/**
+ * The gates the run must act on now.
+ *
+ * #1335: this used to be `openGates` verbatim, which answers only "what does the cursor's own step
+ * gate". A flow may declare gateless sequencing passthroughs, and a cursor resting on one made this
+ * return nothing — which every caller below reads as "this run is unadvanceable". The derivation
+ * now looks forward across those passthroughs to the first step that actually gates something, so
+ * the answer is the gate the run is working toward rather than an accident of where the cursor
+ * happens to be parked. Flows that gate every step are unaffected: the forward walk is only reached
+ * when the cursor's own step declares no gate.
+ */
 function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: string }> {
-  return openGates(run.definition, run.state) as Array<FlowGate & { id: string }>;
+  return actionableOpenGates(run.definition, run.state) as Array<FlowGate & { id: string }>;
 }
 
-async function bundleGateEvidence(
+/**
+ * #1302 freshness turnstile, enforced at the canonical evaluation seam. Independent review of the
+ * first version (a check only in the public `workflow evidence` wrapper) found two BLOCKING
+ * bypasses: a sidecar `record-gate-claim` followed by ANY synchronization advanced the cursor
+ * without the wrapper ever running, and the wrapper's early check was a TOCTOU — an evidence
+ * command could move the workspace between check and evaluation. Every advancement path converges
+ * HERE, and this runs at evaluation time, after evidence commands have executed.
+ *
+ * Advancement is WITHHELD (return false + NOTICE), never thrown: a throw during sync would wedge
+ * every status/projection call for a run holding a stale sidecar-recorded pass claim — the #1164
+ * failure shape. The cursor simply stays at the declaring gate until verification is re-recorded;
+ * the public wrapper's pre-flight check remains for a loud early refusal.
+ */
+export type GateFreshnessCompletionVerifier = typeof verifyProvisionalDeliveryLifecycleCompletion;
+
+/**
+ * The verifier is a PER-CALL parameter defaulting to production, never module state: an earlier
+ * revision exposed a setter here and independent review correctly flagged it as a shipped ambient
+ * enforcement kill-switch (one preloaded call would disable the authority boundary for every
+ * subsequent synchronization in the process). Hermetic tests pass their authority's verifier
+ * explicitly at their own call sites, mirroring how the delivery path itself injects authority.
+ */
+export function gateAdvancementFreshnessSatisfied(
+  gate: unknown,
+  sessionDir: string,
+  projectRoot: string,
+  verifyCompletion: GateFreshnessCompletionVerifier = verifyProvisionalDeliveryLifecycleCompletion,
+): boolean {
+  if (!isRecord(gate) || gate.requires_current_verification !== true) return true;
+  try {
+    // The delivery-tolerant form, not the raw predicate: provisional publication necessarily
+    // adds the session's own delivery/<slug>/ commit BEFORE CI readiness can be recorded, and
+    // the raw snapshot-equality predicate would deadlock that legitimate ordering. This accepts
+    // exactly one hash-bound provisional delivery atop the verified base and nothing else —
+    // the same narrow continuation terminal publication uses.
+    assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(
+      sessionDir, projectRoot, path.basename(sessionDir), verifyCompletion,
+    );
+    return true;
+  } catch (error) {
+    process.stderr.write(`[flow-agents] NOTICE: ${String(gate.id ?? "gate")} advancement withheld (requires_current_verification): ${error instanceof Error ? error.message : String(error)}\n`);
+    return false;
+  }
+}
+
+export async function bundleGateEvidence(
   bundle: unknown,
   gate: FlowGate,
   state: FlowRunState,
@@ -1163,6 +1638,7 @@ async function bundleGateEvidence(
   sessionDir: string,
   manifest: AnyRecord[],
   config: JsonObject,
+  gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier,
 ): Promise<{ failed: boolean; routeReason: string | null; expectationIds: string[]; visitEnteredAt: number } | null> {
   if (!isRecord(bundle) || !Array.isArray(bundle.claims)) return null;
   const expectations = expectationsForGate(gate, config) as FlowExpectation[];
@@ -1236,17 +1712,23 @@ async function bundleGateEvidence(
     const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
     return gateClaim !== null || metadata?.origin === "check";
   });
-  const recordedRunHeads = headBoundGateClaims.map((claim) => {
-    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
-    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
-    return gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
-  });
-  if (headBoundGateClaims.length > 0 && (recordedRunHeads.some((head) => head === null)
-    || new Set(recordedRunHeads).size !== 1
-    || recordedRunHeads[0] !== flowRunHead(state))) {
-    throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.flow_run_head", "must match the canonical Flow state authorized when the gate claim was recorded");
+  const executionEvidenceByClaimId = new Map<string, AnyRecord[]>();
+  for (const evidence of Array.isArray(bundle.evidence) ? bundle.evidence : []) {
+    if (!isRecord(evidence)
+      || typeof evidence.claimId !== "string"
+      || !isRecord(evidence.execution)
+      || typeof evidence.execution.label !== "string"
+      || evidence.execution.label.trim().length === 0) continue;
+    const linked = executionEvidenceByClaimId.get(evidence.claimId) ?? [];
+    linked.push(evidence);
+    executionEvidenceByClaimId.set(evidence.claimId, linked);
   }
+  assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot, executionEvidenceByClaimId);
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
+  // #1302: a PASSING claim at a gate declaring requires_current_verification may not advance the
+  // cursor while review/verification evidence is stale — evaluated here, at the seam, after any
+  // evidence commands ran. Failing claims stay attachable: they are the route-back repair path.
+  if (!failed && !gateAdvancementFreshnessSatisfied(gate, sessionDir, projectRoot, gateFreshnessCompletionVerifier)) return null;
   const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
     const selector = expectation.bundle_claim;
     return selector.claimType === claim.claimType && (!selector.subjectType || selector.subjectType === claim.subjectType);
@@ -1283,6 +1765,261 @@ async function bundleGateEvidence(
     await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
+}
+
+const GATE_CLAIM_HEAD_FIELD = "evidence.claims.metadata.gate_claim.flow_run_head";
+const GATE_CLAIM_STALE_REASON = "must match the canonical Flow state authorized when the gate claim was recorded";
+
+/**
+ * #1170 (PR1): freshness for current-gate claims whose subject is repository content.
+ *
+ * `flow_run_head` is `sha256(canonicalJson(run.state))` — a hash of workflow *position*, not of
+ * the code the claim is about. Requiring every current-gate claim to carry the head that is
+ * canonical *right now* made any intervening state mutation terminal, which is the mechanism
+ * behind #1164 (a sidecar `record-evidence` write at `verify` permanently rejects every later
+ * public `workflow evidence` write).
+ *
+ * The predicate is now per-claim rather than cross-claim:
+ *
+ * - Recorded head equals the current head → current (unchanged fast path; healthy runs never
+ *   capture a workspace snapshot and see zero behavior change).
+ * - Otherwise the claim may re-establish freshness with the binding that actually describes its
+ *   subject: a Git workspace snapshot (HEAD sha + tracked diff + untracked bytes) that still
+ *   deep-equals a freshly captured snapshot of the current tree. A stamped
+ *   `gate_claim.step_id` must additionally name the step the run is on now.
+ * - Head mismatch and snapshot mismatch → hard stale, naming the claim, its recorded head and
+ *   the current head (#1164 ask 1).
+ * - No head and no snapshot → hard stale with a re-record remedy. This deliberately does not
+ *   loosen anything for unstamped, snapshot-less checks (#270 anti-smuggling posture).
+ *
+ * Cross-visit replay of an old pass claim over a byte-identical tree is blocked upstream, not
+ * here: every claim reaching this function already passed `claimIsCurrent`, which requires a
+ * claim/evidence timestamp inside the *current* visit window of this gate's step and excludes
+ * every claim id already shipped in a prior visit's manifest entry. That is why a plain
+ * `record-evidence` check — which carries no `gate_claim` at all, and therefore no `step_id`
+ * (workflow-sidecar.ts stamps `gate_claim` only when an expectation id is supplied) — is still
+ * step-bound: the visit window is the binding. Where a `step_id` *is* stamped it is checked, as
+ * a consistency assertion over the frozen typing.
+ *
+ * Only `kind: "git-worktree"` snapshots are accepted. A `reviewed-files` snapshot digests a
+ * writer-declared file list, so honoring it here would let a claim carry an empty list and
+ * declare itself permanently current.
+ */
+function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string, executionEvidenceByClaimId: ReadonlyMap<string, readonly AnyRecord[]>): void {
+  if (headBoundGateClaims.length === 0) return;
+  const currentHead = flowRunHead(state);
+  const currentStep = state.current_step;
+  let trustedCurrentCommit: string | null = null;
+  let currentWorkspace: { snapshot: AnyRecord | null; error: string | null } | null = null;
+  for (const claim of headBoundGateClaims) {
+    const claimId = typeof claim.id === "string" ? claim.id : "<unknown>";
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
+    const recordedHead = gateClaim && typeof gateClaim.flow_run_head === "string" ? gateClaim.flow_run_head : null;
+    const observedCommands = metadata && Array.isArray(metadata.observed_commands) ? metadata.observed_commands : [];
+    const linkedExecution = executionEvidenceByClaimId.get(claimId) ?? [];
+    const commandReferences = commandEvidenceReferences(metadata);
+    const hasCommandReference = hasCommandEvidenceReference(metadata);
+    // Only a passing claim can satisfy a gate. Failed, disputed, and
+    // not-verified observations remain auditable route-back evidence even when
+    // their capture-time Git provenance is unavailable or dirty. A passing
+    // tests-evidence claim is command-backed by contract even if an older or
+    // malformed record omitted its observation array, so it cannot evade this
+    // check through a matching Flow head.
+    const commandBacked = claim.claimType === "builder.verify.tests"
+      || claim.claimType === "workflow.check.command"
+      || observedCommands.length > 0
+      || hasCommandReference
+      || metadata?.check_kind === "command"
+      || linkedExecution.length > 0;
+    const requiresObservationProvenance = claim.value === "pass" && commandBacked;
+    // Claims with no command observation retain the #1170 Flow-head fast path.
+    // They cannot establish a verified test gate; command-backed passing claims
+    // receive revision-bound provenance and are validated on the same Flow head.
+    if (!requiresObservationProvenance && recordedHead === currentHead) continue;
+    const recordedHeadText = recordedHead === null ? "no recorded head" : `recorded head ${recordedHead}`;
+    const recordedSnapshot = gateClaimWorkspaceSnapshot(claim);
+    if (recordedSnapshot === null) {
+      if (requiresObservationProvenance) {
+        throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot", `claim '${claimId}' cannot contribute to a passing gate without its clean Git-worktree observation snapshot. Re-record this check after the command completes.`);
+      }
+      throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText} and no Git workspace snapshot, so it cannot be reconciled against current head ${currentHead}. Re-record this check at the current head (public: flow-agents workflow evidence; sidecar: workflow:sidecar record-gate-claim).`);
+    }
+    if (requiresObservationProvenance && recordedSnapshot.worktree_clean !== true) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.worktree_clean", `claim '${claimId}' was observed in a dirty Git worktree and is provisional. Clean the worktree and re-record this check.`);
+    }
+    if (requiresObservationProvenance && !isExactLowercaseCommitSha(recordedSnapshot.head_sha)) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.head_sha", `claim '${claimId}' has malformed observed_at_commit '${String(recordedSnapshot.head_sha)}'. Re-record this check from a trusted Git worktree.`);
+    }
+    if (requiresObservationProvenance) {
+      assertPassingCommandObservationProvenance(claimId, observedCommands, recordedSnapshot, linkedExecution, commandReferences, hasCommandReference);
+      if (trustedCurrentCommit === null) {
+        try {
+          trustedCurrentCommit = resolveTrustedLocalGitCommit(projectRoot, "HEAD");
+        } catch (error) {
+          throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.head_sha", `cannot establish a trusted current Git HEAD for passing gate evidence (${errorMessage(error)}). Re-record this check in a complete local Git worktree.`);
+        }
+      }
+      assertObservationAncestor(claimId, recordedSnapshot.head_sha, trustedCurrentCommit, projectRoot);
+    }
+    currentWorkspace ??= captureCurrentGitWorkspaceSnapshot(projectRoot);
+    const recordedStep = gateClaim && typeof gateClaim.step_id === "string" ? gateClaim.step_id : null;
+    const treeUnchanged = currentWorkspace.snapshot !== null && isDeepStrictEqual(recordedSnapshot, currentWorkspace.snapshot);
+    if (requiresObservationProvenance && currentWorkspace.snapshot !== null && currentWorkspace.snapshot.worktree_clean !== true) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot.worktree_clean", `the current Git worktree is dirty, so clean observation evidence for claim '${claimId}' cannot satisfy this gate. Clean the worktree and re-record this check.`);
+    }
+    const stepMatches = recordedStep === null || recordedStep === currentStep;
+    // Flow position equality used to bypass repository-state checks entirely. It
+    // is not evidence that a command observation is bound to this tree, so the
+    // exact snapshot comparison and trusted ancestry above always run first.
+    // A command observation remains step-bound even when its Flow run head is
+    // current. The no-observation fast path above preserves #1170 behavior for
+    // older non-confirming claims; it cannot waive visit/step freshness for a
+    // claim that could satisfy a verified gate.
+    if (treeUnchanged && stepMatches) continue;
+    const detail = treeUnchanged
+      ? `its workspace snapshot still matches the current tree, but it was recorded at step '${recordedStep}' rather than the current step '${currentStep}'`
+      : currentWorkspace.error !== null
+        ? `the current Git workspace snapshot could not be captured (${currentWorkspace.error})`
+        : "its recorded Git workspace snapshot no longer matches the current tree";
+    throw new BuilderBuildRunInputError(GATE_CLAIM_HEAD_FIELD, `${GATE_CLAIM_STALE_REASON}: claim '${claimId}' carries ${recordedHeadText}, the current head is ${currentHead}, and ${detail}. Re-record this check at the current head.`);
+  }
+}
+
+function commandEvidenceReferences(metadata: AnyRecord | null): string[] {
+  return Array.isArray(metadata?.artifact_refs)
+    ? metadata.artifact_refs.flatMap((reference: unknown) => isRecord(reference)
+      && reference.kind === "command"
+      && typeof reference.excerpt === "string"
+      && reference.excerpt.trim().length > 0
+        ? [reference.excerpt.trim()]
+        : [])
+    : [];
+}
+
+function hasCommandEvidenceReference(metadata: AnyRecord | null): boolean {
+  return Array.isArray(metadata?.artifact_refs)
+    && metadata.artifact_refs.some((reference: unknown) => isRecord(reference) && reference.kind === "command");
+}
+
+function assertPassingCommandObservationProvenance(claimId: string, observedCommands: unknown[], snapshot: AnyRecord, linkedExecution: readonly AnyRecord[], commandReferences: readonly string[], hasCommandReference: boolean): void {
+  if (observedCommands.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands", `passing command-backed claim '${claimId}' has no captured command observation. Re-record the command through the canonical writer.`);
+  }
+  const observedLabels: string[] = [];
+  for (const observation of observedCommands) {
+    if (!isRecord(observation)
+      || typeof observation.command !== "string"
+      || observation.command.length === 0
+      || observation.exit_code !== 0
+      || typeof observation.output_sha256 !== "string"
+      || !/^[a-f0-9]{64}$/u.test(observation.output_sha256)
+      || !isExactLowercaseCommitSha(observation.observed_at_commit)
+      || observation.observed_at_commit !== snapshot.head_sha
+      || observation.worktree_clean !== true
+      || !isValidGitWorktreeSnapshot(observation.verification_workspace_snapshot)
+      || observation.verification_workspace_snapshot.worktree_clean !== true
+      || !isDeepStrictEqual(observation.verification_workspace_snapshot, snapshot)) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands", `passing command-backed claim '${claimId}' must carry clean observation-time Git provenance matching its verification workspace snapshot. Re-run the command and re-record the result.`);
+    }
+    observedLabels.push(observation.command);
+  }
+  if (linkedExecution.length > 0) {
+    const labels = linkedExecution.map((evidence) => isRecord(evidence.execution) && typeof evidence.execution.label === "string" ? evidence.execution.label.trim() : "");
+    if (linkedExecution.some((evidence) => !isRecord(evidence.execution)
+      || evidence.passing !== true
+      || evidence.execution.isError !== false
+      || evidence.execution.exitCode !== 0)
+      || labels.length !== observedLabels.length
+      || labels.some((label, index) => label.length === 0 || label !== observedLabels[index])) {
+      throw new BuilderBuildRunInputError("evidence.evidence.execution", `passing command-backed claim '${claimId}' must bind every linked execution label, in order and multiplicity, to a successful captured command observation. Re-run and re-record the command evidence.`);
+    }
+  }
+  if (linkedExecution.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.evidence.execution", `passing command-backed claim '${claimId}' has no linked execution evidence. Re-run and re-record the command through the canonical writer.`);
+  }
+  if (hasCommandReference && commandReferences.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.artifact_refs", `passing command-backed claim '${claimId}' has an unbindable command evidence ref. Supply the exact runnable command text and re-record the observed command evidence.`);
+  }
+  if (commandReferences.length > 0) {
+    const labels = linkedExecution.map((evidence) => (evidence.execution as AnyRecord).label as string);
+    if (commandReferences.length !== labels.length || commandReferences.some((command, index) => command !== labels[index])) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.artifact_refs", `passing command-backed claim '${claimId}' must bind command evidence refs, linked execution labels, and captured observations in the same order and multiplicity. Re-run and re-record the command evidence.`);
+    }
+  }
+}
+
+/**
+ * The snapshot a claim may re-establish freshness against.
+ *
+ * `metadata.verification_workspace_snapshot` is the general channel. `review_target.
+ * workspace_snapshot` is accepted ONLY for a genuinely critique-origin claim: that field is a
+ * critique's own review binding (`workflow-sidecar.ts` recordCritique), and honoring it on any
+ * claim that merely carries a `review_target`-shaped blob would let a non-critique producer
+ * supply its own freshness anchor under a field nothing else on this path validates.
+ *
+ * The discriminator is the (origin, claimType, subjectType) tuple rather than `origin` alone.
+ * `origin` on its own is a writer-supplied string; the tuple is not, because `bundleGateEvidence`
+ * has already rejected any relevant claim whose `origin: "critique"` is not backed by
+ * `claimType: "workflow.critique.review"` + `subjectType: "workflow-critique"` (the producer-type
+ * validation above, covered by the existing "cannot bypass head binding by impersonating exempt
+ * producer origins" test). Re-asserting the tuple here keeps this helper correct on its own terms
+ * rather than dependent on caller ordering. It is the narrowest signal available at this layer:
+ * the critique hash chain (`critique_record_hash`) is equally writer-computed and is validated
+ * downstream by `validateCritiqueResolutionGraph`, not here.
+ *
+ * Note on reachability: the sidecar never stamps `metadata.gate_claim` onto a critique claim
+ * (`workflow-sidecar.ts` critMeta), so a critique-origin claim is not head-bound today and this
+ * branch is currently unreachable in production. It is retained deliberately — #1170's PR2
+ * broadens gate-claim capture, at which point critiques become head-bound and this is the only
+ * snapshot they carry. Gated now so it cannot arrive ungated later.
+ */
+function gateClaimWorkspaceSnapshot(claim: AnyRecord): AnyRecord | null {
+  const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+  if (!metadata) return null;
+  if (isValidGitWorktreeSnapshot(metadata.verification_workspace_snapshot)) return metadata.verification_workspace_snapshot;
+  if (!isCritiqueOriginClaim(claim, metadata)) return null;
+  const reviewTarget = isRecord(metadata.review_target) ? metadata.review_target : null;
+  if (reviewTarget && isValidGitWorktreeSnapshot(reviewTarget.workspace_snapshot)) return reviewTarget.workspace_snapshot;
+  return null;
+}
+
+function isCritiqueOriginClaim(claim: AnyRecord, metadata: AnyRecord): boolean {
+  return metadata.origin === "critique"
+    && claim.claimType === "workflow.critique.review"
+    && claim.subjectType === "workflow-critique";
+}
+
+function isValidGitWorktreeSnapshot(value: unknown): value is AnyRecord {
+  return isRecord(value)
+    && isGitWorktreeSnapshot(value)
+    && typeof value.digest === "string"
+    && typeof value.head_sha === "string";
+}
+
+function captureCurrentGitWorkspaceSnapshot(projectRoot: string): { snapshot: AnyRecord | null; error: string | null } {
+  try {
+    const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+    return { snapshot: isValidGitWorktreeSnapshot(snapshot) ? snapshot : null, error: null };
+  } catch (error) {
+    return { snapshot: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function assertObservationAncestor(claimId: string, observedCommit: string, currentCommit: string, projectRoot: string): void {
+  try {
+    assertTrustedGitAncestor(projectRoot, observedCommit, currentCommit);
+  } catch (error) {
+    const exitStatus = isRecord(error) && typeof error.status === "number" ? error.status : null;
+    if (exitStatus === 1) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands.observed_at_commit", `claim '${claimId}' was observed at ${observedCommit}, which is not an ancestor of trusted current HEAD ${currentCommit}. Re-run the check against the current revision.`);
+    }
+    throw new BuilderBuildRunInputError("evidence.claims.metadata.observed_commands.observed_at_commit", `could not prove that claim '${claimId}' observed commit ${observedCommit} is an ancestor of trusted current HEAD ${currentCommit} (${errorMessage(error)}). Git history may be shallow or missing; fetch the required history and re-record this check.`);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function mergeGateClaimsWithCritiqueHistory(
@@ -1413,8 +2150,26 @@ async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectR
     && isRecord(claim.metadata)
     && claim.metadata.origin === "critique"
     && liveRecordIds.has(claim.metadata.critique_record_id));
-  if (liveCritiques.length === 0 || liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
-    throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a current clean critique");
+  // Two distinguishable causes, two different remedies. Naming the unmet state without the
+  // transition leaves a correct caller with retry as its only move — measured across 12 eval arms:
+  // 81 refusals, 32% of them repeats of a reason already hit in the same run (#1281).
+  if (liveCritiques.length === 0) {
+    throw new BuilderBuildRunInputError(
+      "evidence.critique",
+      "a passing tests-evidence claim requires a current clean critique, and this gate visit has none. "
+        + "Record one with `workflow critique` under a reviewer identity distinct from the implementation "
+        + "actor (set FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process). Note that a route-back "
+        + "starts a new gate visit: critiques from a previous visit remain as audit history but do not "
+        + "satisfy this one.",
+    );
+  }
+  if (liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
+    throw new BuilderBuildRunInputError(
+      "evidence.critique",
+      "a passing tests-evidence claim requires a current clean critique, and this gate visit has one that "
+        + "is not a substantive pass. Address its open findings, then re-record with `workflow critique` "
+        + "(re-recording under the same critique id supersedes the previous verdict).",
+    );
   }
   const critiqueCandidates = await Promise.all(liveCritiques.map(async (claim) => {
     const artifacts = reviewedArtifacts(claim);
@@ -1457,10 +2212,14 @@ function assertObservedTestsEvidence(testClaim: AnyRecord, criteria: AnyRecord[]
   if (!Array.isArray(observed) || observed.length === 0) {
     throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain successful command observations");
   }
+  const observationSnapshot = gateClaimWorkspaceSnapshot(testClaim);
+  if (observationSnapshot === null || observationSnapshot.worktree_clean !== true) {
+    throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must be bound to a clean Git-worktree observation snapshot");
+  }
   const commands = new Set<string>();
   for (const entry of observed) {
-    if (!isRecord(entry) || typeof entry.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256) || commands.has(entry.command)) {
-      throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain unique commands with exit_code 0, a positive executed-test count, and SHA-256 output digests");
+    if (!isRecord(entry) || typeof entry.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(entry.output_sha256) || !isExactLowercaseCommitSha(entry.observed_at_commit) || entry.worktree_clean !== true || entry.observed_at_commit !== observationSnapshot.head_sha || !isValidGitWorktreeSnapshot(entry.verification_workspace_snapshot) || entry.verification_workspace_snapshot.worktree_clean !== true || !isDeepStrictEqual(entry.verification_workspace_snapshot, observationSnapshot) || commands.has(entry.command)) {
+      throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain unique clean command observations with exit_code 0, a positive executed-test count, SHA-256 output digests, and matching observation-time Git-worktree snapshots");
     }
     commands.add(entry.command);
   }
@@ -1632,7 +2391,7 @@ function manifestEvidence(manifest: JsonObject): AnyRecord[] {
 
 function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, sidecar: AnyRecord): { projection: AnyRecord; gateActionEnvelope: GateActionEnvelope | null; progressSnapshot: GateActionProgressSnapshot } {
   const definition = run.definition;
-  const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
+  const gates = openGatesForResult(run);
   const complete = run.state.status === "completed";
   const paused = run.state.status === "paused";
   const canceled = run.state.status === "canceled";
@@ -1932,7 +2691,9 @@ function discoverProjectionPointers(
   let actorEntries: string[] | null = null;
   if (pathExistsNoFollow(actorRoot)) {
     assertSafeDirectory(actorRoot, context.artifactRoot, "current directory");
-    actorEntries = fs.readdirSync(actorRoot).sort();
+    actorEntries = fs.readdirSync(actorRoot)
+      .filter((name) => name !== ".actor-pointers.lockdir")
+      .sort();
     for (const name of actorEntries) {
       const file = path.join(actorRoot, name);
       const stat = fs.lstatSync(file);
@@ -2031,7 +2792,12 @@ function assertProjectionTargetsUnchanged(
 ): void {
   const actorRoot = path.join(context.artifactRoot, "current");
   const currentActorEntries = pathExistsNoFollow(actorRoot)
-    ? (assertSafeDirectory(actorRoot, context.artifactRoot, "current directory"), fs.readdirSync(actorRoot).sort())
+    ? (
+      assertSafeDirectory(actorRoot, context.artifactRoot, "current directory"),
+      fs.readdirSync(actorRoot)
+        .filter((name) => name !== ".actor-pointers.lockdir")
+        .sort()
+    )
     : null;
   if (JSON.stringify(currentActorEntries) !== JSON.stringify(prepared.actorEntries)) {
     throw new BuilderBuildRunInputError("current", `directory changed during ${operation}`);

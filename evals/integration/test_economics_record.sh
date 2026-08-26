@@ -53,6 +53,27 @@ if ! command -v jq >/dev/null 2>&1; then echo "jq not available; skipping econom
 echo "=== economics record (#349) ==="
 export FLOW_AGENTS_ECONOMICS_FIXTURE_MODE=true
 
+# #970: every economics record now carries the SAME producer-identity tuple telemetry.sh stamps
+# ({package_version, content_fingerprint, source}), resolved from scripts/telemetry/lib/install-identity.sh.
+# Pin the WHOLE suite to a hermetic stamp fixture so every emitted record — including the golden
+# byte-equality check below — resolves the identical deterministic tuple on every host, regardless of
+# whether this checkout happens to be built (stamp) / a git checkout (git) / neither (unknown). The
+# stamp|git|unknown resolution branches themselves get dedicated per-invocation overrides further down.
+IDENTITY_STAMP_ROOT="$TMP/install-identity-stamped"
+mkdir -p "$IDENTITY_STAMP_ROOT/build/generated"
+cat > "$IDENTITY_STAMP_ROOT/build/generated/install-identity.json" <<'STAMP'
+{
+  "schema_version": "1.0",
+  "package_name": "@kontourai/flow-agents",
+  "package_version": "9.9.9-fixture",
+  "content_fingerprint": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "git_sha": null,
+  "git_dirty": null,
+  "built_at": "2026-01-01T00:00:00.000Z"
+}
+STAMP
+export FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$IDENTITY_STAMP_ROOT"
+
 # ── Build the session.usage event from the fixture transcript via the REAL usage parser ────────────
 # This is what wires "tokens come from transcript ground truth" into the test: the usage block is
 # produced by usage_parse_transcript reading each assistant message's .message.usage — not hand-set.
@@ -130,6 +151,94 @@ assert_eq "iterations.route_backs == 1" '.iterations.route_backs' '1'
 assert_eq "verification_verdict == PASS" '.defects.verification_verdict' '"PASS"'
 assert_eq "human_wait_s > 0 (decision pause present)" '.time.human_wait_s' '45'
 assert_eq "wall_clock_s == usage.duration_s" '.time.wall_clock_s' '420'
+
+# ── #970: producer identity — the durable economics record carries the SAME tuple telemetry.sh stamps ─
+# The record must join with the telemetry firehose on ONE vocabulary {package_version,
+# content_fingerprint, source} so console#267 can segment economics by Kit version even after the
+# short-retention firehose (console#137) has expired. The block rides as a TOP-LEVEL sibling (NOT
+# inside run_correlation), sourced from the shared scripts/telemetry/lib/install-identity.sh.
+echo "--- #970: install_identity — economics/telemetry join vocabulary on the durable record ---"
+# (i) shape: all three tuple fields present, and NOT nested under run_correlation.
+for f in package_version content_fingerprint source; do
+  present="$(printf '%s' "$REC" | jq -c "has(\"install_identity\") and (.install_identity | has(\"$f\"))" 2>/dev/null)"
+  [[ "$present" == "true" ]] && pass "install_identity.$f present (top-level)" || fail "install_identity.$f missing/nested: got $present"
+done
+rc_has_ii="$(printf '%s' "$REC" | jq -c '.run_correlation | has("install_identity")' 2>/dev/null)"
+[[ "$rc_has_ii" == "false" ]] && pass "install_identity is a top-level sibling, never inside run_correlation" || fail "install_identity leaked into run_correlation: $rc_has_ii"
+# (ii) source enum is always one of the three labeled values, never fabricated.
+rec_source="$(printf '%s' "$REC" | jq -r '.install_identity.source' 2>/dev/null)"
+case "$rec_source" in
+  stamp|git|unknown) pass "install_identity.source is a labeled enum ($rec_source)" ;;
+  *) fail "install_identity.source must be stamp|git|unknown, got '$rec_source'" ;;
+esac
+# (iii) stamp branch: the suite is pinned to a hermetic stamp fixture, so the record reads it verbatim.
+rec_identity="$(printf '%s' "$REC" | jq -c '.install_identity' 2>/dev/null)"
+if [[ "$rec_identity" == '{"package_version":"9.9.9-fixture","content_fingerprint":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","source":"stamp"}' ]]; then
+  pass "install_identity reads the shipped stamp verbatim (source=stamp, version+fingerprint correct)"
+else
+  fail "install_identity stamp case: got $rec_identity"
+fi
+
+# (iv) git branch: no stamp, but the package root is a Flow Agents source checkout → content_fingerprint
+# is git:<HEAD>, source=git. Per-invocation override supersedes the suite-wide stamp root.
+II_GIT="$TMP/ii-checkout"; mkdir -p "$II_GIT"
+printf '{"name":"@kontourai/flow-agents","version":"0.0.0-checkout"}\n' > "$II_GIT/package.json"
+git -C "$II_GIT" init -q >/dev/null 2>&1
+git -C "$II_GIT" add -A >/dev/null 2>&1
+git -C "$II_GIT" -c user.email=eval@example.invalid -c user.name=eval commit -qm "fixture" >/dev/null 2>&1
+II_GIT_SHA="$(git -C "$II_GIT" rev-parse HEAD 2>/dev/null)"
+II_GIT_LOG="$TMP/econ-ii-git.jsonl"; : > "$II_GIT_LOG"
+FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$II_GIT" TELEMETRY_ECONOMICS_LOG_FILE="$II_GIT_LOG" bash "$EMITTER" "$USAGE_EVENT" >/dev/null 2>&1
+git_identity="$(jq -c '.install_identity' "$II_GIT_LOG" 2>/dev/null)"
+if [[ -n "$II_GIT_SHA" && "$git_identity" == "{\"package_version\":\"0.0.0-checkout\",\"content_fingerprint\":\"git:${II_GIT_SHA}\",\"source\":\"git\"}" ]]; then
+  pass "install_identity falls back to the checkout HEAD (source=git)"
+else
+  fail "install_identity git case: got $git_identity (expected git:$II_GIT_SHA)"
+fi
+
+# (v) unknown branch: neither a stamp nor a Flow Agents checkout → the labeled unknown tuple, never a
+# fabricated join key, never an omitted block. Uses an empty root (no package.json).
+II_NONE="$TMP/ii-none"; mkdir -p "$II_NONE"
+II_NONE_LOG="$TMP/econ-ii-none.jsonl"; : > "$II_NONE_LOG"
+FLOW_AGENTS_INSTALL_IDENTITY_ROOT="$II_NONE" TELEMETRY_ECONOMICS_LOG_FILE="$II_NONE_LOG" bash "$EMITTER" "$USAGE_EVENT" >/dev/null 2>&1
+none_identity="$(jq -c '.install_identity' "$II_NONE_LOG" 2>/dev/null)"
+if [[ "$none_identity" == '{"package_version":"unknown","content_fingerprint":"unknown","source":"unknown"}' ]]; then
+  pass "install_identity degrades to the labeled unknown tuple when unavailable (fail-open, block never omitted)"
+else
+  fail "install_identity unknown case: got $none_identity"
+fi
+
+# (vi) NON-OVERRIDE real-resolver path: every other case above pins the resolution via the
+# FLOW_AGENTS_INSTALL_IDENTITY_ROOT override, so the suite would never notice the shared resolver
+# picking the WRONG base for the economics producer's own package root (the resolver-base-shift class).
+# This case unsets the override entirely and asserts economics-record.sh resolves ITS OWN install
+# identity through the real two-fixed-offset package-root logic against this actual checkout. In a
+# built tree the stamp is present → source=stamp + the real package_version; in an unbuilt checkout
+# the resolver must still find the Flow Agents root → source=git with a real version, NEVER unknown.
+# A resolver that resolves the wrong/no root for the economics producer turns this positive assertion
+# red — independent of telemetry.sh's mirror-parity test.
+REAL_STAMP="$ROOT/build/generated/install-identity.json"
+REAL_LOG="$TMP/econ-real-identity.jsonl"; : > "$REAL_LOG"
+env -u FLOW_AGENTS_INSTALL_IDENTITY_ROOT TELEMETRY_ECONOMICS_LOG_FILE="$REAL_LOG" bash "$EMITTER" "$USAGE_EVENT" >/dev/null 2>&1
+real_identity="$(jq -c '.install_identity' "$REAL_LOG" 2>/dev/null)"
+real_source="$(printf '%s' "$real_identity" | jq -r '.source' 2>/dev/null)"
+real_version="$(printf '%s' "$real_identity" | jq -r '.package_version' 2>/dev/null)"
+real_fp="$(printf '%s' "$real_identity" | jq -r '.content_fingerprint' 2>/dev/null)"
+if [[ -f "$REAL_STAMP" ]]; then
+  exp_version="$(jq -r '.package_version' "$REAL_STAMP" 2>/dev/null)"
+  exp_fp="$(jq -r '.content_fingerprint' "$REAL_STAMP" 2>/dev/null)"
+  if [[ "$real_source" == "stamp" && "$real_version" == "$exp_version" && "$real_fp" == "$exp_fp" ]]; then
+    pass "non-override real resolver finds the economics producer's own stamped root (source=stamp, version=$real_version)"
+  else
+    fail "non-override real resolver: expected stamp/$exp_version/$exp_fp, got $real_identity"
+  fi
+else
+  if [[ "$real_source" == "git" && -n "$real_version" && "$real_version" != "unknown" ]]; then
+    pass "non-override real resolver finds the economics producer's checkout root (source=git, version=$real_version)"
+  else
+    fail "non-override real resolver degraded to unknown/wrong (expected a resolved Flow Agents root): got $real_identity"
+  fi
+fi
 
 # ── AC1/AC6: schema validation — golden validates; cost-only (no defects) FAILS (R7 Goodhart) ─────
 echo "--- AC1/AC6: schema — golden validates positive; a cost-only record FAILS (co-required cost+defects) ---"

@@ -1,0 +1,44 @@
+[
+  {
+    "scope": "author:fixture-bot[bot]",
+    "reason": "legacy entry: reason prose names a disclosed gap (no automatic reader for trend data) but carries no structured gaps[] — must be counted, never scraped",
+    "approved_by": "fixture-approver",
+    "declared_at": "2026-06-01T00:00:00Z"
+  },
+  {
+    "scope": "branch-prefix:feat/fixture-structured",
+    "reason": "structured entry with two accepted gaps",
+    "approved_by": "fixture-approver",
+    "declared_at": "2026-07-10T12:00:00Z",
+    "gaps": [
+      "trend readings have no automatic reader",
+      "hosted CI does not run the process-heavy suite"
+    ]
+  },
+  {
+    "scope": "branch-prefix:feat/fixture-empty-gaps",
+    "reason": "structured entry that affirmatively declares zero accepted gaps",
+    "approved_by": "fixture-approver",
+    "declared_at": "2026-07-11T00:00:00Z",
+    "gaps": []
+  },
+  {
+    "scope": "branch-prefix:feat/fixture-legacy-second",
+    "reason": "second legacy entry without gaps[]",
+    "approved_by": "fixture-approver",
+    "declared_at": "2026-07-12T00:00:00Z"
+  },
+  {
+    "scope": "branch-prefix:feat/fixture-invalid-gaps",
+    "reason": "gaps present but not an array of non-empty strings",
+    "approved_by": "fixture-approver",
+    "declared_at": "2026-07-13T00:00:00Z",
+    "gaps": ["", "real gap"]
+  },
+  {
+    "scope": "branch-prefix:feat/fixture-malformed",
+    "reason": "missing approved_by — malformed per ADR 0022 §2",
+    "declared_at": "2026-07-14T00:00:00Z",
+    "gaps": ["gap on a malformed entry must not be projected"]
+  }
+]

@@ -7,6 +7,10 @@ const EXPECTED_VALUE_EXPORTS = [
   "WORKFLOW_STATUS_TO_CONSOLE_PROCESS_STATUS",
   "mapWorkflowStatusToConsoleProcessStatus",
   "deriveConsoleProcessBlockedReason",
+  // #1021: the liveness lane predicate. Pure and dependency-free, so it belongs on the same
+  // contract surface as the mappers above -- Console renders lane state, and a renderer that
+  // recomputes "is this still live" from an age and a TTL is the #933 drift shape again.
+  "laneState",
 ];
 
 test("console-contract subpath exports the documented value contract", () => {
@@ -16,6 +20,7 @@ test("console-contract subpath exports the documented value contract", () => {
   assert.equal(typeof consoleContract.mapWorkflowStatusToConsoleProcessStatus, "function");
   assert.equal(typeof consoleContract.deriveConsoleProcessBlockedReason, "function");
   assert.equal(typeof consoleContract.WORKFLOW_STATUS_TO_CONSOLE_PROCESS_STATUS, "object");
+  assert.equal(typeof consoleContract.laneState, "function");
 });
 
 test("console-contract subpath exports no other surprise value exports", () => {
@@ -70,5 +75,40 @@ test("deriveConsoleProcessBlockedReason sources blocked reason from handoff bloc
   assert.equal(
     consoleContract.deriveConsoleProcessBlockedReason("completed", { nextActionSummary: "should be dropped" }),
     undefined,
+  );
+});
+
+// --- laneState (#1021) ---
+// The whole point of exporting this is that a renderer must NOT recompute liveness from an age
+// and a TTL. These assert the rule through the contract subpath, so the subpath itself is the
+// thing under test -- a re-export that silently stopped resolving would fail here, not just in
+// the liveness-fleet unit tests.
+
+const NOW = Date.UTC(2026, 0, 1, 12, 0, 0);
+const at = (msAgo) => new Date(NOW - msAgo).toISOString();
+
+test("laneState: a trailing release is released regardless of elapsed time", () => {
+  assert.equal(
+    consoleContract.laneState({ lastEventType: "release", lastEventAt: at(0), ttlSeconds: 1800 }, NOW),
+    "released",
+  );
+});
+
+test("laneState: a heartbeat inside its TTL still holds, and past its TTL is reclaimable", () => {
+  assert.equal(
+    consoleContract.laneState({ lastEventType: "heartbeat", lastEventAt: at(60_000), ttlSeconds: 1800 }, NOW),
+    "held",
+  );
+  assert.equal(
+    consoleContract.laneState({ lastEventType: "heartbeat", lastEventAt: at(1_801_000), ttlSeconds: 1800 }, NOW),
+    "reclaimable",
+  );
+});
+
+test("laneState: an unparsable timestamp is reclaimable, never held", () => {
+  assert.equal(
+    consoleContract.laneState({ lastEventType: "claim", lastEventAt: "not-a-timestamp", ttlSeconds: 1800 }, NOW),
+    "reclaimable",
+    "an unreadable lease must not exclude work",
   );
 });

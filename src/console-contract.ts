@@ -50,3 +50,17 @@ export type {
   ConsoleTrustProjection,
   ConsoleTrustProjectionEnvelope,
 } from "./lib/workflow-trust-projection.js";
+/**
+ * #1021 liveness fleet. Same discipline as the projection exports above: the PURE rule and the
+ * shapes, never the stream-reading `readFleet`/`discoverRepoRoots`, which pull in `fs`, `git`,
+ * and `createRequire`.
+ *
+ * `laneState` is the whole freshness predicate, exported so a plane rendering realtime lane
+ * activity asks Flow Agents whether a lane still holds rather than recomputing it from an age
+ * and a TTL — the drift shape #933 caught when station hand-mirrored a status table. Authority
+ * stays put: Flow Agents owns liveness, Console aggregates and renders, exactly as
+ * console-server's flow-bridge consumes `@kontourai/flow/console-contract` types without pulling
+ * in Flow's runtime.
+ */
+export { laneState } from "./lib/liveness-fleet.js";
+export type { LivenessLaneState, LaneObservation, FleetLane } from "./lib/liveness-fleet.js";

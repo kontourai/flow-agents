@@ -103,6 +103,20 @@ test("rejects credential-shaped identities and reasons", () => {
       RunCorrelationValidationError,
     );
   }
+
+  const uriIdentities = explicitIdentities();
+  uriIdentities.runtime_session = {
+    status: "present",
+    value: "https://user:password@example.com/session",
+  };
+  uriIdentities.runtime_turn = {
+    status: "unsupported",
+    reason: "https://user:password@example.com/diagnostic",
+  };
+  assert.throws(
+    () => createRunCorrelationEnvelope({ identities: uriIdentities }),
+    RunCorrelationValidationError,
+  );
 });
 
 test("explicit incomplete correlation is read consistently and rejects sensitive reasons", () => {

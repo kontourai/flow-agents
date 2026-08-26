@@ -2,7 +2,9 @@ import * as fs from "node:fs";
 import { constants as fsConstants } from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { evaluateGate, expectationsForGate, openGates, type FlowExpectation, type FlowGate, type FlowRunState } from "@kontourai/flow";
+import { evaluateGate, expectationsForGate, type FlowExpectation, type FlowGate, type FlowRunState } from "@kontourai/flow";
+import { actionableOpenGates } from "./builder-flow-run-adapter.js";
+import { actionableFlowStepId } from "./lib/flow-resolver.js";
 import { parseKitFlowStepActions, type KitFlowStepActionEntry, type KitFlowStepExpectationBinding } from "./flow-kit/validate.js";
 import {
   EVIDENCE_REF_JSON_SCHEMA,
@@ -16,6 +18,7 @@ import {
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
 import { flowAgentsPackageRoot } from "./lib/package-version.js";
+import { resolveKitFlowBinding, kitFlowSourceRoots, type KitFlowBinding } from "./lib/kit-flow-binding.js";
 
 const MAX_METADATA_BYTES = 1_048_576;
 const MAX_ENVELOPE_BYTES = 65_536;
@@ -211,6 +214,8 @@ type LoadedGateAction = {
   packageRoot: string;
   packageVersion: string;
   kit: AnyRecord;
+  /** The DECLARING kit's binding — the root, kit directory and namespace every lookup below uses. */
+  kitBinding: KitFlowBinding;
   action: KitFlowStepActionEntry;
   actions: KitFlowStepActionEntry[];
   actionableArtifacts: string[];
@@ -224,25 +229,80 @@ type DerivedGateRequirements = {
   acceptedExceptions: GateActionEnvelope["gate"]["accepted_exceptions"];
 };
 
-export function installedBuilderSkillIdentity(skill: string): GateActionEnvelope["action"]["skills"][number] {
-  const packageRoot = flowAgentsPackageRoot();
-  const packageMetadata = readBoundedJson(packageRoot, "package.json", "flow-agents package metadata");
-  if (typeof packageMetadata.version !== "string" || !packageMetadata.version) throw new Error("flow-agents package metadata has no version");
-  const kit = readBoundedJson(packageRoot, path.join("kits", "builder", "kit.json"), "Builder kit metadata");
-  return skillIdentity(kit, packageRoot, packageMetadata.version, skill);
+/**
+ * The DECLARING kit for `definitionId`, and the manifest reference to quote in its diagnostics.
+ *
+ * #1316: every entry point below used to read ONE kit's manifest from the package root for EVERY
+ * flow, so a kit-declared flow's run could not produce a gate-action envelope at all — its step
+ * actions were invisible and the run refused with "must declare exactly one action". The kit is
+ * now the one that DECLARES the flow, resolved through the same binding the canonical run adapter
+ * pins, so the actions consulted here and the definition the run is bound to come from one kit.
+ * The packaged tree is searched first, so a project kit can never shadow a packaged one.
+ *
+ * Refuses when no kit declares the flow: an envelope built from a manifest that does not own the
+ * definition would be a producer claim nothing bound.
+ */
+function declaringKitForFlow(definitionId: string, projectRoot?: string): { kitBinding: KitFlowBinding; manifest: AnyRecord; manifestRef: string } {
+  const kitBinding = resolveKitFlowBinding(definitionId, kitFlowSourceRoots(flowAgentsPackageRoot(), projectRoot));
+  if (!kitBinding) throw new Error(`no installed kit declares Flow ${definitionId}; gate-action metadata cannot be resolved`);
+  const manifest = readBoundedJson(kitBinding.kitsRoot, path.join(kitBinding.kitId, "kit.json"), `${kitBinding.kitId} kit metadata`);
+  return { kitBinding, manifest, manifestRef: `kits/${kitBinding.kitId}/kit.json` };
 }
 
-export function installedBuilderImplementationAllowed(definitionId: string, currentStep: string): boolean {
-  const packageRoot = flowAgentsPackageRoot();
-  const kit = readBoundedJson(packageRoot, path.join("kits", "builder", "kit.json"), "Builder kit metadata");
-  const parsed = parseKitFlowStepActions(kit, "kits/builder/kit.json");
+/**
+ * #1316: takes the flow whose step action names the skill, because that is what identifies the
+ * declaring kit. It previously read one kit's manifest, so it could only ever answer for that
+ * kit's skills — and had no way to say which kit it was answering for.
+ */
+export function installedBuilderSkillIdentity(definitionId: string, skill: string, projectRoot?: string): GateActionEnvelope["action"]["skills"][number] {
+  const packageMetadata = readBoundedJson(flowAgentsPackageRoot(), "package.json", "flow-agents package metadata");
+  if (typeof packageMetadata.version !== "string" || !packageMetadata.version) throw new Error("flow-agents package metadata has no version");
+  const { kitBinding, manifest: kit } = declaringKitForFlow(definitionId, projectRoot);
+  return skillIdentity(kit, kitBinding, packageMetadata.version, skill);
+}
+
+export function installedBuilderImplementationAllowed(definitionId: string, currentStep: string, projectRoot?: string): boolean {
+  const { manifest: kit, manifestRef } = declaringKitForFlow(definitionId, projectRoot);
+  const parsed = parseKitFlowStepActions(kit, manifestRef);
   if (parsed.errors.length) throw new Error(`Builder gate-action metadata is invalid: ${parsed.errors.join("; ")}`);
   const selected = parsed.entries.filter((entry) => entry.flow_id === definitionId && entry.step_id === currentStep);
   if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${definitionId}/${currentStep}`);
   return selected[0]!.implementation_allowed;
 }
 
-export function installedBuilderGateActionAuthority(definitionId: string, currentStep: string, runId: string): {
+/**
+ * True when the kit that DECLARES `definitionId` binds at least one of `stepId`'s expectations to
+ * the named public interface.
+ *
+ * #1336: several public verbs used to ask "is this flow `builder.build` and this step `verify`",
+ * which is a proxy for the question they actually need answered — "is this the step whose evidence
+ * my interface produces". The kit manifest states that directly (`flow_step_actions[]
+ * .expectation_bindings[].interface`), and it states it per flow, so a kit-declared variant that
+ * keeps the same binding is served by the same code path instead of being refused by name.
+ *
+ * Fail-closed: any flow no installed kit declares, any malformed metadata, or a step the kit
+ * declares no action for all answer `false`. A verb must refuse when it cannot establish that the
+ * step it is about to write to is the one it produces evidence for.
+ */
+export function declaredStepBindsInterface(
+  definitionId: string,
+  stepId: string,
+  wanted: KitFlowStepExpectationBinding["interface"],
+  projectRoot?: string,
+): boolean {
+  try {
+    const { manifest: kit, manifestRef } = declaringKitForFlow(definitionId, projectRoot);
+    const parsed = parseKitFlowStepActions(kit, manifestRef);
+    if (parsed.errors.length) return false;
+    return parsed.entries.some((entry) => entry.flow_id === definitionId
+      && entry.step_id === stepId
+      && entry.expectation_bindings.some((binding) => binding.interface === wanted));
+  } catch {
+    return false;
+  }
+}
+
+export function installedBuilderGateActionAuthority(definitionId: string, currentStep: string, runId: string, projectRoot?: string): {
   definition_version: string;
   gate_id: string;
   requirements: Array<Omit<GateActionEnvelope["gate"]["requirements"][number], "status">>;
@@ -255,13 +315,13 @@ export function installedBuilderGateActionAuthority(definitionId: string, curren
   const packageMetadata = readBoundedJson(packageRoot, "package.json", "flow-agents package metadata");
   if (typeof packageMetadata.version !== "string" || !packageMetadata.version) throw new Error("flow-agents package metadata has no version");
   const packageVersion = packageMetadata.version;
-  const kit = readBoundedJson(packageRoot, path.join("kits", "builder", "kit.json"), "Builder kit metadata");
-  const parsed = parseKitFlowStepActions(kit, "kits/builder/kit.json");
+  const { kitBinding, manifest: kit, manifestRef } = declaringKitForFlow(definitionId, projectRoot);
+  const parsed = parseKitFlowStepActions(kit, manifestRef);
   if (parsed.errors.length) throw new Error(`Builder gate-action metadata is invalid: ${parsed.errors.join("; ")}`);
   const selected = parsed.entries.filter((entry) => entry.flow_id === definitionId && entry.step_id === currentStep);
   if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${definitionId}/${currentStep}`);
   const action = selected[0]!;
-  const definition = resolveEffectiveFlowDefinition(definitionId, packageRoot, { allowOverride: false });
+  const definition = resolveEffectiveFlowDefinition(definitionId, kitBinding.sourceRoot, { allowOverride: false });
   if (typeof definition?.version !== "string" || definition.version.length === 0) {
     throw new Error(`Installed Builder Flow has no version for ${definitionId}`);
   }
@@ -291,7 +351,7 @@ export function installedBuilderGateActionAuthority(definitionId: string, curren
   const operation = action.operations[0];
   const protocol = operation ? PUBLIC_OPERATION_CONTRACTS[operation as keyof typeof PUBLIC_OPERATION_CONTRACTS] : undefined;
   const actionEnvelope: GateActionEnvelope["action"] = {
-    skills: action.skills.map((skill) => skillIdentity(kit, packageRoot, packageVersion, skill)),
+    skills: action.skills.map((skill) => skillIdentity(kit, kitBinding, packageVersion, skill)),
     operations: [...action.operations],
     declared_artifacts: declaredArtifacts,
     artifact_bindings: artifactBindings,
@@ -353,25 +413,51 @@ function loadGateAction(input: BuilderGateActionEnvelopeInput): LoadedGateAction
   const packageMetadata = readBoundedJson(packageRoot, "package.json", "flow-agents package metadata");
   if (typeof packageMetadata.version !== "string" || !packageMetadata.version) throw new Error("flow-agents package metadata has no version");
   const packageVersion = packageMetadata.version;
-  const kit = readBoundedJson(packageRoot, path.join("kits", "builder", "kit.json"), "Builder kit metadata");
-  const parsed = parseKitFlowStepActions(kit, "kits/builder/kit.json");
+  const { kitBinding, manifest: kit, manifestRef } = declaringKitForFlow(input.run.definitionId, input.projectRoot);
+  const parsed = parseKitFlowStepActions(kit, manifestRef);
   if (parsed.errors.length) throw new Error(`Builder gate-action metadata is invalid: ${parsed.errors.join("; ")}`);
   const actions = parsed.entries.filter((entry) => entry.flow_id === input.run.definitionId);
-  const selected = actions.filter((entry) => entry.step_id === input.run.state.current_step);
-  if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${input.run.definitionId}/${input.run.state.current_step}`);
+  // #1350: resolve the action for the step whose gate this run must ACT ON, not for the step the
+  // cursor happens to rest on. These are the same step for every gated run, and differ only when
+  // the cursor sits on a gateless sequencing passthrough (#1335). They must not be resolved
+  // independently: `deriveFlowRequirements` asserts the action's declared evidence matches the
+  // gate's canonical requirements exactly, so taking the gate from the walked step and the action
+  // from the cursor's step makes that invariant unsatisfiable — the passthrough declares no
+  // evidence while the gate requires some, and the envelope throws rather than describing the run.
+  const actionStepId = actionableFlowStepId(input.definition, input.run.state.current_step) ?? input.run.state.current_step;
+  const selected = actions.filter((entry) => entry.step_id === actionStepId);
+  if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${input.run.definitionId}/${actionStepId}`);
   const action = selected[0]!;
   const actionableArtifacts = action.artifacts.filter((artifact) => !isControlArtifact(artifact));
   if (action.skills.length > MAX_SKILLS || action.artifacts.length > MAX_ARTIFACTS) {
     throw new Error("Builder gate-action metadata exceeds the supported envelope bound");
   }
-  return { packageRoot, packageVersion, kit, action, actions, actionableArtifacts };
+  return { packageRoot, packageVersion, kit, kitBinding, action, actions, actionableArtifacts };
 }
 
 function deriveFlowRequirements(input: BuilderGateActionEnvelopeInput, action: KitFlowStepActionEntry): DerivedGateRequirements {
-  const gates = openGates(input.definition, input.run.state) as Array<FlowGate & { id: string }>;
+  // #1350: the gates this run must ACT ON, not the gates of the step the cursor happens to rest
+  // on. Both values in this envelope and the session projection come from the SAME projectFlowRun
+  // call, so using `openGates` here made one returned object tell its two readers different things
+  // about the same run: at a gateless step the projection reported `execute-gate` while the
+  // envelope — the machine-readable contract the adapter is contractually required to obey —
+  // advertised no gate, no unresolved evidence and no mutation to invoke, while `next_action.status`
+  // still said `continue`. A run in that state does not fail; it burns turns recording
+  // `gate_not_advanced`. `actionableOpenGates` is the single shared derivation (#1335) and is
+  // unchanged for any run resting on a gated step, where it delegates straight to `openGates`.
+  const gates = actionableOpenGates(input.definition, input.run.state) as Array<FlowGate & { id: string }>;
   const acceptedExceptions: GateActionEnvelope["gate"]["accepted_exceptions"] = [];
+  // Evaluate at the actual current instant, not Flow's own fallback default of
+  // `state.updated_at`. `state.updated_at` only advances when a transition is
+  // recorded (a status change) — evidence attached during a re-evaluation that
+  // does not itself flip the gate outcome (the common "still missing one more
+  // piece" case) leaves it stale. Flow 5.0 now fails-closed on any claim/event
+  // timestamped after its evaluation clock (flow-gates.ts reconciliationForClaim),
+  // so projecting this envelope against a stale `state.updated_at` would mark
+  // exactly-just-attached evidence unresolved even though it is current.
+  const now = new Date().toISOString();
   const requirements = gates.flatMap((gate) => {
-    const outcome = evaluateGate(input.definition, input.run.state, input.run.manifest, gate.id, input.run.config);
+    const outcome = evaluateGate(input.definition, input.run.state, input.run.manifest, gate.id, input.run.config, now);
     if (typeof outcome.accepted_exception_id === "string") {
       acceptedExceptions.push({ gate_id: gate.id, exception_id: outcome.accepted_exception_id });
     }
@@ -390,7 +476,7 @@ function deriveFlowRequirements(input: BuilderGateActionEnvelopeInput, action: K
 }
 
 function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loaded: LoadedGateAction, derived: DerivedGateRequirements): GateActionEnvelope {
-  const { packageRoot, packageVersion, kit, action, actions, actionableArtifacts } = loaded;
+  const { packageVersion, kit, kitBinding, action, actions, actionableArtifacts } = loaded;
   const { gates, requirements, unresolved, unresolvedRequired, acceptedExceptions } = derived;
   const sessionDir = path.resolve(input.sessionDir);
   const sessionArgument = sessionPathForPublicCommand(input.projectRoot, sessionDir);
@@ -410,7 +496,7 @@ function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loade
       gate_ids: gates.map((gate) => gate.id),
     },
     gate: { requirements, unresolved_requirement_ids: unresolved, accepted_exceptions: acceptedExceptions },
-    action: envelopeAction(action, actionableArtifacts, sessionDir, sessionArgument, kit, packageRoot, packageVersion),
+    action: envelopeAction(action, actionableArtifacts, sessionDir, sessionArgument, kit, kitBinding, packageVersion),
     public_interfaces: {
       status: {
         package: { name: "@kontourai/flow-agents", version: packageVersion },
@@ -429,10 +515,10 @@ function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loade
   return envelope;
 }
 
-function envelopeAction(action: KitFlowStepActionEntry, artifacts: string[], sessionDir: string, sessionArgument: string, kit: AnyRecord, packageRoot: string, packageVersion: string): GateActionEnvelope["action"] {
+function envelopeAction(action: KitFlowStepActionEntry, artifacts: string[], sessionDir: string, sessionArgument: string, kit: AnyRecord, kitBinding: KitFlowBinding, packageVersion: string): GateActionEnvelope["action"] {
   const declaredArtifacts = artifacts.map((artifact) => artifactTarget(artifact, sessionDir, sessionArgument, action));
   return {
-    skills: action.skills.map((skill) => skillIdentity(kit, packageRoot, packageVersion, skill)),
+    skills: action.skills.map((skill) => skillIdentity(kit, kitBinding, packageVersion, skill)),
     operations: [...action.operations],
     declared_artifacts: declaredArtifacts,
     artifact_bindings: action.artifact_bindings
@@ -649,17 +735,23 @@ function requirementFromExpectation(gateId: string, expectation: FlowExpectation
   };
 }
 
-function skillIdentity(kit: AnyRecord, packageRoot: string, version: string, skill: string): GateActionEnvelope["action"]["skills"][number] {
+/**
+ * #1316: the skill a step action names is resolved in the DECLARING kit's own namespace and
+ * directory. Both were previously one kit's literals, which is why no other kit's step action
+ * could resolve a skill source. `path` stays relative to the root the kit was found in, so it
+ * remains a reference a reader can follow.
+ */
+function skillIdentity(kit: AnyRecord, kitBinding: KitFlowBinding, version: string, skill: string): GateActionEnvelope["action"]["skills"][number] {
   const skills = Array.isArray(kit.skills) ? kit.skills : [];
-  const entry = skills.find((candidate): candidate is AnyRecord => isRecord(candidate) && candidate.id === `builder.${skill}`);
+  const entry = skills.find((candidate): candidate is AnyRecord => isRecord(candidate) && candidate.id === `${kitBinding.kitId}.${skill}`);
   if (!entry || typeof entry.path !== "string") throw new Error(`Builder gate-action skill '${skill}' has no installed skill source`);
-  const kitRoot = path.join(packageRoot, "kits", "builder");
+  const kitRoot = path.join(kitBinding.kitsRoot, kitBinding.kitId);
   const source = readStableRegularFile(kitRoot, entry.path, `Builder skill '${skill}'`, MAX_METADATA_BYTES);
   if (!source) throw new Error(`Builder skill '${skill}' has no installed skill source`);
   return {
     id: skill,
     package: { name: "@kontourai/flow-agents", version },
-    path: path.relative(fs.realpathSync(packageRoot), source.path).split(path.sep).join("/"),
+    path: path.relative(fs.realpathSync(kitBinding.sourceRoot), source.path).split(path.sep).join("/"),
     sha256: createHash("sha256").update(source.bytes).digest("hex"),
   };
 }

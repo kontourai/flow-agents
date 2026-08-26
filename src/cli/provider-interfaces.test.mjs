@@ -86,7 +86,7 @@ test("workItemReadinessClassifications/referenceAdapterFreshnessDiagnostics expo
 test("AssignmentProvider's method names (provider-interfaces.ts) match assignment-provider.ts main()'s local-file subcommand surface", () => {
   const source = readSource("src/cli/assignment-provider.ts");
   const mainBody = extractFunctionBody(source, "main");
-  const allSubcommands = new Set([...mainBody.matchAll(/command === "([a-z-]+)"/g)].map((m) => m[1]));
+  const allSubcommands = new Set([...mainBody.matchAll(/command === "([a-z-]+)"/g)].map((m) => m[1]).filter((name) => !["--help", "-h", "string"].includes(name)));
   // The CLI also exposes a GitHub "render, don't execute" surface (render-claim/render-release/
   // render-supersede) that AssignmentProvider's provider-neutral interface deliberately does not
   // cover — see provider-interfaces.ts's AssignmentProvider doc comments and this file's header

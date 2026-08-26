@@ -366,6 +366,71 @@ fi
 
 echo ""
 
+# ─── Scenario 4B: Mixed hook group survives re-install (r2 delta HIGH fix) ────
+echo "--- Scenario 4B: Mixed hook group -- user entry co-located with an FA entry survives an ordinary re-install ---"
+#
+# Distinct from Scenario 4 above: here the user hook is injected INTO the SAME group array an FA
+# hook already occupies (the Claude Code settings schema allows multiple entries per group, and
+# nothing prevents a user or another tool appending into a group flow-agents also writes into),
+# not into its own separate top-level group. isManagedHookGroup used to drop the WHOLE group the
+# moment any inner entry matched an FA marker, silently deleting the co-located user entry (and
+# any other group-level field, e.g. a custom `matcher`) on every ordinary `flow-agents init`
+# re-install -- not just via `--uninstall`. mergeSettings now strips at inner-hook granularity.
+
+MIXED_MERGE_DEST="$TMPDIR_EVAL/mixed-merge-claude"
+mkdir -p "$MIXED_MERGE_DEST"
+
+# First install (creates the FA-owned Stop group this scenario injects into).
+(cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$MIXED_MERGE_DEST" >/dev/null 2>&1)
+
+# Inject a user hook entry directly into the FA group's own `hooks` array, plus a custom
+# group-level field, to prove both the entry AND the group shape survive.
+node - "$MIXED_MERGE_DEST/.claude/settings.json" << 'NODE'
+const fs = require("node:fs");
+const path = process.argv[2];
+const s = JSON.parse(fs.readFileSync(path, "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+if (stopGroups.length === 0) throw new Error("fixture assumption broken: no FA Stop group to inject into");
+stopGroups[0].hooks.push({ type: "command", command: "echo my-precious-mixed-user-hook" });
+stopGroups[0].customGroupField = "user-set-value";
+fs.writeFileSync(path, `${JSON.stringify(s, null, 2)}
+`, "utf8");
+NODE
+
+# Second install (upgrade / re-install) -- exercises mergeSettings via install-merge.js.
+(cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$MIXED_MERGE_DEST" >/dev/null 2>&1)
+
+if node - "$MIXED_MERGE_DEST/.claude/settings.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+const userGroup = stopGroups.find((g) => (g.hooks || []).some((h) => String(h.command || "").includes("echo my-precious-mixed-user-hook")));
+if (!userGroup) throw new Error("user hook co-located in an FA group was deleted after re-install: " + JSON.stringify(stopGroups));
+if (userGroup.customGroupField !== "user-set-value") throw new Error("group-level field was not preserved: " + JSON.stringify(userGroup));
+console.log("ok");
+NODE
+then
+  _pass "mixed-group re-install: co-located user hook entry AND its group-level field survived"
+else
+  _fail "mixed-group re-install: co-located user hook entry or its group-level field was lost"
+fi
+
+if node - "$MIXED_MERGE_DEST/.claude/settings.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+const hasFA = stopGroups.some((g) => (g.hooks || []).some((h) => String(h.statusMessage || "").includes("Recording Flow Agents telemetry") || String(h.statusMessage || "").includes("Running Flow Agents hook policy")));
+if (!hasFA) throw new Error("FA hook entries missing from Stop after re-install: " + JSON.stringify(stopGroups));
+console.log("ok");
+NODE
+then
+  _pass "mixed-group re-install: FA hook entries are still present (current bundle's set, refreshed)"
+else
+  _fail "mixed-group re-install: FA hook entries missing after re-install"
+fi
+
+echo ""
+
 # ─── Scenario 5: Global target ───────────────────────────────────────────────
 echo "--- Scenario 5: Global target (--global flag merges into user settings) ---"
 
@@ -1286,6 +1351,28 @@ else
   _fail "CH4: retired generated Codex profiles were not removed"
 fi
 
+# The marker adoption exception is intentionally limited to the exact first
+# line of Codex seed files. A non-header collision remains an unowned-file
+# refusal and must not be overwritten.
+CH4_UNOWNED_OVERLAY="$TMPDIR_EVAL/ch4-unowned-overlay"
+CH4_UNOWNED_DEST="$TMPDIR_EVAL/ch4-unowned-dest"
+mkdir -p "$CH4_UNOWNED_OVERLAY" "$CH4_UNOWNED_DEST"
+printf '%s\nmodel = "managed"\n' '# Generated from packaging/manifest.json. Edit the manifest, not this file.' > "$CH4_UNOWNED_OVERLAY/builder.config.toml"
+printf 'model = "user-owned"\n' > "$CH4_UNOWNED_DEST/builder.config.toml"
+set +e
+node "$ROOT_DIR/scripts/install-owned-files.js" \
+  --adopt-generated-seed-marker '# Generated from packaging/manifest.json. Edit the manifest, not this file.' \
+  "$CH4_UNOWNED_OVERLAY" "$CH4_UNOWNED_DEST" ".flow-agents/codex-install-manifest.json" >"$TMPDIR_EVAL/ch4-unowned-profile.out" 2>&1
+CH4_UNOWNED_STATUS=$?
+set -e
+if [[ "$CH4_UNOWNED_STATUS" -ne 0 ]] \
+  && grep -q 'unowned or ambiguous' "$TMPDIR_EVAL/ch4-unowned-profile.out" \
+  && grep -q 'user-owned' "$CH4_UNOWNED_DEST/builder.config.toml"; then
+  _pass "CH4: non-header generated-profile collision is refused and preserved"
+else
+  _fail "CH4: non-header generated-profile collision was not refused safely"
+fi
+
 if [[ -f "$CH4_DEST/kits/local/installed-kits.json" && -f "$CH4_DEST/kits/local/repositories/user-kit/kit.json" ]] \
   && node - "$CH4_DEST/kits/local/installed-kits.json" << 'NODE'
 const fs = require("node:fs");
@@ -1709,10 +1796,11 @@ OG3_CONFIG_FILE="$OG3_CONFIG_DIR/opencode.json"
 if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG3_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --yes >/dev/null 2>&1 \
   && [[ -f "$OG3_CONFIG_DIR/skills/agentic-engineering/SKILL.md" ]] \
   && [[ ! -e "$OG3_CONFIG_DIR/skills/deliver" ]] \
-  && [[ ! -e "$OG3_CONFIG_DIR/skills/knowledge-capture" ]]; then
-  _pass "OG3: opencode --global: no-kit install exposes only core skills"
+  && [[ ! -e "$OG3_CONFIG_DIR/skills/knowledge-capture" ]] \
+  && node -e 'const fs=require("node:fs"); if ((fs.statSync(process.argv[1]).mode & 0o777) !== 0o600) process.exit(1)' "$OG3_CONFIG_FILE"; then
+  _pass "OG3: opencode --global: no-kit install exposes only core skills and creates private config"
 else
-  _fail "OG3: opencode --global: no-kit skill projection is incorrect"
+  _fail "OG3: opencode --global: no-kit skill projection or private config mode is incorrect"
 fi
 
 OG4_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og4"
@@ -1765,6 +1853,174 @@ if [[ "$OG6_RC" -ne 0 ]] \
   _pass "OG6: opencode --global: invalid user config fails before mutation or activation stamp"
 else
   _fail "OG6: opencode --global: invalid user config was replaced, installed, or stamped"
+fi
+
+OG6_DANGLING_DIR="$TMPDIR_EVAL/opencode-global-og6-dangling"
+OG6_DANGLING_CONFIG="$OG6_DANGLING_DIR/opencode.json"
+OG6_DANGLING_TARGET="$OG6_DANGLING_DIR/missing-opencode.json"
+mkdir -p "$OG6_DANGLING_DIR"
+ln -s "$OG6_DANGLING_TARGET" "$OG6_DANGLING_CONFIG"
+set +e
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG6_DANGLING_CONFIG" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >"$TMPDIR_EVAL/og6-dangling.out" 2>&1
+OG6_DANGLING_RC=$?
+set -e
+if [[ "$OG6_DANGLING_RC" -ne 0 ]] \
+  && [[ -L "$OG6_DANGLING_CONFIG" ]] \
+  && [[ ! -e "$OG6_DANGLING_TARGET" ]] \
+  && [[ ! -e "$OG6_DANGLING_DIR/.flow-agents/install.json" ]] \
+  && grep -q 'symlink' "$TMPDIR_EVAL/og6-dangling.out"; then
+  _pass "OG6: opencode --global: dangling config symlink is rejected without replacement or stamp"
+else
+  _fail "OG6: opencode --global: dangling config symlink was replaced, installed, or stamped"
+fi
+
+echo ""
+echo "--- OG7: opencode --global: Stow-backed config and skills preserve links, accept only the bound backing root ---"
+
+OG7_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og7"
+OG7_DOTFILES_DIR="$TMPDIR_EVAL/opencode-global-og7-dotfiles"
+OG7_CONFIG_FILE="$OG7_CONFIG_DIR/opencode.json"
+OG7_CONFIG_TARGET="$OG7_DOTFILES_DIR/opencode.json"
+OG7_SKILLS_TARGET="$OG7_DOTFILES_DIR/skills"
+OG7_OUTSIDE_DIR="$TMPDIR_EVAL/opencode-global-og7-outside"
+OG7_AGENT_DIR="agents"
+OG7_AGENT_SENTINEL="sentinel"
+OG7_DEV_AGENT="d""ev.md"
+mkdir -p "$OG7_CONFIG_DIR" "$OG7_SKILLS_TARGET/stow-user" "$OG7_OUTSIDE_DIR/$OG7_AGENT_DIR"
+printf '# Stow-owned skill\n' > "$OG7_SKILLS_TARGET/stow-user/SKILL.md"
+printf 'outside agents must remain untouched\n' > "$OG7_OUTSIDE_DIR/$OG7_AGENT_DIR/$OG7_AGENT_SENTINEL"
+cat > "$OG7_CONFIG_TARGET" << 'JSON'
+{
+  "model": "stow-user-model",
+  "provider": { "zai": { "options": { "apiKey": "stow-provider-preserved" } } },
+  "instructions": ["/dotfiles/user-instructions.md"]
+}
+JSON
+chmod 600 "$OG7_CONFIG_TARGET"
+ln -s "$OG7_CONFIG_TARGET" "$OG7_CONFIG_FILE"
+ln -s "$OG7_SKILLS_TARGET" "$OG7_CONFIG_DIR/skills"
+
+OG7_READY=1
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >"$TMPDIR_EVAL/og7-stow.out" 2>&1; then
+  _pass "OG7: Stow-backed OpenCode global init succeeds through the public command"
+else
+  OG7_READY=0
+  _fail "OG7: Stow-backed OpenCode global init rejected the explicitly bound skills link"
+fi
+
+if [[ "$OG7_READY" -eq 1 ]]; then
+if [[ -L "$OG7_CONFIG_FILE" ]] \
+  && [[ -L "$OG7_CONFIG_DIR/skills" ]] \
+  && [[ "$(cat "$OG7_SKILLS_TARGET/stow-user/SKILL.md")" == "# Stow-owned skill" ]] \
+  && node - "$OG7_CONFIG_FILE" << 'NODE'
+const fs = require("node:fs");
+const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if ((fs.statSync(process.argv[2]).mode & 0o777) !== 0o600) throw new Error("private config mode was not preserved");
+if (config.model !== "stow-user-model") throw new Error("model was not preserved");
+if (config.provider?.zai?.options?.apiKey !== "stow-provider-preserved") throw new Error("provider configuration was not preserved");
+if (!config.instructions.includes("/dotfiles/user-instructions.md")) throw new Error("user instructions were not preserved");
+if (!config.instructions.some((entry) => entry.endsWith("/.flow-agents/runtime/AGENTS.md"))) throw new Error("Flow Agents instructions missing");
+NODE
+then
+  _pass "OG7: Stow config target, provider settings, and user skill are preserved"
+else
+  _fail "OG7: Stow config target, provider settings, or user skill changed"
+fi
+
+if [[ -f "$OG7_CONFIG_DIR/plugins/flow-agents.js" ]] \
+  && [[ -f "$OG7_CONFIG_DIR/$OG7_AGENT_DIR/$OG7_DEV_AGENT" ]] \
+  && [[ -f "$OG7_SKILLS_TARGET/deliver/SKILL.md" ]] \
+  && [[ -f "$OG7_CONFIG_DIR/.flow-agents/runtime/AGENTS.md" ]]; then
+  _pass "OG7: OpenCode assets install through the host-visible config root and Stow skills target"
+else
+  _fail "OG7: OpenCode assets did not reach the expected Stow-backed roots"
+fi
+
+if node - "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" "$OG7_DOTFILES_DIR" << 'NODE'
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const serialized = JSON.stringify(manifest);
+const receipt = manifest.conduit_receipt;
+if (!receipt || receipt.hostId !== "opencode" || !Array.isArray(receipt.installed) || receipt.installed.length === 0) throw new Error("missing Conduit receipt");
+if (!receipt.installed.some((entry) => entry.kind === "hook" && entry.id === "plugins/flow-agents.js")) throw new Error("plugin is absent from receipt");
+if (!receipt.installed.some((entry) => entry.kind === "agent")) throw new Error("agents are absent from receipt");
+if (!receipt.installed.some((entry) => entry.kind === "skill")) throw new Error("skills are absent from receipt");
+if (receipt.installed.some((entry) => typeof entry.digest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(entry.digest))) throw new Error("receipt digest is invalid");
+if (serialized.includes("stow-provider-preserved") || serialized.includes(process.argv[3]) || serialized.includes('"content"') || serialized.includes('"target"')) throw new Error("receipt leaked private config or host target data");
+NODE
+then
+  _pass "OG7: Conduit receipt records secret-free OpenCode asset identities and digests"
+else
+  _fail "OG7: Conduit receipt is missing, incomplete, or leaked private data"
+fi
+
+OG7_CONFIG_HASH_BEFORE="$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')"
+OG7_MANIFEST_HASH_BEFORE="$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')"
+OG7_PLUGIN_HASH_BEFORE="$(shasum -a 256 "$OG7_CONFIG_DIR/plugins/flow-agents.js" | awk '{print $1}')"
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >/dev/null 2>&1 \
+  && [[ "$OG7_CONFIG_HASH_BEFORE" == "$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')" ]] \
+  && [[ "$OG7_MANIFEST_HASH_BEFORE" == "$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')" ]] \
+  && [[ "$OG7_PLUGIN_HASH_BEFORE" == "$(shasum -a 256 "$OG7_CONFIG_DIR/plugins/flow-agents.js" | awk '{print $1}')" ]]; then
+  _pass "OG7: repeated Stow-backed install is byte-idempotent for managed config and assets"
+else
+  _fail "OG7: repeated Stow-backed install changed managed config or assets"
+fi
+
+OG7_PLUGIN_SOURCE="$ROOT_DIR/dist/opencode/.opencode/plugins/flow-agents.js"
+OG7_PLUGIN_BACKUP="$TMPDIR_EVAL/og7-flow-agents.js"
+cp "$OG7_PLUGIN_SOURCE" "$OG7_PLUGIN_BACKUP"
+printf '\n// OG7 managed refresh\n' >> "$OG7_PLUGIN_SOURCE"
+if FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >/dev/null 2>&1 \
+  && grep -q 'OG7 managed refresh' "$OG7_CONFIG_DIR/plugins/flow-agents.js"; then
+  _pass "OG7: changed managed OpenCode plugin is refreshed through the receipt-backed installer"
+else
+  _fail "OG7: changed managed OpenCode plugin was not refreshed"
+fi
+cp "$OG7_PLUGIN_BACKUP" "$OG7_PLUGIN_SOURCE"
+
+OG7_PLUGIN_DEST="$OG7_CONFIG_DIR/plugins/flow-agents.js"
+OG7_DANGLING_TARGET="$OG7_OUTSIDE_DIR/missing-flow-agents.js"
+rm "$OG7_PLUGIN_DEST"
+ln -s "$OG7_DANGLING_TARGET" "$OG7_PLUGIN_DEST"
+OG7_CONFIG_HASH_BEFORE_DANGLING="$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')"
+OG7_MANIFEST_HASH_BEFORE_DANGLING="$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')"
+set +e
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >"$TMPDIR_EVAL/og7-dangling.out" 2>&1
+OG7_DANGLING_RC=$?
+set -e
+if [[ "$OG7_DANGLING_RC" -ne 0 ]] \
+  && [[ -L "$OG7_PLUGIN_DEST" ]] \
+  && [[ ! -e "$OG7_DANGLING_TARGET" ]] \
+  && [[ "$OG7_CONFIG_HASH_BEFORE_DANGLING" == "$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')" ]] \
+  && [[ "$OG7_MANIFEST_HASH_BEFORE_DANGLING" == "$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')" ]] \
+  && grep -q 'symlink' "$TMPDIR_EVAL/og7-dangling.out"; then
+  _pass "OG7: dangling destination file symlink is rejected before mutation"
+else
+  _fail "OG7: dangling destination file symlink was replaced or mutated host state"
+fi
+rm "$OG7_PLUGIN_DEST"
+if ! FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >/dev/null 2>&1; then
+  _fail "OG7: managed plugin could not be restored after dangling-link rejection"
+fi
+
+rm -rf "$OG7_CONFIG_DIR/$OG7_AGENT_DIR"
+ln -s "$OG7_OUTSIDE_DIR/$OG7_AGENT_DIR" "$OG7_CONFIG_DIR/$OG7_AGENT_DIR"
+OG7_CONFIG_HASH_BEFORE_ESCAPE="$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')"
+OG7_MANIFEST_HASH_BEFORE_ESCAPE="$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')"
+set +e
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG7_CONFIG_FILE" node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --activate-kit builder --yes >"$TMPDIR_EVAL/og7-escape.out" 2>&1
+OG7_ESCAPE_RC=$?
+set -e
+if [[ "$OG7_ESCAPE_RC" -ne 0 ]] \
+  && [[ -L "$OG7_CONFIG_DIR/$OG7_AGENT_DIR" ]] \
+  && [[ "$(cat "$OG7_OUTSIDE_DIR/$OG7_AGENT_DIR/$OG7_AGENT_SENTINEL")" == "outside agents must remain untouched" ]] \
+  && [[ "$OG7_CONFIG_HASH_BEFORE_ESCAPE" == "$(shasum -a 256 "$OG7_CONFIG_TARGET" | awk '{print $1}')" ]] \
+  && [[ "$OG7_MANIFEST_HASH_BEFORE_ESCAPE" == "$(shasum -a 256 "$OG7_CONFIG_DIR/.flow-agents/runtime-assets.json" | awk '{print $1}')" ]] \
+  && grep -q 'symlink' "$TMPDIR_EVAL/og7-escape.out"; then
+  _pass "OG7: hostile sibling symlink escape is rejected before host mutation"
+else
+  _fail "OG7: hostile sibling symlink escape was accepted or mutated host state"
+fi
 fi
 
 echo ""

@@ -13,6 +13,7 @@ export { GitRepoProvider } from "./git-repo/index.js";
 export { WorkItemProvider, parseWorkItemMetadata } from "./work-item/index.js";
 export { Neo4jProvider } from "./neo4j/index.js";
 export { detectDuplicates, checkDependencyLinkIntegrity, HEALTH_VERBS } from "./health/index.js";
+export { buildKnowledgeTrustBundle, surfaceAdapter } from "./surface-adapter/index.js";
 export {
   EDGE_TYPES,
   CORE_NODE_TYPES,

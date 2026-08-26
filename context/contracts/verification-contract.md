@@ -26,9 +26,13 @@ Each visit to a verification gate establishes a critique generation. Critiques a
 
 When Flow routes back and later re-enters verification, a fresh critique generation is required. Older reviewer slices remain immutable audit history in the trust bundle and evidence manifest, but their prior snapshot hashes are not reinterpreted as reviews of the new implementation. A reviewer handoff must use the public critique writer; it must never require actor impersonation or direct trust-bundle edits.
 
-## Mutation Testing Runs In A Scratch Copy
+## Defect Injection Runs In A Scratch Copy
 
-Mutation-testing tools (Stryker or equivalent) **must** run against a scratch/throwaway copy of the working tree, never the live working tree. They deliberately introduce defects to measure test-suite sensitivity; running them in place risks leaving mutated source, corrupting the checkout, or tripping the gate/anchor on injected failures. Copy the tree to a temporary directory (or a git worktree/clone) and run the mutation tool there; discard it afterward.
+Mutation-testing tools (Stryker or equivalent) **and hand-written defect injection** — any edit made to confirm a check discriminates, then reverted — **must not** mutate, in the live working tree, **any tracked file or any untracked file git does not ignore** — that is, anything the workspace snapshot covers. They deliberately introduce defects to measure test-suite sensitivity; mutating tracked source in place risks leaving mutated source behind, corrupting the checkout, or tripping the gate/anchor on injected failures, and a restore that silently fails is indistinguishable from one that worked.
+
+**Copy the working tree** to a temporary directory (`cp -R`) and run there; discard it afterward. `git clone` and `git worktree add` materialize a commit, so on a tree with uncommitted work they silently produce a scratch copy that does not contain the change under test — the injection then "catches" a defect that was never fixed in that copy, which is a false catch with no dirty tree or failed restore to make it visible.
+
+The prohibition follows the hazard, not the file: a target git ignores (a `build/` artifact, a generated bundle) is outside both the tracked tree and the workspace snapshot, so mutating it in place cannot dirty the checkout or move the gate. Injecting into such a target in place is permitted — restore or regenerate it afterward, since a stale mutated artifact still poisons later runs in that checkout.
 
 ## Verification Phases
 
@@ -86,11 +90,14 @@ Diff:      [PASS/FAIL/NOT_VERIFIED] <changed files reviewed>
 <summary>
 ```
 
-## Structured Evidence Sidecar
+## Workflow Evidence v2 Projection
 
-When verification runs as part of a workflow, write or update `evidence.json` beside the workflow artifacts using `schemas/workflow-evidence.schema.json`.
+When verification runs as part of a workflow, use the sidecar writer to update the authoritative
+`trust.bundle`. Its schema-backed v2 `evidence.json` projection must validate against
+`schemas/workflow-evidence.schema.json` v2, but it is not a second runtime authority and must not
+be hand-authored outside the sidecar writer.
 
-Use the sidecar writer when available:
+Use the sidecar writer:
 
 ```bash
 npm run workflow:sidecar -- record-evidence .kontourai/flow-agents/<slug> \
@@ -112,6 +119,14 @@ Map phases to check kinds:
 - Provider checks from publish-change or release surfaces -> `external`
 
 Use lowercase statuses: `pass`, `fail`, `not_verified`, or `skip`. Set the top-level `verdict` to `pass`, `partial`, `fail`, or `not_verified`. Include `not_verified_gaps` for any missing required evidence.
+
+Every command check in the v2 projection carries the observation-time
+`observed_at_commit` and boolean `worktree_clean` recorded by the repository-owned capture path.
+Do not infer or fill these from verification-time `HEAD`. A dirty observation, missing fields,
+unavailable/non-Git workspace state, malformed or unresolved/shallow commit, non-ancestor commit,
+or a mismatch between its exact captured Git-worktree snapshot and the current snapshot is
+`not_verified` and non-confirming. The gate needs both item-level trusted ancestry and exact
+snapshot equality: ancestry alone does not prove the checked bytes still match.
 
 Modified files are part of verification scope. If changed-file scope is unavailable, mark diff/scope integrity `NOT_VERIFIED` instead of inferring from memory. Optional governance providers such as Veritas may use the same modified-file scope as input or as an integrity reference, but their native reports should remain external evidence referenced from `evidence.json`.
 

@@ -134,7 +134,7 @@ function walk(dir: string): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, entry.name);
-    if (entry.isDirectory() && !isPrivateRuntimeChild(p)) out.push(...walk(p));
+    if (entry.isDirectory() && !isPrivateRuntimeChild(p)) for (const nested of walk(p)) out.push(nested);
     else out.push(p);
   }
   return out;
@@ -520,6 +520,7 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
             continue;
           }
           let currentSubstantivePass = false;
+          let sawStaleWorkspaceSnapshot = false;
           for (const critique of graph.live) {
             if (!critiqueIsSubstantivePass(critique)) {
               issues.push({ path: trustBundlePath, message: "required critique has a live record that is not a substantive verified PASS" });
@@ -538,10 +539,13 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
               if (currentArtifacts.length === 0 || !isDeepStrictEqual(critique.review_target?.workspace_snapshot, captureReviewWorkspaceSnapshot(projectRoot, currentArtifacts))) throw new Error("workspace snapshot changed");
               currentSubstantivePass = true;
             } catch {
+              sawStaleWorkspaceSnapshot = true;
               // Historical passing anchors may be stale as long as another live substantive PASS is current.
             }
           }
-          if (!currentSubstantivePass) issues.push({ path: trustBundlePath, message: "required critique has no current live substantive PASS" });
+          if (!currentSubstantivePass) issues.push({ path: trustBundlePath, message: sawStaleWorkspaceSnapshot
+            ? "required critique has no current live substantive PASS: workspace snapshot changed; re-attest the current workspace"
+            : "required critique has no current live substantive PASS" });
         }
       }
       const acceptance = path.join(dir, "acceptance.json");

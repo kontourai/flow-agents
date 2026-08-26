@@ -1,20 +1,41 @@
 import { spawnSync } from "node:child_process";
+import { ensureArtifactResidueIgnored } from "../lib/artifact-residue-ignore.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
-import { main as buildBundles } from "../tools/build-universal-bundles.js";
+import { acquireBundleBuildLock, buildAllBundles, refreshBundleBuildLock, releaseBundleBuildLock, startBundleBuildLockRefresher } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableFlowAgentsRoot, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
+import { buildOwnedFilesManifest, hashFile as manifestHashFile, writeOwnedFilesManifest } from "../lib/owned-files-manifest.js";
+import {
+  bundleInstallExcludeRel,
+  computeInstallPlan,
+  executePlanCopies,
+  formatDryRunLines,
+  formatInstallSummaryLines,
+  InstallPlanDriftError,
+  installerSupportsPreserveExcludes,
+  verifyInstallPlanMatchesDisk,
+} from "./install-plan.js";
+import {
+  catalogKitIds as registryCatalogKitIds,
+  readPackageVersion,
+  validateActiveKitEntries,
+  type ActiveKitEntry,
+  type KitScope,
+} from "../lib/kit-registry.js";
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
 import { buildReport } from "./telemetry-doctor.js";
 import { bootstrapProviders, type ProviderScope } from "./provider-bootstrap.js";
+import { createOpenCodeAdapter, type InstallationReceipt, type PortableAsset } from "@kontourai/conduit";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
@@ -39,11 +60,32 @@ type InitOptions = {
   // "(auto-detected)" annotation. headlessOptions() itself never sets this
   // (untouched) -- main() merges it onto the headless result separately.
   runtimeAutoDetected?: boolean;
+  /**
+   * Opt in to the permissive Claude Code permission defaults the bundle carries
+   * (`permissions.defaultMode: "auto"`, `skipDangerousModePermissionPrompt: true`).
+   *
+   * Default OFF (kontourai/flow-agents#1345). Those keys were designed for a DEDICATED agent
+   * workspace -- a directory whose only purpose is agent work. `init --dest <repo>` installs
+   * into ordinary product repositories, and `.claude/settings.json` is a PROJECT-level file:
+   * it travels to every clone, machine and person, it takes precedence over the user-level
+   * settings in Claude Code's hierarchy, and nobody who asked for gates and skills asked to
+   * have their permission model changed. Worst of the three: a user who later tightens their
+   * global default finds every kit-installed repo silently overriding that decision, in N
+   * places, each invisible until someone opens the repo's settings file.
+   *
+   * So the permissive posture is now named and recorded rather than implied. `--global` and
+   * `dogfood` already stripped these keys; this makes the project path agree with them, and
+   * leaves the dedicated-workspace behaviour reachable by asking for it. The uninstall-side
+   * removal registration (uninstall.ts's `removeOwnedValues`) is unchanged either way, so
+   * repos that already received the keys still get them cleaned up on `--uninstall`.
+   */
+  permissiveWorkspace?: boolean;
   configureProviders?: boolean;
   providerScope?: ProviderScope;
   providerRepoPath?: string;
   providerProjectNumber?: number;
   providerOnline?: boolean;
+  providerRewriteSettings?: boolean;
 };
 
 const runtimeBundles: Record<Runtime, string> = {
@@ -135,7 +177,27 @@ Options:
   --provider-repo-path PATH
   --provider-project NUMBER
   --online               Verify GitHub auth/project and create the claim label if missing.
+  --dry-run              List every path the install would create, replace, remove, or
+                         preserve; write nothing. Implies --headless. Supported for
+                         project (bundle) installs and --global claude-code.
+  --force                Overwrite existing destination files that are NOT known
+                         bundle-owned content. Without --force such files are always
+                         preserved and reported. Supported for project (bundle)
+                         installs and --global claude-code.
+  --permissive-workspace  claude-code only. Install the permissive permission defaults
+                          (permissions.defaultMode=auto, skipDangerousModePermission-
+                          Prompt=true) into the destination's .claude/settings.json.
+                          OFF by default: those are dedicated-agent-workspace settings,
+                          and a project settings file travels to every clone and
+                          overrides the user's own global posture. Recorded in
+                          .flow-agents/install.json when used.
+  --rewrite-settings      Allow provider bootstrap to rewrite an existing git-tracked
+                          settings file whose content would change (otherwise it
+                          refuses with a diff preview).
   --yes, --headless
+  --uninstall             Remove a prior install instead of installing.
+                          Usage: flow-agents init --uninstall --runtime claude-code [--global | --dest PATH]
+                          Run \`flow-agents init --uninstall --help\` for uninstall-specific options.
 `);
 }
 
@@ -153,13 +215,7 @@ function parseProviderProject(value: string | undefined): number | undefined {
 }
 
 function catalogKitIds(): string[] {
-  const catalogPath = path.join(root, "kits", "catalog.json");
-  if (!fs.existsSync(catalogPath)) return [];
-  const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8")) as { kits?: unknown[] };
-  if (!Array.isArray(catalog.kits)) return [];
-  return catalog.kits
-    .map((entry) => typeof entry === "object" && entry !== null ? String((entry as Record<string, unknown>).id ?? "") : "")
-    .filter(Boolean);
+  return registryCatalogKitIds(root);
 }
 
 function selectedKitIdsFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): string[] {
@@ -169,15 +225,103 @@ function selectedKitIdsFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): 
   return [];
 }
 
-function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = []): void {
+/**
+ * Compute the `active_kits` durable-record field (kontourai/flow-agents kit activation
+ * registry): a richer, explicit companion to the pre-existing `active_kit_ids: string[]` field
+ * (kept unchanged for backward compatibility -- opencode/codex installs already key runtime asset
+ * selection off it, and existing evals assert its exact shape).
+ *
+ * - When the caller made an explicit kit selection (`activeKitIds` non-empty, via
+ *   `--activate-kit`/`--activate-kits`), that selection is what gets recorded, for every runtime.
+ * - Otherwise (the common default-flags case), claude-code records EVERY catalog kit: that has
+ *   always been the actual physical install behavior (the install's `.claude/skills` sync is
+ *   unconditional, not filtered by kit selection), and this
+ *   makes that implicit "all built-ins active" behavior explicit and queryable rather than
+ *   leaving `active_kit_ids` empty while the skills are, in fact, all present on disk. Other
+ *   runtimes install no kit-specific assets by default (opencode/codex only provision kit
+ *   content when a selection is made), so their default `active_kits` stays empty, matching
+ *   what is actually on disk for them too.
+ */
+function computeActiveKits(runtime: Runtime, global: boolean | undefined, activeKitIds: string[], version: string, installedAt: string): ActiveKitEntry[] {
+  const scope: KitScope = global ? "global" : "project";
+  const catalogIds = new Set(catalogKitIds());
+  // `active_kits` (the built-in kit activation registry -- see src/lib/kit-registry.ts) tracks
+  // ONLY built-in (catalog) kits, by design: third-party/local kits have their own independent
+  // activation lifecycle (presence in kits/local/installed-kits.json IS their activation). The
+  // caller's raw `--activate-kit` selection (`activeKitIds`, preserved verbatim in the separate
+  // `active_kit_ids` field below) can legitimately include a local kit id -- e.g. one just
+  // `kit install`ed -- for runtimes whose own activation step (`activateCodexLocal`'s
+  // `kitIdFilter`, `resolveOpencodeSkillNames`) accepts a mix of catalog and local ids. Filtering
+  // to catalog ids HERE (not rejecting the whole call) is the fix for a real bug caught by
+  // src/cli/kit-provisioning.test.mjs: `init --activate-kit <local-kit-id>` used to crash with
+  // "active_kits references unknown kit id" because every explicitly-selected id was recorded
+  // into active_kits unfiltered, then rejected by the catalog-membership check below.
+  const ids = activeKitIds.length > 0
+    ? activeKitIds.filter((id) => catalogIds.has(id))
+    : (runtime === "claude-code" ? catalogKitIds() : []);
+  const entries = ids.map((id) => ({ id, version, activated_at: installedAt, scope }));
+  // Defensive only: `ids` is now always the catalog itself or a subset of it (filtered above), so
+  // this must never fire in practice -- but a record this function itself computed incorrectly
+  // should fail loudly, not get silently persisted as a bogus `active_kits` value.
+  const invalid = validateActiveKitEntries(entries, catalogIds);
+  if (invalid.length) throw new Error(`internal error computing active_kits: ${invalid.join("; ")}`);
+  return entries;
+}
+
+/**
+ * Ensure the workflow artifact root ignores the writer's own transient residue.
+ *
+ * #1264: `workflow evidence` with command evidence executes each `--command` itself and
+ * captures Git provenance AT EXECUTION TIME, from a session directory it has just written
+ * into. Every passing claim therefore requires a clean working tree at the moment the
+ * writer is busy dirtying it -- with transaction directories, lock files and its own
+ * append-only command log. In a repository that does not ignore those paths, the writer
+ * refuses its own observation, and the error names a precondition rather than the cause.
+ *
+ * This was invisible during development because THIS repository has `.kontourai/` in its
+ * own .gitignore; a fresh `init` never wrote one, so the path worked where it was built
+ * and was structurally broken everywhere else.
+ *
+ * The ignore is written INSIDE the artifact root rather than appended to the repository's
+ * .gitignore, deliberately: it needs no edit to a user-authored file, it cannot conflict
+ * with one, and it disappears with the directory it governs, so uninstall stays honest
+ * without special-casing a line it once added somewhere else. It is also deliberately
+ * NARROW -- only the transient residue is ignored, so a project that chooses to commit
+ * its durable run artifacts still can.
+ */
+
+function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = [], configPremerge?: unknown, authorizedBackingRoots: string[] = [], installedValues?: unknown, permissiveWorkspace = false): void {
   const recordPath = durableInstallRecordPath(dest);
   const installRecordDir = path.dirname(recordPath);
   fs.mkdirSync(installRecordDir, { recursive: true });
-  const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
-  const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds };
+  const version = readPackageVersion(root);
+  const installedAt = new Date().toISOString();
+  const activeKits = computeActiveKits(runtime, global, activeKitIds, version, installedAt);
+  // A v2 snapshot explicitly separates the stable lineage origin (provenance)
+  // from the immediately preceding image (byte-exact restore). Older v1 records
+  // remain readable as the best available origin during upgrade.
+  let normalizedPremerge = configPremerge;
+  try {
+    const prior = JSON.parse(fs.readFileSync(recordPath, "utf8")) as Record<string, unknown>;
+    const candidate = prior["config_premerge"] as Record<string, unknown> | undefined;
+    if ((configPremerge as Record<string, unknown> | undefined)?.["schema_version"] === "2.0") { /* bundle installer already wrote the complete lineage */ }
+    else if (prior["runtime"] === runtime && candidate?.["schema_version"] === "2.0") normalizedPremerge = { schema_version: "2.0", origin: candidate["origin"], previous: configPremerge };
+    else if (prior["runtime"] === runtime && candidate?.["schema_version"] === "1.0" && configPremerge && typeof configPremerge === "object") normalizedPremerge = { schema_version: "2.0", origin: candidate, previous: configPremerge };
+    else if (prior["runtime"] === runtime && configPremerge && typeof configPremerge === "object") normalizedPremerge = { schema_version: "2.0", origin: { schema_version: "unknown" }, previous: configPremerge };
+  } catch {
+    // A prior path that cannot be read is evidence of a damaged lineage, not
+    // evidence that the just-installed image was the user's original config.
+    if (fs.existsSync(recordPath) && configPremerge && typeof configPremerge === "object") normalizedPremerge = { schema_version: "2.0", origin: { schema_version: "unknown" }, previous: configPremerge };
+  }
+  if (normalizedPremerge && typeof normalizedPremerge === "object" && (normalizedPremerge as Record<string, unknown>)["schema_version"] === "1.0") {
+    normalizedPremerge = { schema_version: "2.0", origin: normalizedPremerge, previous: normalizedPremerge };
+  }
+  const record = { version, installedAt, runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds, active_kits: activeKits, ...(normalizedPremerge ? { config_premerge: normalizedPremerge } : {}), ...(installedValues ? { installed_values: installedValues } : {}), ...(authorizedBackingRoots.length > 0 ? { authorized_backing_roots: authorizedBackingRoots } : {}), ...(permissiveWorkspace ? { permissive_workspace: true } : {}) };
   const recordTmp = `${recordPath}.tmp.${process.pid}`;
-  fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  fs.chmodSync(recordTmp, 0o600);
   fs.renameSync(recordTmp, recordPath);
+  fs.chmodSync(recordPath, 0o600);
 }
 
 function normalizeRuntime(value: string | undefined): Runtime | undefined {
@@ -535,6 +679,8 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
       providerRepoPath: flagString(args.flags, "provider-repo-path"),
       providerProjectNumber: parseProviderProject(providerProjectAnswer?.trim() || undefined),
       providerOnline,
+      providerRewriteSettings: flagBool(args.flags, "rewrite-settings"),
+      permissiveWorkspace: flagBool(args.flags, "permissive-workspace"),
     };
   } finally {
     rl.close();
@@ -562,6 +708,8 @@ function headlessOptions(argv: string[]): InitOptions {
     providerRepoPath: flagString(args.flags, "provider-repo-path"),
     providerProjectNumber: parseProviderProject(flagString(args.flags, "provider-project")),
     providerOnline: flagBool(args.flags, "online"),
+    providerRewriteSettings: flagBool(args.flags, "rewrite-settings"),
+    permissiveWorkspace: flagBool(args.flags, "permissive-workspace"),
   };
 }
 
@@ -576,6 +724,7 @@ function configureWorkflowProviders(options: InitOptions): number {
       : undefined,
     projectNumber: options.providerProjectNumber,
     online: options.providerOnline,
+    rewriteSettings: options.providerRewriteSettings,
   });
   console.log(`Configured GitHub workflow providers for ${result.repo.owner}/${result.repo.name} (Project ${result.project.number})`);
   for (const file of result.files) console.log(`  ${file}`);
@@ -584,13 +733,45 @@ function configureWorkflowProviders(options: InitOptions): number {
 }
 
 export function ensureBundle(runtime: Runtime): string {
+  return ensureBundleReporting(runtime).bundle;
+}
+
+/**
+ * ensureBundle plus a `rebuilt` report so `init --dry-run` can disclose the one write it may
+ * perform outside the destination (regenerating the package's own dist/ bundle).
+ *
+ * Rebuild when the installer is missing OR predates the overwrite guard's `--exclude-path`
+ * support (kontourai/flow-agents#1288): a stale dist/ from an older build would reject the
+ * exclude flags init now passes. The check is SEMANTIC (the rsync line must carry the
+ * exclude-args expansion -- see installerSupportsPreserveExcludes), not a substring grep: an
+ * installer that merely parses the flag but drops it from the rsync would silently overwrite
+ * everything while accepting the arguments.
+ */
+export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebuilt: boolean } {
   const bundle = path.join(root, "dist", runtimeBundles[runtime]);
-  if (!fs.existsSync(path.join(bundle, "install.sh"))) {
-    const rc = buildBundles();
-    if (rc !== 0) throw new Error(`bundle build failed with exit code ${rc}`);
+  const installSh = path.join(bundle, "install.sh");
+  const current = (): boolean =>
+    fs.existsSync(installSh) && installerSupportsPreserveExcludes(fs.readFileSync(installSh, "utf8"));
+  let rebuilt = false;
+  if (!current()) {
+    // Serialize the rebuild across processes and RE-CHECK under the lock: concurrent init
+    // processes finding dist/ stale at once used to race resetDir (ENOTEMPTY), and a waiter
+    // that rebuilt anyway would delete the tree the winner's install had started reading.
+    const lockDir = acquireBundleBuildLock();
+    const stopRefresher = startBundleBuildLockRefresher(lockDir);
+    try {
+      if (!current()) {
+        const rc = buildAllBundles(() => refreshBundleBuildLock(lockDir));
+        if (rc !== 0) throw new Error(`bundle build failed with exit code ${rc}`);
+        rebuilt = true;
+      }
+    } finally {
+      stopRefresher();
+      releaseBundleBuildLock(lockDir);
+    }
   }
-  if (!fs.existsSync(path.join(bundle, "install.sh"))) throw new Error(`bundle installer missing: ${bundle}`);
-  return bundle;
+  if (!fs.existsSync(installSh)) throw new Error(`bundle installer missing: ${bundle}`);
+  return { bundle, rebuilt };
 }
 
 // The bundle's hook commands resolve the flow-agents scripts directory via
@@ -607,6 +788,11 @@ export function ensureBundle(runtime: Runtime): string {
 // via rewriteCommandsForGlobalInstall below.
 const GLOBAL_INSTALL_PROJECT_DIR_PREFIX = /root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g;
 const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$root\//g;
+
+// Relative paths install.sh's rsync excludes per runtime now live in install-plan.ts
+// (bundleInstallExcludeRel), shared between the overwrite guard's plan walk and the
+// project-scoped ownership manifest walk so both skip exactly what the rsync itself
+// never unconditionally overwrites/owns as a plain file.
 
 type InstallMergeConflict = {
   path: string;
@@ -638,25 +824,145 @@ function mergeInstallSettings(
 }
 
 /**
- * Escape an absolute path for the two nested quoting contexts a hook command lives in:
- * the emitted template is `bash -lc '... node "$root/..." ...'`, so the substituted value sits
- * inside double quotes that are themselves inside the outer single-quoted `bash -lc` argument.
- * Without this, a path containing an apostrophe -- a legitimate home directory such as
- * /Users/o'brien, or an attacker-supplied --dest -- terminates the single-quoted string and
- * injects arbitrary shell into every hook command persisted to settings.json
- * (kontourai/flow-agents#945 review finding).
+ * Escape an absolute path for the shell quoting context the substitution site sits in.
+ *
+ * Every rewrite target substitutes into a double-quoted region (`node "<root>/..."`), so the
+ * value must always survive what a shell still expands inside `"..."` (`\ " $` and backtick).
+ * Some emitted commands wrap that double-quoted region in a single-quoted `bash -lc '...'`
+ * argument; those carry a SECOND quoting layer, and a value containing an apostrophe would
+ * terminate the outer single-quoted string and inject arbitrary shell into every hook command
+ * persisted to settings.json (kontourai/flow-agents#945 review finding). A legitimate
+ * /Users/o'brien home triggers the same break with no adversary.
+ *
+ * `nestedInSingleQuotes` is DERIVED from the command being rewritten rather than assumed,
+ * because the emitted shape is changing: #1101 removes the `bash -lc` wrapper from the hook
+ * path (hooks become exec-form `args` vectors, which never reach a shell at all), leaving
+ * `statusLine` as the one remaining shell string — a bare `node "$CLAUDE_PROJECT_DIR/..."`
+ * with only ONE quoting layer. Applying the outer `'\''` transform to a single-layer string
+ * would not be inert: it would write literal quote characters into the path and silently
+ * break the statusline for exactly the apostrophe homes this escaping exists to protect.
  */
-function shellEscapeForHookCommand(sourceRoot: string): string {
+function shellEscapeForHookCommand(sourceRoot: string, nestedInSingleQuotes: boolean): string {
   // Inner: neutralize what the inner shell would still expand inside "..." .
   const innerSafe = sourceRoot.replace(/([\\"$`])/g, "\\$1");
+  if (!nestedInSingleQuotes) return innerSafe;
   // Outer: close, escape, and reopen the single-quoted bash -lc argument around each quote.
   return innerSafe.replace(/'/g, "'\\''");
 }
 
+/** True when the command's double-quoted substitution site is itself inside `bash -lc '...'`. */
+function hasOuterSingleQuoteLayer(command: string): boolean {
+  return /^\s*\S*bash\s+-lc\s+'/.test(command);
+}
+
+export type OpenCodeConfigBinding = {
+  visiblePath: string;
+  canonicalPath: string;
+  trustedSymlinkRoot?: string;
+  wasSymlink: boolean;
+};
+
+export function opencodeGlobalConfigPath(dest: string): string {
+  const override = process.env["FLOW_AGENTS_USER_OPENCODE_CONFIG"];
+  return override ? path.resolve(override) : path.join(dest, "opencode.json");
+}
+
+function assertPrivateOpenCodeBackingRoot(rootPath: string): void {
+  const stat = fs.statSync(rootPath);
+  const currentUid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  if (!stat.isDirectory()) throw new Error(`OpenCode config backing root is not a directory: ${rootPath}`);
+  if (currentUid !== undefined && stat.uid !== currentUid) throw new Error(`OpenCode config backing root is not owned by the current user: ${rootPath}`);
+  if ((stat.mode & 0o022) !== 0) throw new Error(`OpenCode config backing root is group- or world-writable: ${rootPath}`);
+}
+
+/**
+ * Bind a global OpenCode config link once, then write only its canonical file
+ * target. The target's parent is deliberately the sole trusted backing root
+ * passed to the ownership writer for direct Stow-style child links.
+ */
+export function resolveOpenCodeConfigBinding(visiblePath: string): OpenCodeConfigBinding {
+  let visibleStat: fs.Stats;
+  try {
+    visibleStat = fs.lstatSync(visiblePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { visiblePath, canonicalPath: visiblePath, wasSymlink: false };
+    }
+    throw error;
+  }
+  if (!visibleStat.isSymbolicLink()) {
+    if (!visibleStat.isFile()) throw new Error(`existing OpenCode config is not a regular file: ${visiblePath}`);
+    return { visiblePath, canonicalPath: visiblePath, wasSymlink: false };
+  }
+  let canonicalPath: string;
+  try {
+    canonicalPath = fs.realpathSync(visiblePath);
+  } catch (error) {
+    throw new Error(`OpenCode config symlink is not resolvable: ${visiblePath}: ${(error as Error).message}`);
+  }
+  if (!fs.lstatSync(canonicalPath).isFile()) throw new Error(`OpenCode config symlink target is not a regular file: ${visiblePath}`);
+  assertPrivateOpenCodeBackingRoot(path.dirname(canonicalPath));
+  return {
+    visiblePath,
+    canonicalPath,
+    trustedSymlinkRoot: path.dirname(canonicalPath),
+    wasSymlink: true,
+  };
+}
+
+export function revalidateOpenCodeConfigBinding(binding: OpenCodeConfigBinding): void {
+  if (binding.wasSymlink) {
+    const stat = fs.lstatSync(binding.visiblePath);
+    if (!stat.isSymbolicLink()) throw new Error(`OpenCode config symlink changed during install: ${binding.visiblePath}`);
+    if (fs.realpathSync(binding.visiblePath) !== binding.canonicalPath) {
+      throw new Error(`OpenCode config symlink target changed during install: ${binding.visiblePath}`);
+    }
+  }
+  let canonicalStat: fs.Stats | undefined;
+  try {
+    canonicalStat = fs.lstatSync(binding.canonicalPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (!binding.wasSymlink && canonicalStat?.isSymbolicLink()) {
+    throw new Error(`OpenCode config path became a symlink during install: ${binding.canonicalPath}`);
+  }
+  if (canonicalStat && !canonicalStat.isFile()) {
+    throw new Error(`OpenCode config write target is not a regular file: ${binding.canonicalPath}`);
+  }
+}
+
+function writeJsonAtomic(target: string, value: unknown): void {
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.flow-agents-${process.pid}-${Math.random().toString(16).slice(2)}.tmp`);
+  let mode = 0o600;
+  try {
+    const stat = fs.lstatSync(target);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`OpenCode config write target is not a regular file: ${target}`);
+    mode = stat.mode & 0o777;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  try {
+    fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode });
+    fs.chmodSync(temp, mode);
+    fs.renameSync(temp, target);
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+}
+
+function stampConfigPremergePostInstallHash(premerge: unknown, configPath: string): unknown {
+  if (!premerge || typeof premerge !== "object") return premerge;
+  return {
+    ...(premerge as Record<string, unknown>),
+    post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(configPath)).digest("hex"),
+  };
+}
+
 function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
-  return command
-    .replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "")
-    .replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${shellEscapeForHookCommand(sourceRoot)}/`);
+  const stripped = command.replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "");
+  const escaped = shellEscapeForHookCommand(sourceRoot, hasOuterSingleQuoteLayer(stripped));
+  return stripped.replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${escaped}/`);
 }
 
 /** Recursively rewrite every `command` string found under `value` in place. */
@@ -674,39 +980,6 @@ function rewriteCommandsForGlobalInstall(value: unknown, sourceRoot: string): vo
     }
     rewriteCommandsForGlobalInstall(obj[key], sourceRoot);
   }
-}
-
-/**
- * Additively copy every file under srcDir into destDir, creating directories
- * as needed and overwriting files whose content changed. Never deletes files
- * in destDir that srcDir does not own — destDir may contain unrelated content
- * (other kits, other tools) that this sync must not touch.
- */
-function copyDirMerge(srcDir: string, destDir: string): { added: number; updated: number } {
-  let added = 0;
-  let updated = 0;
-  if (!fs.existsSync(srcDir)) return { added, updated };
-  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
-    const srcPath = path.join(srcDir, entry.name);
-    const destPath = path.join(destDir, entry.name);
-    if (entry.isDirectory()) {
-      const nested = copyDirMerge(srcPath, destPath);
-      added += nested.added;
-      updated += nested.updated;
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    const content = fs.readFileSync(srcPath);
-    if (fs.existsSync(destPath)) {
-      if (Buffer.compare(fs.readFileSync(destPath), content) === 0) continue;
-      updated += 1;
-    } else {
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      added += 1;
-    }
-    fs.writeFileSync(destPath, content);
-  }
-  return { added, updated };
 }
 
 function resolveOpencodeSkillNames(bundle: string, skillsSource: string, activeKitIds: string[]): string[] {
@@ -781,7 +1054,14 @@ function vendorClaudeCodeGlobalRuntime(dest: string, bundle: string): void {
   }
 }
 
-/** Install a staged overlay through the ownership-manifest-tracked installer. Throws on failure. */
+/**
+ * Install a staged overlay through the ownership-manifest-tracked installer. Throws on failure.
+ *
+ * Deliberately NOT shared with the OpenCode global install: that path now needs trusted
+ * symlink-root arguments for its Stow-style child links (installOpenCodeOverlay), which the
+ * claude-code runtime vendoring must never pass — it writes a plain directory tree and
+ * accepting symlinked children there would be new surface, not deduplication.
+ */
 function runOwnedFilesInstaller(overlay: string, dest: string, metadataFields: Record<string, unknown>, label: string): void {
   const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
   const metadata = JSON.stringify({ ...metadataFields, package_version: pkgJson["version"] ?? "0.0.0" });
@@ -790,41 +1070,168 @@ function runOwnedFilesInstaller(overlay: string, dest: string, metadataFields: R
   if (result.status !== 0) throw new Error(result.stderr.trim() || `${label} failed with exit code ${result.status ?? "unknown"}`);
 }
 
-function installOpencodeGlobalAssets(dest: string, bundle: string, runtimeSources: string[], runtimeFiles: string[], skillNames: string[], activeKitIds: string[]): number {
-  const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-opencode-"));
-  let fileCount = 0;
-  const stage = (source: string, destinationRelative: string): void => {
-    const stat = fs.lstatSync(source);
-    if (stat.isSymbolicLink()) throw new Error(`generated OpenCode asset must not be a symlink: ${source}`);
-    if (stat.isDirectory()) {
-      for (const name of fs.readdirSync(source).sort()) stage(path.join(source, name), path.join(destinationRelative, name));
-      return;
+function stageOpenCodeRuntimeAsset(source: string, destinationRelative: string, overlay: string): number {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) throw new Error(`generated OpenCode asset must not be a symlink: ${source}`);
+  if (stat.isDirectory()) {
+    return fs.readdirSync(source).sort().reduce(
+      (count, name) => count + stageOpenCodeRuntimeAsset(path.join(source, name), path.join(destinationRelative, name), overlay),
+      0,
+    );
+  }
+  if (!stat.isFile()) throw new Error(`generated OpenCode asset must be a regular file: ${source}`);
+  const destination = path.join(overlay, destinationRelative);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(destination, stat.mode & 0o777);
+  return 1;
+}
+
+function addOpenCodePortableAssets(
+  source: string,
+  destinationRelative: string,
+  kind: PortableAsset["kind"],
+  overlay: string,
+  assetSources: Map<string, string>,
+  assets: PortableAsset[],
+): void {
+  const stat = fs.lstatSync(source);
+  if (stat.isSymbolicLink()) throw new Error(`generated OpenCode asset must not be a symlink: ${source}`);
+  if (stat.isDirectory()) {
+    for (const name of fs.readdirSync(source).sort()) {
+      addOpenCodePortableAssets(path.join(source, name), path.join(destinationRelative, name), kind, overlay, assetSources, assets);
     }
-    if (!stat.isFile()) throw new Error(`generated OpenCode asset must be a regular file: ${source}`);
-    const destination = path.join(overlay, destinationRelative);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
-    fs.chmodSync(destination, stat.mode & 0o777);
-    fileCount += 1;
-  };
+    return;
+  }
+  if (!stat.isFile()) throw new Error(`generated OpenCode asset must be a regular file: ${source}`);
+  const target = path.resolve(overlay, ...destinationRelative.split("/"));
+  const relative = path.relative(overlay, target);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`generated OpenCode asset has an unsafe destination: ${destinationRelative}`);
+  if (assetSources.has(target)) throw new Error(`generated OpenCode asset has a duplicate destination: ${destinationRelative}`);
+  assetSources.set(target, source);
+  assets.push({ id: destinationRelative, kind, content: fs.readFileSync(source, "utf8"), targetHint: destinationRelative });
+}
+
+async function stageOpenCodeConduitAssets(bundle: string, skillNames: string[], overlay: string): Promise<InstallationReceipt> {
+  const assetSources = new Map<string, string>();
+  const assets: PortableAsset[] = [];
+  addOpenCodePortableAssets(path.join(bundle, ".opencode", "plugins", "flow-agents.js"), "plugins/flow-agents.js", "hook", overlay, assetSources, assets);
+  addOpenCodePortableAssets(path.join(bundle, ".opencode", "agents"), "agents", "agent", overlay, assetSources, assets);
+  for (const skillName of skillNames) {
+    addOpenCodePortableAssets(path.join(bundle, ".opencode", "skills", skillName), path.join("skills", skillName), "skill", overlay, assetSources, assets);
+  }
+  const conduit = createOpenCodeAdapter({
+    resolveTarget: (asset) => asset.targetHint ? path.resolve(overlay, ...asset.targetHint.split("/")) : undefined,
+    write: (target, content) => {
+      const source = assetSources.get(target);
+      if (!source) throw new Error(`Conduit attempted to write an unbound OpenCode asset: ${target}`);
+      if (content !== fs.readFileSync(source, "utf8")) throw new Error(`Conduit content changed before staging: ${source}`);
+      const stat = fs.lstatSync(source);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content, { encoding: "utf8", flag: "wx" });
+      fs.chmodSync(target, stat.mode & 0o777);
+    },
+  });
+  const receipt = await conduit.install(assets);
+  if (receipt.skipped.length > 0 || receipt.installed.length !== assets.length) throw new Error("Conduit did not stage every required OpenCode asset");
+  return receipt;
+}
+
+function installOpenCodeOverlay(overlay: string, dest: string, metadata: string, trustedSymlinkRoot?: string): void {
+  const installerArgs = [path.join(root, "scripts", "install-owned-files.js"), overlay, dest, ".flow-agents/runtime-assets.json", "--metadata-json", metadata];
+  if (trustedSymlinkRoot) {
+    installerArgs.push(
+      "--trusted-symlink-root", trustedSymlinkRoot,
+      "--trusted-symlink-child", "plugins",
+      "--trusted-symlink-child", "agents",
+      "--trusted-symlink-child", "skills",
+    );
+  }
+  const result = spawnSync(process.execPath, installerArgs, { encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr.trim() || `OpenCode runtime asset install failed with exit code ${result.status ?? "unknown"}`);
+}
+
+async function installOpencodeGlobalAssets(dest: string, bundle: string, runtimeSources: string[], runtimeFiles: string[], skillNames: string[], activeKitIds: string[], trustedSymlinkRoot?: string): Promise<number> {
+  const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-opencode-"));
   try {
-    stage(path.join(bundle, ".opencode", "plugins", "flow-agents.js"), "plugins/flow-agents.js");
-    stage(path.join(bundle, ".opencode", "agents"), "agents");
-    for (const skillName of skillNames) stage(path.join(bundle, ".opencode", "skills", skillName), path.join("skills", skillName));
-    for (const entry of runtimeSources) stage(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry));
-    for (const entry of runtimeFiles) stage(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry));
-    runOwnedFilesInstaller(overlay, dest, { runtime: "opencode", active_kit_ids: activeKitIds }, "OpenCode runtime asset install");
-    return fileCount;
+    const receipt = await stageOpenCodeConduitAssets(bundle, skillNames, overlay);
+    let fileCount = 0;
+    for (const entry of [...runtimeSources, ...runtimeFiles]) {
+      fileCount += stageOpenCodeRuntimeAsset(path.join(bundle, entry), path.join(".flow-agents", "runtime", entry), overlay);
+    }
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+    const metadata = JSON.stringify({ runtime: "opencode", package_version: pkgJson["version"] ?? "0.0.0", active_kit_ids: activeKitIds, conduit_receipt: receipt });
+    installOpenCodeOverlay(overlay, dest, metadata, trustedSymlinkRoot);
+    return fileCount + receipt.installed.length;
   } finally {
     fs.rmSync(overlay, { recursive: true, force: true });
   }
 }
 
-function installBundle(bundle: string, options: InitOptions): number {
+/**
+ * The static install.sh argv (#1288). Extracted so each guard layer is independently
+ * unit-testable (round-4 FIX-5): the rsync leg is guarded REDUNDANTLY by --only-absent
+ * (--ignore-existing: never overwrite ANY existing file) and by the per-path preserve
+ * excludes (which also scope install.sh's token substitution and console-config write) --
+ * an end-to-end test cannot see one layer disappear while the other still holds, so each
+ * layer gets its own argv-level assertion.
+ *
+ * Raw relative paths for --exclude-path: install.sh itself escapes rsync wildcard
+ * characters, so the same literal value also drives its EXCLUDE_RELS-scoped guards.
+ * Replaces are applied by the caller's Node executor BEFORE install.sh runs, so token
+ * substitution still covers them.
+ */
+/**
+ * Managed top-level keys a project install subtracts from the bundle's claude-code
+ * settings before install-merge.js merges it. See InitOptions.permissiveWorkspace for
+ * why (kontourai/flow-agents#1345); these are exactly the two keys the `--global` path
+ * (init.ts) and `dogfood` (dogfoodClaudeCode) already delete.
+ */
+export const PERMISSIVE_WORKSPACE_MANAGED_KEYS: readonly string[] = ["permissions", "skipDangerousModePermissionPrompt"];
+
+export function installBundleArgs(
+  options: Pick<InitOptions, "dest" | "telemetrySinks" | "consoleUrl" | "consoleEndpoint" | "consoleTenant" | "permissiveWorkspace"> & { runtime?: Runtime },
+  preservedRelPaths: string[],
+): string[] {
   const args = ["install.sh", options.dest];
+  args.push("--only-absent");
+  // Only claude-code's managed config carries these keys at all; passing the flags for
+  // other runtimes would be inert but would misreport intent in the installer's argv.
+  if (options.runtime === "claude-code" && !options.permissiveWorkspace) {
+    for (const key of PERMISSIVE_WORKSPACE_MANAGED_KEYS) args.push("--omit-managed-key", key);
+  }
+  for (const rel of preservedRelPaths) args.push("--exclude-path", rel);
   for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
   if (options.consoleUrl) args.push("--console-url", options.consoleUrl);
   if (options.consoleEndpoint) args.push("--console-endpoint", options.consoleEndpoint);
+  if (options.consoleTenant) args.push("--console-tenant", options.consoleTenant);
+  return args;
+}
+
+/**
+ * Hold the bundle build lock across a bundle-READING span (#1288 CI fix, kontourai/
+ * flow-agents PR #1309): the planner walk, plan revalidation, the executor's source reads,
+ * install.sh's rsync from dist/, and the ownership-manifest source walk all read the bundle
+ * tree -- and `build-bundles` (a LOCKED writer; provider-bootstrap.test.mjs invokes it
+ * unconditionally in the parallel test corpus) resetDirs that same tree. An unlocked reader
+ * interleaving with a locked builder walked a half-built dist/base on CI (a partial plan
+ * enumerating only the alphabetically-early entries, no install.sh) or died on ENOENT mid
+ * resetDir. Builders and init's read span now mutually exclude; the refresher child keeps
+ * the lock fresh for however long the span runs.
+ */
+function withBundleReadLock<T>(fn: () => T): T {
+  const lockDir = acquireBundleBuildLock();
+  const stopRefresher = startBundleBuildLockRefresher(lockDir);
+  try {
+    return fn();
+  } finally {
+    stopRefresher();
+    releaseBundleBuildLock(lockDir);
+  }
+}
+
+function installBundle(bundle: string, options: InitOptions, preservedRelPaths: string[] = []): number {
+  const args = installBundleArgs(options, preservedRelPaths);
   let tempTokenFile: string | undefined;
   const consoleTokenFile = options.consoleTokenFile ?? (() => {
     if (!options.consoleTokenValue) return undefined;
@@ -834,7 +1241,6 @@ function installBundle(bundle: string, options: InitOptions): number {
     return file;
   })();
   if (consoleTokenFile) args.push("--console-token-file", consoleTokenFile);
-  if (options.consoleTenant) args.push("--console-tenant", options.consoleTenant);
   const env = { ...process.env };
   const result = spawnSync("bash", args, { cwd: bundle, env, encoding: "utf8", stdio: "inherit" });
   if (tempTokenFile) fs.rmSync(path.dirname(tempTokenFile), { recursive: true, force: true });
@@ -908,34 +1314,62 @@ function headlessRuntimeAutoDetected(argv: string[]): boolean {
  * reachability timeout (2000ms unless overridden), and any thrown/rejected
  * error here is caught and downgraded to a warning line only.
  */
+/**
+ * Classify the telemetry config file the doctor actually resolved, relative to THIS install.
+ *
+ * #1344: `resolveTelemetryConfigFile` deliberately searches beyond the destination --
+ * TELEMETRY_CONFIG_FILE, then a trusted `<dest>/.kontourai/telemetry-console.conf`, then a
+ * trusted `~/.flow-agents/telemetry-console.conf`, then the destination's shipped default --
+ * because a machine-wide install IS the supported configuration for the hooks. That is right
+ * for a diagnostic and wrong for an install summary that says nothing about which file it
+ * read: on the reported install the resolved file was the user-global conf, whose token,
+ * tenant and Console URL had nothing to do with the `--telemetry-sink local-files` run being
+ * summarised. Naming the file and its scope is what makes the difference visible.
+ */
+export function classifyResolvedTelemetryConfig(configFile: string, dest: string, configExists: boolean): "destination" | "workspace" | "user-global" | "explicit" | "absent" {
+  if (!configExists) return "absent";
+  const resolved = path.resolve(configFile);
+  const workspaceConf = path.join(path.resolve(dest), ".kontourai", "telemetry-console.conf");
+  if (resolved === workspaceConf) return "workspace";
+  if (resolved === path.join(os.homedir(), ".flow-agents", "telemetry-console.conf")) return "user-global";
+  const destPrefix = `${path.resolve(dest)}${path.sep}`;
+  if (resolved.startsWith(destPrefix)) return "destination";
+  return "explicit";
+}
+
 async function printPostInstallSummary(options: InitOptions): Promise<void> {
   let doctorConsole: {
     sink: "local-only" | "console";
     reachability: { checked: boolean; ok: boolean | null; error?: string; statusCode?: number };
   } = { sink: "local-only", reachability: { checked: false, ok: null } };
-  let tokenConfigured = false;
-  let tenantConfigured = false;
+  let tokenSource: "environment" | "config-file" | "absent" = "absent";
+  let tenantSource: "environment" | "config-file" | "absent" = "absent";
+  let resolvedConfigFile: string | undefined;
+  let resolvedConfigScope: "destination" | "workspace" | "user-global" | "explicit" | "absent" = "absent";
   try {
     const report = await buildReport(["--dest", options.dest]);
     doctorConsole = report.console;
-    tokenConfigured = report.console.tokenConfigured;
-    tenantConfigured = report.console.tenantConfigured;
+    tokenSource = report.console.tokenSource;
+    tenantSource = report.console.tenantSource;
+    resolvedConfigFile = report.telemetry.configFile;
+    resolvedConfigScope = classifyResolvedTelemetryConfig(report.telemetry.configFile, options.dest, report.telemetry.configExists);
   } catch (error) {
-    console.warn(`flow-agents init: WARNING: could not verify the Console connection: ${(error as Error).message} (telemetry still installed; run 'flow-agents telemetry-doctor' to re-check).`);
+    console.warn(`flow-agents init: WARNING: could not resolve the telemetry configuration to report on: ${(error as Error).message} (telemetry still installed; run 'flow-agents telemetry-doctor' to re-check).`);
   }
   const consoleStatus = describeConsoleStatus({ console: doctorConsole });
   const nextSteps = [`Run your agent inside ${options.dest} -- Flow Agents hooks are already wired.`];
-  if (consoleStatus.status !== "local-only") {
+  if (consoleStatus.status !== "not-configured") {
     nextSteps.push("Telemetry now flows to Kontour Console; visit the Console for ROI/economics views.");
   }
-  // Only for the "reachability was never attempted" case (self-hosted/BYO
-  // HTTPS hosts default to not-allowed without --allow-network) -- never for
-  // local-only (nothing to verify) or the already-verified case (nothing left
-  // to do). doctorConsole.reachability.checked is the same raw signal
-  // describeConsoleStatus used to pick its NOT_CHECKED_DETAIL branch, so this
-  // stays in sync with that classifier without re-parsing its detail string.
-  if (consoleStatus.status === "connected-unverified" && doctorConsole.reachability.checked === false) {
+  // Actionable only when an endpoint IS configured and no check was attempted (self-hosted/
+  // BYO HTTPS hosts default to not-allowed without --allow-network). Never for
+  // not-configured (nothing to verify), never for verified (nothing left to do), and never
+  // for a check that ran and failed (--allow-network would not change that answer).
+  if (consoleStatus.status === "unverified-not-attempted") {
     nextSteps.push("Self-hosted/BYO Console reachability was not checked; run `flow-agents telemetry-doctor --allow-network` to verify it.");
+  }
+  if (resolvedConfigScope !== "destination" && resolvedConfigScope !== "absent") {
+    nextSteps.push(`The Console lines above describe ${resolvedConfigFile}, which this install did not write; run \`flow-agents telemetry-doctor --dest ${options.dest}\` to re-check at any time.`);
   }
   nextSteps.push("Re-run `flow-agents init` anytime to reconfigure runtime, destination, or Console connection.");
   const summaryLines = buildPostInstallSummaryLines({
@@ -944,23 +1378,50 @@ async function printPostInstallSummary(options: InitOptions): Promise<void> {
     dest: options.dest,
     telemetrySinks: options.telemetrySinks,
     consoleStatus,
-    tokenConfigured,
-    tenantConfigured,
+    resolvedConfigFile,
+    resolvedConfigScope,
+    tokenSource,
+    tenantSource,
     nextSteps,
   });
   for (const line of summaryLines) console.log(line);
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
+  // `flow-agents init --uninstall --runtime claude-code [--global | --dest PATH]` removes what
+  // a prior claude-code install wrote. Dispatched here (rather than as its own top-level
+  // subcommand) so it stays discoverable from `flow-agents init --help` and shares init's own
+  // flag surface (--runtime, --global, --dest, --yes/--headless); the implementation itself
+  // lives in uninstall.ts, which owns its own --help/usage.
+  if (argv.includes("--uninstall")) {
+    const { main: uninstallMain } = await import("./uninstall.js");
+    return uninstallMain(argv.filter((arg) => arg !== "--uninstall"));
+  }
   if (argv.includes("--help") || argv.includes("-h")) {
     usage();
     return 0;
   }
-  const headless = argv.includes("--yes") || argv.includes("--headless") || !process.stdin.isTTY;
+  // Read as bare argv membership (not parseArgs) so a following positional can never be
+  // swallowed as the flag's value: `--dry-run` and `--force` are always boolean.
+  const dryRun = argv.includes("--dry-run");
+  const force = argv.includes("--force");
+  // --dry-run implies headless: a preview must never prompt.
+  const headless = argv.includes("--yes") || argv.includes("--headless") || dryRun || !process.stdin.isTTY;
   try {
     const options = headless
       ? { ...headlessOptions(argv), runtimeAutoDetected: headlessRuntimeAutoDetected(argv) }
       : await interactiveOptions(argv);
+    // The overwrite guard covers project (bundle rsync) installs and the --global
+    // claude-code skills/agents sync (#1288 review BLOCKING-2). The --global codex and
+    // opencode paths delegate to installers that already fail closed on unowned collisions
+    // (install-codex-home.sh / install-owned-files.js refuse rather than overwrite), so
+    // --dry-run/--force have no meaning there; refusing the flags is honest, silently
+    // ignoring them is not. (pi --global falls through to a workspace install and keeps
+    // full flag support.)
+    if ((dryRun || force) && options.global && (options.runtime === "codex" || options.runtime === "opencode")) {
+      console.error(`flow-agents init: --dry-run and --force are not supported with --global for ${options.runtime} (its installer already refuses unowned collisions instead of overwriting)`);
+      return 2;
+    }
     // Scope-collision check for claude-code: Claude Code merges user-level
     // (~/.claude/settings.json) and project-level (.claude/settings.json) settings
     // and runs ALL matching hooks from both files. If a user-level settings file
@@ -983,7 +1444,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // global settings dir is the claude config root, so the settings.json
     // lives directly in dest (not dest/.claude/).
     if (options.global && options.runtime === "claude-code") {
-      const bundle = ensureBundle(options.runtime);
+      const { bundle, rebuilt } = ensureBundleReporting(options.runtime);
       // For --global, dest is ~/.claude/ (the global settings dir).
       // dogfoodClaudeCode writes to dest/.claude/settings.json — but for global,
       // the settings.json lives at dest/settings.json (dest IS ~/.claude/).
@@ -993,12 +1454,47 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         console.error(`flow-agents init: bundle settings missing: ${sourcePath}`);
         return 1;
       }
+      // #1288 review BLOCKING-2: the skills/agents sync used to be copyDirMerge, which
+      // overwrote every differing collision (a user-authored ~/.claude/agents file was
+      // replaced with no classification and no --force). It now runs through the same
+      // ownership plan as project installs: unowned differing files are preserved and
+      // reported, stale bundle-owned files (hash-matching the previous install's global
+      // ownership manifest) update without --force, and --force overrides preserves.
+      // Removals stay disabled here: the historical sync was additive-only and ~/.claude
+      // holds unrelated user content; deletion would be new destructive surface.
+      // Intermediate symlinks are tolerated (refuseSymlinkParents: false): the legacy
+      // skills chain (~/.claude/skills/<name> -> ~/.agents/skills/<name>) is a supported
+      // layout this writer has always updated through, and this path copies files itself
+      // (no rsync that would replace the link object).
+      const globalPlanParams = {
+        mappings: [
+          { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
+          { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
+        ],
+        manifestDest: options.dest,
+        excludeRel: new Set<string>(),
+        force,
+        reportStaleOwned: false,
+        refuseSymlinkParents: false,
+      };
+      // Same bundle-read lock as the project path: the plan walk, the copies' source
+      // reads, and both manifest builders below read the bundle tree a concurrent
+      // `build-bundles` may be resetting.
+      const globalExit = withBundleReadLock<number | null>(() => {
+      const globalPlan = computeInstallPlan(globalPlanParams);
+      if (dryRun) {
+        for (const line of formatDryRunLines(globalPlan, `${options.runtime} --global skills/agents`, options.dest)) console.log(line);
+        console.log("Note: settings.json is merge-owned (hooks merged into your existing settings; user keys preserved) and is not part of the file plan above.");
+        if (rebuilt) console.log("Note: rebuilt the claude-code bundle in the package dist/ to compute this plan (outside the destination).");
+        return 0;
+      }
+      // Vendor the hook/statusline runtime into a durable, destination-owned location
+      // BEFORE any settings.json read/merge/write (kontourai/flow-agents#945): a global
+      // install must not depend on the ephemeral npx-cache/source-checkout path this
+      // process happened to launch from (see vendorClaudeCodeGlobalRuntime). This must
+      // succeed first -- if it fails, abort without touching settings.json.
+      // Placed AFTER the dry-run early return above: --dry-run must not write to dest.
       fs.mkdirSync(options.dest, { recursive: true });
-      // Vendor the hook/statusline runtime into a durable, destination-owned
-      // location BEFORE any settings.json mutation (kontourai/flow-agents#945):
-      // a global install must not depend on the ephemeral npx-cache/source-checkout
-      // path this process happened to launch from (see vendorClaudeCodeGlobalRuntime).
-      // This must succeed first -- if it fails, abort without touching settings.json.
       try {
         vendorClaudeCodeGlobalRuntime(options.dest, bundle);
       } catch (error) {
@@ -1010,33 +1506,61 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // Remove permissive defaults (not appropriate for global user settings).
       delete managed["permissions"];
       delete managed["skipDangerousModePermissionPrompt"];
-      // Bundle hook commands assume CLAUDE_PROJECT_DIR points at this package;
-      // a global install must not depend on which project is currently open or on
-      // the ephemeral path this process launched from, so rewrite them to the
-      // durable vendored runtime root instead (see vendorClaudeCodeGlobalRuntime,
-      // kontourai/flow-agents#945).
+      // See rewriteCommandsForGlobalInstall: bundle hook commands assume
+      // CLAUDE_PROJECT_DIR points at this package; a global install must not depend on
+      // which project is currently open, nor on the ephemeral path this process launched
+      // from, so rewrite them to the durable vendored runtime root instead
+      // (see vendorClaudeCodeGlobalRuntime, kontourai/flow-agents#945).
       const vendorRoot = path.join(durableFlowAgentsRoot(options.dest), "runtime");
       rewriteCommandsForGlobalInstall(managed, vendorRoot);
       const destSettingsPath = path.join(options.dest, "settings.json");
-      const installMergePath = path.join(root, "scripts", "install-merge.js");
-      const _require = createRequire(import.meta.url);
-      const { mergeSettings } = _require(installMergePath) as { mergeSettings: MergeSettingsFn };
+      // #1288 round-3 HIGH-2: FAIL CLOSED before anything else reads or snapshots the
+      // file. Merging over an unparseable settings file would replace the user's
+      // (possibly recoverable) content with managed-only settings. --force deliberately
+      // does not apply: this is a parse failure, not an overwrite decision.
       let existing: Record<string, unknown> = {};
       if (fs.existsSync(destSettingsPath)) {
-        try { existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
+        try {
+          existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>;
+        } catch (error) {
+          throw new Error(
+            `existing Claude settings at ${destSettingsPath} are not valid JSON (${error instanceof Error ? error.message : String(error)}); ` +
+            "fix or move the file and re-run (--force does not override a parse failure)"
+          );
+        }
       }
+      const installMergePath = path.join(root, "scripts", "install-merge.js");
+      const _require = createRequire(import.meta.url);
+      const { mergeSettings, captureConfigPremerge, installedValues } = _require(installMergePath) as { mergeSettings: MergeSettingsFn; captureConfigPremerge: (configPath: string) => unknown; installedValues: (configPath: string, merged: Record<string, unknown>, managed: Record<string, unknown>) => unknown };
+      const configPremerge = { ...(captureConfigPremerge(destSettingsPath) as Record<string, unknown>), runtime: "claude-code" };
       const merged = mergeInstallSettings(mergeSettings, existing, managed);
+      // HIGH-3/HIGH-2 posture: revalidate the plan BEFORE the first write (including the
+      // settings rename), so a drift refusal is always truthful about "nothing was
+      // written"; the copy executor then re-enforces per file (exclusive creates,
+      // re-hash-before-rename replaces).
+      verifyInstallPlanMatchesDisk(globalPlan, globalPlanParams);
+      fs.mkdirSync(options.dest, { recursive: true });
       const tmp = `${destSettingsPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+      // #1288 round-4 FIX-4: the merge was computed from the premerge snapshot's bytes; a
+      // VALID concurrent edit landing between capture and rename would be silently
+      // destroyed by the rename. Require byte-equality with the capture immediately
+      // before renaming into place; abort naming the file on any divergence.
+      {
+        const premergeSnapshot = configPremerge as { existed?: boolean; bytes_base64?: string };
+        const premergeBytes = premergeSnapshot.existed ? premergeSnapshot.bytes_base64 ?? "" : "";
+        const currentBytes = fs.existsSync(destSettingsPath) ? fs.readFileSync(destSettingsPath).toString("base64") : "";
+        if (currentBytes !== premergeBytes) {
+          fs.rmSync(tmp, { force: true });
+          throw new InstallPlanDriftError([destSettingsPath]);
+        }
+      }
       fs.renameSync(tmp, destSettingsPath);
-      // Additive skills/agents sync: adds new files and updates changed ones,
-      // never deletes — dest may hold unrelated content from other kits/tools.
-      const skillsSync = copyDirMerge(path.join(bundle, ".claude", "skills"), path.join(options.dest, "skills"));
-      const agentsSync = copyDirMerge(path.join(bundle, ".claude", "agents"), path.join(options.dest, "agents"));
+      const globalCopies = executePlanCopies(globalPlan);
       // Write version stamp.
-      writeInstallRecord(options.dest, "claude-code", true, options.activeKitIds ?? []);
+      writeInstallRecord(options.dest, "claude-code", true, options.activeKitIds ?? [], { ...configPremerge, post_install_sha256: crypto.createHash("sha256").update(fs.readFileSync(destSettingsPath)).digest("hex") }, [], installedValues(destSettingsPath, merged, managed));
       console.log(`Flow Agents global hooks merged for claude-code in ${options.dest}`);
-      console.log(`Synced skills (+${skillsSync.added} new, ~${skillsSync.updated} updated) and agents (+${agentsSync.added} new, ~${agentsSync.updated} updated) in ${options.dest}`);
+      for (const line of formatInstallSummaryLines(globalPlan, options.dest, globalCopies.racedPaths)) console.log(line);
       // Write a per-skill-file sha256 content-hash manifest, sibling of install.json, so
       // `flow-agents skill-drift-check` and the SessionStart advisory can classify installed
       // skill files as in_sync/kit_updated/user_modified/unbaselined/missing_install/kit_removed
@@ -1059,6 +1583,27 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
             "(drift detection will report unbaselined until the next successful --global sync)."
         );
       }
+      // Write the ownership manifest `flow-agents init --uninstall` reads back (kontourai/flow-agents#uninstall).
+      // Derived from the bundle SOURCE trees (never dest), so it can never misattribute a
+      // pre-existing dest entry (e.g. a legacy skill symlink) that this install did not itself
+      // write. settings.json is intentionally excluded -- it is merge-owned, not file-owned;
+      // uninstall strips only the managed hook/statusLine entries from it (see uninstall.ts).
+      // Paths the guard PRESERVED are excluded too: their on-disk content is the user's, and
+      // recording it as bundle-owned would authorize the next init to overwrite it.
+      const globalManifestPkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+      writeOwnedFilesManifest(options.dest, buildOwnedFilesManifest({
+        mappings: [
+          { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
+          { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
+        ],
+        excludeRel: new Set([...globalPlan.preserved, ...globalCopies.racedPaths]),
+        runtime: "claude-code",
+        version: globalManifestPkgJson["version"] ?? "0.0.0",
+        global: true,
+      }));
+      return null;
+      });
+      if (globalExit !== null) return globalExit;
       return configureWorkflowProviders(options);
     }
     // --global for opencode: merge config and sync the runtime assets OpenCode discovers globally.
@@ -1088,15 +1633,18 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       fs.mkdirSync(options.dest, { recursive: true });
       const runtimeRoot = path.join(options.dest, ".flow-agents", "runtime");
       managed["instructions"] = [path.join(runtimeRoot, "AGENTS.md")];
-      // The global opencode.json lives directly at dest/opencode.json.
-      const destConfigPath = path.join(options.dest, "opencode.json");
+      // Bind the host-visible config symlink before any host mutation. Its
+      // canonical target is the only config file we ever replace, while the
+      // host-visible config root remains the OpenCode discovery root.
+      const configBinding = resolveOpenCodeConfigBinding(opencodeGlobalConfigPath(options.dest));
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
-      const { mergeSettings } = _require(installMergePath) as { mergeSettings: MergeSettingsFn };
+      const { mergeSettings, captureConfigPremerge, installedValues } = _require(installMergePath) as { mergeSettings: MergeSettingsFn; captureConfigPremerge: (configPath: string) => unknown; installedValues: (configPath: string, merged: Record<string, unknown>, managed: Record<string, unknown>) => unknown };
+      const configPremerge = { ...(captureConfigPremerge(configBinding.canonicalPath) as Record<string, unknown>), runtime: "opencode" };
       let existing: Record<string, unknown> = {};
-      if (fs.existsSync(destConfigPath)) {
+      if (fs.existsSync(configBinding.canonicalPath)) {
         try {
-          existing = JSON.parse(fs.readFileSync(destConfigPath, "utf8")) as Record<string, unknown>;
+          existing = JSON.parse(fs.readFileSync(configBinding.canonicalPath, "utf8")) as Record<string, unknown>;
         } catch (error) {
           throw new Error(`existing OpenCode config is invalid JSON; refusing to replace it: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -1108,13 +1656,19 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       }
       const managedInstructions = managed["instructions"] as string[];
       merged["instructions"] = [...new Set([...(existingInstructions as string[] | undefined ?? []), ...managedInstructions])];
-      const installedAssetCount = installOpencodeGlobalAssets(options.dest, bundle, runtimeSources, runtimeFiles, skillNames, options.activeKitIds ?? []);
-      const tmp = `${destConfigPath}.tmp.${process.pid}`;
-      fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}
-`, "utf8");
-      fs.renameSync(tmp, destConfigPath);
+      const installedAssetCount = await installOpencodeGlobalAssets(
+        options.dest,
+        bundle,
+        runtimeSources,
+        runtimeFiles,
+        skillNames,
+        options.activeKitIds ?? [],
+        configBinding.trustedSymlinkRoot,
+      );
+      revalidateOpenCodeConfigBinding(configBinding);
+      writeJsonAtomic(configBinding.canonicalPath, merged);
       // Stamp only after every required runtime asset and its content manifest exist.
-      writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? []);
+      writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? [], stampConfigPremergePostInstallHash(configPremerge, configBinding.canonicalPath), configBinding.trustedSymlinkRoot ? [fs.realpathSync(configBinding.trustedSymlinkRoot)] : [], installedValues(configBinding.canonicalPath, merged, managed));
       console.log(`Flow Agents global config and runtime assets synced for opencode in ${options.dest}`);
       console.log(`Reconciled ${installedAssetCount} managed runtime files and ${skillNames.length} discoverable skills`);
       return configureWorkflowProviders(options);
@@ -1152,10 +1706,104 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         `Falling back to workspace default destination: ${options.dest}`
       );
     }
-    const bundle = ensureBundle(options.runtime);
-    const installed = installBundle(bundle, options);
+    const { bundle, rebuilt } = ensureBundleReporting(options.runtime);
+    // Overwrite guard (#1288): classify every bundle path against the destination BEFORE
+    // any write. Existing files that are not known bundle-owned content (no hash match
+    // against the incoming bundle or the previous install's ownership manifest) are
+    // preserved -- excluded from the rsync -- unless --force explicitly overrides.
+    // Stale bundle-owned leftovers (manifest-owned, absent from the bundle) are REPORTED,
+    // never deleted, and any bundle path whose destination parent is a symlinked directory
+    // refuses the whole install (InstallPlanSymlinkParentError) before anything is written.
+    const excludeRel = bundleInstallExcludeRel(options.runtime);
+    const planParams = {
+      mappings: [{ sourceDir: bundle, destDir: options.dest, prefix: "" }],
+      manifestDest: options.dest,
+      excludeRel,
+      force,
+      reportStaleOwned: true,
+      refuseSymlinkParents: true,
+    };
+    const guardedExit = withBundleReadLock<number | null>(() => {
+    const plan = computeInstallPlan(planParams);
+    if (dryRun) {
+      for (const line of formatDryRunLines(plan, options.runtime, options.dest)) console.log(line);
+      if (rebuilt) console.log(`Note: rebuilt the ${options.runtime} bundle in the package dist/ to compute this plan (outside the destination).`);
+      return 0;
+    }
+    // #1288 review HIGH-3: re-derive the plan immediately before any write and refuse on
+    // divergence; then enforce AT WRITE TIME what revalidation cannot see. Replaces and
+    // forced overwrites are applied by the Node executor (temp write -> re-hash the
+    // destination -> rename; abort naming the path on drift) BEFORE install.sh runs, so
+    // its token substitution and config steps still cover the updated files. The rsync
+    // itself then runs with --only-absent (--ignore-existing) plus the preserve excludes:
+    // the copy layer can only write paths that do not exist, so a file appearing in the
+    // final window is skipped, never overwritten.
+    //
+    verifyInstallPlanMatchesDisk(plan, planParams);
+    executePlanCopies(plan, new Set(["replace", "force-overwrite"]));
+    const installed = installBundle(bundle, options, plan.preserved);
     if (installed !== 0) return installed;
-    writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? []);
+    // Post-install audit of planned creates: --ignore-existing guarantees a file that
+    // appeared in the final window was skipped (never overwritten). For every runtime
+    // except kiro the skipped file is also DETECTABLE (its bytes differ from the bundle's,
+    // and only scripts/telemetry/telemetry.conf is legitimately post-processed), so it is
+    // reported as preserved and kept OUT of the ownership manifest -- adopting the raced
+    // writer's bytes as bundle-owned would authorize the next init to overwrite them.
+    // Dispositioned residual (kiro only): token substitution rewrites created files, so a
+    // raced create is indistinguishable there; exposure is a summary-labeling inaccuracy
+    // and possible manifest adoption in the sub-second window between revalidation and the
+    // rsync reaching that path -- never a destroyed file in THIS run.
+    const racedCreates: string[] = [];
+    const missingCreates: string[] = [];
+    for (const entry of plan.entries) {
+      if (entry.action !== "create") continue;
+      if (!fs.existsSync(entry.destPath)) {
+        missingCreates.push(entry.rel);
+        continue;
+      }
+      if (options.runtime === "kiro" || entry.rel === "scripts/telemetry/telemetry.conf") continue;
+      if (manifestHashFile(entry.destPath) !== manifestHashFile(entry.sourcePath)) racedCreates.push(entry.rel);
+    }
+    if (missingCreates.length > 0) {
+      console.warn(`flow-agents init: WARNING: ${missingCreates.length} planned file(s) missing after install: ${missingCreates.slice(0, 5).join(", ")}${missingCreates.length > 5 ? ` (+${missingCreates.length - 5} more)` : ""}`);
+    }
+    // Project bundle installers create the merge snapshot themselves. Forward it
+    // into the richer outer record instead of erasing provenance on return.
+    let configPremerge: unknown;
+    let installedValues: unknown;
+    try {
+      const generated = JSON.parse(fs.readFileSync(durableInstallRecordPath(options.dest), "utf8")) as Record<string, unknown>;
+      configPremerge = generated["config_premerge"];
+      installedValues = generated["installed_values"];
+    } catch { /* runtimes without a merged config have no snapshot */ }
+    ensureArtifactResidueIgnored(options.dest);
+    writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? [], configPremerge, [], installedValues, options.runtime === "claude-code" && Boolean(options.permissiveWorkspace));
+    // Every project bundle install writes the ownership manifest `flow-agents init
+    // --uninstall` (claude-code) reads back -- and, since #1288, the manifest is ALSO what
+    // lets the NEXT init recognize stale bundle-owned files and update them without
+    // --force (the upgrade path). Historically only claude-code wrote it; base/codex/
+    // opencode/kiro/pi project installs write it too now, or their upgrade path would
+    // preserve every stale bundle file forever. The source tree is the whole bundle root,
+    // matching exactly what install.sh's rsync copies into dest (bundleInstallExcludeRel
+    // mirrors installScript()'s exclude list -- merge-owned configs are merge-owned, not
+    // file-owned). Paths the guard PRESERVED are excluded too: their on-disk content is
+    // the user's, and recording it as bundle-owned would authorize the next init to
+    // overwrite it.
+    {
+      const projectManifestPkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+      writeOwnedFilesManifest(options.dest, buildOwnedFilesManifest({
+        mappings: [{ sourceDir: bundle, destDir: options.dest, prefix: "" }],
+        excludeRel: new Set([...excludeRel, ...plan.preserved, ...racedCreates]),
+        runtime: options.runtime,
+        version: projectManifestPkgJson["version"] ?? "0.0.0",
+        global: false,
+      }));
+    }
+    // #1288: a silent no-op and a 191-file overwrite must not both read as a bare success.
+    for (const line of formatInstallSummaryLines(plan, options.dest, racedCreates)) console.log(line);
+    return null;
+    });
+    if (guardedExit !== null) return guardedExit;
     const activated = await activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or

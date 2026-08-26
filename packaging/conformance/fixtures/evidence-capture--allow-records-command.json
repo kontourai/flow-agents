@@ -19,7 +19,12 @@
   },
   "workspace_setup": {
     "AGENTS.md": "# Test Repo\n",
-    ".flow-agents/cap-task/state.json": "{\"schema_version\":\"1.0\",\"task_slug\":\"cap-task\",\"status\":\"in_progress\",\"phase\":\"verification\",\"updated_at\":\"2026-06-23T00:00:00Z\"}"
+    ".kontourai/flow-agents/cap-task/state.json": "{\"schema_version\":\"1.0\",\"task_slug\":\"cap-task\",\"status\":\"in_progress\",\"phase\":\"verification\",\"updated_at\":\"2026-06-23T00:00:00Z\"}",
+    ".kontourai/flow-agents/current/conformance-6c1d6cedf276ea3f.json": "{\"active_slug\":\"cap-task\",\"artifact_dir\":\"cap-task\"}"
+  },
+  "workspace_git": true,
+  "env": {
+    "FLOW_AGENTS_ACTOR": "conformance"
   },
   "expected": {
     "exit_code": 0,

@@ -97,6 +97,31 @@ A marker missing any of these four fields on an entry is treated as malformed an
 through to the fail-closed default (`bundle-required-no-declared-marker`), same as if no
 marker existed at all.
 
+**Optional `gaps[]` field (ADR 0022 addendum part 6, #1267).** An entry MAY additionally
+carry `gaps`, an array of non-empty strings, each naming one disclosed gap accepted along
+with the exemption:
+
+```json
+{
+  "scope": "branch-prefix:feat/example",
+  "reason": "scoped change delivered with an accepted gap",
+  "approved_by": "brian.anderson1222",
+  "declared_at": "2026-08-17T00:00:00Z",
+  "gaps": ["trend readings have no automatic reader"]
+}
+```
+
+`gaps` does not participate in exemption matching or well-formedness — the four required
+fields above remain the complete validity contract, and both readers
+(`scripts/ci/trust-reconcile.js`, `scripts/hooks/lib/unstarted-delivery.js`) tolerate the
+extra field. It is read only by `flow-agents console-declared-projection`, which folds every
+structured gap into an aging record a Console can render (one record per gap, carrying this
+entry's `declared_at` so an old gap surfaces with its real age). Prose in `reason` is never
+scraped for gaps: a legacy entry without `gaps` is counted and disclosed in the projection's
+summary (`legacy_entries_not_projected`), not silently omitted. When declaring a new
+exemption that accepts a known gap, prefer naming the gap in `gaps[]` (structure) in
+addition to explaining it in `reason` (rationale).
+
 **Scope forms.** A `scope` string is one or more space-separated conditions; each condition
 is one of exactly four forms (string equality/prefix matching only — **no `RegExp` is ever
 constructed from marker content**, in either the single- or compound-condition path):
@@ -128,6 +153,10 @@ is this repo's own `delivery/DECLARED` release-please entry:
 }
 ```
 
+(The live entry names the current release bot, `author:kontourai-releases[bot]`; the shape is
+identical. See the note below on why the `author:` half survived a serious proposal to remove
+it.)
+
 **`ref:`/`branch-prefix:` alone are insufficient for identity exemptions.** Per the ADR 0022
 2026-07-03 addendum: `ref:`/`branch-prefix:` match against `GITHUB_HEAD_REF`, which is
 **pusher-controlled on a fork PR** — anyone who can open a PR can name their branch to satisfy
@@ -139,6 +168,40 @@ to match. `author:` alone does not have this weakness (`GITHUB_ACTOR` is platfor
 pusher-chosen), which is why this repo's `dependabot[bot]` entry (`author:dependabot[bot]`)
 was security-review-confirmed sufficient on its own with no `branch-prefix:` needed — identity
 alone, not branch/ref, is the relevant boundary for that actor.
+
+**Why the pairing survives its own worst day (#1011) — read this before proposing to drop
+`author:`.** The rule above has a real cost, and it has already been paid once. An `author:`
+condition couples a standing exemption to an identity that rotates on someone else's
+schedule, and when it rotates the exemption fails **closed and silent**: the release bot
+became the `kontourai-releases` GitHub App, `author:github-actions[bot]` stopped matching,
+and every release PR failed Trust Reconcile for 13 days while `5.4.0` never shipped. The
+obvious remedy — scope release automation on `branch-prefix:release-please--` alone, since
+nothing but `.github/workflows/release-please.yml` opens branches with that prefix — was
+proposed, implemented, and **rejected before merge**.
+
+It was rejected because it pays for a *reporting* failure with a *security* boundary. The
+addendum's finding is not hypothetical here: the adversary this anchor exists to constrain is
+an **agent delivering in this repo**, and an agent names its own branch. A
+`branch-prefix:`-only release exemption is therefore self-service — any agent willing to call
+its branch `release-please--something` skips Step 2 entirely. "Nothing else opens branches
+with that prefix" describes today's *automation*, not the set of things that *can*.
+
+What changed instead is the reporting (see the next note): the identical incident is now
+legible in the **first** failing run rather than after thirteen. The accepted trade is stated
+rather than implied — on the next actor rotation this exemption **will** fail and release PRs
+**will** go red until a human re-keys it. A release train that breaks loudly is a bounded
+operational cost; thirteen silent days was the bug. Both halves are pinned by regression
+tests (`evals/integration/test_trust_reconcile_negatives.sh`, cases 7w/7x): the rotation
+fails and the failure names the dead condition and the resolved actor, and naming a
+`release-please--` branch without the bot identity does not exempt.
+
+**Unmatched markers are reported distinctly (#1011).** The reconciler no longer prints one
+sentence for every marker-side failure. A marker that is **absent**, **malformed**, present
+but matching **no condition at all**, and present with an entry that matched **some** of its
+conditions are four separate diagnostics; the last two name each failed condition and the
+resolved context value it failed against, and the partial-match case is flagged
+`STALE-SCOPE SUSPECTED` because that is the signature of a drifted scope rather than of a
+change that simply has no exemption. The verdict is unchanged — all four still fail closed.
 
 **Array form + append, never clobber.** `delivery/DECLARED` accepts either a single
 `{scope, reason, approved_by, declared_at}` object or a JSON array of such objects, so one

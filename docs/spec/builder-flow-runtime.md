@@ -149,6 +149,51 @@ definition bounds that correction to three Flow-owned attempts and blocks on exh
 there is no default execute route. Status and sync are read-only/reprojection operations,
 not implicit backtracking or definition amendment.
 
+A gate may declare `requires_current_verification: true` in its Flow Definition
+(the Builder Kit declares it on `merge-ready-ci-gate`). The evidence writer then
+refuses a **passing** claim for that gate's expectations while canonical review
+and test verification evidence is stale for the current workspace, running the
+same snapshot-freshness predicate the delivery publish preflight runs and
+surfacing its exact vocabulary. This closes the #1302 composition trap: freshness
+was previously guarded only at the exits (publish), so a cursor-advancing gate
+could commit the run past its last repair point on stale evidence. Failing
+claims are exempt — they are the repair path — and the Builder `learn-gate`
+declares `missing_evidence`/`default -> verify` so staleness discovered past
+`merge-ready-ci` remains repairable through the ordinary bounded route-back
+mechanism instead of stranding the run.
+
+Recording a non-pass status at a gate with an `on_route_back` map is a disclosed
+cost, not a silent transition (#1304). The disclosure has two halves, split along
+declared-versus-observed lines so it never predicts what evaluation will decide.
+Before the mutation, the evidence writer (and the direct sidecar gate-claim
+writer) prints a stderr NOTICE stating only pre-existing facts: the gate's
+declared route map (`reason -> step`, quoted from the definition), the persisted
+attempt history grouped by Flow's budget identity — normalized reason + loop +
+retry epoch, with the current epoch derived from `retry_authorized` pairings
+(an authorized-but-undebited epoch reads `0 attempts (authorized)`) and closed
+epochs parenthesized — against the declared budget, and that a route-back
+invalidates current-visit verification evidence (critique/tests re-records).
+After the mutation commits — fresh or recovered, a recovered outcome being this
+invocation's canonically attached candidate whose later bookkeeping failed — the
+evidence writer reports what evaluation actually did, derived verbatim from the
+transitions it appended to canonical state: routed to a step (with the
+transition's own attempt/max/reason), blocked on an exhausted budget, or — the
+#1304 live trap — no route at all, with the non-pass claim sitting live at the
+unchanged step. A gate declaring `requires_current_verification` adds the
+point-of-use ordering rule whenever no VERIFIED provisional delivery record
+exists for the session (the production record verifier is the suppression key;
+a record's mere existence, or fresh current verification evidence — the exact
+pre-trap state — never suppresses it): publish the provisional delivery BEFORE
+recording this gate; a live non-pass claim here blocks the publish that would
+resolve it. Both keys are facts (the declaration and the record verifier's
+verdict), never a gate name, so core stays kit-generic; the disclosure is
+additive output and existing refusal strings are unchanged. On the direct
+sidecar path a disclosure failure degrades loudly (a static warning that a
+non-pass claim may spend a route-back attempt and sit live) rather than
+silently; only a proven-noncanonical session or a proven-absent canonical run
+stays quiet. The signed reseal path is orchestrator-mediated and out of this
+disclosure's scope.
+
 ## Agent Projection
 
 While a run is active, `state.json` contains:
@@ -442,7 +487,7 @@ the transition.
 The public reference coordinator source is
 `packaging/lifecycle-authority/coordinator.mjs`. Administrators install, upgrade, or roll it back at
 the pinned path with `sudo scripts/lifecycle-authority-admin.sh <install|upgrade|rollback> [coordinator.mjs] [node_modules]`.
-The script stages the exact published `@kontourai/flow` 3.9.0 package and the transitive runtime
+The script stages the exact published `@kontourai/flow` 5.0.0 package and the transitive runtime
 dependencies declared by that package
 under the root-owned coordinator directory, then checks the reducer's public artifact identity and
 hash from `packaging/lifecycle-authority/flow-reducer-v1.json`. It preserves one prior coordinator,
@@ -451,6 +496,33 @@ create registries, signing keys, or deployment-specific configuration. The coord
 administrator-owned inputs under
 `/etc/kontourai/flow-agents-lifecycle-authority-v1` and durable locks/completions under
 `/var/lib/kontourai/flow-agents-lifecycle-authority-v1`.
+
+### Host-authorized ordinary evidence
+
+A host session whose runtime identity differs from the exact assignment actor
+may establish an expiring actor-scoped routing binding containing that
+assignment actor pair. The pointer remains non-authoritative metadata.
+`workflow evidence-request` is available only through a live matching binding
+and emits the canonical unsigned `authorize-workflow-evidence` record. That
+record binds the canonical project, run, and subject; exact assignment
+generation, actor key, and actor struct; the independently named host routing
+key, routing-binding id, and raw digest; Flow run head and
+manifest digest; Trust Bundle digest; exact semantic evidence arguments; nonce;
+and bounded validity window.
+
+The host signs that record with a registered lifecycle-authority key and
+supplies it to ordinary `workflow evidence --authorization-file`. The
+coordinator verifies the signature and every protected current preimage,
+durably redeems the nonce, and signs a completion whose result core binds both
+the canonical authorization digest and evidence-request digest. The package
+validates the same exact preimages and completion, then holds the subject and
+host-pointer generation locks through the existing staged evidence
+transaction. Canonical evidence and Flow transitions therefore retain their
+normal writer semantics. Replay, expiry, binding retirement or replacement,
+assignment takeover, and changed Flow, trust, or evidence arguments fail
+closed. Operation-bound expectations still require their dedicated external
+completion, and completed-bundle verification replacement still requires the
+separate atomic reseal protocol below.
 
 ### Canonical manifest and completion-key boundaries
 
@@ -579,6 +651,18 @@ removes fixed stages before the signed plan; an open fence plus a retained plan 
 cleanup-replay state, not a permanent rejection.
 Candidate, bundle, ledger, completion, Flow, signature, expiry, nonce, or claim-scope drift fails
 closed.
+
+Publishing requires an administrator-injected host capability at the fixed protected configuration
+path `verification-reseal-atomic-replace.cjs`. Its
+`kontourai.atomic-expected-preimage-replace.v1` operation must atomically compare the named leaf's
+exact presence, mode, size, and digest and replace or delete it only when that preimage still
+matches. Root validates the fixed file as a non-symlinked, root-owned, non-writable artifact; only
+the caller-identity mutation worker loads and executes it. The coordinator passes a pinned parent descriptor and basename—not a caller-selected
+path—and independently verifies the unchanged parent and exact postimage afterward. Descriptor
+pinning is defense in depth; it is not itself the leaf CAS. The reference coordinator deliberately
+ships no fallback implementation and refuses on every platform before coordinator state, nonce,
+plan, stage, fence, or artifact mutation when the protected capability is absent or invalid.
+Request creation and external signing remain portable for later redemption by a configured host.
 
 After an applied or replayed reseal, the public package recovers `state.json`,
 current pointers, and the optional terminal outcome from the new canonical Flow
@@ -805,3 +889,7 @@ atomically writes an immutable
 `evidenceRef` is already shaped for `workflow evidence --evidence-ref-json`, so
 the schedule and typed mutable-resource deferral travel with the gate's ordinary
 test or acceptance evidence instead of becoming a parallel gate truth source.
+
+### Sealed external calibration boundary
+
+External calibration is a separately signed, one-shot lifecycle action, not a Builder gate evaluator. It binds the canonical session and its one work-item subject, signed closure, and explicit budgets. Root-owned nonce and completion leases recover only when a PID is dead/reused or boot identity changed, never by elapsed time alone. The exact closure is staged below a root-owned non-listable execution parent and launched through a fixed privilege-drop binary that clears supplementary groups. The signed controller, closure, signing principal, and invoking OS account are trusted local TCB: staging is an integrity/replay boundary, not secrecy from another process already running as that UID. A hostile signed controller deliberately escaping its process group is an advisory limitation. Public callers retain only a verified safe result without free-form provider output. Tracking: #1146.

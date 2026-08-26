@@ -17,6 +17,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { isWithinRuntimeArtifactRoot } from "./declared-artifact-roots.js";
+// #1280 review FIX-1 / FIX-2 (the rules) live in kit-flow-binding.ts (#1316, the location), so
+// the RESOLVER — which reads a flow's bytes — and the RUN BINDING — which decides which kit's
+// manifest supplies the run's provenance — share ONE answer to "is this tree a kit source" and
+// ONE answer to "which ids may this manifest declare". Each branch had grown its own copy; the
+// resolver admitting bytes the run binding rejects (or vice versa) is exactly the disagreement
+// those rules exist to prevent, and it is the mechanism behind the start-validates-consumer /
+// run-binds-package split this merge closes.
+import { canonicalKitFlowSourceRoots, canonicalKitsRoot, kitManifestFlowDeclarations } from "./kit-flow-binding.js";
 
 // ─── Security: Layer 1 traversal defense ─────────────────────────────────────
 //
@@ -38,23 +47,24 @@ import { fileURLToPath } from "node:url";
 const SLUG_RE = /^[a-zA-Z0-9_-]+$/;
 
 /**
- * Returns true when the given resolved absolute path falls within a Flow Agents
- * runtime artifact directory (an agent-writable area). Used to reject FLOW_AGENTS_FLOW_DEFS_DIR
- * overrides that point into agent-controlled storage.
+ * True when a resolved directory lies inside Flow Agents RUNTIME ARTIFACT STORAGE — the
+ * `.kontourai/flow-agents` / `.flow-agents` / `delivery` sub-roots the runtime writes session
+ * artifacts into. Delegates to the ONE definition of those roots
+ * (`declared-artifact-roots.ts`, the same list the config-protection hook and the sidecar's
+ * fixture writer scope themselves to), so a FlowDefinition source can never be judged in-bounds
+ * here while the hook treats the same path as protected runtime storage.
+ *
+ * #1280 review FIX-1: this replaced a local `isAgentWritableDir` that scanned path SEGMENTS for
+ * the literals `.flow-agents` / `.kontourai/flow-agents`. Two defects that fixed: it missed
+ * `delivery` entirely, and — because it was a flat segment scan on the spelled path with
+ * realpath only as a fallback for the WHOLE string — it had no notion of a root's POSITION.
+ * The name was also a claim nothing computed: it said "agent-writable" while deriving
+ * "matches a name". Writability is not derivable here at all (runtime and agent share a uid),
+ * so the honest boundary is containment in runtime storage, and the name now says that.
+ * See the contract note on `isWithinRuntimeArtifactRoot` for what is deliberately NOT covered.
  */
-function hasAgentWritableRuntimeSegment(resolvedDir: string): boolean {
-  const parts = resolvedDir.split(path.sep);
-  if (parts.includes(".flow-agents")) return true;
-  return parts.some((part, index) => part === ".kontourai" && parts[index + 1] === "flow-agents");
-}
-
-function isAgentWritableDir(resolvedDir: string): boolean {
-  if (hasAgentWritableRuntimeSegment(resolvedDir)) return true;
-  try {
-    return hasAgentWritableRuntimeSegment(fs.realpathSync.native(resolvedDir));
-  } catch {
-    return false;
-  }
+function isRuntimeArtifactDir(resolvedDir: string): boolean {
+  return isWithinRuntimeArtifactRoot(resolvedDir);
 }
 
 function installedPackageRoot(): string | null {
@@ -72,13 +82,13 @@ function installedPackageRoot(): string | null {
 function packagedFlowFile(kitId: string, flowName: string, consumerRoot: string): string | null {
   const packageRoot = installedPackageRoot();
   if (!packageRoot || path.resolve(packageRoot) === path.resolve(consumerRoot)) return null;
-  const kitsRoot = path.resolve(packageRoot, "kits");
+  const kitsRoot = canonicalKitsRoot(packageRoot);
+  if (!kitsRoot) return null;
   const candidate = path.resolve(kitsRoot, kitId, "flows", `${flowName}.flow.json`);
   if (!candidate.startsWith(kitsRoot + path.sep)) return null;
   try {
-    const realKitsRoot = fs.realpathSync.native(kitsRoot);
     const realCandidate = fs.realpathSync.native(candidate);
-    return realCandidate.startsWith(realKitsRoot + path.sep) ? realCandidate : null;
+    return realCandidate.startsWith(kitsRoot + path.sep) ? realCandidate : null;
   } catch {
     return null;
   }
@@ -113,7 +123,7 @@ export function resolveFlowFilePath(
 
   if (override) {
     const resolvedOverride = path.resolve(override);
-    if (isAgentWritableDir(resolvedOverride)) {
+    if (isRuntimeArtifactDir(resolvedOverride)) {
       return null;
     } else {
       expectedRoot = resolvedOverride;
@@ -122,8 +132,13 @@ export function resolveFlowFilePath(
       flowFilePath = path.join(resolvedOverride, `${flowId}.flow.json`);
     }
   } else {
-    expectedRoot = path.resolve(repoRoot, "kits");
-    flowFilePath = path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+    // #1280 review FIX-1: the expected root is the REALPATH of `<repoRoot>/kits`, refused
+    // outright when that realpath escapes the repo root or lands in runtime artifact storage.
+    // Deriving the boundary from the same link that is being followed is not a boundary.
+    const kitsRoot = canonicalKitsRoot(repoRoot);
+    if (!kitsRoot) return null;
+    expectedRoot = kitsRoot;
+    flowFilePath = path.join(kitsRoot, kitId, "flows", `${flowName}.flow.json`);
     canonicalLookup = true;
   }
 
@@ -137,9 +152,13 @@ export function resolveFlowFilePath(
 
   // If the file exists, resolve final symlinks before returning a readable path.
   // `readFileSync` follows symlinks; this keeps lexical containment from turning
-  // into an out-of-root file read through a symlinked FlowDefinition.
+  // into an out-of-root file read through a symlinked FlowDefinition. For the canonical
+  // lookup `expectedRoot` is ALREADY a realpath (canonicalKitsRoot), so this comparison is
+  // against a boundary the tree owner controls, not one a symlink under test chose.
   try {
-    const realExpectedRoot = fs.existsSync(expectedRoot) ? fs.realpathSync.native(expectedRoot) : expectedRoot;
+    const realExpectedRoot = canonicalLookup
+      ? expectedRoot
+      : (fs.existsSync(expectedRoot) ? fs.realpathSync.native(expectedRoot) : expectedRoot);
     const realPath = fs.realpathSync.native(resolvedPath);
     if (!realPath.startsWith(realExpectedRoot + path.sep) && realPath !== realExpectedRoot) {
       return null;
@@ -177,6 +196,8 @@ export type ActiveFlowStep = {
   routeBackReasons: string[];
   /** When resolved through a parent step's uses_flow edge, names the child FlowDefinition that owns the gate. */
   sourceFlowId?: string;
+  /** Ordered child FlowDefinitions that contribute a composed multi-child gate. */
+  sourceFlowIds?: string[];
 };
 
 /** Shape of a gate entry in the FlowDefinition JSON. */
@@ -187,6 +208,20 @@ type FlowGate = {
   on_route_back?: Record<string, string>;
   /** Policy governing route-back attempt limits. */
   route_back_policy?: { max_attempts: number; on_exceeded: string };
+  /**
+   * #1302: a cursor-advancing gate that declares this refuses to accept a passing claim while
+   * canonical review/verification evidence is stale for the current workspace — enforced at the
+   * evidence writer by the SAME predicate the publish preflight runs (one predicate, quoted
+   * everywhere; a paraphrase here would recreate the #1299/#1300 divergence class).
+   */
+  requires_current_verification?: boolean;
+};
+
+type FlowStep = { id: string; next: string | null; uses_flow?: string; uses_flows?: string[] };
+
+type RouteBackMetadata = {
+  onRouteBack?: Record<string, string>;
+  routeBackPolicy?: { max_attempts: number; on_exceeded: string };
 };
 
 /** Shape of a FlowDefinition JSON file. */
@@ -197,13 +232,15 @@ type FlowDefinition = {
    *  (e.g. "execution") to step ids (e.g. "execute") so advance-state can write active_step_id
    *  without hardcoding any vocabulary in the core. */
   phase_map?: Record<string, string>;
-  steps?: Array<{ id: string; next: string | null; uses_flow?: string }>;
+  steps?: FlowStep[];
   gates?: Record<string, FlowGate>;
   /** Optional claim types or expectation ids this flow intentionally exposes to parent/composed flows. */
   exports?: string[];
+  /** Resolver-emitted provenance for gates imported through uses_flows. */
+  flow_agents_contributions?: Array<{ flow_id: string; gate_id: string; step_id: string; expectation_ids: string[] }>;
 };
 
-type InternalActiveFlowStep = ActiveFlowStep & { flowExports?: string[] };
+type InternalActiveFlowStep = ActiveFlowStep & { flowExports?: string[]; routeBack?: RouteBackMetadata };
 
 function flowIdParts(flowId: string): { kitId: string; flowName: string } | null {
   if (!flowId) return null;
@@ -213,6 +250,245 @@ function flowIdParts(flowId: string): { kitId: string; flowName: string } | null
   const flowName = flowId.slice(dotIdx + 1);
   if (!kitId || !flowName) return null;
   return { kitId, flowName };
+}
+
+/**
+ * Enumerate the flow ids the installed kits DECLARE — the derivation the public
+ * `workflow start` verb consults instead of enumerating flow identifiers in core (#1280).
+ *
+ * Sources mirror resolveFlowFilePath's resolution order exactly, so the derived list never
+ * names a flow the resolver would look up somewhere else:
+ *   - FLOW_AGENTS_FLOW_DEFS_DIR override (when set and outside runtime artifact storage):
+ *     every `<flowId>.flow.json` file in that directory. The override replaces canonical kit
+ *     lookup wholesale, so it replaces discovery too. An override inside runtime artifact
+ *     storage yields an empty list — the same fail-closed posture resolveFlowFilePath takes.
+ *   - Canonical: each kit directory under `<repoRoot>/kits/*` (that root resolved, and refused
+ *     when it escapes the repo root or lands in runtime storage), plus the executing package's
+ *     own `kits/*` (the same package fallback canonical resolution applies). A kit's
+ *     declaration surface is its `kit.json` `flows[].id` list when the manifest declares
+ *     one — the packaged, digest-covered artifact — else its `flows/*.flow.json` directory.
+ *
+ * Ids without the `<kit>.<flow>` slug shape the resolver requires are excluded: a refusal
+ * that recommends an id the resolver can never resolve would be worse than none. This
+ * enumerates EXISTENCE only; conformance stays with resolveEffectiveFlowDefinition.
+ */
+export function declaredKitFlowIds(repoRoot: string): string[] {
+  return [...new Set(declaredKitFlows(repoRoot).map((declaration) => declaration.flowId))].sort();
+}
+
+/** How a kit tree told us a flow exists. The three are not interchangeable — see below. */
+export type KitFlowDeclarationVia = "override" | "manifest" | "flows-directory";
+
+/** A declared flow id, BOUND TO THE ROOT THAT DECLARED IT. */
+export interface DeclaredKitFlow {
+  flowId: string;
+  /** The root whose `kits/` tree (or defs override directory) carries the declaration. */
+  sourceRoot: string;
+  via: KitFlowDeclarationVia;
+}
+
+/**
+ * `declaredKitFlowIds`, but each id carries the SOURCE that declared it (#1316 review FIX-2).
+ *
+ * The bare `Set<string>` this replaced is the whole defect: a union of package and consumer
+ * declarations, handed to a caller that then resolved the definition by a DIFFERENT rule. A
+ * package declaration for `builder.build` could therefore authorize a start whose bytes came from
+ * a consumer `kits/builder/flows/build.flow.json` the package never declared — start validating
+ * one file while the run adapter pins another. Carrying the source makes the two comparable, and
+ * `flow-admission.ts` requires them to be EQUAL.
+ *
+ * Roots are walked in `canonicalKitFlowSourceRoots` order — PACKAGED FIRST, the same order the
+ * run binding uses — and the FIRST declaration of an id is the one that authorizes it. That is
+ * what makes a project kit unable to shadow a packaged one on the start path, matching what the
+ * adapter has always done on the run path.
+ *
+ * `via` is retained because the three sources are not equivalent authority:
+ *   - `manifest`        — the kit said so, in the artifact the package digest covers. Only this
+ *                         one can also supply a RUN BINDING.
+ *   - `flows-directory` — a file exists where canonical resolution would look, but no manifest
+ *                         declares it. Enough to LIST in a refusal (a refusal should name
+ *                         everything a start could resolve); never enough to bind.
+ *   - `override`        — FLOW_AGENTS_FLOW_DEFS_DIR. Existence only, and never a run binding: an
+ *                         env var is not provenance.
+ */
+export function declaredKitFlows(repoRoot: string): DeclaredKitFlow[] {
+  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
+  if (override) {
+    const resolvedOverride = path.resolve(override);
+    if (isRuntimeArtifactDir(resolvedOverride)) return [];
+    const overridden: DeclaredKitFlow[] = [];
+    for (const entry of listDirents(resolvedOverride)) {
+      if (!entry.isFile() || !entry.name.endsWith(".flow.json")) continue;
+      const id = entry.name.slice(0, -".flow.json".length);
+      if (slugFlowIdParts(id)) overridden.push({ flowId: id, sourceRoot: resolvedOverride, via: "override" });
+    }
+    return overridden;
+  }
+  const declarations: DeclaredKitFlow[] = [];
+  const seen = new Set<string>();
+  const push = (flowId: string, sourceRoot: string, via: KitFlowDeclarationVia): void => {
+    if (seen.has(flowId)) return;
+    seen.add(flowId);
+    declarations.push({ flowId, sourceRoot, via });
+  };
+  for (const sourceRoot of canonicalKitFlowSourceRoots(repoRoot)) {
+    const kitsRoot = canonicalKitsRoot(sourceRoot);
+    if (!kitsRoot) continue;
+    for (const kitEntry of listDirents(kitsRoot)) {
+      if (!kitEntry.isDirectory() || !SLUG_RE.test(kitEntry.name)) continue;
+      const declared = kitManifestFlowDeclarations(kitsRoot, kitEntry.name);
+      if (declared) {
+        for (const declaration of declared) push(declaration.flowId, sourceRoot, "manifest");
+        continue;
+      }
+      for (const flowEntry of listDirents(path.join(kitsRoot, kitEntry.name, "flows"))) {
+        if (!flowEntry.isFile() || !flowEntry.name.endsWith(".flow.json")) continue;
+        const id = `${kitEntry.name}.${flowEntry.name.slice(0, -".flow.json".length)}`;
+        if (slugFlowIdParts(id)) push(id, sourceRoot, "flows-directory");
+      }
+    }
+  }
+  return declarations;
+}
+
+function listDirents(dir: string): fs.Dirent[] {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+/** flowIdParts, plus the SLUG_RE contract `resolveFlowFilePath` actually enforces on both parts.
+ *  A declaration whose id the resolver could never resolve is not a declaration. */
+function slugFlowIdParts(flowId: string): { kitId: string; flowName: string } | null {
+  const parts = flowIdParts(flowId);
+  if (!parts) return null;
+  return SLUG_RE.test(parts.kitId) && SLUG_RE.test(parts.flowName) ? parts : null;
+}
+
+
+/**
+ * The identifier contract THIS RESOLVER enforces at read time, applied as a start-time
+ * conformance check (#1280 review FIX-5).
+ *
+ * `validateDefinition` from `@kontourai/flow` is the base contract and is deliberately looser:
+ * it accepts any non-empty string as a step id. The resolver is stricter — `resolveFlowStep`
+ * returns null for any `stepId` outside SLUG_RE (see resolveFlowStepInternal), and
+ * `resolveFlowFilePath` returns null for a flow id whose parts fall outside it. A definition
+ * that passes only the base contract can therefore be published as an active step and then
+ * resolve to NOTHING, at which point the Stop hook silently falls back to generic `workflow.*`
+ * enforcement — a governance downgrade produced by a definition the start accepted. Callers
+ * that admit a definition into a session must apply this too, so what start validates and what
+ * runtime can resolve are the same set.
+ *
+ * Returns a list of human-readable issues; empty means the definition satisfies the resolver's
+ * own identifier contract.
+ *
+ * `phase_map` IS checked, on its VALUES only (#1316 review FIX-4). It was on the not-checked list
+ * as "a kit chooses its own lifecycle projection" — true of the phase KEYS, which are the kit's
+ * own vocabulary and stay unchecked. The values are not a vocabulary: `advance-state` publishes
+ * one verbatim into `active_step_id`, and `resolvePhaseMap` only ever asserted they are strings.
+ * A mapping to `"bad step"`, or to a step the definition never declares, therefore recreates
+ * exactly the unresolvable active pointer the step-id clause above exists to prevent — through a
+ * second door, with the same consequence (the Stop hook silently falls back to generic
+ * `workflow.*` enforcement). A projection may choose WHICH declared step a phase lands on; it may
+ * not name a step that does not exist.
+ *
+ * DELIBERATELY NOT CHECKED HERE (disclosed rather than implied — a third-party definition still
+ * influences these, and no further check stands between the declaration and the behavior):
+ *   - `phase_map` KEYS: the kit's own phase vocabulary, matched against whatever `--phase` the
+ *     caller passes. An unmatched phase publishes no pointer at all, which is already fail-closed.
+ *   - `expects[].bundle_claim` (claimType / subjectType / accepted_statuses): selects which
+ *     Stop-hook claim satisfies a gate; a kit chooses its own claim vocabulary.
+ *   - `on_route_back` / `route_back_policy`: route-back targets and attempt limits consumed by
+ *     `advance-state`; structurally validated by `routeBackMetadataForGate`, but the declared
+ *     targets and limits themselves are the kit's.
+ *   - `requires_current_verification`: enforced at the canonical Builder evaluation seam, so it
+ *     has no effect for a flow with no canonical run.
+ *   - producer-binding completeness: whether a step's expectations have a producer that can
+ *     actually satisfy them is not knowable from the definition alone (see
+ *     `expectedGateProducer`, which resolves producers from a kit manifest, not the definition).
+ */
+export function flowDefinitionResolverContractIssues(
+  definition: unknown,
+  options: { declaredStepIds?: ReadonlySet<string> } = {},
+): string[] {
+  const issues: string[] = [];
+  if (!isRecord(definition)) return ["definition must be an object"];
+  const id = definition["id"];
+  if (typeof id !== "string" || !slugFlowIdParts(id)) {
+    issues.push(`definition id ${JSON.stringify(String(id))} must be "<kit>.<flow>" with both parts matching ${SLUG_RE}`);
+  }
+  const steps = definition["steps"];
+  const stepIds = new Set<string>();
+  if (Array.isArray(steps)) {
+    for (const step of steps) {
+      const stepId = isRecord(step) ? step["id"] : undefined;
+      if (typeof stepId !== "string") continue;
+      stepIds.add(stepId);
+      if (!SLUG_RE.test(stepId)) {
+        issues.push(`step id ${JSON.stringify(stepId)} must match ${SLUG_RE}; the resolver cannot resolve a gate for it`);
+      }
+    }
+  }
+  const gates = definition["gates"];
+  if (isRecord(gates)) {
+    for (const [gateId, gate] of Object.entries(gates)) {
+      const step = isRecord(gate) ? gate["step"] : undefined;
+      if (typeof step !== "string") continue;
+      if (!SLUG_RE.test(step)) {
+        issues.push(`gate ${JSON.stringify(gateId)} names step ${JSON.stringify(step)}, which must match ${SLUG_RE}`);
+      } else if (steps !== undefined && !stepIds.has(step)) {
+        issues.push(`gate ${JSON.stringify(gateId)} names step ${JSON.stringify(step)}, which the definition does not declare`);
+      }
+    }
+  }
+  // #1316 review FIX-4: `advance-state` publishes a phase_map VALUE verbatim into
+  // `active_step_id`. Hold it to the same contract a step id is held to, at the same floor.
+  const phaseMap = definition["phase_map"];
+  if (isRecord(phaseMap)) {
+    // Judge the value against the steps THE RESOLVER WILL SEE when it resolves the published
+    // active_step_id, which is `declaredStepIds` when the caller supplies it. That set is NOT
+    // always this definition's own `steps`: `resolveEffectiveFlowDefinition` prunes TERMINAL
+    // SENTINELS (an ungated `next: null` step some other step points at), while
+    // `resolveFlowStepInternal` reads the RAW file, where the sentinel is still a step. Judging a
+    // phase_map against the pruned list would refuse `closeout: "closeout"` — a correct mapping
+    // to a real, ungated terminal step — as if it named nothing.
+    const resolvable = options.declaredStepIds ?? stepIds;
+    const canJudgeMembership = options.declaredStepIds !== undefined || steps !== undefined;
+    for (const [phase, mapped] of Object.entries(phaseMap)) {
+      if (typeof mapped !== "string") {
+        issues.push(`phase_map ${JSON.stringify(phase)} maps to ${JSON.stringify(mapped)}, which must be a declared step id`);
+      } else if (!SLUG_RE.test(mapped)) {
+        issues.push(`phase_map ${JSON.stringify(phase)} maps to step ${JSON.stringify(mapped)}, which must match ${SLUG_RE}; advance-state would publish it as an active_step_id the resolver cannot resolve`);
+      } else if (canJudgeMembership && !resolvable.has(mapped)) {
+        issues.push(`phase_map ${JSON.stringify(phase)} maps to step ${JSON.stringify(mapped)}, which the definition does not declare`);
+      }
+    }
+  }
+  return issues;
+}
+
+/**
+ * The step ids the RAW definition declares — the exact set `resolveFlowStepInternal` matches a
+ * published `active_step_id` against, because it is read the same way (`readFlowDefinition`).
+ *
+ * Exported so the admission check can judge `phase_map` against what an active pointer will
+ * actually be resolved against rather than against the composed definition, which legitimately
+ * omits pruned terminal sentinels. Deriving it from the same read is the point: a second
+ * enumeration of "which steps exist" is a second answer.
+ *
+ * Returns null when the definition cannot be read at all.
+ */
+export function declaredFlowStepIds(flowId: string, repoRoot: string, allowOverride = true): ReadonlySet<string> | null {
+  const source = readFlowDefinition(flowId, repoRoot, allowOverride);
+  if (!source || !Array.isArray(source.steps)) return null;
+  const ids = new Set<string>();
+  for (const step of source.steps) {
+    if (step && typeof step.id === "string") ids.add(step.id);
+  }
+  return ids;
 }
 
 function readFlowDefinition(flowId: string, repoRoot: string, allowOverride = true): FlowDefinition | null {
@@ -227,6 +503,90 @@ function readFlowDefinition(flowId: string, repoRoot: string, allowOverride = tr
   } catch {
     return null; // ENOENT, permission error, or parse error → fail-open
   }
+}
+
+function childFlowIdsForStep(step: FlowStep): string[] | null {
+  const scalar = step.uses_flow;
+  const list = step.uses_flows;
+  if (scalar !== undefined && list !== undefined) return null;
+  // A present scalar declaration must be a single non-empty id.  Treating an
+  // array (or an empty value) as "no composition" would silently erase the
+  // legacy fan-in attempt instead of failing closed.
+  if (scalar !== undefined) return typeof scalar === "string" && scalar.trim() ? [scalar] : null;
+  if (list === undefined) return [];
+  if (!Array.isArray(list) || list.length === 0 || list.some((flowId) => typeof flowId !== "string" || !flowId.trim())) return null;
+  if (new Set(list).size !== list.length) return null;
+  return list;
+}
+
+const AGGREGATE_GATE_PREFIX = "flow-agents.aggregate.";
+
+function aggregateGateId(stepId: string): string {
+  return `${AGGREGATE_GATE_PREFIX}${stepId}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Route-back metadata participates in the aggregate gate's observable runtime
+ * behavior, so malformed or partial declarations are not safe to ignore.
+ */
+function routeBackMetadataForGate(gate: FlowGate): RouteBackMetadata | null {
+  const rawRoutes = gate.on_route_back;
+  const rawPolicy = gate.route_back_policy;
+  if (rawRoutes === undefined && rawPolicy === undefined) return {};
+  if (!isRecord(rawRoutes)) return null;
+  const onRouteBack: Record<string, string> = {};
+  for (const [reason, target] of Object.entries(rawRoutes)) {
+    if (!reason || typeof target !== "string" || !target) return null;
+    onRouteBack[reason] = target;
+  }
+  if (rawPolicy === undefined) return { onRouteBack };
+  if (!isRecord(rawPolicy)
+    || !Number.isSafeInteger(rawPolicy.max_attempts)
+    || rawPolicy.max_attempts < 1
+    || typeof rawPolicy.on_exceeded !== "string"
+    || !rawPolicy.on_exceeded) return null;
+  return {
+    onRouteBack,
+    routeBackPolicy: { max_attempts: rawPolicy.max_attempts, on_exceeded: rawPolicy.on_exceeded },
+  };
+}
+
+/** Return null when children would give the aggregate contradictory retry semantics. */
+function mergeRouteBackMetadata(metadata: RouteBackMetadata[]): RouteBackMetadata | null {
+  const onRouteBack: Record<string, string> = {};
+  let routeBackPolicy: RouteBackMetadata["routeBackPolicy"] | undefined;
+  let policyPresence: boolean | undefined;
+  for (const entry of metadata) {
+    const hasPolicy = entry.routeBackPolicy !== undefined;
+    if (policyPresence === undefined) policyPresence = hasPolicy;
+    else if (policyPresence !== hasPolicy) return null;
+    if (hasPolicy) {
+      if (routeBackPolicy
+        && (routeBackPolicy.max_attempts !== entry.routeBackPolicy!.max_attempts
+          || routeBackPolicy.on_exceeded !== entry.routeBackPolicy!.on_exceeded)) return null;
+      routeBackPolicy = entry.routeBackPolicy;
+    }
+    for (const [reason, target] of Object.entries(entry.onRouteBack ?? {})) {
+      if (onRouteBack[reason] !== undefined && onRouteBack[reason] !== target) return null;
+      onRouteBack[reason] = target;
+    }
+  }
+  if (routeBackPolicy && Object.keys(onRouteBack).length === 0) return null;
+  return {
+    ...(Object.keys(onRouteBack).length > 0 ? { onRouteBack } : {}),
+    ...(routeBackPolicy ? { routeBackPolicy } : {}),
+  };
+}
+
+function routeBackGateFields(metadata: RouteBackMetadata): Pick<FlowGate, "on_route_back" | "route_back_policy"> {
+  return {
+    ...(metadata.onRouteBack ? { on_route_back: metadata.onRouteBack } : {}),
+    ...(metadata.routeBackPolicy ? { route_back_policy: metadata.routeBackPolicy } : {}),
+  };
 }
 
 /**
@@ -261,26 +621,68 @@ function resolveEffectiveFlowDefinitionInternal(flowId: string, repoRoot: string
   if (!source || !Array.isArray(source.steps)) return null;
   const effective = JSON.parse(JSON.stringify(source)) as FlowDefinition;
   effective.gates = { ...(effective.gates ?? {}) };
+  const contributions: NonNullable<FlowDefinition["flow_agents_contributions"]> = [];
 
   for (let index = 0; index < source.steps.length; index += 1) {
-    const sourceStep = source.steps[index]!;
-    if (typeof sourceStep.uses_flow !== "string" || !sourceStep.uses_flow.trim()) continue;
-    const child = resolveEffectiveFlowDefinitionInternal(sourceStep.uses_flow, repoRoot, nextSeen, allowOverride) as FlowDefinition | null;
-    if (!child || !child.gates) return null;
-    const childGateEntry = Object.entries(child.gates).find(([, gate]) => gate?.step === sourceStep.id);
-    if (!childGateEntry) return null;
+    const sourceStep: FlowStep = source.steps[index]!;
+    const childFlowIds = childFlowIdsForStep(sourceStep);
+    if (childFlowIds === null) return null;
+    if (childFlowIds.length === 0) continue;
     if (Object.values(effective.gates).some((gate) => gate?.step === sourceStep.id)) return null;
-    const [childGateId, childGate] = childGateEntry;
-    const childExpects = Array.isArray(childGate.expects) ? childGate.expects : [];
-    const exported = exportedExpectations(childExpects, child.exports);
-    if (!exported) return null;
-    effective.gates[`${sourceStep.uses_flow}:${childGateId}`] = {
-      ...childGate,
-      expects: exported,
+
+    // Keep scalar composition byte-compatible: its one child gate remains
+    // namespaced exactly as before rather than becoming an aggregate.
+    if (typeof sourceStep.uses_flow === "string") {
+      const child = resolveEffectiveFlowDefinitionInternal(childFlowIds[0]!, repoRoot, nextSeen, allowOverride) as FlowDefinition | null;
+      if (!child || !child.gates) return null;
+      const childGateEntry = Object.entries(child.gates).find(([, gate]) => gate?.step === sourceStep.id);
+      if (!childGateEntry) return null;
+      const [childGateId, childGate] = childGateEntry;
+      const childExpects = Array.isArray(childGate.expects) ? childGate.expects : [];
+      const exported = exportedExpectations(childExpects, child.exports);
+      if (!exported) return null;
+      effective.gates[`${sourceStep.uses_flow}:${childGateId}`] = {
+        ...childGate,
+        expects: exported,
+      };
+      const { uses_flow: _usesFlow, ...compiledStep } = effective.steps![index]!;
+      effective.steps![index] = compiledStep;
+      continue;
+    }
+
+    const imports: Array<{ flowId: string; gateId: string; expects: GateExpectation[]; routeBack: RouteBackMetadata; requiresCurrentVerification: boolean }> = [];
+    const expectationIds = new Set<string>();
+    for (const childFlowId of childFlowIds) {
+      const child = resolveEffectiveFlowDefinitionInternal(childFlowId, repoRoot, nextSeen, allowOverride) as FlowDefinition | null;
+      if (!child || !child.gates) return null;
+      const childGateEntries: Array<[string, FlowGate]> = Object.entries(child.gates).filter(([, gate]) => gate?.step === sourceStep.id);
+      // A list contributor must resolve to one gate, matching live resolution.
+      if (childGateEntries.length !== 1) return null;
+      const [childGateId, childGate] = childGateEntries[0]!;
+      const childExpects = Array.isArray(childGate.expects) ? childGate.expects : [];
+      const exported = exportedExpectations(childExpects, child.exports);
+      const routeBack = routeBackMetadataForGate(childGate);
+      if (!exported || !routeBack || exported.some((expectation) => expectationIds.has(expectation.id))) return null;
+      for (const expectation of exported) expectationIds.add(expectation.id);
+      imports.push({ flowId: childFlowId, gateId: childGateId, expects: exported, routeBack, requiresCurrentVerification: childGate.requires_current_verification === true });
+    }
+    const routeBack = mergeRouteBackMetadata(imports.map((entry) => entry.routeBack));
+    const gateId = aggregateGateId(sourceStep.id);
+    if (!routeBack || effective.gates[gateId]) return null;
+    effective.gates[gateId] = {
+      step: sourceStep.id,
+      expects: imports.flatMap((entry) => entry.expects),
+      ...routeBackGateFields(routeBack),
+      // #1302: a freshness turnstile declared by ANY contributor governs the whole aggregate —
+      // dropping it here would silently disarm the guard for list-composed flows.
+      ...(imports.some((entry) => entry.requiresCurrentVerification) ? { requires_current_verification: true } : {}),
     };
-    const { uses_flow: _usesFlow, ...compiledStep } = effective.steps![index]!;
+    for (const imported of imports) contributions.push({ flow_id: imported.flowId, gate_id: imported.gateId, step_id: sourceStep.id, expectation_ids: imported.expects.map((expectation) => expectation.id) });
+    const { uses_flows: _usesFlows, ...compiledStep } = effective.steps![index]!;
     effective.steps![index] = compiledStep;
   }
+  if (contributions.length > 0) effective.flow_agents_contributions = contributions;
+  else delete effective.flow_agents_contributions;
   const effectiveSteps = effective.steps!;
   const gatedSteps = new Set(Object.values(effective.gates).flatMap((gate) =>
     typeof gate?.step === "string" ? [gate.step] : []));
@@ -297,6 +699,68 @@ function resolveEffectiveFlowDefinitionInternal(flowId: string, repoRoot: string
         : step);
   }
   return effective as unknown as Record<string, unknown>;
+}
+
+/**
+ * The step whose gate a run sitting on `stepId` must satisfy next.
+ *
+ * A flow may declare steps that gate nothing — sequencing passthroughs that exist so route-back
+ * targets and phase names keep resolving, while demanding no evidence. `builder.build-lean` is the
+ * first shipped flow to declare any (#1335), and before this derivation existed a run's cursor
+ * could come to rest on one and never leave: `applyEvaluation` (the only code in @kontourai/flow
+ * that moves a cursor) fires on a GATE outcome, so a step with no gate has nothing to move it, and
+ * `evaluateRun` with no explicit gate throws `no gate for current step`.
+ *
+ * The engine already knows how to traverse them — `evaluateRun(runId, { gate })` walks the cursor
+ * forward across gateless steps (recording an honest `"step has no gate"` transition for each) when
+ * only gateless steps separate the cursor from that gate. What it cannot do is tell a caller WHICH
+ * gate to name. That is this function: it answers "which declared gate is this run working toward",
+ * derived from the definition rather than from any flow identifier.
+ *
+ * Traversal deliberately mirrors the engine's own (`advanceThroughGatelessSteps`): follow `next`
+ * while the step declares no gate, stop at the first step that does, guard against cycles. Returns
+ * `stepId` itself when that step is gated, and `null` when the chain runs out without reaching a
+ * gate — a genuinely unadvanceable run, which callers must refuse rather than paper over.
+ */
+export function actionableFlowStepId(definition: unknown, stepId: string): string | null {
+  if (!isRecord(definition) || !Array.isArray(definition.steps) || !stepId) return null;
+  const gatedSteps = new Set(
+    Object.values(isRecord(definition.gates) ? definition.gates : {})
+      .flatMap((gate) => (isRecord(gate) && typeof gate.step === "string" ? [gate.step] : [])),
+  );
+  const nextByStepId = new Map<string, string | null>();
+  for (const step of definition.steps) {
+    if (isRecord(step) && typeof step.id === "string" && step.id) {
+      nextByStepId.set(step.id, typeof step.next === "string" && step.next ? step.next : null);
+    }
+  }
+  let cursor: string | null = stepId;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor)) {
+    if (!nextByStepId.has(cursor)) return null;
+    if (gatedSteps.has(cursor)) return cursor;
+    seen.add(cursor);
+    cursor = nextByStepId.get(cursor) ?? null;
+  }
+  return null;
+}
+
+/**
+ * `resolveFlowStep` for the step a run sitting on `stepId` must satisfy next — i.e. `stepId`
+ * itself when it declares a gate, otherwise the first gated step reachable across gateless
+ * sequencing passthroughs (#1335).
+ *
+ * The walk runs over the EFFECTIVE definition on purpose: a `uses_flow` step declares its gate in
+ * the child flow, so judging "is this step gated" against the raw file would read every composed
+ * step as gateless and walk straight past it. Resolution of the target step then goes through the
+ * ordinary `resolveFlowStep`, so the returned `stepId`/`gateId` are the real ones the kit binds a
+ * producer at — never the passthrough the cursor happened to be parked on.
+ */
+export function resolveActionableFlowStep(flowId: string, stepId: string, repoRoot: string): ActiveFlowStep | null {
+  const effective = resolveEffectiveFlowDefinition(flowId, repoRoot);
+  const target = actionableFlowStepId(effective, stepId);
+  if (!target) return null;
+  return resolveFlowStep(flowId, target, repoRoot);
 }
 
 /**
@@ -394,33 +858,71 @@ function resolveFlowStepInternal(flowId: string, stepId: string, repoRoot: strin
 
   if (!flowDef || typeof flowDef !== "object") return null;
 
-  // Find the gate whose .step matches stepId.
-  if (flowDef.gates) {
-    for (const [gateId, gate] of Object.entries(flowDef.gates)) {
-      if (!gate || gate.step !== stepId) continue;
-      const expects = Array.isArray(gate.expects) ? gate.expects : [];
-      return { flowId, stepId, gateId, gateExpects: expects, routeBackReasons: Object.keys(gate.on_route_back ?? {}), flowExports: flowDef.exports };
-    }
+  const composedStep = Array.isArray(flowDef.steps) ? flowDef.steps.find((step) => step?.id === stepId) : undefined;
+  const childFlowIds = composedStep ? childFlowIdsForStep(composedStep) : [];
+  if (childFlowIds === null) return null;
+
+  const directGateEntry = flowDef.gates
+    ? Object.entries(flowDef.gates).find(([, gate]) => gate?.step === stepId)
+    : undefined;
+  if (directGateEntry) {
+    if (childFlowIds.length > 0) return null;
+    const [gateId, gate] = directGateEntry;
+    const routeBack = routeBackMetadataForGate(gate);
+    if (!routeBack) return null;
+    return { flowId, stepId, gateId, gateExpects: Array.isArray(gate.expects) ? gate.expects : [], routeBackReasons: Object.keys(routeBack.onRouteBack ?? {}), flowExports: flowDef.exports, routeBack };
   }
 
-  const composedStep = Array.isArray(flowDef.steps)
-    ? flowDef.steps.find((step) => step && step.id === stepId && typeof step.uses_flow === "string" && step.uses_flow.trim())
-    : null;
-  if (composedStep?.uses_flow) {
-    const child = resolveFlowStepInternal(composedStep.uses_flow, stepId, repoRoot, seen);
-    if (child) {
+  if (childFlowIds.length === 1 && typeof composedStep?.uses_flow === "string") {
+    const child = resolveFlowStepInternal(childFlowIds[0]!, stepId, repoRoot, seen);
+    if (!child) return null;
+    const childGateExpects = exportedExpectations(child.gateExpects, child.flowExports);
+    if (!childGateExpects) return null;
+    return {
+      flowId,
+      stepId,
+      gateId: `${child.flowId}:${child.gateId}`,
+      gateExpects: childGateExpects,
+      routeBackReasons: child.routeBackReasons,
+      sourceFlowId: child.flowId,
+      flowExports: flowDef.exports,
+      routeBack: child.routeBack,
+    };
+  }
+
+  if (childFlowIds.length > 0) {
+    const gateExpects: GateExpectation[] = [];
+    const expectationIds = new Set<string>();
+    const routeBackEntries: RouteBackMetadata[] = [];
+    if (flowDef.gates?.[aggregateGateId(stepId)]) return null;
+    for (const childFlowId of childFlowIds) {
+      // Match effective compilation: a list contributor must compile to one
+      // gate at this step, not merely have a first gate live resolution finds.
+      const effectiveChild = resolveEffectiveFlowDefinitionInternal(childFlowId, repoRoot, new Set([flowId]), true) as FlowDefinition | null;
+      const effectiveChildGates = effectiveChild?.gates
+        ? Object.entries(effectiveChild.gates).filter(([, gate]) => gate?.step === stepId)
+        : [];
+      if (effectiveChildGates.length !== 1) return null;
+      const child = resolveFlowStepInternal(childFlowId, stepId, repoRoot, new Set(seen));
+      if (!child) return null;
       const childGateExpects = exportedExpectations(child.gateExpects, child.flowExports);
-      if (!childGateExpects) return null;
-      return {
-        flowId,
-        stepId,
-        gateId: `${child.flowId}:${child.gateId}`,
-        gateExpects: childGateExpects,
-        routeBackReasons: child.routeBackReasons,
-        sourceFlowId: child.flowId,
-        flowExports: flowDef.exports,
-      };
+      if (!childGateExpects || !child.routeBack || childGateExpects.some((expectation) => expectationIds.has(expectation.id))) return null;
+      for (const expectation of childGateExpects) expectationIds.add(expectation.id);
+      gateExpects.push(...childGateExpects);
+      routeBackEntries.push(child.routeBack);
     }
+    const routeBack = mergeRouteBackMetadata(routeBackEntries);
+    if (!routeBack) return null;
+    return {
+      flowId,
+      stepId,
+      gateId: aggregateGateId(stepId),
+      gateExpects,
+      routeBackReasons: Object.keys(routeBack.onRouteBack ?? {}),
+      sourceFlowIds: [...childFlowIds],
+      flowExports: flowDef.exports,
+      routeBack,
+    };
   }
 
   return null; // no gate matched the given stepId
@@ -592,6 +1094,23 @@ export function resolveRouteBackPolicy(
   const toStep = phaseMap[toPhase];
   if (!fromStep || !toStep) return null; // phases not in this flow
 
+  // List composition emits one gate only in the effective runtime definition;
+  // consult that gate so retry accounting uses the same merged policy as live
+  // gate evaluation. Scalar composition keeps the historical raw-flow path.
+  const sourceStep = Array.isArray(flowDef.steps) ? flowDef.steps.find((step) => step?.id === fromStep) : undefined;
+  if (sourceStep?.uses_flows !== undefined) {
+    const effective = resolveEffectiveFlowDefinition(flowId, repoRoot) as FlowDefinition | null;
+    const aggregate = effective?.gates?.[aggregateGateId(fromStep)];
+    if (!aggregate) return null;
+    const metadata = routeBackMetadataForGate(aggregate);
+    if (!metadata?.routeBackPolicy || !metadata.onRouteBack || !Object.values(metadata.onRouteBack).includes(toStep)) return null;
+    return {
+      maxAttempts: metadata.routeBackPolicy.max_attempts,
+      onExceeded: metadata.routeBackPolicy.on_exceeded,
+      fromStepId: fromStep,
+    };
+  }
+
   if (!flowDef.gates) return null;
   for (const gate of Object.values(flowDef.gates)) {
     if (!gate || gate.step !== fromStep) continue;
@@ -610,4 +1129,42 @@ export function resolveRouteBackPolicy(
     };
   }
   return null;
+}
+
+/**
+ * True when a flow is WORK-ITEM DRIVEN — i.e. it declares a gate expecting `selected-work`, the
+ * expectation a pull-work producer satisfies by selecting a Work Item (#1341).
+ *
+ * This exists to replace `flowId === "builder.build"` at the three sites that used a flow NAME to
+ * decide whether a run gets provider-ownership validation, selection-evidence checking, and a
+ * machine-readable next_action. None of those are properties of the name: they are properties of
+ * "does this flow select a Work Item at all". Deriving them made the gate-value ablation's two arms
+ * differ in four ways beyond their gate set, any of which could have been misread as an effect of
+ * gate removal.
+ *
+ * Derived from the EFFECTIVE definition so a `uses_flow` step that declares the expectation in a
+ * child flow is seen — judging against the raw file would read a composed step as declaring nothing.
+ *
+ * FAILS CLOSED. An unreadable or unresolvable definition returns `true`, so a flow we cannot
+ * classify keeps the stricter behaviour. Silently granting weaker checks to an unclassifiable flow
+ * is the exact defect this replaces.
+ */
+export function flowSelectsWorkItem(definition: unknown): boolean {
+  if (!definition || typeof definition !== "object") return true;
+  const gates = (definition as { gates?: Record<string, unknown> }).gates;
+  if (!gates || typeof gates !== "object") return true;
+  for (const gate of Object.values(gates)) {
+    const expects = (gate as { expects?: unknown[] })?.expects;
+    // A gate whose expects cannot be read makes the whole definition UNCLASSIFIABLE, which is not
+    // the same as "read it and found no selected-work". Skipping it would silently downgrade an
+    // unreadable definition to the weaker behaviour — the defect this function replaces.
+    if (expects === undefined) continue;
+    if (!Array.isArray(expects)) return true;
+    for (const expectation of expects) {
+      const id = (expectation as { id?: unknown; expectation_id?: unknown })?.id
+        ?? (expectation as { expectation_id?: unknown })?.expectation_id;
+      if (id === "selected-work") return true;
+    }
+  }
+  return false;
 }

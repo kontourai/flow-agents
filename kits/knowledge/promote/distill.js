@@ -13,6 +13,8 @@
 
 import { slugify, readGlossaryTerms, validateDecisionDelta } from "./lib.js";
 
+const LEARNING_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
 function deriveSubject(decision) {
   if (decision.subject) return decision.subject;
   // Derive a rough noun-phrase subject from the outcome body (draft — the
@@ -79,18 +81,23 @@ export function distill(residue, options = {}) {
     }
   }
 
-  const learnings = (residue.learnings || []).map((rec, i) => ({
-    id: rec.id || `learn-${residue.slug}-${i + 1}`,
-    title: rec.summary ? rec.summary.split(/[.;]/)[0].trim() : `Learning ${i + 1}`,
-    body: rec.summary || "",
-    outcome: rec.outcome || null,
-    source_refs: Array.isArray(rec.source_refs) ? rec.source_refs : [],
-    correction: rec.correction && rec.correction.needed ? {
-      type: rec.correction.type || null,
-      recurrence_key: rec.correction.recurrence_key || null,
-      prevention: rec.correction.prevention || null,
-    } : null,
-  }));
+  const learnings = (residue.learnings || []).map((rec, i) => {
+    const fallbackId = `learn-${slugify(residue.slug) || "session"}-${i + 1}`;
+    const id = typeof rec.id === "string" && LEARNING_ID_RE.test(rec.id) ? rec.id : fallbackId;
+    if (rec.id && id === fallbackId) warnings.push(`learning id was regenerated for proposal safety: ${String(rec.id)}`);
+    return {
+      id,
+      title: rec.summary ? rec.summary.split(/[.;]/)[0].trim() : `Learning ${i + 1}`,
+      body: rec.summary || "",
+      outcome: rec.outcome || null,
+      source_refs: Array.isArray(rec.source_refs) ? rec.source_refs : [],
+      correction: rec.correction && rec.correction.needed ? {
+        type: rec.correction.type || null,
+        recurrence_key: rec.correction.recurrence_key || null,
+        prevention: rec.correction.prevention || null,
+      } : null,
+    };
+  });
 
   return { decisions, vocabulary, learnings, warnings };
 }

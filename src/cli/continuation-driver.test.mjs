@@ -11,6 +11,7 @@ import { MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES, MAX_CONTINUATION_TURN_RESULT_B
 import { executeContinuationAdapter, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "../../build/src/cli/continuation-adapter.js";
 import { EVIDENCE_REF_JSON_SCHEMA, installedBuilderGateActionAuthority } from "../../build/src/builder-gate-action-envelope.js";
 import { validateSnapshot } from "../../build/src/continuation-validation.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const PACKAGE_VERSION = JSON.parse(fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
 const TEST_DEFINITION_DIGEST = "0".repeat(64);
@@ -31,7 +32,7 @@ function snapshot(step, status = "active") {
   return {
     run_id: "run-251",
     definition_id: "builder.build",
-    definition_version: "1.3",
+    definition_version: "1.4",
     definition_digest: TEST_DEFINITION_DIGEST,
     status,
     disposition,
@@ -667,7 +668,7 @@ test("reinvoked missions compare synchronized progress with the durable baseline
 });
 
 test("reinvocation counts one interrupted unchanged turn as no progress exactly once", async () => {
-  const baseline = { current_step: "execute", definition_version: "1.3", definition_digest: TEST_DEFINITION_DIGEST, canonical_evidence: [], observed_artifacts: [] };
+  const baseline = { current_step: "execute", definition_version: "1.4", definition_digest: TEST_DEFINITION_DIGEST, canonical_evidence: [], observed_artifacts: [] };
   const store = memoryStore({
     schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
     adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "execute",
@@ -746,7 +747,7 @@ test("interrupted turns are reconciled before waiting and terminal disposition b
     ["waiting", envelopeSnapshot("verify", { status: "paused" }), "waiting"],
     ["terminal", terminalProgressSnapshot("completed", { step: "verify" }), "done"],
   ]) await t.test(name, async () => {
-    const baseline = { current_step: "verify", definition_version: "1.3", definition_digest: TEST_DEFINITION_DIGEST, canonical_status: "active", canonical_evidence: [], observed_artifacts: [] };
+    const baseline = { current_step: "verify", definition_version: "1.4", definition_digest: TEST_DEFINITION_DIGEST, canonical_status: "active", canonical_evidence: [], observed_artifacts: [] };
     const store = memoryStore({
       schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
       adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "verify",
@@ -1280,10 +1281,10 @@ test("driver classifies adapter timeout failures and records canonical non-advan
 });
 
 test("active turn authority is lock-bound, short-lived, and fails closed", async (t) => {
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-authority-"));
+  const sessionDir = makeFixtureDir("continuation-authority-");
   t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
   const runId = path.basename(sessionDir);
-  const canonicalState = { run_id: runId, definition_id: "builder.build", definition_version: "1.3", definition_digest: TEST_DEFINITION_DIGEST, current_step: "plan", status: "active" };
+  const canonicalState = { run_id: runId, definition_id: "builder.build", definition_version: "1.4", definition_digest: TEST_DEFINITION_DIGEST, current_step: "plan", status: "active" };
   writeAuthorityAssignment(sessionDir, "codex:authority-test", { audit_trail: "x".repeat(20 * 1024) });
   let issued;
 
@@ -1293,7 +1294,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
       schema_version: "1.0",
       run_id: runId,
       definition_id: "builder.build",
-      active_turn_definition_version: "1.3",
+      active_turn_definition_version: "1.4",
       active_turn_definition_digest: TEST_DEFINITION_DIGEST,
       max_turns: 2,
       adapter_command_identity: "adapter-identity",
@@ -1307,7 +1308,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
       sessionDir,
       runId,
       definitionId: "builder.build",
-      definitionVersion: "1.3",
+      definitionVersion: "1.4",
       definitionDigest: TEST_DEFINITION_DIGEST,
       currentStep: "plan",
       iteration: 1,
@@ -1350,7 +1351,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
       runId: issued.runId,
       turnSecret: issued.turnSecret,
       assignmentActor: "codex:authority-test",
-      canonicalState: { ...canonicalState, definition_version: "1.3", definition_digest: "f".repeat(64) },
+      canonicalState: { ...canonicalState, definition_version: "1.4", definition_digest: "f".repeat(64) },
     }).valid, false, "an authority issued before a Flow amendment cannot authorize the amended head");
     assert.equal(activeTurnAuthority.validateActiveTurnAuthority({
       sessionDir,
@@ -1428,7 +1429,7 @@ test("active turn authority is lock-bound, short-lived, and fails closed", async
 });
 
 test("authority cleanup leaves an expiring record when a parent is replaced", (t) => {
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-authority-parent-"));
+  const sessionDir = makeFixtureDir("continuation-authority-parent-");
   t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
   const runId = path.basename(sessionDir);
   writeAuthorityAssignment(sessionDir, "codex:authority-test");
@@ -1441,7 +1442,7 @@ test("authority cleanup leaves an expiring record when a parent is replaced", (t
     adapter_command_identity: "adapter-identity", status: "active", turns_started: 1, active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
+    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
   });
   bindAuthoritySigner(sessionDir, issued);
@@ -1457,7 +1458,7 @@ test("authority cleanup leaves an expiring record when a parent is replaced", (t
 });
 
 test("authority write leaves its temporary record when a parent is replaced", (t) => {
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-authority-write-parent-"));
+  const sessionDir = makeFixtureDir("continuation-authority-write-parent-");
   t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
   const runId = path.basename(sessionDir);
   writeAuthorityAssignment(sessionDir, "codex:authority-test");
@@ -1481,7 +1482,7 @@ test("authority write leaves its temporary record when a parent is replaced", (t
   };
   try {
     assert.throws(() => activeTurnAuthority.issueActiveTurnAuthority({
-      sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
+      sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
       adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
     }), /injected parent replacement/);
   } finally {
@@ -1491,7 +1492,7 @@ test("authority write leaves its temporary record when a parent is replaced", (t
 });
 
 test("a signed authority rejects a stale lock from an exited driver", (t) => {
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-authority-stale-lock-"));
+  const sessionDir = makeFixtureDir("continuation-authority-stale-lock-");
   t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
   const runId = path.basename(sessionDir);
   writeAuthorityAssignment(sessionDir, "codex:authority-test");
@@ -1506,7 +1507,7 @@ test("a signed authority rejects a stale lock from an exited driver", (t) => {
     adapter_command_identity: "adapter-identity", status: "active", turns_started: 1, active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
+    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
   });
   bindAuthoritySigner(sessionDir, issued);
@@ -1517,7 +1518,7 @@ test("a signed authority rejects a stale lock from an exited driver", (t) => {
 });
 
 test("authority validation rejects an active-turn file atomically replaced after descriptor read", (t) => {
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-authority-final-race-"));
+  const sessionDir = makeFixtureDir("continuation-authority-final-race-");
   t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
   const runId = path.basename(sessionDir);
   writeAuthorityAssignment(sessionDir, "codex:authority-test");
@@ -1530,7 +1531,7 @@ test("authority validation rejects an active-turn file atomically replaced after
     adapter_command_identity: "adapter-identity", status: "active", turns_started: 1, active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
+    sessionDir, runId, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: TEST_DEFINITION_DIGEST, currentStep: "plan", iteration: 1, maxTurns: 1,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "codex:authority-test", assignmentActorStruct: authorityActorStruct, lock, timeoutMs: 10_000,
   });
   bindAuthoritySigner(sessionDir, issued);
@@ -1561,7 +1562,7 @@ test("authority validation rejects an active-turn file atomically replaced after
 });
 
 test("canonical Flow state rejects final-path replacement after descriptor read", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-canonical-race-"));
+  const root = makeFixtureDir("continuation-canonical-race-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const slug = "canonical-race-run";
   const sessionDir = path.join(root, ".kontourai", "flow-agents", slug);
@@ -1596,7 +1597,7 @@ test("canonical Flow state rejects final-path replacement after descriptor read"
 });
 
 test("canonical Flow state rejects an unknown definition step and a replaced run parent", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-canonical-definition-"));
+  const root = makeFixtureDir("continuation-canonical-definition-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const slug = "canonical-definition-run";
   const sessionDir = path.join(root, ".kontourai", "flow-agents", slug);
@@ -1636,7 +1637,7 @@ test("canonical Flow state rejects an unknown definition step and a replaced run
 });
 
 test("canonical Flow state rejects every Flow-schema-invalid amendment before resolving its successor", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-canonical-amendment-schema-"));
+  const root = makeFixtureDir("continuation-canonical-amendment-schema-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const slug = "canonical-amendment-run";
   const sessionDir = path.join(root, ".kontourai", "flow-agents", slug);
@@ -1699,7 +1700,7 @@ test("canonical Flow state rejects every Flow-schema-invalid amendment before re
 });
 
 test("Stop ignores an unvalidated capability locator and preserves ordinary pointer selection", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-invalid-locator-"));
+  const root = makeFixtureDir("continuation-invalid-locator-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(path.join(root, "AGENTS.md"), "# Test Repo\n");
   const artifactRoot = path.join(root, ".kontourai", "flow-agents");
@@ -1748,7 +1749,7 @@ test("Stop ignores an unvalidated capability locator and preserves ordinary poin
 });
 
 test("Stop keeps a base-valid signed session selected across paused and completed canonical dispositions", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-exact-scope-"));
+  const root = makeFixtureDir("continuation-exact-scope-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(path.join(root, "AGENTS.md"), "# Test Repo\n");
   const artifactRoot = path.join(root, ".kontourai", "flow-agents");
@@ -1798,7 +1799,7 @@ test("Stop keeps a base-valid signed session selected across paused and complete
     active_turn_step: "plan", pending_barrier: null,
   }));
   const issued = activeTurnAuthority.issueActiveTurnAuthority({
-    sessionDir: exactDir, runId: exactSlug, definitionId: "builder.build", definitionVersion: "1.3", definitionDigest: installedDefinitionDigest, currentStep: "plan", iteration: 1, maxTurns: 2,
+    sessionDir: exactDir, runId: exactSlug, definitionId: "builder.build", definitionVersion: "1.4", definitionDigest: installedDefinitionDigest, currentStep: "plan", iteration: 1, maxTurns: 2,
     adapterCommandIdentity: "adapter-identity", assignmentActor: "driver-actor", assignmentActorStruct: authorityActorStruct,
     lock, timeoutMs: 30_000,
   });
@@ -1839,7 +1840,7 @@ test("Stop keeps a base-valid signed session selected across paused and complete
 });
 
 test("artifact validation skips only a private continuation driver child", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-validator-"));
+  const root = makeFixtureDir("continuation-validator-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const session = path.join(root, "session-a");
   fs.mkdirSync(path.join(session, "continuation-driver"), { recursive: true });
@@ -1941,7 +1942,7 @@ test("driver reauthorizes immediately before each adapter turn", async () => {
 });
 
 test("explicit adapter argv receives one structured action without a shell", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-adapter-"));
+  const root = makeFixtureDir("continuation-adapter-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const adapter = path.join(root, "adapter.mjs");
   const command = path.join(root, "command.json");
@@ -1966,7 +1967,7 @@ test("explicit adapter argv receives one structured action without a shell", asy
 });
 
 test("adapter descendants preserve ordinary actor resolution and receive only fresh turn capability companions", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-adapter-actor-"));
+  const root = makeFixtureDir("continuation-adapter-actor-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const adapter = path.join(root, "adapter.mjs");
   const command = path.join(root, "command.json");
@@ -2022,7 +2023,7 @@ test("adapter descendants preserve ordinary actor resolution and receive only fr
 });
 
 test("loaded adapter binds executable and script content for every turn", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-integrity-"));
+  const root = makeFixtureDir("continuation-integrity-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const adapter = path.join(root, "adapter.mjs");
   const command = path.join(root, "command.json");
@@ -2046,7 +2047,7 @@ test("loaded adapter binds executable and script content for every turn", async 
 });
 
 test("adapter integrity hashes raw file bytes", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-binary-integrity-"));
+  const root = makeFixtureDir("continuation-binary-integrity-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const adapter = path.join(root, "adapter.mjs");
   const data = path.join(root, "binary.dat");
@@ -2072,7 +2073,7 @@ test("adapter integrity hashes raw file bytes", async (t) => {
 });
 
 test("adapter timeout terminates its process group", { skip: process.platform === "win32" }, async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-timeout-"));
+  const root = makeFixtureDir("continuation-timeout-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const adapter = path.join(root, "adapter.mjs");
   const command = path.join(root, "command.json");
@@ -2101,7 +2102,7 @@ test("adapter timeout terminates its process group", { skip: process.platform ==
 });
 
 test("adapter stderr with timeout-like text remains an adapter_error", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-timeout-stderr-"));
+  const root = makeFixtureDir("continuation-timeout-stderr-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const adapter = path.join(root, "adapter.mjs");
   const command = path.join(root, "command.json");
@@ -2125,7 +2126,7 @@ test("adapter stderr with timeout-like text remains an adapter_error", async (t)
 });
 
 test("completed adapter forcibly terminates background descendants", { skip: process.platform === "win32" }, async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-completed-child-"));
+  const root = makeFixtureDir("continuation-completed-child-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const adapter = path.join(root, "adapter.mjs");
   const command = path.join(root, "command.json");
@@ -2177,7 +2178,7 @@ test("deadline and pid barriers report ready or pending without consuming turns"
 });
 
 test("file continuation store refuses a symlinked state target", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-store-"));
+  const root = makeFixtureDir("continuation-store-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = createFileContinuationStore(root);
   const outside = path.join(root, "outside.json");
@@ -2187,7 +2188,7 @@ test("file continuation store refuses a symlinked state target", (t) => {
 });
 
 test("file continuation store bounds and identity-checks state, event, and accepted-turn reads", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-store-hardening-"));
+  const root = makeFixtureDir("continuation-store-hardening-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = createFileContinuationStore(root);
   const driverDir = path.join(root, "continuation-driver");
@@ -2213,7 +2214,7 @@ test("file continuation store bounds and identity-checks state, event, and accep
 });
 
 test("file continuation store rejects a state path replaced during descriptor open", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-store-replaced-"));
+  const root = makeFixtureDir("continuation-store-replaced-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = createFileContinuationStore(root);
   const state = {
@@ -2246,7 +2247,7 @@ test("file continuation store rejects a state path replaced during descriptor op
 });
 
 test("attestation turns fail closed when accepted events lack durable request/result coverage", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-store-coverage-"));
+  const root = makeFixtureDir("continuation-store-coverage-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = createFileContinuationStore(root);
   store.save({
@@ -2260,7 +2261,7 @@ test("attestation turns fail closed when accepted events lack durable request/re
 });
 
 test("file continuation store detects deleted and rolled-back mission state", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-rollback-"));
+  const root = makeFixtureDir("continuation-rollback-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = createFileContinuationStore(root);
   store.save({
@@ -2302,7 +2303,7 @@ test("file continuation store detects deleted and rolled-back mission state", (t
 });
 
 test("file continuation store restores a parked barrier from mission history", (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-barrier-rollback-"));
+  const root = makeFixtureDir("continuation-barrier-rollback-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const store = createFileContinuationStore(root);
   const barrier = { kind: "pid", pid: process.pid };
@@ -2326,7 +2327,7 @@ test("file continuation store restores a parked barrier from mission history", (
 });
 
 test("session lock rejects concurrent drivers and reclaims a dead owner", async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-lock-"));
+  const root = makeFixtureDir("continuation-lock-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   await withContinuationDriverLock(root, async () => {

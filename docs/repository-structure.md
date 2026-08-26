@@ -10,7 +10,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 
 - Edit canonical source in the repo root areas listed below, then regenerate derived output with the documented commands.
 - Do not edit `dist/`, `build/`, or `_site/` by hand. They are generated from tracked source.
-- Do not commit local runtime state from `.kontourai/flow-agents/<slug>/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/`, generated `.veritas/` output, or tool caches; intentionally tracked `.veritas/` governance/config remains durable source.
+- Do not commit local runtime state from `.kontourai/flow-agents/<slug>/`, `.flow-agents/` except `.flow-agents/config/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/`, generated `.veritas/` output, or tool caches; intentionally tracked `.veritas/` governance/config remains durable source.
 - Runtime workflow artifacts stay local and ignored; promote reviewable or durable outcomes to docs, source, schemas, or provider records before merging to `main`.
 - Treat generated exports and installed runtime config as products of `packaging/manifest.json`, `src/tools/build-universal-bundles.ts`, `scripts/install-*.sh`, and the source directories they copy.
 - Use `.kontourai/` for non-durable local or generated Kontour workspace state. Keep durable tracked files in intuitive product-owned paths such as `.veritas/`, `.flow/`, `.agents/`, `.claude/commands`, and `docs/`; existing transition ignores remain during migration.
@@ -41,7 +41,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | Path | Classification | Source of truth | Generated or runtime policy | Safe cleanup rule |
 | --- | --- | --- | --- | --- |
 | `.kontourai/` | local/generated workspace state | Local Kontour tools and developer workflows, including `.kontourai/flow-agents/<slug>/` runtime sessions. | Ignored. | Safe local cleanup when no active workflow needs it; durable source and decisions stay in product-owned tracked paths. |
-| `.flow-agents/` | durable local Flow Agents state | Explicit Flow Agents config/install records when documented. | Ignored unless a repo-specific contract intentionally tracks a durable file. | Do not use for non-durable workflow sessions; migrate old runtime artifacts into `.kontourai/flow-agents/`. |
+| `.flow-agents/` | committed policy plus local install state | `.flow-agents/config/` is the only trackable Flow Agents subpath; install/runtime state remains local. | Ignore all except `.flow-agents/config/**`. | Do not use for non-durable workflow sessions; migrate old runtime artifacts into `.kontourai/flow-agents/`. |
 | `.claude/` | installed runtime config | Generated bundle or local runtime install. | Ignored. | Reinstall from `dist/claude-code/` instead of editing as source. |
 | `.codex/` | installed runtime config | Generated bundle or local runtime install. | Ignored. | Reinstall from `dist/codex/` or `scripts/install-codex-home.sh`; do not treat local hooks as canonical. |
 | `.githooks/` | canonical repo tooling | Tracked repository hook scripts. | Source, not runtime agent hooks. | Keep compatible with `npm run setup:repo-hooks` and `npm run validate:repo-hooks --`. |

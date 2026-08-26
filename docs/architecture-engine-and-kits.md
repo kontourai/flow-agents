@@ -63,6 +63,7 @@ Flow Agents adds optional extension fields for agent use:
 - `dependencies`
 - `workflow_triggers`
 - `hook_influence_expectations`
+- `observability_contribution` — an optional, versioned read descriptor for Kit-owned projections; hosts render and operate it without acquiring Flow, Surface, or runtime authority.
 
 This is the plugin model. A third-party kit uses the same container shape and validation path as the built-in kits. Bring-your-own-kit is not a side channel; it is the extension point.
 

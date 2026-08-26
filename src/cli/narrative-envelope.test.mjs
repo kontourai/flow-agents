@@ -20,6 +20,16 @@ import {
   validateGroundedNarrative,
   writeEnvelope,
 } from "../../build/src/index.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+
+// The surface-explanation source records the RESOLVED @kontourai/surface as
+// provenance. Read the resolved version rather than freezing a literal: a frozen
+// literal asserts nothing about the derivation and reds on every Surface bump
+// (it did, on 2.13.0 -> 2.17.0). Comparing against the package actually resolved
+// still fails if the stamp is fabricated or read from the wrong package.
+const RESOLVED_SURFACE = JSON.parse(
+  fs.readFileSync(new URL("../../node_modules/@kontourai/surface/package.json", import.meta.url), "utf8"),
+);
 
 const CAPTURED_AT = "2026-07-14T15:00:00.000Z";
 const COMPILED_AT = "2026-07-14T16:00:00.000Z";
@@ -32,7 +42,7 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const sha8 = (bytes) => sha256(bytes).slice(0, 8);
 
 function constructedNarrative({ missingReport = false, reportBytes: suppliedReportBytes, redactionFields = [] } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-envelope-"));
+  const root = makeFixtureDir("narrative-envelope-");
   const narrativeDir = path.join(root, "narrative");
   const flowRoot = path.join(root, "flow");
   const sessionDir = path.join(root, "session");
@@ -69,7 +79,7 @@ function constructedNarrative({ missingReport = false, reportBytes: suppliedRepo
 }
 
 function correlationNarrativeDir(transitions, { overlapping = false, timezoneLess = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-correlation-"));
+  const root = makeFixtureDir("narrative-correlation-");
   const narrativeDir = path.join(root, "narrative");
   const telemetryDir = path.join(root, "telemetry");
   const flowRoot = path.join(root, "flow");
@@ -162,7 +172,8 @@ test("snapshot capture preserves Flow bytes and freezes a stable Surface explana
 
   assert.equal(surface.status, "snapshotted");
   assert.equal(surface.integrity_class, "path_only");
-  assert.deepEqual(surface.origin.package, { name: "@kontourai/surface", version: "2.13.0" });
+  assert.match(RESOLVED_SURFACE.version, /^\d+\.\d+\.\d+/);
+  assert.deepEqual(surface.origin.package, { name: "@kontourai/surface", version: RESOLVED_SURFACE.version });
   const resolvedSurface = resolveSource(narrativeDir, surface.source_id);
   assert.equal(resolvedSurface.status, "resolved");
   const explanation = JSON.parse(Buffer.from(resolvedSurface.content).toString("utf8"));

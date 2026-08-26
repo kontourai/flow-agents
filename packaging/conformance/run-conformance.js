@@ -70,6 +70,17 @@ function createTempWorkspace(setup) {
   return tmpDir;
 }
 
+function initializeCleanGitWorkspace(tmpDir) {
+  const git = process.platform === 'win32' ? 'git' : '/usr/bin/git';
+  const invoke = (args) => {
+    const result = spawnSync(git, args, { cwd: tmpDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    if (result.error || result.status !== 0) throw new Error(`conformance fixture Git setup failed: ${result.stderr || result.error?.message || 'unknown error'}`);
+  };
+  invoke(['init', '-q', '-b', 'main']);
+  invoke(['add', '--all']);
+  invoke(['-c', 'user.name=Flow Agents Conformance', '-c', 'user.email=conformance@example.invalid', 'commit', '-qm', 'clean fixture']);
+}
+
 function cleanupWorkspace(tmpDir) {
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 }
@@ -230,6 +241,7 @@ function run(argv) {
     // Set up workspace if fixture needs one
     if (fixture.workspace_setup) {
       tmpWorkspace = createTempWorkspace(fixture.workspace_setup);
+      if (fixture.workspace_git === true) initializeCleanGitWorkspace(tmpWorkspace);
     }
 
     let actual;

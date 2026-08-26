@@ -196,18 +196,18 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 
 ### 2.1 Workflow Steering
 
-**Intent**: Inject phase-transition reminders and ambient workflow-state guidance so the agent does not lose track of where it is in the delivery pipeline after subagent calls or context compaction.
+**Intent**: Inject ambient workflow-state guidance so the agent does not lose track of where it is in the delivery pipeline across turns and context compaction.
 
 **Canonical script**: `scripts/hooks/workflow-steering.js`
 
-**Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding), `postToolUse` (after `InvokeSubagents` tool calls)
+**Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding). There is no `postToolUse` wiring: a phase-transition table keyed on an `InvokeSubagents` tool call was removed in #1172 because no shipped runtime wires this hook to `postToolUse` and none emits a tool call by that name.
 
 **Inputs consumed**:
 - `.kontourai/flow-agents/<slug>/state.json` — current workflow phase and status
 - `.kontourai/flow-agents/<slug>/critique.json` — open critique findings
 - `docs/context-map.md` — structure hint for repo navigation
 
-**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of every user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
+**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of a user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Since #1172 the turn-start re-grounding is hash-guarded: an unchanged state block is emitted once and then suppressed until it changes, and the guard is reset at every `SessionStart` (including `source: compact`) so a compaction never strands the agent without the current-step directive. The context-map pointer is `SessionStart`-only for the same reason, and is emitted at every `SessionStart` whether or not a workflow session is active — a session-less checkout is exactly when an index is worth most. The supersession notice is deliberately exempt and stays every-turn. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
 
 **Degradation when host lacks trigger**: If the host has no `userPromptSubmit`-equivalent hook, workflow steering is silent. The agent receives no ambient phase reminders at turn start. This is a capability loss, not a blocking failure. Log the gap in the adapter's conformance declaration.
 
@@ -250,8 +250,9 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 - `.kontourai/flow-agents/<slug>/acceptance.json` — acceptance criteria; a criterion's `command`-kind `evidence_ref` (`excerpt`) is the most-trusted backstop command
 - `.kontourai/flow-agents/current.json` (`active_flow_id`/`active_step_id`) — when present, resolves the active kit FlowDefinition's gate `expects[]` via the compiled `build/src/lib/flow-resolver.js` (`loadActiveFlowStep`, ADR 0016 Abstraction A P-c); requires `build/` to exist and fails open to the legacy `workflow.*`-only behavior when it does not (the `hasBuild` guard — the same fail-open pattern already used for the trust-bundle validator)
 - The active kit's `kits/<kit>/flows/<flow>.flow.json` — the FlowDefinition file `current.json` resolves against; the matching gate's `expects[].bundle_claim.claimType` values become the declared claim types enforced for the active step (see FlowDefinition-driven claim selection below)
-- `FLOW_AGENTS_GOAL_FIT_MODE` env var — `block` | `warn` | `off` (the legacy `FLOW_AGENTS_GOAL_FIT_STRICT=true` is an alias for `block`)
-- `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` env var — consecutive-identical-block cap before the escape hatch releases (default 3)
+- `.flow-agents/config/core.config.json` — strict committed core policy, resolved only from the immutable `HEAD` blob; absent config preserves the historical defaults and invalid committed config fails closed.
+- `.flow-agents/config/<kit-id>.kit.config.json` — proposal-only Flow `gate_overrides.<gate>.expectations.<expectation>` changes. The filename stem must equal `kit_id`; only a Kit listed by the bounded local init activation record receives a non-mutating preview, and that preview compares committed `.flow/config.json` authority. It cannot install/activate Kits, apply the preview, or patch arbitrary Flow authority.
+- Goal-fit environment values — development conveniences only. Production can only move upward through `off < warn < block` mode and `skip < off < block` backstop policy, in addition to tightening block cap, timeout, and sidecar/critique requirements. `FLOW_AGENTS_GOAL_FIT_BACKSTOP=warn` remains a development alias for `off`. `recheck` is different: it executes model-supplied command text, so it is a committed-policy opt-in and a production environment value cannot turn it from `false` to `true`; malformed policy fails closed with recheck disabled.
 - `FLOW_AGENTS_GOAL_FIT_BACKSTOP` env var — `block` (default) | `off`/`warn` | `skip`; controls the capture backstop re-run (see Capture cross-reference below)
 - `FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS` env var — per-backstop-command timeout in ms (default 120000; runaway commands are SIGKILL'd)
 - `FLOW_AGENTS_GOAL_FIT_RECHECK` env var — `true` opts into re-running the model's free-form `evidence.checks[].command` (the RCE-risky path; off by default)
@@ -261,6 +262,53 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 - `block`: exits 2 when the active workflow artifact has state, Definition Of Done, Goal Fit, evidence, sidecar, or capture cross-reference issues that classify as blocking. Shipped L2 runtime configs (Claude Code, Codex) set `block` by default, overridable per-operator via the env var.
 - `off`: silent (exits 0, no stderr).
 - Escape hatch: in `block` mode the same goal-fit gap is refused up to `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` (default 3) consecutive times, then released (exit 0 with a loud notice) so a genuinely-unsatisfiable goal cannot trap the agent. A changing gap resets the streak.
+
+**Turn-ending contract for a blocking Stop (#1172)**: `decision:"block"` + `reason` is the
+model-facing channel; `continue:false` + `stopReason` is the user-facing one, and `continue`
+takes precedence over any event-specific decision field. Emitting both — the shape shipped
+before #1172 — routed the entire remediation block to the operator and delivered none of it to
+the agent that had to act on it. A blocking Stop therefore returns `decision`+`reason`, and
+turn-ending is decided by the class of block:
+
+- **Soft block** (an ordinary evidence gap): the harness adapter MUST NOT end the turn. This
+  gate owns termination for that class through the `MAX_BLOCKS` release valve above. An adapter
+  fence pre-empts the valve, truncating it below the count the gate advertises to the operator.
+- **Hard block** (non-releasable: caught false-completion, capture contradiction, tamper signal,
+  integrity failure, canonical Flow still active): the valve deliberately never fires, so the
+  gate has no termination of its own and the adapter supplies one — end the turn on the
+  continuation firing (`stop_hook_active: true`, i.e. a Stop that fires because a previous Stop
+  blocked). One self-correction attempt, then a human.
+
+A hook declares the hard class on a **structured control line**, never in prose, so no adapter
+has to pattern-match one hook's wording:
+
+```
+[flow-agents:stop-control] {"v":1,"terminal":true,"code":"non-releasable-hard-block"}
+```
+
+Adapters MUST strip every control line from both the agent-facing and user-facing text. An
+absent or malformed line reads as **soft** — a false `terminal` truncates the valve, whereas a
+missed one is still bounded by the backstop below. The contract, parser and backstop live in
+`scripts/hooks/lib/stop-escalation.js`; `stop-goal-fit.js` declares the prefix literal
+independently (its shipped `context/` mirror carries a fixed lib subset) and
+`test_goal_fit_hook.sh` pins the two literals equal.
+
+**Consecutive-block backstop (#1172)**: adapters additionally maintain a per-actor count of
+consecutive blocking Stops and force `continue:false` at `FLOW_AGENTS_STOP_MAX_BLOCKS`
+(default 5) regardless of marker or runtime signal, clearing it on any non-blocking Stop and at
+every SessionStart. This exists because `stop_hook_active` is observed in live Claude Code
+payloads but is no longer listed in the published hooks reference: without a floor, a runtime
+that stopped sending it would let a non-releasable block re-prompt the model indefinitely with
+no human ever seeing it. The threshold sits above `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` so the
+gate's own release always fires first on the normal soft path and the backstop stays invisible.
+Storage is best-effort in the fail-open direction: an unreadable or unwritable counter degrades
+to never escalating — it can never suppress the block itself.
+
+> **Adapter coverage gap (follow-up, not closed by #1172)**: only the Claude Code adapter
+> implements the rules above. `scripts/hooks/codex-hook-adapter.js` has no Stop turn-ending path
+> at all — pre-existing, so a hard block under Codex already re-prompts indefinitely today. The
+> backstop is deliberately runtime-agnostic (it depends on no runtime-specific payload field) and
+> is the shape that closes this for Codex and any future L2 adapter.
 
 **FlowDefinition-driven claim selection (ADR 0016 Abstraction A)**: When `current.json` resolves an active flow/step, `bundleEnforcement`'s claim-selection predicate (`isSelectedClaim`) is a **union**: `workflow.*`-prefixed claims are always selected as a baseline floor, and the active gate's declared `claimType` set (from `expects[].bundle_claim.claimType`, e.g. `builder.verify.tests`) is selected *in addition to* that floor — never instead of it. An earlier design used a pure if/else (declared types selected only when a FlowDefinition was active, with no `workflow.*` fallback) and was found in PR #215 to compose into a HIGH-severity gate-bypass chain: a forged `current.json` pointing at an `expects: []` flow made the if/else select zero claims, silently skipping all re-derivation, tamper-detection, and high/critical enforcement. The union floor closed that chain and is a **permanent** design decision, not a transitional step toward the if/else — see [ADR 0016](../adr/0016-three-hard-boundary-model.md) and the PR #215 post-mortem in [ADR 0015](../adr/0015-flow-flow-agents-boundary-reconciliation.md). Consequently, an active FlowDefinition whose gate resolves to an **empty** `expects[]` is always a `HARD_BLOCK` (`gate misconfiguration: active FlowDefinition has empty expects[]...`) — an empty declared set is treated as a possible tampered flow definition, never as a legitimately-empty gate that quietly enforces nothing beyond the floor.
 
@@ -274,6 +322,15 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
    - **(c) model free-form command** — `evidence.checks[].command`, ONLY when `FLOW_AGENTS_GOAL_FIT_RECHECK=true` (opt-in; the RCE-risky path).
 
    If the resolved backstop re-run fails, it is a caught false-completion. If NO trusted command resolves, the gate records `NOT_VERIFIED` — never a guess, never a silent pass, never auto-running an unlisted string.
+
+**Tests-evidence scope divergence (#1171)**: cases 2 and 3 above both accept the claim by verifying the command the claim *names* — neither verifies that the named command is the command the repo *declares* for a tests-shaped claim. A claimed-pass `npx vitest run test/one.test.ts` is captured, exits 0, and re-runs green while the declared suite is never re-checked. So on those two accepting paths only, the gate additionally reports a **scope divergence** when the claimed command is a NARROWED test invocation (a recognized test runner carrying an explicit file/name selector) and the repo declares a test target (the same `declaredManifestTarget` used by backstop source (b)) that the claim does not name. Deliberately conservative: an unrecognized runner, a runner with no selector, or a command the repo itself declares as one of its scripts is never flagged. Severity is `warn` (visible, non-blocking) by default because the standing #1048 workaround institutionalized recording narrowed direct-runner commands; `FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE=block` escalates the same finding to a `HARD_BLOCK`. Narrowing is legitimate when it is *declared*: a claim carrying `metadata.evidence_scope = {narrowed: true, reason: "<why>"}` in `trust.bundle` (or an `evidence_scope` field on the `evidence.json` check) reconciles clean in both modes — the requirement is that narrowing be visible in the bundle, never inferred as full coverage. Disclosure is evaluated **per claim**: bundle-sourced checks are deduplicated by command text, so when several claims name the identical command the divergence survives unless *every* one of them is disclosed, and the warning names an undisclosed claim. The CI reconciler already refuses a non-manifest tests-shaped command outright (`not-run` divergence), so this closes the local Stop backstop, which was the unguarded surface — though note that is a *logical* argument, not an operational one: during a CI outage the Stop hook is the only layer a session experiences, and its default here is warn.
+
+The finding is bound to what was **actually executed**, not to the claimed command text. When the backstop resolves source (b) — the declared manifest target — the full suite genuinely ran, and no divergence is reported even though the claim named a narrower command.
+
+Known limitations, disclosed rather than detected:
+
+- **Text-level detection only.** Narrowing expressed in a runner config (`vitest.config` `include`, `jest` `testMatch`), in source (`.only`/`fdescribe`), through state-based flags (`--onlyChanged`, `--changedSince`), or inside a wrapper script body is invisible to this check. A clean result means "the command text does not admit narrowing", never "the full declared suite demonstrably ran". Closing these needs config parsing or per-run test-count accounting — a different mechanism with a much larger false-positive surface.
+- **The `repoDeclaresCommand` exemption is npm-only.** `declaredManifestTarget` recognizes Makefile, Cargo, tox/pytest, and just/task targets, but the "the repo itself declares this exact command" false-positive guard only scans `package.json` scripts. A non-npm consumer whose declared narrow-looking command is a Make or cargo target can therefore see a warn line; the `evidence_scope` disclosure escape covers that case, and severity is warn by default.
 
 **Backstop guardrails**: each backstop command runs under a per-command timeout (`FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS`, default 120s; runaway commands are killed). The trusted-source backstop (a/b) rides `block` mode by default but is operator-disablable for latency: `FLOW_AGENTS_GOAL_FIT_BACKSTOP=off` (re-run becomes warn-only, never blocks) or `=skip` (no re-run at all → record `NOT_VERIFIED`). The arbitrary-model-command backstop (c) is opt-in only via `FLOW_AGENTS_GOAL_FIT_RECHECK`.
 
@@ -298,7 +355,7 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 
 ### 2.5 Evidence Capture (capture-first determinism)
 
-**Intent**: Make evidence about what actually ran *machine-recorded at the source* rather than transcribed later by the model. `evidence.json` is the model's narration and can claim a test passed when it did not. The capture policy deterministically records every command/shell tool execution and its observed result to an append-only log, which the Stop-Goal-Fit gate (§2.3) cross-references against the model's claims. This makes re-running at the gate a thin backstop, not the primary check.
+**Intent**: Make evidence about what actually ran *machine-recorded at the source* rather than transcribed later by the model. `trust.bundle` is the runtime authority; its v2 `workflow-evidence` projection cannot replace its gate decision. The capture policy deterministically records every command/shell tool execution and its observed result to an append-only log, which the Stop-Goal-Fit gate (§2.3) cross-references against the model's claims. This makes re-running at the gate a thin backstop, not the primary check.
 
 **Canonical script**: `scripts/hooks/evidence-capture.js`
 
@@ -309,11 +366,22 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 - `tool_response` / `tool_output` / `error` — the host tool result (per §1, `postToolUse`); the source of the deterministically-observed outcome.
 - `.kontourai/flow-agents/current.json` (`active_slug` / `artifact_dir`) then newest-mtime `state.json` — resolves the active artifact dir, the same way Workflow Steering and Stop-Goal-Fit do.
 
-**Output**: appends one JSON object per line to `.kontourai/flow-agents/<slug>/command-log.jsonl`:
+**Observation boundary and output**: after the host result has been classified, and before the
+record is appended or chain-hashed, capture the repository `HEAD` and cleanliness. The resulting
+record appends one JSON object per line to `.kontourai/flow-agents/<slug>/command-log.jsonl`:
 
 ```json
-{ "command": "npm test", "observedResult": "pass", "exitCode": 0, "capturedAt": "2026-06-23T00:00:00Z", "source": "postToolUse-capture" }
+{ "command": "npm test", "observedResult": "pass", "exitCode": 0, "observed_at_commit": "0123456789abcdef0123456789abcdef01234567", "worktree_clean": true, "capturedAt": "2026-06-23T00:00:00Z", "source": "postToolUse-capture" }
 ```
+
+The capture uses fixed, bounded trusted-Git calls. If `HEAD` cannot be resolved, the root is not a
+Git worktree, or the state cannot be captured consistently, it leaves the log unchanged rather than
+fabricating a clean/current record. A missing observation is
+`NOT_VERIFIED` and non-confirming downstream. `worktree_clean: false` is representable for audit,
+but provisional: it cannot become a verified event or satisfy a gate. The canonical writer applies
+the same timing after its child process settles and additionally retains the exact
+`verification_workspace_snapshot`; the gate requires item-level trusted ancestry plus that exact
+snapshot equality. Neither ancestry nor cleanliness alone proves the tested bytes.
 
 **Exit-code handling (deterministic observation only)**: a clean integer exit code is host-dependent. The policy extracts the real exit code where the host surfaces one (`tool_response`/`tool_output` `.exitCode`/`.exit_code`/`.status`/`.code`/`.returnCode`, or top-level equivalents) and sets `observedResult` to `pass` iff that code is `0`. When no clean integer exit code is present, `exitCode` is recorded as `null` and `observedResult` is inferred *only* from deterministic failure signals — a non-empty `error`, a `success:false`/`failed:true`/`is_error:true` flag, or a non-empty stderr with no stdout. When no clean integer exit code is present AND no deterministic failure signal exists, `exitCode` is recorded as `null` and `observedResult` is **`ambiguous`** — never `pass`. A `pass` always requires positive evidence (a clean integer exit code of 0; no host currently surfaces a positive success flag). Plain stdout text is never scanned for the words "error"/"fail"; the model's narration is never consulted.
 
@@ -321,9 +389,18 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 
 **Codex host-banner carve-out**: On the Codex runtime, the host serializes the real exit code as host-generated prose (`Process exited with code N`) inside the tool result / session rollout rather than as a structured field (observed on codex-cli 0.142.5). The codex ADAPTER (`scripts/hooks/codex-hook-adapter.js`, scoped to the evidence-capture invocation on `postToolUse` only) extracts exactly that banner and injects it as a structured `tool_response.exitCode` BEFORE capture observes; this is a deterministic HOST signal (host-authored fixed format), not narration scanning — capture itself still never scans stdout or model narration. Extraction (`scripts/hooks/lib/codex-exit-code.js`) is **preamble-anchored**: the banner in a `function_call_output.output` string sits in the HOST-authored preamble, before the model's own stdout, which the codex CLI appends after a literal `Output:` delimiter; extraction matches the banner only in the portion BEFORE that delimiter (the FIRST match when no delimiter is present) and never scans the post-delimiter model stdout, so a command that deliberately prints a forged `Process exited with code 0` to its own stdout cannot override the real host-reported code. Reads are **head-anchored and bounded**: the target rollout line is located via a bounded backward scan (default 1MB), and only the first ~64KB of that line is read/parsed — the preamble/banner lives within the first few hundred bytes of the `output` field regardless of how much model stdout follows, so a >64KB flood of stdout after the banner can never displace it out of the read window; beyond either bound, extraction yields no signal (`null` → the `ambiguous` default above), never a guess. Extraction **correlates or declines** rather than blindly trusting the newest rollout entry: a payload-carried call_id match is authoritative when present; absent that, the newest `function_call_output` is cross-checked against its paired `function_call`'s command, and a resolvable match uses it while a resolvable **mismatch DECLINES to no signal** (never attributes another call's exit code); only when no correlation signal exists at all (the common single-call case) does it fall back to the newest banner. The `transcript_path` is resolved through `realpath` and required to be a regular file — and, when the codex sessions root itself is resolvable, contained within it — before any read. Extraction is fail-open throughout (missing/unreadable rollout, an unresolvable line, a declined correlation, or no banner → no injection → the `ambiguous` default above, subject to the consumer semantics described above).
 
-**Decision contract**: Non-blocking. Always exits 0 and echoes stdin. Idempotent/append-only. Fail-open on any error — a capture failure must never block the agent or corrupt the log. Only records when an active workflow artifact dir resolves (otherwise there is nothing to anchor the log to).
+**Decision contract**: The PostToolUse process path is the explicit non-blocking exception: it
+always exits 0 and echoes stdin so capture trouble does not block the agent. It is
+idempotent/append-only, but an unexpected capture error must emit a diagnostic and append no
+confirming observation. Missing or uncertain capture state is `not_verified`, never a substitute
+for a successful observation. The policy records only when an active workflow artifact directory
+resolves (otherwise there is nothing to anchor the log to).
 
-**Degradation when host lacks trigger**: If the host has no `postToolUse` hook, command results are not captured. The Stop gate then has no capture log to cross-reference and falls back to its trusted backstop re-run (§2.3) for claimed-pass command checks. Log the gap as `postToolUse: no native equivalent — evidence capture unavailable; Stop gate relies on backstop re-run only`.
+**Degradation when host lacks trigger**: If the host has no `postToolUse` hook, command results
+are not captured. Emit `postToolUse: no native equivalent — evidence capture unavailable` and
+mark capture-dependent evidence `not_verified`; the absence of a capture record cannot confirm a
+claim. The Stop gate may independently re-run a command as fresh evidence (§2.3), but that new
+observation does not transform the missing capture into a successful one.
 
 ---
 
@@ -700,6 +777,7 @@ For structured `run()` responses (native import form), the return value is:
 | `FLOW_AGENTS_GOAL_FIT_BACKSTOP` | `block` (default) / `off` (=`warn`) / `skip` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS` | Integer string (default 120000) | `stop-goal-fit.js` |
 | `FLOW_AGENTS_GOAL_FIT_RECHECK` | `true` / `false` (opt-in re-run of model free-form command) | `stop-goal-fit.js` |
+| `FLOW_AGENTS_GOAL_FIT_SCOPE_DIVERGENCE` | `warn` (default) / `block` (escalate the tests-evidence scope divergence to a hard block; tighten-only, no `off`) | `stop-goal-fit.js` |
 | `FLOW_AGENTS_REQUIRE_SIDECARS` | `true` / `false` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_REQUIRE_CRITIQUE` | `true` / `false` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_HOOK_RUNTIME` | `claude-code`, `codex`, etc. | Hook adapters (forwarded to scripts) |

@@ -1,10 +1,14 @@
 import * as fs from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
+import { validateTrustBundle } from "@kontourai/surface";
 import { parseArgs, flagString } from "../lib/args.js";
 import { readJson } from "../lib/fs.js";
 import { executePublishChangeOperation, type CompletePublishChangeOperationResult } from "../builder-flow-runtime.js";
-import { resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
+import { assertTrustedGitAncestor, execTrustedGitSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
+import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { observedCommandsBindExactWorkspaceSnapshot } from "./workflow-sidecar.js";
 
 const CLOSING_KEYWORD_RE = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?<refs>(?:(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+|https:\/\/github\.com\/[^\s)]+\/(?:issues|pull)\/\d+)(?:\s*(?:,|and)\s*(?:(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+|https:\/\/github\.com\/[^\s)]+\/(?:issues|pull)\/\d+))*)/gi;
 const GITHUB_REF_RE = /(?<url>https:\/\/github\.com\/(?<url_owner>[^/\s)]+)\/(?<url_repo>[^/\s)]+)\/(?:issues|pull)\/(?<url_number>\d+))|(?:(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+))?#(?<number>\d+)/g;
@@ -115,16 +119,142 @@ function evaluateProviderChecks(argv: string[]): number {
   return status === "not_verified" ? 3 : 0;
 }
 
+function trustedProjectRootForReconciliation(sessionDir: string): string {
+  const resolvedSession = fs.realpathSync(sessionDir);
+  const projectRoot = fs.realpathSync(String(execTrustedGitSync(resolvedSession, ["rev-parse", "--show-toplevel"])).trim());
+  const relative = path.relative(projectRoot, resolvedSession);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("session directory is outside its trusted Git worktree");
+  }
+  return projectRoot;
+}
+
+function trustBundleReconciliationGap(bundle: Record<string, unknown>, projectRoot: string): string | null {
+  const claims = Array.isArray(bundle.claims) ? bundle.claims as Record<string, unknown>[] : [];
+  const evidence = Array.isArray(bundle.evidence) ? bundle.evidence as Record<string, unknown>[] : [];
+  const liveChecks = claims.filter((claim) => {
+    const metadata = claim.metadata;
+    return metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      && (metadata as Record<string, unknown>).origin === "check"
+      && claim.producerStatus !== "superseded"
+      && typeof (metadata as Record<string, unknown>).superseded_by !== "string";
+  });
+  if (liveChecks.length === 0) return "trust.bundle has no live check claims";
+  let currentSnapshot: Record<string, unknown> | null = null;
+  const currentCanonicalSnapshot = (): Record<string, unknown> | null => {
+    if (currentSnapshot) return currentSnapshot;
+    try {
+      if (String(execTrustedGitSync(projectRoot, ["rev-parse", "--is-shallow-repository"])).trim() !== "false") return null;
+      const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+      if (snapshot.kind !== "git-worktree" || snapshot.worktree_clean !== true) return null;
+      currentSnapshot = snapshot;
+      return currentSnapshot;
+    } catch { return null; }
+  };
+  for (const check of liveChecks) {
+    const checkId = typeof check.id === "string" ? check.id : "<unknown>";
+    if (check.value === "skip") continue;
+    if (check.value !== "pass" || check.status !== "verified") {
+      return `live check ${checkId} is not a verified pass or skip`;
+    }
+    const linkedEvidence = evidence.filter((item) => item.claimId === check.id);
+    if (!linkedEvidence.some((item) => item.passing === true)) {
+      return `live check ${checkId} has no linked passing evidence`;
+    }
+    const metadata = check.metadata as Record<string, unknown>;
+    const commandArtifactRefs = Array.isArray(metadata.artifact_refs)
+      ? metadata.artifact_refs
+        .filter((ref): ref is Record<string, unknown> => Boolean(ref) && typeof ref === "object" && !Array.isArray(ref))
+        .filter((ref) => ref.kind === "command")
+      : [];
+    const artifactCommandLabels = commandArtifactRefs
+      .filter((ref) => typeof ref.excerpt === "string" && ref.excerpt.length > 0)
+      .map((ref) => ref.excerpt as string);
+    const declaredCommandLabels = artifactCommandLabels.length > 0
+      ? artifactCommandLabels
+      : typeof metadata.command === "string" && metadata.command.length > 0 ? [metadata.command] : [];
+    const commandEvidence = linkedEvidence.filter((item) => {
+      const execution = item.execution;
+      if (!execution || typeof execution !== "object" || Array.isArray(execution)) return false;
+      const label = (execution as Record<string, unknown>).label;
+      return typeof label === "string" && label.length > 0;
+    });
+    const commandBacked = check.claimType === "workflow.check.command" || metadata.check_kind === "command"
+      || commandArtifactRefs.length > 0 || declaredCommandLabels.length > 0 || commandEvidence.length > 0;
+    if (commandBacked) {
+      if (commandArtifactRefs.length !== artifactCommandLabels.length) {
+        return `command-backed check ${checkId} has a command artifact reference without an exact command excerpt`;
+      }
+      if (commandEvidence.length === 0) {
+        return `command-backed check ${checkId} lacks linked execution evidence`;
+      }
+      const observations = metadata.observed_commands;
+      if (!observedCommandsBindExactWorkspaceSnapshot(observations, metadata.verification_workspace_snapshot)) {
+        return `command-backed check ${checkId} lacks exact clean observed command provenance`;
+      }
+      const current = currentCanonicalSnapshot();
+      if (!current) return `command-backed check ${checkId} cannot establish a clean current trusted Git worktree`;
+      if (!isDeepStrictEqual(metadata.verification_workspace_snapshot, current)) {
+        return `command-backed check ${checkId} snapshot does not match the current trusted Git worktree`;
+      }
+      for (const observation of observations as Record<string, unknown>[]) {
+        try {
+          assertTrustedGitAncestor(projectRoot, String(observation.observed_at_commit), String(current.head_sha));
+        } catch {
+          return `command-backed check ${checkId} observed commit is not a trusted ancestor of current HEAD`;
+        }
+      }
+      if (!Array.isArray(observations) || observations.length !== commandEvidence.length) {
+        return `command-backed check ${checkId} has mismatched command observation multiplicity`;
+      }
+      const executionLabels = commandEvidence.map((item) => (item.execution as Record<string, unknown>).label);
+      if (declaredCommandLabels.length > 0 && (declaredCommandLabels.length !== executionLabels.length
+        || declaredCommandLabels.some((label, index) => label !== executionLabels[index]))) {
+        return `command-backed check ${checkId} has declared commands that do not exactly match execution evidence`;
+      }
+      for (let index = 0; index < commandEvidence.length; index += 1) {
+        const evidenceItem = commandEvidence[index]!;
+        const execution = evidenceItem.execution as Record<string, unknown>;
+        const observation = observations[index] as Record<string, unknown>;
+        if (evidenceItem.passing !== true || execution.exitCode !== 0
+          || observation.command !== execution.label || observation.exit_code !== 0
+          || typeof observation.output_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(observation.output_sha256)) {
+          return `command-backed check ${checkId} has an unconfirmed execution observation`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function reconcile(argv: string[]): number {
   const root = argv[0];
   if (!root) throw new Error("artifact_root is required");
-  const evidence = readJson(path.join(root, "evidence.json")) as Record<string, unknown>;
-  const release = readJson(path.join(root, "release.json")) as Record<string, unknown>;
+  const bundleFile = path.join(root, "trust.bundle");
   const mismatches: string[] = [];
-  if (evidence.verdict !== "pass") mismatches.push("evidence verdict is not pass");
-  const gates = Array.isArray(release.gates) ? release.gates as Record<string, unknown>[] : [];
-  if (["merge", "release", "deploy"].includes(String(release.decision)) && gates.filter((gate) => gate.required !== false).some((gate) => gate.status !== "pass")) mismatches.push("positive release decision has non-pass required gate");
-  console.log(JSON.stringify({ role: "FinalStateReconciliation", status: mismatches.length ? "fail" : "pass", authoritative_refs: [path.join(root, "evidence.json"), path.join(root, "release.json")], mismatches }, null, 2));
+  if (!fs.existsSync(bundleFile)) {
+    mismatches.push("trust.bundle is required for confirming reconciliation; re-record verification through the workflow writer");
+  } else {
+    try {
+      const bundle = validateTrustBundle(readJson(bundleFile)) as unknown as Record<string, unknown>;
+      const projectRoot = trustedProjectRootForReconciliation(root);
+      const gap = trustBundleReconciliationGap(bundle, projectRoot);
+      if (gap) mismatches.push(gap);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      mismatches.push(`trust.bundle is not valid: ${detail}`);
+    }
+  }
+  try {
+    const release = readJson(path.join(root, "release.json")) as Record<string, unknown>;
+    const gates = Array.isArray(release.gates) ? release.gates as Record<string, unknown>[] : [];
+    if (["merge", "release", "deploy"].includes(String(release.decision)) && gates.filter((gate) => gate.required !== false).some((gate) => gate.status !== "pass")) mismatches.push("positive release decision has non-pass required gate");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    mismatches.push(`release.json is not readable: ${detail}`);
+  }
+  const status = mismatches.length === 0 ? "pass" : "not_verified";
+  console.log(JSON.stringify({ role: "FinalStateReconciliation", status, authoritative_refs: [bundleFile, path.join(root, "release.json")], mismatches }, null, 2));
   return mismatches.length ? 4 : 0;
 }
 
@@ -205,9 +335,34 @@ function resolveImmutableHeadSha(projectRoot: string, headRef: string): string {
   }
 }
 
+const PUBLISH_CHANGE_USAGE: Record<string, string> = {
+  execute: "usage: publish-change execute --session-dir <dir> --title <text> --head-ref <ref> --base-ref <ref> [--body <text>] [--draft]",
+  render: "usage: publish-change render --input-json <path|-> [--body-out <path>]",
+  "validate-closing-refs": "usage: publish-change validate-closing-refs --input-json <path|->",
+  "evaluate-provider-checks": "usage: publish-change evaluate-provider-checks --change-files-json <path|-> [--provider-checks-json <path>]",
+  "reconcile-final-state": "usage: publish-change reconcile-final-state <artifact_root>",
+};
+
+function hasHelp(argv: string[]): boolean {
+  return argv.includes("--help") || argv.includes("-h");
+}
+
+function printPublishChangeUsage(): void {
+  console.log("usage: publish-change <execute|render|validate-closing-refs|evaluate-provider-checks|reconcile-final-state> [flags]");
+  console.log("Run `publish-change <command> --help` for command-specific flags.");
+}
+
 export function main(argv = process.argv.slice(2)): number | Promise<number> {
   try {
     const [command, ...rest] = argv;
+    if (command === "--help" || command === "-h") {
+      printPublishChangeUsage();
+      return 0;
+    }
+    if (typeof command === "string" && hasHelp(rest) && Object.prototype.hasOwnProperty.call(PUBLISH_CHANGE_USAGE, command)) {
+      console.log(PUBLISH_CHANGE_USAGE[command]);
+      return 0;
+    }
     if (command === "execute") return execute(rest);
     if (command === "render") return render(rest);
     if (command === "validate-closing-refs") return validateClosingRefs(rest);

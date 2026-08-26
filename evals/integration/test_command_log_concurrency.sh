@@ -50,6 +50,12 @@ printf '{"active_slug":"%s","artifact_dir":".kontourai/flow-agents/%s"}' "$SLUG"
   > "$REPO/.kontourai/flow-agents/current.json"
 printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$SLUG\",\"status\":\"in_progress\",\"phase\":\"build\",\"updated_at\":\"2026-06-23T00:00:00Z\",\"next_action\":{\"status\":\"in_progress\",\"summary\":\"work\"}}" \
   > "$REPO/.kontourai/flow-agents/$SLUG/state.json"
+printf '.kontourai/\n' > "$REPO/.gitignore"
+git -C "$REPO" init -q -b main
+git -C "$REPO" config user.email 'eval@example.invalid'
+git -C "$REPO" config user.name 'Command log concurrency eval'
+git -C "$REPO" add AGENTS.md .gitignore
+git -C "$REPO" commit -qm 'seed clean workspace'
 
 N=24
 echo "Test: $N concurrent captures into one command-log must not fork the chain"
