@@ -60,15 +60,25 @@ export async function runObservedCommand(command: string, projectRoot: string): 
         // #1369: both ESRCH and EPERM mean "the signal did not land", and neither indicates a
         // fault in the command being observed — so both return false rather than throwing.
         //
-        // ESRCH is the group being gone. EPERM is what macOS returns for `kill(-pid, sig)` when
-        // the group leader exits between the liveness check and the signal, which is the COMMON
-        // case here: beginCleanup runs from the child's own `exit` event, so this fires on every
-        // successful command, against a group whose leader has just died.
+        // beginCleanup runs from the child's own `exit` event, so this fires on every successful
+        // command against a group whose leader has just died. MEASURED, because the first version
+        // of this comment guessed and guessed wrong: over 300 real exit-path teardowns on this
+        // platform the result was ESRCH 300/300, EPERM 0/300. EPERM is RARE here, not the common
+        // case. It is still worth handling — it was observed in the wild, failing an aggregate
+        // verify lane — and its consequence is severe out of proportion to its frequency: the
+        // rethrow reached beginCleanup's catch and rejected a completed observation whose exit
+        // code and output had already been captured.
         //
-        // EPERM does not prove the group is gone — it proves this process cannot signal it. Both
-        // readings leave the caller the same two options, and escalating to SIGKILL would fail
-        // identically, so completing with the captured exit code and output is strictly better
-        // than rejecting and discarding an observation of a command that ran fine.
+        // There is no liveness check to race against — the only guard above is `child.pid` being
+        // truthy — so EPERM here means the process group id can no longer be signalled by this
+        // process, not that a check went stale.
+        //
+        // EPERM does not prove the group is gone; it proves this process cannot signal it. On the
+        // EXIT path both readings leave the caller the same options and escalating to SIGKILL
+        // would fail identically, so completing with the captured result is strictly better than
+        // discarding it. On the TIMEOUT path they do NOT coincide — the child is still running and
+        // the options are reject-vs-wait-forever — which is why beginCleanup arms a bounded settle
+        // below rather than relying on this return value alone.
         //
         // Deliberately NOT a blanket catch: any other errno still throws, because it would
         // indicate something this helper does not understand.
