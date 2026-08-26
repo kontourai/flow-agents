@@ -64,6 +64,28 @@ test('source-directory replacement by an out-of-scope symlink must be rejected',
   } finally {fs.lstatSync=original;syncBuiltinESMExports();}
 });
 
+test('configured narrative root cannot be rebound during canonicalization', async t => {
+  const f = fixture(t);
+  const input = f.persist();
+  const original = fs.realpathSync;
+  let swapped = false;
+  try {
+    fs.realpathSync = function(file,...args) {
+      if (!swapped && file === f.narrativeDir) {
+        swapped = true;
+        const outside = path.join(f.root,'out-of-scope-narrative');
+        fs.renameSync(f.narrativeDir,outside);
+        fs.symlinkSync(outside,f.narrativeDir);
+      }
+      return original.call(this,file,...args);
+    };
+    syncBuiltinESMExports();
+    const result = await api.readGroundedNarrative(input);
+    assert.equal(swapped,true);
+    assert.deepEqual(result,{status:'unavailable',reason:'corrupt'});
+  } finally {fs.realpathSync=original;syncBuiltinESMExports();}
+});
+
 test('actual source reads respect the remaining aggregate cap even if manifest size lies', async t => {
   const f = fixture(t);
   f.manifest.sources[0].bytes = 1;
@@ -117,4 +139,28 @@ test('browser process codec is strict and exposes only typed runtime action outc
   assert.deepEqual(projected?.runtime.documentActions,[{kind:'command',outcome:'fail'}]);
   assert.equal(api.decodeRetainedNarrativeProcessProjection({...projected,private_path:'/private/CODEC_LEAK'}),undefined);
   assert.doesNotMatch(JSON.stringify(projected),/PRIVATE_COMMAND_CANARY|source_refs|statements/);
+});
+
+test('browser codecs bound serialized provenance and preserve safe long command outcomes', t => {
+  const f = fixture(t);
+  const sourceRef = f.manifest.sources[0].source_id;
+  const projection = api.projectRetainedNarrativeProcess({schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)},f.envelope);
+  assert.ok(projection);
+  assert.equal(api.decodeRetainedNarrativeProcessProjection({...projection,provenance:{...projection.provenance,compiler:{name:'flow-agents-narrative-composer',version:'x'.repeat(1024*1024)}}}),undefined);
+  assert.equal(api.decodeRetainedNarrativeProcessProjection({...projection,capture:{...projection.capture,knownGapClasses:Array(129).fill('mcp_non_native_tools')}}),undefined);
+  f.runtime.embedded.document_statements = [
+    {id:'c'.repeat(16),class:'observed',proposition:'Command `npm test` was observed to fail (exit 1)',source_refs:[sourceRef]},
+    {id:'d'.repeat(16),class:'observed',proposition:`Command \`${'x'.repeat(605)}\` was observed to fail (exit 1)`,source_refs:[sourceRef]},
+  ];
+  f.runtime.embedded.coverage.cited = 1;
+  const longProjection = api.projectRetainedNarrativeProcess({schemaVersion:'grounded-narrative-ref/v1',narrativeId:'probe',envelopeSha256:'a'.repeat(64)},f.envelope);
+  assert.deepEqual(longProjection?.runtime.documentActions,[{kind:'command',outcome:'fail'},{kind:'command',outcome:'fail'}]);
+});
+
+test('unsafe retained compiler provenance remains available natively but is withheld from browser projection', async t => {
+  const f = fixture(t);
+  f.envelope.provenance.compiler.version = '/private/COMPILER_VERSION_CANARY';
+  const read = await api.readGroundedNarrative(f.persist());
+  assert.equal(read.status,'available');
+  assert.equal(api.projectRetainedNarrativeProcess(read.ref,read.envelope),undefined);
 });

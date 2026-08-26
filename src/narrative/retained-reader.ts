@@ -77,6 +77,10 @@ interface DirectoryFence {
   readonly real: string;
   readonly dev: number;
   readonly ino: number;
+  /** The exact configured spelling is separately fenced against rebinding. */
+  readonly configuredPath: string;
+  readonly configuredDev: number;
+  readonly configuredIno: number;
 }
 
 function safeRoot(root: string): DirectoryFence {
@@ -89,7 +93,15 @@ function safeRoot(root: string): DirectoryFence {
     // From here on every operation uses and fences the canonical directory itself.
     const canonical = fs.lstatSync(real);
     if (canonical.isSymbolicLink() || !canonical.isDirectory()) fail("unauthorized");
-    return { path: real, real, dev: canonical.dev, ino: canonical.ino };
+    // Do not adopt a target selected after the initial admission. A changed configured
+    // path is a rebind, even if its new target happens to contain the same bytes.
+    const configuredAfter = fs.lstatSync(root);
+    if (configuredAfter.isSymbolicLink() || configuredAfter.dev !== stat.dev || configuredAfter.ino !== stat.ino
+      || canonical.dev !== stat.dev || canonical.ino !== stat.ino) fail("corrupt");
+    return {
+      path: real, real, dev: canonical.dev, ino: canonical.ino,
+      configuredPath: root, configuredDev: stat.dev, configuredIno: stat.ino,
+    };
   } catch (error) {
     if (error instanceof ReadFailure) throw error;
     fail("not_captured");
@@ -99,7 +111,9 @@ function safeRoot(root: string): DirectoryFence {
 function assertDirectoryFence(fence: DirectoryFence): void {
   try {
     const stat = fs.lstatSync(fence.path);
-    if (stat.isSymbolicLink() || !stat.isDirectory() || stat.dev !== fence.dev || stat.ino !== fence.ino || fs.realpathSync(fence.path) !== fence.real) {
+    const configured = fs.lstatSync(fence.configuredPath);
+    if (stat.isSymbolicLink() || !stat.isDirectory() || stat.dev !== fence.dev || stat.ino !== fence.ino || fs.realpathSync(fence.path) !== fence.real
+      || configured.isSymbolicLink() || !configured.isDirectory() || configured.dev !== fence.configuredDev || configured.ino !== fence.configuredIno) {
       fail("corrupt");
     }
   } catch (error) {
@@ -120,7 +134,12 @@ function readBoundedFile(root: DirectoryFence, relative: string, maxBytes: numbe
     try {
       const stat = fs.lstatSync(cursor);
       if (stat.isSymbolicLink() || !stat.isDirectory()) fail("corrupt");
-      parents.push({ path: cursor, real: fs.realpathSync(cursor), dev: stat.dev, ino: stat.ino });
+      const real = fs.realpathSync(cursor);
+      const canonical = fs.lstatSync(real);
+      const configuredAfter = fs.lstatSync(cursor);
+      if (configuredAfter.isSymbolicLink() || canonical.isSymbolicLink() || !canonical.isDirectory()
+        || configuredAfter.dev !== stat.dev || configuredAfter.ino !== stat.ino || canonical.dev !== stat.dev || canonical.ino !== stat.ino) fail("corrupt");
+      parents.push({ path: real, real, dev: canonical.dev, ino: canonical.ino, configuredPath: cursor, configuredDev: stat.dev, configuredIno: stat.ino });
     } catch (error) {
       if (error instanceof ReadFailure) throw error;
       fail("not_captured");

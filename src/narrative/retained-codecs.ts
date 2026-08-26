@@ -12,6 +12,8 @@ export const RETAINED_NARRATIVE_PROCESS_PROJECTION_SCHEMA_VERSION = "retained-na
 export const MAX_RETAINED_NARRATIVE_ID_LENGTH = 256;
 export const MAX_RETAINED_PROCESS_TURNS = 256;
 export const MAX_RETAINED_PROCESS_ACTIONS = 1024;
+export const MAX_RETAINED_PROCESS_VERSION_LENGTH = 128;
+export const MAX_RETAINED_PROCESS_DATETIME_LENGTH = 64;
 
 export type RetainedNarrativeProcessActionKind =
   | "tool_event"
@@ -49,6 +51,9 @@ export interface RetainedNarrativeProcessProjection {
 }
 
 const SHA256 = /^[0-9a-f]{64}$/;
+const NARRATIVE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
@@ -58,7 +63,7 @@ export function decodeGroundedNarrativeRef(value: unknown): GroundedNarrativeRef
   const record = object(value);
   if (!record || Object.keys(record).length !== 3
     || record.schemaVersion !== GROUNDED_NARRATIVE_REF_SCHEMA_VERSION
-    || typeof record.narrativeId !== "string" || !record.narrativeId || record.narrativeId.length > MAX_RETAINED_NARRATIVE_ID_LENGTH
+    || typeof record.narrativeId !== "string" || !record.narrativeId || record.narrativeId.length > MAX_RETAINED_NARRATIVE_ID_LENGTH || !NARRATIVE_ID.test(record.narrativeId)
     || typeof record.envelopeSha256 !== "string" || !SHA256.test(record.envelopeSha256)) return undefined;
   return { schemaVersion: GROUNDED_NARRATIVE_REF_SCHEMA_VERSION, narrativeId: record.narrativeId, envelopeSha256: record.envelopeSha256 };
 }
@@ -67,6 +72,8 @@ function exact(record: Record<string, unknown> | undefined, keys: readonly strin
   return !!record && Object.keys(record).length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(record, key));
 }
 function nonNegativeInteger(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
+function safeVersion(value: unknown): value is string { return typeof value === "string" && value.length <= MAX_RETAINED_PROCESS_VERSION_LENGTH && SEMVER.test(value); }
+function dateTime(value: unknown): value is string { return typeof value === "string" && value.length <= MAX_RETAINED_PROCESS_DATETIME_LENGTH && DATE_TIME.test(value) && !Number.isNaN(Date.parse(value)); }
 function action(value: unknown): RetainedNarrativeProcessAction | undefined {
   const record = object(value);
   if (!record || typeof record.kind !== "string"
@@ -81,7 +88,7 @@ export function decodeRetainedNarrativeProcessProjection(value: unknown): Retain
   const record = object(value);
   if (!exact(record, ["schemaVersion", "ref", "narrativeId", "provenance", "capture", "runtime"])
     || record.schemaVersion !== RETAINED_NARRATIVE_PROCESS_PROJECTION_SCHEMA_VERSION
-    || typeof record.narrativeId !== "string" || record.narrativeId.length > MAX_RETAINED_NARRATIVE_ID_LENGTH) return undefined;
+    || typeof record.narrativeId !== "string" || record.narrativeId.length > MAX_RETAINED_NARRATIVE_ID_LENGTH || !NARRATIVE_ID.test(record.narrativeId)) return undefined;
   const ref = decodeGroundedNarrativeRef(record.ref);
   const provenance = object(record.provenance);
   const compiler = object(provenance?.compiler);
@@ -90,16 +97,17 @@ export function decodeRetainedNarrativeProcessProjection(value: unknown): Retain
   const runtime = object(record.runtime);
   const coverage = object(runtime?.coverage);
   if (!ref || ref.narrativeId !== record.narrativeId || !exact(provenance, ["compiler", "compiled_at", "manifest_sha256"])
-    || !exact(compiler, ["name", "version"]) || compiler.name !== "flow-agents-narrative-composer" || typeof compiler.version !== "string" || !compiler.version
-    || typeof provenance.compiled_at !== "string" || !provenance.compiled_at || typeof provenance.manifest_sha256 !== "string" || !SHA256.test(provenance.manifest_sha256)
+    || !exact(compiler, ["name", "version"]) || compiler.name !== "flow-agents-narrative-composer" || !safeVersion(compiler.version)
+    || !dateTime(provenance.compiled_at) || typeof provenance.manifest_sha256 !== "string" || !SHA256.test(provenance.manifest_sha256)
     || !exact(capture, ["channels", "knownGapClasses"]) || !exact(channels, ["active", "inactive", "unknown"])
-    || !nonNegativeInteger(channels.active) || !nonNegativeInteger(channels.inactive) || !nonNegativeInteger(channels.unknown) || !Array.isArray(capture.knownGapClasses)
+    || !nonNegativeInteger(channels.active) || !nonNegativeInteger(channels.inactive) || !nonNegativeInteger(channels.unknown) || !Array.isArray(capture.knownGapClasses) || capture.knownGapClasses.length > 128
     || !runtime || !exact(runtime, ["coverage", "turns", "documentActions"]) || !exact(coverage, ["sources", "cited", "unavailable"])
     || !nonNegativeInteger(coverage.sources) || !nonNegativeInteger(coverage.cited) || !nonNegativeInteger(coverage.unavailable)
     || !Array.isArray(runtime.turns) || runtime.turns.length > MAX_RETAINED_PROCESS_TURNS
-    || !Array.isArray(runtime.documentActions)) return undefined;
+    || !Array.isArray(runtime.documentActions) || runtime.documentActions.length > MAX_RETAINED_PROCESS_ACTIONS) return undefined;
   const allowedGaps: KnownGapClass[] = ["mcp_non_native_tools", "actor_attribution_conflation", "cross_session_event_contamination"];
-  if (capture.knownGapClasses.some((gap) => !allowedGaps.includes(gap as KnownGapClass))) return undefined;
+  if (capture.knownGapClasses.some((gap) => !allowedGaps.includes(gap as KnownGapClass))
+    || new Set(capture.knownGapClasses).size !== capture.knownGapClasses.length) return undefined;
   let actionCount = runtime.documentActions.length;
   const documentActions = runtime.documentActions.map(action);
   if (documentActions.some((item) => !item)) return undefined;
@@ -110,7 +118,8 @@ export function decodeRetainedNarrativeProcessProjection(value: unknown): Retain
     const ordinal = turn?.ordinal;
     if (!exact(turn, ["ordinal", "boundary", "actions"]) || typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < -1
       || !exact(boundary, boundary?.rule_id === undefined ? ["derived"] : ["derived", "rule_id"])
-      || typeof boundary.derived !== "boolean" || (boundary.rule_id !== undefined && boundary.rule_id !== "turn-spine/v1") || !Array.isArray(turn.actions)) return undefined;
+      || typeof boundary.derived !== "boolean" || (boundary.rule_id !== undefined && boundary.rule_id !== "turn-spine/v1") || !Array.isArray(turn.actions)
+      || turn.actions.length > MAX_RETAINED_PROCESS_ACTIONS || actionCount + turn.actions.length > MAX_RETAINED_PROCESS_ACTIONS) return undefined;
     actionCount += turn.actions.length;
     const actions = turn.actions.map(action);
     if (actions.some((item) => !item)) return undefined;
