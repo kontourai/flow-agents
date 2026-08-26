@@ -61,11 +61,28 @@ export async function runObservedCommand(command: string, projectRoot: string): 
         // fault in the command being observed — so both return false rather than throwing.
         //
         // beginCleanup runs from the child's own `exit` event, so this fires on every successful
-        // command against a group whose leader has just died. MEASURED, because the first version
-        // of this comment guessed and guessed wrong: over 300 real exit-path teardowns on this
-        // platform the result was ESRCH 300/300, EPERM 0/300. EPERM is RARE here, not the common
-        // case. It is still worth handling — it was observed in the wild, failing an aggregate
-        // verify lane — and its consequence is severe out of proportion to its frequency: the
+        // command against a group whose leader has just died. MEASURED, because the first two
+        // versions of this comment guessed and guessed wrong — and the measurement conditions
+        // turn out to matter more than the rate, so they are recorded with it:
+        //
+        //   sequential, single-member group,  300 teardowns : ESRCH 300, EPERM   0
+        //   concurrent 8x200, single-member, 1600 teardowns : ESRCH 1600, EPERM  0
+        //   concurrent 16x100, single-member,1600 teardowns : ESRCH 1600, EPERM  0
+        //   concurrent 8x100, TWO-member group, 800        : ESRCH 30,  EPERM   2  (2 of 8 workers)
+        //
+        // So EPERM is not a function of machine load, and a loop over `bash -lc true` will never
+        // show it however hard the box is working. It appears when the group has MORE THAN ONE
+        // member — when the observed command spawned children, which every real evidence command
+        // does — because the leader can be reaped while the group is not yet empty. A naive probe
+        // reporting 0/1600 therefore proves nothing about real workloads; that is the trap this
+        // comment exists to stop the next reader falling into.
+        //
+        // (Independent review measured 28/1600 = 1.75% on an 8x200 concurrent probe. That shape
+        // is not reproducible here — single-member groups gave 0/1600 — so the rates differ and
+        // only the conclusion is shared: it is real, and it is not reachable by a simple loop.)
+        //
+        // It is worth handling because it was observed in the wild failing an aggregate verify
+        // lane, and because its consequence is severe out of proportion to its frequency: the
         // rethrow reached beginCleanup's catch and rejected a completed observation whose exit
         // code and output had already been captured.
         //
@@ -104,14 +121,25 @@ export async function runObservedCommand(command: string, projectRoot: string): 
         .update("stderr\0").update(stderrHash.digest());
       resolve({ code: closedCode, outputSha256: outputHash.digest("hex"), output });
     };
-    const beginCleanup = (): void => {
+    // ROUND-3 BLOCKER: this runs from BOTH the timeout and the child's own `exit`, and round 2
+    // armed the bounded settle from either — so a command that exited 0 in ~50ms but left an
+    // out-of-group process holding its inherited stdout was REJECTED at killGraceMs, blaming a
+    // timeout that never happened. Measured against origin/main on the same probe: main RESOLVED
+    // exit_code=0 at 8168ms, round 2 REJECTED at 5074ms. The entry path is the discriminator and
+    // was already known here, so it is passed explicitly rather than inferred.
+    const beginCleanup = (reason: "timeout" | "exit"): void => {
       if (settled || cleanupStarted) return;
       cleanupStarted = true;
       try {
         if (!terminateProcessGroup("SIGTERM")) {
           cleanupComplete = true;
           complete();
-          if (!settled) {
+          // Only the TIMEOUT path may bound this. On the exit path the command has already
+          // finished, its streams will close on their own, and waiting is both correct and what
+          // main does — there is no runaway left to bound, so rejecting there would discard a
+          // successful observation. (An exit-path stream holder that NEVER closes still hangs;
+          // that is pre-existing, untouched here, and filed rather than silently absorbed.)
+          if (reason === "timeout" && !settled) {
             // #1369 round 2: the group could not be signalled AND the streams are still open, so
             // the child is still running -- this is the TIMEOUT path, not the exit path. complete()
             // can never fire (it needs streamsClosed) and no other timer is armed, so the promise
@@ -140,11 +168,11 @@ export async function runObservedCommand(command: string, projectRoot: string): 
         fail(error as Error);
       }
     };
-    timeout = setTimeout(beginCleanup, timeoutMs);
+    timeout = setTimeout(() => beginCleanup("timeout"), timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => { stdoutHash.update(chunk); captureOutput(chunk); });
     child.stderr.on("data", (chunk: Buffer) => { stderrHash.update(chunk); captureOutput(chunk); });
     child.once("error", fail);
-    child.once("exit", (code) => { closedCode = code; beginCleanup(); });
+    child.once("exit", (code) => { closedCode = code; beginCleanup("exit"); });
     child.once("close", () => { streamsClosed = true; complete(); });
   });
   // This must follow the process's `close` event, which is the point at which

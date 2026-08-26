@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 import { runObservedCommand } from "../../build/src/lib/observed-command.js";
 import { captureReviewWorkspaceSnapshot, MAX_UNTRACKED_FILE_BYTES, MAX_UNTRACKED_TOTAL_BYTES, setWorkspaceSnapshotTestHooksForTest } from "../../build/src/lib/review-workspace-snapshot.js";
@@ -135,15 +135,25 @@ test("canonical snapshots reject tracked and untracked mutations after their fir
 // ── #1369: teardown-race errnos must not abandon a completed observation ──────────────────────
 //
 // beginCleanup runs from the child's OWN `exit` event, so terminateProcessGroup fires on every
-// successful command against a process group whose leader has just died. macOS returns EPERM
-// (not ESRCH) for `kill(-pid, sig)` when the leader exits between the liveness check and the
-// signal, and EPERM used to rethrow — rejecting the whole observation of a command that ran fine.
+// successful command against a process group whose leader has just died. EPERM used to rethrow
+// there, rejecting the whole observation of a command that ran fine.
 //
-// The errno is injected by stubbing process.kill, and that is DISCLOSED as the limit of this
-// test: a real EPERM needs a process group owned by another uid, which is not available here. To
-// stop the stub silently not firing (a test that passes for the wrong reason), each case asserts
-// the stub was actually invoked with the negative pid AND that the value thrown carried the errno
-// under test.
+// TWO CLAIMS THAT STOOD HERE WERE WRONG AND ARE CORRECTED RATHER THAN QUIETLY DROPPED:
+//   - "macOS returns EPERM (not ESRCH)" — measured, ESRCH is overwhelmingly what comes back;
+//     EPERM is the rare case (see the measurement table in observed-command.ts).
+//   - "between the liveness check and the signal" — there is no liveness check; the only guard
+//     is `child.pid` being truthy.
+// Both were corrected in the source comment in an earlier round and the correction did not reach
+// this file, which is its own small lesson about fixing a claim in one place only.
+//
+// A THIRD claim here was FALSE and is now retired: this header used to say a real EPERM "needs a
+// process group owned by another uid, which is not available here". It does not. Real EPERM is
+// reproducible at the same uid with no privilege change — 2 in 800 teardowns (2 of 8 concurrent
+// workers) once the process group has more than one member. It is simply too rare to assert on
+// deterministically, which is the actual reason these cases inject the errno rather than race for
+// it. To stop the stub silently not firing (a test that passes for the wrong reason), each case
+// asserts the stub was invoked, only ever with a negative pid, and that the thrown value carried
+// the errno under test.
 function withKillErrno(code, body) {
   const realKill = process.kill.bind(process);
   const calls = [];
@@ -223,5 +233,47 @@ test("a timeout against an unsignalable process group settles instead of hanging
       if (!previousTimeout) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS;
       if (!previousGrace) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
     }
+  }
+});
+
+test("a command that exits cleanly is NOT failed because something outside its group holds the pipe", async () => {
+  // ROUND-3 BLOCKER, as a regression test. The bounded settle added in round 2 fired from BOTH
+  // beginCleanup entry paths, so a command that exited 0 immediately while an out-of-group
+  // process kept its inherited stdout was REJECTED at killGraceMs — blaming a timeout that never
+  // happened. Measured against origin/main on this exact shape: main RESOLVED exit_code=0 at
+  // 8168ms; round 2 REJECTED at 5074ms.
+  //
+  // Real ESRCH, no stubs. `os.setsid()` is used because macOS ships no `setsid(1)` — the first
+  // version of this probe silently did nothing for that reason and "passed".
+  const python = spawnSync("python3", ["-c", "import os; print(os.getpid())"], { encoding: "utf8" });
+  assert.equal(python.status, 0, "python3 is required to create an out-of-group stream holder; without it this test proves nothing");
+
+  const root = gitFixture();
+  const previousGrace = process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
+  process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = "300";
+  const holdSeconds = 2;
+  const command = [
+    "python3 -c '",
+    "import os,sys,time",
+    "pid = os.fork()",
+    "if pid == 0:",
+    "    os.setsid()",
+    `    time.sleep(${holdSeconds})`,
+    "    os._exit(0)",
+    'print("started"); sys.stdout.flush()',
+    "'",
+    "exit 0",
+  ].join("\n");
+  try {
+    const started = Date.now();
+    const result = await runObservedCommand(command, root);
+    const elapsed = Date.now() - started;
+    assert.equal(result.exit_code, 0, "the command exited 0 and must be observed as such");
+    // It must have WAITED for the holder rather than settling at the grace budget: proof the
+    // bounded settle did not fire on this path.
+    assert.ok(elapsed > holdSeconds * 1000 * 0.8, `resolved in ${elapsed}ms, before the out-of-group holder released the pipe — the exit path was bounded when it must not be`);
+  } finally {
+    if (previousGrace) process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = previousGrace;
+    else delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
   }
 });
