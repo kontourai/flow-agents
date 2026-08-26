@@ -57,7 +57,23 @@ export async function runObservedCommand(command: string, projectRoot: string): 
         else child.kill(signal);
         return true;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+        // #1369: both ESRCH and EPERM mean "the signal did not land", and neither indicates a
+        // fault in the command being observed — so both return false rather than throwing.
+        //
+        // ESRCH is the group being gone. EPERM is what macOS returns for `kill(-pid, sig)` when
+        // the group leader exits between the liveness check and the signal, which is the COMMON
+        // case here: beginCleanup runs from the child's own `exit` event, so this fires on every
+        // successful command, against a group whose leader has just died.
+        //
+        // EPERM does not prove the group is gone — it proves this process cannot signal it. Both
+        // readings leave the caller the same two options, and escalating to SIGKILL would fail
+        // identically, so completing with the captured exit code and output is strictly better
+        // than rejecting and discarding an observation of a command that ran fine.
+        //
+        // Deliberately NOT a blanket catch: any other errno still throws, because it would
+        // indicate something this helper does not understand.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ESRCH" || code === "EPERM") return false;
         throw error;
       }
     };

@@ -131,3 +131,59 @@ test("canonical snapshots reject tracked and untracked mutations after their fir
     }
   }
 });
+
+// ── #1369: teardown-race errnos must not abandon a completed observation ──────────────────────
+//
+// beginCleanup runs from the child's OWN `exit` event, so terminateProcessGroup fires on every
+// successful command against a process group whose leader has just died. macOS returns EPERM
+// (not ESRCH) for `kill(-pid, sig)` when the leader exits between the liveness check and the
+// signal, and EPERM used to rethrow — rejecting the whole observation of a command that ran fine.
+//
+// The errno is injected by stubbing process.kill, and that is DISCLOSED as the limit of this
+// test: a real EPERM needs a process group owned by another uid, which is not available here. To
+// stop the stub silently not firing (a test that passes for the wrong reason), each case asserts
+// the stub was actually invoked with the negative pid AND that the value thrown carried the errno
+// under test.
+function withKillErrno(code, body) {
+  const realKill = process.kill.bind(process);
+  const calls = [];
+  process.kill = (pid, signal) => {
+    if (typeof pid === "number" && pid < 0) {
+      calls.push({ pid, signal });
+      const error = new Error(`kill ${code}`);
+      error.errno = -1;
+      error.code = code;
+      error.syscall = "kill";
+      throw error;
+    }
+    return realKill(pid, signal);
+  };
+  return body().finally(() => { process.kill = realKill; }).then((value) => ({ value, calls }));
+}
+
+for (const code of ["EPERM", "ESRCH"]) {
+  test(`observed command survives a ${code} process-group teardown race and still reports the command's real result`, async () => {
+    const root = gitFixture();
+    const { value: result, calls } = await withKillErrno(code, () => runObservedCommand("printf observed-1369", root));
+
+    // The stub must have fired on the GROUP kill, or this test proves nothing about the catch.
+    assert.ok(calls.length > 0, `process.kill was never called with a negative pid — the ${code} injection did not reach terminateProcessGroup`);
+    assert.ok(calls.every((call) => call.pid < 0), "the injection must target the process group, not a bare pid");
+
+    // The observation is completed, not abandoned: real exit code and real captured output.
+    assert.equal(result.exit_code, 0, `a ${code} teardown race must not change the observed exit code`);
+    const observation = captured(result);
+    assert.equal(observation.worktree_clean, true);
+    assert.match(result.output ?? observation.output ?? "", /observed-1369/, "the command's captured output must survive the teardown race");
+  });
+}
+
+test("an errno the teardown does not understand still fails loudly", async () => {
+  // The fix must not become a blanket catch. EINVAL is not a teardown race and must still reject.
+  const root = gitFixture();
+  await assert.rejects(
+    withKillErrno("EINVAL", () => runObservedCommand("printf observed-1369", root)),
+    (error) => /EINVAL/.test(String(error?.message ?? error)),
+    "an unrecognised kill errno must still surface rather than be swallowed",
+  );
+});
