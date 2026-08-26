@@ -1198,7 +1198,9 @@ if flow_agents_node "$WRITER" record-evidence "$INVALID_ACCEPTANCE_REF_DIR" \
   --check-json '{"id":"valid-check","kind":"test","status":"pass","summary":"Valid check."}' \
   --timestamp "2026-05-09T00:01:05Z" >"$TMPDIR_EVAL/invalid-acceptance-ref.out" 2>"$TMPDIR_EVAL/invalid-acceptance-ref.err"; then
   _fail "sidecar writer should reject existing legacy acceptance evidence_refs"
-elif rg -q 'acceptance\.criteria\[0\]\.evidence_refs entries must be structured evidence reference objects' "$TMPDIR_EVAL/invalid-acceptance-ref.out" "$TMPDIR_EVAL/invalid-acceptance-ref.err" \
+# #1359: the refusal now names the offending ENTRY as well as the array, so the assertion carries
+# the entry index too — a refusal that cannot say which entry is a refusal the caller must bisect.
+elif rg -q 'acceptance\.criteria\[0\]\.evidence_refs\[0\] entries must be structured evidence reference objects' "$TMPDIR_EVAL/invalid-acceptance-ref.out" "$TMPDIR_EVAL/invalid-acceptance-ref.err" \
   && [[ ! -f "$INVALID_ACCEPTANCE_REF_DIR/evidence.json" ]] \
   && rg -q '"status": "planned"' "$INVALID_ACCEPTANCE_REF_DIR/state.json"; then
   _pass "sidecar writer rejects existing invalid acceptance refs before mutation"
