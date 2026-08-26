@@ -117,8 +117,8 @@ git -C "$REPO" checkout -q pr-head
 LAST_OUTPUT=""
 LAST_STATUS=0
 run_check() {
-  local body="$1" head="${2:-$HEAD_SHA}" base="${3:-$BASE_SHA}"
-  LAST_OUTPUT="$(cd "$REPO" && PR_BODY="$body" PR_HEAD_SHA="$head" PR_BASE_SHA="$base" node "$VALIDATOR" 2>&1)"
+  local body="$1" head="${2:-$HEAD_SHA}" base="${3:-$BASE_SHA}" author="${4:-a-human}"
+  LAST_OUTPUT="$(cd "$REPO" && PR_BODY="$body" PR_HEAD_SHA="$head" PR_BASE_SHA="$base" PR_AUTHOR="$author" node "$VALIDATOR" 2>&1)"
   LAST_STATUS=$?
 }
 
@@ -210,6 +210,33 @@ for fixture in pr-1101-body pr-1041-body pr-1354-body; do
   expect_ok_paths_from_key "extracts exactly the answer key for ${fixture%-body}" \
     "$FIXTURES/$fixture.expected-paths.txt"
 done
+
+# --- 2b. the one measured bot false positive --------------------------------------
+# #28's real dependabot body quotes an upstream commit subject naming a file in
+# actions/setup-python. Both directions are asserted: exempt as dependabot, and RED when
+# the same body is attributed to anyone else — so the exemption is what does the work
+# here, not an accident of the synthetic tree.
+DEPENDABOT_BODY="$(cat "$FIXTURES/pr-28-dependabot-body.md")"
+UPSTREAM_PATH="$(head -1 "$FIXTURES/pr-28-dependabot-body.upstream-paths.txt")"
+
+run_check "$DEPENDABOT_BODY" "$HEAD_SHA" "$BASE_SHA" "dependabot[bot]"
+if [[ "$LAST_STATUS" -eq 0 && "$LAST_OUTPUT" == *"skipped for dependabot[bot]"* ]]; then
+  pass "exempts dependabot, whose body is upstream attribution it cannot rewrite"
+else
+  fail "dependabot exemption did not apply (exit $LAST_STATUS: $LAST_OUTPUT)"
+fi
+
+expect_fail_naming "reds on the same dependabot body when any other author claims it" \
+  "$DEPENDABOT_BODY" "$UPSTREAM_PATH"
+
+expect_fail_naming "does not exempt release-please, whose changelog is about this repository" \
+  "Adds \`src/cli/never-existed.test.mjs\`." "src/cli/never-existed.test.mjs"
+run_check "Adds \`src/cli/never-existed.test.mjs\`." "$HEAD_SHA" "$BASE_SHA" "github-actions[bot]"
+if [[ "$LAST_STATUS" -ne 0 ]]; then
+  pass "the exemption is one named author, not every bot"
+else
+  fail "an unlisted bot author was exempted"
+fi
 
 # --- 3. the legitimate-body classes ------------------------------------------------
 expect_pass "accepts a file this branch deletes" \
@@ -348,10 +375,11 @@ fi
 
 if [[ "$source_and_static" == *'PR_BODY: ${{ github.event.pull_request.body }}'* \
   && "$source_and_static" == *'PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}'* \
-  && "$source_and_static" == *'PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}'* ]]; then
-  pass "CI passes the body and both SHAs through the environment, never a shell argument"
+  && "$source_and_static" == *'PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}'* \
+  && "$source_and_static" == *'PR_AUTHOR: ${{ github.event.pull_request.user.login }}'* ]]; then
+  pass "CI passes the body, both SHAs, and the author through the environment, never a shell argument"
 else
-  fail "CI does not use the required env boundary for the body and SHAs"
+  fail "CI does not use the required env boundary for the body, SHAs, and author"
 fi
 
 body_step="$(sed -n '/name: Validate pull request body file references/,/name: Install Node dependencies/p' "$WORKFLOW")"

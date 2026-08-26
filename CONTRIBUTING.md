@@ -50,7 +50,7 @@ This contract applies to the pull request title rather than replacing local comm
 
 `scripts/ci/validate-pr-body-file-refs.mjs` fails a pull request when its body names a repo-rooted file path that does not resolve at the **PR head**. It exists because #1366's body carried a verification table naming a test file that lived on a sibling branch and appeared zero times in its own diff, while opening `Closes #1363` / `Closes #1365` — two issues that change does not touch. A body is a provenance record: it is what a reviewer reads instead of re-running the evidence, and `Closes #N` mutates issue state on merge.
 
-What counts as a file reference is deliberately narrow, and every rule below was measured against the last 120 merged pull requests in this repository (180 extracted path claims):
+What counts as a file reference is deliberately narrow, and every rule below was measured against 148 real pull requests in this repository — the 120 most recently merged plus all 32 dependabot ones — replayed at their real head and base SHAs (180 extracted path claims):
 
 - A candidate is `<top-level-directory>/<segments>.<ext>`. The set of top-level directories is **derived from the PR head's own tree**, not hand-listed, so it cannot drift — and generated roots are excluded for free, since `build/` is not tracked and `node build/src/cli.js` is therefore never read as a claim. Requiring a file extension keeps globs (`src/**`), bare directory mentions (`scripts/ci/`), issue references, and prose out; a preceding-character rule keeps URLs and absolute paths out.
 - **Code fences and inline code are not exempt.** The fabricated evidence in #1366 was inside a fenced block. That is where evidence claims live, so that is exactly where the check has to look.
@@ -63,7 +63,11 @@ For a path that is deliberately not in this tree — one that is relative to a f
 <!-- pr-body-paths: allow kits/example/kit.json — path is relative to the eval's fixture root, not the repo root -->
 ```
 
-The reason is required; a directive without one fails. Across those 120 merged pull requests exactly one would have needed a directive (two paths in #1331, both relative to a temporary fixture tree), so the measured false-positive rate is 2 of 180 path claims. There are no bot exceptions and no soft failures.
+The reason is required; a directive without one fails.
+
+One author is exempt, and only one: **dependabot**. Its body is entirely upstream attribution — the dependency's own release notes, changelog and commit list, pasted from another repository. One of the 32 dependabot pull requests here (#28) quotes an upstream commit subject naming a file in `actions/setup-python`, which is not a claim that this tree contains it; dependabot cannot rewrite its own body to add a directive, and a required check a bot can never pass is a check that gets bypassed. Release-please is **not** exempt: its changelogs are about this repository, and every release pull request in the measurement passes on its own merits. There are no soft failures and no `continue-on-error`.
+
+Across those 148 pull requests exactly one would have needed a directive (two paths in #1331, both relative to a temporary fixture tree rather than the repo root), so the measured false-positive rate is **1 of 148 pull requests, 2 of 180 path claims**.
 
 ## Validation
 

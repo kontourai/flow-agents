@@ -20,6 +20,28 @@ import { execFileSync } from "node:child_process";
 const DIRECTIVE = /<!--\s*pr-body-paths:\s*allow\s+([^\s>]+)([\s\S]*?)-->/g;
 const MIN_REASON_CHARS = 8;
 
+// Authors whose bodies are not claims about this repository's diff. The reason is the
+// value so an entry cannot be added without one.
+//
+// Dependabot's body is entirely upstream attribution — the dependency's own release
+// notes, changelog and commit list, pasted from another repository. Measured over all 32
+// dependabot pull requests in this repository, one (#28, actions/setup-python) quotes an
+// upstream commit subject naming `docs/advanced-usage.md`, a file in ACTIONS/SETUP-PYTHON.
+// It is not a claim that this tree contains that file, dependabot cannot rewrite its own
+// body to add a directive, and a required check a bot can never pass is a check that gets
+// bypassed — which costs more than the zero fabrication risk this exempts, since no agent
+// lane composes a dependabot body.
+//
+// This is NOT a general bot exemption: release-please's bodies are changelogs of THIS
+// repository and are checked like everyone else's (all release pull requests in the
+// 120-PR measurement pass).
+const EXEMPT_AUTHORS = new Map([
+  [
+    "dependabot[bot]",
+    "body is upstream attribution (the dependency's own release notes, changelog and commits), not a claim about this diff",
+  ],
+]);
+
 function git(args) {
   return execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 28, stdio: ["ignore", "pipe", "pipe"] });
 }
@@ -58,6 +80,12 @@ if (typeof body !== "string") {
 }
 
 function run(bodyText, head, base) {
+  const author = (process.env.PR_AUTHOR || "").trim();
+  if (EXEMPT_AUTHORS.has(author)) {
+    console.log(`PR body file references: skipped for ${author} — ${EXEMPT_AUTHORS.get(author)}.`);
+    return;
+  }
+
   if (tryGit(["cat-file", "-e", `${head}^{commit}`]) === null) {
     console.error(
       `PR body file-reference validation could not run: the PR head commit ${head} is not in this checkout.\n` +

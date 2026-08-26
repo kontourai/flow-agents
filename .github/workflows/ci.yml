@@ -61,6 +61,7 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: node scripts/ci/validate-pr-body-file-refs.mjs
 
       - name: Install Node dependencies
