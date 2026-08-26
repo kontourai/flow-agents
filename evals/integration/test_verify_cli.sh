@@ -258,6 +258,16 @@ fi
 # The action checkout does not arrive with node_modules. Its ESM status-derivation helper
 # resolves @kontourai/surface from the action repository, so the composite action must install
 # the action's own locked runtime dependencies rather than relying on the consumer repo.
+#
+# The requirement is that the action's `npm ci --omit=dev` actually installs Surface, so what
+# has to hold is that Surface is declared somewhere that flag set installs -- `dependencies`,
+# or `optionalDependencies` given the action also passes `--include=optional`. This used to
+# read `optionalDependencies` alone, which named the field rather than the requirement.
+# kontourai/flow-agents#1362 collapsed Surface's duplicate devDependencies/optionalDependencies
+# declarations into one exact `dependencies` entry -- a strictly stronger guarantee, since
+# `dependencies` installs unconditionally while an optional dependency may legitimately be
+# skipped. A devDependencies-only declaration is the one shape that breaks the action, and is
+# rejected explicitly below rather than left to fall out of the section lookup.
 if node -e '
   const fs=require("fs"), path=require("path");
   const root=process.argv[1];
@@ -266,10 +276,14 @@ if node -e '
   const lock=JSON.parse(fs.readFileSync(path.join(root,"package-lock.json"),"utf8"));
   const installsAtActionRoot=/ACTION_REPO_ROOT="\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\."/.test(action)
     && /npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund --prefix "\$ACTION_REPO_ROOT"/.test(action);
-  const surfaceDeclared=Boolean(pkg.optionalDependencies && pkg.optionalDependencies["@kontourai/surface"]);
+  const surfaceField=(pkg.dependencies||{})["@kontourai/surface"] ? "dependencies"
+    : (pkg.optionalDependencies||{})["@kontourai/surface"] ? "optionalDependencies" : null;
+  const surfaceDeclared=surfaceField!==null;
+  const surfaceDevOnly=!surfaceDeclared && Boolean((pkg.devDependencies||{})["@kontourai/surface"]);
   const surfaceLocked=Boolean(lock.packages && lock.packages["node_modules/@kontourai/surface"]);
   if(!installsAtActionRoot) console.error("trust-verify action does not install locked runtime dependencies at the action root");
-  if(!surfaceDeclared) console.error("@kontourai/surface is not a declared runtime dependency");
+  if(surfaceDevOnly) console.error("@kontourai/surface is declared only in devDependencies, which the composite action npm ci --omit=dev skips");
+  else if(!surfaceDeclared) console.error("@kontourai/surface is not a declared runtime dependency (expected in dependencies or optionalDependencies)");
   if(!surfaceLocked) console.error("@kontourai/surface is absent from package-lock.json");
   process.exit(installsAtActionRoot && surfaceDeclared && surfaceLocked ? 0 : 1);
 ' "$ROOT"; then

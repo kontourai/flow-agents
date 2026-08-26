@@ -207,6 +207,20 @@ async function resolveTelemetryRunBinding({
   ) {
     return incomplete('no authenticated Builder run is bound to this runtime session');
   }
+  // ABSENT and MALFORMED are different states and were reported with one message.
+  //
+  // The pointer writer only emits binding_id when a host workflow binding exists
+  // (src/builder-flow-runtime.ts: `...(binding ? { binding_id: binding.bindingId } : {})`),
+  // so a run started without one produces a perfectly well-formed pointer that this
+  // check called "invalid" — 1,968 events in a 236,775-event local corpus, every one of
+  // them mislabelled, sending readers to hunt corruption that does not exist. The rest
+  // of those pointers validate: active_slug and artifact_dir are strings and agree.
+  //
+  // Whether correlation SHOULD require a host binding is a separate, open question
+  // (#1276). This only stops the diagnostic from naming the wrong condition.
+  if (discoveredPointer.binding_id === undefined || discoveredPointer.binding_id === null) {
+    return incomplete('no host workflow binding was established for this run');
+  }
   if (
     typeof discoveredPointer.binding_id !== 'string'
     || typeof discoveredPointer.active_slug !== 'string'

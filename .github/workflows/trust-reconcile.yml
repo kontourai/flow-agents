@@ -27,11 +27,16 @@
 # The agent cannot self-declare success here: it cannot modify the CI environment,
 # pre-disable this job, or post-forge results after the check runs.
 #
-# THIS JOB IS ALREADY A REQUIRED, ADMIN-ENFORCED STATUS CHECK on main (verified via
-# `gh api repos/kontourai/flow-agents/branches/main/protection`: "Trust Reconcile" is in
-# required_status_checks.contexts, enforce_admins.enabled: true). No PR — including from
-# admins — can merge past a failing run. Disabling/relaxing this requires a server-side
-# branch-protection change (GitHub UI/API), not a code change in this repo.
+# ARMED (2026-08-24): this workflow is a REQUIRED status check on main, alongside
+# Source and Static, Workflow Contracts, Runtime and Kit and Integration Coverage.
+# A failure blocks merge. Requiredness lives in server-side branch protection, not
+# here; editing this file alone can neither arm nor disarm it.
+#
+# Arming basis: the preceding 24 consecutive main commits all passed this lane, so
+# requiring it blocked nothing that was already being delivered — it only removes the
+# window in which a change could merge with its delivery evidence unreconciled. That
+# window was not hypothetical: #1329 merged through it on 2026-08-24 with this lane
+# red, because an armed auto-merge fires on the required set alone.
 #
 # Additive — NOT a gate-hook change. Does not modify scripts/hooks/*, kits/knowledge,
 # or continue-work. Mirrors the structure of .github/workflows/ci.yml.
@@ -88,10 +93,12 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    outputs:
+      failure-summary: ${{ steps.trust-reconcile.outputs.failure-summary }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history (not the default shallow fetch-depth: 1): the bundle-ownership
           # staleness check (ADR 0022 addendum, part 2) resolves `git merge-base
@@ -169,3 +176,18 @@ jobs:
             trust.attestation.status.json
           if-no-files-found: ignore
           retention-days: 30
+
+  trust-advisory-comment:
+    if: >-
+      ${{ always() && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository }}
+    needs: trust-reconcile
+    permissions:
+      pull-requests: write
+    uses: kontourai/.github/.github/workflows/trust-advisory-comment.yml@e6dfe1bea874266a98059c682c21a6b73ae9c71e
+    with:
+      pr-number: ${{ github.event.pull_request.number }}
+      result: ${{ needs['trust-reconcile'].result }}
+      run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      check-name: Trust Reconcile
+      details: ${{ needs['trust-reconcile'].outputs.failure-summary }}

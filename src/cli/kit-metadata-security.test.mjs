@@ -9,12 +9,13 @@ import { readKitInventory } from "../../build/src/runtime-adapters.js";
 import { main as validateHookInfluence } from "../../build/src/cli/validate-hook-influence.js";
 import { parseKitAgentSpawnTriggers, parseKitFlowStepActions, parseKitSkillRoles, validateKitRepository, validateKitRepositoryDiagnostics } from "../../build/src/flow-kit/validate.js";
 import { observeBuilderArtifactsForProgress } from "../../build/src/builder-gate-action-envelope.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require = createRequire(import.meta.url);
 const { workflowTriggersFor } = require("../../scripts/hooks/lib/kit-catalog.js");
 
 function tempRoot(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return makeFixtureDir(prefix);
 }
 
 function writeJson(file, value) {
@@ -69,11 +70,25 @@ test("Builder flow step actions are structured, complete, and operation-aware", 
   const result = parseKitFlowStepActions(manifest, "kits/builder/kit.json");
 
   assert.deepEqual(result.errors, []);
-  assert.equal(result.entries.length, 14);
-  assert.deepEqual(result.entries.find((entry) => entry.step_id === "plan")?.skills, ["plan-work"]);
-  assert.deepEqual(result.entries.filter((entry) => entry.implementation_allowed).map((entry) => `${entry.flow_id}/${entry.step_id}`), ["builder.build/execute"]);
-  assert.equal(result.entries.find((entry) => entry.step_id === "verify")?.expectation_bindings.find((binding) => binding.expectation_id === "clean-critique")?.interface, "workflow.critique");
-  assert.deepEqual(result.entries.find((entry) => entry.step_id === "pr-open"), {
+  // Three flows declare step actions: builder.build (10), its reduced-gate ablation variant
+  // builder.build-lean (10), and builder.shape (4). Counted per flow rather than in total, so a
+  // row moving between flows cannot keep the sum right while changing what each flow declares.
+  assert.equal(result.entries.length, 24);
+  assert.deepEqual(
+    Object.fromEntries([...new Set(result.entries.map((entry) => entry.flow_id))].sort().map((flowId) => [flowId, result.entries.filter((entry) => entry.flow_id === flowId).length])),
+    { "builder.build": 10, "builder.build-lean": 10, "builder.shape": 4 },
+  );
+  const action = (flowId, stepId) => result.entries.find((entry) => entry.flow_id === flowId && entry.step_id === stepId);
+  assert.deepEqual(action("builder.build", "plan")?.skills, ["plan-work"]);
+  // The variant ablates plan-gate, so its plan step demands nothing — the discriminating
+  // difference between the two arms, asserted where the producer matrix is pinned.
+  assert.deepEqual(action("builder.build-lean", "plan")?.skills, []);
+  assert.deepEqual(action("builder.build-lean", "plan")?.expectation_ids, []);
+  assert.deepEqual(action("builder.build-lean", "design-probe")?.skills, []);
+  assert.deepEqual(action("builder.build-lean", "design-probe")?.expectation_ids, []);
+  assert.deepEqual(result.entries.filter((entry) => entry.implementation_allowed).map((entry) => `${entry.flow_id}/${entry.step_id}`), ["builder.build/execute", "builder.build-lean/execute"]);
+  assert.equal(action("builder.build", "verify")?.expectation_bindings.find((binding) => binding.expectation_id === "clean-critique")?.interface, "workflow.critique");
+  assert.deepEqual(action("builder.build", "pr-open"), {
     flow_id: "builder.build",
     step_id: "pr-open",
     skills: [],
@@ -422,12 +437,18 @@ test("flow expectation ownership cannot be bypassed by reclassifying a producer 
   const producer = manifest.skill_roles.find((entry) => entry.skill_id === "builder.evidence-gate");
   producer.role = "extension";
   delete producer.flow_id;
+  // The kit declares a reduced-gate variant that reuses this producer, so a reclassification that
+  // left the variant binding behind would be a half-mutation the shape rules reject for a
+  // different reason — masking the ownership signal this test exists to prove.
+  delete producer.flow_ids;
   producer.step_ids = [];
   producer.expectation_ids = [];
   producer.artifacts = [];
-  const action = manifest.flow_step_actions.find((entry) => entry.flow_id === "builder.build" && entry.step_id === "merge-ready");
-  action.skills = [];
-  delete action.operations;
+  for (const flowId of ["builder.build", "builder.build-lean"]) {
+    const action = manifest.flow_step_actions.find((entry) => entry.flow_id === flowId && entry.step_id === "merge-ready");
+    action.skills = [];
+    delete action.operations;
+  }
   writeJson(manifestFile, manifest);
 
   const errors = (await validateKitRepository(kit)).join("\n");
@@ -447,11 +468,17 @@ test("operation-only composed actions must explicitly and exclusively own expect
     return (await validateKitRepository(kit)).join("\n");
   }
 
+  // pull-request-opened belongs to the COMPOSED builder.publish-learn step, so its owner key is
+  // shared by every flow that composes it. Both parents must drop the declaration for the
+  // expectation to become genuinely unowned; breaking one while the other still declares it is a
+  // manifest with one owner, not zero.
   const missing = await errorsFor("missing", (manifest) => {
-    const action = manifest.flow_step_actions.find((entry) => entry.flow_id === "builder.build" && entry.step_id === "pr-open");
-    action.skills = [];
-    action.operations = ["publish-change"];
-    delete action.expectation_ids;
+    for (const flowId of ["builder.build", "builder.build-lean"]) {
+      const action = manifest.flow_step_actions.find((entry) => entry.flow_id === flowId && entry.step_id === "pr-open");
+      action.skills = [];
+      action.operations = ["publish-change"];
+      delete action.expectation_ids;
+    }
   });
   assert.match(missing, /expectation_ids must be explicitly declared/);
   assert.match(missing, /flow expectation 'builder\.publish-learn\/pr-open\/pull-request-opened' must have exactly one producer owner; found 0/);
@@ -474,23 +501,30 @@ test("mixed skill and operation ownership follows each expectation binding inter
   fs.cpSync("kits/builder", kit, { recursive: true });
   const manifestFile = path.join(kit, "kit.json");
   const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
-  const action = manifest.flow_step_actions.find((entry) => entry.flow_id === "builder.build" && entry.step_id === "verify");
-  action.operations = ["publish-change"];
-  const policyBinding = action.expectation_bindings.find((entry) => entry.expectation_id === "policy-compliance");
-  policyBinding.interface = "operation";
-  policyBinding.operation = "publish-change";
-  const policyArtifactBinding = action.artifact_bindings.find((entry) => entry.expectation_ids.includes("policy-compliance"));
-  const policyArtifactIndex = action.artifacts.indexOf(policyArtifactBinding.artifact);
-  action.artifacts[policyArtifactIndex] = "publish-change.result.json";
-  policyArtifactBinding.artifact = "publish-change.result.json";
+  // The verify producer role is shared by builder.build and its reduced-gate variant, so moving
+  // policy-compliance off that role moves it in BOTH flows; the action rebinding has to follow in
+  // both or the variant is left with an expectation no producer owns.
+  const policyBindings = ["builder.build", "builder.build-lean"].map((flowId) => {
+    const entry = manifest.flow_step_actions.find((candidate) => candidate.flow_id === flowId && candidate.step_id === "verify");
+    entry.operations = ["publish-change"];
+    const policyBinding = entry.expectation_bindings.find((candidate) => candidate.expectation_id === "policy-compliance");
+    policyBinding.interface = "operation";
+    policyBinding.operation = "publish-change";
+    const policyArtifactBinding = entry.artifact_bindings.find((candidate) => candidate.expectation_ids.includes("policy-compliance"));
+    entry.artifacts[entry.artifacts.indexOf(policyArtifactBinding.artifact)] = "publish-change.result.json";
+    policyArtifactBinding.artifact = "publish-change.result.json";
+    return policyBinding;
+  });
   const verifier = manifest.skill_roles.find((entry) => entry.skill_id === "builder.verify-work");
   verifier.expectation_ids = verifier.expectation_ids.filter((id) => id !== "policy-compliance");
   writeJson(manifestFile, manifest);
   const valid = (await validateKitRepository(kit)).join("\n");
   assert.doesNotMatch(valid, /verify\/policy-compliance.*producer owner/);
 
-  policyBinding.interface = "workflow.evidence";
-  delete policyBinding.operation;
+  for (const policyBinding of policyBindings) {
+    policyBinding.interface = "workflow.evidence";
+    delete policyBinding.operation;
+  }
   writeJson(manifestFile, manifest);
   const missing = (await validateKitRepository(kit)).join("\n");
   assert.match(missing, /flow expectation 'builder\.build\/verify\/policy-compliance' must have exactly one producer owner; found 0/);

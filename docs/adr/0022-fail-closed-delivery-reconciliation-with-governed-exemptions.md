@@ -574,3 +574,35 @@ until a dedicated one-time cleanup PR; they are harmless (prefer-newest) but do 
 single fixed path, not a growth vector. This addendum changes WHERE seals live and HOW the
 owning one is chosen; it does not touch Step 1 (fresh verify), the DECLARED exemption path, or
 any fail-closed verdict — all of which are regression-locked unchanged.
+
+## Addendum (2026-08-17, part 6): optional structured `gaps[]` on DECLARED entries — accepted gaps become aging records (#1267)
+
+Owner-directed follow-up (issue #1267, option 1 of the two shapes the issue offered): a
+DECLARED entry MAY carry an optional fifth field, `gaps`, an **array of non-empty strings**,
+each naming ONE disclosed gap accepted along with the exemption:
+
+```json
+{
+  "scope": "branch-prefix:feat/example",
+  "reason": "scoped change delivered with an accepted gap",
+  "approved_by": "brian.anderson1222",
+  "declared_at": "2026-08-17T00:00:00Z",
+  "gaps": ["trend readings have no automatic reader"]
+}
+```
+
+**§2's well-formedness definition is UNCHANGED**: the four required fields (`scope`,
+`reason`, `approved_by`, `declared_at`) remain the complete validity contract, and both
+readers (`scripts/ci/trust-reconcile.js` exemption matching and
+`scripts/hooks/lib/unstarted-delivery.js` advisory) tolerate the extra field exactly as they
+tolerate any extra field — an entry with `gaps[]` matches, exempts, and is reported exactly
+as before (regression-locked in `evals/integration/test_trust_reconcile_negatives.sh`).
+`gaps` is read ONLY by the accepted-gap projection (`flow-agents
+console-declared-projection`, a transport-agnostic per-scope-upsert fold per #1086/#1087),
+which projects one aging record per structured gap. Legacy entries whose `reason` prose
+names a gap are **never scraped** — they are counted and disclosed in the projection's own
+summary (`legacy_entries_not_projected`) so their absence is visible, not silent. A `gaps`
+field that is present but NOT an array of non-empty strings makes the entry invalid **for
+projection only** (warned, skipped, disclosed) — it does not affect exemption matching,
+which never reads the field. Field documentation for exemption authors lives in
+`delivery/README.md` alongside the scope grammar.

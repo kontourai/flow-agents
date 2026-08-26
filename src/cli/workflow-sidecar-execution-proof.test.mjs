@@ -3,17 +3,18 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 
-import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
+import { composeGateVerdict, externalCritiqueAuthorityForGate, inferExecutedTestCount, isMeaningfulTestCommand, liveCritiqueFreshnessSatisfied, observedExecutedTestCount, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
 import * as workflowSidecar from "../../build/src/cli/workflow-sidecar.js";
 import { lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest } from "../../build/src/external-lifecycle-authority.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const commandLogChain = createRequire(import.meta.url)("../../scripts/lib/command-log-chain.js");
 
 function fixture(files) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-proof-"));
+  const root = makeFixtureDir("flow-agents-test-proof-");
   for (const [name, content] of Object.entries(files)) {
     const file = path.join(root, name);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -34,7 +35,7 @@ function appendTransactionAbortForTest(capability, transactionId = "transaction-
 
 test("transaction abort journal safely appends to present and absent regular logs", () => {
   for (const present of [false, true]) {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-abort-${present ? "present" : "absent"}-`));
+    const directory = makeFixtureDir(`flow-agents-abort-${present ? "present" : "absent"}-`);
     const logFile = path.join(directory, "command-log.jsonl");
     if (present) fs.writeFileSync(logFile, '{"source":"foreign"}\n');
 
@@ -49,7 +50,7 @@ test("transaction abort journal safely appends to present and absent regular log
 
 test("transaction abort journal refuses non-regular log targets without modifying them", () => {
   for (const kind of ["symlink", "fifo", "directory"]) {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-abort-${kind}-`));
+    const directory = makeFixtureDir(`flow-agents-abort-${kind}-`);
     const logFile = path.join(directory, "command-log.jsonl");
     const outside = path.join(directory, "outside.log");
     if (kind === "symlink") {
@@ -69,7 +70,7 @@ test("transaction abort journal refuses non-regular log targets without modifyin
 });
 
 test("transaction abort journal refuses create races and replaced session identities", () => {
-  const racedDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-create-race-"));
+  const racedDirectory = makeFixtureDir("flow-agents-abort-create-race-");
   const racedLog = path.join(racedDirectory, "command-log.jsonl");
   assert.equal(typeof workflowSidecar.setWriterTransactionAbortTestHooksForTest, "function", "the abort journal exposes a deterministic create-race test hook");
   workflowSidecar.setWriterTransactionAbortTestHooksForTest({ beforeExclusiveCreate: () => fs.writeFileSync(racedLog, "foreign race\n") });
@@ -80,7 +81,7 @@ test("transaction abort journal refuses create races and replaced session identi
   }
   assert.equal(fs.readFileSync(racedLog, "utf8"), "foreign race\n");
 
-  const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-replaced-root-"));
+  const artifactRoot = makeFixtureDir("flow-agents-abort-replaced-root-");
   const sessionDir = path.join(artifactRoot, "session");
   fs.mkdirSync(sessionDir);
   const capability = writerAbortCapabilityForTest(sessionDir);
@@ -94,7 +95,7 @@ test("transaction abort journal refuses create races and replaced session identi
 });
 
 test("transaction abort journal refuses to extend a broken execution-proof chain", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-broken-chain-"));
+  const directory = makeFixtureDir("flow-agents-abort-broken-chain-");
   const logFile = path.join(directory, "command-log.jsonl");
   const broken = `${JSON.stringify({
     source: "canonical-writer-execution",
@@ -118,7 +119,7 @@ test("transaction abort denial preserves malformed and gap command-log bytes exa
     ["malformed", `${JSON.stringify(chained)}\nnot json\n`],
     ["mid-chain-gap", `${JSON.stringify(chained)}\n[]\n`],
   ]) {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), `flow-agents-abort-denied-${name}-`));
+    const directory = makeFixtureDir(`flow-agents-abort-denied-${name}-`);
     const logFile = path.join(directory, "command-log.jsonl");
     fs.writeFileSync(logFile, raw);
     assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(directory), `transaction-denied-${name}`), false, `${name}: denied authority is fail closed`);
@@ -127,7 +128,7 @@ test("transaction abort denial preserves malformed and gap command-log bytes exa
 });
 
 test("transaction abort journal refuses to extend a valid-hash non-benign fork", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-non-benign-fork-"));
+  const directory = makeFixtureDir("flow-agents-abort-non-benign-fork-");
   const logFile = path.join(directory, "command-log.jsonl");
   const makeSibling = (source) => {
     const record = {
@@ -146,7 +147,7 @@ test("transaction abort journal refuses to extend a valid-hash non-benign fork",
 });
 
 test("transaction abort journal never deletes a stale foreign lock", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-stale-lock-"));
+  const directory = makeFixtureDir("flow-agents-abort-stale-lock-");
   const lockFile = path.join(directory, "command-log.jsonl.lock.0");
   const contents = `${JSON.stringify({ generation: 0, nonce: "foreign", state: "active" })}\n`;
   fs.writeFileSync(lockFile, contents);
@@ -159,7 +160,7 @@ test("transaction abort journal never deletes a stale foreign lock", () => {
 });
 
 test("transaction abort journal loops partial writes and rejects zero writes", () => {
-  const partialDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-partial-write-"));
+  const partialDirectory = makeFixtureDir("flow-agents-abort-partial-write-");
   workflowSidecar.setWriterTransactionAbortTestHooksForTest({
     write: (fd, buffer, offset, length, position) => fs.writeSync(fd, buffer, offset, Math.min(length, 3), position),
   });
@@ -170,7 +171,7 @@ test("transaction abort journal loops partial writes and rejects zero writes", (
   }
   assert.equal(JSON.parse(fs.readFileSync(path.join(partialDirectory, "command-log.jsonl"), "utf8")).transaction.id, "transaction-partial");
 
-  const zeroDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-zero-write-"));
+  const zeroDirectory = makeFixtureDir("flow-agents-abort-zero-write-");
   workflowSidecar.setWriterTransactionAbortTestHooksForTest({ write: () => 0 });
   try {
     assert.equal(appendTransactionAbortForTest(writerAbortCapabilityForTest(zeroDirectory), "transaction-zero"), false);
@@ -180,7 +181,7 @@ test("transaction abort journal loops partial writes and rejects zero writes", (
 });
 
 test("transaction abort journal rereads and rejects post-fsync corruption", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-reread-corruption-"));
+  const directory = makeFixtureDir("flow-agents-abort-reread-corruption-");
   workflowSidecar.setWriterTransactionAbortTestHooksForTest({
     beforeReread: (descriptor) => { fs.writeSync(descriptor, Buffer.from("!"), 0, 1, 0); },
   });
@@ -192,7 +193,7 @@ test("transaction abort journal rereads and rejects post-fsync corruption", () =
 });
 
 test("transaction abort journal rejects lock replacement during descriptor release", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-abort-lock-replacement-"));
+  const directory = makeFixtureDir("flow-agents-abort-lock-replacement-");
   let replacement = "";
   let stderr = "";
   const writeStderr = process.stderr.write;
@@ -231,7 +232,7 @@ test("explicit gate verdicts remain authoritative over successful and failing co
 });
 
 test("critique authority gates ignore embedded ledger events and require a protected external ledger", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-critique-authority-"));
+  const dir = makeFixtureDir("flow-agents-critique-authority-");
   const bundle = {
     claims: [{ metadata: { origin: "critique", critique_resolution: { kind: "cross-reviewer" } } }],
     critique_resolution_events: [{ event_id: "embedded-forgery" }],
@@ -295,6 +296,86 @@ test("package-script output cannot manufacture a positive test count", () => {
   assert.equal(inferExecutedTestCount("npm test", root, "# tests 999\n"), 0);
 });
 
+test("#1048: a committed host-declared ordinary CI lane is substantive tests evidence", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({
+      scripts: {
+        "verify:static": "node --check checks/static-check.mjs",
+        "test:full": "node --test test/contract.test.mjs",
+        "ci:fast": "npm run verify:static && npm run test:full",
+      },
+      "trust-reconcile-manifest": [{ id: "ci-fast", command: "npm run ci:fast" }],
+    }),
+    "checks/static-check.mjs": "export {};\n",
+    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+  });
+
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "fixture"], { cwd: root });
+
+  assert.equal(isMeaningfulTestCommand("npm run ci:fast", root), true);
+  assert.deepEqual(testExecutionProof("npm run ci:fast", root), {
+    kind: "local-process-exit",
+    runner: "node --test",
+    static_test_units: 1,
+  });
+  assert.equal(isMeaningfulTestCommand("npm run ci:fast -- --verbose", root), false, "manifest matching is exact, not prefix-based");
+  assert.equal(isMeaningfulTestCommand(" npm run ci:fast", root), false, "manifest matching preserves leading whitespace verbatim");
+  assert.equal(isMeaningfulTestCommand("npm run ci:fast ", root), false, "manifest matching preserves trailing whitespace verbatim");
+
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+    scripts: {
+      "verify:static": "node --check checks/static-check.mjs",
+      "test:full": "echo forged",
+      "ci:fast": "npm run verify:static && npm run test:full",
+    },
+    "trust-reconcile-manifest": [{ id: "ci-fast", command: "npm run ci:fast" }],
+  }));
+  assert.equal(testExecutionProof("npm run ci:fast", root)?.runner, "node --test", "a declared lane and every delegated script body come from its committed HEAD manifest");
+
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+    scripts: { "ci:uncommitted": "node --test test/contract.test.mjs" },
+    "trust-reconcile-manifest": [{ id: "ci-uncommitted", command: "npm run ci:uncommitted" }],
+  }));
+  assert.equal(isMeaningfulTestCommand("npm run ci:uncommitted", root), false, "an uncommitted manifest cannot authorize a command");
+
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+    scripts: { "ci:empty": "echo ok", "ci:true": "true", "ci:blank": "" },
+    "trust-reconcile-manifest": [
+      { id: "ci-empty", command: "npm run ci:empty" },
+      { id: "ci-true", command: "npm run ci:true" },
+      { id: "ci-blank", command: "npm run ci:blank" },
+    ],
+  }));
+  execFileSync("git", ["add", "package.json"], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "vacuous lanes"], { cwd: root });
+  for (const command of ["npm run ci:empty", "npm run ci:true", "npm run ci:blank"]) {
+    assert.equal(isMeaningfulTestCommand(command, root), false, `${command} remains vacuous despite manifest membership`);
+    assert.equal(testExecutionProof(command, root), null);
+  }
+});
+
+test("#1048: a tracked PATH shim cannot gain membership from a declared CI lane", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({
+      scripts: { "ci:fast": "node --test test/contract.test.mjs" },
+      "trust-reconcile-manifest": [{ id: "ci-fast", command: "PATH=./shim npm run ci:fast" }],
+    }),
+    "shim/npm": "#!/bin/sh\nprintf '1..1\\nok 1 - forged\\n'\nexit 0\n",
+    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+  });
+  fs.chmodSync(path.join(root, "shim/npm"), 0o755);
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "fixture"], { cwd: root });
+
+  const forged = execFileSync("bash", ["-lc", "PATH=./shim npm run ci:fast"], { cwd: root, encoding: "utf8" });
+  assert.match(forged, /ok 1 - forged/);
+  assert.equal(isMeaningfulTestCommand("PATH=./shim npm run ci:fast", root), false);
+  assert.equal(testExecutionProof("PATH=./shim npm run ci:fast", root), null);
+});
+
 test("supported node test workflows produce source-derived local proof", () => {
   const root = fixture({
     "package.json": JSON.stringify({ scripts: { test: "node --test test/contract.test.mjs" } }),
@@ -304,8 +385,37 @@ test("supported node test workflows produce source-derived local proof", () => {
   const proof = testExecutionProof("npm test", root);
   assert.deepEqual(proof, { kind: "local-process-exit", runner: "node --test", static_test_units: 1 });
   assert.equal(inferExecutedTestCount("npm test", root, "# tests 0\n"), 0);
-  assert.equal(inferExecutedTestCount("npm test", root, "# tests 1\n"), 1);
-  assert.equal(inferExecutedTestCount("npm test", root, "ℹ tests 1\n"), 1);
+  assert.equal(inferExecutedTestCount("npm test", root, "# tests 1\n"), 0, "test plans are declarations, not executed passes");
+  assert.equal(inferExecutedTestCount("npm test", root, "# pass 1\n"), 0, "a detached summary line is not runner-owned proof");
+  assert.equal(inferExecutedTestCount("npm test", root, "ℹ tests 1\n"), 0);
+  assert.equal(observedExecutedTestCount("ok example.test/package\n"), 0, "a passing package is not an executed test count");
+  assert.equal(observedExecutedTestCount("1..2\nok 1 - ran\nok 2 - deferred # SKIP later\n"), 1, "TAP plans and skipped records do not count");
+  assert.equal(observedExecutedTestCount("# Subtest: skipped suite\n    ok 1 - deferred # SKIP later\n    1..1\nok 1 - skipped suite\n1..1\n"), 0, "an all-skipped TAP subtest does not make its outer suite marker a pass");
+});
+
+test("#1048: a name-filtered, skipped-only Node suite with printed pass-shaped stdout is null proof", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({ scripts: { test: "node --test --test-name-pattern=contract test/contract.test.mjs" } }),
+    "test/contract.test.mjs": 'import { describe, it } from "node:test";\nconsole.log("1 passed");\ndescribe("suite", () => { it("contract", { skip: true }, () => {}); });\n',
+  });
+  const command = "node --test --test-name-pattern=contract test/contract.test.mjs";
+  const result = spawnSync(process.execPath, ["--test", "--test-name-pattern=contract", "test/contract.test.mjs"], { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH ?? "" } });
+  assert.equal(result.status, 0, result.stderr);
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.match(output, /1 passed/);
+  assert.match(output, /(?:#|ℹ)\s*pass 0/);
+  assert.equal(testExecutionProof(command, root)?.static_test_units, 1, "static declarations alone cannot establish execution");
+  assert.equal(inferExecutedTestCount(command, root, output), 0, "zero executed-and-passed tests is null proof");
+});
+
+test("#1048: Go PASS records count real cases but never package success or zero Rust summaries", () => {
+  const root = fixture({
+    "contract_test.go": "package contract\nimport \"testing\"\nfunc TestContract(t *testing.T) {}\n",
+  });
+  assert.equal(inferExecutedTestCount("go test ./...", root, "=== RUN   TestContract\n--- PASS: TestContract (0.00s)\nPASS\nok   example/contract 0.003s\n"), 1);
+  assert.equal(inferExecutedTestCount("go test ./...", root, "ok   example/contract 0.003s\n"), 0, "a successful package is not a test count");
+  assert.equal(observedExecutedTestCount("test result: ok. 0 passed; 0 failed; 0 ignored\n", "cargo test"), 0);
 });
 
 test("empty suite declarations are not counted as executed test cases", () => {

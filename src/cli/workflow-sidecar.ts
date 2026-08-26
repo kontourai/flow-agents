@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
-import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolveFlowStep, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { resolveActionableFlowStep, resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { FLOW_AGENTS_RUNTIME_DIR, defaultArtifactRootForRead, flowAgentsArtifactRoot, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } from "../lib/local-artifact-root.js";
 import { isProvablyOutsideDeclaredRoots } from "../lib/declared-artifact-roots.js";
 import { validateSchemaValue, type Issue as SchemaIssue } from "../lib/mini-json-schema.js";
@@ -17,19 +17,32 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
-import { assertTrustedGitAncestor } from "../lib/trusted-git.js";
-import { startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
+import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
+import { assertTrustedGitAncestor, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
+import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
+// #1315 review FIX-4 / #1316: the canonical-run capability is DECLARED by the run adapter that
+// owns it, and is now DERIVED from what each declaring kit binds rather than enumerated. Both
+// ensure-session and the public `workflow start` verb consult this one predicate, so the set of
+// flows that get a pinned run record and the set the public verb admits cannot drift apart into
+// a half-start.
+import { isCanonicalRunFlowId } from "../builder-flow-run-adapter.js";
+import { resolveKitFlowBinding, resolveKitGateProducer, kitFlowIdParts, kitFlowSourceRoots } from "../lib/kit-flow-binding.js";
+import { flowAdmissionRefusal } from "../lib/flow-admission.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
 import { validateRunCorrelationPresence } from "../run-correlation.js";
 import {
-  EVIDENCE_REF_FIELD_SCHEMAS,
-  EVIDENCE_REF_KINDS,
-  EVIDENCE_REF_RULES,
+  commandTextFromEvidenceRef,
+  criterionShapeViolations,
+  critiqueLaneShapeViolations,
+  parameterViolations,
+  WORKFLOW_CRITIQUE_PARAMETERS,
+  CRITIQUE_LANE_ID_PATTERN,
+  evidenceRefListShapeViolations,
+  evidenceRefShapeViolations,
   NARRATIVE_PROMOTE_OPERATION,
   WORKFLOW_ACCEPTANCE_STATUSES,
-  WORKFLOW_CRITIQUE_STATUSES,
 } from "./public-contracts.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
@@ -39,6 +52,7 @@ import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLo
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
+import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, normalizeRouteReasonForBudget, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
 
 type AnyObj = Record<string, any>;
 
@@ -832,11 +846,12 @@ function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | nu
  * Three-way classification, keyed on `observedResult` (never re-derived from `exitCode` alone,
  * which would miscoerce the #362 grep/diff absence carve-out `ambiguous,exitCode:1` entry to
  * `fail`):
- *   - "fail"      when `observedResult==="fail"`, or (legacy, no observedResult) a nonzero
+ *   - "fail"      when `observedResult==="fail"`, or (older format, no observedResult) a nonzero
  *                 integer `exitCode`.
- *   - "ambiguous" when `observedResult==="ambiguous"`, or (legacy) `exitCode` is `null` with no
+ *   - "ambiguous" when `observedResult==="ambiguous"`, or (older format) `exitCode` is `null` with no
  *                 fail signal.
- *   - "pass"      when `observedResult==="pass"`, or (legacy) `exitCode===0`.
+ *   - "pass"      when `observedResult==="pass"` with captured clean provenance. Older-format
+ *                 exit-zero records are non-confirming and must be re-recorded.
  *
  * Precedence across repeated entries for the same command: fail > pass > ambiguous. A genuine
  * exit-0 pass is positive evidence and confirms; ambiguous holds only when there is neither a
@@ -847,20 +862,42 @@ function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | nu
  * `checkStatusToEventStatus("not_verified")` returns null (no verification event emitted) and the
  * evidence item is stamped `passing:false`. See Decision/finding #2 in the iteration-2 plan.
  */
-export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map<string, { observedResult: "pass" | "fail" | "ambiguous"; exitCode: number | null }> {
-  const captureByCommand = new Map<string, { observedResult: "pass" | "fail" | "ambiguous"; exitCode: number | null }>();
+export type FoldedCommandObservation = {
+  observedResult: "pass" | "fail" | "ambiguous";
+  exitCode: number | null;
+  observedAtCommit?: string;
+  worktreeClean?: boolean;
+  verificationWorkspaceSnapshot?: AnyObj;
+};
+
+/** A pass is confirmation only when it names the clean snapshot it observed. */
+function commandLogPassProvenance(entry: AnyObj): Pick<FoldedCommandObservation, "observedAtCommit" | "worktreeClean" | "verificationWorkspaceSnapshot"> | null {
+  const observedAtCommit = typeof entry.observed_at_commit === "string" ? entry.observed_at_commit : "";
+  const worktreeClean = entry.worktree_clean;
+  const snapshot = entry.verification_workspace_snapshot
+    ?? (entry.writer && typeof entry.writer === "object" ? entry.writer.verification_workspace_snapshot : undefined);
+  if (!isExactLowercaseCommitSha(observedAtCommit) || worktreeClean !== true
+    || !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)
+    || snapshot.kind !== "git-worktree" || snapshot.head_sha !== observedAtCommit
+    || snapshot.worktree_clean !== true || typeof snapshot.digest !== "string" || !/^[a-f0-9]{64}$/.test(snapshot.digest)) return null;
+  return { observedAtCommit, worktreeClean: true, verificationWorkspaceSnapshot: snapshot as AnyObj };
+}
+
+export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map<string, FoldedCommandObservation> {
+  const captureByCommand = new Map<string, FoldedCommandObservation>();
   for (const entry of Array.isArray(commandLog) ? commandLog : []) {
     if (!entry || typeof entry.command !== "string") continue;
     const key = entry.command.replace(/\s+/g, " ").trim();
     if (!key) continue;
     const exitCode = Number.isInteger(entry.exitCode) ? (entry.exitCode as number) : null;
     let result: "pass" | "fail" | "ambiguous";
+    const passProvenance = commandLogPassProvenance(entry);
     if (entry.observedResult === "fail" || (entry.observedResult === undefined && exitCode !== null && exitCode !== 0)) {
       result = "fail";
-    } else if (entry.observedResult === "pass" || (entry.observedResult === undefined && exitCode === 0)) {
+    } else if ((entry.observedResult === "pass" || (entry.observedResult === undefined && exitCode === 0)) && passProvenance) {
       result = "pass";
     } else {
-      // Covers observedResult==="ambiguous" AND the legacy no-observedResult, exitCode:null case.
+      // Covers observedResult==="ambiguous" and older-format records with no usable signal.
       result = "ambiguous";
     }
     const prev = captureByCommand.get(key);
@@ -885,7 +922,12 @@ export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map
     } else {
       mergedExitCode = prev.exitCode;
     }
-    captureByCommand.set(key, { observedResult: merged, exitCode: mergedExitCode });
+    const winningEntry = merged === result ? passProvenance : prev;
+    captureByCommand.set(key, {
+      observedResult: merged,
+      exitCode: mergedExitCode,
+      ...(merged === "pass" && winningEntry?.observedAtCommit ? winningEntry : {}),
+    });
   }
   return captureByCommand;
 }
@@ -903,7 +945,7 @@ export function composeGateVerdict(
 ): "pass" | "fail" | "not_verified" {
   if (requestedStatus !== "pass") return requestedStatus;
   if (observedResult === "fail") return "fail";
-  if (observedResult === "ambiguous") return "not_verified";
+  if (observedResult !== "pass") return "not_verified";
   return "pass";
 }
 
@@ -934,8 +976,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // writeTrustBundle below) threads through to resolveActiveFlowStep's per-actor-first,
   // legacy-fallback current.json read; omitted, this is IDENTICAL to pre-#291 behavior.
   const exactRepoRoot = flowAgentsDir ? findRepoRootFromDir(path.dirname(flowAgentsDir)) : null;
+  // #1335: the run's cursor may rest on a gateless sequencing passthrough, which declares no gate
+  // and therefore no expects[] to type a claim against. The step a claim belongs to is the one the
+  // run must SATISFY next, which `resolveActionableFlowStep` derives; for a cursor already on a
+  // gated step it is that step, so flows that gate every step are unaffected.
   const activeStep: ActiveFlowStep | null = exactFlowContext && exactRepoRoot
-    ? resolveFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, exactRepoRoot)
+    ? resolveActionableFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, exactRepoRoot)
     : flowAgentsDir ? resolveActiveFlowStep(flowAgentsDir, actorKey) : null;
 
   // #270 CRITICAL/HIGH fix: resolve the session's active_flow_id independent of whether the
@@ -988,6 +1034,30 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // FlowDefinition (e.g. a bogus/renamed active_flow_id, or a `kits/` path that no longer
   // resolves) — a `!flowRepoRoot` check can never catch this because flowRepoRoot is always
   // truthy here (see the note above), so that check was dead code against this failure mode.
+  /**
+   * The bound-definition identity of the run THIS session is on, read from the canonical Flow
+   * projection `syncAndProject` writes from the run record. Null for a session with no Flow run
+   * (legacy/ad-hoc), in which case there is nothing to check a restored stamp against.
+   *
+   * #1280/#1316: this is the authority a restored `gate_claim.flow_id` / `definition_version` /
+   * `definition_digest` is validated against. Without it, a claim recorded under a kit's
+   * reduced-gate variant and a claim recorded under the full flow are the same bytes.
+   */
+  let _sessionFlowIdentityCache: AnyObj | null | undefined = undefined;
+  const sessionFlowIdentity = (): AnyObj | null => {
+    if (_sessionFlowIdentityCache !== undefined) return _sessionFlowIdentityCache;
+    _sessionFlowIdentityCache = null;
+    if (flowAgentsDir) {
+      try {
+        const state = loadJson(path.join(flowAgentsDir, slug, "state.json"));
+        const projected = state.flow_run && typeof state.flow_run === "object" && !Array.isArray(state.flow_run) ? state.flow_run as AnyObj : null;
+        _sessionFlowIdentityCache = gateClaimFlowIdentityFields(projected);
+      } catch {
+        _sessionFlowIdentityCache = null;
+      }
+    }
+    return _sessionFlowIdentityCache;
+  };
   let _allGateExpectsCache: import("../lib/flow-resolver.js").FlowGateExpectsEntry[] | null | undefined = undefined;
   const allGateExpectsForSession = (): import("../lib/flow-resolver.js").FlowGateExpectsEntry[] | null => {
     if (_allGateExpectsCache !== undefined) return _allGateExpectsCache;
@@ -1171,6 +1241,19 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   }
   // ────────────────────────────────────────────────────────────────────────────
 
+  // #1170: non-command records are bound at record time. They have no process observation
+  // boundary, so this remains the producer for ordinary fresh sidecar checks. Command-backed
+  // evidence is intentionally excluded: it must carry the snapshot captured by its command.
+  let capturedFreshWorkspaceSnapshot: AnyObj | null | undefined;
+  const freshNonCommandWorkspaceSnapshot = (): AnyObj | null => {
+    if (capturedFreshWorkspaceSnapshot === undefined) {
+      capturedFreshWorkspaceSnapshot = flowAgentsDir
+        ? tryCaptureGitWorktreeSnapshot(tryCanonicalProjectRootForSession(path.join(flowAgentsDir, slug)))
+        : null;
+    }
+    return capturedFreshWorkspaceSnapshot;
+  };
+
   // Evidence checks → claims + evidence items + events. Capture is authoritative.
   for (const check of Array.isArray(checks) ? checks : []) {
     if (!check.id) continue;
@@ -1204,9 +1287,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // evidence item below is stamped passing:false. `isError` stays fail-only (ambiguous is
     // not an error).
     const requestedStatus = String(check.status ?? "");
-    const effectiveStatus = ["pass", "fail", "not_verified"].includes(requestedStatus)
+    const effectiveStatus = cmd && ["pass", "fail", "not_verified"].includes(requestedStatus)
       ? composeGateVerdict(requestedStatus as "pass" | "fail" | "not_verified", captured?.observedResult)
       : requestedStatus;
+    if (cmd && requestedStatus === "pass" && effectiveStatus === "not_verified") {
+      process.stderr.write(`[trust.bundle] command-backed check '${String(check.id)}' cannot confirm pass without an exact clean command observation; re-run and re-record the command through record-check or record-gate-claim.\n`);
+    }
     const evStatus = waiver ? "assumed" : checkStatusToEventStatus(effectiveStatus);
     // Promotion claim marker (issue #312): a `promote` check carries a session-local
     // _promotion object that must survive onto claim.metadata.promotion so the archive gate
@@ -1229,13 +1315,22 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // raw command output — a command producing >64KiB of output has its digest computed only over
     // the retained prefix, so two runs whose outputs diverge only past the 64KiB boundary hash
     // identically.
-    const outputDigestMeta = typeof check._output_sha256 === "string" && check._output_sha256.length > 0
+    const outputDigestMeta = typeof check._output_sha256 === "string" && /^[a-f0-9]{64}$/.test(check._output_sha256)
       ? { algorithm: "sha256", hex: check._output_sha256 }
       : null;
     const observedCommandsMeta = Array.isArray(check._observed_commands)
       ? check._observed_commands
-        .filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string")
-        .map((entry: AnyObj) => ({ command: entry.command, exit_code: entry.exit_code, output_sha256: entry.output_sha256, ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}), ...(entry.execution_proof && typeof entry.execution_proof === "object" ? { execution_proof: entry.execution_proof } : {}) }))
+        .filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string" && /^[a-f0-9]{64}$/.test(entry.output_sha256))
+        .map((entry: AnyObj) => ({
+          command: entry.command,
+          exit_code: entry.exit_code,
+          output_sha256: entry.output_sha256,
+          ...(typeof entry.observed_at_commit === "string" ? { observed_at_commit: entry.observed_at_commit } : {}),
+          ...(typeof entry.worktree_clean === "boolean" ? { worktree_clean: entry.worktree_clean } : {}),
+          ...(entry.verification_workspace_snapshot && typeof entry.verification_workspace_snapshot === "object" ? { verification_workspace_snapshot: entry.verification_workspace_snapshot } : {}),
+          ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}),
+          ...(entry.execution_proof && typeof entry.execution_proof === "object" ? { execution_proof: entry.execution_proof } : {}),
+        }))
       : null;
     const verificationWorkspaceSnapshotMeta = check._verification_workspace_snapshot
       && typeof check._verification_workspace_snapshot === "object"
@@ -1258,6 +1353,23 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const gateClaimDeclaredStepId = typeof check._gate_claim_declared_step_id === "string" ? check._gate_claim_declared_step_id : null;
     const gateClaimRouteReason = typeof check._gate_claim_route_reason === "string" ? check._gate_claim_route_reason : null;
     const gateClaimFlowRunHead = typeof check._gate_claim_flow_run_head === "string" ? check._gate_claim_flow_run_head : null;
+    // #1280/#1316: WHICH FLOW, AND WHICH VARIANT, this claim was recorded against. Stamped from
+    // the session's canonical Flow projection at record time (never from a caller flag), so a
+    // writer cannot assert a gate set it did not run. Validated here on every rebuild: a claim
+    // carried into a session running a DIFFERENT definition is refused, not silently re-typed
+    // against the definition that happens to be bound now — which is how a reduced-gate run
+    // would otherwise come to be read as a full one.
+    const gateClaimFlowIdentity = gateClaimFlowIdentityFields({
+      definition_id: check._gate_claim_flow_id,
+      definition_version: check._gate_claim_definition_version,
+      definition_digest: check._gate_claim_definition_digest,
+    });
+    if (gateClaimFlowIdentity) {
+      const sessionIdentity = sessionFlowIdentity();
+      if (sessionIdentity && !isDeepStrictEqual(sessionIdentity, gateClaimFlowIdentity)) {
+        die(`buildTrustBundle: gate claim '${String(check.id ?? "<unknown>")}' was recorded against flow definition ${String(gateClaimFlowIdentity._gate_claim_flow_id)}@${String(gateClaimFlowIdentity._gate_claim_definition_version)} (digest ${String(gateClaimFlowIdentity._gate_claim_definition_digest)}), but this session's Flow run is bound to ${String(sessionIdentity._gate_claim_flow_id)}@${String(sessionIdentity._gate_claim_definition_version)} (digest ${String(sessionIdentity._gate_claim_definition_digest)}). A claim recorded under one flow definition cannot satisfy a gate of another — a reduced-gate variant and the full flow are different definitions. Re-record the gate claim inside the session whose run it belongs to.`);
+      }
+    }
     // #270 CRITICAL/HIGH fix: checksFromBundle stamps this when it read a claim that is
     // gate-claim-SHAPED (origin:"check", check_kind:"external", kit-typed claimType) but carries
     // NO metadata.gate_claim stamp — a claim this code could not have produced without also
@@ -1276,6 +1388,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const claimMetadata: AnyObj = {
       origin: "check",
       check_kind: String(check.kind ?? "external"),
+      ...(cmd ? { command: cmd } : {}),
       ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
       ...(typeof check._producer === "string" ? { expected_producer: check._producer } : {}),
       ...(typeof check._recorded_by === "string" ? { recorded_by: check._recorded_by } : {}),
@@ -1289,27 +1402,44 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(observedCommandsMeta && observedCommandsMeta.length > 0 ? { observed_commands: observedCommandsMeta } : {}),
       ...(verificationWorkspaceSnapshotMeta ? { verification_workspace_snapshot: verificationWorkspaceSnapshotMeta } : {}),
       ...(acceptanceContractMeta ? { acceptance_contract: acceptanceContractMeta } : {}),
+      ...(Array.isArray(check._acceptance_contract_history) && check._acceptance_contract_history.length > 0
+        ? { acceptance_contract_history: check._acceptance_contract_history } : {}),
     };
 
+    // A multi-command gate claim has one check but multiple real executions. Preserve each
+    // execution as separately linked evidence so consumers can bind every observed command
+    // without accepting unrepresented extras.
+    const evItems: AnyObj[] = observedCommandsMeta && observedCommandsMeta.length > 0
+      ? observedCommandsMeta.map((observation, index) => ({
+        id: `${evId}:${index + 1}`,
+        claimId,
+        evidenceType: evClass.evidenceType,
+        method: evClass.method,
+        sourceRef: `${slug}/command-log.jsonl`,
+        excerptOrSummary: fieldOrBehavior,
+        observedAt: ts,
+        collectedBy: "flow-agents/workflow-sidecar",
+        passing: effectiveStatus === "pass" && observation.exit_code === 0,
+        execution: { runner: "bash", label: observation.command, isError: observation.exit_code !== 0, exitCode: observation.exit_code },
+      }))
+      : (() => {
+        const evItem: AnyObj = { id: evId, claimId, evidenceType: evClass.evidenceType, method: evClass.method, sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: effectiveStatus === "pass" };
+        if (captured) {
+          evItem.sourceRef = `${slug}/command-log.jsonl`;
+          evItem.collectedBy = "flow-agents/evidence-capture";
+          evItem.execution = { runner: "bash", label: cmd, isError: captured.observedResult === "fail", ...(captured.exitCode != null ? { exitCode: captured.exitCode } : {}) };
+        } else if (cmd && !waiver) {
+          evItem.execution = { runner: "bash", label: cmd, isError: effectiveStatus !== "pass" };
+        }
+        return [evItem];
+      })();
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
-      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [evId], createdAt: ts, verifiedAt: ts };
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: evItems.map((item) => item.id), createdAt: ts, verifiedAt: ts };
       events.push(evt);
       claimEvents.push(evt);
     }
-    const evItem: AnyObj = { id: evId, claimId, evidenceType: evClass.evidenceType, method: evClass.method, sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: effectiveStatus === "pass" };
-    if (captured) {
-      evItem.sourceRef = `${slug}/command-log.jsonl`;
-      evItem.collectedBy = "flow-agents/evidence-capture";
-      evItem.execution = { runner: "bash", label: cmd, isError: captured.observedResult === "fail", ...(captured.exitCode != null ? { exitCode: captured.exitCode } : {}) };
-    } else if (cmd && !waiver) {
-      // WS8 (ADR 0020): always stamp execution.label on command-backed checks so the CI
-      // reconciler has a stable key to match against the manifest, even when the local
-      // command-log capture did not happen to run this command. isError is derived from
-      // the check's own reported status (no captured exit code available in this path).
-      evItem.execution = { runner: "bash", label: cmd, isError: effectiveStatus !== "pass" };
-    }
-    evidenceItems.push(evItem);
+    evidenceItems.push(...evItems);
 
     // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
     // When record-gate-claim sets _gate_claim_expectation_id, pass it for exact lookup (ADR 0016 P-d Increment 2).
@@ -1350,16 +1480,41 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // rebuild that has no active flow step of its own; only a genuinely first write (no
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
-      const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}) } }
+      // #1170 (PR2) producer completeness: a check that resolves to a kit-typed gate claim is a
+      // CURRENT-GATE claim — `builder-flow-runtime.ts` classifies every `origin: "check"` claim as
+      // head-bound. A sidecar `record-evidence` check carries no `metadata.gate_claim` (that stamp
+      // is minted only by record-gate-claim), so it contributes a NULL head and, before PR1, made
+      // every later public `workflow evidence` write fail forever — #1164.
+      //
+      // PR1 lets such a claim re-establish freshness from a Git workspace snapshot instead. This is
+      // the producer half: stamp that snapshot at record time, so a live #1164-shaped run recovers
+      // in the field on an unchanged tree with no operator intervention.
+      //
+      // Only the snapshot is stamped here, deliberately NOT a `flow_run_head`. A fresh
+      // record-evidence check has no `gate_claim` object to carry a head (`_gate_claim_expectation_id`
+      // is minted only by record-gate-claim and restored only from a prior write), and synthesizing
+      // one from `matchExpectsEntry`'s heuristic would freeze a guessed expectation binding into
+      // the #270 anti-smuggling surface. Stamping a head onto a RESTORED claim would be worse
+      // still: it would let a stale claim pass the head fast path without any tree comparison at
+      // all. The snapshot is the whole producer gap, and it is the binding that actually describes
+      // a claim whose subject is repository content.
+      // A workspace snapshot belongs to the observation that produced this check. Rebuilds may
+      // only preserve that exact object; recapturing here would re-anchor old evidence.
+      const declaredWorkspaceSnapshot = verificationWorkspaceSnapshotMeta
+        ?? (check._fresh_record_write === true && !cmd ? freshNonCommandWorkspaceSnapshot() : null);
+      const declaredBaseMetadata: AnyObj = declaredWorkspaceSnapshot
+        ? { ...claimMetadata, verification_workspace_snapshot: declaredWorkspaceSnapshot }
         : claimMetadata;
+      const declaredMetadata: AnyObj = gateClaimExpectationId
+        ? { ...declaredBaseMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}), ...(gateClaimFlowRunHead ? { flow_run_head: gateClaimFlowRunHead } : {}), ...(gateClaimFlowIdentity ? { flow_id: gateClaimFlowIdentity._gate_claim_flow_id, definition_version: gateClaimFlowIdentity._gate_claim_definition_version, definition_digest: gateClaimFlowIdentity._gate_claim_definition_digest } : {}) } }
+        : declaredBaseMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
-      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
+      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: evItems as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
       // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
       const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, ...(claimMetadata ? { metadata: claimMetadata } : {}) };
-      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
+      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: evItems as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
     }
   }
@@ -1383,17 +1538,26 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       && commandRefs.includes(observation.command)
       && observation.exit_code === 0
       && typeof observation.output_sha256 === "string"
-      && /^[a-f0-9]{64}$/i.test(observation.output_sha256)
+      && /^[a-f0-9]{64}$/.test(observation.output_sha256)
+      && typeof observation.observed_at_commit === "string"
+      && isExactLowercaseCommitSha(observation.observed_at_commit)
+      && observation.worktree_clean === true
+      && observation.verification_workspace_snapshot?.kind === "git-worktree"
+      && observation.verification_workspace_snapshot?.head_sha === observation.observed_at_commit
+      && observation.verification_workspace_snapshot?.worktree_clean === true
+      && /^[a-f0-9]{64}$/.test(String(observation.verification_workspace_snapshot?.digest ?? ""))
       && Number.isSafeInteger(observation.test_count)
       && observation.test_count > 0
-      && observation.execution_proof?.kind === "local-process-exit",
+      && ["local-process-exit", "coordinated-command-receipt"].includes(String(observation.execution_proof?.kind)),
     );
+    const criterionSnapshot = passingObservationSnapshot(observedCommands as ObservedCommand[]);
     const hasObservedCommandProvenance = CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA.has(criterion)
       && criterionIdentityVersion === 2
       && criterionVerifiedAt !== null
       && Number.isFinite(Date.parse(criterionVerifiedAt))
       && observedCommands.length === rawObservedCommands.length
       && observedCommands.length > 0
+      && criterionSnapshot !== null
       && commandRefs.every((command: string) => observedCommands.some((observation: AnyObj) => observation.command === command));
     const criterionStatus = normalizedCriterionStatus === "pass" && !hasObservedCommandProvenance
       ? "pending"
@@ -1671,12 +1835,36 @@ function parseArgs(argv: string[]): { command: string; positional: string[]; opt
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i]!;
     if (!arg.startsWith("--")) { positional.push(arg); continue; }
+    // #1294: `--key=value` binds exactly like the shared parser (src/lib/args.ts) — the value is
+    // everything after the first `=`, even when empty or `--`-prefixed. Before this, the whole
+    // token became a flag named `key=value`, so the syntax silently degraded in half the CLI.
+    const eq = arg.indexOf("=");
+    if (eq !== -1) {
+      (opts[arg.slice(2, eq)] ??= []).push(arg.slice(eq + 1));
+      continue;
+    }
     const key = arg.slice(2);
     const next = rest[i + 1];
     if (!next || next.startsWith("--")) flags.add(key);
     else { (opts[key] ??= []).push(next); i += 1; }
   }
   return { command: command ?? "", positional, opts, flags };
+}
+
+// Exported alias for the parity test only (workflow-sidecar-help.test.mjs): the local parser's
+// `--key=value` handling must match src/lib/args.ts's byte-for-byte semantics, and a test can only
+// assert that by driving both parsers directly.
+export { parseArgs as parseSidecarArgs };
+/**
+ * Every form an agent uses to ask for help: bare trailing `--help` (lands in flags), valued
+ * `--help <word>` (the local parser consumes the word as a value, landing in opts — still a help
+ * request, never an input), and positional `-h` (single-dash never parses as a flag). The three
+ * tailored-help commands and the generic dispatcher intercept share THIS predicate; round 1 of
+ * independent review found the tailored handlers checking only `flags.has("help")`, which left
+ * `verify-hold -h` executing domain logic on a documentation request.
+ */
+function wantsSidecarHelp(p: ReturnType<typeof parseArgs>): boolean {
+  return p.flags.has("help") || "help" in p.opts || p.positional.includes("-h");
 }
 function opt(parsed: ReturnType<typeof parseArgs>, key: string, fallback = ""): string { return parsed.opts[key]?.at(-1) ?? fallback; }
 function opts(parsed: ReturnType<typeof parseArgs>, key: string): string[] { return parsed.opts[key] ?? []; }
@@ -1952,7 +2140,7 @@ function findRepoRootFromDirStrict(startDir: string): string | null {
  * session dir with no repo ancestor fails closed (skips publish) rather than
  * silently trusting process.cwd(), which could be an unrelated real repo.
  */
-function findRepoRootFromDir(startDir: string): string {
+export function findRepoRootFromDir(startDir: string): string {
   const discovered = findRepoRootFromDirStrict(startDir);
   if (discovered) return discovered;
   if (path.basename(startDir) === ".kontourai") return path.dirname(startDir);
@@ -2065,7 +2253,10 @@ function loadRunnableCommandHelper(): { isRunnableCommandText: (text: string) =>
 const AMBIGUOUS_REMEDIATION_ADVICE = "self-asserting command ('! grep ...' or 'grep -c ... | grep -qx 0')";
 
 function validateRunnableCheckCommand(check: AnyObj, context: string): void {
-  if (check.kind !== "command" || !hasNonEmptyString(check.command)) return;
+  if (check.kind !== "command") return;
+  if (!hasNonEmptyString(check.command)) {
+    die(`${context}: kind:"command" checks require a non-empty runnable command; move descriptive-only evidence to kind:"external" instead.`);
+  }
   const { isRunnableCommandText } = loadRunnableCommandHelper();
   if (!isRunnableCommandText(check.command)) {
     die(`${context}: kind:"command" check command is not a runnable shell command: "${check.command}" — remediate by either (1) moving the prose to summary and omitting command/execution.label, or (2) reclassifying this check as kind:"external" (session-local attestation) instead of kind:"command".`);
@@ -2445,34 +2636,66 @@ function enforceEnsureSessionOwnership(
     if (!candidate || typeof candidate.effective_state !== "string" || !validStates.has(candidate.effective_state)) {
       die(`ensure-session --effective-state-json must contain an .effective object with a recognized effective_state (held|reclaimable|human-held|free); got ${JSON.stringify(candidate ? candidate.effective_state : candidate)}`);
     }
-    if (workItemRef && (parsed.role !== "AssignmentStatus"
-      || parsed.provider !== assignmentProviderKind
-      || assignment?.provider !== assignmentProviderKind
-      || assignment?.subject_id !== slug
-      || (assignmentProviderKind === "github" && (assignment?.has_claim_label !== true
-        || typeof assignment?.assignee !== "string"
-        || assignment.assignee.length === 0
-        || typeof assignment?.claim_comment_author !== "string"
-        || assignment.claim_comment_author.length === 0
-        || assignment.claim_comment_author !== assignment.assignee
-        || assignment?.repository?.owner !== githubWorkItem?.owner
-        || assignment?.repository?.name !== githubWorkItem?.name
-        || assignment?.issue_number !== githubWorkItem?.issueNumber))
-      || record?.role !== "AssignmentClaimRecord"
-      || record?.status !== "claimed"
-      || record?.subject_id !== slug
-      || record?.work_item_ref !== workItemRef
-      || (assignmentProviderKind !== "local-file" && (typeof record?.branch !== "string" || record.branch.length === 0))
-      || record?.actor_key !== resolution.branchActorKey
-      || !record.actor || typeof record.actor !== "object"
-      || record.actor.runtime !== resolution.actorStruct.runtime
-      || record.actor.session_id !== resolution.actorStruct.session_id
-      || record.actor.host !== resolution.actorStruct.host
-      || (record.actor.human ?? null) !== (resolution.actorStruct.human ?? null)
-      || candidate.effective_state !== "held"
-      || candidate.reason !== "self_is_holder"
-      || candidate.holder?.actor !== resolution.branchActorKey)) {
-      die("ensure-session --effective-state-json must be the configured provider's AssignmentStatus for this Work Item, with a claimed record and self_is_holder actor matching the current runtime");
+    if (workItemRef) {
+      // Every condition of the ownership check, individually named. This was one ~15-clause
+      // boolean whose die() named none of them, so a caller with a single wrong field got the
+      // same sentence as a caller with nothing — and the only way to find the failing clause
+      // was to re-derive the conjunction from source (measured live: ~15 invocations burned on
+      // exactly that; #1293). Same per-condition-breakdown shape as trust-reconcile's
+      // delivery/DECLARED reporting, which is this repo's proven form for "a conjunction
+      // failed: say which conjunct".
+      //
+      // The leading sentence of the die() below is byte-identical to the single message this
+      // block emitted before the breakdown existed; the per-clause list is appended after it,
+      // so any external consumer matching on the original prefix keeps matching. Every
+      // interpolated value goes through sanitize() (id-like tier) per the cap rationale above.
+      const clauseFailures: string[] = [];
+      const clause = (ok: boolean, name: string, detail?: string): void => {
+        if (!ok) clauseFailures.push(detail ? `${name} (${detail})` : name);
+      };
+      // Canonical actor keys are runtime:session:host[:human] and can reach ~260 characters —
+      // far past the 64-char id-like tier. Truncating an expected-vs-got pair at 64 can render
+      // two UNEQUAL keys as byte-identical text, making the diagnostic assert a mismatch while
+      // displaying none (independent review reproduced exactly that with 109/110-char keys).
+      // 260 matches the actor-key display cap already used by assignment-provider.ts.
+      const sanitizeActorKey = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 260);
+      clause(parsed.role === "AssignmentStatus", "role must be \"AssignmentStatus\"", `got ${sanitize(parsed.role)}`);
+      clause(parsed.provider === assignmentProviderKind, "top-level provider must match --assignment-provider", `got ${sanitize(parsed.provider)}, expected ${sanitize(assignmentProviderKind)}`);
+      clause(assignment?.provider === assignmentProviderKind, "assignment.provider must match --assignment-provider", `got ${sanitize(assignment?.provider)}`);
+      clause(assignment?.subject_id === slug, "assignment.subject_id must equal the session slug", `got ${sanitize(assignment?.subject_id)}, expected ${sanitize(slug)}`);
+      if (assignmentProviderKind === "github") {
+        clause(assignment?.has_claim_label === true, "assignment.has_claim_label must be true");
+        clause(typeof assignment?.assignee === "string" && assignment.assignee.length > 0, "assignment.assignee must be a non-empty string");
+        clause(typeof assignment?.claim_comment_author === "string" && assignment.claim_comment_author.length > 0, "assignment.claim_comment_author must be a non-empty string");
+        clause(assignment?.claim_comment_author === assignment?.assignee, "claim_comment_author must equal assignee", `got ${sanitize(assignment?.claim_comment_author)} vs ${sanitize(assignment?.assignee)}`);
+        clause(assignment?.repository?.owner === githubWorkItem?.owner, "assignment.repository.owner must match the Work Item repo", `got ${sanitize(assignment?.repository?.owner)}, expected ${sanitize(githubWorkItem?.owner)}; assignment-provider status derives repository from --repo <owner>/<name>`);
+        clause(assignment?.repository?.name === githubWorkItem?.name, "assignment.repository.name must match the Work Item repo", `got ${sanitize(assignment?.repository?.name)}, expected ${sanitize(githubWorkItem?.name)}; assignment-provider status derives repository from --repo <owner>/<name>`);
+        clause(assignment?.issue_number === githubWorkItem?.issueNumber, "assignment.issue_number must match the Work Item", `got ${sanitize(assignment?.issue_number)}, expected ${sanitize(githubWorkItem?.issueNumber)}`);
+      }
+      clause(record?.role === "AssignmentClaimRecord", "record.role must be \"AssignmentClaimRecord\"", `got ${sanitize(record?.role)}`);
+      clause(record?.status === "claimed", "record.status must be \"claimed\"", `got ${sanitize(record?.status)}`);
+      clause(record?.subject_id === slug, "record.subject_id must equal the session slug", `got ${sanitize(record?.subject_id)}`);
+      clause(record?.work_item_ref === workItemRef, "record.work_item_ref must equal --work-item", `got ${sanitize(record?.work_item_ref)}, expected ${sanitize(workItemRef)}`);
+      if (assignmentProviderKind !== "local-file") {
+        clause(typeof record?.branch === "string" && record.branch.length > 0, "record.branch must be a non-empty branch name for a provider-backed claim");
+      }
+      clause(record?.actor_key === resolution.branchActorKey, "record.actor_key must equal the runtime's canonical actor key", `got ${sanitizeActorKey(record?.actor_key)}, expected ${sanitizeActorKey(resolution.branchActorKey)}`);
+      const recordActor = record && typeof record.actor === "object" && record.actor !== null ? record.actor as AnyObj : undefined;
+      clause(recordActor !== undefined, "record.actor must be an object");
+      if (recordActor) {
+        clause(recordActor.runtime === resolution.actorStruct.runtime, "record.actor.runtime must match the current runtime", `got ${sanitize(recordActor.runtime)}, expected ${sanitize(resolution.actorStruct.runtime)}`);
+        clause(recordActor.session_id === resolution.actorStruct.session_id, "record.actor.session_id must match the current session", `got ${sanitize(recordActor.session_id)}`);
+        clause(recordActor.host === resolution.actorStruct.host, "record.actor.host must match the current host", `got ${sanitize(recordActor.host)}, expected ${sanitize(resolution.actorStruct.host)}`);
+        clause((recordActor.human ?? null) === (resolution.actorStruct.human ?? null), "record.actor.human must match the current runtime's human identity", `got ${sanitizeActorKey(recordActor.human ?? null)}, expected ${sanitizeActorKey(resolution.actorStruct.human ?? null)}`);
+      }
+      clause(candidate.effective_state === "held", "effective.effective_state must be \"held\"", `got ${sanitize(candidate.effective_state)}`);
+      clause(candidate.reason === "self_is_holder", "effective.reason must be \"self_is_holder\"", `got ${sanitize(candidate.reason)}`);
+      clause(candidate.holder?.actor === resolution.branchActorKey, "effective.holder.actor must equal the runtime's canonical actor key", `got ${sanitizeActorKey(candidate.holder?.actor)}`);
+      if (clauseFailures.length > 0) {
+        die("ensure-session --effective-state-json must be the configured provider's AssignmentStatus for this Work Item, with a claimed record and self_is_holder actor matching the current runtime"
+          + `; ${clauseFailures.length} failing condition(s): `
+          + clauseFailures.map((failure, index) => `[${index + 1}] ${failure}`).join("; "));
+      }
     }
     if (assignmentProviderKind !== "local-file" && workItemRef) {
       providerBranch = record!.branch as string;
@@ -2667,6 +2890,25 @@ function enforceEnsureSessionOwnership(
  *   --claim-ttl-seconds <n>        Overrides the liveness-policy TTL default for a new claim.
  *   --reason <text>                Audit-trail reason recorded on the claim/supersede record.
  */
+/**
+ * THE admission gate for a flow id on the sidecar surface (#1315 review, HIGH).
+ *
+ * The sidecar is an installed binary on PATH, so `workflow start`'s refusal closed one door of
+ * two. `ensure-session --flow-id <anything>` wrote session and current artifacts for any
+ * resolvable flow and merely skipped the canonical run; `advance-state --flow-definition
+ * <anything>` wrote state.json and published `active_step_id` — the pointer the Stop hook reads
+ * to decide which gate governs the turn — with no canonical run and no satisfied gate. Both were
+ * half-admissions: a session advertising an active flow that nothing pins.
+ *
+ * The predicate is the SAME derivation the public verb applies (`flowAdmissionRefusal`), not a
+ * sidecar-local restatement of it. That is the property the review asked for: a flow with no
+ * canonical run binding is refused at ensure-session and at advance-state, exactly as at start.
+ */
+function assertAdmissibleFlow(flowId: string, repoRoot: string, surface: string): void {
+  const refusal = flowAdmissionRefusal(flowId, repoRoot, surface);
+  if (refusal) die(refusal);
+}
+
 function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string): { flowId: string; stepId: string; firstStep: string } {
   const flowId = opt(p, "flow-id");
   const explicitStep = opt(p, "step-id");
@@ -2676,6 +2918,7 @@ function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string)
     return { flowId: "", stepId: "", firstStep: "" };
   }
 
+  assertAdmissibleFlow(flowId, findRepoRootFromDir(dir), "ensure-session --flow-id");
   const firstStep = resolveFirstStep(flowId, findRepoRootFromDir(dir));
   if (!firstStep) die(`ensure-session could not resolve the first step for Flow Definition ${JSON.stringify(flowId)}`);
   if (opt(p, "ad-hoc-reason")) {
@@ -2688,7 +2931,23 @@ function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string)
   return { flowId, stepId: explicitStep || firstStep, firstStep };
 }
 
-function assertCanonicalBuilderArtifactRoot(root: string, flowId: "builder.build" | "builder.shape"): void {
+/**
+ * The artifact root a Flow session may be entered against.
+ *
+ * #1314 / #1316: this guard used to run only for two hardcoded flow ids, so EVERY other flow
+ * skipped it entirely — a fail-open the widening of the run adapter would have inherited and
+ * multiplied. Nothing in the rule is kit-specific: it asserts that the artifact root occupies
+ * the canonical `<project>/.kontourai/flow-agents` position and that neither it, its `.kontourai`
+ * parent, nor the project root is a symlink. That is a PORTABILITY mechanic — it keeps a session's
+ * artifacts where every other surface (the config-protection hook, the fixture writer, the
+ * `delivery/` publisher, relative `run_ref`s) computes them to be, and stops a redirected root
+ * from having a session's artifacts land somewhere those surfaces do not guard.
+ *
+ * A kit cannot opt out of that and still be portable, so there is nothing to derive per kit:
+ * the check now runs for every flow id. The refusal text interpolates the flow id, so the
+ * messages for the previously-covered flows are unchanged.
+ */
+function assertCanonicalFlowArtifactRoot(root: string, flowId: string): void {
   const kontouraiRoot = path.dirname(root);
   const projectRoot = path.dirname(kontouraiRoot);
   if (path.basename(root) !== "flow-agents" || path.basename(kontouraiRoot) !== ".kontourai") {
@@ -2726,7 +2985,9 @@ function preflightEnsureSession(p: ReturnType<typeof parseArgs>): void {
   const dir = sessionDirFor(root, slug);
   assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
-  if (entry.flowId === "builder.build" || entry.flowId === "builder.shape") assertCanonicalBuilderArtifactRoot(root, entry.flowId);
+  // #1314: universal, not per-flow — see assertCanonicalFlowArtifactRoot. An entry with no flow
+  // id is not a Flow session and has no canonical root to assert.
+  if (entry.flowId) assertCanonicalFlowArtifactRoot(root, entry.flowId);
   sessionWorkItem(p, slug, dir);
 }
 
@@ -2736,7 +2997,7 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
   const dir = sessionDirFor(root, slug);
   assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
-  if (entry.flowId === "builder.build" || entry.flowId === "builder.shape") assertCanonicalBuilderArtifactRoot(root, entry.flowId);
+  if (entry.flowId) assertCanonicalFlowArtifactRoot(root, entry.flowId);
   const workItem = sessionWorkItem(p, slug, dir);
   // #291 Wave 2 Task 2.1 (§3, §4): resolve the actor ONCE, then run the ownership guard BEFORE
   // any directory/file is created — a refusal must never leave a stray empty session dir. Reused
@@ -2857,14 +3118,14 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
     entry.flowId || undefined,
     resumedStep || undefined,
     actorResolution.unresolved ? undefined : actorResolution.branchActorKey,
-    entry.flowId === "builder.build" || entry.flowId === "builder.shape",
+    isCanonicalRunFlowId(entry.flowId, findRepoRootFromDir(dir)),
   );
   if (selectedWorkEvidence?.providerBranch) {
     // current.json and the actor-scoped projection are both derived from state.json. Verify that
     // both projections retained the exact provider branch before the canonical Builder run starts.
     assertProviderBranchAgreement(root, slug, dir, selectedWorkEvidence.providerBranch, actorResolution.branchActorKey);
   }
-  if (allowCanonicalFlowMutation && (entry.flowId === "builder.build" || entry.flowId === "builder.shape")) {
+  if (allowCanonicalFlowMutation && isCanonicalRunFlowId(entry.flowId, findRepoRootFromDir(dir))) {
     try {
       const started = await startBuilderFlowSession({ sessionDir: dir, flowId: entry.flowId });
       if (started.run.state.current_step === "pull-work"
@@ -3095,44 +3356,46 @@ function evidenceRef(kind: string, fields: AnyObj): AnyObj {
 function hasNonEmptyString(value: unknown): boolean {
   return typeof value === "string" && value.length > 0;
 }
-function hasPositiveInteger(value: unknown): boolean {
-  return Number.isInteger(value) && Number(value) >= 1;
+/**
+ * #1359: one refusal, every problem. A caller fixing N faults in one payload must not pay N
+ * invocations to discover them, so every validator below COLLECTS violations and refuses once.
+ * The refusal text is unchanged per violation — nothing here accepts an input the field-by-field
+ * version rejected; only the arrival rate changed.
+ */
+function dieOnViolations(violations: readonly string[]): void {
+  if (violations.length === 0) return;
+  if (violations.length === 1) die(violations[0]!);
+  die(`${violations.length} problems must be fixed together:\n  - ${violations.join("\n  - ")}`);
 }
+// Array- and entry-level rule bodies live with every other rule body in public-contracts, so the
+// corpus the drift test walks is the complete set. Re-deriving them here is exactly the drift the
+// round-1 review demonstrated: a rule one function over that --explain cannot see.
+const evidenceRefListViolations = evidenceRefListShapeViolations;
 export function validateEvidenceRef(ref: AnyObj, label: string, projectRoot = process.cwd()): AnyObj {
-  if (!(EVIDENCE_REF_KINDS as readonly unknown[]).includes(ref.kind)) die(`${label} entry kind must be one of: ${EVIDENCE_REF_KINDS.join(", ")}`);
-  for (const key of Object.keys(ref)) if (!Object.hasOwn(EVIDENCE_REF_FIELD_SCHEMAS, key)) die(`${label} entries contain unsupported field: ${key}`);
-  if (ref.url !== undefined && !hasNonEmptyString(ref.url)) die(`${label} entry url must be a non-empty string`);
-  if (ref.file !== undefined && !hasNonEmptyString(ref.file)) die(`${label} entry file must be a non-empty string`);
-  if (ref.excerpt !== undefined && !hasNonEmptyString(ref.excerpt)) die(`${label} entry excerpt must be a non-empty string`);
-  if (ref.summary !== undefined && !hasNonEmptyString(ref.summary)) die(`${label} entry summary must be a non-empty string`);
-  if (ref.line_start !== undefined && !hasPositiveInteger(ref.line_start)) die(`${label} entry line_start must be a positive integer`);
-  if (ref.line_end !== undefined && !hasPositiveInteger(ref.line_end)) die(`${label} entry line_end must be a positive integer`);
+  // ORDER IS THE CONTRACT, NOT AN ACCIDENT. #619 narrative trust isolation runs FIRST, before any
+  // shape rule, because AC5 requires #619 to be the REFUSING AUTHORITY on every (kind, channel)
+  // pair. Round-2 review caught #1358's first cut reordering these below dieOnViolations: nothing
+  // was admitted -- all 15 pairs still refused -- but 8 of 15 answered with a shape rule instead
+  // of the isolation diagnostic, so the guard stopped being the thing that spoke. A security
+  // refusal that is merely reachable is not the same as one that is authoritative.
+  //
+  // Consequence, accepted deliberately: a ref that is BOTH narrative-poisoned and malformed
+  // reports only the isolation refusal, so #1359's one-pass property yields to #619 here. That is
+  // the right precedence -- the caller's next move is to stop citing narrative content, not to
+  // fix a field -- and evidence-ref-narrative-isolation-precedence in workflow-explain.test.mjs
+  // pins it so a future reorder fails loudly instead of silently downgrading the guard.
+  // rejectNarrativeReference ignores non-strings, so it is safe ahead of the type checks.
   rejectNarrativeReference(projectRoot, ref.file, `${label} entry file`);
   rejectNarrativeReference(projectRoot, ref.url, `${label} entry url`);
   rejectNarrativeReference(projectRoot, ref.excerpt, `${label} entry excerpt`);
-  const rules = EVIDENCE_REF_RULES[ref.kind as keyof typeof EVIDENCE_REF_RULES];
-  for (const rule of rules) {
-    const present = (field: string): boolean => field === "line_start" || field === "line_end"
-      ? hasPositiveInteger(ref[field])
-      : hasNonEmptyString(ref[field]);
-    const valid = rule.mode === "all" ? rule.fields.every(present) : rule.fields.some(present);
-    if (!valid) {
-      const separator = rule.fields.length > 2 ? ", " : " ";
-      const joined = rule.fields.length > 1
-        ? `${rule.fields.slice(0, -1).join(separator)}${rule.fields.length > 2 ? "," : ""} or ${rule.fields.at(-1)}`
-        : rule.fields[0];
-      die(`${label} ${ref.kind} refs require ${rule.mode === "all" && rule.fields.length > 1 ? joined.replace(/ or ([^,]+)$/, " and $1") : joined}`);
-    }
-  }
+  // Shape rules are enforced from the SAME constants `workflow <verb> --explain` prints (#1358);
+  // a rule hand-written here would be a rule the accepted-shape output cannot know about.
+  dieOnViolations(evidenceRefShapeViolations(ref, label));
   return ref;
 }
 export function normalizeEvidenceRefs(raw: unknown, label: string, projectRoot = process.cwd()): AnyObj[] {
-  if (!Array.isArray(raw)) die(`${label} must be an array`);
-  return raw.map((ref) => {
-    if (typeof ref === "string") die(`${label} entries must be structured evidence reference objects; legacy string refs are not supported`);
-    if (!ref || typeof ref !== "object" || Array.isArray(ref)) die(`${label} entries must be objects`);
-    return validateEvidenceRef({ ...ref as AnyObj }, label, projectRoot);
-  });
+  dieOnViolations(evidenceRefListViolations(raw, label));
+  return (raw as unknown[]).map((ref, index) => validateEvidenceRef({ ...ref as AnyObj }, `${label}[${index}]`, projectRoot));
 }
 
 function canonicalProjectRootForSession(dir: string): string {
@@ -3143,6 +3406,47 @@ function canonicalProjectRootForSession(dir: string): string {
   const stat = fs.lstatSync(projectRoot);
   if (stat.isSymbolicLink() || !stat.isDirectory()) die("gate evidence project root must be a non-symlink directory");
   return projectRoot;
+}
+
+/**
+ * #1170 (PR2): the canonical project root for a session, or null when the session is not a
+ * canonical `.kontourai/flow-agents/<slug>` layout.
+ *
+ * `canonicalProjectRootForSession` dies on a non-canonical layout, which is correct where a
+ * canonical root is a precondition (observed commands, passing public tests evidence). The
+ * broadened workspace-snapshot capture below is *additive provenance* — a legacy or tmp session
+ * layout must keep recording claims exactly as it does today rather than becoming unrecordable.
+ */
+function tryCanonicalProjectRootForSession(dir: string): string | null {
+  try {
+    return canonicalProjectRootForSession(dir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #1170 (PR2): best-effort Git worktree snapshot for gate-claim provenance.
+ *
+ * Returns a snapshot ONLY when a canonical Git worktree resolves. Two deliberate exclusions:
+ *
+ * - `null` root / capture failure / non-Git tree → null. The claim degrades to today's legacy
+ *   semantics (no snapshot recorded, nothing rejected at record time). Snapshot capture is a
+ *   freshness *affordance*; failing to obtain one must never make a recordable claim unrecordable.
+ * - A `reviewed-files` snapshot → null, never stamped. `captureReviewWorkspaceSnapshot` falls back
+ *   to digesting the supplied reviewed-file list when the tree is not Git-backed; with the empty
+ *   list passed here that digest is a constant, so stamping it would mint a claim that is
+ *   permanently self-current. The consumer (`builder-flow-runtime.ts` `isGitWorktreeSnapshot`)
+ *   already refuses to honor that shape — this keeps the producer from writing it at all.
+ */
+function tryCaptureGitWorktreeSnapshot(projectRoot: string | null): AnyObj | null {
+  if (!projectRoot) return null;
+  try {
+    const snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+    return snapshot.kind === "git-worktree" && typeof snapshot.head_sha === "string" ? snapshot as AnyObj : null;
+  } catch {
+    return null;
+  }
 }
 
 // #619: the narrative isolation guard must run for EVERY session layout (canonical,
@@ -3308,6 +3612,33 @@ function globMatches(pattern: string, relative: string): boolean {
 
 type GateProducer = { id: string; artifactPatterns: string[]; selfProducedTrustSlices: string[] };
 
+/**
+ * The BOUND-DEFINITION IDENTITY carried by a session's canonical Flow projection, in the
+ * underscore-prefixed check-field form gate claims are stamped with — or null when the
+ * projection does not carry a complete one.
+ *
+ * #1280/#1316. `syncAndProject` writes `state.json.flow_run.definition_{id,version,digest}`
+ * straight from the run record, which the run adapter pins to the declaring kit's binding and
+ * re-asserts by deep equality on every load. So these three fields are the run record's own
+ * answer to "which flow, and which variant of it, is this session running" — the property #1280
+ * requires so that a reduced-gate run can never be mistaken for a full one once kits can declare
+ * gate-set variants.
+ *
+ * ALL THREE OR NOTHING. A partial identity ("this flow, unknown variant") is exactly the
+ * ambiguity the stamp exists to remove: two variants of one flow share `definition_id`, so an
+ * identity without the version and digest would read as agreement between definitions that
+ * differ. Callers treat null from a session that HAS a Flow run as a projection that must be
+ * regenerated, not as permission to skip the stamp.
+ */
+function gateClaimFlowIdentityFields(projectedRun: AnyObj | null): AnyObj | null {
+  if (!projectedRun) return null;
+  const flowId = typeof projectedRun.definition_id === "string" && projectedRun.definition_id ? projectedRun.definition_id : null;
+  const version = typeof projectedRun.definition_version === "string" && projectedRun.definition_version ? projectedRun.definition_version : null;
+  const digest = typeof projectedRun.definition_digest === "string" && projectedRun.definition_digest ? projectedRun.definition_digest : null;
+  if (!flowId || !version || !digest) return null;
+  return { _gate_claim_flow_id: flowId, _gate_claim_definition_version: version, _gate_claim_definition_digest: digest };
+}
+
 export function rejectOperationBoundExpectation(expectationId: string, operation: string): never {
   const completion = operation === NARRATIVE_PROMOTE_OPERATION
     ? "authenticated external narrative provider completion"
@@ -3315,37 +3646,51 @@ export function rejectOperationBoundExpectation(expectationId: string, operation
   die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires ${completion}`);
 }
 
-function expectedGateProducer(flowId: string, stepId: string, expectationId: string): GateProducer {
-  const manifest = loadJson(path.join(flowAgentsPackageRoot(), "kits", "builder", "kit.json"));
-  const actions = Array.isArray(manifest.flow_step_actions) ? manifest.flow_step_actions as AnyObj[] : [];
-  const action = actions.find((candidate) => candidate.flow_id === flowId && candidate.step_id === stepId);
-  if (!action) die(`record-gate-claim cannot derive a producer for unknown Flow step ${flowId}/${stepId}`);
-  const binding = Array.isArray(action.expectation_bindings)
-    ? action.expectation_bindings.find((candidate): candidate is AnyObj => candidate && typeof candidate === "object" && !Array.isArray(candidate) && candidate.expectation_id === expectationId)
-    : undefined;
-  if (binding?.interface === "operation") {
-    const operation = typeof binding.operation === "string" ? binding.operation : "the declared external operation";
-    rejectOperationBoundExpectation(expectationId, operation);
+/**
+ * The producer the DECLARING kit binds to this gate expectation.
+ *
+ * #1316: this used to load ONE packaged kit's manifest for every flow, which is why a
+ * kit-declared flow could be started but never satisfy a gate — the producer lookup could not
+ * see its bindings. The manifest is now the one belonging to the kit that declares `flowId`,
+ * resolved through the same binding the canonical run adapter pins, so the producer a claim is
+ * checked against and the definition the run is bound to come from the same kit.
+ *
+ * `projectRoot` widens the search to a project-installed kit; the packaged tree is still
+ * searched first, so a project kit can never shadow a packaged one (see `kitFlowSourceRoots`).
+ * Every refusal string here is unchanged — they are matched by consumers.
+ */
+function expectedGateProducer(flowId: string, stepId: string, expectationId: string, projectRoot?: string): GateProducer {
+  const parts = kitFlowIdParts(flowId);
+  const binding = parts ? resolveKitFlowBinding(flowId, kitFlowSourceRoots(flowAgentsPackageRoot(), projectRoot)) : null;
+  if (!binding) die(`record-gate-claim cannot derive a producer for unknown Flow step ${flowId}/${stepId}`);
+  const resolution = resolveKitGateProducer(binding.manifest, binding.kitId, flowId, stepId, expectationId);
+  if (resolution.kind === "operation") rejectOperationBoundExpectation(expectationId, resolution.operation);
+  if (resolution.kind === "missing") {
+    if (resolution.reason === "no-step-action") die(`record-gate-claim cannot derive a producer for unknown Flow step ${flowId}/${stepId}`);
+    die(`record-gate-claim cannot derive exactly one producer for ${flowId}/${stepId}/${expectationId}`);
   }
-  const skills = Array.isArray(action.skills) ? action.skills.filter((value: unknown): value is string => typeof value === "string") : [];
-  const roles = Array.isArray(manifest.skill_roles) ? manifest.skill_roles as AnyObj[] : [];
-  const owners = roles.filter((role) => typeof role.skill_id === "string"
-    && Array.isArray(role.step_ids) && role.step_ids.includes(stepId)
-    && Array.isArray(role.expectation_ids) && role.expectation_ids.includes(expectationId)
-    && skills.includes(role.skill_id.replace(/^builder\./, "")));
-  if (owners.length !== 1) die(`record-gate-claim cannot derive exactly one producer for ${flowId}/${stepId}/${expectationId}`);
-  const owner = owners[0]!;
-  const artifacts = (Array.isArray(owner.artifacts) ? owner.artifacts : []).filter((value): value is string => typeof value === "string" && value !== "ephemeral decision record");
+  const artifacts = resolution.artifacts;
   return {
-    id: owner.skill_id,
+    id: resolution.skillId,
     artifactPatterns: artifacts.filter((value) => !value.includes("#")),
     selfProducedTrustSlices: artifacts.filter((value) => value.startsWith("trust.bundle#")).map((value) => value.slice("trust.bundle#".length)),
   };
 }
 
 function validateReviewableGateEvidence(dir: string, slug: string, refs: AnyObj[], producer: GateProducer, label: string): void {
-  if (refs.length === 0) die(`${label} requires at least one reviewable --evidence-ref-json`);
   const projectRoot = canonicalProjectRootForSession(dir);
+  // Expanded once: both the match loop and the refusal text need the same concrete paths. Run 1
+  // of the instrumented dogfood (#1293) paid one full refusal per gate to learn each producer
+  // artifact's filename, although the binding was always derivable — so the refusal now NAMES the
+  // expected path(s), and every issue this function can diagnose is reported in ONE pass rather
+  // than as a ladder. Derived from the kit's own bindings via GateProducer; no artifact name is
+  // hardcoded here (core stays kit-generic).
+  const expandedPatterns = producer.artifactPatterns.map((pattern) => {
+    const expanded = pattern.replaceAll("<slug>", slug);
+    return expanded.startsWith(".kontourai/") ? expanded : `.kontourai/flow-agents/${slug}/${expanded}`;
+  });
+  const issues: string[] = [];
+  if (refs.length === 0) issues.push(`${label} requires at least one reviewable --evidence-ref-json`);
   let declaredProducerArtifactFound = producer.artifactPatterns.length === 0;
   let localOrCommandEvidenceFound = false;
   for (const [index, ref] of refs.entries()) {
@@ -3355,22 +3700,25 @@ function validateReviewableGateEvidence(dir: string, slug: string, refs: AnyObj[
     ref.file = relative;
     localOrCommandEvidenceFound = true;
     if (ref.kind === "artifact" && producer.artifactPatterns.length > 0) {
-      const patterns = producer.artifactPatterns.map((pattern) => {
-        const expanded = pattern.replaceAll("<slug>", slug);
-        return expanded.startsWith(".kontourai/") ? expanded : `.kontourai/flow-agents/${slug}/${expanded}`;
-      });
-      if (patterns.some((pattern) => globMatches(pattern, relative))) declaredProducerArtifactFound = true;
+      if (expandedPatterns.some((pattern) => globMatches(pattern, relative))) declaredProducerArtifactFound = true;
     }
   }
-  if (!declaredProducerArtifactFound) die(`${label} requires a declared durable artifact from producer ${producer.id}`);
-  if (producer.selfProducedTrustSlices.length > 0 && !localOrCommandEvidenceFound) {
-    die(`${label} is produced as trust.bundle fragment(s) ${producer.selfProducedTrustSlices.join(", ")} and requires local artifact or command evidence; external-only references cannot prove a passing claim`);
+  if (!declaredProducerArtifactFound) {
+    // Prefix-preserving extension of the original sentence (no consumer greps it — swept), now
+    // naming the concrete expected path(s) so the fix is one write, not one more refusal.
+    issues.push(`${label} requires a declared durable artifact from producer ${producer.id}; expected artifact matching: ${expandedPatterns.join(" or ")} — write it, then reference it with an evidence-ref-json of kind "artifact"`);
   }
+  if (producer.selfProducedTrustSlices.length > 0 && !localOrCommandEvidenceFound) {
+    issues.push(`${label} is produced as trust.bundle fragment(s) ${producer.selfProducedTrustSlices.join(", ")} and requires local artifact or command evidence; external-only references cannot prove a passing claim`);
+  }
+  if (issues.length === 1) die(issues[0]!);
+  if (issues.length > 1) die(`${label}: ${issues.length} evidence requirement(s) unmet:\n${issues.map((issue, index) => `  [${index + 1}] ${issue}`).join("\n")}`);
 }
 
-function commandFromEvidenceRef(ref: AnyObj): string {
-  return typeof ref.excerpt === "string" ? ref.excerpt.trim() : (typeof ref.url === "string" ? ref.url.trim() : "");
-}
+// The matcher, the printed rule, and the printed example all read CRITERION_COMMAND_MATCH_FIELDS.
+// Round-1 review found the example keyed on `summary` while the rule named `excerpt`; a shared
+// precedence constant is what stops that recurring.
+const commandFromEvidenceRef = commandTextFromEvidenceRef;
 
 function hasTestIntent(name: string): boolean {
   return /(?:^|[-_.\/])(test|tests|check|checks|verify|verification|spec|specs|eval|evals)(?:$|[-_.\/])/i.test(name) || /(?:test|check|verify|spec|eval)/i.test(path.basename(name));
@@ -3386,11 +3734,55 @@ function resolvesExplicitTestTarget(projectRoot: string, token: string): boolean
 }
 
 /** Validate test-evidence command shape without executing it. */
-type TestExecutionProof = {
+type LocalTestExecutionProof = {
   kind: "local-process-exit";
   runner: string;
   static_test_units: number;
 };
+type TestExecutionProof = LocalTestExecutionProof | CoordinatedCommandReceiptProof;
+
+/**
+ * A host may name an otherwise-unconventional CI lane in its committed
+ * reconcile manifest. This is shape authorization only: callers still need a
+ * locally-derived non-vacuous test proof, and the writer still executes and
+ * records the command before accepting a passing claim.
+ */
+function committedManifestDeclaresExactCommand(command: string, pkg: Record<string, unknown> | null): boolean {
+  const manifest = pkg?.["trust-reconcile-manifest"];
+  return Array.isArray(manifest) && manifest.some((entry) => entry
+    && typeof entry === "object"
+    && !Array.isArray(entry)
+    && typeof entry.id === "string"
+    && entry.command === command);
+}
+
+/**
+ * A manifest declaration can name a host-specific lane, but it cannot grant an
+ * alternate process-resolution environment. In particular, a leading
+ * assignment such as `PATH=./shim` can replace a bare runner with a tracked
+ * lookalike before the shell reaches the declared command. Keep this check on
+ * the raw command: normalizing or stripping its prefix first would re-open
+ * that substitution channel for an exact manifest entry.
+ */
+function rawCommandCanUseManifestMembership(command: string): boolean {
+  const tokens = command.trim().split(/\s+/).filter(Boolean);
+  const first = tokens[0] ?? "";
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return false;
+  // A path-qualified executable is likewise chosen by the command text rather
+  // than the trusted host runner resolution. The supported runners below use
+  // their bare executable forms.
+  return first !== "" && !first.includes("/");
+}
+
+function committedPackageJson(projectRoot: string): Record<string, unknown> | null {
+  try {
+    const head = resolveTrustedLocalGitCommit(projectRoot, "HEAD");
+    const pkg = JSON.parse(readTrustedGitBlobSync(projectRoot, head, "package.json").toString("utf8"));
+    return pkg && typeof pkg === "object" && !Array.isArray(pkg) ? pkg as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
 
 function staticTestUnits(file: string, executable: string): number {
   try {
@@ -3415,13 +3807,19 @@ function staticTestUnits(file: string, executable: string): number {
  * a Vitest/Jest-looking success summary, but it cannot turn a non-test script
  * into a supported test workflow or supply this locally-created proof.
  */
-export function testExecutionProof(command: string, projectRoot: string, seenScripts = new Set<string>(), packageScriptBody = false): TestExecutionProof | null {
+export function testExecutionProof(command: string, projectRoot: string, seenScripts = new Set<string>(), packageScriptBody = false, committedScriptPackage: Record<string, unknown> | null = null): TestExecutionProof | null {
+  // Membership is an exception for an unconventional script *name*, never for
+  // a command whose raw process resolution can be redirected.
+  const committedPackage = committedScriptPackage ?? committedPackageJson(projectRoot);
+  const manifestDeclared = rawCommandCanUseManifestMembership(command)
+    && committedPackage !== null
+    && committedManifestDeclaresExactCommand(command, committedPackage);
   const normalized = command.trim().replace(/\s+/g, " ");
   if (!normalized || /[`$()]/.test(normalized)) return null;
   if (/[;&|]/.test(normalized)) {
     if (!packageScriptBody || normalized.includes("||") || /[;|]/.test(normalized)) return null;
     const segments = normalized.split(/\s*&&\s*/).filter(Boolean);
-    return segments.length > 1 ? segments.map((segment) => testExecutionProof(segment, projectRoot, new Set(seenScripts), false)).find(Boolean) ?? null : null;
+    return segments.length > 1 ? segments.map((segment) => testExecutionProof(segment, projectRoot, new Set(seenScripts), false, committedScriptPackage)).find(Boolean) ?? null : null;
   }
   if (/^(?:true|:|\/usr\/bin\/true)$/i.test(normalized)) return null;
   if (/^(?:echo|printf)(?:\s|$)/i.test(normalized)) return null;
@@ -3437,14 +3835,34 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
       const units = target ? staticTestUnits(path.resolve(projectRoot, target), "bun") : 0;
       return units > 0 ? { kind: "local-process-exit", runner: "bun test", static_test_units: units } : null;
     }
+    // A coordinator is admitted only when its exact public command is declared
+    // in the reconcile manifest and its observed receipt proves a complete,
+    // stable, committed test result. The resolver names no product or filename.
+    if (resolveCoordinatedCommandBinding(normalized, projectRoot)) {
+      return {
+        kind: "coordinated-command-receipt",
+        protocol: "flow-agents.coordinated-command-receipt/v1",
+        request_key: "pending-observation",
+        receipt_sha256: "pending-observation",
+        receipt_commit_sha256: "pending-observation",
+      };
+    }
     const script = tokens[1] === "run" || tokens[1] === "run-script" ? tokens[2] : tokens[1];
-    if (!script || !hasTestIntent(script) || seenScripts.has(script)) return null;
+    // A host's exact, committed reconcile-manifest entry authorizes an
+    // unconventional *script name*, not its body. The body must still resolve
+    // to a substantive local test workflow below; `echo ok` and `true` remain
+    // null proof and cannot become tests-evidence.
+    if (!script || (!manifestDeclared && !hasTestIntent(script)) || seenScripts.has(script)) return null;
     try {
-      const pkg = loadJson(path.join(projectRoot, "package.json"));
+      // A manifest-authorized lane's declaration and its body must describe
+      // the same immutable HEAD bytes. Propagate that source through nested
+      // npm-script delegation, rather than switching back to a dirty worktree
+      // body on the first `npm run` segment.
+      const pkg = committedScriptPackage ?? (manifestDeclared ? committedPackage : loadJson(path.join(projectRoot, "package.json")));
       const scriptCommand = pkg.scripts && typeof pkg.scripts === "object" ? pkg.scripts[script] : undefined;
       if (typeof scriptCommand !== "string") return null;
       seenScripts.add(script);
-      return testExecutionProof(scriptCommand, projectRoot, seenScripts, true);
+      return testExecutionProof(scriptCommand, projectRoot, seenScripts, true, committedScriptPackage ?? (manifestDeclared ? committedPackage : null));
     } catch { return null; }
   }
   if (["vitest", "jest", "mocha", "ava", "pytest", "rspec", "phpunit"].includes(executableName)
@@ -3519,30 +3937,105 @@ export function isMeaningfulTestCommand(command: string, projectRoot: string, se
   return testExecutionProof(command, projectRoot, seenScripts, packageScriptBody) !== null;
 }
 
-export function observedExecutedTestCount(output: string): number {
-  const counts: number[] = [];
-  for (const pattern of [
-    /^\s*(?:#|ℹ)\s*tests\s+(\d+)\s*$/gim,
-    /^\s*1\.\.(\d+)(?:\s|$)/gim,
-    /\b(\d+)\s+passed\b/gim,
-  ]) {
-    for (const match of output.matchAll(pattern)) counts.push(Number(match[1]));
+export function observedExecutedTestCount(output: string, runner?: string): number {
+  if (runner === "node --test") {
+    // Node prints its summary after every test's stdout.  Take only the last
+    // pass line that is followed by the rest of that canonical terminal block;
+    // source code cannot place a lookalike after the runner has finished.
+    const summaries = [...output.matchAll(/^(?:#|ℹ)\s*pass\s+(\d+)\s*$/gim)];
+    const terminal = summaries.at(-1);
+    if (!terminal || !/(?:^|\n)(?:#|ℹ)\s*fail\s+\d+\s*$[\s\S]*(?:^|\n)(?:#|ℹ)\s*skipped\s+\d+\s*$[\s\S]*(?:^|\n)(?:#|ℹ)\s*duration_ms\s+[\d.]+\s*$/im.test(output.slice((terminal.index ?? 0) + terminal[0].length))) return 0;
+    return Number(terminal[1]);
   }
-  const explicitPasses = output.match(/^\s*(?:---\s+PASS:|ok\s+\d+\s+-)/gm)?.length ?? 0;
-  if (explicitPasses > 0) counts.push(explicitPasses);
-  const goPackages = output.match(/^ok\s+\S+(?:\s|$)/gm)?.length ?? 0;
-  if (goPackages > 0) counts.push(goPackages);
-  return Math.max(0, ...counts.filter((count) => Number.isSafeInteger(count) && count > 0));
+  if (runner === "go test") {
+    // Go's package `ok` line says only that a package succeeded.  The runner's
+    // per-case PASS records are the usable execution signal.
+    return output.match(/^---\s+PASS:\s+\S+(?:\s+\([\d.]+s\))?\s*$/gm)?.length ?? 0;
+  }
+  if (runner === "cargo test") {
+    const summaries = [...output.matchAll(/^test result: ok\.\s+(\d+) passed;.*$/gim)];
+    return Number(summaries.at(-1)?.[1] ?? 0);
+  }
+  // Project-local test commands commonly use TAP as their result contract. A
+  // plan merely declares what should run and aggregate `# tests` totals can
+  // include skipped work, so accept individual completed case records only.
+  // Do not accept SKIP/TODO cases. For a nested TAP subtest whose children are
+  // all SKIP/TODO, its unqualified outer `ok` is a suite marker, not evidence
+  // that a case ran.
+  const lines = output.split(/\r?\n/);
+  const candidates: { index: number; name: string }[] = [];
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^ok\s+\d+(?:\s+-\s+(.*?))?\s*$/i);
+    if (match && !/#\s*(?:SKIP|TODO)\b/i.test(line)) candidates.push({ index, name: (match[1] ?? "").trim() });
+  }
+  return candidates.filter(({ index, name }) => {
+    // TAP subtests print an indented child block followed by an unindented
+    // `ok N - <subtest name>`. Treat that record as a suite marker only when
+    // every completed child case in its immediately preceding subtest block
+    // was explicitly skipped or todo.
+    let marker = -1;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const subtest = lines[cursor]!.match(/^#\s+Subtest:\s+(.+?)\s*$/i);
+      if (subtest) {
+        if (subtest[1]!.trim() === name) marker = cursor;
+        break;
+      }
+      if (/^ok\s+\d+/.test(lines[cursor]!)) break;
+    }
+    if (marker < 0) return true;
+    const childCases = lines.slice(marker + 1, index).filter((line) => /^\s+ok\s+\d+/i.test(line));
+    return childCases.length === 0 || childCases.some((line) => !/#\s*(?:SKIP|TODO)\b/i.test(line));
+  }).length;
 }
 
 export function inferExecutedTestCount(command: string, projectRoot: string, output: string, seenScripts = new Set<string>()): number {
   const proof = testExecutionProof(command, projectRoot, seenScripts);
-  if (!proof) return 0;
-  const observed = observedExecutedTestCount(output);
+  if (!proof || proof.kind !== "local-process-exit") return 0;
+  const observed = observedExecutedTestCount(output, proof.runner);
   return observed > 0 ? Math.min(proof.static_test_units, observed) : 0;
 }
 
-type ObservedCommand = { command: string; exit_code: number; output_sha256: string; test_count?: number; execution_proof?: TestExecutionProof };
+type ObservedCommand = {
+  command: string;
+  exit_code: number;
+  output_sha256: string;
+  observed_at_commit?: string;
+  worktree_clean?: boolean;
+  verification_workspace_snapshot?: AnyObj;
+  test_count?: number;
+  execution_proof?: TestExecutionProof;
+};
+
+function passingObservationSnapshot(observations: readonly ObservedCommand[]): AnyObj | null {
+  if (observations.length === 0) return null;
+  let snapshot: AnyObj | null = null;
+  for (const observation of observations) {
+    const provenance = commandLogPassProvenance({
+      observed_at_commit: observation.observed_at_commit,
+      worktree_clean: observation.worktree_clean,
+      verification_workspace_snapshot: observation.verification_workspace_snapshot,
+    });
+    if (!provenance?.verificationWorkspaceSnapshot) return null;
+    if (snapshot && !isDeepStrictEqual(snapshot, provenance.verificationWorkspaceSnapshot)) return null;
+    snapshot = provenance.verificationWorkspaceSnapshot;
+  }
+  return snapshot;
+}
+
+/** Every confirming observation must bind exactly to one clean Git snapshot. */
+export function observedCommandsBindExactWorkspaceSnapshot(observed: unknown, expected: unknown): boolean {
+  if (!expected || typeof expected !== "object" || Array.isArray(expected)) return false;
+  const snapshot = expected as AnyObj;
+  if (snapshot.version !== 1 || snapshot.kind !== "git-worktree" || snapshot.algorithm !== "sha256"
+    || typeof snapshot.digest !== "string" || !/^[a-f0-9]{64}$/.test(snapshot.digest)
+    || !isExactLowercaseCommitSha(snapshot.head_sha) || snapshot.worktree_clean !== true) return false;
+  return Array.isArray(observed) && observed.length > 0 && observed.every((entry: AnyObj) =>
+    entry && typeof entry === "object" && !Array.isArray(entry)
+    && isExactLowercaseCommitSha(entry.observed_at_commit)
+    && entry.observed_at_commit === snapshot.head_sha
+    && entry.worktree_clean === true
+    && isDeepStrictEqual(entry.verification_workspace_snapshot, snapshot));
+}
 
 function observedCommandReference(commands: readonly string[], command: string, observation?: { exit_code: number | null; output_sha256: string }): string {
   const ordinal = commands.indexOf(command) + 1;
@@ -3559,13 +4052,38 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
     if (!isRunnableCommandText(command)) die(`record-gate-claim ${observedCommandReference(commands, command)} is not a runnable shell command — prose belongs in --summary, which is never executed.`);
     if (requireTestIntent && !isMeaningfulTestCommand(command, projectRoot)) die("record-gate-claim tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
   }
-  // Passing test evidence is always executed exactly once by this canonical
-  // writer. Caller-supplied observations remain available for non-test
-  // attestations but can never stand in for locally observed test execution.
+  // The canonical writer executes every command and records its own observation.
   const observeCommand = async (command: string) => {
     const result = await runObservedCommand(command, projectRoot);
+    const coordinated = requireTestIntent ? resolveCoordinatedCommandBinding(command, projectRoot) : null;
+    if (coordinated) {
+      const receipt = observeCoordinatedCommandReceipt(coordinated, projectRoot, result);
+      const { test_count, execution_proof } = receipt;
+      return {
+        command,
+        exit_code: result.exit_code,
+        output_sha256: result.output_sha256,
+        ...(result.observation.status === "captured" ? {
+          observed_at_commit: result.observation.observed_at_commit,
+          worktree_clean: result.observation.worktree_clean,
+          verification_workspace_snapshot: result.observation.verification_workspace_snapshot,
+        } : {}),
+        test_count,
+        execution_proof,
+      };
+    }
     const proof = requireTestIntent ? testExecutionProof(command, projectRoot) : null;
-    return { command, exit_code: result.exit_code, output_sha256: result.output_sha256, ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}) };
+    return {
+      command,
+      exit_code: result.exit_code,
+      output_sha256: result.output_sha256,
+      ...(result.observation.status === "captured" ? {
+        observed_at_commit: result.observation.observed_at_commit,
+        worktree_clean: result.observation.worktree_clean,
+        verification_workspace_snapshot: result.observation.verification_workspace_snapshot,
+      } : {}),
+      ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}),
+    };
   };
   // Sequential, never concurrent: evidence commands are test runs against one working tree, so
   // any two that build shared artifacts (every eval here starts with `npm run build:bundles`)
@@ -3575,17 +4093,17 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
   // claim is persisted. Narrowing here instead would just fail to compile.
   const observed: Awaited<ReturnType<typeof observeCommand>>[] = [];
   for (const command of commands) observed.push(await observeCommand(command));
-  if (observed.length !== commands.length) die("record-gate-claim requires exactly one --observed-command-json for every --command");
+  if (observed.length !== commands.length) die("record-gate-claim writer did not return one observation for every --command");
   const byCommand = new Map<string, ObservedCommand>();
   for (const entry of observed) {
-    if (typeof entry.command !== "string" || typeof entry.exit_code !== "number" || !Number.isInteger(entry.exit_code) || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256)) die("--observed-command-json must contain command, integer exit_code, and sha256 output_sha256");
-    if (!commands.includes(entry.command)) die("--observed-command-json command must exactly match one supplied --command");
+    if (typeof entry.command !== "string" || typeof entry.exit_code !== "number" || !Number.isInteger(entry.exit_code) || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(entry.output_sha256)) die("record-gate-claim writer produced an invalid command observation");
+    if (!commands.includes(entry.command)) die("record-gate-claim writer observation command does not match a supplied --command");
     if (expectedStatus === "pass" && entry.exit_code !== 0) die(`record-gate-claim passing evidence ${observedCommandReference(commands, entry.command, entry)} failed`);
-    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || entry.execution_proof.kind !== "local-process-exit")) die(`record-gate-claim passing tests-evidence ${observedCommandReference(commands, entry.command, entry)} did not produce a local execution proof`);
-    if (byCommand.has(entry.command)) die("--observed-command-json command values must be unique");
+    if (requireTestIntent && (!Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || !entry.execution_proof || !["local-process-exit", "coordinated-command-receipt"].includes(String(entry.execution_proof.kind)))) die(`record-gate-claim passing tests-evidence ${observedCommandReference(commands, entry.command, entry)} did not produce a local execution proof`);
+    if (byCommand.has(entry.command)) die("record-gate-claim writer produced duplicate command observations");
     byCommand.set(entry.command, entry as ObservedCommand);
   }
-  if (commands.some((command) => !byCommand.has(command))) die("every --command requires a corresponding --observed-command-json");
+  if (commands.some((command) => !byCommand.has(command))) die("record-gate-claim writer did not observe every supplied --command");
   return commands.map((command) => byCommand.get(command)!);
 }
 
@@ -3643,10 +4161,13 @@ export function appendWriterObservedCommands(dir: string, observed: ObservedComm
           command: entry.command,
           observedResult: entry.exit_code === 0 ? "pass" : "fail",
           exitCode: entry.exit_code,
+          ...(typeof entry.observed_at_commit === "string" ? { observed_at_commit: entry.observed_at_commit } : {}),
+          ...(typeof entry.worktree_clean === "boolean" ? { worktree_clean: entry.worktree_clean } : {}),
           capturedAt: timestamp,
           source: WRITER_OBSERVATION_SOURCE,
           writer: {
             output_sha256: entry.output_sha256,
+            ...(entry.verification_workspace_snapshot ? { verification_workspace_snapshot: entry.verification_workspace_snapshot } : {}),
             ...(transactionId ? { transaction_id: transactionId } : {}),
             ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}),
             ...(entry.execution_proof ? { execution_proof: entry.execution_proof } : {}),
@@ -3799,20 +4320,35 @@ export function appendWriterTransactionAbort(capability: WriterTransactionAbortC
   }
 }
 
-function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySet<string>, label: string, requireAll = false): void {
+function observedCommandRefViolations(refs: AnyObj[], observedCommands: ReadonlySet<string>, label: string, requireAll = false): string[] {
+  const violations: string[] = [];
   const commandRefs = refs.filter((ref) => ref.kind === "command");
-  if (commandRefs.length === 0) die(`${label} requires a command evidence ref matching a successful observed command`);
-  for (const ref of commandRefs) {
-    if (!observedCommands.has(commandFromEvidenceRef(ref))) die(`${label} command evidence ref must exactly match a successful --observed-command-json command`);
+  if (commandRefs.length === 0) violations.push(`${label} requires a command evidence ref matching a successful observed command`);
+  if (commandRefs.some((ref) => !observedCommands.has(commandFromEvidenceRef(ref)))) {
+    violations.push(`${label} command evidence ref must exactly match a successful writer-observed command`);
   }
   if (requireAll) {
     const referenced = new Set(commandRefs.map(commandFromEvidenceRef));
-    if ([...observedCommands].some((command) => !referenced.has(command))) die(`${label} requires a top-level command evidence ref for every successful observed command`);
+    if ([...observedCommands].some((command) => !referenced.has(command))) violations.push(`${label} requires a top-level command evidence ref for every successful observed command`);
   }
+  return violations;
 }
 
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string): AnyObj[] {
-  if (raw.length === 0) die("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
+function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySet<string>, label: string, requireAll = false): void {
+  dieOnViolations(observedCommandRefViolations(refs, observedCommands, label, requireAll));
+}
+
+/**
+ * `preconditionProblems` carries state-level refusals that are knowable BEFORE any payload is
+ * parsed (today: the current-clean-critique requirement, #1359 step 8), so a caller whose payload
+ * is also malformed learns both in the same refusal instead of after four shape round-trips.
+ */
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string, preconditionProblems: readonly string[]): AnyObj[] {
+  const problems: string[] = [...preconditionProblems];
+  if (raw.length === 0) {
+    problems.push("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
+    dieOnViolations(problems);
+  }
   const incoming = raw.map((value) => parseJson(value, "--criterion-json"));
   const expectedById = new Map<string, AnyObj>();
   for (const criterion of existing) {
@@ -3822,39 +4358,66 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   const expectedIds = [...expectedById.keys()];
   const ids = incoming.map((criterion) => typeof criterion.id === "string" ? criterion.id : "");
   if (new Set(ids).size !== ids.length || ids.length !== expectedIds.length || ids.some((id) => !expectedIds.includes(id))) {
-    die(`--criterion-json must cover every declared acceptance criterion exactly once (expected: ${expectedIds.join(", ") || "none"}; received: ${ids.join(", ") || "none"})`);
+    problems.push(`--criterion-json must cover every declared acceptance criterion exactly once (expected: ${expectedIds.join(", ") || "none"}; received: ${ids.join(", ") || "none"})`);
   }
+  const labels = ids.map((id, index) => id.length > 0 ? id : `#${index}`);
+  // One collector, every body: the nested evidence_refs rules and the "requires reviewable"
+  // rule are produced inside criterionShapeViolations so --explain's table is their only source.
+  incoming.forEach((criterion, index) => problems.push(...criterionShapeViolations(criterion, labels[index]!)));
+  dieOnViolations(problems);
   const observedCommandNames = new Set(observedCommands.map((observation) => observation.command));
-  return incoming.map((criterion, index) => {
-    if (Object.keys(criterion).some((key) => !["id", "status", "evidence_refs"].includes(key))) die(`criterion ${ids[index]} may update only id, status, and evidence_refs`);
-    if (criterion.status !== "pass") die(`criterion ${ids[index]} must have status pass for a passing tests-evidence claim`);
-    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot);
-    if (refs.length === 0) die(`criterion ${ids[index]} requires reviewable evidence_refs`);
-    requireObservedCommandRefs(refs, observedCommandNames, `criterion ${ids[index]}`);
+  const normalized = incoming.map((criterion, index) => normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot));
+  dieOnViolations(normalized.flatMap((refs, index) => observedCommandRefViolations(refs, observedCommandNames, `criterion ${ids[index]}`)));
+  return normalized.map((refs, index) => {
     const referencedCommands = new Set(refs.filter((ref) => ref.kind === "command").map(commandFromEvidenceRef));
     const criterionObservedCommands = observedCommands.filter((observation) => referencedCommands.has(observation.command));
     return markCanonicallyObservedCriterion({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _observed_commands: criterionObservedCommands });
   });
 }
 
-const critiqueStatuses = new Set<string>(WORKFLOW_CRITIQUE_STATUSES);
-const safeCritiqueId = /^[a-z][a-z0-9_-]*$/;
+// The id grammar `record-critique` enforces is the SAME constant `--explain` prints for
+// `--lane-json`; a second local copy is a second thing to drift. (The verdict vocabulary is now
+// enforced straight from WORKFLOW_CRITIQUE_PARAMETERS' allowed_values, so the local Set is gone.)
+const safeCritiqueId = new RegExp(CRITIQUE_LANE_ID_PATTERN);
+
+/** Lane payload violations WITHOUT dying, so they can join the flag-level refusal. */
+function critiqueLaneViolations(raw: string[]): string[] {
+  const problems: string[] = [];
+  const parsed: AnyObj[] = [];
+  raw.forEach((value, index) => {
+    let lane: AnyObj | null = null;
+    try {
+      const candidate = JSON.parse(value) as unknown;
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new Error("object expected");
+      lane = candidate as AnyObj;
+    } catch {
+      problems.push(`--lane-json ${index} must be valid JSON object`);
+    }
+    if (lane) { parsed.push(lane); problems.push(...critiqueLaneShapeViolations(lane, index)); }
+  });
+  const ids = parsed.map((lane) => lane.id);
+  if (ids.some((id) => typeof id === "string") && new Set(ids).size !== ids.length) problems.push("--lane-json ids must be unique");
+  return problems;
+}
 
 function normalizeCritiqueLanes(raw: string[], projectRoot: string): AnyObj[] {
   if (raw.length === 0) die("record-critique requires at least one --lane-json");
-  const lanes = raw.map((value, index) => {
-    const lane = parseJson(value, "--lane-json");
-    const keys = Object.keys(lane);
-    if (keys.some((key) => !["id", "status", "summary", "evidence_refs"].includes(key))) die(`--lane-json ${index} contains unsupported fields`);
-    if (!safeCritiqueId.test(String(lane.id ?? ""))) die(`--lane-json ${index} id must be a unique safe identifier`);
-    if (!critiqueStatuses.has(String(lane.status ?? ""))) die(`--lane-json ${index} status must be one of: pass, fail, not_verified`);
-    if (!hasNonEmptyString(lane.summary)) die(`--lane-json ${index} summary must be non-empty`);
-    const evidenceRefs = normalizeEvidenceRefs(lane.evidence_refs, `--lane-json ${index} evidence_refs`, projectRoot);
-    if (evidenceRefs.length === 0) die(`--lane-json ${index} requires structured reviewable evidence_refs`);
-    return { id: lane.id, status: lane.status, summary: lane.summary, evidence_refs: evidenceRefs };
-  });
-  if (new Set(lanes.map((lane) => lane.id)).size !== lanes.length) die("--lane-json ids must be unique");
-  return lanes;
+  const parsed = raw.map((value) => parseJson(value, "--lane-json"));
+  const problems: string[] = [];
+  parsed.forEach((lane, index) => problems.push(...critiqueLaneShapeViolations(lane, index)));
+  // Round-2 LOW: ids were taken from RAW lanes before validation, so two lanes both MISSING an id
+  // collapsed to a single `undefined` and emitted "ids must be unique" when no two ids were equal
+  // -- a false statement inside a refusal whose whole purpose is being actionable. Only compare
+  // ids that actually exist; the missing ones are already reported by the id-grammar rule.
+  const ids = parsed.map((lane) => lane.id).filter((id): id is string => typeof id === "string");
+  if (new Set(ids).size !== ids.length) problems.push("--lane-json ids must be unique");
+  dieOnViolations(problems);
+  return parsed.map((lane, index) => ({
+    id: lane.id,
+    status: lane.status,
+    summary: lane.summary,
+    evidence_refs: normalizeEvidenceRefs(lane.evidence_refs, `--lane-json ${index} evidence_refs`, projectRoot),
+  }));
 }
 
 function reviewTargetArtifacts(dir: string, rawPaths: string[], label: string): AnyObj[] {
@@ -3891,6 +4454,39 @@ function reviewTargetArtifactsMatch(dir: string, reviewTarget: unknown): boolean
       return digest === sha256;
     });
   } catch { return false; }
+}
+
+/**
+ * The current-clean-critique precondition for a passing tests-evidence claim, as a list rather
+ * than a throw so it can be reported alongside payload faults in one refusal (#1359).
+ *
+ * Three distinguishable causes were collapsed into one message that named none of them, and the
+ * remedy differs per cause. Measured across 12 eval arms: this refusal fired 13x, 6 of those as
+ * repeats within a single run — a caller told only "requires a current clean critique" has no
+ * transition to act on, so retrying is its only move (kontourai/flow-agents#1281). At most one
+ * cause is reported: they are ordered from most to least fundamental and the later ones are
+ * meaningless once an earlier one holds.
+ */
+function passingTestsCritiquePreconditionProblems(dir: string, critiques: AnyObj[]): string[] {
+  const liveCritiques = critiques.filter((critique) => !critique.superseded_by);
+  if (liveCritiques.length === 0) {
+    return ["a passing tests-evidence claim requires a current clean critique first, and this run has no critique yet. "
+      + "Record one with `workflow critique` under a reviewer identity distinct from the implementation actor: "
+      + "set FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process."];
+  }
+  if (liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique))) {
+    return ["a passing tests-evidence claim requires a current clean critique first, and this gate visit has a live "
+      + "critique that is not a substantive pass. It is not necessarily the newest one: supersession is "
+      + "per reviewer, so an earlier reviewer's open critique stays live even after a different reviewer "
+      + "records a clean one. Address that critique's open findings and re-record it with `workflow critique` "
+      + "under the SAME critique id and the same reviewer identity, which is what supersedes it."];
+  }
+  if (!liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique))) {
+    return ["a passing tests-evidence claim requires a current clean critique first, and this run's critique predates "
+      + "the current workspace state. Re-record the critique with `workflow critique` against the tree as it "
+      + "stands now, then retry this claim."];
+  }
+  return [];
 }
 
 function critiqueIsCleanAndCurrent(dir: string, critique: AnyObj): boolean {
@@ -4283,15 +4879,210 @@ function loadTrustBundleForTrustMachinery(dir: string): AnyObj {
   });
 }
 
+type RoutedBackClaimProvenance = {
+  currentRunHead: string | null;
+  claimsById: Map<string, AnyObj[]>;
+};
+
+function routedBackClaimIdentity(claim: AnyObj): AnyObj {
+  return {
+    id: claim.id,
+    subjectType: claim.subjectType,
+    subjectId: claim.subjectId,
+    facet: claim.facet,
+    claimType: claim.claimType,
+    fieldOrBehavior: claim.fieldOrBehavior,
+    value: claim.value,
+    impactLevel: claim.impactLevel,
+    verificationPolicyId: claim.verificationPolicyId,
+    metadata: claim.metadata,
+  };
+}
+
+function routedBackClaimProvenance(dir: string): RoutedBackClaimProvenance {
+  const sidecar = loadJson(path.join(dir, "state.json"), {});
+  const projectedFlow = sidecar?.flow_run;
+  const currentRunHead = typeof projectedFlow?.run_head === "string" ? projectedFlow.run_head : null;
+  const runRef = typeof projectedFlow?.run_ref === "string" ? projectedFlow.run_ref : null;
+  const runId = typeof projectedFlow?.run_id === "string" ? projectedFlow.run_id : null;
+  if (!currentRunHead || !runRef || !runId || runId !== sidecar.task_slug) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  const projectRoot = narrativeGuardRoot(dir);
+  const candidateRunDir = path.resolve(projectRoot, runRef);
+  const relativeRunDir = path.relative(projectRoot, candidateRunDir);
+  if (!relativeRunDir || relativeRunDir.startsWith("..") || path.isAbsolute(relativeRunDir)
+    || !fs.existsSync(candidateRunDir) || fs.lstatSync(candidateRunDir).isSymbolicLink()) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  const resolvedProjectRoot = fs.realpathSync(projectRoot);
+  const resolvedRunDir = fs.realpathSync(candidateRunDir);
+  const canonicalRunDir = fs.realpathSync(runDir(runId, projectRoot));
+  const resolvedRelative = path.relative(resolvedProjectRoot, resolvedRunDir);
+  if (!resolvedRelative || resolvedRelative.startsWith("..") || path.isAbsolute(resolvedRelative)
+    || resolvedRunDir !== canonicalRunDir) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  if (path.basename(resolvedRunDir) !== runId) return { currentRunHead, claimsById: new Map() };
+  const readCanonicalRunBytes = (segments: string[], label: string, maxBytes: number): Buffer => {
+    const candidate = path.join(resolvedRunDir, ...segments);
+    if (typeof fs.constants.O_NOFOLLOW !== "number") {
+      throw new Error(`${label} requires O_NOFOLLOW support`);
+    }
+    const pathBefore = fs.lstatSync(candidate);
+    if (pathBefore.isSymbolicLink() || !pathBefore.isFile()) {
+      throw new Error(`${label} must be a regular file within the canonical Flow run`);
+    }
+    const resolved = fs.realpathSync(candidate);
+    const relative = path.relative(resolvedRunDir, resolved);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error(`${label} must stay within the canonical Flow run`);
+    }
+    const ancestors = [resolvedRunDir, ...segments.slice(0, -1).map((_, index) =>
+      path.join(resolvedRunDir, ...segments.slice(0, index + 1)))];
+    const ancestorIdentities = ancestors.map((ancestor) => {
+      const stat = fs.lstatSync(ancestor);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} parent path must contain only real directories`);
+      return { path: ancestor, dev: stat.dev, ino: stat.ino };
+    });
+    const descriptor = fs.openSync(candidate, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const stat = fs.fstatSync(descriptor);
+      if (!stat.isFile() || stat.size > maxBytes
+        || stat.dev !== pathBefore.dev || stat.ino !== pathBefore.ino
+        || stat.size !== pathBefore.size || stat.mtimeMs !== pathBefore.mtimeMs
+        || stat.ctimeMs !== pathBefore.ctimeMs) {
+        throw new Error(`${label} exceeds its bounded regular-file limit or changed identity`);
+      }
+      const bytes = Buffer.alloc(Number(stat.size));
+      let offset = 0;
+      while (offset < bytes.length) {
+        const count = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+        if (count <= 0) throw new Error(`${label} changed while reading`);
+        offset += count;
+      }
+      const after = fs.fstatSync(descriptor);
+      if (after.dev !== stat.dev || after.ino !== stat.ino || after.size !== stat.size
+        || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs) {
+        throw new Error(`${label} changed while reading`);
+      }
+      const pathAfter = fs.lstatSync(candidate);
+      if (pathAfter.isSymbolicLink() || !pathAfter.isFile()
+        || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino
+        || pathAfter.size !== after.size || pathAfter.mtimeMs !== after.mtimeMs
+        || pathAfter.ctimeMs !== after.ctimeMs || fs.realpathSync(candidate) !== resolved) {
+        throw new Error(`${label} changed identity while reading`);
+      }
+      for (const ancestor of ancestorIdentities) {
+        const current = fs.lstatSync(ancestor.path);
+        if (current.isSymbolicLink() || !current.isDirectory()
+          || current.dev !== ancestor.dev || current.ino !== ancestor.ino) {
+          throw new Error(`${label} parent path changed while reading`);
+        }
+      }
+      return bytes;
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  };
+  const readCanonicalRunJson = (segments: string[], label: string, maxBytes: number): AnyObj =>
+    JSON.parse(readCanonicalRunBytes(segments, label, maxBytes).toString("utf8"));
+  const startDefinition = readCanonicalRunJson(["definition.json"], "canonical Flow start definition", 2 * 1024 * 1024);
+  const canonicalStateInput = readCanonicalRunJson(["state.json"], "canonical Flow state", 8 * 1024 * 1024);
+  let canonicalState: AnyObj;
+  let effectiveDefinition: AnyObj;
+  try {
+    const validated = validateRunStateConsistency(startDefinition, canonicalStateInput, { runId });
+    canonicalState = validated.state;
+    effectiveDefinition = validated.definition;
+  } catch {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  if (canonicalState.run_id !== runId || canonicalState.definition_id !== projectedFlow.definition_id
+    || canonicalState.definition_version !== projectedFlow.definition_version
+    || definitionDigest(effectiveDefinition) !== projectedFlow.definition_digest
+    || !Array.isArray(sidecar.work_item_refs) || sidecar.work_item_refs.length !== 1
+    || canonicalState.subject !== sidecar.work_item_refs[0]) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  if (flowRunHead(canonicalState) !== currentRunHead) return { currentRunHead, claimsById: new Map() };
+  const manifest = readCanonicalRunJson(["evidence", "manifest.json"], "canonical Flow evidence manifest", 32 * 1024 * 1024);
+  // Flow's evidence manifest is anchored to the immutable start definition.
+  // Authorized amendments are authenticated by validateRunStateConsistency
+  // above and advance only the effective state/definition identity.
+  if (manifest.run_id !== runId || manifest.definition_id !== startDefinition.id
+    || manifest.definition_version !== startDefinition.version) {
+    return { currentRunHead, claimsById: new Map() };
+  }
+  const evidenceById = new Map<string, AnyObj>();
+  for (const evidence of Array.isArray(manifest?.evidence) ? manifest.evidence : []) {
+    if (evidence && typeof evidence.id === "string") evidenceById.set(evidence.id, evidence);
+  }
+  const claimsById = new Map<string, AnyObj[]>();
+  for (const transition of Array.isArray(canonicalState?.transitions) ? canonicalState.transitions : []) {
+    if (!transition || transition.type !== "route_back" || typeof transition.from_step !== "string"
+      || typeof transition.route_reason !== "string" || !Array.isArray(transition.evidence_refs)) continue;
+    for (const evidenceRef of transition.evidence_refs) {
+      const attachment = evidenceById.get(evidenceRef);
+      if (!attachment || attachment.gate_id !== transition.gate_id
+        || typeof attachment.stored_path !== "string"
+        || !/^[a-f0-9]{64}$/i.test(String(attachment.sha256 ?? ""))) continue;
+      const transitionEvidenceSha256 = transition.analytics?.evidence_sha256;
+      if (typeof transitionEvidenceSha256 !== "string"
+        || transitionEvidenceSha256.toLowerCase() !== attachment.sha256.toLowerCase()) continue;
+      let storedBytes: Buffer;
+      let storedBundle: AnyObj;
+      try {
+        storedBytes = readCanonicalRunBytes(attachment.stored_path.split("/"), `canonical Flow evidence ${attachment.id}`, 32 * 1024 * 1024);
+        if (createHash("sha256").update(storedBytes).digest("hex") !== attachment.sha256.toLowerCase()) continue;
+        storedBundle = JSON.parse(storedBytes.toString("utf8"));
+      } catch {
+        continue;
+      }
+      if (!isDeepStrictEqual(storedBundle, attachment.bundle)) continue;
+      const claims = storedBundle.claims;
+      if (!Array.isArray(claims)) continue;
+      for (const historical of claims) {
+        const gateClaim = historical?.metadata?.gate_claim;
+        if (claimOrigin(historical) !== "check" || typeof historical?.id !== "string"
+          || historical.value !== "fail" || historical.status !== "disputed"
+          || gateClaim?.step_id !== transition.from_step
+          || gateClaim?.route_reason !== transition.route_reason
+          || !Array.isArray(transition.expectation_ids)
+          || !transition.expectation_ids.includes(gateClaim?.expectation_id)) continue;
+        const entries = claimsById.get(historical.id) ?? [];
+        entries.push(historical);
+        claimsById.set(historical.id, entries);
+      }
+    }
+  }
+  return { currentRunHead, claimsById };
+}
+
+function historicalRoutedBackCheckClaim(claim: AnyObj, provenance: RoutedBackClaimProvenance): boolean {
+  const gateClaim = claim?.metadata?.gate_claim;
+  return claimOrigin(claim) === "check"
+    && claim.value === "fail"
+    && claim.status === "disputed"
+    && typeof gateClaim?.route_reason === "string"
+    && gateClaim.route_reason.length > 0
+    && typeof gateClaim.flow_run_head === "string"
+    && provenance.currentRunHead !== null
+    && gateClaim.flow_run_head !== provenance.currentRunHead
+    && (provenance.claimsById.get(claim.id) ?? []).some((historical) =>
+      isDeepStrictEqual(routedBackClaimIdentity(historical), routedBackClaimIdentity(claim)));
+}
+
 function checksFromBundle(dir: string): AnyObj[] {
   const bundle = loadTrustBundleForTrustMachinery(dir);
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
+  const provenance = routedBackClaimProvenance(dir);
   // Validate stamps on every claim up front — any unstamped claim anywhere in the bundle marks
   // it pre-supersession, regardless of whether it is check/acceptance/critique-typed.
   for (const claim of allClaims) requireStampedClaim(claim, dir);
   if (!Array.isArray(bundle.evidence)) return [];
   const claimById = new Map<string, AnyObj>();
-  for (const c of allClaims) if (c && c.id) claimById.set(c.id, c);
+  for (const c of allClaims) if (c && c.id && !historicalRoutedBackCheckClaim(c, provenance)) claimById.set(c.id, c);
   const seen = new Set<string>();
   const checks: AnyObj[] = [];
   const kindOf = (claim: AnyObj): string => String((claim.metadata as AnyObj).check_kind);
@@ -4322,12 +5113,12 @@ function checksFromBundle(dir: string): AnyObj[] {
   const outputSha256Of = (claim: AnyObj): string | undefined => {
     const md = claim.metadata as AnyObj;
     const od = md && typeof md === "object" ? md.output_digest as AnyObj : undefined;
-    return od && typeof od === "object" && od.algorithm === "sha256" && typeof od.hex === "string" && od.hex.length > 0 ? od.hex : undefined;
+    return od && typeof od === "object" && od.algorithm === "sha256" && typeof od.hex === "string" && /^[a-f0-9]{64}$/.test(od.hex) ? od.hex : undefined;
   };
   const observedCommandsOf = (claim: AnyObj): ObservedCommand[] | undefined => {
     const md = claim.metadata as AnyObj;
     const observed = md && typeof md === "object" ? md.observed_commands : undefined;
-    return Array.isArray(observed) ? observed.filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string") : undefined;
+    return Array.isArray(observed) ? observed.filter((entry: AnyObj) => typeof entry?.command === "string" && typeof entry?.exit_code === "number" && typeof entry?.output_sha256 === "string" && /^[a-f0-9]{64}$/.test(entry.output_sha256)) : undefined;
   };
   const verificationWorkspaceSnapshotOf = (claim: AnyObj): AnyObj | undefined => {
     const md = claim.metadata as AnyObj;
@@ -4360,9 +5151,16 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
     if (typeof gc.flow_run_head === "string") check._gate_claim_flow_run_head = gc.flow_run_head;
+    // #1280/#1316 read side of the bound-definition identity (write side: the gate_claim
+    // assembly in buildTrustBundle). Restoring it is what lets a REBUILD re-assert that the
+    // claim still belongs to the definition this session's run is bound to.
+    if (typeof gc.flow_id === "string") check._gate_claim_flow_id = gc.flow_id;
+    if (typeof gc.definition_version === "string") check._gate_claim_definition_version = gc.definition_version;
+    if (typeof gc.definition_digest === "string") check._gate_claim_definition_digest = gc.definition_digest;
     const md = claim.metadata as AnyObj;
     if (md && typeof md.acceptance_contract === "object" && !Array.isArray(md.acceptance_contract)) {
       check._acceptance_contract = md.acceptance_contract;
+      if (Array.isArray(md.acceptance_contract_history)) check._acceptance_contract_history = md.acceptance_contract_history;
     }
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
@@ -4437,6 +5235,7 @@ function checksFromBundle(dir: string): AnyObj[] {
   for (const claim of allClaims) {
     if (!claim) continue;
     if (claimOrigin(claim) !== "check") continue;
+    if (historicalRoutedBackCheckClaim(claim, provenance)) continue;
     if (seen.has(claim.id)) continue;
     seen.add(claim.id);
     const kind = kindOf(claim);
@@ -4497,7 +5296,7 @@ function acceptanceContract(criteria: AnyObj[]): AnyObj {
   };
 }
 
-function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; critiques: AnyObj[] } {
+function readBundleState(dir: string, options: { reanchoringPlanContract?: boolean } = {}): { checks: AnyObj[]; criteria: AnyObj[]; critiques: AnyObj[] } {
   const acceptance = loadJson(path.join(dir, "acceptance.json"));
   const bundledCriteria = criteriaFromBundle(dir);
   const acceptedCriteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
@@ -4510,7 +5309,14 @@ function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; c
   }
   const checks = checksFromBundle(dir);
   const plannedContract = checks.find((check) => check._gate_claim_expectation_id === "implementation-plan")?._acceptance_contract;
-  if (plannedContract) {
+  // #1312: the refusal below PRESCRIBES revising criteria "through a provenance-bearing planning
+  // operation" — which is recording implementation-plan (pass), the write that snapshots the
+  // amended acceptance.json into the superseding claim's _acceptance_contract. That write calls
+  // THIS function before it can re-anchor, so without the exemption the guard forbids the exact
+  // operation its own message names (found live by run kontourai-flow-agents-1304). The caller
+  // asserts the legitimacy conditions (implementation-plan + pass + cursor at the plan step);
+  // every other write keeps the strict stale-anchor check.
+  if (plannedContract && !options.reanchoringPlanContract) {
     const currentContract = acceptanceContract(acceptedCriteria);
     if (plannedContract.version !== currentContract.version
       || plannedContract.algorithm !== currentContract.algorithm
@@ -4657,6 +5463,13 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const verdict = opt(p, "verdict") || die("--verdict is required");
   if (!verdicts.has(verdict)) die("verdict must be one of: pass, partial, fail, not_verified");
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  // #1191: signal validation — reject writes against terminal/closed Flow runs
+  // (Temporal closed-workflow signal rule). record-evidence carries no flow_run_head,
+  // so only the run_closed check applies. No-op for sessions without a Flow run.
+  // #1192: classified — run_closed is terminal (never retried). Using the retry
+  // helper without enableTransientRetry wraps the throw in ClassifiedWriteError.
+  const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
+  if (_signalValidationRoot) await assertMutationWritableWithRetry({ runId: slug, cwd: _signalValidationRoot });
   const _ts0 = opt(p, "timestamp", now());
   const _waiver = parseWaiver(p, _ts0);
   // #270 follow-up fix (iteration 5, narrowed iteration 6): read the bundle's CURRENT check ids
@@ -4667,9 +5480,16 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const _existingState = readBundleState(dir);
   const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
   const projectRoot = narrativeGuardRoot(dir);
+  // #1170 (PR2): `_fresh_record_write` marks the checks supplied in THIS invocation, so
+  // buildTrustBundle stamps a workspace snapshot onto them and onto nothing else. Every check
+  // restored from the existing bundle by the mergeChecksById call below keeps whatever snapshot
+  // it was originally recorded with; only a genuinely new (or re-recorded, same-id superseding)
+  // check gets bound to the tree as it is right now. The marker is transient — buildTrustBundle
+  // projects an explicit allowlist of `_`-prefixed fields into claim metadata and this is not one
+  // of them, so it never reaches the bundle and never round-trips through checksFromBundle.
   const _checksRaw = [
-    ...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot)),
-    ...opts(p, "surface-trust-json").map((file, index) => surfaceCheckFromArtifact(file, index, projectRoot)),
+    ...opts(p, "check-json").map((v) => ({ ...normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot), _fresh_record_write: true })),
+    ...opts(p, "surface-trust-json").map((file, index) => ({ ...surfaceCheckFromArtifact(file, index, projectRoot), _fresh_record_write: true })),
   ];
   // WS8 (AC4, iteration 2): a command-backed check reconciles against CI or fails — it can
   // NEVER be waived. Reject --accepted-gap-reason/--waived-by on any check whose evidence
@@ -4756,6 +5576,11 @@ function clampOutput(text: string): string {
 async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[] | null): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  // #1191: signal validation — reject writes against terminal/closed Flow runs
+  // (Temporal closed-workflow signal rule). No-op for sessions without a Flow run.
+  // #1192: classified — run_closed is terminal (never retried).
+  const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
+  if (_signalValidationRoot) await assertMutationWritableWithRetry({ runId: slug, cwd: _signalValidationRoot });
   const ts = opt(p, "timestamp", now());
   const commandString = opt(p, "command");
   if (!commandArgv?.length && !commandString) die('record-check requires a command: either `record-check <dir> -- <command...>` or `--command "<shell string>"`');
@@ -4812,7 +5637,14 @@ async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[
   // stderr note and the check summary text, not a new status value.
   const { isAmbiguousAbsenceCommand } = loadRunnableCommandHelper();
   const ambiguous = exitCode === 1 && isAmbiguousAbsenceCommand(displayCommand ?? "");
-  const status = exitCode === 0 ? "pass" : (ambiguous ? "not_verified" : "fail");
+  const observedSnapshot = tryCaptureGitWorktreeSnapshot(repoRoot);
+  const observedAtCommit = observedSnapshot && typeof observedSnapshot.head_sha === "string" ? observedSnapshot.head_sha : undefined;
+  const worktreeClean = observedSnapshot?.worktree_clean;
+  // record-check has no caller-requested pass to refuse, so an unavailable or dirty provenance
+  // degrades an otherwise-zero exit to the existing non-confirming status.
+  const status = exitCode === 0 && !(observedAtCommit && worktreeClean === true)
+    ? "not_verified"
+    : exitCode === 0 ? "pass" : (ambiguous ? "not_verified" : "fail");
   // #270 MEDIUM fix: hash the captured (clamped) output — the digest itself is what gets
   // persisted onto claim.metadata (below, via buildTrustBundle), NEVER the raw output. This is
   // secret-safe by construction: even if the executed command's stdout/stderr contained a
@@ -4822,7 +5654,7 @@ async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[
   // anywhere (dead code) — this replaces it with a REAL digest that IS persisted.
   const capturedOutput = clampOutput(`${stdout}${stderr ? `
 ${stderr}` : ""}`.trim());
-  const outputSha256 = capturedOutput ? createHash("sha256").update(capturedOutput, "utf8").digest("hex") : null;
+  const outputSha256 = createHash("sha256").update(capturedOutput, "utf8").digest("hex");
   const checkIdRaw = opt(p, "id") || displayCommand;
   const checkId = checkIdRaw.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "record-check";
   const summary = opt(p, "summary", `record-check: ${displayCommand}${exitCode !== null ? ` (exit ${exitCode})` : ""}${ambiguous ? " — AMBIGUOUS (bare grep/diff exit 1): NOT_VERIFIED, not silently pass/fail" : ""}`);
@@ -4842,7 +5674,20 @@ ${stderr}` : ""}`.trim());
     summary,
     command: displayCommand,
   }, false, _existingCheckStampById, repoRoot);
-  if (outputSha256) check._output_sha256 = outputSha256;
+  check._output_sha256 = outputSha256;
+  if (exitCode !== null) {
+    const observed: ObservedCommand = {
+      command: displayCommand,
+      exit_code: exitCode,
+      output_sha256: outputSha256,
+      ...(observedAtCommit ? { observed_at_commit: observedAtCommit } : {}),
+      ...(typeof worktreeClean === "boolean" ? { worktree_clean: worktreeClean } : {}),
+      ...(observedSnapshot ? { verification_workspace_snapshot: observedSnapshot } : {}),
+    };
+    check._observed_commands = [observed];
+    if (status === "pass") check._verification_workspace_snapshot = observedSnapshot;
+    appendWriterObservedCommands(dir, [observed], ts);
+  }
 
   const _mergedChecks = mergeChecksById(_existingState.checks, [check]);
   assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, _existingState.criteria, _existingState.critiques));
@@ -4866,6 +5711,155 @@ function diagnostic(dir: string, code: string, summary: string): never {
   const payload = { timestamp: now(), code, summary };
   appendJsonl(path.join(dir, "transition-diagnostics.jsonl"), payload);
   die(`${code}: ${summary}`);
+}
+
+/**
+ * #1304: route-back cost disclosure at the point of use — the subjunctive PRE half.
+ *
+ * Emitted to stderr BEFORE a non-pass gate claim is recorded at a gate that declares an
+ * `on_route_back` map. It states only facts that exist before the mutation: the DECLARED route
+ * map, the attempt history already PERSISTED at this gate grouped by Flow's real budget
+ * identity (normalized reason + loop + retry epoch, read verbatim from the transitions), and
+ * the declared budget. It never predicts what evaluation will decide — the actual outcome
+ * (routed / blocked / live non-pass claim) is a separate post-mutation report derived from the
+ * transitions evaluation actually recorded (`routeBackOutcomeLines` in workflow.ts). Predicting
+ * `routeBackDecision` here was reviewed as a parallel encoding of route semantics that lies in
+ * the live #1304 scenario: an unpublished `not_verified` at a `requires_current_verification`
+ * gate is WITHHELD by the freshness seam, not routed.
+ *
+ * The publish-first line is keyed off two facts, never a gate name (#1280 kit-generic
+ * boundary): the gate's `requires_current_verification` declaration, and the caller-supplied
+ * `publishFirstVerifier` — the production provisional-delivery RECORD verifier
+ * (`assertVerifiedProvisionalDeliveryRecord`), whose throw means "no verifying provisional
+ * delivery record exists" (absent, stale, or invalid all mean publish-first is still the
+ * needed action). Fresh current verification evidence must never suppress the guidance: that
+ * is exactly the pre-trap state, where recording a non-pass claim makes the evidence stale and
+ * blocks the publish that would resolve it.
+ */
+export function routeBackDisclosureLines(
+  run: { definition: unknown; state: { current_step: string; transitions?: unknown } },
+  expectation: string,
+  requestedStatus: string,
+  publishFirstVerifier?: () => unknown,
+): string[] {
+  if (requestedStatus !== "fail" && requestedStatus !== "not_verified") return [];
+  const gates = openGates(run.definition as never, run.state as never) as AnyObj[];
+  const gate = gates.find((candidate) => Array.isArray(candidate.expects)
+    && (candidate.expects as AnyObj[]).some((requirement) => requirement && typeof requirement === "object" && requirement.id === expectation));
+  if (!gate) return [];
+  const routes = gate.on_route_back;
+  if (!routes || typeof routes !== "object" || Array.isArray(routes) || Object.keys(routes).length === 0) return [];
+  const gateName = String(gate.id ?? "the current gate");
+  const declared = Object.entries(routes as Record<string, unknown>).map(([reason, step]) => `${reason} -> ${String(step)}`).join(", ");
+  const transitions = Array.isArray(run.state.transitions) ? run.state.transitions as AnyObj[] : [];
+  // Per-identity history: Flow budgets attempts per route identity — normalized reason + exact
+  // loop (from_step -> to_step) + retry epoch — so anything less granular would be a claim the
+  // accounting does not make. Group persisted transitions by that identity (first-recorded
+  // order), name the CURRENT epoch's recorded count, and parenthesize closed epochs. The current
+  // epoch consults `retry_authorized` transitions, not just observed route_backs: Flow's own
+  // epoch derivation (routeBackEpoch) is keyed off the paired authorization, so an
+  // authorized-but-undebited epoch reports as "epoch N: 0 attempts (authorized)" — reading only
+  // route_backs would name a closed epoch as current.
+  const transitionIdentity = (transition: AnyObj): { key: string; reason: string; from: string; to: string; epoch: number } => {
+    const reason = normalizeRouteReasonForBudget(gate, typeof transition.route_reason === "string" && transition.route_reason.length > 0
+      ? transition.route_reason
+      : typeof transition.reason === "string" && transition.reason.length > 0 ? transition.reason : null);
+    const from = String(transition.from_step ?? "");
+    const to = String(transition.to_step ?? "");
+    const epoch = Number.isInteger(Number(transition.retry_epoch)) && Number(transition.retry_epoch) > 0 ? Number(transition.retry_epoch) : 1;
+    return { key: `${reason}|${from}|${to}`, reason, from, to, epoch };
+  };
+  const identities = new Map<string, { reason: string; from: string; to: string; epochs: Map<number, number>; authorizedEpoch: number }>();
+  for (const transition of transitions) {
+    if (!transition || typeof transition !== "object" || transition.gate_id !== gate.id) continue;
+    if (transition.type === "route_back") {
+      const attempt = Number(transition.attempt);
+      if (!Number.isInteger(attempt) || attempt <= 0) continue;
+      const { key, reason, from, to, epoch } = transitionIdentity(transition);
+      const identity = identities.get(key) ?? { reason, from, to, epochs: new Map<number, number>(), authorizedEpoch: 0 };
+      identity.epochs.set(epoch, Math.max(identity.epochs.get(epoch) ?? 0, attempt));
+      identities.set(key, identity);
+    } else if (transition.type === "retry_authorized" && transition.status === "retry-authorized") {
+      const { key, reason, from, to, epoch } = transitionIdentity(transition);
+      const identity = identities.get(key) ?? { reason, from, to, epochs: new Map<number, number>(), authorizedEpoch: 0 };
+      identity.authorizedEpoch = Math.max(identity.authorizedEpoch, epoch);
+      identities.set(key, identity);
+    }
+  }
+  const history = identities.size === 0
+    ? "none"
+    : [...identities.values()].map(({ reason, from, to, epochs, authorizedEpoch }) => {
+      const currentEpoch = Math.max(authorizedEpoch, ...(epochs.size ? epochs.keys() : [1]));
+      const current = epochs.get(currentEpoch) ?? 0;
+      const closed = [...epochs.entries()].filter(([epoch]) => epoch !== currentEpoch)
+        .sort(([left], [right]) => left - right)
+        .map(([epoch, attempt]) => `epoch ${epoch} closed at ${attempt}`);
+      return `${reason} ${from}->${to} epoch ${currentEpoch}: ${current} attempt${current === 1 ? "" : "s"}${current === 0 ? " (authorized)" : ""}${closed.length ? ` (${closed.join(", ")})` : ""}`;
+    }).join("; ");
+  const policy = gate.route_back_policy as AnyObj | undefined;
+  const maxAttempts = Number.isInteger(policy?.max_attempts) ? Number(policy!.max_attempts) : DEFAULT_ROUTE_BACK_MAX_ATTEMPTS;
+  const lines = [
+    `[workflow] NOTICE: recording ${requestedStatus} for ${expectation} at ${gateName} can spend a bounded route-back attempt: this gate declares route-backs (${declared}); route-back attempts recorded at this gate: ${history} (budget max ${maxAttempts} per route identity); a route-back invalidates current-visit verification evidence (critique/tests must be re-recorded).`,
+  ];
+  if (gate.requires_current_verification === true && publishFirstVerifier) {
+    let deliveryVerified = false;
+    try {
+      publishFirstVerifier();
+      deliveryVerified = true;
+    } catch { /* absent, stale, or invalid provisional delivery: publish-first still applies */ }
+    if (!deliveryVerified) {
+      lines.push(`[workflow] NOTICE: ${gateName} declares requires_current_verification and no verifying provisional delivery exists for this session — publish the provisional delivery BEFORE recording this gate; a live non-pass claim here blocks the publish that would resolve it.`);
+    }
+  }
+  return lines;
+}
+
+/**
+ * #1304: the direct-CLI record-gate-claim disclosure emission, extracted so its
+ * benign-vs-loud decision is directly testable through the production function.
+ *
+ * Only two states are PROVEN benign and stay silent: a non-canonical session layout (path
+ * shape alone — no gate can exist) and a canonical layout whose run state is ENOENT (no
+ * canonical Flow run). Every other failure — root stat errors, unreadable/corrupt run files,
+ * module load, disclosure computation — degrades LOUDLY: a silent skip would let a non-pass
+ * claim spend its route-back cost undisclosed, the exact contract failure #1304 exists to
+ * prevent. (`tryCanonicalProjectRootForSession` is deliberately NOT used here: it collapses
+ * stat failures and layout mismatches into one null.) Note the loud line is defense-in-depth:
+ * within `record-gate-claim` itself, the earlier signal-validation reader consumes the same
+ * canonical files more strictly and fails the whole command CLOSED before any write, so no
+ * currently-reachable corruption spends a cost undisclosed — the loud path guards the failure
+ * classes that skip that reader (root resolution, module load, computation).
+ */
+export async function emitRecordGateClaimRouteBackDisclosure(dir: string, slug: string, expectationId: string, statusVal: string): Promise<void> {
+  const artifactRootDir = path.dirname(dir);
+  const isCanonicalLayout = path.basename(artifactRootDir) === "flow-agents" && path.basename(path.dirname(artifactRootDir)) === ".kontourai";
+  if (!isCanonicalLayout) return;
+  try {
+    const disclosureRoot = canonicalProjectRootForSession(dir);
+    const flowDir = runDir(slug, disclosureRoot);
+    let runStatePresent = true;
+    try {
+      fs.statSync(path.join(flowDir, "state.json"));
+    } catch (statError) {
+      if ((statError as NodeJS.ErrnoException).code === "ENOENT") runStatePresent = false;
+      else throw statError;
+    }
+    if (runStatePresent) {
+      const disclosureRun = {
+        definition: JSON.parse(fs.readFileSync(path.join(flowDir, "definition.json"), "utf8")) as unknown,
+        state: JSON.parse(fs.readFileSync(path.join(flowDir, "state.json"), "utf8")) as { current_step: string; transitions?: unknown },
+      };
+      // Lazy import: the public workflow module statically imports this one, so the
+      // production provisional-delivery record verifier is reached dynamically (only on
+      // this direct-CLI, non-pass path) to keep the module graph acyclic at load time.
+      const { assertVerifiedProvisionalDeliveryRecord } = await import("./workflow.js");
+      const lines = routeBackDisclosureLines(disclosureRun, expectationId, statusVal,
+        () => assertVerifiedProvisionalDeliveryRecord(dir, disclosureRoot, slug));
+      for (const line of lines) process.stderr.write(`${line}\n`);
+    }
+  } catch {
+    process.stderr.write("[workflow] NOTICE: route-back disclosure unavailable (module load failed); a non-pass claim here may spend a route-back attempt and sit live.\n");
+  }
 }
 
 /**
@@ -4931,11 +5925,39 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     die("--flow-run-head must match the exact session Flow projection");
   }
   const flowRunHead = requestedFlowRunHead ? requestedFlowRunHead.toLowerCase() : projectedFlowRunHead;
+  // #1191: signal validation — reject writes against terminal/closed Flow runs or
+  // stale heads (Temporal closed-workflow signal rule). The sidecar projection may
+  // lag the canonical head after an external lifecycle authority mutation (#1164);
+  // the gate_advanced head check applies only when the caller explicitly stamped a
+  // head via --flow-run-head (concurrent-writer guard). When the head is inferred
+  // from the projection, only run_closed is enforced — the projection is a cache,
+  // not a concurrency signal. No-op for sessions without a Flow run.
+  // #1192: a transient head-desync (gate_advanced) is retried with a fresh
+  // canonical re-read — re-load, re-stamp head, re-attempt — instead of dying.
+  // Terminal (run_closed) is never retried.
+  const _signalValidationRoot = tryCanonicalProjectRootForSession(dir);
+  let effectiveFlowRunHead = flowRunHead;
+  if (_signalValidationRoot) {
+    const _retryResult = await assertMutationWritableWithRetry({
+      runId: slug, cwd: _signalValidationRoot,
+      stampedFlowRunHead: requestedFlowRunHead ? flowRunHead : undefined,
+      enableTransientRetry: true,
+    });
+    effectiveFlowRunHead = _retryResult.effectiveFlowRunHead;
+  }
   const exactFlowId = projectedRun && typeof projectedRun.definition_id === "string" ? projectedRun.definition_id : null;
   const exactStepId = projectedRun && typeof projectedRun.current_step === "string" ? projectedRun.current_step : null;
+  // Fail closed, with the projection's own remedy: a session that HAS a Flow run but whose
+  // projection cannot supply the bound-definition identity would record a gate claim that no
+  // rebuild could bind to a definition. That is the same class of staleness
+  // FlowProjectionRegenerationRequiredError already exists for (a projection lagging its run),
+  // and it has the same fix — re-sync the projection from the run record.
+  const projectedRunDefinition = gateClaimFlowIdentityFields(projectedRun);
   const exactFlowContext = exactFlowId && exactStepId ? { flowId: exactFlowId, stepId: exactStepId } : undefined;
   const activeStep = exactFlowContext
-    ? resolveFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, findRepoRootFromDir(path.dirname(flowAgentsDir)))
+    // #1335: the actionable step, not the parked one — see buildTrustBundle's note. A gateless
+    // passthrough has no gate to record against, and the kit binds its producer at the gated step.
+    ? resolveActionableFlowStep(exactFlowContext.flowId, exactFlowContext.stepId, findRepoRootFromDir(path.dirname(flowAgentsDir)))
     : resolveActiveFlowStep(flowAgentsDir, gateClaimActorKey);
   if (exactFlowContext && !activeStep) die(`record-gate-claim cannot resolve exact session Flow step ${exactFlowContext.flowId}/${exactFlowContext.stepId}`);
   if (!activeStep) die("record-gate-claim requires an active flow step in current.json (set via ensure-session --flow-id or advance-state --flow-definition)");
@@ -4957,12 +5979,30 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     die(`record-gate-claim: gate "${activeStep.gateId}" has ${expects.length} expects[] entries; --expectation <id> is required. Available: ${expects.map((e) => e.id).join(", ")}`);
   }
 
+  // #1304: direct sidecar writes spend route-back cost too — disclose the declared/persisted
+  // facts before the bundle write. The public `workflow evidence` wrapper emits this itself
+  // under the subject lock (fresher state), so suppress here to avoid a double disclosure.
+  // Reseal (signed authority path, orchestrator-mediated) is a disclosed non-goal of #1304.
+  if (!publicWorkflowAuthority && statusVal !== "pass") {
+    await emitRecordGateClaimRouteBackDisclosure(dir, slug, targetExpectation.id, statusVal);
+  }
+
   const { claimType, subjectType } = targetExpectation.bundle_claim;
   const gateCommands = opts(p, "command");
   const gateCommand = gateCommands[0] ?? "";
   const mustRunTests = targetExpectation.id === "tests-evidence" && statusVal === "pass";
-  const observedCommandRaw = opts(p, "observed-command-json");
-  if (mustRunTests && gateCommands.length === 0) die("record-gate-claim requires at least one --command for a passing tests-evidence claim");
+  if (opts(p, "observed-command-json").length > 0) {
+    die("record-gate-claim does not accept --observed-command-json; the canonical writer executes and records every --command");
+  }
+  if (mustRunTests) {
+    const missing: string[] = [];
+    if (gateCommands.length === 0) missing.push("at least one --command");
+    if (opts(p, "evidence-ref-json").length === 0) missing.push('a kind:"command" --evidence-ref-json whose excerpt exactly equals a writer-observed --command');
+    if (opts(p, "criterion-json").length === 0) missing.push("one --criterion-json for every declared acceptance criterion");
+    if (missing.length > 0) {
+      die(`record-gate-claim passing tests-evidence requires ${missing.join("; ")}. Do not supply --observed-command-json: the canonical writer executes each --command and records its exit code and output digest.`);
+    }
+  }
   // #619: the narrative evidence-ref guards (validateEvidenceRef / normalizeCheck /
   // completePassingCriteria) need a non-null, location-independent project root that never
   // dies on a non-canonical session. normalizeObservedCommands still requires the strict
@@ -4973,6 +6013,40 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const observedCommands = gateCommands.length > 0
     ? await normalizeObservedCommands(gateCommands, canonicalRoot!, mustRunTests, statusVal)
     : [];
+  // A requested pass is bound to the command-time Git state, never to a later writer rebuild.
+  // Every confirming command must name the SAME clean canonical snapshot; otherwise a later
+  // observation could launder an earlier one under its newer tree.
+  const observedWorkspaceSnapshot = statusVal === "pass" && observedCommands.length > 0
+    ? passingObservationSnapshot(observedCommands)
+    : null;
+  if (statusVal === "pass" && observedCommands.length > 0 && !observedWorkspaceSnapshot) {
+    // Fired 15x across 12 eval arms (8 as in-run repeats). The old message named the missing state
+    // but no transition. `passingObservationSnapshot` returns null for two distinct reasons; report
+    // which one, with its own remedy (#1281).
+    const withoutProvenance = observedCommands.filter((observation) => !commandLogPassProvenance({
+      observed_at_commit: observation.observed_at_commit,
+      worktree_clean: observation.worktree_clean,
+      verification_workspace_snapshot: observation.verification_workspace_snapshot,
+    })?.verificationWorkspaceSnapshot);
+    if (withoutProvenance.length > 0) {
+      die(
+        "record-gate-claim passing command evidence requires captured clean Git provenance; " +
+          `${withoutProvenance.length} of ${observedCommands.length} observed command(s) carry none ` +
+          `(first: ${String(withoutProvenance[0]?.command ?? "<unnamed>").slice(0, 80)}). ` +
+          "This verb executes every --command itself, so the command did run through the workflow; " +
+          "provenance is absent because the workspace state could not be captured as clean at the moment " +
+          "the command finished. Either the project root is not a Git workspace this verb can snapshot, " +
+          "or the tree was dirty when the command exited (a command that writes untracked output does this " +
+          "to itself). Commit or clean the tree, then retry this claim.",
+      );
+    }
+    die(
+      "record-gate-claim passing command evidence requires ONE exact shared workspace snapshot; the observed " +
+        `commands carry provenance from more than one tree state across ${observedCommands.length} command(s). ` +
+        "Re-run every confirming command against the same clean tree, without editing or committing between " +
+        "them, so they share a single snapshot.",
+    );
+  }
   // #634: persist the writer's real executions into the hash-chained command-log so the
   // capture fold has a deterministic observation even on exit-code-blind hosts.
   appendWriterObservedCommands(dir, observedCommands, ts, writerTransactionId);
@@ -4984,8 +6058,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // (do not run commands for a claim we will reject) but will fail that eval — update it in the
   // same change rather than treating the failure as an unrelated regression.
   if (!mustRunTests && gateCommands.length > 1) die("record-gate-claim accepts repeatable --command only for passing tests-evidence claims");
-  if (gateCommands.length === 0 && observedCommandRaw.length > 0) die("--observed-command-json requires --command");
-  if (!mustRunTests && gateCommand && observedCommandRaw.length === 0) {
+  if (!mustRunTests && gateCommand) {
     const { isRunnableCommandText } = loadRunnableCommandHelper();
     if (!isRunnableCommandText(gateCommand)) die(`record-gate-claim --command "${gateCommand}" is not a runnable shell command — prose belongs in --summary, which is never executed.`);
   }
@@ -5006,17 +6079,58 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     _gate_claim_identity_version: 2,
     _gate_claim_recorded_at: ts,
     ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
-    ...(flowRunHead ? { _gate_claim_flow_run_head: flowRunHead } : {}),
+    ...(effectiveFlowRunHead ? { _gate_claim_flow_run_head: effectiveFlowRunHead } : {}),
+    // #1280/#1316 — WHICH FLOW, AND WHICH VARIANT OF IT, THIS CLAIM WAS RECORDED AGAINST.
+    //
+    // `flow_run_head` pins run POSITION (sha256 of run state); the four typing fields pin the
+    // EXPECTATION. Neither pins the DEFINITION, and the stamp was validated at bundle-build time
+    // against `current.json`'s `active_flow_id` — mutable session state read at a later moment.
+    // So a claim recorded under a kit's reduced-gate variant was byte-indistinguishable from one
+    // recorded under the full flow, which is exactly the confusion #1280 requires be impossible
+    // once a kit can declare gate-set variants.
+    //
+    // Source is the session's canonical Flow projection, which `syncAndProject` writes straight
+    // from the run record's pinned definition — never a caller flag, so a writer cannot assert a
+    // variant it did not run. `assertGateClaimFlowIdentity` re-checks a restored stamp against
+    // the projection at bundle-build time, so a claim carried into a session running a different
+    // definition is refused rather than re-typed.
+    ...(projectedRunDefinition ?? {}),
   };
+  // Fail closed AT WRITE TIME, not at projection-parse time: a session that HAS a Flow run but
+  // whose projection cannot supply the bound-definition identity would record a claim no rebuild
+  // could bind. Checking it here rather than earlier keeps input validation's own diagnostics
+  // first — the narrative-trust-isolation refusal (#619) is a security property, and preempting
+  // it with a staleness message told the caller to regenerate a projection when the real answer
+  // was that the command was refused. Same remedy as FlowProjectionRegenerationRequiredError's
+  // other site: re-sync the projection from the run record.
+  if (projectedRun && !projectedRunDefinition) throw new FlowProjectionRegenerationRequiredError(dir);
   if (targetExpectation.id === "implementation-plan" && statusVal === "pass") {
     const acceptance = loadJson(path.join(dir, "acceptance.json"));
     const criteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
     check._acceptance_contract = acceptanceContract(criteria);
+    // #1312 review: an amendment must stay AUDITABLE. mergeChecksById replaces the prior plan
+    // claim, which would silently drop contract A — carry the full predecessor chain forward as
+    // an append-only history so an amendment is always distinguishable from a first anchor
+    // (a criteria swap that rides a re-record leaves its predecessor's digest, contents, actor,
+    // and timestamp in the surviving claim).
+    const priorPlan = checksFromBundle(dir).find((prior) => prior._gate_claim_expectation_id === "implementation-plan");
+    const priorContract = priorPlan?._acceptance_contract as AnyObj | undefined;
+    if (priorContract && priorContract.digest !== (check._acceptance_contract as AnyObj).digest) {
+      const priorHistory = Array.isArray(priorPlan?._acceptance_contract_history) ? priorPlan!._acceptance_contract_history as AnyObj[] : [];
+      check._acceptance_contract_history = [...priorHistory, {
+        predecessor: priorContract,
+        superseded_at: ts,
+        superseded_by_actor: gateClaimActorKey,
+        reason: summary,
+      }];
+    } else if (Array.isArray(priorPlan?._acceptance_contract_history)) {
+      check._acceptance_contract_history = priorPlan!._acceptance_contract_history;
+    }
   }
 
   // Include structured evidence refs if provided
   const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json", projectRoot));
-  const producer = expectedGateProducer(exactFlowContext?.flowId ?? activeStep.flowId, activeStep.stepId, targetExpectation.id);
+  const producer = expectedGateProducer(exactFlowContext?.flowId ?? activeStep.flowId, activeStep.stepId, targetExpectation.id, projectRoot);
   if (statusVal === "pass") validateReviewableGateEvidence(dir, slug, evidenceRefs, producer, `gate claim ${targetExpectation.id}`);
   if (mustRunTests) requireObservedCommandRefs(evidenceRefs, observedCommandNames, "a passing tests-evidence claim", true);
 
@@ -5039,11 +6153,33 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
   if (mustRunTests && publicWorkflowAuthority) {
-    const verificationSnapshot = captureReviewWorkspaceSnapshot(canonicalRoot!, []);
-    if (verificationSnapshot.kind !== "git-worktree" || typeof verificationSnapshot.head_sha !== "string") {
-      die("a passing public tests-evidence claim requires a canonical Git workspace snapshot");
+    // The public tests-evidence claim must use the exact snapshot returned by the observed
+    // process, not a fresh capture after command execution.
+    if (!observedWorkspaceSnapshot) die("a passing public tests-evidence claim requires captured clean Git provenance");
+    checkNormalized._verification_workspace_snapshot = observedWorkspaceSnapshot;
+  } else if (observedWorkspaceSnapshot) {
+    checkNormalized._verification_workspace_snapshot = observedWorkspaceSnapshot;
+  } else {
+    // #1170 (PR2) producer completeness: capture the workspace snapshot for EVERY gate claim
+    // recorded while a canonical Git root resolves, not only the passing-public-tests case.
+    //
+    // `flow_run_head` hashes workflow POSITION, so a claim recorded before any state movement is
+    // stranded by the head predicate even though the code it attests to never changed (#1164).
+    // PR1 taught the consumer to re-establish freshness from a Git workspace snapshot; without
+    // this capture that tolerance is unreachable for the claims that actually need it, because
+    // nothing but the tests-evidence path ever produced a snapshot to reconcile against.
+    //
+    // Strictly additive: absent a Git root this records exactly what it recorded before (no
+    // snapshot, no failure — legacy semantics), and a claim whose head still matches never
+    // consults the snapshot at all.
+    // Preserve #1170's non-command producer behavior. A claim with no executed command has no
+    // command-time observation to launder, so its record-time Git snapshot remains the binding.
+    // Command-backed claims deliberately never enter this capture path: their snapshot must come
+    // from the exact observed process result above, including for non-pass observations.
+    if (gateCommands.length === 0) {
+      const snapshot = tryCaptureGitWorktreeSnapshot(tryCanonicalProjectRootForSession(dir));
+      if (snapshot) checkNormalized._verification_workspace_snapshot = snapshot;
     }
-    checkNormalized._verification_workspace_snapshot = verificationSnapshot;
   }
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
@@ -5055,14 +6191,17 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // in the bundle on every gate-claim write (the 21-claims-to-1 wipe). A gate claim against the
   // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
   // gate claim against a different expectation is additive.
-  const _existingState = readBundleState(dir);
-  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot) : _existingState.criteria;
+  const _existingState = readBundleState(dir, {
+    reanchoringPlanContract: targetExpectation.id === "implementation-plan" && statusVal === "pass",
+  });
+  // #1359 step 8: the current-clean-critique requirement is state, knowable before a single
+  // character of the payload is parsed. It used to be checked AFTER the criteria were accepted,
+  // so a caller with four criterion faults paid four round-trips before even hearing about it.
+  // It is now collected first and refused TOGETHER with any payload faults.
+  const criteria = mustRunTests
+    ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot, passingTestsCritiquePreconditionProblems(dir, _existingState.critiques))
+    : _existingState.criteria;
   if (mustRunTests) {
-    const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
-    const hasCurrentCritique = liveCritiques.some((critique) => critiqueIsCleanAndCurrent(dir, critique) && critiqueWorkspaceSnapshotIsCurrent(dir, critique));
-    if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsSubstantivePass(critique)) || !hasCurrentCritique) {
-      die("a passing tests-evidence claim requires a current clean critique first");
-    }
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
   }
   const _mergedChecks = mergeChecksById(_existingState.checks, [checkNormalized]);
@@ -5169,6 +6308,29 @@ async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
   return 0;
 }
 
+/**
+ * Refuse an `active_step_id` write that the canonical Flow run does not support.
+ *
+ * Sessions with no canonical run bound are untouched: there is nothing to diverge from, and the
+ * pointer is the only cursor they have.
+ */
+function assertPointerMatchesCanonicalRun(dir: string, flow: string, repoRoot: string, phase: string, stepId: string): void {
+  const state = loadJson(path.join(dir, "state.json"));
+  const flowRun = state && typeof state === "object" && !Array.isArray(state.flow_run) && typeof state.flow_run === "object" && state.flow_run !== null
+    ? state.flow_run as Record<string, unknown> : null;
+  const boundFlowId = typeof flowRun?.definition_id === "string" ? flowRun.definition_id : null;
+  const canonicalStep = typeof flowRun?.current_step === "string" ? flowRun.current_step : null;
+  if (!boundFlowId || !canonicalStep) return;
+  if (boundFlowId !== flow) {
+    diagnostic(dir, "flow_definition_mismatch", `advance-state --flow-definition ${flow} does not match the canonical Flow run this session is bound to (${boundFlowId}). Refusing to move the active_step_id pointer under a different definition.`);
+  }
+  const actionable = resolveActionableFlowStep(boundFlowId, canonicalStep, repoRoot);
+  const actionableStepId = actionable?.stepId ?? canonicalStep;
+  if (stepId !== actionableStepId) {
+    diagnostic(dir, "canonical_step_divergence", `advance-state --phase ${phase} would point active_step_id at "${stepId}", but the canonical Flow run for ${boundFlowId} is at "${canonicalStep}" and its next gate is at "${actionableStepId}". The pointer cannot advance past the canonical run: record the evidence its current gate declares (flow-agents workflow evidence / workflow-sidecar record-gate-claim), then re-synchronize.`);
+  }
+}
+
 async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const status = opt(p, "status");
@@ -5233,6 +6395,10 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   // AND the target phase maps to a step listed in on_route_back values.
   // builder.build verify-gate already carries this declaration — behavior preserved.
   const repoRoot = flow ? findRepoRootFromDir(dir) : "";
+  // Same admission rule as ensure-session and `workflow start` — see assertAdmissibleFlow. This
+  // must run BEFORE the route-back guard and BEFORE writeState, because everything below it
+  // writes: transition-attempts.json, state.json, handoff.json, and the active_step_id pointer.
+  if (flow) assertAdmissibleFlow(flow, repoRoot, "advance-state --flow-definition");
   const routeBack = flow ? resolveRouteBackPolicy(flow, prev.phase, phase, repoRoot) : null;
   if (routeBack) {
     const reason = opt(p, "route-back-reason");
@@ -5258,6 +6424,16 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     // repoRoot already computed above when flow is present
     const phaseMap = resolvePhaseMap(flow, repoRoot);
     const stepId = phaseMap?.[phase] ?? undefined;
+    // #1335: the pointer must never claim a step the canonical run is not at. This used to write
+    // whatever the phase map named and exit 0, so `--phase execution` on a run parked at
+    // `design-probe` reported success while leaving current.json saying "execute" and the canonical
+    // run saying "design-probe" — a split-brain manufactured by a command that said it worked. The
+    // canonical run is the authority; when it cannot be moved, this refuses instead of pretending.
+    //
+    // The comparison is against the ACTIONABLE step, not the parked one, because a run resting on a
+    // gateless passthrough is legitimately working toward the next gated step (see
+    // resolveActionableFlowStep) — that is agreement, not divergence.
+    if (stepId) assertPointerMatchesCanonicalRun(dir, flow, repoRoot, phase, stepId);
     if (stepId) {
       // #291 Wave 2 Task 2.1 (§5): thread the calling actor through so this second writeCurrent()
       // call site ALSO dual-writes the per-actor projection, not only ensure-session's call site —
@@ -5288,11 +6464,22 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const projectRoot = canonicalProjectRootForSession(dir);
+  // #1359 round 2: the flag ladder. This used to refuse --verdict, then --summary, then
+  // --lane-json, then the payload -- three round-trips before a caller's payload was even read,
+  // which is the burn #1358 exists to remove. Flag requirements come from the SAME declaration
+  // `--explain` prints (WORKFLOW_CRITIQUE_PARAMETERS), and the lane payload's own violations are
+  // collected into the same refusal, so one invocation reports everything wrong.
+  const laneRaw = opts(p, "lane-json");
   const verdict = opt(p, "verdict");
-  if (!critiqueStatuses.has(verdict)) die("record-critique requires --verdict pass, fail, or not_verified");
   const summary = opt(p, "summary");
-  if (!hasNonEmptyString(summary)) die("record-critique requires --summary");
-  const lanes = normalizeCritiqueLanes(opts(p, "lane-json"), projectRoot);
+  dieOnViolations([
+    ...parameterViolations(WORKFLOW_CRITIQUE_PARAMETERS, (flag) => opts(p, flag.replace(/^--/, "")), "record-critique"),
+    ...(laneRaw.length > 0 ? critiqueLaneViolations(laneRaw) : []),
+  ]);
+  // Already validated above; normalizeCritiqueLanes stays as the single construction path and as
+  // defence in depth, so a payload that somehow reaches it malformed still refuses rather than
+  // being built.
+  const lanes = normalizeCritiqueLanes(laneRaw, projectRoot);
   const reviewArtifacts = reviewTargetArtifacts(dir, opts(p, "artifact-ref"), "record-critique review_target");
   if (verdict === "pass" && (lanes.some((lane) => lane.status !== "pass") || reviewArtifacts.length === 0)) {
     die("a passing critique requires every lane to pass and at least one local reviewed --artifact-ref");
@@ -6315,8 +7502,8 @@ export function runReconcilePreflight(
  * Usage: workflow-sidecar reconcile-preflight <artifactDir> [--manifest <json>] [--repo-root <path>]
  */
 async function reconcilePreflightCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  if (p.flags.has("help") || (!p.positional[0] && !p.opts["help"])) {
-    if (p.flags.has("help")) {
+  if (wantsSidecarHelp(p) || (!p.positional[0] && !p.opts["help"])) {
+    if (wantsSidecarHelp(p)) {
       console.log("Usage: workflow-sidecar reconcile-preflight <artifactDir> [--manifest <json>] [--repo-root <path>]");
       console.log("Local, pre-push shape-only check of <artifactDir>/trust.bundle. Exits 0 with no issues, 1 otherwise.");
       return 0;
@@ -6615,12 +7802,12 @@ export function runVerifyHold(
  * `publishDelivery()`.
  *
  * Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>]
- *   [--assignment-provider <kind>] [--effective-state-json <path|->]
+ *   [--assignment-provider <kind>] [--effective-state-json <path|->] [--repo-root <path>]
  */
 async function verifyHoldCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  if (p.flags.has("help") || (!p.positional[0] && !p.opts["help"])) {
-    if (p.flags.has("help")) {
-      console.log("Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>] [--assignment-provider <kind>] [--effective-state-json <path|->]");
+  if (wantsSidecarHelp(p) || (!p.positional[0] && !p.opts["help"])) {
+    if (wantsSidecarHelp(p)) {
+      console.log("Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>] [--assignment-provider <kind>] [--effective-state-json <path|->] [--repo-root <path>]");
       console.log("Checks whether the calling actor is the fresh, non-superseded holder of <artifactDir>'s subject. Exits 0 if ok (including not_evaluated), 1 otherwise.");
       return 0;
     }
@@ -6773,7 +7960,7 @@ export function runTakeoverPreflight(
 }
 
 async function takeoverPreflightCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
-  if (p.flags.has("help")) {
+  if (wantsSidecarHelp(p)) {
     console.log("Usage: workflow-sidecar takeover-preflight <artifactDir> [--actor <key>] [--now <iso>] [--grace-seconds <n>]");
     console.log("Renders the ADR 0021 §5 takeover protocol (grace-then-supersede | back-off | claim | ask-first | proceed) for a reclaimable candidate. Read-only; never mutates.");
     return 0;
@@ -7103,26 +8290,26 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   return 0;
 }
 function evidenceClean(dir: string): boolean {
-  // Phase 4c: read from trust.bundle (sole verification artifact); fall back to evidence.json for
-  // legacy (pre-bundle-era) sessions that never wrote a trust.bundle at all — unrelated to origin
-  // stamping. When a trust.bundle IS present, every claim must be stamped (requireStampedClaim);
-  // there is no claimType-derivation fallback for an unstamped claim (#268/#344).
+  // trust.bundle is the sole runtime verification authority. An older evidence.json record must
+  // be upgraded by re-recording through the writer; it can never make a clean pass on its own.
   const bundle = loadTrustBundleForTrustMachinery(dir);
   if (Array.isArray(bundle.claims)) {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
     const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "check");
     if (checkClaims.length === 0) return false;
+    const provenance = routedBackClaimProvenance(dir);
     return checkClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
-      return v === "pass" || v === "skip";
+      if (v === "pass" || v === "skip") return true;
+      // A failed claim with a route reason is retained as history after Flow
+      // moves to a new canonical head. It must remain auditable without
+      // poisoning a later repaired delivery forever. A failure bound to the
+      // current head, or one without an authenticated head transition, remains
+      // live and therefore non-clean.
+      return historicalRoutedBackCheckClaim(c, provenance);
     });
   }
-  // Legacy fallback: evidence.json (pre-bundle-era sessions with no trust.bundle at all)
-  const e = loadJson(path.join(dir, "evidence.json"), {});
-  return e.verdict === "pass" && Array.isArray(e.checks) && e.checks.length > 0 && e.checks.every((c: AnyObj) => {
-    if (!(c.status === "pass" || c.status === "skip")) return false;
-    return !Array.isArray(c.standard_refs) || c.standard_refs.every((r: AnyObj) => ["junit", "sarif", "coverage", "veritas"].includes(r.standard));
-  });
+  return false;
 }
 function critiqueClean(dir: string): boolean {
   // trust.bundle is the sole critique artifact. Legacy critique.json must not influence gates.
@@ -7182,10 +8369,9 @@ export function assertCurrentVerifiedWorkspaceEvidence(dir: string): AnyObj {
   const metadata = testsClaims[0]!.metadata as AnyObj;
   const observed = metadata.observed_commands;
   const expected = metadata.verification_workspace_snapshot;
-  if (!Array.isArray(observed) || observed.length === 0
-    || observed.some((entry: AnyObj) => typeof entry?.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || entry.test_count <= 0 || !/^[a-f0-9]{64}$/i.test(String(entry.output_sha256)))
-    || !expected || typeof expected !== "object" || Array.isArray(expected)
-    || expected.kind !== "git-worktree" || typeof expected.head_sha !== "string") fail();
+  if (!observedCommandsBindExactWorkspaceSnapshot(observed, expected)
+    || !Array.isArray(observed)
+    || observed.some((entry: AnyObj) => typeof entry?.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || entry.test_count <= 0 || !/^[a-f0-9]{64}$/.test(String(entry.output_sha256)))) fail();
   if (!isDeepStrictEqual(expected, current)) fail();
   return structuredClone(current);
 }
@@ -7226,13 +8412,10 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     const _dogfoodExistingCheckStampById = existingCheckStampMap(readBundleState(dir).checks);
     const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _dogfoodExistingCheckStampById, projectRoot));
     if (checks.some((c) => c.status !== "pass" && c.status !== "skip")) die("clean evidence requires all non-skipped checks to pass");
-    // Phase 4c: evidence check reads from trust.bundle (sole verification artifact); legacy evidence.json fallback in evidenceClean.
     // #268/#344: builder.* check/critique claims count as clean evidence via their authoritative origin stamp.
     const _hasBundleEvidence = fs.existsSync(path.join(dir, "trust.bundle")) && evidenceClean(dir);
-    const _hasLegacyEvidence = fs.existsSync(path.join(dir, "evidence.json")) && evidenceClean(dir);
-    if (!_hasBundleEvidence && !_hasLegacyEvidence && fs.existsSync(path.join(dir, "trust.bundle"))) die("cannot mark clean without passing evidence");
-    if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && fs.existsSync(path.join(dir, "evidence.json"))) die("cannot mark clean without passing evidence");
-    if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && !fs.existsSync(path.join(dir, "evidence.json")) && checks.length === 0) die("cannot mark clean without passing evidence");
+    if (fs.existsSync(path.join(dir, "trust.bundle")) && !_hasBundleEvidence) die("cannot mark clean without passing evidence");
+    if (!fs.existsSync(path.join(dir, "trust.bundle")) && checks.length === 0) die("cannot mark clean without passing evidence; upgrade by re-recording checks into trust.bundle");
     if (p.flags.has("require-critique") || opt(p, "release-decision")) {
       const newCritiqueVerdict = opt(p, "critique-verdict", "pass");
       for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"), projectRoot);
@@ -8387,6 +9570,34 @@ const COMMAND_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> = [
   ["help", "Print this command list."],
 ];
 
+/**
+ * Option-level metadata, one level below COMMAND_DESCRIPTIONS (#1294): command → its complete
+ * option allowlist, in usage order. One table, two consumers — the SAME entry feeds a command's
+ * `--help` output and its unknown-flag rejection in main(), so help and enforcement cannot
+ * disagree (the workflow.ts verbSpecs rule from #1292 applied to the sidecar).
+ *
+ * Adoption is incremental and per command, exactly as #1294 specifies: a command listed here
+ * rejects flags outside its allowlist; a command absent from this map keeps its current
+ * behaviour verbatim (unknown flags still pass through). Only add a command after enumerating
+ * every flag its function body AND its helpers actually read — a missing entry here is a new
+ * refusal for a legitimate caller. `--help` is implicitly allowed everywhere and never listed.
+ *
+ * workflow-sidecar-help.test.mjs drift-tests this map against main()'s dispatcher and against
+ * each adopted command's `--help` output.
+ */
+const COMMAND_OPTION_SPECS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["claim", ["json"]],
+  ["seal-checkpoint", ["task-slug", "timestamp"]],
+  // publish-delivery is deliberately NOT adopted: it is a hard-die stub whose one job is printing
+  // the "disabled; use `flow-agents workflow publish-delivery`" redirect for EVERY invocation.
+  // An allowlist in front of it shadows that message with an unknown-flag refusal for real
+  // callers (the repo's own evals invoke it with --repo-root) — round 1 of independent review
+  // reproduced exactly that. Enforcement is meaningless for a command that dies unconditionally.
+  ["reconcile-preflight", ["manifest", "repo-root"]],
+  ["verify-hold", ["actor", "now", "assignment-provider", "effective-state-json", "repo-root"]],
+  ["takeover-preflight", ["actor", "now", "grace-seconds"]],
+]);
+
 function printHelp(): void {
   const width = Math.max(...COMMAND_DESCRIPTIONS.map(([name]) => name.length));
   const lines = [
@@ -8429,6 +9640,39 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
     return 0;
   }
   if (!p.command) die("workflow-sidecar command is required");
+  // `<command> --help` on any dispatched subcommand: print that command's description line and
+  // return BEFORE any lock, artifact-dir resolution, or preflight — a documentation request must
+  // never begin a verb's action (#1290, #1292; the top-level `help` interception above already
+  // states the same rule for the command position). Presence is the signal: the local parser
+  // records a trailing `--help` in `flags` but `--help <word>` in `opts`, and both are requests
+  // for help, not inputs. Commands with their own tailored `--help` handling (they render richer
+  // usage than a description line) are excluded so their existing output is unchanged.
+  const SELF_HANDLED_HELP = new Set(["reconcile-preflight", "verify-hold", "takeover-preflight"]);
+  if (!SELF_HANDLED_HELP.has(p.command) && wantsSidecarHelp(p)) {
+    const described = COMMAND_DESCRIPTIONS.find(([name]) => name === p.command);
+    if (described) {
+      const spec = COMMAND_OPTION_SPECS.get(p.command);
+      const optionsBlock = spec === undefined
+        ? "Options not yet declared for this command; run `workflow-sidecar help` for the command list."
+        : spec.length === 0
+          ? "Options: (none)"
+          : `Options:\n${spec.map((option) => `  --${option}`).join("\n")}`;
+      console.log(`Usage: workflow-sidecar ${described[0]} [options]\n\n${described[1]}\n\n${optionsBlock}`);
+      return 0;
+    }
+  }
+  // #1294: adopted commands (COMMAND_OPTION_SPECS) reject unknown flags BEFORE any lock or
+  // artifact-dir resolution — an unrecognised flag is a usage error, not a degraded no-op. Help
+  // requests are exempt (already intercepted above for generic commands; SELF_HANDLED_HELP
+  // commands print their own tailored usage, and a documentation request must never be refused
+  // into a rejection). Unadopted commands keep their current behaviour verbatim.
+  const optionSpec = COMMAND_OPTION_SPECS.get(p.command);
+  if (optionSpec !== undefined && !wantsSidecarHelp(p)) {
+    const unknown = [...Object.keys(p.opts), ...p.flags].filter((key) => key !== "help" && !optionSpec.includes(key));
+    if (unknown.length > 0) {
+      die(`unknown flag --${unknown[0]} for ${p.command}; supported: ${optionSpec.length > 0 ? optionSpec.map((option) => `--${option}`).join(", ") : "(none)"}`);
+    }
+  }
   if (p.command === "ensure-session") preflightEnsureSession(p);
   // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
   // surface (see the `action === "whoami"` branch inside `liveness()` above) — it must never

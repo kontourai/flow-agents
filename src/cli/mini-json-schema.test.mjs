@@ -95,3 +95,13 @@ test("validateSchemaValue rejects unregistered external schema refs", () => {
     },
   ]);
 });
+
+test("validateSchemaValue validates schema-valued additionalProperties", () => {
+  const issues = [];
+  validateSchemaValue("fixture.json", { expected: "ok", dynamic: 7 }, {
+    type: "object",
+    properties: { expected: { type: "string" } },
+    additionalProperties: { type: "string", minLength: 1 },
+  }, "fixture", issues);
+  assert.deepEqual(issues, [{ path: "fixture.json", message: "fixture.dynamic must be string" }]);
+});

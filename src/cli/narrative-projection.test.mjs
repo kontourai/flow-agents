@@ -14,6 +14,7 @@ import {
   stableStringify,
   validateNarrativeRuntimeProjection,
 } from "../../build/src/index.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const NOW = "2026-07-14T15:00:00.000Z";
 const PROJECTED_AT = "2026-07-14T16:00:00.000Z";
@@ -34,7 +35,7 @@ function writeJsonLines(file, records) {
 }
 
 function constructedNarrative({ includeTrust = false, fileOnly = false, timeoutWithoutDuration = false, spacedFileName = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-projection-"));
+  const root = makeFixtureDir("narrative-projection-");
   const narrativeDir = path.join(root, "artifacts", "narrative", "runtime-test");
   const telemetryDir = path.join(root, "telemetry");
   const sessionDir = path.join(root, "runtime-session");

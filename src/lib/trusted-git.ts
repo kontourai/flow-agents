@@ -10,29 +10,107 @@ const TRUSTED_GIT_EXECUTABLES = process.platform === "darwin"
     ? ["C:\\Program Files\\Git\\cmd\\git.exe"]
     : ["/usr/bin/git", "/run/current-system/sw/bin/git", "/usr/local/bin/git"];
 
+const TRUSTED_GIT_NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
+
+/** A Git object format is fixed-width: SHA-1 is 40 lowercase hex and SHA-256 is 64. */
+export function isExactLowercaseCommitSha(value: unknown): value is string {
+  return typeof value === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(value);
+}
+
 /** Execute bounded Git argv with replacement objects and caller configuration disabled. */
-export function execTrustedGitSync(projectRoot: string, argv: readonly string[], encoding: "utf8" | "buffer" = "utf8"): string | Buffer {
+export function execTrustedGitSync(projectRoot: string, argv: readonly string[], encoding: "utf8" | "buffer" = "utf8", maxBuffer = 1024 * 1024): string | Buffer {
   const executable = resolveTrustedGitIdentity();
   revalidateTrustedGitIdentity(executable);
-  const output = execFileSync(executable.path, ["--no-replace-objects", "-C", projectRoot, ...argv], {
+  const output = execFileSync(executable.path, trustedGitArgv(projectRoot, argv), {
     encoding: encoding === "buffer" ? "buffer" : "utf8",
     env: trustedGitEnvironment(),
     stdio: ["ignore", "pipe", "ignore"],
+    maxBuffer,
   });
   revalidateTrustedGitIdentity(executable);
   return output;
 }
 
+/** Read a bounded blob addressed by an already-resolved immutable commit. */
+export function readTrustedGitBlobSync(projectRoot: string, commit: string, relativePath: string, maxBytes = 1024 * 1024): Buffer {
+  if (!isExactLowercaseCommitSha(commit) || !isSafeGitRelativePath(relativePath)) {
+    throw new Error("unsafe immutable Git blob reference");
+  }
+  try {
+    const output = execTrustedGitSync(projectRoot, ["cat-file", "blob", `${commit}:${relativePath}`], "buffer", maxBytes + 1);
+    if (!Buffer.isBuffer(output) || output.length > maxBytes) throw new Error("immutable Git blob exceeds size limit");
+    return output;
+  } catch {
+    throw new Error("could not read immutable Git blob with trusted Git");
+  }
+}
+
+function isSafeGitRelativePath(value: string): boolean {
+  return value.length > 0
+    && value.length <= 240
+    && !value.startsWith("/")
+    && !value.includes("\\")
+    && value.split("/").every((part) => part.length > 0 && part !== "." && part !== ".." && !part.includes("\0"));
+}
+
+/**
+ * Repository config is untrusted input for every caller of this helper. Keep
+ * executable configuration disabled even for read-only commands: fsmonitor is
+ * consulted by status, diff drivers can launch external commands, and a future
+ * caller must not gain hook execution merely by adding a mutating Git verb.
+ */
+function trustedGitArgv(projectRoot: string, argv: readonly string[]): string[] {
+  const command = argv[0];
+  if (command === "diff" && argv.some((argument) => argument === "--ext-diff" || argument === "--textconv")) {
+    throw new Error("trusted Git refuses external diff and text conversion options");
+  }
+  const hardened = command === "diff" ? appendSafeDiffOptions(argv) : [...argv];
+  return [
+    "--no-replace-objects",
+    "-c", "core.fsmonitor=false",
+    "-c", `core.hooksPath=${TRUSTED_GIT_NULL_DEVICE}`,
+    "-c", "diff.external=",
+    "-C", projectRoot,
+    ...hardened,
+  ];
+}
+
+function appendSafeDiffOptions(argv: readonly string[]): string[] {
+  return [argv[0]!, "--no-ext-diff", "--no-textconv", ...argv.slice(1)];
+}
+
 export function resolveTrustedLocalGitCommit(projectRoot: string, ref: string): string {
   try {
     const sha = String(execTrustedGitSync(projectRoot, ["rev-parse", "--verify", `${ref}^{commit}`])).trim().toLowerCase();
-    if (!/^[0-9a-f]{40,64}$/u.test(sha)) throw new Error("not an immutable commit");
+    if (!isExactLowercaseCommitSha(sha)) throw new Error("not an immutable commit");
     return sha;
   } catch { throw new Error("could not resolve ref to an immutable local commit with trusted Git"); }
 }
 
 export function assertTrustedGitAncestor(cwd: string, ancestor: string, descendant: string): void {
   execTrustedGitSync(cwd, ["merge-base", "--is-ancestor", ancestor, descendant]);
+}
+
+/**
+ * Prove that a commit remains reachable after a squash merge without trusting
+ * branch names or replacement objects. A direct ancestor is always accepted.
+ * Otherwise, a reachable commit with the exact same Git tree is the narrow
+ * squash bridge: the reviewed bytes survived under a new commit identity.
+ */
+export function assertTrustedGitAncestorOrEquivalentTree(cwd: string, ancestor: string, descendant: string): void {
+  if (!isExactLowercaseCommitSha(ancestor) || !isExactLowercaseCommitSha(descendant)) throw new Error("invalid immutable Git commit");
+  try {
+    assertTrustedGitAncestor(cwd, ancestor, descendant);
+    return;
+  } catch { /* A squash merge deliberately breaks commit ancestry. */ }
+  const tree = String(execTrustedGitSync(cwd, ["rev-parse", "--verify", `${ancestor}^{tree}`])).trim().toLowerCase();
+  if (!isExactLowercaseCommitSha(tree)) throw new Error("could not resolve immutable Git tree");
+  // A bounded traversal prevents a malformed fixture/repository from turning
+  // validation into an unbounded history scan. The 1 MiB output cap is also
+  // enforced by execTrustedGitSync.
+  const reachableTrees = String(execTrustedGitSync(cwd, ["log", "--format=%T", "--max-count=10000", descendant]));
+  if (reachableTrees.split(/\r?\n/u).some((candidate) => candidate === tree)) return;
+  throw new Error("commit is neither an ancestor nor an equivalent-tree squash predecessor");
 }
 
 function trustedGitEnvironment(): NodeJS.ProcessEnv {

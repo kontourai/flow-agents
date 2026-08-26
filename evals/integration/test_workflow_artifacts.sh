@@ -267,7 +267,7 @@ JSON
 
 cat > "$ARTIFACT_DIR/evidence.json" <<'JSON'
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "task_slug": "workflow-contract-e2e",
   "verdict": "pass",
   "checks": [
@@ -275,7 +275,9 @@ cat > "$ARTIFACT_DIR/evidence.json" <<'JSON'
       "id": "workflow-artifact-validator",
       "kind": "test",
       "status": "pass",
-      "command": "flow_agents_node validate-workflow-artifacts fixture",
+      "command": "node build/src/cli/validate-workflow-artifacts.js fixture",
+      "observed_at_commit": "0123456789abcdef0123456789abcdef01234567",
+      "worktree_clean": true,
       "summary": "Valid Markdown artifacts and sidecars pass.",
       "artifact_refs": [
         {
@@ -637,7 +639,7 @@ fi
 mkdir -p "$BAD/bad-sidecar"
 cat > "$BAD/bad-sidecar/evidence.json" <<'JSON'
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "task_slug": "bad-sidecar",
   "verdict": "maybe",
   "checks": []
@@ -652,10 +654,172 @@ else
   _fail "bad sidecar failure did not mention verdict"
 fi
 
+# Evidence sidecars are schema v2 only. A retained v1 record is auditable data,
+# but it cannot satisfy the current evidence contract.
+mkdir -p "$BAD/evidence-v1"
+cat > "$BAD/evidence-v1/evidence.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "evidence-v1",
+  "verdict": "not_verified",
+  "checks": [
+    {
+      "id": "rejected-v1-check",
+      "kind": "test",
+      "status": "not_verified",
+      "summary": "Version 1 evidence must be re-recorded under v2."
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/evidence-v1" >"$TMPDIR_EVAL/evidence-v1.out" 2>&1; then
+  _fail "v1 evidence sidecar should fail"
+elif rg -q 'schema_version must be 2.0' "$TMPDIR_EVAL/evidence-v1.out"; then
+  _pass "v1 evidence sidecar fails with an explicit v2 migration error"
+else
+  _fail "v1 evidence sidecar failure did not name schema version: $(cat "$TMPDIR_EVAL/evidence-v1.out")"
+fi
+
+mkdir -p "$BAD/missing-observed-commit"
+cat > "$BAD/missing-observed-commit/evidence.json" <<'JSON'
+{
+  "schema_version": "2.0",
+  "task_slug": "missing-observed-commit",
+  "verdict": "not_verified",
+  "checks": [
+    {
+      "id": "command-check",
+      "kind": "test",
+      "status": "not_verified",
+      "command": "npm test",
+      "worktree_clean": true,
+      "summary": "Command observations require their observed commit."
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/missing-observed-commit" >"$TMPDIR_EVAL/missing-observed-commit.out" 2>&1; then
+  _fail "v2 command check without observed_at_commit should fail"
+elif rg -Fq 'checks[0].observed_at_commit is required' "$TMPDIR_EVAL/missing-observed-commit.out"; then
+  _pass "v2 command check without observed_at_commit fails"
+else
+  _fail "missing observed_at_commit failure did not name provenance: $(cat "$TMPDIR_EVAL/missing-observed-commit.out")"
+fi
+
+mkdir -p "$BAD/command-kind-missing-command-and-provenance"
+cat > "$BAD/command-kind-missing-command-and-provenance/evidence.json" <<'JSON'
+{
+  "schema_version": "2.0",
+  "task_slug": "command-kind-missing-command-and-provenance",
+  "verdict": "pass",
+  "checks": [
+    {
+      "id": "command-kind-missing-command-and-provenance",
+      "kind": "command",
+      "status": "pass",
+      "summary": "Command-kind checks need a runnable command and capture provenance."
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/command-kind-missing-command-and-provenance" >"$TMPDIR_EVAL/command-kind-missing-command-and-provenance.out" 2>&1; then
+  _fail "kind:command check without command and provenance should fail"
+elif rg -Fq 'checks[0].command is required' "$TMPDIR_EVAL/command-kind-missing-command-and-provenance.out" \
+  && rg -Fq 'checks[0].observed_at_commit is required' "$TMPDIR_EVAL/command-kind-missing-command-and-provenance.out" \
+  && rg -Fq 'checks[0].worktree_clean is required' "$TMPDIR_EVAL/command-kind-missing-command-and-provenance.out"; then
+  _pass "kind:command checks require a command and capture provenance"
+else
+  _fail "kind:command missing command/provenance did not name every required field: $(cat "$TMPDIR_EVAL/command-kind-missing-command-and-provenance.out")"
+fi
+
+mkdir -p "$BAD/missing-worktree-clean"
+cat > "$BAD/missing-worktree-clean/evidence.json" <<'JSON'
+{
+  "schema_version": "2.0",
+  "task_slug": "missing-worktree-clean",
+  "verdict": "not_verified",
+  "checks": [
+    {
+      "id": "command-check",
+      "kind": "command",
+      "status": "not_verified",
+      "command": "npm test",
+      "observed_at_commit": "0123456789abcdef0123456789abcdef01234567",
+      "summary": "Command observations require their worktree cleanliness."
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/missing-worktree-clean" >"$TMPDIR_EVAL/missing-worktree-clean.out" 2>&1; then
+  _fail "v2 command check without worktree_clean should fail"
+elif rg -Fq 'checks[0].worktree_clean is required' "$TMPDIR_EVAL/missing-worktree-clean.out"; then
+  _pass "v2 command check without worktree_clean fails"
+else
+  _fail "missing worktree_clean failure did not name provenance: $(cat "$TMPDIR_EVAL/missing-worktree-clean.out")"
+fi
+
+mkdir -p "$TMPDIR_EVAL/dirty-evidence"
+cat > "$TMPDIR_EVAL/dirty-evidence/evidence.json" <<'JSON'
+{
+  "schema_version": "2.0",
+  "task_slug": "dirty-evidence",
+  "verdict": "not_verified",
+  "checks": [
+    {
+      "id": "dirty-command-check",
+      "kind": "command",
+      "status": "not_verified",
+      "command": "npm test",
+      "observed_at_commit": "0123456789abcdef0123456789abcdef01234567",
+      "worktree_clean": false,
+      "summary": "Dirty observations are recorded as non-confirming."
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$TMPDIR_EVAL/dirty-evidence" >"$TMPDIR_EVAL/dirty-evidence.out" 2>&1; then
+  _pass "dirty v2 evidence remains representable as not_verified"
+else
+  _fail "dirty v2 evidence should remain representable: $(cat "$TMPDIR_EVAL/dirty-evidence.out")"
+fi
+
+mkdir -p "$BAD/dirty-pass"
+cat > "$BAD/dirty-pass/evidence.json" <<'JSON'
+{
+  "schema_version": "2.0",
+  "task_slug": "dirty-pass",
+  "verdict": "pass",
+  "checks": [
+    {
+      "id": "dirty-command-check",
+      "kind": "command",
+      "status": "pass",
+      "command": "npm test",
+      "observed_at_commit": "0123456789abcdef0123456789abcdef01234567",
+      "worktree_clean": false,
+      "summary": "A dirty observation cannot support a passing gate."
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/dirty-pass" >"$TMPDIR_EVAL/dirty-pass.out" 2>&1; then
+  _fail "dirty v2 evidence must not produce a pass"
+elif rg -q 'status must be one of: fail, not_verified, skip' "$TMPDIR_EVAL/dirty-pass.out"; then
+  _pass "dirty v2 evidence cannot assert a passing command check"
+else
+  _fail "dirty pass failure did not name non-confirming statuses: $(cat "$TMPDIR_EVAL/dirty-pass.out")"
+fi
+
 mkdir -p "$BAD/contradictory-evidence"
 cat > "$BAD/contradictory-evidence/evidence.json" <<'JSON'
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "task_slug": "contradictory-evidence",
   "verdict": "pass",
   "checks": [
@@ -680,7 +844,7 @@ fi
 mkdir -p "$BAD/empty-evidence"
 cat > "$BAD/empty-evidence/evidence.json" <<'JSON'
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "task_slug": "empty-evidence",
   "verdict": "pass",
   "checks": []
@@ -698,7 +862,7 @@ fi
 mkdir -p "$BAD/bad-standard-ref"
 cat > "$BAD/bad-standard-ref/evidence.json" <<'JSON'
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "task_slug": "bad-standard-ref",
   "verdict": "pass",
   "checks": [
@@ -758,7 +922,7 @@ fi
 mkdir -p "$BAD/source-missing-required"
 cat > "$BAD/source-missing-required/evidence.json" <<'JSON'
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "task_slug": "source-missing-required",
   "verdict": "pass",
   "checks": [
@@ -789,7 +953,7 @@ fi
 mkdir -p "$BAD/empty-non-source-ref"
 cat > "$BAD/empty-non-source-ref/evidence.json" <<'JSON'
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "task_slug": "empty-non-source-ref",
   "verdict": "pass",
   "checks": [

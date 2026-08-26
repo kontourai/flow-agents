@@ -12,6 +12,31 @@ import {
 import { reclaimBuilderWorktree } from "./worktree-reclaim.js";
 
 const USAGE = "Usage: flow-agents builder-run <recover|pause|resume|cancel|cancel-request|release-assignment|archive|reclaim> --session-dir <path> [--reason <text> | --authorization-file <path>]";
+/**
+ * The flag allowlists builderRun enforces per forwarded action. The MAP IS PRIVATE: round 2 of
+ * independent review demonstrated live mutation through the exported sets changing command
+ * acceptance in-process (.pause.add("injected") let resume accept an unknown flag). The public
+ * workflow CLI's help table derives these verbs' options through builderRunActionFlags(), which
+ * copies out — same source of truth, no path back to the enforcing objects.
+ */
+const ACTION_FLAGS: Record<string, Set<string>> = {
+  reclaim: new Set(["session-dir"]),
+  pause: new Set(["session-dir", "reason"]),
+  resume: new Set(["session-dir", "reason"]),
+  "release-assignment": new Set(["session-dir", "reason"]),
+  cancel: new Set(["session-dir", "authorization-file"]),
+  archive: new Set(["session-dir", "authorization-file"]),
+};
+function actionFlagSet(action: string): Set<string> {
+  const set = ACTION_FLAGS[action];
+  if (!set) throw new Error(`builderRun has no flag allowlist for action ${action}`);
+  return set;
+}
+/** Copy-out projection of the per-action allowlists. Never returns the enforcing objects. */
+export function builderRunActionFlags(): Record<string, string[]> {
+  return Object.fromEntries(Object.entries(ACTION_FLAGS).map(([action, set]) => [action, [...set].sort()]));
+}
+
 const CANCEL_REQUEST_USAGE = "Usage: flow-agents builder-run cancel-request --session-dir <path> [--out <file>] [--reason <text>] [--actor <name>] [--expires-in-hours <n>]";
 
 /**
@@ -99,7 +124,7 @@ export async function main(argv: string[]): Promise<number> {
     return await runCancelRequest(sessionDir, parsed.flags);
   }
   if (action === "reclaim") {
-    if (parsed.positionals.length !== 1 || Object.keys(parsed.flags).some((name) => name !== "session-dir")) {
+    if (parsed.positionals.length !== 1 || Object.keys(parsed.flags).some((name) => !actionFlagSet("reclaim").has(name))) {
       console.error(USAGE);
       return 64;
     }
@@ -113,7 +138,12 @@ export async function main(argv: string[]): Promise<number> {
   const agentLifecycle = action === "pause" || action === "resume" || action === "release-assignment";
   const authorizedLifecycle = action === "cancel" || action === "archive";
   const lifecycle = agentLifecycle || authorizedLifecycle;
-  const allowedLifecycleFlag = (name: string) => name === "session-dir" || (agentLifecycle ? name === "reason" : name === "authorization-file");
+  // Each action enforces ITS OWN set — never a representative sibling's. Round 2 of independent
+  // review executed the divergence the representative-key shortcut permitted: an option added to
+  // resume's exported set appeared in help but was rejected here, because enforcement consulted
+  // pause's set. Identical sets today made it invisible; the first asymmetric edit would have
+  // shipped help that lies.
+  const allowedLifecycleFlag = (name: string) => actionFlagSet(action as string).has(name);
   if (lifecycle && (parsed.positionals.length !== 1 || Object.keys(parsed.flags).some((name) => !allowedLifecycleFlag(name)))) {
     console.error(USAGE);
     return 64;

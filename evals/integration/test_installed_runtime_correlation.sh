@@ -254,7 +254,7 @@ for runtime in claude codex kiro opencode pi; do
     && cmp -s <(tail -1 "$analytics" | jq -S '.run_correlation') <(jq -S . "$expected") \
     && cmp -s <(jq -cS 'select(.event_type == "agent.delegate") | .run_correlation' "$full" | tail -1) <(jq -cS . "$expected") \
     && cmp -s <(jq -cS '.run_correlation' "$state") <(jq -cS . "$expected") \
-    && cmp -s <(tail -1 "$TMP/$runtime.economics.jsonl" | jq -cS '.run_correlation') <(jq -cS . "$expected") \
+    && cmp -s <(jq -cS 'select(.producer_authority != "flow_run_record") | .run_correlation' "$TMP/$runtime.economics.jsonl" | tail -1) <(jq -cS . "$expected") \
     && jq -e '
       .workflow_outcome.source == "canonical_flow_projection"
       and .workflow_outcome.process_status == "not_verified"
@@ -312,8 +312,14 @@ for expectation in shaped-problem shaped-outcome shaped-constraints shaped-non-g
 done
 cp "$ROOT/evals/fixtures/telemetry/usage-transcript-sample.jsonl" "$TERMINAL_TRANSCRIPT"
 invoke_claude_lifecycle Stop "$TERMINAL_RUNTIME_SESSION" "$TERMINAL_WORKSPACE" "$TERMINAL_PREFIX" "$TERMINAL_TRANSCRIPT"
+# Wait for the LEGACY producer's record specifically. A Builder Stop appends two economics records
+# from two independent detached writers, so a merely non-empty file means "one of them won the
+# race", not "the one this fixture asserts about has arrived" — waiting on -s alone samples an
+# empty selection and reports it as a broken producer path.
 for _ in $(seq 1 50); do
-  [[ -s "$TERMINAL_PREFIX.economics.jsonl" ]] && break
+  [[ -s "$TERMINAL_PREFIX.economics.jsonl" ]] \
+    && [[ -n "$(jq -c 'select(.producer_authority != "flow_run_record")' "$TERMINAL_PREFIX.economics.jsonl" 2>/dev/null | tail -1)" ]] \
+    && break
   sleep 0.1
 done
 
@@ -337,7 +343,14 @@ const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
 const trust = JSON.parse(fs.readFileSync(trustFile, 'utf8'));
 const flow = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
 const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-const economics = JSON.parse(fs.readFileSync(economicsFile, 'utf8').trim().split('\n').at(-1));
+// The economics log is a MULTI-PRODUCER stream: the Stop hook appends both the legacy
+// session.usage-derived record and the canonical Flow-run-derived one, from two detached
+// writers whose append order is a race. Positional selection was only ever correct while a
+// single producer wrote here. These assertions are about the legacy authenticated producer.
+const economics = JSON.parse(fs.readFileSync(economicsFile, 'utf8').trim().split('\n')
+  .filter(Boolean)
+  .filter((line) => { try { return JSON.parse(line).producer_authority !== 'flow_run_record'; } catch { return false; } })
+  .at(-1));
 const terminal = JSON.parse(fs.readFileSync(terminalFile, 'utf8'));
 const correlation = terminal.run_correlation;
 const exact = (value, label) => {

@@ -24,6 +24,7 @@ import {
   normalizeFinding,
   normalizeLearning,
   reduceCaptureLogByCommand,
+  observedCommandsBindExactWorkspaceSnapshot,
 } from "../../build/src/cli/workflow-sidecar.js";
 
 // ── explainClaim (#171: consumed from @kontourai/surface >=2.10) ─────────────
@@ -32,6 +33,25 @@ import {
 // function's behavior through the SAME expectations the prototype carried, so a
 // Surface regression (or an accidental un-lift) fails here.
 import { explainClaim, buildTrustReport, TrustBundleBuilder } from "@kontourai/surface";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+
+const CLEAN_COMMIT = "a".repeat(40);
+const cleanObservation = (command, observedResult = "pass", exitCode = 0, snapshot = {}) => ({
+  command,
+  observedResult,
+  exitCode,
+  observed_at_commit: CLEAN_COMMIT,
+  worktree_clean: true,
+  verification_workspace_snapshot: {
+    version: 1,
+    kind: "git-worktree",
+    algorithm: "sha256",
+    digest: "b".repeat(64),
+    head_sha: CLEAN_COMMIT,
+    worktree_clean: true,
+    ...snapshot,
+  },
+});
 
 test("explainClaim (Surface): unknown claim id returns found:false sentinel", () => {
   const report = buildTrustReport(new TrustBundleBuilder({ source: "unit:171" }).build());
@@ -150,7 +170,7 @@ test("narrative namespace paths and free-form references are rejected with the t
 });
 
 test("narrative isolation canonicalizes aliases and rejects narrative content independent of location", { concurrency: false }, () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-isolation-unit-"));
+  const root = makeFixtureDir("narrative-isolation-unit-");
   const narrativeDir = path.join(root, ".kontourai", "narrative", "run", "n1");
   const envelope = path.join(narrativeDir, "envelope.json");
   const relocated = path.join(root, "evidence", "relocated.json");
@@ -255,6 +275,52 @@ test("normalizeCheck: validates required fields, kind, and status", () => {
   assert.equal(ok.status, "pass");
 });
 
+test("normalizeCheck: command checks require a runnable command", () => {
+  assert.throws(
+    () => normalizeCheck({ id: "unrun-command", kind: "command", status: "pass", summary: "caller assertion" }),
+    /require a non-empty runnable command/,
+  );
+  assert.throws(
+    () => normalizeCheck({ id: "prose-command", kind: "command", status: "pass", summary: "caller assertion", command: "this is prose" }),
+    /not a runnable shell command/,
+  );
+  assert.doesNotThrow(() => normalizeCheck({ id: "run-command", kind: "command", status: "pass", summary: "ran command", command: "npm test" }));
+});
+
+test("publish verification rejects mismatched, upper-case, and non-exact observed commits", () => {
+  const expected = cleanObservation("npm test").verification_workspace_snapshot;
+  const matching = [cleanObservation("npm test")];
+  assert.equal(observedCommandsBindExactWorkspaceSnapshot(matching, expected), true);
+
+  const sha256Commit = "c".repeat(64);
+  const sha256Expected = structuredClone(expected);
+  sha256Expected.head_sha = sha256Commit;
+  const sha256Observation = [cleanObservation("npm test")];
+  sha256Observation[0].observed_at_commit = sha256Commit;
+  sha256Observation[0].verification_workspace_snapshot.head_sha = sha256Commit;
+  assert.equal(observedCommandsBindExactWorkspaceSnapshot(sha256Observation, sha256Expected), true);
+
+  const mismatch = [cleanObservation("npm test", "pass", 0, { head_sha: "b".repeat(40) })];
+  assert.equal(observedCommandsBindExactWorkspaceSnapshot(mismatch, expected), false);
+
+  for (const commit of [CLEAN_COMMIT.toUpperCase(), "a".repeat(41), "a".repeat(63)]) {
+    const invalid = [cleanObservation("npm test")];
+    invalid[0].observed_at_commit = commit;
+    assert.equal(observedCommandsBindExactWorkspaceSnapshot(invalid, expected), false, commit);
+  }
+
+  for (const mutate of [
+    (snapshot) => { delete snapshot.digest; },
+    (snapshot) => { snapshot.digest = "B".repeat(64); },
+    (snapshot) => { snapshot.version = 2; },
+    (snapshot) => { snapshot.algorithm = "sha512"; },
+  ]) {
+    const malformed = structuredClone(expected);
+    mutate(malformed);
+    assert.equal(observedCommandsBindExactWorkspaceSnapshot(matching, malformed), false);
+  }
+});
+
 // ── reduceCaptureLogByCommand (#470 iteration 2, finding #2 — three-way capture fold) ────
 
 test("reduceCaptureLogByCommand: a single ambiguous entry classifies as ambiguous (non-confirming), not pass", () => {
@@ -286,25 +352,25 @@ test("reduceCaptureLogByCommand: fail beats pass and ambiguous regardless of ent
 test("reduceCaptureLogByCommand: pass beats ambiguous when there is no fail", () => {
   const out = reduceCaptureLogByCommand([
     { command: "npm test", observedResult: "ambiguous", exitCode: null },
-    { command: "npm test", observedResult: "pass", exitCode: 0 },
+    cleanObservation("npm test"),
   ]);
   const entry = out.get("npm test");
   assert.equal(entry.observedResult, "pass");
   assert.equal(entry.exitCode, 0);
 });
 
-test("reduceCaptureLogByCommand: legacy entries (no observedResult) classify from exitCode alone", () => {
+test("reduceCaptureLogByCommand: older-format exit-zero entries are non-confirming without provenance", () => {
   const out = reduceCaptureLogByCommand([
-    { command: "legacy-pass", exitCode: 0 },
+    { command: "unprovenanced-pass", exitCode: 0 },
     { command: "legacy-fail", exitCode: 1 },
     { command: "legacy-ambiguous", exitCode: null },
   ]);
-  assert.equal(out.get("legacy-pass").observedResult, "pass");
+  assert.equal(out.get("unprovenanced-pass").observedResult, "ambiguous");
   assert.equal(out.get("legacy-fail").observedResult, "fail");
   assert.equal(out.get("legacy-ambiguous").observedResult, "ambiguous");
 });
 
-test("reduceCaptureLogByCommand: legacy nonzero exit code classifies as fail (never coerced to pass)", () => {
+test("reduceCaptureLogByCommand: unprovenanced nonzero exit code classifies as fail (never coerced to pass)", () => {
   const out = reduceCaptureLogByCommand([{ command: "some cmd", exitCode: 2 }]);
   const entry = out.get("some cmd");
   assert.equal(entry.observedResult, "fail");
@@ -378,7 +444,7 @@ test("buildGateInquiryRecords: emits a single missed_block record for an empty b
 test("writer-observed pass lifts an otherwise ambiguous command to pass", () => {
   const fold = reduceCaptureLogByCommand([
     { command: "npm run test:unit", observedResult: "ambiguous", exitCode: null, source: "postToolUse-capture" },
-    { command: "npm run test:unit", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+    { ...cleanObservation("npm run test:unit"), source: "canonical-writer-execution" },
   ]);
   assert.equal(fold.get("npm run test:unit").observedResult, "pass");
 });
@@ -387,10 +453,10 @@ test("a hook-observed fail is never buried by a writer-observed pass, in either 
   for (const entries of [
     [
       { command: "npm run test:unit", observedResult: "fail", exitCode: 1, source: "postToolUse-capture" },
-      { command: "npm run test:unit", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+      { ...cleanObservation("npm run test:unit"), source: "canonical-writer-execution" },
     ],
     [
-      { command: "npm run test:unit", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+      { ...cleanObservation("npm run test:unit"), source: "canonical-writer-execution" },
       { command: "npm run test:unit", observedResult: "fail", exitCode: 1, source: "postToolUse-capture" },
     ],
   ]) {
@@ -417,7 +483,7 @@ test("when both entries carry the winning status the newer non-null exit code wi
 
 test("an ambiguous entry's null exit code never displaces the winning pass's code", () => {
   const fold = reduceCaptureLogByCommand([
-    { command: "npm test", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+    { ...cleanObservation("npm test"), source: "canonical-writer-execution" },
     { command: "npm test", observedResult: "ambiguous", exitCode: null, source: "postToolUse-capture" },
   ]);
   assert.equal(fold.get("npm test").observedResult, "pass");
@@ -431,4 +497,19 @@ test("a writer-observed fail is sticky like any other observed fail", () => {
   ]);
   assert.equal(fold.get("npm run test:unit").observedResult, "fail");
   assert.equal(fold.get("npm run test:unit").exitCode, 2);
+});
+
+test("reduceCaptureLogByCommand: dirty or snapshotless passes are non-confirming, while a failure remains sticky", () => {
+  const dirty = reduceCaptureLogByCommand([cleanObservation("npm test", "pass", 0, { worktree_clean: false })]);
+  assert.equal(dirty.get("npm test").observedResult, "ambiguous");
+  const noSnapshot = reduceCaptureLogByCommand([{
+    command: "npm test", observedResult: "pass", exitCode: 0,
+    observed_at_commit: CLEAN_COMMIT, worktree_clean: true,
+  }]);
+  assert.equal(noSnapshot.get("npm test").observedResult, "ambiguous");
+  const failed = reduceCaptureLogByCommand([
+    cleanObservation("npm test"),
+    { command: "npm test", observedResult: "fail", exitCode: 1 },
+  ]);
+  assert.equal(failed.get("npm test").observedResult, "fail");
 });

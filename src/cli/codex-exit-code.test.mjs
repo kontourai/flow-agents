@@ -12,6 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const require = createRequire(import.meta.url);
 const { extractExitCodeFromBanner, readExitCodeFromRollout } = require(
@@ -28,7 +29,7 @@ let previousCodexHome;
 let fakeCodexHome;
 before(() => {
   previousCodexHome = process.env.CODEX_HOME;
-  fakeCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-home-"));
+  fakeCodexHome = makeFixtureDir("codex-exit-code-home-");
   process.env.CODEX_HOME = fakeCodexHome;
 });
 after(() => {
@@ -37,7 +38,7 @@ after(() => {
 });
 
 function writeRollout(lines) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-"));
+  const dir = makeFixtureDir("codex-exit-code-");
   const file = path.join(dir, "rollout.jsonl");
   fs.writeFileSync(file, lines.map(l => JSON.stringify(l)).join("\n") + "\n");
   return file;
@@ -102,7 +103,7 @@ test("readExitCodeFromRollout: single-line rollout extracts the preamble banner,
 // --- malformed / partial JSONL lines ---
 
 test("readExitCodeFromRollout: malformed JSONL lines are skipped, valid entry still found", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-"));
+  const dir = makeFixtureDir("codex-exit-code-");
   const file = path.join(dir, "rollout.jsonl");
   const goodLine = JSON.stringify(functionCallOutput("call_1", "Process exited with code 1\nOutput:\n..."));
   fs.writeFileSync(file, ["{not valid json", "", goodLine].join("\n") + "\n");
@@ -244,7 +245,7 @@ test("readExitCodeFromRollout: unresolved multi-call tail never falls back to ne
 });
 
 test("readExitCodeFromRollout: malformed function call cannot make an output look unpaired", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-"));
+  const dir = makeFixtureDir("codex-exit-code-");
   const file = path.join(dir, "rollout.jsonl");
   const output = JSON.stringify(functionCallOutput("call_old", "Process exited with code 0\nOutput:\n..."));
   fs.writeFileSync(file, `${output}\n{"payload":{"type":"function_call","call_id":"call_current"\n`);
@@ -304,7 +305,7 @@ test("readExitCodeFromRollout: malformed duplicate call IDs remain ambiguous", (
 });
 
 test("readExitCodeFromRollout: malformed JSON blocks historical and explicit-id correlation", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-"));
+  const dir = makeFixtureDir("codex-exit-code-");
   const file = path.join(dir, "rollout.jsonl");
   const call = JSON.stringify(execCommandCall("same", "npm test"));
   const output = JSON.stringify(functionCallOutput("same", "Process exited with code 0\nOutput:\n..."));
@@ -315,7 +316,7 @@ test("readExitCodeFromRollout: malformed JSON blocks historical and explicit-id 
 });
 
 test("readExitCodeFromRollout: a partial function-call token blocks historical correlation", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-"));
+  const dir = makeFixtureDir("codex-exit-code-");
   const file = path.join(dir, "rollout.jsonl");
   const call = JSON.stringify(execCommandCall("old", "npm test"));
   const output = JSON.stringify(functionCallOutput("old", "Process exited with code 0\nOutput:\n..."));
@@ -399,10 +400,10 @@ test("readExitCodeFromRollout: non-string/empty path returns null", () => {
 // --- containment (LOW finding #8) ---
 
 test("readExitCodeFromRollout: a transcript path escaping a resolvable codex sessions root is rejected", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-home2-"));
+  const home = makeFixtureDir("codex-exit-code-home2-");
   const sessionsRoot = path.join(home, "sessions");
   fs.mkdirSync(sessionsRoot, { recursive: true });
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "codex-exit-code-outside-"));
+  const outside = makeFixtureDir("codex-exit-code-outside-");
   const outsideFile = path.join(outside, "rollout.jsonl");
   fs.writeFileSync(outsideFile, JSON.stringify(functionCallOutput("call_1", "Process exited with code 1\nOutput:\n...")) + "\n");
 

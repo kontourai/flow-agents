@@ -163,12 +163,87 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 
 ## Flow
 
-The kit ships one flow:
+The kit ships these flows:
 
 **`knowledge.store-contract`** — gates on three evidence claims before a store implementation
 is accepted: contract-suite pass, provenance-enforcement pass, and round-trip integrity pass.
 S2 will add pipeline flows for raw ingestion, compilation, and concept management; this flow
 and adapter infrastructure remain the foundation.
+
+### Living Context: standalone Context Check
+
+**`knowledge.context-check`** is a deterministic, proposals-only flow for checking whether
+saved context can be recalled at a particular repository revision and whether a bounded change
+requires a source-owned update. It is deliberately separate from the large store flow-runner and
+from Builder composition.
+
+The input follows
+[`schemas/knowledge/context-check-input.schema.json`](../schemas/knowledge/context-check-input.schema.json):
+it binds a workspace, repository, exact 40-character Git commit SHA, target audience, changed
+surfaces (or diff paths), and one or more selected `git-repo` Knowledge roots. The result follows
+[`schemas/knowledge/context-check-result.schema.json`](../schemas/knowledge/context-check-result.schema.json).
+
+```js
+import { runContextCheck } from "./context-check/index.js";
+
+const result = runContextCheck({
+  repoRoot: "/work/repository",
+  proposalDir: "/work/run/proposals", // explicit; the only writable location
+  input: {
+    schema_version: "1.0",
+    workspace: "platform",
+    repository: "example/repository",
+    revision: "0123456789abcdef0123456789abcdef01234567",
+    target_audience: "maintainer",
+    changed_surfaces: ["src/context-adapter.js"],
+    knowledge_roots: [{
+      id: "repository-decisions",
+      provider: "git-repo",
+      manifest_path: "knowledge/claims.json"
+    }]
+  }
+});
+```
+
+Each selected manifest is read only by `git show <resolved-sha>:<manifest-path>` after the
+adapter verifies that `repoRoot` is the named worktree root and that the requested SHA is a raw
+commit object. It clears inherited `GIT_*` environment overrides and disables Git replacement and
+graft semantics; an unreadable revision or manifest fails closed. The adapter never falls through
+to a dirty working tree.
+Recall results use contextual statuses `current`, `superseded`, and `unverifiable`; a no-answer
+is explicit for **each missing requested claim id** (`unverifiable` with reason `no_answer`) and
+makes the result `not_verified`, even when other requested claims were recalled.
+Those are recall/currentness statements, not trust decisions.
+
+Reconciliation compares exact declared affected surfaces with the bounded input and leaves clean
+controls clean. An intersection is only `affected` and requires reconciliation; it is never a
+`contradicted`, broken, or trust verdict unless the selected authoritative fixture explicitly
+supplies contradiction evidence. Affected unverifiable claims remain `unverifiable` and still
+route a proposal to their owning source without deriving trust. Every intersecting surface is
+returned.
+
+Affected claims yield only a minimal `context-update` proposal routed to the claim's declared
+owning source. The adapter never edits docs, decisions, or Knowledge records. With `write: true`
+(the default), `proposalDir` must be an existing private non-symlink directory. Writes use
+exclusive no-follow file creation and reject symlink components or targets before creating output;
+use `write: false` for a fully read-only check.
+
+The flow documents the Ops #121 `holds`/`broken`/`unverifiable` terms solely as consumer
+vocabulary. Ops #121 and Surface retain any claim-evidence-freshness or trust authority; Context
+Check does not derive or replace it. Product effectiveness remains an Evals responsibility.
+
+Both input and result are checked through the shared Knowledge JSON-schema validator. Result
+reconciliation uses status-specific variants: `contradicted` requires authoritative evidence,
+`clean` has no affected surface, and `affected`/`unverifiable` require at least one. The shared
+result validator also rejects `verdict: pass` whenever any recalled entry is `unverifiable`,
+including a no-answer. Path inputs reject traversal through either slash style, leading/trailing
+whitespace, and control characters before execution.
+
+Run the deterministic fixture suite:
+
+```bash
+node --test kits/knowledge/context-check/context-check.test.js
+```
 
 ---
 
@@ -406,14 +481,16 @@ a snapshot digest + timestamp is recorded on the graph.
 
 ```js
 import { GitRepoProvider } from "./kits/knowledge/providers/git-repo/index.js";
-import { WorkItemProvider } from "./kits/knowledge/providers/work-item/index.js";
+import { WorkItemProvider, createGhRunner } from "./kits/knowledge/providers/work-item/index.js";
 import { syncToNeo4j } from "./kits/knowledge/providers/neo4j/index.js";
 import { resolveNeo4jConfig, createDriver } from "./kits/knowledge/providers/neo4j/index.js";
 
 const driver = await createDriver(resolveNeo4jConfig());
 const providers = [
   new GitRepoProvider({ repoRoot: process.cwd() }),
-  new WorkItemProvider({ repo: "kontourai/flow-agents" }), // reads via gh
+  // WorkItemProvider requires an injected runner (no default); createGhRunner()
+  // shells out to `gh` for read-only issue listing.
+  new WorkItemProvider({ repo: "kontourai/flow-agents", runner: createGhRunner() }),
 ];
 console.log(await syncToNeo4j({ driver, providers })); // { writes, unchanged, digest, ... }
 ```
@@ -452,3 +529,7 @@ NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=testpassword \
   node --test kits/knowledge/providers/neo4j/integration.test.js
 docker rm -f kg-neo4j
 ```
+
+## Schema authority and vendoring
+
+`schemas/knowledge/` is the canonical source for every Knowledge schema. The matching `schemas/knowledge/` directory inside this Kit is an exact install payload, not an independently maintained contract. Update both in the same change; `src/cli/kit-knowledge-vendoring-portability.test.mjs` enforces byte-for-byte parity before the Kit is installed.

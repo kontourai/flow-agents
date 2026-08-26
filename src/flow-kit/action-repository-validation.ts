@@ -1,12 +1,18 @@
 import fs from "node:fs";
 import * as path from "node:path";
-import { sameStringSet, type KitFlowStepActionEntry } from "./action-metadata.js";
+import { sameStringSet, skillRoleFlowIds, type KitFlowStepActionEntry } from "./action-metadata.js";
 
-type SkillRoleEntry = { skill_id: string; role: string; flow_id?: string; step_ids: string[]; expectation_ids: string[]; artifacts: string[] };
-type FlowExpectation = { id: string; exportKeys: Set<string> };
-type FlowMetadata = { steps: Set<string>; expectationsByStep: Map<string, Map<string, FlowExpectation>>; usesFlowByStep: Map<string, string>; exports: Set<string> };
-type EffectiveFlowStep = { sourceFlowId: string; stepId: string; expectations: Map<string, FlowExpectation>; flowIds: Set<string> };
+type SkillRoleEntry = { skill_id: string; role: string; flow_id?: string; flow_ids?: string[]; step_ids: string[]; expectation_ids: string[]; artifacts: string[] };
+type FlowExpectation = { id: string; exportKeys: Set<string>; sourceFlowId: string };
+type RouteBackMetadata = { onRouteBack: Map<string, string>; routeBackPolicy?: { maxAttempts: number; onExceeded: string } };
+type FlowMetadata = { steps: Set<string>; expectationsByStep: Map<string, Map<string, FlowExpectation>>; gateCountByStep: Map<string, number>; routeBackByStep: Map<string, RouteBackMetadata[] | undefined>; gateIds: Set<string>; usesFlowIdsByStep: Map<string, string[]>; listCompositionSteps: Set<string>; invalidCompositionSteps: Set<string>; exports: Set<string> };
+type EffectiveFlowStep = { sourceFlowId: string; stepId: string; expectations: Map<string, FlowExpectation>; flowIds: Set<string>; gateCount: number; routeBack?: RouteBackMetadata };
 const MAX_FLOW_DEFINITION_BYTES = 1_048_576;
+
+/** True when any flow the role binds contributes to this composed step. */
+function servesRole(effective: EffectiveFlowStep | undefined, roleFlowIds: string[]): boolean {
+  return effective !== undefined && roleFlowIds.some((flowId) => effective.flowIds.has(flowId));
+}
 
 export function validateActionRepositoryMetadata(input: {
   kitDir: string;
@@ -19,6 +25,7 @@ export function validateActionRepositoryMetadata(input: {
   validateDeclaredSkills(input.manifest, input.skillRoles, input.manifestPath, errors);
   const flows = loadFlowMetadata(input.kitDir, input.manifest, input.manifestPath, errors);
   const resolve = effectiveStepResolver(flows);
+  validateCompositionCompatibility(flows, resolve, input.manifestPath, errors);
   validateRoleReferences(input.skillRoles, flows, resolve, input.manifestPath, errors);
   validateSkillArtifactOwnership(input.actions, input.skillRoles, resolve, input.manifest, input.manifestPath, errors);
   const owners = seedSkillOwners(input.skillRoles, resolve);
@@ -32,7 +39,8 @@ function validateSkillArtifactOwnership(actions: KitFlowStepActionEntry[], roles
   for (const row of roles) {
     if (row.role !== "step" || !row.flow_id) continue;
     const shortId = row.skill_id.replace(prefix, "");
-    const declared = actions.flatMap((action) => resolve(action.flow_id, action.step_id)?.flowIds.has(row.flow_id!)
+    const roleFlowIds = skillRoleFlowIds(row);
+    const declared = actions.flatMap((action) => servesRole(resolve(action.flow_id, action.step_id), roleFlowIds)
       && row.step_ids.includes(action.step_id)
       && action.skills.includes(shortId)
       ? action.artifacts
@@ -66,13 +74,32 @@ function loadFlowMetadata(kitDir: string, manifest: Record<string, unknown>, man
     const definition = safe.definition;
     const steps = Array.isArray(definition.steps) ? definition.steps.filter(isRecord) : [];
     const stepIds = new Set(steps.flatMap((step) => typeof step.id === "string" ? [step.id] : []));
-    const usesFlowByStep = new Map(steps.flatMap((step) => typeof step.id === "string" && typeof step.uses_flow === "string" ? [[step.id, step.uses_flow] as const] : []));
-    flows.set(flow.id, { steps: stepIds, usesFlowByStep, expectationsByStep: expectationsByStep(definition), exports: new Set(Array.isArray(definition.exports) ? definition.exports.filter((value): value is string => typeof value === "string" && value.length > 0) : []) });
+    const usesFlowIdsByStep = new Map<string, string[]>();
+    const listCompositionSteps = new Set<string>();
+    const invalidCompositionSteps = new Set<string>();
+    for (const step of steps) {
+      if (typeof step.id !== "string") continue;
+      const scalar = step.uses_flow;
+      const list = step.uses_flows;
+      if (scalar !== undefined && list !== undefined) {
+        invalidCompositionSteps.add(step.id);
+      } else if (scalar !== undefined) {
+        if (typeof scalar !== "string" || !scalar) invalidCompositionSteps.add(step.id);
+        else usesFlowIdsByStep.set(step.id, [scalar]);
+      } else if (list !== undefined) {
+        if (!Array.isArray(list) || list.length === 0 || list.some((value) => typeof value !== "string" || !value) || new Set(list).size !== list.length) invalidCompositionSteps.add(step.id);
+        else {
+          usesFlowIdsByStep.set(step.id, list);
+          listCompositionSteps.add(step.id);
+        }
+      }
+    }
+    flows.set(flow.id, { steps: stepIds, usesFlowIdsByStep, listCompositionSteps, invalidCompositionSteps, expectationsByStep: expectationsByStep(definition, flow.id), gateCountByStep: gateCountsByStep(definition), routeBackByStep: routeBackByStep(definition), gateIds: new Set(isRecord(definition.gates) ? Object.keys(definition.gates) : []), exports: new Set(Array.isArray(definition.exports) ? definition.exports.filter((value): value is string => typeof value === "string" && value.length > 0) : []) });
   }
   return flows;
 }
 
-function expectationsByStep(definition: Record<string, unknown>): Map<string, Map<string, FlowExpectation>> {
+function expectationsByStep(definition: Record<string, unknown>, sourceFlowId: string): Map<string, Map<string, FlowExpectation>> {
   const result = new Map<string, Map<string, FlowExpectation>>();
   if (!isRecord(definition.gates)) return result;
   for (const gate of Object.values(definition.gates)) {
@@ -82,11 +109,73 @@ function expectationsByStep(definition: Record<string, unknown>): Map<string, Ma
       if (!isRecord(value) || typeof value.id !== "string") continue;
       const exportKeys = new Set([value.id]);
       if (isRecord(value.bundle_claim) && typeof value.bundle_claim.claimType === "string") exportKeys.add(value.bundle_claim.claimType);
-      expectations.set(value.id, { id: value.id, exportKeys });
+      expectations.set(value.id, { id: value.id, exportKeys, sourceFlowId });
     }
     result.set(gate.step, expectations);
   }
   return result;
+}
+
+function gateCountsByStep(definition: Record<string, unknown>): Map<string, number> {
+  const result = new Map<string, number>();
+  if (!isRecord(definition.gates)) return result;
+  for (const gate of Object.values(definition.gates)) {
+    if (!isRecord(gate) || typeof gate.step !== "string") continue;
+    result.set(gate.step, (result.get(gate.step) ?? 0) + 1);
+  }
+  return result;
+}
+
+function routeBackByStep(definition: Record<string, unknown>): Map<string, RouteBackMetadata[] | undefined> {
+  const result = new Map<string, RouteBackMetadata[] | undefined>();
+  if (!isRecord(definition.gates)) return result;
+  for (const gate of Object.values(definition.gates)) {
+    if (!isRecord(gate) || typeof gate.step !== "string") continue;
+    const entries = result.get(gate.step);
+    if (entries === undefined && result.has(gate.step)) continue;
+    const metadata = readRouteBackMetadata(gate);
+    if (!metadata) result.set(gate.step, undefined);
+    else result.set(gate.step, [...(entries ?? []), metadata]);
+  }
+  return result;
+}
+
+function readRouteBackMetadata(gate: Record<string, unknown>): RouteBackMetadata | undefined {
+  const rawRoutes = gate.on_route_back;
+  const rawPolicy = gate.route_back_policy;
+  if (rawRoutes === undefined && rawPolicy === undefined) return { onRouteBack: new Map() };
+  if (!isRecord(rawRoutes)) return undefined;
+  const onRouteBack = new Map<string, string>();
+  for (const [reason, target] of Object.entries(rawRoutes)) {
+    if (!reason || typeof target !== "string" || !target) return undefined;
+    onRouteBack.set(reason, target);
+  }
+  if (rawPolicy === undefined) return { onRouteBack };
+  const maxAttempts = isRecord(rawPolicy) ? rawPolicy.max_attempts : undefined;
+  const onExceeded = isRecord(rawPolicy) ? rawPolicy.on_exceeded : undefined;
+  if (typeof maxAttempts !== "number" || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || typeof onExceeded !== "string" || !onExceeded) return undefined;
+  return { onRouteBack, routeBackPolicy: { maxAttempts, onExceeded } };
+}
+
+function mergeRouteBackMetadata(entries: RouteBackMetadata[]): RouteBackMetadata | undefined {
+  const onRouteBack = new Map<string, string>();
+  let routeBackPolicy: RouteBackMetadata["routeBackPolicy"];
+  let policyPresence: boolean | undefined;
+  for (const entry of entries) {
+    const hasPolicy = entry.routeBackPolicy !== undefined;
+    if (policyPresence === undefined) policyPresence = hasPolicy;
+    else if (policyPresence !== hasPolicy) return undefined;
+    if (hasPolicy) {
+      if (routeBackPolicy && (routeBackPolicy.maxAttempts !== entry.routeBackPolicy!.maxAttempts || routeBackPolicy.onExceeded !== entry.routeBackPolicy!.onExceeded)) return undefined;
+      routeBackPolicy = entry.routeBackPolicy;
+    }
+    for (const [reason, target] of entry.onRouteBack) {
+      if (onRouteBack.has(reason) && onRouteBack.get(reason) !== target) return undefined;
+      onRouteBack.set(reason, target);
+    }
+  }
+  if (routeBackPolicy && onRouteBack.size === 0) return undefined;
+  return { onRouteBack, ...(routeBackPolicy ? { routeBackPolicy } : {}) };
 }
 
 function effectiveStepResolver(flows: Map<string, FlowMetadata>): (flowId: string, stepId: string, seen?: Set<string>) => EffectiveFlowStep | undefined {
@@ -97,26 +186,54 @@ function effectiveStepResolver(flows: Map<string, FlowMetadata>): (flowId: strin
     const flow = flows.get(flowId);
     if (!flow) return undefined;
     const direct = flow.expectationsByStep.get(stepId);
-    if (direct) return { sourceFlowId: flowId, stepId, expectations: direct, flowIds: new Set([flowId]) };
-    const childFlowId = flow.usesFlowByStep.get(stepId);
-    if (!childFlowId) return { sourceFlowId: flowId, stepId, expectations: new Map(), flowIds: new Set([flowId]) };
-    const child = resolve(childFlowId, stepId, seen);
-    const childFlow = flows.get(childFlowId);
-    if (!child || !childFlow || [...child.expectations.values()].some((expectation) => ![...expectation.exportKeys].some((key) => childFlow.exports.has(key)))) return undefined;
-    child.flowIds.add(flowId);
-    return child;
+    if (direct) return flow.invalidCompositionSteps.has(stepId) || flow.usesFlowIdsByStep.has(stepId) ? undefined : { sourceFlowId: flowId, stepId, expectations: direct, flowIds: new Set([flowId]), gateCount: flow.gateCountByStep.get(stepId) ?? 0, routeBack: flow.routeBackByStep.get(stepId)?.[0] };
+    if (flow.invalidCompositionSteps.has(stepId)) return undefined;
+    const childFlowIds = flow.usesFlowIdsByStep.get(stepId);
+    if (!childFlowIds) return { sourceFlowId: flowId, stepId, expectations: new Map(), flowIds: new Set([flowId]), gateCount: 0 };
+    const expectations = new Map<string, FlowExpectation>();
+    const flowIds = new Set<string>([flowId]);
+    const isListComposition = flow.listCompositionSteps.has(stepId);
+    if (isListComposition && flow.gateIds.has(`flow-agents.aggregate.${stepId}`)) return undefined;
+    let gateCount = isListComposition ? 1 : 0;
+    const routeBackEntries: RouteBackMetadata[] = [];
+    for (const childFlowId of childFlowIds) {
+      const child = resolve(childFlowId, stepId, new Set(seen));
+      const childFlow = flows.get(childFlowId);
+      // `uses_flows` emits one aggregate runtime gate; a contributor with more
+      // than one gate at the same step would diverge from live resolution.
+      if (!child || !childFlow
+        || (isListComposition && child.gateCount !== 1)
+        || [...child.expectations.values()].some((expectation) => ![...expectation.exportKeys].some((key) => childFlow.exports.has(key)))
+        || [...child.expectations.keys()].some((id) => expectations.has(id))
+        || (isListComposition && !child.routeBack)) return undefined;
+      if (!isListComposition) gateCount = child.gateCount;
+      for (const [id, expectation] of child.expectations) expectations.set(id, expectation);
+      for (const id of child.flowIds) flowIds.add(id);
+      if (isListComposition) routeBackEntries.push(child.routeBack!);
+    }
+    const routeBack = isListComposition ? mergeRouteBackMetadata(routeBackEntries) : undefined;
+    if (isListComposition && !routeBack) return undefined;
+    return { sourceFlowId: childFlowIds[0]!, stepId, expectations, flowIds, gateCount, routeBack };
   };
   return resolve;
 }
 
+function validateCompositionCompatibility(flows: Map<string, FlowMetadata>, resolve: ReturnType<typeof effectiveStepResolver>, manifestPath: string, errors: string[]): void {
+  for (const [flowId, flow] of flows) for (const stepId of new Set([...flow.usesFlowIdsByStep.keys(), ...flow.invalidCompositionSteps])) {
+    if (!resolve(flowId, stepId)) errors.push(`${manifestPath}: flow '${flowId}/${stepId}' has incompatible composed route-back or gate metadata`);
+  }
+}
+
 function validateRoleReferences(roles: SkillRoleEntry[], flows: Map<string, FlowMetadata>, resolve: ReturnType<typeof effectiveStepResolver>, manifestPath: string, errors: string[]): void {
-  for (const row of roles) {
-    if (!row.flow_id) continue;
-    const flow = flows.get(row.flow_id);
-    if (!flow) { errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown flow '${row.flow_id}'`); continue; }
-    for (const stepId of row.step_ids) if (!flow.steps.has(stepId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown step '${row.flow_id}/${stepId}'`);
-    const allowed = new Set(row.step_ids.flatMap((stepId) => [...(resolve(row.flow_id!, stepId)?.expectations.keys() ?? [])]));
-    for (const expectationId of row.expectation_ids) if (!allowed.has(expectationId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' expectation '${expectationId}' is not owned by its bound step(s)`);
+  // Every flow the role claims is checked, not merely the primary one: an unchecked additional
+  // binding is a producer claim nothing validates, which is the whole class of defect the
+  // owner-cardinality rule below exists to prevent.
+  for (const row of roles) for (const rowFlowId of skillRoleFlowIds(row)) {
+    const flow = flows.get(rowFlowId);
+    if (!flow) { errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown flow '${rowFlowId}'`); continue; }
+    for (const stepId of row.step_ids) if (!flow.steps.has(stepId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown step '${rowFlowId}/${stepId}'`);
+    const allowed = new Set(row.step_ids.flatMap((stepId) => [...(resolve(rowFlowId, stepId)?.expectations.keys() ?? [])]));
+    for (const expectationId of row.expectation_ids) if (!allowed.has(expectationId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' expectation '${expectationId}' is not owned by its bound step(s) in '${rowFlowId}'`);
   }
 }
 
@@ -124,11 +241,13 @@ function seedSkillOwners(roles: SkillRoleEntry[], resolve: ReturnType<typeof eff
   const owners = new Map<string, string[]>();
   for (const row of roles) {
     if (row.role !== "step" || !row.flow_id) continue;
-    for (const stepId of row.step_ids) {
-      const effective = resolve(row.flow_id, stepId);
+    // One owner entry per (bound flow, step, expectation). Cardinality stays per flow, so a role
+    // serving two flows is one producer in each rather than two producers in either.
+    for (const rowFlowId of skillRoleFlowIds(row)) for (const stepId of row.step_ids) {
+      const effective = resolve(rowFlowId, stepId);
       if (!effective) continue;
       for (const expectationId of row.expectation_ids) if (effective.expectations.has(expectationId)) {
-        const key = `${effective.sourceFlowId}\0${effective.stepId}\0${expectationId}`;
+        const key = `${effective.expectations.get(expectationId)?.sourceFlowId ?? effective.sourceFlowId}\0${effective.stepId}\0${expectationId}`;
         owners.set(key, [...(owners.get(key) ?? []), `skill:${row.skill_id}`]);
       }
     }
@@ -147,21 +266,27 @@ function validateActions(actions: KitFlowStepActionEntry[], roles: SkillRoleEntr
     if (!sameStringSet(action.expectation_ids, [...effective.expectations.keys()])) errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' expectation_ids must exactly equal its resolved Flow expectation set`);
     for (const skill of action.skills) {
       const row = roleByShortId.get(skill);
-      if (!row || row.role !== "step" || !row.flow_id || !effective.flowIds.has(row.flow_id) || !row.step_ids.includes(action.step_id)) errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' skill '${skill}' must match one step-role binding`);
+      if (!row || row.role !== "step" || !row.flow_id || !servesRole(effective, skillRoleFlowIds(row)) || !row.step_ids.includes(action.step_id)) errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' skill '${skill}' must match one step-role binding`);
     }
     for (const expectationId of effective.expectations.keys()) {
       const binding = action.expectation_bindings.find((entry) => entry.expectation_id === expectationId);
       if (binding?.interface !== "operation") continue;
-      const key = `${effective.sourceFlowId}\0${effective.stepId}\0${expectationId}`;
-      owners.set(key, [...(owners.get(key) ?? []), `operation:${action.flow_id}/${action.step_id}`]);
+      const key = `${effective.expectations.get(expectationId)?.sourceFlowId ?? effective.sourceFlowId}\0${effective.stepId}\0${expectationId}`;
+      // The owner is the OPERATION, not the composing step that named it. An extension flow
+      // (`uses_flow`) is composed into every parent that reuses it, so keying by parent counted
+      // one producer once per parent — two parents binding the SAME operation looked like two
+      // producers of one expectation. Two parents binding DIFFERENT operations still does, which
+      // is the case this rule exists to catch.
+      owners.set(key, [...(owners.get(key) ?? []), `operation:${binding.operation ?? `${action.flow_id}/${action.step_id}`}`]);
     }
   }
 }
 
 function validateOwnerCardinality(flows: Map<string, FlowMetadata>, owners: Map<string, string[]>, manifestPath: string, errors: string[]): void {
   for (const [flowId, flow] of flows) for (const [stepId, expectations] of flow.expectationsByStep) for (const expectationId of expectations.keys()) {
-    const found = owners.get(`${flowId}\0${stepId}\0${expectationId}`) ?? [];
-    if (found.length !== 1) errors.push(`${manifestPath}: flow expectation '${flowId}/${stepId}/${expectationId}' must have exactly one producer owner; found ${found.length}`);
+    // DISTINCT owners: the same producer reached through two composition paths is one producer.
+    const found = [...new Set(owners.get(`${flowId}\0${stepId}\0${expectationId}`) ?? [])];
+    if (found.length !== 1) errors.push(`${manifestPath}: flow expectation '${flowId}/${stepId}/${expectationId}' must have exactly one producer owner; found ${found.length}${found.length > 1 ? ` (${found.join(", ")})` : ""}`);
   }
 }
 

@@ -9,6 +9,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { endpointAllowed } from "../../build/src/cli/telemetry-doctor.js";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 test("endpointAllowed: known hosted Console (console.kontourai.io) is allowed without --allow-network", () => {
   assert.equal(endpointAllowed("https://console.kontourai.io/api/telemetry/records", false), true);
@@ -67,7 +68,7 @@ test("resolveTelemetryConfigFile: mirrors config.sh's precedence", async () => {
   const os = await import("node:os");
   const path = await import("node:path");
 
-  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "fa-doctor-"));
+  const dest = makeFixtureDir("fa-doctor-");
   const telemetryDir = path.join(dest, "scripts", "telemetry");
   const shipped = path.join(telemetryDir, "telemetry.conf");
 
@@ -75,8 +76,13 @@ test("resolveTelemetryConfigFile: mirrors config.sh's precedence", async () => {
   // ~/.flow-agents/telemetry-console.conf, which would otherwise win and make
   // the assertions describe the machine rather than the precedence.
   const previousHome = process.env.HOME;
-  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "fa-home-"));
+  const fakeHome = makeFixtureDir("fa-home-");
   process.env.HOME = fakeHome;
+  // Isolate TELEMETRY_CONFIG_FILE the same way: CI's eval harness defaults it
+  // to a console-free fixture (evals/ci/run-baseline.sh), which would otherwise
+  // win over every file-precedence branch this test asserts.
+  const previousTelemetryConfigFile = process.env.TELEMETRY_CONFIG_FILE;
+  delete process.env.TELEMETRY_CONFIG_FILE;
   try {
 
   // Nothing trusted anywhere -> the shipped default, as before.
@@ -119,6 +125,8 @@ test("resolveTelemetryConfigFile: mirrors config.sh's precedence", async () => {
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
+    if (previousTelemetryConfigFile === undefined) delete process.env.TELEMETRY_CONFIG_FILE;
+    else process.env.TELEMETRY_CONFIG_FILE = previousTelemetryConfigFile;
     fs.rmSync(fakeHome, { recursive: true, force: true });
   }
   fs.rmSync(dest, { recursive: true, force: true });

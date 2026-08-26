@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { noteActiveFlow, noteGateOutcome } from "../transition-log.js";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
@@ -10,17 +11,19 @@ import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { declaredStepBindsInterface } from "../builder-gate-action-envelope.js";
 import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
-import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion } from "../external-lifecycle-authority.js";
+import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthorization, invokeExternalLifecycleAuthority, invokeExternalSealedLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion, verifySealedExecutionCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
-import { workItemSlug } from "../lib/work-item-identity.js";
+import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
-import { main as builderRun } from "./builder-run.js";
+import { publicJsonFlagShapes, WORKFLOW_CRITIQUE_PARAMETERS, WORKFLOW_EVIDENCE_PARAMETERS, type ParameterSpec } from "./public-contracts.js";
+import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
-import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
@@ -32,6 +35,7 @@ import {
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
+import { flowAdmissionRefusal } from "../lib/flow-admission.js";
 import {
   createContinuationEvidenceCheckpointWriter,
   validateContinuationEvidenceCheckpointDirectory,
@@ -44,7 +48,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence-request", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence-request", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "execute-sealed-workload-request", "execute-sealed-workload", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 const PROVISIONAL_DELIVERY_RECORD = "provisional-delivery.json";
 const PROVISIONAL_DELIVERY_TRANSACTION = ".provisional-delivery.transaction.json";
 const PROVISIONAL_DELIVERY_AUTHORITY_COMPLETION = "provisional-delivery.authority-completion.json";
@@ -75,6 +79,8 @@ Public workflow verbs:
   publish-provisional-delivery-request  Build the exact provisional-delivery authorization payload.
   publish-provisional-delivery  Publish a checkpoint-bound bundle for required PR CI reconciliation.
   publish-delivery    Publish the terminal, learning-inclusive delivery bundle for CI reconciliation.
+  execute-sealed-workload  Execute one externally signed, staged provider workload.
+  execute-sealed-workload-request  Emit the exact canonical authorization payload for external signing.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
   release             Release the current assignment without canceling the run.
@@ -83,12 +89,229 @@ Public workflow verbs:
   reclaim             Remove a clean linked worktree after learning and confirmed merge.
   doctor              Report CLI, install, Kit, Flow, and artifact compatibility.
 
+Add --explain to any verb to print the exact accepted shape of its JSON flags, with examples.
+
 Use the isolated exact-package command emitted by workflow status and doctor in automation.`);
+}
+
+
+// ─── Per-verb help, derived from the enforcing option sets (#1292 / #1290) ───────────────────
+//
+// One table, two consumers. Each verb's `options` set here is the SAME object its
+// assertOnlyFlags call enforces — the rejection path and the help path cannot disagree, because
+// there is nothing to disagree about. Verbs whose options are `null` have no allowlist today;
+// they get summary-only help rather than a freshly invented allowlist, because a new allowlist
+// is a new refusal and slice 1 changes no verb behaviour. (Their option metadata arrives with
+// the preflight work in #1293/#1294.) Summaries are the human-authored lines from usage(),
+// verbatim — never generated from flag names, which would be a label nothing derives.
+//
+// A drift test (workflow-help.test.mjs) binds this table to the dispatcher the same way
+// workflow-sidecar-help.test.mjs binds COMMAND_DESCRIPTIONS to the sidecar's switch.
+type VerbSpec = { summary: string; options: Set<string> | null; enforcement: "workflow" | "builder-run" | null };
+// The public dispatcher strips these before forwarding to builderRun, so they are accepted
+// end-to-end on every forwarded verb in addition to the action's own builderRun allowlist.
+// `json` is deliberately NOT advertised here although the dispatcher accepts and strips it:
+// builderRun emits JSON unconditionally, so the flag has no effect on these verbs, and help
+// that lists a no-op option overstates the contract (review round 2).
+const FORWARDED_PUBLIC_FLAGS = ["artifact-root", "session-dir"] as const;
+function forwardedVerbOptions(action: string): Set<string> {
+  const flags = builderRunActionFlags()[action];
+  if (!flags) throw new Error(`no builderRun allowlist for forwarded action ${action}`);
+  return new Set<string>([...FORWARDED_PUBLIC_FLAGS, ...flags]);
+}
+let _verbSpecsCache: Map<string, VerbSpec> | null = null;
+function verbSpecs(): Map<string, VerbSpec> {
+  if (_verbSpecsCache === null) {
+    _verbSpecsCache = new Map<string, VerbSpec>([
+    ["start", { summary: 'Start or resume a workflow for a Work Item.', options: new Set<string>(["flow", "work-item", "task-slug", "artifact-root", "source-request", "summary", "title", "criterion", "assignment-provider", "effective-state-json"]), enforcement: "workflow" }],
+    ["status", { summary: 'Show the current canonical run and projected next action.', options: null, enforcement: null }],
+    ["evidence-request", { summary: 'Emit an exact host-recovery evidence authorization for external signing.', options: EVIDENCE_FLAGS, enforcement: "workflow" }],
+    ["evidence", { summary: 'Record evidence for the current Flow gate and synchronize it.', options: EVIDENCE_FLAGS, enforcement: "workflow" }],
+    ["reseal-verification-evidence-request", { summary: 'Build the exact staged verification-evidence authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "expires-in-hours"]), enforcement: "workflow" }],
+    ["reseal-verification-evidence", { summary: 'Atomically publish a signed staged verification-evidence candidate.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]), enforcement: "workflow" }],
+    ["recover-exact-current-completion-request", { summary: 'Build the exact completion-recovery authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "expires-in-hours"]), enforcement: "workflow" }],
+    ["recover-exact-current-completion", { summary: 'Refresh stale same-run lifecycle authority without changing evidence or history.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]), enforcement: "workflow" }],
+    ["critique", { summary: 'Record review critique directly into the current trust bundle.', options: new Set<string>(["artifact-root", "session-dir", "json", "id", "verdict", "summary", "artifact-ref", "finding-json", "lane-json"]), enforcement: "workflow" }],
+    ["resolve-critique-request", { summary: 'Build the exact critique-resolution authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]), enforcement: "workflow" }],
+    ["resolve-critique", { summary: 'Resolve a repaired historical critique through a later review record.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), enforcement: "workflow" }],
+    ["repair-critique-resolution-history-request", { summary: 'Build the exact resolution-history repair authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]), enforcement: "workflow" }],
+    ["repair-critique-resolution-history", { summary: 'Attest a missing historical authority event through a new signed repair.', options: new Set<string>(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), enforcement: "workflow" }],
+    ["drive", { summary: 'Continue the canonical run through an explicit runtime adapter.', options: new Set<string>(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "evidence-checkpoint-dir", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms", "context-policy"]), enforcement: "workflow" }],
+    ["publish-provisional-delivery-request", { summary: 'Build the exact provisional-delivery authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "expires-in-hours"]), enforcement: "workflow" }],
+    ["publish-provisional-delivery", { summary: 'Publish a checkpoint-bound bundle for required PR CI reconciliation.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]), enforcement: "workflow" }],
+    ["publish-delivery", { summary: 'Publish the terminal, learning-inclusive delivery bundle for CI reconciliation.', options: new Set<string>(["artifact-root", "session-dir", "json"]), enforcement: "workflow" }],
+    ["execute-sealed-workload-request", { summary: 'Emit the exact canonical authorization payload for external signing.', options: new Set<string>(["artifact-root", "session-dir", "sealed-workload-file", "subject", "nonce", "expires-in-minutes", "max-staged-bytes", "max-runtime-ms", "max-output-bytes", "max-provider-calls", "max-cost-microusd", "max-tokens"]), enforcement: "workflow" }],
+    ["execute-sealed-workload", { summary: 'Execute one externally signed, staged provider workload.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file", "sealed-workload-file"]), enforcement: "workflow" }],
+    ["pause", { summary: 'Pause the current run as its assignment actor.', options: forwardedVerbOptions("pause"), enforcement: "builder-run" }],
+    ["resume", { summary: 'Resume the current paused run as its assignment actor.', options: forwardedVerbOptions("resume"), enforcement: "builder-run" }],
+    ["release", { summary: 'Release the current assignment without canceling the run.', options: forwardedVerbOptions("release-assignment"), enforcement: "builder-run" }],
+    ["cancel", { summary: 'Cancel through a signed user/operator authorization record.', options: forwardedVerbOptions("cancel"), enforcement: "builder-run" }],
+    ["archive", { summary: 'Archive a terminal session through a signed authorization record.', options: forwardedVerbOptions("archive"), enforcement: "builder-run" }],
+    ["reclaim", { summary: 'Remove a clean linked worktree after learning and confirmed merge.', options: forwardedVerbOptions("reclaim"), enforcement: "builder-run" }],
+    ["doctor", { summary: 'Report CLI, install, Kit, Flow, and artifact compatibility.', options: null, enforcement: null }],
+    ]);
+  }
+  return _verbSpecsCache;
+}
+/**
+ * Read-only projection for tests and tooling. The live map is deliberately NOT exported: its
+ * Sets are the very objects assertOnlyFlags enforces, so an exported reference would let any
+ * same-process importer widen an allowlist and silently weaken enforcement (independent review
+ * probed exactly that and watched the injected option survive into the next enforcement call).
+ * Copies out, never references.
+ */
+export function verbSpecsSnapshot(): ReadonlyArray<{ verb: string; summary: string; options: string[] | null; enforcement: "workflow" | "builder-run" | null }> {
+  return [...verbSpecs().entries()].map(([verb, spec]) => ({
+    verb,
+    summary: spec.summary,
+    options: spec.options ? [...spec.options].sort() : null,
+    enforcement: spec.enforcement,
+  }));
+}
+function verbSpecOptions(verb: string): Set<string> {
+  const spec = verbSpecs().get(verb);
+  if (!spec || spec.options === null) throw new Error(`no declared option set for workflow ${verb}`);
+  return spec.options;
+}
+// ─── `--explain`: the accepted JSON shapes, derived from the enforcing constants (#1358) ────────
+//
+// Nine of a live run's CLI round-trips were spent learning shapes the kit already held as data.
+// This prints them. A verb explains a JSON flag IFF its own enforcing option set accepts that
+// flag, and the shape text comes from `publicJsonFlagShapes()` — the same constants the sidecar
+// validators refuse from — so `--explain` cannot advertise a flag the verb rejects, nor a shape
+// the validator does not enforce. workflow-explain.test.mjs binds both directions executably.
+type JsonFlagShape = ReturnType<typeof publicJsonFlagShapes>[string];
+/**
+ * Round-2 MEDIUM: the verbs' own parameter tables already declared `required`, `allowed_values`,
+ * `repeatable` and `required_when`, and nothing read them — so a caller learned the flags one
+ * refusal at a time before the payload was even parsed. `--explain` prints them and
+ * `parameterViolations` enforces them, from the one declaration.
+ */
+const VERB_PARAMETERS: Record<string, readonly ParameterSpec[]> = {
+  critique: WORKFLOW_CRITIQUE_PARAMETERS,
+  evidence: WORKFLOW_EVIDENCE_PARAMETERS,
+};
+export type ExplainSpec = {
+  verb: string;
+  summary: string;
+  parameters: ParameterSpec[];
+  json_flags: JsonFlagShape[];
+  /** Shapes nested INSIDE an accepted flag's payload. Never advertised as flags: `workflow
+   *  critique` embeds evidence refs in `--lane-json` but rejects `--evidence-ref-json` itself. */
+  referenced_shapes: { name: string; shape: JsonFlagShape }[];
+  preconditions: string[];
+};
+/**
+ * State-level requirements that are knowable before any payload is parsed. Stating them here is
+ * the #1359 "surface preconditions up front" half: the live run discovered the clean-critique
+ * requirement at invocation 8, after four shape round-trips.
+ */
+const VERB_PRECONDITIONS: Record<string, string[]> = {
+  evidence: [
+    "a passing tests-evidence claim requires a current clean critique first — record one with `workflow critique` under a reviewer identity distinct from the implementation actor (FLOW_AGENTS_ACTOR=<reviewer-id>)",
+    "a passing tests-evidence claim requires captured clean Git provenance — the working tree must be clean at record time",
+    "each --command must resolve through a known test/check/verify/eval runner and must reconcile against the CI manifest",
+  ],
+  critique: [
+    "the run's current step must be one whose declaring kit binds an expectation to the workflow.critique interface",
+    "the reviewer identity must be distinct from the implementation actor (set FLOW_AGENTS_ACTOR=<reviewer-id>)",
+  ],
+};
+export function explainSpec(verb: string): ExplainSpec {
+  const spec = verbSpecs().get(verb);
+  const options = spec?.options;
+  const shapes = publicJsonFlagShapes();
+  const accepted = Object.entries(shapes).filter(([flag]) => options?.has(flag) === true);
+  const embedded = new Set(accepted.flatMap(([, shape]) => shape.embeds).filter((key) => options?.has(key) !== true));
+  return {
+    verb,
+    summary: spec?.summary ?? "",
+    parameters: [...(VERB_PARAMETERS[verb] ?? [])].map((parameter) => ({ ...parameter })),
+    json_flags: accepted.map(([, shape]) => shape),
+    referenced_shapes: [...embedded].filter((key) => shapes[key]).map((key) => ({ name: `evidence_refs[] entry (the ${shapes[key]!.flag} shape; this verb does not accept that flag directly)`, shape: shapes[key]! })),
+    preconditions: VERB_PRECONDITIONS[verb] ?? [],
+  };
+}
+function renderShape(heading: string, shape: JsonFlagShape, renderExample: (example: Record<string, unknown>) => string, description = shape.description): void {
+  console.log(`\n${heading}`);
+  console.log(`  ${description}`);
+  console.log(`  Accepted fields: ${shape.fields.join(", ")}`);
+  // Round-1 review byte-checked the old header and found it false for 9 of 26 rules: the refusal
+  // prefixes the body with the offending object's label. The header now says exactly that, and
+  // every line below IS a body the collectors emit (workflow-explain.test.mjs asserts set-equality
+  // over a generated corpus, so a rule that is not emitted cannot be printed and vice versa).
+  console.log(`  Rules — a refusal is "<label> <rule>", where <label> names the offending object:`);
+  for (const rule of shape.rules) {
+    const note = rule.enforced_by === "object-shape" ? "" : `  [${rule.enforced_by}]`;
+    console.log(`    - ${rule.body}${note}`);
+  }
+  console.log(`  Accepted examples:`);
+  for (const example of shape.examples) console.log(`    ${renderExample(example)}`);
+}
+function renderVerbExplain(verb: string, asJson: boolean): void {
+  const spec = explainSpec(verb);
+  if (asJson) {
+    console.log(JSON.stringify(spec, null, 2));
+    return;
+  }
+  console.log(`Accepted input shapes for: flow-agents workflow ${verb}`);
+  if (spec.summary) console.log(`\n${spec.summary}`);
+  if (spec.json_flags.length === 0) {
+    console.log(`\nThis verb accepts no structured JSON flags. Run \`flow-agents workflow ${verb} --help\` for its options.`);
+  }
+  if (spec.parameters.length > 0) {
+    console.log(`\nFlags (refused together in one pass, before any payload is parsed):`);
+    for (const parameter of spec.parameters) {
+      const notes: string[] = [];
+      if (parameter.required) notes.push(parameter.repeatable ? "required, repeatable" : "required");
+      else if (parameter.repeatable) notes.push("optional, repeatable");
+      else notes.push("optional");
+      if (parameter.allowed_values) notes.push(`one of: ${parameter.allowed_values.join(", ")}`);
+      if (parameter.required_when) {
+        const other = spec.parameters.find((candidate) => candidate.name === parameter.required_when!.parameter);
+        notes.push(`required when ${other?.flag ?? parameter.required_when.parameter} is ${parameter.required_when.equals}`);
+      }
+      console.log(`  ${parameter.flag}  (${notes.join("; ")})`);
+    }
+  }
+  for (const shape of spec.json_flags) renderShape(shape.flag, shape, (example) => `${shape.flag} ${JSON.stringify(JSON.stringify(example))}`);
+  for (const referenced of spec.referenced_shapes) {
+    renderShape(referenced.name, referenced.shape, (example) => JSON.stringify(example), "One structured evidence reference, nested in the payload above.");
+  }
+  if (spec.preconditions.length > 0) {
+    console.log(`\nPreconditions checked before the payload is accepted:`);
+    for (const precondition of spec.preconditions) console.log(`  - ${precondition}`);
+  }
+  console.log(`\nRun \`flow-agents workflow ${verb} --help\` for the full option list, or add --json for machine-readable shapes.`);
+}
+function renderVerbHelp(verb: string, asJson: boolean): void {
+  const spec = verbSpecs().get(verb);
+  const summary = spec?.summary ?? "";
+  const options = spec?.options ? [...spec.options].sort() : null;
+  if (asJson) {
+    console.log(JSON.stringify({ verb, summary, options }, null, 2));
+    return;
+  }
+  console.log(`Usage: flow-agents workflow ${verb} [options]`);
+  if (summary) console.log(`\n${summary}`);
+  if (options) {
+    console.log(`\nOptions:`);
+    for (const option of options) console.log(`  --${option}`);
+  } else {
+    console.log(`\nOptions: not yet declared for this verb (see kontourai/flow-agents#1293, #1294); run \`flow-agents workflow\` for the verb list.`);
+  }
+  if (explainSpec(verb).json_flags.length > 0) {
+    console.log(`\nRun \`flow-agents workflow ${verb} --explain\` for the accepted shape of each JSON flag, with examples.`);
+  }
 }
 
 export async function main(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   const verb = parsed.positionals[0];
+  if (verb === "help" && parsed.positionals[1] && (PUBLIC_VERBS as readonly string[]).includes(parsed.positionals[1])) {
+    renderVerbHelp(parsed.positionals[1], flagBool(parsed.flags, "json"));
+    return 0;
+  }
   if (!verb || verb === "help" || verb === "--help" || verb === "-h") {
     usage();
     return 0;
@@ -97,6 +320,22 @@ export async function main(argv: string[]): Promise<number> {
     console.error(`Unknown workflow verb: ${verb}`);
     usage();
     return 64;
+  }
+  // Help is intercepted BEFORE any verb action — before session-pointer resolution, before any
+  // artifact I/O. Presence of the flag is the signal (not flagBool): `--help <word>` would parse
+  // as a valued flag, and a documentation request must never fall through to verb execution — on
+  // a mutating verb that fall-through is an attempted mutation (#1290, #1292). `-h` never reaches
+  // flags (parseArgs only consumes `--`-prefixed arguments), so it is checked as a positional.
+  if (parsed.flags["help"] !== undefined || parsed.positionals.includes("-h")) {
+    renderVerbHelp(verb, flagBool(parsed.flags, "json"));
+    return 0;
+  }
+  // `--explain` is a documentation request with the same no-mutation contract as `--help`, and is
+  // intercepted at the same point for the same reason (#1290/#1292): a request for the accepted
+  // shape must never fall through to a mutating verb. Presence is the signal, not flagBool.
+  if (parsed.flags["explain"] !== undefined) {
+    renderVerbExplain(verb, flagBool(parsed.flags, "json"));
+    return 0;
   }
   if (verb === "start") return start(argv.slice(1));
   if (verb === "doctor") return doctor(argv.slice(1));
@@ -117,19 +356,73 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "publish-provisional-delivery-request") return provisionalDeliveryAuthorizationRequest(sessionDir, argv.slice(1));
   if (verb === "publish-delivery") {
-    assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json"]), "workflow publish-delivery");
+    assertOnlyFlags(parsed.flags, verbSpecOptions("publish-delivery"), "workflow publish-delivery");
     return publishDeliveryFromPublicWorkflow(sessionDir, flagBool(parsed.flags, "json"), "terminal");
   }
   if (verb === "publish-provisional-delivery") {
-    assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "authorization-file"]), "workflow publish-provisional-delivery");
+    assertOnlyFlags(parsed.flags, verbSpecOptions("publish-provisional-delivery"), "workflow publish-provisional-delivery");
     const authorizationFile = flagString(parsed.flags, "authorization-file");
     if (!authorizationFile) throw new Error("workflow publish-provisional-delivery requires --authorization-file <signed authority>");
     return publishDeliveryFromPublicWorkflow(sessionDir, flagBool(parsed.flags, "json"), "provisional", authorizationFile);
   }
+  if (verb === "execute-sealed-workload-request") return executeSealedWorkloadRequest(sessionDir, argv.slice(1));
+  if (verb === "execute-sealed-workload") return executeSealedWorkload(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
   if (verb === "release" && !flagString(parsed.flags, "reason")) throw new Error("workflow release requires --reason <text>");
   return builderRun([verb === "release" ? "release-assignment" : verb, "--session-dir", sessionDir, ...forwarded]);
+}
+
+export function executeSealedWorkloadRequest(sessionDir: string, argv: string[]): number {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, verbSpecOptions("execute-sealed-workload-request"), "workflow execute-sealed-workload-request");
+  const workloadFile = flagString(parsed.flags, "sealed-workload-file"); const explicitSubject = flagString(parsed.flags, "subject");
+  if (!workloadFile) throw new Error("workflow execute-sealed-workload-request requires --sealed-workload-file");
+  const workload = fs.readFileSync(workloadFile); if (workload.length > 1024 * 1024) throw new Error("sealed workload request exceeds 1MiB");
+  const minutes = Number(flagString(parsed.flags, "expires-in-minutes") ?? "5");
+  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 60) throw new Error("--expires-in-minutes must be between 0 and 60");
+  const issuedAt = new Date(); const bound = readBoundSession(sessionDir);
+  const state = readJsonFile(path.join(sessionDir, "state.json"), "sealed workload session state");
+  const derivedSubject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 && typeof state.work_item_refs[0] === "string" ? state.work_item_refs[0] : null;
+  if (!derivedSubject || !derivedSubject) throw new Error("workflow execute-sealed-workload-request requires a canonical one-work-item session");
+  if (explicitSubject && explicitSubject !== derivedSubject) throw new Error("workflow execute-sealed-workload-request --subject does not match the canonical session subject");
+  // Explicit finite budgets are mandatory: the command must never silently
+  // grant a controller the coordinator maxima.
+  const budgetNames = ["max-staged-bytes", "max-runtime-ms", "max-output-bytes", "max-provider-calls", "max-cost-microusd", "max-tokens"];
+  for (const name of budgetNames) if (!flagString(parsed.flags, name)) throw new Error(`workflow execute-sealed-workload-request requires --${name}`);
+  const authorization = buildUnsignedSealedWorkloadAuthorization({ projectRoot: bound.projectRoot, runId: path.basename(sessionDir), subject: derivedSubject,
+    workloadSha256: createHash("sha256").update(workload).digest("hex"), nonce: flagString(parsed.flags, "nonce") ?? `sealed-${randomBytes(16).toString("hex")}`,
+    issuedAt: issuedAt.toISOString(), expiresAt: new Date(issuedAt.getTime() + minutes * 60_000).toISOString(),
+    maxStagedBytes: Number(flagString(parsed.flags, "max-staged-bytes")), maxRuntimeMs: Number(flagString(parsed.flags, "max-runtime-ms")), maxOutputBytes: Number(flagString(parsed.flags, "max-output-bytes")), maxProviderCalls: Number(flagString(parsed.flags, "max-provider-calls")), maxCostMicrousd: Number(flagString(parsed.flags, "max-cost-microusd")), maxTokens: Number(flagString(parsed.flags, "max-tokens")) });
+  // Emit the exact compact bytes covered by Ed25519 alongside the readable
+  // object. External signers must sign signing_payload verbatim; pretty JSON
+  // is presentation only and is never the signature contract.
+  console.log(JSON.stringify({ authorization, signing_payload: canonicalJson(authorization) }, null, 2)); return 0;
+}
+
+export async function executeSealedWorkload(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, verbSpecOptions("execute-sealed-workload"), "workflow execute-sealed-workload");
+  const authorizationFile = flagString(parsed.flags, "authorization-file");
+  const sealedWorkloadFile = flagString(parsed.flags, "sealed-workload-file");
+  if (!authorizationFile || !sealedWorkloadFile) throw new Error("workflow execute-sealed-workload requires --authorization-file and --sealed-workload-file");
+  const request = buildUnsignedSealedExecutionRequest({ projectRoot: readBoundSession(sessionDir).projectRoot, sessionDir, authorizationFile, sealedWorkloadFile });
+  // Bind the invocation to the exact authorization the public caller saw;
+  // completion verification rejects a helper result for any substituted file.
+  const authorization = readJsonFile(authorizationFile, "sealed execution authorization");
+  const requestSha256 = lifecycleAuthorityResultDigest(request);
+  const authorizationSha256 = lifecycleAuthorityResultDigest(authorization);
+  const result = await invokeExternalSealedLifecycleAuthority(request);
+  if (!result.safe_result) throw new Error("workflow execute-sealed-workload received no safe result");
+  verifySealedExecutionCompletion(result.completion, {
+    runId: result.run_id,
+    requestSha256,
+    authorizationSha256,
+    safeResult: result.safe_result,
+  });
+  const output = { action: request.action, run_id: result.run_id, operation_status: result.operation_status, completion: result.completion, safe_result: result.safe_result };
+  console.log(json ? JSON.stringify(output) : JSON.stringify(output, null, 2));
+  return 0;
 }
 
 type DeliveryPublicationKind = "provisional" | "terminal";
@@ -145,7 +438,7 @@ const PRODUCTION_PROVISIONAL_DELIVERY_AUTHORITY: ProvisionalDeliveryAuthority = 
 };
 
 function provisionalAuthorizationHours(flags: Record<string, string | boolean | string[]>): number {
-  assertOnlyFlags(flags, new Set(["artifact-root", "session-dir", "expires-in-hours"]), "workflow publish-provisional-delivery-request");
+  assertOnlyFlags(flags, verbSpecOptions("publish-provisional-delivery-request"), "workflow publish-provisional-delivery-request");
   const hours = Number(flagString(flags, "expires-in-hours") ?? "1");
   if (!Number.isFinite(hours) || hours <= 0 || hours > 24) throw new Error("publish-provisional-delivery-request --expires-in-hours must be between 0 and 24");
   return hours;
@@ -159,8 +452,12 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
     const caller = assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
     recoverProvisionalDeliveryTransaction(sessionDir, projectRoot, slug);
     const inspected = await inspectBuilderFlowSession({ sessionDir });
-    if (inspected.run.definitionId !== "builder.build" || inspected.run.state.status !== "active" || inspected.run.state.current_step !== "merge-ready-ci") {
-      throw new Error("provisional delivery authorization requires the active builder.build merge-ready-ci gate");
+    // #1336: the declared property, not the flow's name — the run must be held at the gate that
+    // refuses to advance without current verification, which is exactly what this authorization
+    // unblocks. `assertDeliveryPublicationEligibility` asks the same question at publication.
+    const turnstileGate = inspected.run.state.status === "active" ? currentFreshnessTurnstileGate(inspected) : null;
+    if (!turnstileGate) {
+      throw new Error(`provisional delivery authorization requires an active canonical run held at a single gate declaring requires_current_verification; ${inspected.run.definitionId} is ${inspected.run.state.status} at ${inspected.run.state.current_step}`);
     }
     assertCurrentVerifiedWorkspaceEvidence(sessionDir);
     const workspace = provisionalSourceSnapshot(projectRoot, slug);
@@ -170,8 +467,7 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
     assertCurrentVerifiedWorkspaceEvidence(sessionDir);
     if (!isDeepStrictEqual(workspace, provisionalSourceSnapshot(projectRoot, slug))) throw new Error("provisional delivery authorization workspace changed while sealing");
     const checkpoint = readJsonFile(path.join(sessionDir, "trust.checkpoint.json"), "provisional delivery checkpoint");
-    const gates = openGates(inspected.run.definition, inspected.run.state) as JsonRecord[];
-    if (gates.length !== 1 || typeof gates[0]?.id !== "string") throw new Error("provisional delivery authorization requires exactly one current gate");
+    const gates = [turnstileGate];
     const assignment = readLocalAssignmentStatus(path.dirname(sessionDir), slug).record;
     if (!assignment || assignment.status !== "claimed" || assignment.actor_key !== caller.actorKey || !assignment.claimed_at) throw new Error("provisional delivery authorization requires the current assignment generation");
     const workItems = Array.isArray(sidecar.work_item_refs) ? sidecar.work_item_refs.filter((value): value is string => typeof value === "string") : [];
@@ -191,9 +487,9 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
       project_root: projectRoot, run_id: slug, subject: workItems[0], work_item: workItems[0], assignment_actor_key: caller.actorKey,
       assignment_generation: assignment.claimed_at, published_head_sha: String(changeRef.head_sha), provider_record_id: String(changeRef.provider_record_id),
       provider_observation_sha256: sha256File(providerObservationPath),
-      flow_definition_id: "builder.build", flow_definition_version: inspected.run.definitionVersion,
-      flow_definition_digest: definitionDigest(inspected.run.definition), flow_run_head: flowRunHead(inspected.run.state), flow_gate_id: gates[0].id as string,
-      flow_gate_visit: new Date(currentGateVisit(inspected.run.state, "merge-ready-ci").enteredAt).toISOString(), workspace_snapshot: workspace,
+      flow_definition_id: inspected.run.definitionId, flow_definition_version: inspected.run.definitionVersion,
+      flow_definition_digest: definitionDigest(inspected.run.definition), flow_run_head: flowRunHead(inspected.run.state), flow_gate_id: gates[0]!.id as string,
+      flow_gate_visit: new Date(currentGateVisit(inspected.run.state, inspected.run.state.current_step).enteredAt).toISOString(), workspace_snapshot: workspace,
       checkpoint_slug: slug, checkpoint_commit_sha: String(checkpoint.commit_sha), checkpoint_sha256: sha256File(path.join(sessionDir, "trust.checkpoint.json")),
       bundle_sha256: sha256File(path.join(sessionDir, "trust.bundle")), attestation_sha256: sha256File(path.join(sessionDir, "trust.checkpoint.attestation.json")), companions,
       nonce: randomBytes(16).toString("hex"), requested_at: requestedAt.toISOString(), expires_at: new Date(requestedAt.getTime() + hours * 3_600_000).toISOString(),
@@ -203,18 +499,35 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
   return 0;
 }
 
+/**
+ * The gate the run's cursor sits on, when it declares the freshness turnstile that provisional
+ * delivery exists to satisfy (`requires_current_verification`). Null otherwise.
+ *
+ * #1336: this replaces `current_step === "merge-ready-ci"` on a flow named `builder.build`. That
+ * pair is a proxy for the declared property — the run is held at a gate that will not advance until
+ * current verification evidence exists for the published workspace (see
+ * `gateAdvancementFreshnessSatisfied`). Asking the definition removes the proxy, and a kit-declared
+ * flow that keeps that gate keeps the verb.
+ */
+function currentFreshnessTurnstileGate(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): JsonRecord | null {
+  const gates = openGates(inspected.run.definition, inspected.run.state) as JsonRecord[];
+  // The "exactly one current gate" invariant the request path asserted separately is kept here,
+  // not merely implied: a step that somehow opened two gates must refuse rather than have the
+  // turnstile picked out of the pair.
+  if (gates.length !== 1 || typeof gates[0]?.id !== "string") return null;
+  return gates[0]!.requires_current_verification === true ? gates[0]! : null;
+}
+
 function assertDeliveryPublicationEligibility(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, kind: DeliveryPublicationKind): void {
-  const completed = inspected.run.definitionId === "builder.build"
-    && inspected.run.state.status === "completed"
-    && ["learn", "done"].includes(inspected.run.state.current_step);
-  const provisionalReady = inspected.run.definitionId === "builder.build"
-    && inspected.run.state.status === "active"
-    && inspected.run.state.current_step === "merge-ready-ci";
+  // A run reaches "completed" only by PASSING the gate on a step whose `next` is null, so the
+  // status is the derivation; the old step-name list was a restatement of it for one flow.
+  const completed = inspected.run.state.status === "completed";
+  const provisionalReady = inspected.run.state.status === "active" && currentFreshnessTurnstileGate(inspected) !== null;
   if (kind === "provisional" && !provisionalReady) {
-    throw new Error("workflow publish-provisional-delivery requires the canonical builder.build run to be at merge-ready-ci after a pull request is opened; it cannot stand in for release readiness or terminal delivery");
+    throw new Error(`workflow publish-provisional-delivery requires the canonical ${inspected.run.definitionId} run to be active at a gate declaring requires_current_verification after a pull request is opened; it is at ${inspected.run.state.current_step} (${inspected.run.state.status}) and cannot stand in for release readiness or terminal delivery`);
   }
   if (kind === "terminal" && !completed) {
-    throw new Error("workflow publish-delivery requires a completed canonical builder.build run after passing learning; partial or active learn sessions cannot publish terminal delivery evidence");
+    throw new Error(`workflow publish-delivery requires a completed canonical ${inspected.run.definitionId} run after passing learning; partial or active sessions (this one is ${inspected.run.state.status} at ${inspected.run.state.current_step}) cannot publish terminal delivery evidence`);
   }
 }
 function deliveryWorkspaceCapture(
@@ -660,6 +973,19 @@ type ProvisionalCompletionVerifier = (
   expected: { runId: string; requestSha256: string; resultCoreSha256: string },
 ) => JsonRecord;
 
+/**
+ * #1304: the publish-first suppression key. The whole delivery-evidence predicate
+ * (`assertTerminalDeliveryWorkspaceEvidence`) is the WRONG key for the route-back disclosure:
+ * its strict branch succeeds on fresh current verification WITHOUT examining the provisional
+ * record — exactly the pre-trap state where recording a non-pass claim would make that evidence
+ * stale and block the publish that would resolve it. Only a VERIFYING provisional delivery
+ * record — bindings validated by the production record verifier — may suppress the guidance.
+ * Throws whenever no such record exists (absent, stale, or invalid).
+ */
+export function assertVerifiedProvisionalDeliveryRecord(sessionDir: string, projectRoot: string, slug: string): void {
+  verifyRecordedProvisionalDelivery(sessionDir, projectRoot, slug, verifyProvisionalDeliveryLifecycleCompletion);
+}
+
 function verifyRecordedProvisionalDelivery(
   sessionDir: string,
   projectRoot: string,
@@ -856,7 +1182,7 @@ function readSignedCheckpointStatement(file: string): JsonRecord {
 
 async function drive(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "evidence-checkpoint-dir", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms", "context-policy"]), "workflow drive");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("drive"), "workflow drive");
   const adapterCommandFile = flagString(parsed.flags, "adapter-command-file");
   if (!adapterCommandFile) throw new Error("workflow drive requires --adapter-command-file <path>");
   const evidenceSigningKeyFile = flagString(parsed.flags, "evidence-signing-key-file");
@@ -1032,30 +1358,138 @@ function loadContinuationTurnAuthority(): {
   };
 }
 
-async function start(argv: string[]): Promise<number> {
-  const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["flow", "work-item", "task-slug", "artifact-root", "source-request", "summary", "title", "criterion", "assignment-provider", "effective-state-json"]), "workflow start");
-  const flow = flagString(parsed.flags, "flow", "builder.build")!;
-  if (flow !== "builder.build" && flow !== "builder.shape") throw new Error("workflow start supports only --flow builder.build or builder.shape");
-  const workItem = flagString(parsed.flags, "work-item");
-  const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
-  const taskSlug = flagString(parsed.flags, "task-slug");
+/**
+ * One-pass contract report for `workflow start` (#1293).
+ *
+ * The prior shape validated one input per invocation, so a cold-start agent discovered the
+ * contract as a ladder of single-fact refusals — measured live at 4+ invocations before the first
+ * run ever started, each costing a full context read. This collects every diagnosable issue and,
+ * when TWO OR MORE exist, reports them together with a complete runnable template naming the
+ * producing verbs for derived inputs.
+ *
+ * When exactly ONE issue exists, the original single-fact error is thrown byte-identical: those
+ * strings are matched by consumers (test_public_workflow_cli.sh substring-matches two of them),
+ * and a lone missing input needs no template. The combined report embeds each original line
+ * verbatim for the same reason — a consumer matching the substring keeps matching.
+ *
+ * Honesty rule for the template: provider-conditional requirements are labelled with their
+ * condition. The template never claims completeness for providers not yet selected — a
+ * complete-looking template that is incomplete would recreate the defect this exists to fix.
+ */
+function collectStartContractIssues(input: {
+  flow: string; workItem: string | undefined; taskSlug: string | undefined;
+  assignmentProvider: string | undefined; effectiveStateJson: string | undefined;
+}): string[] {
+  const issues: string[] = [];
+  const { flow, workItem, taskSlug, assignmentProvider, effectiveStateJson } = input;
   if (flow === "builder.shape") {
-    if (!taskSlug || !isSafeSlug(taskSlug)) throw new Error("workflow start --flow builder.shape requires an explicit safe --task-slug");
-    if (workItem) throw new Error("workflow start --flow builder.shape creates a local Work Item; omit --work-item");
-  } else if (!workItem) {
-    throw new Error("workflow start requires --work-item <provider-ref>");
+    if (!taskSlug || !isSafeSlug(taskSlug)) issues.push("workflow start --flow builder.shape requires an explicit safe --task-slug");
+    if (workItem) issues.push("workflow start --flow builder.shape creates a local Work Item; omit --work-item");
+    // NO early return: the provider-combination checks below applied to shape before this
+    // collector existed, and skipping them silently ACCEPTED previously-refused invocations
+    // (review round 1, HIGH: shape + --assignment-provider github without effective state
+    // passed preflight and downstream treated the ownership guard as "not evaluated" —
+    // a fail-open widening, exactly the class a preflight must never introduce).
   }
-  const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
-  const effectiveStateJson = flagString(parsed.flags, "effective-state-json");
-  if (flow === "builder.build" && workItem && !workItem.startsWith("local:") && !assignmentProvider) {
-    throw new Error("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
+  if (flow !== "builder.shape" && !workItem) issues.push("workflow start requires --work-item <provider-ref>");
+  if (flow !== "builder.shape" && workItem && !workItem.startsWith("local:")) {
+    // An unparseable reference must be a NUMBERED issue, not silently downgraded to template
+    // placeholders (round-2 review: owner/repo#0 reported only the provider issues while the
+    // actually-broken input went unmentioned).
+    // The invalid-ref issue carries the CANONICAL parser's own diagnostic rather than a locally
+    // authored paraphrase: the shared-reference-corpus conformance test (provider-bootstrap.test)
+    // asserts bootstrap, start, and the sidecar judge refs with ONE vocabulary, and a third
+    // spelling of the contract is exactly the divergence it exists to block (it caught this
+    // line's first version in CI).
+    try { workItemSlug(workItem); } catch (error) { issues.push(`workflow start --work-item ${JSON.stringify(workItem)} is not a valid provider reference: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  if (workItem && !workItem.startsWith("local:") && !assignmentProvider) {
+    issues.push("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
   }
   if (assignmentProvider !== "local-file" && !effectiveStateJson) {
-    throw new Error(`workflow start requires --effective-state-json <path> for assignment provider ${assignmentProvider}`);
+    issues.push(`workflow start requires --effective-state-json <path> for assignment provider ${assignmentProvider ?? "<kind>"}`);
   }
   if (assignmentProvider === "local-file" && effectiveStateJson) {
-    throw new Error("workflow start --effective-state-json is only valid for a non-local assignment provider");
+    issues.push("workflow start --effective-state-json is only valid for a non-local assignment provider");
+  }
+  return issues;
+}
+
+function startContractReport(issues: string[], workItem: string | undefined): string {
+  // The template is github-scoped, so the caller's ref is bound into it ONLY when the real
+  // GitHub identity parser accepts it. Anything else — including refs the provider-neutral
+  // parser accepts (round-2 review: `jira:ABC` rendered as `gh issue view jira:ABC --repo
+  // jira:AB`) — gets placeholders. The report path never throws while formatting a diagnostic
+  // (round 1: a loose regex let workItemSlug() throw mid-report for owner/repo#0).
+  let ownerRepo = "<owner>/<repo>"; let issueNumber = "<n>"; let ref = "<owner>/<repo>#<n>"; let slug = "<owner>-<repo>-<n>";
+  if (workItem) {
+    try {
+      const identity = githubWorkItemIdentity(workItem);
+      ownerRepo = `${identity.owner}/${identity.name}`; issueNumber = String(identity.issueNumber);
+      ref = workItem; slug = workItemSlug(workItem);
+    } catch { /* placeholders stand; the collector numbers the invalid ref as its own issue */ }
+  }
+  return [
+    `workflow start: ${issues.length} missing or invalid input(s):`,
+    ...issues.map((issue, index) => `  [${index + 1}] ${issue}`),
+    "",
+    "Known-required inputs and their producing chain for --assignment-provider github (steps",
+    "marked (github) apply only to that provider; other providers differ, and requirements the",
+    "runtime discovers at execution are not listed here):",
+    "  0. hold the assignment: the status in step 2 must show a CLAIMED record for your identity.",
+    "     If unclaimed, claim first: flow-agents assignment-provider render-claim --provider github \\",
+    `       --subject-id ${slug} --actor-json <file: {runtime,session_id,host}> \\`,
+    "       --input-json <file: {repo:{owner,name}, issue_number, work_item_ref, actor_key, branch, artifact_dir[, ttl_seconds]}>",
+    "     then execute its gh_commands verbatim, under the SAME identity you will run start with   (github)",
+    `  1. gh issue view ${issueNumber} --repo ${ownerRepo} --json number,state,assignees,labels,comments,body,url > issue.json`,
+    `  2. flow-agents assignment-provider status --provider github --repo ${ownerRepo} \\`,
+    `       --issue-json issue.json --subject-id ${slug} \\`,
+    "       --liveness-events-json <path-or-'[]'-file> \\",
+    "       --self-actor \"$(flow-agents-workflow-sidecar liveness whoami --json | jq -r .actor)\" > effective-state.json   (github)",
+    `  3. author .kontourai/flow-agents/${slug}/${slug}--pull-work.md naming ${ref} and the selection rationale (a file you write, not a command)`,
+    `  4. flow-agents workflow start --work-item ${ref} --assignment-provider github --effective-state-json effective-state.json   (github)`,
+    "",
+    "Identity rule: run start under the SAME canonical identity the claim was created with — if",
+    "the claim was made under FLOW_AGENTS_ACTOR, set the identical value; if it was made with",
+    "ambient session identity, do not set FLOW_AGENTS_ACTOR. The checkout must be on the claim's",
+    "branch.",
+  ].join("\n");
+}
+
+/**
+ * #1280 / #1316: `workflow start` admits a flow only when it EXISTS, CONFORMS, CAN ACTUALLY RUN,
+ * and would run THE BYTES THIS CHECK JUST VALIDATED — each answer derived, never enumerated in
+ * core. Core spells no kit name here.
+ *
+ * The rule itself lives in `flow-admission.ts` because this verb is not the only door: the
+ * installed sidecar's `ensure-session --flow-id` and `advance-state --flow-definition` reach the
+ * same artifacts, and the #1315 review found them still admitting what this refused. One rule,
+ * every door — see that module for the four questions and who answers each.
+ */
+function assertKitDeclaredFlow(flow: string, repoRoot: string): void {
+  const refusal = flowAdmissionRefusal(flow, repoRoot, "workflow start --flow");
+  if (refusal) throw new Error(refusal);
+}
+
+async function start(argv: string[]): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, verbSpecOptions("start"), "workflow start");
+  const flow = flagString(parsed.flags, "flow", "builder.build")!;
+  const workItem = flagString(parsed.flags, "work-item");
+  const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
+  assertKitDeclaredFlow(flow, findRepoRootFromDir(artifactRoot));
+  const taskSlug = flagString(parsed.flags, "task-slug");
+  const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
+  const effectiveStateJson = flagString(parsed.flags, "effective-state-json");
+  const contractIssues = collectStartContractIssues({ flow, workItem, taskSlug, assignmentProvider, effectiveStateJson });
+  if (contractIssues.length === 1) throw new Error(contractIssues[0]);
+  if (contractIssues.length > 1) {
+    // The provider chain template only makes sense for the provider-backed build flow; rendering
+    // it under shape-flow issues would hand the caller a recipe for a different contract (caught
+    // by this slice's own test before it shipped).
+    throw new Error(flow === "builder.shape"
+      ? [`workflow start: ${contractIssues.length} missing or invalid input(s):`, ...contractIssues.map((issue, index) => `  [${index + 1}] ${issue}`)].join("\n")
+      : startContractReport(contractIssues, workItem));
   }
   if (workItem?.startsWith("local:")) {
     const localSlug = workItem.slice("local:".length);
@@ -1134,6 +1568,10 @@ async function status(sessionDir: string, json: boolean): Promise<number> {
 
 const EVIDENCE_FLAGS = new Set([
   "artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason",
+  // Accepted but not required: run state is the authority for which flow an evidence
+  // write belongs to (see noteActiveFlow). Present so an operator can disambiguate a
+  // shared expectation id by hand, and so the flag is not silently rejected.
+  "flow",
   "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "authorization-file",
 ]);
 
@@ -1201,7 +1639,7 @@ function hostEvidencePreimage(sessionDir: string, projectRoot: string, slug: str
 
 async function evidenceRequest(sessionDir: string, argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, EVIDENCE_FLAGS, "workflow evidence-request");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("evidence-request"), "workflow evidence-request");
   if (flagString(parsed.flags, "authorization-file")) throw new Error("workflow evidence-request does not accept --authorization-file");
   const { slug, projectRoot } = readBoundSession(sessionDir);
   const validated = validateEvidenceArguments(parsed, projectRoot);
@@ -1330,12 +1768,89 @@ function reportEvidenceOutcome(
   else console.log(report.attached
     ? `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is ${report.status} at ${report.current_step}.`
     : `Recorded evidence (${report.gate_verdict.persisted_value}; commands: ${formatCommandOutcomes(report.command_observations)}); canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
+  // Both branches exit 0, so the exit code cannot distinguish a gate that advanced from
+  // one still refusing to. Record the verdict itself.
+  // The report carries `awaiting_evidence` as a boolean, not the missing ids: which
+  // expectations remain is known to the gate evaluator and dropped before here. The
+  // verdict is recorded; the missing set stays absent rather than invented.
+  noteGateOutcome({ attached: report.attached === true });
   return 0;
+}
+
+/**
+ * #1302: the freshness turnstile. Both instrumented dogfood runs reached a terminal state whose
+ * honest delivery the publish preflight then refused, because the cursor-advancing gate after
+ * verify accepted while verification was stale — freshness guards existed at the exits but not at
+ * the turnstile that commits the run to the exit. Any gate that declares
+ * `requires_current_verification` now runs the SAME predicate the publish preflight runs before a
+ * passing claim may advance the cursor, and surfaces that predicate's exact vocabulary (one
+ * predicate, quoted everywhere — a paraphrase here would recreate the #1299/#1300 class). Failing
+ * claims are exempt: they are the repair path the route-back map exists for.
+ */
+export function assertGateFreshnessTurnstile(
+  sessionDir: string,
+  run: { definition: unknown; state: { current_step: string } },
+  expectation: string,
+  requestedStatus: string,
+): void {
+  if (requestedStatus !== "pass") return;
+  const gates = openGates(run.definition as never, run.state as never) as JsonRecord[];
+  const gate = gates.find((candidate) => Array.isArray(candidate.expects)
+    && (candidate.expects as JsonRecord[]).some((requirement) => (requirement as JsonRecord).id === expectation));
+  if (!gate || gate.requires_current_verification !== true) return;
+  try {
+    // Delivery-tolerant form: the session's own hash-bound provisional delivery commit is the
+    // one legitimate post-verification revision at this gate (see assertTerminalDeliveryWorkspaceEvidence).
+    const { projectRoot, slug } = readBoundSession(sessionDir);
+    assertTerminalDeliveryWorkspaceEvidence(sessionDir, projectRoot, slug);
+  } catch (error) {
+    const inner = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `${String(gate.id ?? "gate")} declares requires_current_verification: a passing ${expectation} claim cannot advance the cursor past its last verification repair point while evidence is stale. ${inner}`,
+      { cause: error },
+    );
+  }
+}
+
+/**
+ * #1304: route-back cost disclosure — the factual POST half. `routeBackDisclosureLines` (the
+ * subjunctive PRE half, shared with the sidecar writer) states only declared/persisted facts
+ * before the mutation; this half reports what evaluation ACTUALLY did, derived verbatim from the
+ * transitions the committed mutation appended to canonical state — never from a re-derivation of
+ * route semantics. Exactly one of three truths is reported:
+ *   - a `route_back` transition was appended and the run left/looped its step → routed, with the
+ *     transition's own attempt/max/reason;
+ *   - a `route_back` transition was appended with `limit_exceeded` and the run is blocked →
+ *     budget exhausted, the run did not route;
+ *   - no `route_back` transition was appended → the non-pass claim sits LIVE at the unchanged
+ *     step (the run-4 trap: an unpublished `not_verified` at a `requires_current_verification`
+ *     gate is withheld, not routed).
+ */
+export function routeBackOutcomeLines(
+  postState: { status?: unknown; current_step: string; transitions?: unknown },
+  preTransitionCount: number,
+  expectation: string,
+  requestedStatus: string,
+): string[] {
+  const transitions = Array.isArray(postState.transitions) ? postState.transitions as JsonRecord[] : [];
+  const appended = transitions.slice(preTransitionCount)
+    .filter((transition) => transition && typeof transition === "object" && (transition as JsonRecord).type === "route_back");
+  if (appended.length === 0) {
+    return [`[workflow evidence] NOTICE: recorded ${requestedStatus} for ${expectation}; the run did not route — it remains at '${postState.current_step}', and a non-pass claim recorded here sits live until superseded.`];
+  }
+  const routeBack = appended[appended.length - 1]!;
+  const attempt = String(routeBack.attempt);
+  const max = String(routeBack.max_attempts);
+  if (routeBack.limit_exceeded === true && postState.status === "blocked") {
+    return [`[workflow evidence] NOTICE: route-back budget exhausted (attempt ${attempt} of ${max}); the run did not route and is BLOCKED at '${postState.current_step}'.`];
+  }
+  const reason = typeof routeBack.route_reason === "string" && routeBack.route_reason.length > 0 ? `, reason ${routeBack.route_reason}` : "";
+  return [`[workflow evidence] NOTICE: recorded ${requestedStatus} for ${expectation} routed the run back to '${String(routeBack.to_step)}' (route-back attempt ${attempt} of ${max}${reason}); current-visit verification evidence (critique/tests) must be re-recorded.`];
 }
 
 async function evidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, EVIDENCE_FLAGS, "workflow evidence");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("evidence"), "workflow evidence");
   const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json", "authorization-file"]));
   const { slug, projectRoot } = readBoundSession(sessionDir);
   const validated = validateEvidenceArguments(parsed, projectRoot);
@@ -1344,6 +1859,9 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   // Check before recovery, locking, or actor resolution so a locally authored
   // operation result cannot cause any canonical or projection mutation.
   const inspected = await inspectBuilderFlowSession({ sessionDir });
+  // The scorer cannot attribute a shared expectation id without knowing the flow, and
+  // this is where the flow is actually known.
+  noteActiveFlow(inspected.run.definitionId);
   const operation = builderOperationForExpectation(inspected.run.definitionId, expectation);
   if (operation) {
     throw new Error(`workflow evidence cannot satisfy operation-bound expectation ${expectation}; ${operation} requires authenticated external ChangeProvider completion`);
@@ -1360,6 +1878,19 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     // session state cannot change mid-invocation.
     const repaired = await recoverBuilderFlowSession({ sessionDir });
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
+    assertGateFreshnessTurnstile(sessionDir, repaired.run, expectation, requestedStatus);
+    // #1304 PRE: declared route map + persisted per-identity attempt history, emitted under the
+    // lock after authorization and immediately before the mutation — facts only, never a
+    // prediction of what evaluation will decide (an unauthorized or refused invocation
+    // discloses nothing). The publish-first guidance is suppressed ONLY by a VERIFYING
+    // provisional delivery record (production record verifier) — never by fresh current
+    // verification evidence, which is the pre-trap state.
+    const routeFacts = routeBackDisclosureLines(repaired.run, expectation, requestedStatus,
+      () => assertVerifiedProvisionalDeliveryRecord(sessionDir, repaired.projectRoot, slug));
+    for (const line of routeFacts) process.stderr.write(`${line}\n`);
+    const preTransitionCount = Array.isArray((repaired.run.state as JsonRecord).transitions)
+      ? ((repaired.run.state as JsonRecord).transitions as unknown[]).length
+      : 0;
     const run = (beforeCanonicalMutation?: () => void) => runEvidenceTransaction({
       sessionDir,
       slug,
@@ -1372,18 +1903,35 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
       beforeRun: repaired.run,
       beforeCanonicalMutation,
     });
+    let result: Awaited<ReturnType<typeof runEvidenceTransaction>>;
     if (!caller.hostRecovery) {
       if (flagString(parsed.flags, "authorization-file")) throw new Error("workflow evidence --authorization-file is only valid for host recovery");
-      return run();
+      result = await run();
+    } else {
+      result = await runHostAuthorizedEvidence({ sessionDir, slug, parsed, validated, repaired, caller, run });
     }
-    return runHostAuthorizedEvidence({ sessionDir, slug, parsed, validated, repaired, caller, run });
+    // #1304 POST: report what evaluation actually did, derived from the canonical state this
+    // invocation just committed (still under the subject lock, so the read is race-free).
+    // "recovered" means THIS invocation's candidate was canonically attached and only a later
+    // operation failed — its observed outcome is reported exactly like the fresh-commit path.
+    if (routeFacts.length > 0 && (result.state === "attached" || result.state === "recovered")) {
+      const post = await loadBuilderFlowRun({ cwd: repaired.projectRoot, runId: slug });
+      const outcomeLines = routeBackOutcomeLines(
+        post.state as { status?: unknown; current_step: string; transitions?: unknown },
+        preTransitionCount,
+        expectation,
+        requestedStatus,
+      );
+      for (const line of outcomeLines) process.stderr.write(`${line}\n`);
+    }
+    return result;
   });
   return reportEvidenceOutcome(outcome, json);
 }
 
 async function resealVerificationEvidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "authorization-file"]), "workflow reseal-verification-evidence");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("reseal-verification-evidence"), "workflow reseal-verification-evidence");
   const authorizationFile = flagString(parsed.flags, "authorization-file");
   if (!authorizationFile) throw new Error("workflow reseal-verification-evidence requires a signed --authorization-file <path>");
   const canonicalSessionDir = validateCanonicalSessionDir(sessionDir);
@@ -1409,7 +1957,7 @@ async function resealVerificationEvidence(sessionDir: string, argv: string[], js
 
 async function recoverExactCurrentCompletion(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "authorization-file"]), "workflow recover-exact-current-completion");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("recover-exact-current-completion"), "workflow recover-exact-current-completion");
   const authorizationFile = flagString(parsed.flags, "authorization-file");
   if (!authorizationFile) throw new Error("workflow recover-exact-current-completion requires a signed --authorization-file <path>");
   const canonicalSessionDir = validateCanonicalSessionDir(sessionDir);
@@ -1456,15 +2004,17 @@ export function assertRecoveryLedgerCoverage(bundle: JsonRecord, events: JsonRec
 
 async function recoverExactCurrentCompletionRequest(sessionDir: string, argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "expires-in-hours"]), "workflow recover-exact-current-completion-request");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("recover-exact-current-completion-request"), "workflow recover-exact-current-completion-request");
   const hours = Number(flagString(parsed.flags, "expires-in-hours") ?? "24");
   if (!Number.isFinite(hours) || hours <= 0 || hours > 8760) throw new Error("expires-in-hours must be between 0 and 8760");
   const { slug, projectRoot } = readBoundSession(sessionDir);
   const request = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     const repaired = await recoverBuilderFlowSession({ sessionDir });
-    if (repaired.run.definitionId !== "builder.build" || repaired.run.state.current_step !== "verify") throw new Error("exact-current completion recovery is allowed only for the canonical builder.build verify gate");
+    if (!declaredStepBindsInterface(repaired.run.definitionId, repaired.run.state.current_step, "workflow.critique", projectRoot)) {
+      throw new Error(`exact-current completion recovery is allowed only at the canonical review gate — a step whose declaring kit binds an expectation to workflow.critique; ${repaired.run.definitionId}/${repaired.run.state.current_step} declares none`);
+    }
     const gates = openGates(repaired.run.definition, repaired.run.state) as JsonRecord[];
-    if (gates.length !== 1 || typeof gates[0]?.id !== "string") throw new Error("exact-current completion recovery requires exactly one canonical current verify gate");
+    if (gates.length !== 1 || typeof gates[0]?.id !== "string") throw new Error("exact-current completion recovery requires exactly one canonical current review gate");
     const bundleBytes = readProtectedRegularFileBytes(path.join(sessionDir, "trust.bundle"), "exact-current completion recovery trust bundle", 4 * 1024 * 1024);
     if (!bundleBytes) throw new Error("exact-current completion recovery requires a current trust.bundle");
     const bundle = JSON.parse(bundleBytes.toString("utf8")) as JsonRecord;
@@ -1499,7 +2049,7 @@ async function recoverExactCurrentCompletionRequest(sessionDir: string, argv: st
       stale_completion_request_sha256: String(stale.request_sha256), stale_completion_result_core_sha256: String(stale.result_core_sha256), stale_completion_coordinator_runtime_sha256: String(stale.coordinator_runtime_sha256),
       current_bundle_sha256: createHash("sha256").update(bundleBytes).digest("hex"), current_ledger_sha256: createHash("sha256").update(ledgerBytes).digest("hex"), current_ledger_length: events.length, current_ledger_tail_hash: String(events.at(-1)?.event_hash ?? "0".repeat(64)),
       critique_projection_sha256: String(critique.digest), resolution_edge_projection_sha256: String(edges.digest), resolution_edge_projection_count: Number(edges.count),
-      flow_definition_id: "builder.build", flow_definition_sha256: createHash("sha256").update(definitionBytes).digest("hex"), flow_step_id: "verify", flow_gate_id: gates[0]!.id as string, flow_gate_policy_sha256: canonicalSha256({ gate_id: gates[0]!.id, requirements: gates[0]!.expects }), flow_run_head: flowRunHead(repaired.run.state), flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
+      flow_definition_id: repaired.run.definitionId, flow_definition_sha256: createHash("sha256").update(definitionBytes).digest("hex"), flow_step_id: repaired.run.state.current_step, flow_gate_id: gates[0]!.id as string, flow_gate_policy_sha256: canonicalSha256({ gate_id: gates[0]!.id, requirements: gates[0]!.expects }), flow_run_head: flowRunHead(repaired.run.state), flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
       nonce: `exact-current-recovery-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`, requested_at: now.toISOString(), expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
     });
   });
@@ -1509,8 +2059,7 @@ async function recoverExactCurrentCompletionRequest(sessionDir: string, argv: st
 
 async function resealVerificationEvidenceRequest(sessionDir: string, argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
-  const flags = new Set(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command", "expires-in-hours"]);
-  assertOnlyFlags(parsed.flags, flags, "workflow reseal-verification-evidence-request");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("reseal-verification-evidence-request"), "workflow reseal-verification-evidence-request");
   const expectation = flagString(parsed.flags, "expectation");
   const requestedStatus = flagString(parsed.flags, "status");
   if (!expectation || !requestedStatus || !flagString(parsed.flags, "summary")) {
@@ -1524,10 +2073,12 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
   const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json", "expires-in-hours"]));
   const request = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     const repaired = await recoverBuilderFlowSession({ sessionDir });
-    if (repaired.run.definitionId !== "builder.build" || repaired.run.state.current_step !== "verify") throw new Error("verification evidence reseal is allowed only for the canonical builder.build verify gate");
+    if (!declaredStepBindsInterface(repaired.run.definitionId, repaired.run.state.current_step, "workflow.critique", projectRoot)) {
+      throw new Error(`verification evidence reseal is allowed only at the canonical review gate — a step whose declaring kit binds an expectation to workflow.critique; ${repaired.run.definitionId}/${repaired.run.state.current_step} declares none`);
+    }
     const currentGates = openGates(repaired.run.definition, repaired.run.state) as JsonRecord[];
     if (currentGates.length !== 1 || typeof currentGates[0]?.id !== "string") {
-      throw new Error("verification evidence reseal requires exactly one canonical current verify gate");
+      throw new Error("verification evidence reseal requires exactly one canonical current review gate");
     }
     const currentGate = currentGates[0]!;
     const currentRequirements = Array.isArray(currentGate.expects) ? currentGate.expects as JsonRecord[] : [];
@@ -1625,8 +2176,8 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
       current_completion_sha256: createHash("sha256").update(completionBytes).digest("hex"),
       current_completion_request_sha256: String(completion.request_sha256),
       current_completion_result_core_sha256: String(completion.result_core_sha256),
-      flow_definition_id: "builder.build",
-      flow_step_id: "verify",
+      flow_definition_id: repaired.run.definitionId,
+      flow_step_id: repaired.run.state.current_step,
       flow_gate_id: currentGate.id as string,
       flow_run_head: caller.expectedRunHead,
       flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
@@ -2356,7 +2907,9 @@ function formatCommandOutcomes(observations: CommandObservationReport[]): string
   return observations.length === 0 ? "none" : observations.map((observation) => `${observation.outcome} (exit ${observation.exit_code})`).join(", ");
 }
 
-function assertExecuteFailureRouteBeforeMutation(
+// Exported for the #1304 byte-stability tests: these refusal strings predate the route-back
+// disclosure and consumers substring-match them, so they must stay byte-identical.
+export function assertExecuteFailureRouteBeforeMutation(
   definition: JsonRecord,
   currentStep: string,
   status: string,
@@ -2395,7 +2948,7 @@ function builderOperationForExpectation(flowId: string, expectationId: string): 
 
 async function critique(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "id", "verdict", "summary", "artifact-ref", "finding-json", "lane-json"]), "workflow critique");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("critique"), "workflow critique");
   if (!flagString(parsed.flags, "summary")) throw new Error("workflow critique requires --summary <text>");
   if (Object.hasOwn(parsed.flags, "reviewer")) throw new Error("workflow critique derives reviewer identity from the authenticated assignment actor; --reviewer is not accepted");
   const { slug, projectRoot } = readBoundSession(sessionDir);
@@ -2403,7 +2956,12 @@ async function critique(sessionDir: string, argv: string[], json: boolean): Prom
   const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     const caller = assertDistinctReviewActor(sessionDir, slug);
     const current = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
-    if (current.definitionId !== "builder.build" || current.state.current_step !== "verify") throw new Error("workflow critique is allowed only for the canonical builder.build verify step");
+    // #1336: `workflow.critique` is the interface a kit BINDS an expectation to. Asking the
+    // declaring kit whether the run's current step carries that binding is the same question the
+    // old `builder.build`/`verify` pair approximated, asked of the declaration instead of the name.
+    if (!declaredStepBindsInterface(current.definitionId, current.state.current_step, "workflow.critique", projectRoot)) {
+      throw new Error(`workflow critique is allowed only at a step whose declaring kit binds an expectation to the workflow.critique interface; ${current.definitionId}/${current.state.current_step} declares none`);
+    }
     const beforeManifest = JSON.parse(JSON.stringify(current.manifest)) as JsonRecord;
     const beforeTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
     const legacySidecars = ["critique.json", "evidence.json"].map((name) => ({ name, digest: optionalFileDigest(path.join(sessionDir, name)) }));
@@ -2428,7 +2986,7 @@ async function critique(sessionDir: string, argv: string[], json: boolean): Prom
 
 async function resolveCritique(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), "workflow resolve-critique");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("resolve-critique"), "workflow resolve-critique");
   if (!flagString(parsed.flags, "prior-record-id") || !flagString(parsed.flags, "resolving-record-id")) {
     throw new Error("workflow resolve-critique requires --prior-record-id <id> and --resolving-record-id <id>");
   }
@@ -2443,7 +3001,7 @@ async function resolveCritique(sessionDir: string, argv: string[], json: boolean
 
 async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]), "workflow resolve-critique-request");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("resolve-critique-request"), "workflow resolve-critique-request");
   const priorRecordId = flagString(parsed.flags, "prior-record-id");
   const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
   if (!priorRecordId || !resolvingRecordId) throw new Error("workflow resolve-critique-request requires both critique record ids");
@@ -2488,7 +3046,7 @@ async function resolveCritiqueRequest(sessionDir: string, argv: string[]): Promi
 
 async function repairCritiqueResolutionHistory(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "authorization-file"]), "workflow repair-critique-resolution-history");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("repair-critique-resolution-history"), "workflow repair-critique-resolution-history");
   const priorRecordId = flagString(parsed.flags, "prior-record-id");
   const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
   const authorizationFile = flagString(parsed.flags, "authorization-file");
@@ -2502,7 +3060,7 @@ async function repairCritiqueResolutionHistory(sessionDir: string, argv: string[
 
 async function repairCritiqueResolutionHistoryRequest(sessionDir: string, argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "prior-record-id", "resolving-record-id", "expires-in-hours"]), "workflow repair-critique-resolution-history-request");
+  assertOnlyFlags(parsed.flags, verbSpecOptions("repair-critique-resolution-history-request"), "workflow repair-critique-resolution-history-request");
   const priorRecordId = flagString(parsed.flags, "prior-record-id");
   const resolvingRecordId = flagString(parsed.flags, "resolving-record-id");
   if (!priorRecordId || !resolvingRecordId) throw new Error("workflow repair-critique-resolution-history-request requires both critique record ids");
@@ -2841,7 +3399,9 @@ function doctor(argv: string[]): number {
   const staleInstall = installedVersion !== null && installedVersion !== cliVersion;
   const activeKitIds = Array.isArray(install?.active_kit_ids) ? install.active_kit_ids.map(String) : (installedKit ? ["builder"] : []);
   const runtime = typeof install?.runtime === "string" ? install.runtime : "base";
-  const remediation = pinnedFlowAgentsCommand(cliVersion, ["init", "--runtime", runtime, "--dest", projectRoot, ...activeKitIds.flatMap((id) => ["--activate-kit", id]), "--yes"]);
+  // #1288: never recommend the bare (destructive) init command -- the remedy previews with
+  // --dry-run first; the dry-run output itself explains how to apply (and when --force is needed).
+  const remediation = pinnedFlowAgentsCommand(cliVersion, ["init", "--runtime", runtime, "--dest", projectRoot, ...activeKitIds.flatMap((id) => ["--activate-kit", id]), "--yes", "--dry-run"]);
   const localDependencyFile = path.join(projectRoot, "node_modules", "@kontourai", "flow-agents", "package.json");
   const localDependency = readOptionalJson(localDependencyFile);
   const installIntegrity = verifyInstalledAssets(projectRoot, packageRoot, runtime);
@@ -2961,7 +3521,20 @@ function readJsonFile(file: string, label: string): JsonRecord {
   try {
     const stat = fs.fstatSync(descriptor);
     if (!stat.isFile() || stat.size > 1024 * 1024) throw new Error(`${label} must be a regular file no larger than 1 MiB`);
-    const value = JSON.parse(fs.readFileSync(descriptor, "utf8")) as unknown;
+    // Same shape as the lstat case above: the label is in hand and a bare SyntaxError
+    // discarded it, so a corrupt state file reported the parser's position and not which
+    // file of the run was unreadable.
+    //
+    // The read is deliberately OUTSIDE the parser's catch. Wrapping both would report a
+    // mid-read I/O fault (EIO on a failing disk, say) as "not valid JSON" and send the
+    // operator off to repair content that was never the problem.
+    const contents = fs.readFileSync(descriptor, "utf8");
+    let value: unknown;
+    try {
+      value = JSON.parse(contents) as unknown;
+    } catch (error) {
+      throw new Error(`${label} is not valid JSON (${file}): ${error instanceof Error ? error.message : String(error)}`);
+    }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be a JSON object`);
     return value as JsonRecord;
   } finally {
@@ -3089,7 +3662,7 @@ function readActiveAssignmentSnapshot(sessionDir: string, slug: string): ActiveA
       throw new Error("workflow assignment changed while accepting its active generation");
     }
     const assignment = JSON.parse(raw.toString("utf8")) as JsonRecord;
-    assertActiveAssignmentShape(assignment, slug);
+    assertActiveAssignmentShape(assignment, slug, sessionDir);
     return {
       assignment,
       file,
@@ -3161,12 +3734,18 @@ async function assertMatchingAssignmentActor(sessionDir: string, slug: string): 
       hostRecovery,
     };
   }
-  throw new Error("workflow mutation requires the session's active, matching assignment actor");
+  throw new Error(
+    "workflow mutation requires the session's active, matching assignment actor\n\n" +
+      assignmentClaimRemediation(sessionDir, slug, assignment),
+  );
 }
 
 function assertOrdinaryMatchingAssignmentActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
-  const { caller, matches } = assignmentActorContext(sessionDir, slug);
-  if (!matches) throw new Error("workflow mutation requires the session's active, matching assignment actor");
+  const { caller, matches, assignment } = assignmentActorContext(sessionDir, slug);
+  if (!matches) throw new Error(
+    "workflow mutation requires the session's active, matching assignment actor\n\n" +
+      assignmentClaimRemediation(sessionDir, slug, assignment),
+  );
   return caller;
 }
 
@@ -3188,13 +3767,16 @@ function normalizeAssignmentActor(value: unknown): JsonRecord | null {
 
 function readActiveAssignment(sessionDir: string, slug: string): JsonRecord {
   const assignment = readAssignment(sessionDir, slug);
-  assertActiveAssignmentShape(assignment, slug);
+  assertActiveAssignmentShape(assignment, slug, sessionDir);
   return assignment;
 }
 
-function assertActiveAssignmentShape(assignment: JsonRecord, slug: string): void {
+function assertActiveAssignmentShape(assignment: JsonRecord, slug: string, sessionDir: string): void {
   if (assignment.status !== "claimed" || assignment.artifact_dir !== slug || typeof assignment.actor_key !== "string" || !assignment.actor_key || !assignment.actor || typeof assignment.actor !== "object" || Array.isArray(assignment.actor)) {
-    throw new Error("workflow mutation requires the session's active implementation assignment");
+    throw new Error(
+      "workflow mutation requires the session's active implementation assignment\n\n" +
+        assignmentClaimRemediation(sessionDir, slug, assignment),
+    );
   }
 }
 
@@ -3211,6 +3793,23 @@ function assertDistinctReviewActor(sessionDir: string, slug: string): ReturnType
     );
   }
   return caller;
+}
+
+function assignmentClaimRemediation(sessionDir: string, slug: string, assignment: JsonRecord | null): string {
+  const artifactRoot = path.dirname(sessionDir);
+  const branchValue = assignment?.branch;
+  const branch = typeof branchValue === "string" && branchValue.trim() ? branchValue : "<branch>";
+  const dirValue = assignment?.artifact_dir;
+  const artifactDir = typeof dirValue === "string" && dirValue.trim() ? dirValue : slug;
+  const command = [
+    "flow-agents", "assignment-provider", "claim",
+    "--provider", "local-file",
+    "--artifact-root", artifactRoot,
+    "--subject-id", slug,
+    "--branch", branch,
+    "--artifact-dir", artifactDir,
+  ].join(" ");
+  return `To claim this session, run:\n${command}\nPass --actor-json <path-to-actor.json> (or set FLOW_AGENTS_ACTOR) if no environment actor resolves.`;
 }
 
 function immutableReport<T>(value: T): T {
@@ -3339,7 +3938,12 @@ function validateCanonicalSessionDir(candidate: string): string {
     ["session directory", sessionDir, "directory"],
     ["workflow state", path.join(sessionDir, "state.json"), "file"],
   ] as const) {
-    const stat = fs.lstatSync(entry);
+    // lstatSync throws ENOENT for a missing entry, which discarded the label this loop
+    // already knows and surfaced a raw Node error instead. Absence is the common case —
+    // a mistyped slug, or a verb called before `workflow start` — so it gets the clearest
+    // message of the three, naming which component is missing and where it was looked for.
+    const stat = fs.lstatSync(entry, { throwIfNoEntry: false });
+    if (!stat) throw new Error(`${label} not found at ${entry}`);
     if (stat.isSymbolicLink() || (kind === "directory" ? !stat.isDirectory() : !stat.isFile())) throw new Error(`${label} must be a non-symlink ${kind}`);
   }
   const bundle = path.join(sessionDir, "trust.bundle");

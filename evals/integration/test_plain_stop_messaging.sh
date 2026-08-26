@@ -57,12 +57,22 @@ out=$(run_case "x" "$VERIFY_RESULT" 5)
 grep -q 'kontourai-flow-agents-568' <<<"$out" && _pass "names the paused task" || _fail "missing task name: $out"
 grep -q 'final review' <<<"$out" && _pass "translates 'verify' step to 'final review' (Slice B)" || _fail "missing plain step phrase: $out"
 grep -q '5 sign-offs' <<<"$out" && _pass "states the number of pending sign-offs (5)" || _fail "missing gap count: $out"
-grep -qi 'cancel the run to close it now' <<<"$out" && _pass "offers the cancel option in plain terms" || _fail "missing cancel option: $out"
-grep -q 'let it finish those checks' <<<"$out" && _pass "offers the finish option in plain terms" || _fail "missing finish option: $out"
+grep -qi 'cancel the run' <<<"$out" && _pass "offers the cancel option in plain terms" || _fail "missing cancel option: $out"
+grep -q 'record the outstanding sign-offs' <<<"$out" && _pass "offers the finish option in plain terms" || _fail "missing finish option: $out"
 grep -q 'a reviewer sign-off' <<<"$out" && _pass "lists 'a reviewer sign-off' (clean-critique translated)" || _fail "missing reviewer sign-off: $out"
 grep -q 'the acceptance checks' <<<"$out" && _pass "lists 'the acceptance checks' (acceptance-criteria translated)" || _fail "missing acceptance checks: $out"
 grep -q 'test results' <<<"$out" && _pass "lists 'test results' (tests-evidence translated)" || _fail "missing test results: $out"
-grep -q 'Nothing else' <<<"$out" && _pass "reassures nothing else is blocked" || _fail "missing reassurance: $out"
+grep -q 'No other work is blocked' <<<"$out" && _pass "reassures nothing else is blocked" || _fail "missing reassurance: $out"
+
+# #1172 (review MEDIUM-2): this lead now travels on BOTH channels — to the model in `reason` on a
+# blocking Stop's first contact, and to the operator in `stopReason` when the refusal escalates.
+# It may therefore not address either audience as "you", tell the model that a human's options are
+# its own, or tell a human that what follows is not for them.
+if ! grep -qiE "you're doing|you are doing|for the agent|for debugging|technical detail below" <<<"$out"; then
+  _pass "#1172: the plain lead is audience-neutral — it reads correctly to both the model and the operator"
+else
+  _fail "#1172: the plain lead still addresses one specific audience: $out"
+fi
 
 # --- 3. No internal vocabulary leaks into the human lead ----------------------
 echo ""

@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import type { FlowLifecycleRequest } from "@kontourai/flow";
 import type { ActorStruct } from "./cli/assignment-provider.js";
+import { declaredStepBindsInterface } from "./builder-gate-action-envelope.js";
 
 type JsonRecord = Record<string, unknown>;
 export type AuthorizedBuilderLifecycleOperation = "cancel" | "archive";
@@ -125,8 +126,12 @@ export interface VerificationEvidenceResealAuthorization {
   current_completion_sha256: string;
   current_completion_request_sha256: string;
   current_completion_result_core_sha256: string;
-  flow_definition_id: "builder.build";
-  flow_step_id: "verify";
+  /** #1336: the flow the run is actually bound to. Was pinned to one literal, which made every
+   *  kit-declared flow unable to request the operation at all. The binding that matters is checked
+   *  against the run: `flow_step_id` must name a step whose declaring kit binds workflow.critique,
+   *  and the external coordinator additionally requires `definition.id === flow_definition_id`. */
+  flow_definition_id: string;
+  flow_step_id: string;
   flow_gate_id: string;
   flow_run_head: string;
   flow_manifest_sha256: string;
@@ -161,7 +166,12 @@ export interface ProvisionalDeliveryAuthorization {
   published_head_sha: string;
   provider_record_id: string;
   provider_observation_sha256: string;
-  flow_definition_id: "builder.build";
+  /** #1336: the flow the run is actually bound to. Was pinned to one literal, which made every
+   *  kit-declared flow unable to request provisional delivery at all. This type carries no step id;
+   *  what binds it is checked elsewhere — the coordinator requires `definition.id ===
+   *  flow_definition_id` AND that the run is held at the gate its definition declares
+   *  `requires_current_verification`, which is the gate provisional delivery exists to unblock. */
+  flow_definition_id: string;
   flow_definition_version: string;
   flow_definition_digest: string;
   flow_run_head: string;
@@ -211,9 +221,13 @@ export interface ExactCurrentCompletionRecoveryAuthorization {
   critique_projection_sha256: string;
   resolution_edge_projection_sha256: string;
   resolution_edge_projection_count: number;
-  flow_definition_id: "builder.build";
+  /** #1336: the flow the run is actually bound to. Was pinned to one literal, which made every
+   *  kit-declared flow unable to request the operation at all. The binding that matters is checked
+   *  against the run: `flow_step_id` must name a step whose declaring kit binds workflow.critique,
+   *  and the external coordinator additionally requires `definition.id === flow_definition_id`. */
+  flow_definition_id: string;
   flow_definition_sha256: string;
-  flow_step_id: "verify";
+  flow_step_id: string;
   flow_gate_id: string;
   flow_gate_policy_sha256: string;
   flow_run_head: string;
@@ -256,7 +270,12 @@ export function validateExactCurrentCompletionRecoveryAuthorization(value: JsonR
   if (value.project_root !== expected.projectRoot || value.run_id !== expected.runId || value.subject !== expected.subject) throw new Error("exact-current completion recovery authorization does not bind the canonical project, run, and subject");
   if (value.permitted_transition !== "exact-current-completion-only") throw new Error("exact-current completion recovery authorization transition is invalid");
   if (!["resolve-critique", "repair-critique-resolution-history", "reseal-verification-evidence", "recover-exact-current-completion"].includes(String(value.stale_completion_action))) throw new Error("exact-current completion recovery authorization stale completion action is invalid");
-  if (value.flow_definition_id !== "builder.build" || value.flow_step_id !== "verify") throw new Error("exact-current completion recovery authorization must bind the builder.build verify gate");
+  // #1336: the review gate is the one the DECLARING KIT binds an expectation to workflow.critique
+  // at — the same derivation `workflow critique` and the reseal request now use. A literal pair
+  // refused every kit-declared flow while proving nothing a variant could not also satisfy.
+  if (!declaredStepBindsInterface(String(value.flow_definition_id), String(value.flow_step_id), "workflow.critique", expected.projectRoot)) {
+    throw new Error(`exact-current completion recovery authorization must bind a canonical review gate; ${String(value.flow_definition_id)}/${String(value.flow_step_id)} declares no workflow.critique binding`);
+  }
   for (const field of EXACT_CURRENT_COMPLETION_RECOVERY_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_sha256") || field.endsWith("_tail_hash") || field === "flow_run_head")) {
     if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`exact-current completion recovery authorization ${field} must be a SHA-256 digest`);
   }
@@ -310,7 +329,9 @@ export function validateVerificationEvidenceResealAuthorization(value: JsonRecor
       || typeof value.assignment_actor !== "object" || value.assignment_actor === null || Array.isArray(value.assignment_actor)) {
     throw new Error("verification evidence reseal authorization assignment binding is invalid");
   }
-  if (value.flow_definition_id !== "builder.build" || value.flow_step_id !== "verify") throw new Error("verification evidence reseal authorization must bind the builder.build verify gate");
+  if (!declaredStepBindsInterface(String(value.flow_definition_id), String(value.flow_step_id), "workflow.critique", expected.projectRoot)) {
+    throw new Error(`verification evidence reseal authorization must bind a canonical review gate; ${String(value.flow_definition_id)}/${String(value.flow_step_id)} declares no workflow.critique binding`);
+  }
   if (value.claim_delta !== "replace") throw new Error("verification evidence reseal authorization claim delta is invalid");
   for (const field of VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_sha256") || field.endsWith("_tail_hash") || field === "flow_run_head")) {
     if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`verification evidence reseal authorization ${field} must be a SHA-256 digest`);

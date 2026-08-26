@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/delegation-envelope/1.0.json",
+  "title": "Provider-neutral delegation envelope",
+  "$comment": "This structural schema is paired with validateDelegationEnvelope for credential-signature detection and semantic validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "envelope_id", "generation", "correlation", "flow_binding", "actor_id", "subject_id", "source", "authority", "budget", "runtime", "continuation_id", "cancellation_id", "revisions"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "envelope_id": { "$ref": "#/$defs/uuid" },
+    "generation": { "type": "integer", "minimum": 0 },
+    "parent_envelope_id": { "$ref": "#/$defs/uuid" },
+    "correlation": {
+      "oneOf": [
+        { "$ref": "https://kontourai.dev/schemas/flow-agents/run-correlation-envelope/1.0.json" },
+        { "type": "object", "additionalProperties": false, "required": ["status", "reason"], "properties": { "status": { "const": "incomplete" }, "reason": { "$ref": "#/$defs/reason" } } }
+      ]
+    },
+    "flow_binding": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["status", "flow_run_id", "flow_step_id", "gate_attempt"], "properties": { "status": { "const": "bound" }, "flow_run_id": { "$ref": "#/$defs/id" }, "flow_step_id": { "$ref": "#/$defs/id" }, "gate_attempt": { "type": "integer", "minimum": 0 } } },
+        { "type": "object", "additionalProperties": false, "required": ["status", "reason"], "properties": { "status": { "const": "unbound" }, "reason": { "$ref": "#/$defs/reason" } } }
+      ]
+    },
+    "actor_id": { "$ref": "#/$defs/id" },
+    "subject_id": { "$ref": "#/$defs/id" },
+    "source": { "type": "object", "additionalProperties": false, "required": ["repository_id", "worktree_id", "source_state_id"], "properties": { "repository_id": { "$ref": "#/$defs/id" }, "worktree_id": { "$ref": "#/$defs/id" }, "source_state_id": { "$ref": "#/$defs/id" }, "dirty_state_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } },
+    "authority": { "type": "object", "additionalProperties": false, "required": ["allowed_tools", "allowed_effects", "mutable_resources", "posture", "approval", "escalation"], "properties": { "allowed_tools": { "$ref": "#/$defs/idList" }, "allowed_effects": { "$ref": "#/$defs/idList" }, "mutable_resources": { "$ref": "#/$defs/resourceList" }, "posture": { "enum": ["report-only", "writer"] }, "approval": { "enum": ["automatic", "requires_approval"] }, "escalation": { "enum": ["deny", "request"] } } },
+    "budget": { "type": "object", "additionalProperties": false, "required": ["max_attempts", "max_depth", "max_concurrent_children", "max_input_tokens", "max_output_tokens", "max_cost_micros", "expires_at"], "properties": { "max_attempts": { "$ref": "#/$defs/nonNegativeInteger" }, "max_depth": { "$ref": "#/$defs/nonNegativeInteger" }, "max_concurrent_children": { "$ref": "#/$defs/nonNegativeInteger" }, "max_input_tokens": { "$ref": "#/$defs/nonNegativeInteger" }, "max_output_tokens": { "$ref": "#/$defs/nonNegativeInteger" }, "max_cost_micros": { "$ref": "#/$defs/nonNegativeInteger" }, "expires_at": { "$ref": "#/$defs/canonicalTimestamp" } } },
+    "runtime": { "type": "object", "additionalProperties": false, "required": ["required_capabilities", "runtime_receipt_ref", "model_receipt_ref"], "properties": { "required_capabilities": { "$ref": "#/$defs/idList" }, "runtime_receipt_ref": { "$ref": "#/$defs/id" }, "model_receipt_ref": { "$ref": "#/$defs/id" } } },
+    "continuation_id": { "$ref": "#/$defs/id" },
+    "cancellation_id": { "$ref": "#/$defs/id" },
+    "revisions": { "type": "object", "additionalProperties": false, "required": ["prompt_revision", "rubric_revision", "policy_revision"], "properties": { "prompt_revision": { "$ref": "#/$defs/id" }, "rubric_revision": { "$ref": "#/$defs/id" }, "policy_revision": { "$ref": "#/$defs/id" } } }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["parent_envelope_id"] },
+      "then": { "properties": { "generation": { "minimum": 1 } } },
+      "else": { "properties": { "generation": { "const": 0 } } }
+    }
+  ],
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "credentialFreeText": { "allOf": [ { "type": "string" }, { "not": { "anyOf": [
+      { "pattern": "[A-Za-z][A-Za-z0-9+.-]*://[^\\s/?#@]*@" },
+      { "pattern": "[Bb][Ee][Aa][Rr][Ee][Rr]\\s+" },
+      { "pattern": "(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt][_-]?[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd])\\s*[:=]" },
+      { "pattern": "(?:[Ss][Kk]|[Gg][Hh][OoPpRrSsUu]|[Nn][Pp][Mm]|[Pp][Yy][Pp][Ii]|[Hh][Ff])_[A-Za-z0-9_-]{8,}" },
+      { "pattern": "[Gg][Ii][Tt][Hh][Uu][Bb]_[Pp][Aa][Tt]_[A-Za-z0-9_]{12,}" },
+      { "pattern": "[Xx][Oo][Xx][BbAaPpRrSs]-[A-Za-z0-9-]{8,}" },
+      { "pattern": "[Gg][Ll][Pp][Aa][Tt]-[A-Za-z0-9_-]{8,}" },
+      { "pattern": "AKIA[A-Z0-9]{12,}" },
+      { "pattern": "AIza[A-Za-z0-9_-]{20,}" },
+      { "pattern": "[Yy][Aa]29\\.[A-Za-z0-9_-]{8,}" },
+      { "pattern": "SG\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}" },
+      { "pattern": "(?:[Ww][Hh][Ss][Ee][Cc]|[SsRrPp][Kk]_(?:[Ll][Ii][Vv][Ee]|[Tt][Ee][Ss][Tt]))_[A-Za-z0-9_-]{8,}" },
+      { "pattern": "(?:^|[^A-Za-z0-9])[Ss][Kk]-(?:[Pp][Rr][Oo][Jj]-|[Aa][Nn][Tt]-)?[A-Za-z0-9_-]{8,}" },
+      { "pattern": "[Ss][Qq]0(?:[Aa][Tt][Pp]|[Cc][Ss][Pp])-[A-Za-z0-9_-]{8,}" },
+      { "pattern": "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\." }
+    ] } } ] },
+    "id": { "allOf": [ { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://)[A-Za-z0-9][A-Za-z0-9._:@#/-]{0,254}$" }, { "$ref": "#/$defs/credentialFreeText" } ] },
+    "reason": { "allOf": [ { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\u0000-\\u001f\\u007f]+$" }, { "$ref": "#/$defs/credentialFreeText" } ] },
+    "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "canonicalTimestamp": { "type": "string", "pattern": "^(?:(?:[0-9]{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))|(?:(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:00|0[48]|[2468][048]|[13579][26])00)-02-29))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$" },
+    "idList": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+    "resourceList": { "type": "array", "uniqueItems": true, "items": { "allOf": [ { "type": "string", "pattern": "^(?!.*(?:^|/)\\.\\.?(?:/|$))[A-Za-z0-9][A-Za-z0-9._@-]*(?:/[A-Za-z0-9][A-Za-z0-9._@-]*)*$" }, { "$ref": "#/$defs/credentialFreeText" } ] } }
+  }
+}

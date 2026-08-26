@@ -88,7 +88,6 @@ Full payload/decision schema is documented in `docs/spec/runtime-hook-surface.md
 | `stop-goal-fit--off-mode.json` | stop-goal-fit | stop | L1 | Silent (exit 0, no stderr) with FLOW_AGENTS_GOAL_FIT_MODE=off |
 | `workflow-steering--allow-no-state.json` | workflow-steering | userPromptSubmit | L1 | Pass-through when no active workflow state |
 | `workflow-steering--inject-active-state.json` | workflow-steering | userPromptSubmit | L1 | Injects STATE hint for blocked task |
-| `workflow-steering--inject-subagent-steering.json` | workflow-steering | postToolUse | L1 | Injects EXECUTION COMPLETE hint after tool-worker |
 | `workflow-steering--reground-active-prompt.json` | workflow-steering | userPromptSubmit | L1 | Re-grounds an ordinary in_progress task (not just flagged states) |
 | `workflow-steering--reground-session-start.json` | workflow-steering | sessionStart | L1 | Re-grounds the active goal on SessionStart (survives compaction/resume) |
 

@@ -1,0 +1,9 @@
+{
+  "run_id": "econ-fixture-zero-duration-boundary",
+  "note": "design-probe's window is [T0,T0) -- zero duration (two transitions share the identical timestamp). The CORRECT derivation (endMs > startMs) excludes it entirely from phases[]; a boundary mutation (endMs >= startMs) would wrongly include a phantom 0-length design-probe entry.",
+  "design_probe_present": false,
+  "phase_wall_clock_s": {
+    "plan": 120,
+    "execute": 10
+  }
+}

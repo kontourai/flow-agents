@@ -191,6 +191,32 @@ flow_agents workflow evidence \
   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/example/example--plan-work.md","summary":"Accepted criterion and verification mapping."}'
 ```
 
+`--criterion-json` supplies the complete, verified evidence for the accepted criteria during this
+public verification transaction. It is intentionally distinct from `acceptance.json`: that file
+remains the planning contract and can retain an incomplete planner reference such as
+`{"kind":"source","summary":"Locate the implementation source before verification."}`.
+The successful `workflow evidence --expectation tests-evidence` command validates the complete
+criterion objects and records them in authoritative `trust.bundle`; it does not rewrite the
+planning artifact. Do not edit `acceptance.json` to repair a planned placeholder or invoke the
+package-private `workflow:sidecar record-evidence` writer for that purpose. Generic/private
+evidence writes continue to validate their final refs and fail closed on incomplete source refs.
+
+### Revision-bound command observations
+
+The public evidence command does not accept caller-supplied Git provenance. Repository-owned
+capture records `observed_at_commit` and `worktree_clean` after each command result settles, then
+preserves them in `trust.bundle` metadata and the consumer-facing `workflow-evidence` v2 projection.
+For an item to contribute to a passing gate, its captured commit must resolve through trusted Git
+and be an ancestor of current `HEAD`, its cleanliness must be `true`, and its exact captured
+Git-worktree snapshot must equal the current snapshot. Ancestry is not byte proof; the snapshot
+comparison is required as well.
+
+Dirty, missing, non-Git, malformed, unavailable, unresolved/shallow, or non-ancestor provenance
+is `NOT_VERIFIED`/`not_verified`, never an implicit pass. Schema v1 is rejected and must be
+re-recorded; v2 command entries missing these fields are non-confirming. A delivery checkpoint or attestation `commit_sha` is
+aggregate transport provenance, not a substitute for an individual command's
+`observed_at_commit`.
+
 An embedding host whose current runtime identity cannot reproduce the active
 assignment actor must establish an expiring recovery-capable session binding,
 then authorize each ordinary evidence mutation separately. Run
@@ -704,6 +730,32 @@ authentication material are deliberately excluded from result artifacts, trust b
 diagnostics, logs, and test snapshots. Local deterministic coverage does not itself prove a live
 provider operation; privileged live recovery remains a separate verification activity.
 
+### Authenticated `merge-change`
+
+`merge-change execute --session-dir <session> --strategy <squash|rebase|merge-commit|merge-queue> --authorization-file <signed-file>` is the supported mutation path for a configured ChangeProvider that explicitly declares `change.merge`. Readiness records a decision; it never authorizes or performs a merge. First create a read-only signing request, sign its exact payload with a registered lifecycle-authority Ed25519 key, and add that signature to the request file:
+
+```bash
+flow_agents merge-change request \
+  --session-dir .kontourai/flow-agents/example \
+  --strategy squash \
+  --out /absolute/outside-project/merge-change.authorization.json
+
+flow_agents merge-change execute \
+  --session-dir .kontourai/flow-agents/example \
+  --strategy squash \
+  --authorization-file /absolute/outside-project/merge-change.authorization.json
+```
+
+The protected lifecycle coordinator validates and consumes this signed, single-use authorization under the session subject lock immediately before provider mutation. It binds the exact run, definition identity/digest and Flow state, repository/PR, terminal head, strategy, assignment actor, publication-time expected provider actor, issued action digest, nonce, request time, and expiry. Repeating the same operation after a crash can return only its exact durable replay; it cannot authorize a different head, strategy, provider, PR, actor, or request. A read-only `merge-change validate-terminal-delivery --session-dir <session> --head-ref <ref>` diagnoses the local terminal-delivery binding without calling a provider.
+
+#### Target-branch policy precondition
+
+Automated merge requires the target branch to enforce a no-bypass pull-request approval policy (required_pull_request_reviews with required_approving_review_count >= 1, plus enforce_admins). `merge-change request` observes this precondition against the configured provider **before** it mints an unsigned authorization and refuses when the target branch does not satisfy it, naming the actual condition (approval policy absent, zero required approvals, or `enforce_admins` disabled) rather than a type error. When the provider cannot be reached the request reports `merge_policy_precondition.status: "unverified"` with the reason instead of passing silently; `merge-change execute` re-checks the same policy against the provider immediately before mutation. Ruleset-only configurations that do not expose an equivalent no-bypass policy remain deliberately unsupported rather than guessed.
+
+The practical consequence for a rollout: a repository whose only write-access account authors every pull request **cannot** satisfy this precondition, because GitHub forbids approving your own pull request and `enforce_admins` leaves no bypass. Such a repository needs a second approving reviewer with write access (or an app/bot with write access that can submit approving reviews) before `merge-change` can merge; until then its merges remain a disclosed provider operation performed outside `merge-change`. Enabling required reviews on a target branch is a repository policy decision with consequences for bot-authored pull requests (release automation, dependency bots) and is deliberately not something the kit changes.
+
+The enforced order is publish change, provisional delivery if CI needs it, exact-head checks, readiness, learning, terminal delivery on the same source branch, commit/push its delivery-only companions, refreshed required checks on that exact terminal head, then merge. The operation requires a completed canonical Builder run that semantically contains the `merge-ready-ci` evidence-refresh control (`missing_evidence` and `default` route to `verify`, bounded by a block-on-exceeded policy) and passing refreshed verification evidence, the current matching assignment actor, a clean source worktree, byte-identical session/working-tree/committed terminal companions, a checkpoint-bound in-toto or DSSE companion, and an ancestor-bound delivery-only delta. It rejects source drift, a changed head, provider-configuration drift, provider-actor drift, zero required checks, and non-passing required checks before mutation. Squash, rebase, merge-commit, and merge-queue each use exact-head provider behavior; no tree-equivalence or post-squash delivery-only provenance relaxation is accepted.
+
 Immediately before spawning an adapter turn, the driver writes a transient, schema-versioned
 `active-turn.json` beside its mission state and passes a raw 32-byte turn secret plus the path-safe,
 signed run id in `FLOW_AGENTS_CONTINUATION_TURN_SECRET` and
@@ -788,3 +840,9 @@ that preserves the recorded runtime and active Kits.
 The package may use lower-level writer modules internally. They are not a
 supported consumer or skill surface. Consumer guidance and Builder skills use
 `flow-agents workflow` exclusively.
+
+## Sealed workload execution
+
+`workflow execute-sealed-workload-request` emits the readable unsigned `authorization` and an exact compact canonical-JSON `signing_payload` for a separately registered Ed25519 signer. The signer signs the `signing_payload` bytes verbatim and attaches that signature to the authorization. The command derives the subject from the bound one-work-item session (an optional `--subject` must match it), binds the canonical project/run/session identity and exact workload digest, and requires every finite budget flag explicitly. It never grants coordinator maxima by default. The public execute command rereads the exact signed authorization, computes request and authorization digests, and prints only a completion verified against that exact safe result.
+
+The root coordinator stages the signed closure under a root-owned per-operation leaf of a non-listable execution root, clears supplementary groups in its fixed native privilege-drop launcher, and removes and awaits the process group on every terminal outcome or forwarded cancellation before leaf cleanup. The signed controller/closure, local signing principal, and invoking OS account are trusted local TCB. Staging provides exact-byte integrity and replay control; it is not a secrecy boundary against another process already running as the invoking UID. Deliberate `setsid` escape by a hostile signed controller is likewise outside this proportional local threat model. The public command never returns raw provider material: retained artifacts are closed structured values only—booleans, finite numbers, hashes, and a fixed status vocabulary. Tracking: #1146.
