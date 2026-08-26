@@ -4253,6 +4253,78 @@ else
   _fail "unrelated rebuild regressed or refreshed verified acceptance provenance: $(cat "$TMPDIR_EVAL/multi-rebuild.out" "$TMPDIR_EVAL/multi-rebuild.err")"
 fi
 
+# #1363 review F1: the VERIFYING IDENTITY must survive that same rebuild. The bundle above was
+# just rewritten by record-evidence — the ordinary route to delivery, since record-critique,
+# record-learning and record-evidence all rebuild after the gate claim. Every actor field is
+# re-derived on each rebuild from what checksFromBundle/criteriaFromBundle restore, so a missing
+# restore does not fail: it SILENTLY reverts the claim to the tool constant and drops
+# verified_by, permanently, in exactly the bundle that gets delivered. Asserted after the
+# rebuild, not at the write that stamped it, because only the post-rebuild read has the power to
+# catch that.
+if node - "$MULTI_DIR/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const TOOL = 'flow-agents/workflow-sidecar';
+const eventFor = (id) => bundle.events.find((event) => event.claimId === id);
+const evidenceFor = (id) => bundle.evidence.filter((item) => item.claimId === id);
+
+const gate = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence' && claim.value === 'pass');
+if (!gate) process.exit(1);
+if (gate.metadata.recorded_by !== 'multi-observed-actor') process.exit(2);
+if (eventFor(gate.id)?.actor !== 'multi-observed-actor') process.exit(3);
+if (!evidenceFor(gate.id).every((item) => item.collectedBy === 'multi-observed-actor' && item.supportStrength === 'entails')) process.exit(4);
+if (!gate.metadata.observed_commands.every((entry) => entry.source === 'canonical-writer-execution')) process.exit(5);
+
+const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance' && claim.value === 'pass');
+if (criteria.length !== 2) process.exit(6);
+for (const criterion of criteria) {
+  if (criterion.metadata.criterion.verified_by !== 'multi-observed-actor') process.exit(7);
+  if (eventFor(criterion.id)?.actor !== 'multi-observed-actor') process.exit(8);
+  const items = evidenceFor(criterion.id);
+  if (items.length === 0 || !items.every((item) => item.collectedBy === 'multi-observed-actor' && item.supportStrength === 'entails')) process.exit(9);
+  if (!criterion.metadata.criterion.observed_commands.every((entry) => entry.source === 'canonical-writer-execution')) process.exit(10);
+}
+
+const critiques = bundle.claims.filter((claim) => claim.metadata?.origin === 'critique' && claim.status !== 'superseded');
+if (critiques.length === 0) process.exit(11);
+if (!critiques.every((claim) => { const e = eventFor(claim.id); return !e || e.actor === claim.metadata.reviewer; })) process.exit(12);
+const verifiers = new Set(bundle.events.filter((event) => event.status === 'verified').map((event) => event.actor));
+if (verifiers.has(TOOL)) process.exit(13);
+if (!verifiers.has('multi-observed-actor') || !verifiers.has('multi-reviewer')) process.exit(14);
+NODE
+then
+  _pass "#1363/#1365: the verifying actor, verified_by, and execution source all SURVIVE a record-evidence rebuild (restore path, not just the stamping write)"
+else
+  _fail "#1363/#1365: a rebuild dropped the verifying identity or the execution source (exit $?)"
+fi
+
+# #1363 review F3: `_recorded_by` and `_observed_commands` are trust-bearing after this change —
+# the fold publishes the first as the event actor / evidence collector, and derives
+# supportStrength "entails" from the second's `source`. A caller-supplied --check-json must not
+# be able to name a verifier for a command that never ran. normalizeCheck scrubs both.
+if flow_agents_node "$WRITER" record-evidence "$MULTI_DIR" \
+  --verdict not_verified \
+  --check-json '{"id":"forged-provenance-probe","kind":"command","status":"pass","summary":"Smuggled provenance probe.","command":"npm test","_recorded_by":"forged-reviewer","_observed_commands":[{"command":"npm test","exit_code":0,"output_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source":"canonical-writer-execution"}]}' \
+  --timestamp "2026-07-11T11:00:36Z" >"$TMPDIR_EVAL/multi-forge.out" 2>"$TMPDIR_EVAL/multi-forge.err" \
+  && node - "$MULTI_DIR/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const forged = bundle.claims.find((claim) => String(claim.subjectId || '').endsWith('/forged-provenance-probe'));
+if (!forged) process.exit(1);
+// The smuggled actor must reach NOTHING: not private metadata, not the event, not the evidence.
+if (forged.metadata.recorded_by !== undefined) process.exit(2);
+if (forged.metadata.observed_commands !== undefined) process.exit(3);
+if (bundle.events.some((event) => event.actor === 'forged-reviewer')) process.exit(4);
+if (bundle.evidence.some((item) => item.collectedBy === 'forged-reviewer')) process.exit(5);
+// And no evidence anywhere may claim to entail on nobody's authority.
+if (bundle.evidence.some((item) => item.supportStrength === 'entails' && item.collectedBy === 'flow-agents/workflow-sidecar')) process.exit(6);
+NODE
+then
+  _pass "#1363: a --check-json cannot smuggle _recorded_by/_observed_commands into the trust-bearing actor and entails fields"
+else
+  _fail "#1363: caller-supplied provenance stamps reached the trust bundle (exit $?): $(cat "$TMPDIR_EVAL/multi-forge.out" "$TMPDIR_EVAL/multi-forge.err")"
+fi
+
 # A direct acceptance artifact edit cannot replace or erase the durable criterion contract on a
 # later, unrelated bundle write. This reproduces the issue #601 artifact-only erasure vector.
 node - "$MULTI_DIR/acceptance.json" <<'NODE'

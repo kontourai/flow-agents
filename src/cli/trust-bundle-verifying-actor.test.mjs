@@ -152,6 +152,43 @@ test("#1363 critique origin: the reviewer becomes the event actor", async () => 
   assert.equal(eventFor(bundle, claim.id).actor, "reviewer-beta");
 });
 
+test("#1363: the DEFAULT reviewer string is not a verifier — a review nobody claimed names no actor", async () => {
+  // record-critique defaults --reviewer to "tool-code-reviewer", and three further sites re-apply
+  // that default (import-critique, the bundle restore, and the fold itself), so metadata.reviewer
+  // is never absent. Publishing it as the event actor would assert a real agent in this ecosystem
+  // as the verifier of a review nobody claimed — the exact false provenance #1363 exists to stop.
+  const bundle = await buildTrustBundle("actor", TS, [], [], [critique({ reviewer: "tool-code-reviewer" })]);
+  const claim = bundle.claims.find((c) => c.metadata?.origin === "critique");
+  assert.equal(claim.metadata.reviewer, "tool-code-reviewer", "the recorded string is preserved in metadata — only the derived field abstains");
+  assert.equal(eventFor(bundle, claim.id).actor, TOOL_ACTOR);
+
+  // Same for a critique whose reviewer field is missing entirely (the fold re-defaults it).
+  const missing = critique();
+  delete missing.reviewer;
+  const bundle2 = await buildTrustBundle("actor", TS, [], [], [missing]);
+  const claim2 = bundle2.claims.find((c) => c.metadata?.origin === "critique");
+  assert.equal(eventFor(bundle2, claim2.id).actor, TOOL_ACTOR);
+});
+
+test("#1363: `entails` is never asserted on nobody's authority", async () => {
+  // "No verifier was recorded" and "this evidence entails the claim" cannot both be true of one
+  // item — and corroboration counts (collectedBy, entails) pairs, so an entailing item collected
+  // by the tool constant would let the TOOL be counted as a distinct actor.
+  const noActor = await buildTrustBundle("actor", TS, [writerObservedCheck()], [], [], [writerLogEntry("npm test")]);
+  const claim = noActor.claims.find((c) => c.metadata?.origin === "check");
+  const [evidence] = evidenceFor(noActor, claim.id);
+  assert.equal(evidence.collectedBy, TOOL_ACTOR);
+  assert.equal("supportStrength" in evidence, false, "a writer observation with no named collector must not be marked entails");
+
+  for (const b of [noActor, await buildTrustBundle("actor", TS, [writerObservedCheck({ _recorded_by: "agent-alpha" })], [], [critique()], [writerLogEntry("npm test")])]) {
+    assert.equal(
+      b.evidence.some((e) => e.supportStrength === "entails" && e.collectedBy === TOOL_ACTOR),
+      false,
+      "no entailing evidence may carry the tool constant as its collector",
+    );
+  }
+});
+
 test("#1363: reviewer-vs-implementer is now visible in the delivered bundle, not only in private metadata", async () => {
   const bundle = await buildTrustBundle("actor", TS, [writerObservedCheck({ _recorded_by: "agent-alpha" })], [], [critique()], [writerLogEntry("npm test")]);
   const actors = new Set(bundle.events.filter((e) => e.status === "verified").map((e) => e.actor));
@@ -159,10 +196,14 @@ test("#1363: reviewer-vs-implementer is now visible in the delivered bundle, not
     "before the fix both events read 'flow-agents/workflow-sidecar' and an independent critique was indistinguishable from a self-recorded check");
 });
 
-test("#1363: corroboration.minActors has a real input — and same-actor evidence does not inflate it", async () => {
-  // The mechanism is deliberately NOT enabled in this change; this asserts only that the input
-  // it reads (distinct collectedBy over supportStrength "entails" evidence, per claim) is now
-  // populated, and that two observations from ONE actor still count as one actor.
+test("#1363: distinct-collector counting has a real input — and same-actor evidence does not inflate it", async () => {
+  // Surface counts distinct collectedBy over supportStrength "entails" evidence per claim
+  // (evaluateCorroboration). That counter is reached from an InquiryRecord claim requirement, NOT
+  // from a VerificationPolicy, and this change does not enable it anywhere — see the PR for why
+  // minActors:2 is in fact unsatisfiable for every claim this producer emits today. What is
+  // asserted here is only that the input is now populated and is counted per ACTOR: two
+  // observations run by ONE actor remain one actor, so no such threshold could ever be met by
+  // volume of evidence.
   const twoCommands = writerObservedCheck({
     _recorded_by: "agent-alpha",
     _observed_commands: [

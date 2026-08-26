@@ -764,6 +764,22 @@ const SIDECAR_TOOL_ACTOR = "flow-agents/workflow-sidecar";
 const CAPTURE_HOOK_COLLECTOR = "flow-agents/evidence-capture";
 
 /**
+ * #1363 review F2: record-critique's `--reviewer` DEFAULT. It is applied in four places
+ * (recordCritique's flag default, import-critique's synthesized argv, critiquesFromBundle's
+ * restore, and buildTrustBundle's own fold default), so `metadata.reviewer` is NEVER absent —
+ * which means a critique recorded without `--reviewer` carries this string indistinguishably
+ * from one whose reviewer really is the `tool-code-reviewer` agent.
+ *
+ * It is therefore NOT a derived identity, and must never be published as `VerificationEvent.actor`:
+ * doing so asserts a named agent in this ecosystem as the verifier of a review nobody claimed —
+ * the exact false-provenance failure #1363 exists to prevent. The string stays in
+ * `metadata.reviewer` (its meaning there is unchanged, and supersession scoping still keys on it);
+ * only the derived actor field abstains. Single-sourced here so the four sites cannot drift apart
+ * and silently make the sentinel unrecognisable to the fold.
+ */
+const DEFAULT_CRITIQUE_REVIEWER = "tool-code-reviewer";
+
+/**
  * #1363: the verifying identity a claim actually carries, or null when none was derived.
  *
  * Present iff derived: an empty or retired-"local" actor key is NOT an identity, and a failure
@@ -774,10 +790,14 @@ const CAPTURE_HOOK_COLLECTOR = "flow-agents/evidence-capture";
  * The predicate is `scripts/hooks/lib/actor-identity.js`'s `isUnresolvedActor` (the same one the
  * liveness/lifecycle paths use), consumed rather than re-implemented.
  */
-function recordedActorOrNull(value: unknown): string | null {
+function recordedActorOrNull(value: unknown, unresolvedSentinel?: string): string | null {
   if (typeof value !== "string") return null;
   const actor = value.trim();
   if (actor.length === 0) return null;
+  // A caller-defaulted sentinel is indistinguishable from a real identity once stored, so it is
+  // treated as "not derived" — abstaining is the safe direction, since the recorded string is
+  // still readable in claim.metadata for anyone who wants it.
+  if (unresolvedSentinel !== undefined && actor === unresolvedSentinel) return null;
   try {
     if (loadActorIdentityHelper().isUnresolvedActor(actor)) return null;
   } catch { return null; }
@@ -1471,7 +1491,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
         // verification, which is precisely the thing #1363 exists to prevent. Leaving them unset
         // (rather than `cited`) is also status-neutral — Surface reads an absent supportStrength
         // as entails for claim-status derivation, so no existing claim's status moves.
-        ...(observation.source === WRITER_OBSERVATION_SOURCE
+        // #1363 review F5: `entails` additionally requires a DERIVED collector. "No verifier was
+        // recorded" and "this evidence entails the claim" cannot both be asserted of the same
+        // item — and corroboration counts (collectedBy, entails) pairs, so an entailing item
+        // collected by the tool constant would let the TOOL be counted as an actor.
+        ...(checkActor !== null
+          && observation.source === WRITER_OBSERVATION_SOURCE
           && (observation.exit_code === 0 ? effectiveStatus === "pass" : effectiveStatus === "fail")
           ? { supportStrength: "entails" } : {}),
         passing: effectiveStatus === "pass" && observation.exit_code === 0,
@@ -1649,7 +1674,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
           // process. Reaching here already requires exit 0 + clean Git provenance for every
           // observation (hasObservedCommandProvenance), so the outcome agrees with the claim by
           // construction; the remaining question is only whether the writer ran it.
-          ...(observation.source === WRITER_OBSERVATION_SOURCE ? { supportStrength: "entails" } : {}),
+          ...(criterionActor !== null && observation.source === WRITER_OBSERVATION_SOURCE ? { supportStrength: "entails" } : {}),
           passing: true,
           execution: { runner: "bash", label: observation.command, isError: false, exitCode: 0 },
         });
@@ -1684,7 +1709,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // (status "superseded" + first-class metadata.superseded_by), but is excluded from reconcile
     // evaluation and from the "critique pass cannot include fail members" validator rule.
     const supersededBy = typeof c.superseded_by === "string" && c.superseded_by.length > 0 ? c.superseded_by : null;
-    const critiqueReviewer = String(c.reviewer ?? "tool-code-reviewer");
+    const critiqueReviewer = String(c.reviewer ?? DEFAULT_CRITIQUE_REVIEWER);
     const critiqueReviewedAt = String(c.reviewed_at ?? ts);
     const critiqueIdentityVersion = c.identity_version === 2 ? 2 : 1;
     const reconstructedMetadata = c._source_claim_metadata
@@ -1744,7 +1769,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // a claim reconstructed from a prior write reports the reviewer it was recorded under, not
     // whoever triggered the rebuild. This surfaces an identity that was already recorded; it
     // does not manufacture one — a critique with no reviewer string keeps SIDECAR_TOOL_ACTOR.
-    const critiqueActor = recordedActorOrNull(critMeta.reviewer);
+    const critiqueActor = recordedActorOrNull(critMeta.reviewer, DEFAULT_CRITIQUE_REVIEWER);
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
       const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: critiqueActor ?? SIDECAR_TOOL_ACTOR, method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
@@ -4651,6 +4676,18 @@ export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existi
     check._waiver = { ...(check._waiver as AnyObj) };
     delete (check._waiver as AnyObj).skip_learning;
   }
+  // #1363 review F3: `_recorded_by` and `_observed_commands` are TRUST-BEARING — the fold
+  // publishes the first as VerificationEvent.actor / Evidence.collectedBy and derives
+  // supportStrength "entails" from the second's `source`. They are minted by the writer that
+  // actually resolved an actor and actually spawned a process (recordGateClaim, recordCheck),
+  // both of which stamp them AFTER this call, exactly like `_output_sha256`. Every
+  // caller-supplied check (record-evidence/record-check/dogfood-pass --check-json) flows through
+  // here, and this spread previously carried them straight into the bundle — so a --check-json
+  // could name any actor as the verifier of a command that never ran, and it validated. Scrubbed
+  // unconditionally at this single choke point: there is deliberately no opt-in flag, because an
+  // opt-in is a thing a future caller can get wrong.
+  delete check._recorded_by;
+  delete check._observed_commands;
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
   if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {
     const existingHasStamp = existingCheckStampById?.get(check.id);
@@ -5394,7 +5431,7 @@ export function critiquesFromBundle(dir: string): AnyObj[] {
       findings: Array.isArray(md.findings) ? md.findings : [],
       lanes: Array.isArray(md.lanes) ? md.lanes : [],
       review_target: md.review_target && typeof md.review_target === "object" && !Array.isArray(md.review_target) ? md.review_target : { artifacts: [] },
-      reviewer: typeof md.reviewer === "string" ? md.reviewer : "tool-code-reviewer",
+      reviewer: typeof md.reviewer === "string" ? md.reviewer : DEFAULT_CRITIQUE_REVIEWER,
       reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
       ...(md.identity_version === 2 ? { identity_version: 2 } : {}),
       critique_record_id: typeof md.critique_record_id === "string" && md.critique_record_id.length > 0 ? md.critique_record_id : c.id,
@@ -5696,6 +5733,15 @@ ${stderr}` : ""}`.trim());
     summary,
     command: displayCommand,
   }, false, _existingCheckStampById, repoRoot);
+  // #1363 review F5: record-check EXECUTES the command itself under this process's privileges
+  // (see this function's trust-posture note above), so the actor that invoked it is the real
+  // collector of the observation below — the same identity, from the same helper, that
+  // recordGateClaim stamps one function away. Without this the observation would be published
+  // as "entails" with no named collector, which is incoherent: nothing can be said to entail a
+  // claim on nobody's authority. Stamped AFTER normalizeCheck, which scrubs the field so a
+  // caller can never supply it (F3).
+  const recordCheckActorKey = resolveReadActorKey(p);
+  if (!loadActorIdentityHelper().isUnresolvedActor(recordCheckActorKey)) check._recorded_by = recordCheckActorKey;
   check._output_sha256 = outputSha256;
   if (exitCode !== null) {
     const observed: ObservedCommand = {
@@ -6163,7 +6209,6 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     check.artifact_refs = evidenceRefs;
   }
   check._producer = producer.id;
-  check._recorded_by = gateClaimActorKey;
   if (producer.selfProducedTrustSlices.length > 0) check._producer_self_produced_trust_slices = producer.selfProducedTrustSlices;
 
   // #270(b)/#412: --command gives a gate claim a real, runnable execution.label distinct from
@@ -6173,9 +6218,15 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   // FLOW_AGENTS_GOAL_FIT_RECHECK. Validated at record time with the same isRunnableCommandText
   // heuristic the Stop-hook backstop uses (single-sourced — see loadRunnableCommandHelper).
   if (gateCommand) check.command = gateCommand;
-  if (observedCommands.length > 0) check._observed_commands = observedCommands;
 
   const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
+  // #1363 review F3: the trust-bearing stamps are applied AFTER normalizeCheck, which scrubs
+  // both unconditionally (see its note). This is the same ordering `_output_sha256` already
+  // uses, and it is what makes the scrub absolute — the only values that reach the bundle are
+  // the actor THIS invocation resolved and the observations THIS invocation's writer produced,
+  // never anything a caller supplied.
+  checkNormalized._recorded_by = gateClaimActorKey;
+  if (observedCommands.length > 0) checkNormalized._observed_commands = observedCommands;
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
   if (mustRunTests && publicWorkflowAuthority) {
     // The public tests-evidence claim must use the exact snapshot returned by the observed
@@ -6546,7 +6597,7 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   }
   const critique: AnyObj = {
     id: critiqueId,
-    reviewer: opt(p, "reviewer", "tool-code-reviewer"),
+    reviewer: opt(p, "reviewer", DEFAULT_CRITIQUE_REVIEWER),
     reviewed_at: opt(p, "timestamp", new Date().toISOString()),
     identity_version: 2,
     verdict,
@@ -6607,7 +6658,7 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   };
   const _mergedCritiques = bundleCritiques.map((e: AnyObj) => {
     const eSuperseded = typeof e.superseded_by === "string" && e.superseded_by.length > 0;
-    const eReviewer = String(e.reviewer ?? "tool-code-reviewer");
+    const eReviewer = String(e.reviewer ?? DEFAULT_CRITIQUE_REVIEWER);
     if (critique.verdict === "pass" && e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) {
       return { ...e, superseded_by: _supersedeMarker, critique_resolution: sameReviewerResolution(e) };
     }
@@ -6804,7 +6855,7 @@ async function importCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     opts: {
       ...p.opts,
       id: [slugify(path.basename(review).replace(/\.md$/, ""), "review")],
-      reviewer: ["tool-code-reviewer"],
+      reviewer: [DEFAULT_CRITIQUE_REVIEWER],
       verdict: [verdict],
       summary: [`Imported critique from ${path.basename(review)}`],
       "artifact-ref": [importedArtifact],
