@@ -14,6 +14,7 @@
  *           c. Claimed-pass + CI never ran the command                              → DIVERGENCE
  *           d. workflow.check.command claim with no evidence (never captured)       → DIVERGENCE
  *           e. checkpoint-only bundle (no evidence/claims) → DIVERGENCE (full bundle required)
+ *           f. PROVISIONAL delivery that reconciled 0 command claims → DIVERGENCE (#1371)
  *
  * Exit codes:
  *   0 — fresh verify passed AND no divergence (bundle reconciled clean, OR bundle
@@ -1141,6 +1142,49 @@ function resolveDeclaredExemption(repoRoot, ctx) {
  * behavior for the flat layout (delivery/trust.bundle ↔ delivery/trust.checkpoint.json) and
  * correct for per-session.
  */
+/**
+ * Read the checkpoint that binds a discovered delivery, resolved the same way
+ * extractBundleCommitSha() resolves a commit binding: the bundle's own JSON when the caller
+ * handed us a `trust.checkpoint.json`, otherwise the SAME-DIRECTORY sibling checkpoint. Returns
+ * null when there is no readable checkpoint.
+ *
+ * Same-directory resolution is deliberate and matches every other checkpoint read in this file
+ * (#379 per-session layout): `delivery/<slug>/trust.bundle` is bound by
+ * `delivery/<slug>/trust.checkpoint.json`, never by a different session's.
+ */
+function readDeliveryCheckpoint(bundlePath, bundleJson) {
+  if (bundleJson && (bundleJson.status !== undefined || bundleJson.phase !== undefined)
+    && path.basename(bundlePath) === 'trust.checkpoint.json') {
+    return bundleJson;
+  }
+  const siblingCheckpoint = path.join(path.dirname(bundlePath), 'trust.checkpoint.json');
+  try {
+    return JSON.parse(fs.readFileSync(siblingCheckpoint, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Is this discovered delivery a PROVISIONAL publication (ADR 0022 addendum; issue #1371)?
+ *
+ * A provisional delivery is a bundle published to `delivery/<slug>/` for the sole purpose of
+ * letting CI check it — its checkpoint is sealed `status: "provisional"`, `phase:
+ * "ci-readiness"` (the same pair `provisionalDeliveryIsExactCheckedRevision()` already reads
+ * as the exact-checked-revision ownership carve-out, and the same pair the runtime's own
+ * `writeProvisionalDeliveryRecord` refuses to record without). It is an AGENT CLAIM, not a
+ * verdict: nothing has yet checked it, which is precisely why it was published here.
+ *
+ * The distinction is load-bearing because of what it unlocks: `bundleAttestsThisChange()`
+ * gates on commit-sha ancestry ALONE, so a bundle merely sitting at the right sha satisfies
+ * `bundle-required` regardless of whether its claims mean anything. See the
+ * `provisional-unreconciled` gate in runTrustReconcile() for the rule that closes that.
+ */
+function deliveryIsProvisional(bundlePath, bundleJson) {
+  const checkpoint = readDeliveryCheckpoint(bundlePath, bundleJson);
+  return !!checkpoint && checkpoint.status === 'provisional' && checkpoint.phase === 'ci-readiness';
+}
+
 function extractBundleCommitSha(repoRoot, bundlePath, bundleJson) {
   if (bundleJson && typeof bundleJson.commit_sha === 'string' && bundleJson.commit_sha.trim()) {
     return bundleJson.commit_sha.trim();
@@ -1474,6 +1518,17 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       return 1;
     }
 
+    // #1371: resolved from the delivery's own sealed checkpoint (status "provisional", phase
+    // "ci-readiness"), not from a field on the bundle. The checkpoint pair is the derivation
+    // that already exists and is already load-bearing — a second `provisional: true` stamp on
+    // the bundle would be a label nothing computes, and would additionally break the
+    // checkpoint attestation, whose in-toto predicate IS the bundle byte-for-byte (see
+    // merge-change.ts assertCheckpointCompanionIntegrity).
+    const bundleIsProvisional = deliveryIsProvisional(bundlePath, bundle);
+    if (bundleIsProvisional) {
+      process.stdout.write('[trust-reconcile] delivery is PROVISIONAL (checkpoint status=provisional phase=ci-readiness) — an agent claim awaiting this run\'s verdict, not evidence\n');
+    }
+
     const hasEvidence = Array.isArray(bundle.evidence) && bundle.evidence.length > 0;
     const hasClaims = Array.isArray(bundle.claims) && bundle.claims.length > 0;
 
@@ -1533,6 +1588,12 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       const { issues: manifestIssues, unresolved: reconcilableUnresolved } =
         reconcilableManifestIssues(reconcilable, manifestByCmd);
       issues.push(...manifestIssues);
+      // #1371: count the command claims this run actually CONFIRMED against CI's own fresh
+      // result — incremented at the single RECONCILED emission site below, so the count can
+      // never disagree with the narrative CI prints. A claim that diverged, was laundered, was
+      // not manifest-matched, or was accepted session-locally is NOT a confirmation and is
+      // deliberately not counted here.
+      let reconciledCommandClaims = 0;
       for (const { cmd, manifestEntry: entry } of reconcilableUnresolved) {
         const normalCmd = normalizeCmd(cmd);
 
@@ -1568,6 +1629,7 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
           continue;
         }
 
+        reconciledCommandClaims += 1;
         process.stdout.write(`[trust-reconcile]   RECONCILED: '${cmd}' (manifest id: ${entry.id}) — claimed pass, CI fresh run = PASS\n`);
       }
 
@@ -1597,6 +1659,40 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       // with zero attested claims is distinguishable in the log from one where the count line
       // is simply absent (grep-stable for downstream tooling / reviewers).
       process.stdout.write(`[trust-reconcile] ${attestedCount} attested claim(s) accepted without independent verification\n`);
+
+      // #1371: a PROVISIONAL delivery satisfies bundle-required only through claims CI
+      // actually confirmed — never by being present.
+      //
+      // This is the same principle as the `checkpoint-bypass` refusal above ("checkpoint-only
+      // bundle cannot be reconciled per-command; full trust.bundle required"), taken one step
+      // further. That gate catches a bundle with NO claims at all. It does not catch a bundle
+      // whose claims are all session-local: `sessionLocalShapeIssues` accepts a self-consistent
+      // `verified` attestation claim at L0 by design (ADR 0020 Residuals — blocking it would
+      // break every honest human-attestation use), so a provisional delivery carrying nothing
+      // but attestations reconciles ZERO commands and still exits 0, printing "all claimed-pass
+      // commands reconciled clean". Measured on this reconciler before this gate existed: a
+      // delivery holding only the repo's own `fabricated-attestation` fixture passed.
+      //
+      // That is a guard that cannot fail, because `bundleAttestsThisChange()` gates on
+      // commit-sha ancestry ALONE — it asks whether a bundle belongs to this change, never
+      // whether the bundle's claims mean anything. For a TERMINAL/verified delivery the
+      // owner-signed lifecycle stands behind the artifact and L0 attestation acceptance is the
+      // documented, deliberate residual. A PROVISIONAL delivery has no such backing: its entire
+      // reason to exist is "an independent party has not checked this yet — check it". If CI
+      // checked nothing, it confirmed nothing, and the bundle has earned nothing.
+      //
+      // Scope is deliberately narrow. This gate NEVER fires for a non-provisional delivery, so
+      // the L0 attestation residual is untouched everywhere it was already accepted. Measured
+      // against this repo's three committed provisional deliveries (…-977, …-992, …-1125): each
+      // carries exactly one reconcilable command claim, so the real publication path satisfies
+      // this without change.
+      if (bundleIsProvisional && reconciledCommandClaims === 0) {
+        process.stderr.write('[trust-reconcile] provisional delivery reconciled 0 command claim(s) against CI\'s fresh run\n');
+        issues.push({
+          type: 'provisional-unreconciled',
+          message: 'trust divergence: provisional delivery reconciled 0 command claim(s) against CI\'s fresh run; a provisional bundle satisfies bundle-required only through claims CI confirmed, never by being present',
+        });
+      }
     }
   } else if (isPostMergeEvent) {
     // Event-scoped enforcement (ADR 0022 addendum, part 4): bundle-required enforcement
