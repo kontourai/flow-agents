@@ -1386,6 +1386,139 @@ fi
 
 restore_derive_helper
 
+# ---------------------------------------------------------------------------
+# 10. #1371 — a PROVISIONAL delivery satisfies bundle-required ONLY through claims CI
+#     actually confirmed, never by being present.
+#
+#     `bundleAttestsThisChange()` gates on commit-sha ancestry ALONE. Before this gate
+#     existed, a provisional delivery whose bundle carried nothing but session-local
+#     attestation claims reconciled ZERO commands and still exited 0 — MEASURED against the
+#     repo's own `fabricated-attestation` fixture, which printed "all claimed-pass commands
+#     reconciled clean" over a bundle that confirmed nothing. That is a guard that cannot
+#     fail.
+#
+#     All four cases run the REAL scripts/ci/trust-reconcile.js through AUTO-DISCOVERY
+#     against a throwaway git repo (never --bundle: the staleness/ownership path an explicit
+#     --bundle deliberately bypasses is exactly the path CI uses). The pass/divergence
+#     fixtures are DERIVED FROM A REAL PRODUCTION PROVISIONAL BUNDLE
+#     (delivery/kontourai-flow-agents-1125) with only its execution.label rewritten, so the
+#     accept case is production-shaped rather than hand-invented.
+#
+#     Case 10d is the SCOPE CONTROL and is load-bearing: it is the same claims-free bundle as
+#     10c under a `delivered`/`release` checkpoint, and it MUST still pass. Blocking it would
+#     silently revoke ADR 0020's deliberate L0 acceptance of honest human attestations for
+#     every non-provisional delivery.
+# ---------------------------------------------------------------------------
+echo "=== #1371 provisional delivery must reconcile something (auto-discovery) ==="
+P1371_ROOT="$(mktemp -d)"
+P1371_PASSCMD='node -e "process.exit(0)"'
+P1371_FAILCMD='node -e "process.exit(3)"'
+cleanup_1371() { rm -rf "$P1371_ROOT"; }
+trap 'cleanup_declared; rm -rf "$PERSESSION_TMPROOT"; restore_derive_helper; cleanup_1371' EXIT
+
+# derive_1371_bundle <out> <label>  — real production provisional bundle, one label rewritten.
+derive_1371_bundle() {
+  node -e '
+const fs = require("fs");
+const bundle = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+for (const item of bundle.evidence) if (item.execution && item.execution.label) item.execution.label = process.argv[3];
+fs.writeFileSync(process.argv[2], JSON.stringify(bundle, null, 1));
+' "$ROOT/delivery/kontourai-flow-agents-1125/trust.bundle" "$2" "$3"
+}
+
+# build_1371_repo <dir> <bundle> <checkpoint-status> <checkpoint-phase>
+build_1371_repo() {
+  local dir="$1" bundle="$2" status="$3" phase="$4" sha
+  rm -rf "$dir"; mkdir -p "$dir/delivery/probe-slug"
+  cp "$bundle" "$dir/delivery/probe-slug/trust.bundle"
+  echo '{}' > "$dir/package.json"
+  git -C "$dir" init -q .
+  git -C "$dir" config user.email trust-reconcile-negatives@example.invalid
+  git -C "$dir" config user.name trust-reconcile-negatives
+  git -C "$dir" add -A
+  git -C "$dir" -c commit.gpgsign=false commit -qm "provisional delivery fixture"
+  sha="$(git -C "$dir" rev-parse HEAD)"
+  cat > "$dir/delivery/probe-slug/trust.checkpoint.json" <<EOF
+{"schema_version":"1.0","slug":"probe-slug","work_item":null,"status":"$status","phase":"$phase","sealed_at":"2026-08-26T00:00:00Z","commit_sha":"$sha","checkpoint":{"asOf":"2026-08-26T00:00:00.000Z","statusByClaimId":{},"throughEventCreatedAt":"2026-08-26T00:00:00Z","throughEventCreatedAtByClaimId":{},"statusFunctionVersion":"2"}}
+EOF
+  printf '%s' "$sha" > "$dir/.fixture-sha"
+}
+
+# run_1371 <label> <dir> <canonical-command> <expected-exit> <needle> [forbidden] [needle2]
+#
+# `needle2` exists because the EXIT CODE CANNOT DISCRIMINATE in case 1371b: a diverging claim
+# already pushes its own `divergence` issue, so the run reds whether or not the provisional gate
+# also fires. A fault injection that counted a CI-FAILED claim as "reconciled"
+# (`reconciledCommandClaims += 1` inside the !ciResult.passed branch) was therefore NOT CAUGHT by
+# the first version of these assertions — measured, not assumed. That injection corrupts the very
+# counter this whole gate rests on, so the invariant "a claim CI failed is never a confirmation"
+# is now pinned explicitly rather than left to an exit code that cannot see it.
+run_1371() {
+  local label="$1" dir="$2" cmd="$3" expected="$4" needle="$5" forbidden="${6:-}" needle2="${7:-}"
+  local sha out code
+  sha="$(cat "$dir/.fixture-sha")"
+  out="$(TRUST_RECONCILE_SHA="$sha" TRUST_RECONCILE_EVENT="pull_request" TRUST_RECONCILE_COMMANDS="$cmd" \
+    node "$RECONCILE" --repo-root "$dir" 2>&1)"
+  code=$?
+  if [[ $code -eq $expected ]]; then
+    _pass "$label: exit $code (expected $expected)"
+  else
+    _fail "$label: expected exit $expected, got $code — output: $out"
+  fi
+  if echo "$out" | grep -qF "$needle"; then
+    _pass "$label: emitted \"$needle\""
+  else
+    _fail "$label: expected \"$needle\" — output: $out"
+  fi
+  if [[ -n "$needle2" ]] ; then
+    if echo "$out" | grep -qF "$needle2"; then
+      _pass "$label: emitted \"$needle2\""
+    else
+      _fail "$label: expected \"$needle2\" — output: $out"
+    fi
+  fi
+  if [[ -n "$forbidden" ]] ; then
+    if echo "$out" | grep -qF "$forbidden"; then
+      _fail "$label: must NOT emit \"$forbidden\" — output: $out"
+    else
+      _pass "$label: does not emit \"$forbidden\""
+    fi
+  fi
+}
+
+derive_1371_bundle "$ROOT/delivery/kontourai-flow-agents-1125/trust.bundle" "$P1371_ROOT/reconciling.json" "$P1371_PASSCMD"
+# The DIVERGING fixture must name a command the manifest CONTAINS and that CI FAILS. Rewriting
+# only the canonical command instead makes the claim manifest-unmatched, which produces
+# [not-run] and never reaches the claimed-pass-vs-CI-FAIL branch this case exists to prove.
+derive_1371_bundle "$ROOT/delivery/kontourai-flow-agents-1125/trust.bundle" "$P1371_ROOT/diverging.json" "$P1371_FAILCMD"
+
+build_1371_repo "$P1371_ROOT/accept"    "$P1371_ROOT/reconciling.json"        provisional ci-readiness
+build_1371_repo "$P1371_ROOT/diverge"   "$P1371_ROOT/diverging.json"          provisional ci-readiness
+build_1371_repo "$P1371_ROOT/vacuous"   "$FX/fabricated-attestation.json"     provisional ci-readiness
+build_1371_repo "$P1371_ROOT/delivered" "$FX/fabricated-attestation.json"     delivered   release
+
+# 10a. ACCEPT: a provisional delivery whose command claim genuinely reconciles against CI's
+#      fresh run passes — the gate is not a blanket refusal of provisional deliveries.
+run_1371 "1371a provisional-reconciles" "$P1371_ROOT/accept" "$P1371_PASSCMD" 0 \
+  "RECONCILED: 'node -e \"process.exit(0)\"'" "[provisional-unreconciled]"
+
+# 10b. REFUSE: claimed pass, CI fresh run FAIL — the genuine divergence branch (asserted by
+#      needle, not by exit code alone, because a fresh-fail would redden this run anyway).
+#      The second needle pins the counter: a claim CI FAILED is never counted as a confirmation,
+#      so the provisional gate fires here too. Without it the exit code alone cannot tell a
+#      correct counter from a corrupted one (proven by an uncaught injection).
+run_1371 "1371b provisional-diverges" "$P1371_ROOT/diverge" "$P1371_FAILCMD" 1 \
+  "[divergence] trust divergence: agent claimed 'node -e \"process.exit(3)\"' passed; CI fresh run = FAIL" \
+  "" "[provisional-unreconciled] trust divergence: provisional delivery reconciled 0 command claim(s)"
+
+# 10c. REFUSE: a provisional delivery that confirmed nothing. This is the #1371 exploit.
+run_1371 "1371c provisional-vacuous" "$P1371_ROOT/vacuous" "$P1371_PASSCMD" 1 \
+  "[provisional-unreconciled] trust divergence: provisional delivery reconciled 0 command claim(s)"
+
+# 10d. SCOPE CONTROL: identical claims-free bundle, non-provisional checkpoint → still passes.
+run_1371 "1371d delivered-vacuous-unaffected" "$P1371_ROOT/delivered" "$P1371_PASSCMD" 0 \
+  "1 attested claim(s) accepted without independent verification" "[provisional-unreconciled]"
+
 
 echo ""
 if [[ $errors -eq 0 ]]; then
