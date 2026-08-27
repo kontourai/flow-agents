@@ -143,6 +143,7 @@ const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification:
   ["evals/fixtures/narrative-grounding-validator", { owners: ["evals/integration/test_narrative_grounding_validator.sh"], classification: "narrative grounding validator adversarial fixtures (#623)" }],
   ["evals/fixtures/narrative-prose-renderer", { owners: ["evals/integration/test_narrative_prose_renderer.sh"], classification: "model-assisted prose renderer adversarial fixtures (#614): provenance-subset (unsupported-summary), no-op-loop lack-of-progress wording, and prompt-injection fixtures reused from evals/fixtures/narrative-grounding-validator" }],
   ["evals/fixtures/narrative-evals", { owners: ["evals/integration/test_narrative_evals.sh"], classification: "grounded narrative faithfulness eval corpus + result-schema package (#612): ten R1 case-class fixtures with frozen-manifest answer keys plus five R3 corruption fixtures whose named eval-check anchors are the scorer-teeth mutation targets" }],
+  ["evals/fixtures/pr-body-file-refs", { owners: ["evals/static/test_pr_body_file_refs.sh"], classification: "verbatim GitHub-stored pull request bodies for the #1375 PR-body file-reference contract, each paired with a hand-checked expected-paths answer key" }],
   ["evals/fixtures/pull-work-provider", { owners: ["evals/integration/test_pull_work_provider.sh"], classification: "work item provider normalization fixtures" }],
   ["evals/fixtures/pull-work-wip-shepherding", { owners: ["evals/static/test_workflow_skills.sh"], classification: "WIP shepherding state fixtures" }],
   ["evals/fixtures/surface-trust", { owners: ["evals/integration/test_workflow_sidecar_writer.sh"], classification: "Surface trust evidence fixtures" }],
@@ -320,6 +321,14 @@ function validateLegacyRefs(reporter: Reporter): void {
     if (!textRefExtensions.has(path.extname(file))) continue;
     const parts = path.relative(path.join(root, "evals"), file).split(path.sep);
     if (parts.includes("results") || parts.some((part) => ignoredRefDirs.has(part))) continue;
+    // evals/fixtures/pr-body-file-refs/ holds VERBATIM GitHub-stored pull request bodies
+    // (#1375). They are historical records of what somebody wrote, not references this
+    // repository owns, and one of them names a path that never existed on the branch it
+    // described — that fabrication IS the fixture. Asserting those paths resolve here
+    // would assert the opposite of what the fixture exists to prove, and rewriting the
+    // bodies to satisfy this scan would destroy the record. Scoped to this one directory
+    // by exact path: no other fixture group is exempt.
+    if (parts.slice(0, 2).join("/") === "fixtures/pr-body-file-refs") continue;
     const text = readText(file);
     for (const match of text.matchAll(legacyRefRe)) {
       const ref = match[0].replace(/[.,)'"\]]+$/, "");

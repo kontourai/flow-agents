@@ -1,0 +1,5 @@
+evals/integration/test_narrative_trust_isolation.sh
+src/cli/public-contracts.ts
+src/cli/workflow-explain.test.mjs
+src/cli/workflow-sidecar.ts
+src/cli/workflow.ts
