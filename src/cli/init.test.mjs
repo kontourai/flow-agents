@@ -17,6 +17,7 @@ import {
   detectRuntimeFromProcessEnv,
   detectRuntimeFromFilesystem,
   detectDefaultRuntime,
+  rewriteCommandForGlobalInstall,
 } from "../../build/src/cli/init.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
@@ -159,4 +160,71 @@ test("init headless: --activate-kit auto-includes declared kit dependencies", ()
   assert.equal(activatedKitIds.has("builder"), true);
   assert.equal(activatedKitIds.has("knowledge"), true);
   assert.deepEqual(activation.errors ?? [], []);
+});
+
+// ── #945 SEC: global-install command rewriting must escape a user-supplied
+// --dest before persisting it into settings.json, where the host runs it every
+// session. Post-#1101 the claude-code hook path is exec form (`args` argv
+// vectors, never shell-parsed) and `statusLine` is the only shell-form string
+// left — one double-quoted layer. Both are exercised below by EXECUTING the
+// rewritten command, not just matching its text.
+
+/** A directory whose name breaks naive quoting, plus a probe script inside it. */
+function apostropheRootFixture(prefix) {
+  const base = makeFixtureDir(prefix);
+  const root = path.join(base, "o'brien; touch INJECTED; echo 'x");
+  fs.mkdirSync(path.join(root, "scripts", "statusline"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "statusline", "probe.js"), "console.log('PROBE_RAN');\n", "utf8");
+  return { base, root };
+}
+
+test("#945 SEC: statusLine shell string escapes a hostile --dest, still resolves, and injects nothing", () => {
+  const { base, root } = apostropheRootFixture("init-rewrite-statusline-");
+  // The post-#1101 statusLine shape.
+  const command = 'node "$CLAUDE_PROJECT_DIR/scripts/statusline/probe.js"';
+  const rewritten = rewriteCommandForGlobalInstall(command, root);
+  const result = spawnSync(rewritten, { shell: true, cwd: base, encoding: "utf8", timeout: 30000 });
+
+  assert.equal(result.status, 0, `rewritten statusLine failed: ${rewritten}\n${result.stderr}`);
+  assert.match(result.stdout, /PROBE_RAN/, `escaped path did not resolve: ${rewritten}\n${result.stderr}`);
+  assert.equal(fs.existsSync(path.join(base, "INJECTED")), false, "injected shell executed");
+  assert.equal(fs.existsSync(path.join(root, "INJECTED")), false, "injected shell executed");
+  // Exactly one quoting layer: an outer single-quote transform would put literal
+  // `'\''` into the path and silently break apostrophe homes.
+  assert.doesNotMatch(rewritten, /'\\''/, `outer single-quote escaping wrongly applied: ${rewritten}`);
+});
+
+test("#945 SEC: a shell metacharacter in --dest cannot break out of the double-quoted region", () => {
+  const base = makeFixtureDir("init-rewrite-meta-");
+  const root = path.join(base, 'x"; touch INJECTED; echo "y');
+  fs.mkdirSync(path.join(root, "scripts", "statusline"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "statusline", "probe.js"), "console.log('PROBE_RAN');\n", "utf8");
+  const rewritten = rewriteCommandForGlobalInstall('node "$CLAUDE_PROJECT_DIR/scripts/statusline/probe.js"', root);
+  const result = spawnSync(rewritten, { shell: true, cwd: base, encoding: "utf8", timeout: 30000 });
+
+  assert.equal(result.status, 0, `rewritten statusLine failed: ${rewritten}\n${result.stderr}`);
+  assert.match(result.stdout, /PROBE_RAN/, `escaped path did not resolve: ${rewritten}\n${result.stderr}`);
+  assert.equal(fs.existsSync(path.join(base, "INJECTED")), false, "injected shell executed via double-quote break-out");
+});
+
+test("#945 SEC: command substitution in --dest is neutralized, not evaluated", () => {
+  const base = makeFixtureDir("init-rewrite-cmdsub-");
+  const root = path.join(base, "$(touch INJECTED)`touch INJECTED2`");
+  fs.mkdirSync(path.join(root, "scripts", "statusline"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "statusline", "probe.js"), "console.log('PROBE_RAN');\n", "utf8");
+  const rewritten = rewriteCommandForGlobalInstall('node "$CLAUDE_PROJECT_DIR/scripts/statusline/probe.js"', root);
+  const result = spawnSync(rewritten, { shell: true, cwd: base, encoding: "utf8", timeout: 30000 });
+
+  assert.equal(result.status, 0, `rewritten statusLine failed: ${rewritten}\n${result.stderr}`);
+  assert.match(result.stdout, /PROBE_RAN/, `escaped path did not resolve: ${rewritten}\n${result.stderr}`);
+  assert.equal(fs.existsSync(path.join(base, "INJECTED")), false, "command substitution executed");
+  assert.equal(fs.existsSync(path.join(base, "INJECTED2")), false, "backtick substitution executed");
+});
+
+test("#945 SEC: a benign path round-trips unchanged", () => {
+  const plain = "/opt/flow-agents/runtime";
+  assert.equal(
+    rewriteCommandForGlobalInstall('node "$CLAUDE_PROJECT_DIR/scripts/statusline/probe.js"', plain),
+    `node "${plain}/scripts/statusline/probe.js"`,
+  );
 });

@@ -493,10 +493,13 @@ fi
 # which only points at scripts/ for project-scoped installs (installBundle
 # rsyncs scripts/ alongside .claude/). A --global install must rewrite that to
 # an absolute path, or every FA hook silently MODULE_NOT_FOUNDs in any project
-# other than this package's own checkout.
-if [[ -f "$GLOBAL_SETTINGS_JSON" ]] && node - "$GLOBAL_SETTINGS_JSON" << 'NODE'
+# other than this package's own checkout -- and post-#945 that absolute path
+# must be the durable vendored runtime root, not the ephemeral npx cache.
+if [[ -f "$GLOBAL_SETTINGS_JSON" ]] && node - "$GLOBAL_SETTINGS_JSON" "$GLOBAL_SETTINGS_DIR" << 'NODE'
 const fs = require("node:fs");
+const path = require("node:path");
 const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const dest = process.argv[3];
 const hooks = s.hooks || {};
 const entries = Object.values(hooks).flat().flatMap((g) => (g.hooks || []));
 const faEntries = entries.filter((h) => {
@@ -504,20 +507,50 @@ const faEntries = entries.filter((h) => {
   return haystack.includes("claude-hook-adapter.js") || haystack.includes("claude-telemetry-hook.js");
 });
 if (faEntries.length === 0) throw new Error("no FA hook entries found to check");
+// Post-#945: the substituted path must be the durable <dest>/.flow-agents/runtime/ vendored
+// copy, not the ephemeral npx-cache/source-checkout root the installer happened to run from.
+const vendorRoot = path.join(dest, ".flow-agents", "runtime");
 for (const h of faEntries) {
   if (!Array.isArray(h.args) || h.args.length === 0) throw new Error("FA hook entry is not exec form (no args): " + JSON.stringify(h));
   const scriptPath = String(h.args[0]);
   if (scriptPath.includes("CLAUDE_PROJECT_DIR")) throw new Error("FA hook args still depend on CLAUDE_PROJECT_DIR (breaks outside this package's own project): " + scriptPath);
   if (!/\/scripts\/hooks\/[^/]+\.js$/.test(scriptPath)) throw new Error("FA hook args[0] is not a scripts/hooks path: " + scriptPath);
+  if (!scriptPath.startsWith(vendorRoot + path.sep)) throw new Error("FA hook args[0] does not point at the vendored runtime root " + vendorRoot + ": " + scriptPath);
   if (!fs.existsSync(scriptPath)) throw new Error("FA hook args[0] points at a path that does not exist: " + scriptPath);
 }
 console.log("ok");
 NODE
 then
-  _pass "--global: FA hook commands use an absolute, resolvable path (no CLAUDE_PROJECT_DIR dependency)"
+  _pass "--global: FA hook commands use the durable vendored runtime root (no CLAUDE_PROJECT_DIR / npx-cache dependency)"
 else
-  _fail "--global: FA hook commands are not resolvable outside this package's own project directory"
+  _fail "--global: FA hook commands are not resolvable outside this package's own project directory, or do not point at the vendored runtime root"
 fi
+
+# AC2: merged settings must never reference an ephemeral npx-cache path.
+if [[ -f "$GLOBAL_SETTINGS_JSON" ]] && ! grep -q '_npx' "$GLOBAL_SETTINGS_JSON"; then
+  _pass "--global: settings.json contains zero _npx path occurrences (AC2)"
+else
+  _fail "--global: settings.json unexpectedly references an npx-cache path (_npx) (AC2)"
+fi
+
+# AC4 (part 1): the vendored runtime's version stamp reflects the package version.
+if [[ -f "$GLOBAL_SETTINGS_DIR/.flow-agents/install.json" ]] && node - "$GLOBAL_SETTINGS_DIR/.flow-agents/install.json" "$ROOT_DIR/package.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const pkg = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+if (record.version !== pkg.version) throw new Error("install.json version (" + record.version + ") does not match package.json version (" + pkg.version + ")");
+console.log("ok");
+NODE
+then
+  _pass "--global: install.json version stamp matches package.json version (AC4)"
+else
+  _fail "--global: install.json version stamp does not match package.json version (AC4)"
+fi
+
+# Capture state right after the first --global run, for the AC3 (idempotent re-run) and
+# AC4 (installedAt updates on re-run) checks performed after the second run below.
+cp "$GLOBAL_SETTINGS_JSON" "$GLOBAL_SETTINGS_JSON.first"
+FIRST_INSTALL_INSTALLED_AT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$GLOBAL_SETTINGS_DIR/.flow-agents/install.json','utf8')).installedAt)" 2>/dev/null || echo "")
 
 # Regression guard: --global must also sync skills and agents so newly added
 # Builder Kit skills don't require a full reinstall to pick up.
@@ -560,6 +593,22 @@ if [[ -n "$FIRST_MANIFEST_GENERATED_AT" && -n "$SECOND_MANIFEST_GENERATED_AT" &&
   _pass "--global: re-running init regenerates skills-manifest.json (generatedAt changed)"
 else
   _fail "--global: skills-manifest.json generatedAt did not change on re-run (first=$FIRST_MANIFEST_GENERATED_AT second=$SECOND_MANIFEST_GENERATED_AT)"
+fi
+
+# AC3: re-running init --global twice yields byte-identical managed wiring in settings.json.
+if diff -q "$GLOBAL_SETTINGS_JSON.first" "$GLOBAL_SETTINGS_JSON" >/dev/null 2>&1; then
+  _pass "--global: re-running init --global twice produces byte-identical settings.json (AC3)"
+else
+  _fail "--global: settings.json changed between two consecutive init --global runs (AC3)"
+  diff "$GLOBAL_SETTINGS_JSON.first" "$GLOBAL_SETTINGS_JSON" || true
+fi
+
+# AC4 (part 2): the version stamp's installedAt updates on every successful re-run.
+SECOND_INSTALL_INSTALLED_AT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$GLOBAL_SETTINGS_DIR/.flow-agents/install.json','utf8')).installedAt)" 2>/dev/null || echo "")
+if [[ -n "$FIRST_INSTALL_INSTALLED_AT" && -n "$SECOND_INSTALL_INSTALLED_AT" && "$FIRST_INSTALL_INSTALLED_AT" != "$SECOND_INSTALL_INSTALLED_AT" ]]; then
+  _pass "--global: install.json installedAt updates on re-run (AC4)"
+else
+  _fail "--global: install.json installedAt did not change on re-run (first=$FIRST_INSTALL_INSTALLED_AT second=$SECOND_INSTALL_INSTALLED_AT) (AC4)"
 fi
 
 echo ""
