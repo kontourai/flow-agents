@@ -39,7 +39,9 @@ git -C "$REPO" add src/value.js
 git -C "$REPO" commit -qm base
 BASE_SHA="$(git -C "$REPO" rev-parse HEAD)"
 printf '%s\n' 'export const value = 2;' 'export const doubled = value * 2;' > "$REPO/src/value.js"
+printf '%s\n' 'export const unusual = true;' > "$REPO/src/@review\`path.js"
 git -C "$REPO" add src/value.js
+git -C "$REPO" add 'src/@review`path.js'
 git -C "$REPO" commit -qm head
 HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
 
@@ -72,7 +74,7 @@ TARGET_FILE="$(output_value target-file)"
 ASSESSMENT_FILE="$(output_value assessment-file)"
 RESULT_FILE="$(output_value result-file)"
 
-node -e 'const fs=require("fs"); const [file,head]=process.argv.slice(1); const value=JSON.parse(fs.readFileSync(file,"utf8")); if(value.head_sha!==head||value.changed_file_count!==1||value.changed_files[0].path!=="src/value.js") process.exit(1)' "$TARGET_FILE" "$HEAD_SHA" \
+node -e 'const fs=require("fs"); const [file,head]=process.argv.slice(1); const value=JSON.parse(fs.readFileSync(file,"utf8")); if(value.head_sha!==head||value.changed_file_count!==2||!value.changed_files.some((entry)=>entry.path==="src/value.js")) process.exit(1)' "$TARGET_FILE" "$HEAD_SHA" \
   && ok "target records the exact head and changed-file inventory" \
   || bad "target should record the exact head and changed-file inventory"
 
@@ -106,6 +108,20 @@ if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FI
   bad "comment verdict should not launder a medium finding that requires change"
 else
   ok "medium requires_change finding routes as fail"
+fi
+
+printf '%s\n' '{"verdict":"fail","summary":"Inconsistent critical finding.","coverage":[{"lane":"code","status":"fail","summary":"Critical finding."}],"findings":[{"id":"critical-advisory","severity":"critical","requires_change":false,"file":"src/value.js","line":2,"title":"Critical advisory","description":"Critical severity cannot be advisory."}],"gaps":[]}' > "$ASSESSMENT_FILE"
+if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
+  bad "critical finding should require requires_change=true"
+else
+  ok "critical/high findings cannot contradict required-change routing"
+fi
+
+printf '%s\n' '{"verdict":"fail","summary":"Inconsistent low finding.","coverage":[{"lane":"code","status":"pass","summary":"Low advisory finding."}],"findings":[{"id":"low-blocking","severity":"low","requires_change":true,"file":"src/value.js","line":2,"title":"Low blocker","description":"Low severity cannot request route-back."}],"gaps":[]}' > "$ASSESSMENT_FILE"
+if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
+  bad "low finding should require requires_change=false"
+else
+  ok "low/info findings cannot contradict advisory routing"
 fi
 
 printf '%s\n' '{"verdict":"not_verified","summary":"Coverage unavailable.","coverage":[{"lane":"code","status":"not_verified","summary":"Reviewer could not inspect the change."}],"findings":[],"gaps":["Required source coverage was unavailable."]}' > "$ASSESSMENT_FILE"
@@ -151,6 +167,7 @@ grep -Fq 'project_doc_max_bytes=0' "$ACTION" \
   && grep -Fq 'project_doc_fallback_filenames=[]' "$ACTION" \
   && grep -Fq "steps.prepare.outputs['review-working-directory']" "$ACTION" \
   && ! grep -Fq -- '--ignore-user-config' "$ACTION" \
+  && ! grep -Fq -- '--skip-git-repo-check' "$ACTION" \
   && ok "protected Codex args disable project instruction discovery from a separate trusted cwd" \
   || bad "Codex action must use protected-compatible args and a trusted non-project cwd"
 grep -Fq 'openai-api-key:' "$ACTION" \
@@ -178,7 +195,7 @@ node -e 'const fs=require("fs"); for (const file of process.argv.slice(1)) JSON.
 # Validate the public result schema with the same Ajv 2020 implementation used
 # elsewhere in this repository. The schema must reject malformed core arrays,
 # not merely rely on the producer's private validation.
-printf '%s\n' '{"verdict":"fail","summary":"Blocking correctness finding.","coverage":[{"lane":"code","status":"fail","summary":"A changed line is incorrect."}],"findings":[{"id":"correctness-1","severity":"high","requires_change":true,"file":"src/value.js","line":2,"title":"Incorrect behavior","description":"The changed expression does not satisfy the stated invariant."}],"gaps":[]}' > "$ASSESSMENT_FILE"
+printf '%s\n' '{"verdict":"fail","summary":"Blocking correctness finding.","coverage":[{"lane":"code","status":"fail","summary":"A changed line is incorrect."}],"findings":[{"id":"correctness-1","severity":"high","requires_change":true,"file":"src/value.js","line":2,"title":"Incorrect behavior","description":"The changed expression does not satisfy the stated invariant."},{"id":"odd-path","severity":"low","requires_change":false,"file":"src/@review`path.js","line":99,"title":"Advisory path note","description":"This finding is intentionally outside a changed line."}],"gaps":[]}' > "$ASSESSMENT_FILE"
 env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null
 node --input-type=module - "$ROOT_DIR/schemas/codex-pr-review-result.schema.json" "$RESULT_FILE" <<'NODE'
 import fs from "node:fs";
@@ -193,6 +210,15 @@ for (const [field, invalid] of [["coverage", [42]], ["findings", ["bad"]], ["gap
   candidate[field] = invalid;
   if (validate(candidate)) process.exit(2);
 }
+const laundered = structuredClone(result);
+laundered.verdict = "pass";
+if (validate(laundered)) process.exit(3);
+const inconsistentHigh = structuredClone(result);
+inconsistentHigh.findings[0].requires_change = false;
+if (validate(inconsistentHigh)) process.exit(4);
+const inconsistentLow = structuredClone(result);
+inconsistentLow.findings[0].severity = "low";
+if (validate(inconsistentLow)) process.exit(5);
 NODE
 if [[ "$?" -eq 0 ]]; then
   ok "public result schema validates core arrays and rejects malformed entries"
@@ -246,6 +272,9 @@ fi
 node -e 'const fs=require("fs"); const posts=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const body=posts[0]; if(posts.length!==1||body.event!=="COMMENT"||body.commit_id!==process.argv[2]||body.comments.length!==1||body.comments[0].path!=="src/value.js"||body.comments[0].line!==2||!body.comments[0].body.includes("requires a code change")) process.exit(1)' "$REQUEST_FILE" "$HEAD_SHA" \
   && ok "publish attaches the finding to the changed right-side line with fix rationale" \
   || bad "publish should attach the finding to the changed right-side line with fix rationale"
+node -e 'const fs=require("fs"); const body=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))[0].body; if(body.includes("src/@review`path.js")||body.includes("@review")) process.exit(1)' "$REQUEST_FILE" \
+  && ok "publication sanitizes unusual repository filenames before Markdown rendering" \
+  || bad "publication should sanitize unusual repository filenames"
 env "${publish_env[@]}" REVIEW_GITHUB_TOKEN=test node "$SCRIPT" publish >/dev/null
 node -e 'const fs=require("fs"); if(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).length!==1) process.exit(1)' "$REQUEST_FILE" \
   && ok "same-head publication is idempotent" \

@@ -4,6 +4,48 @@
   "title": "Builder Codex pull request review result",
   "type": "object",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "verdict": { "const": "pass" } }, "required": ["verdict"] },
+      "then": {
+        "properties": {
+          "coverage": { "items": { "properties": { "status": { "const": "pass" } } } },
+          "findings": { "maxItems": 0 },
+          "gaps": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "comment" } }, "required": ["verdict"] },
+      "then": {
+        "properties": {
+          "coverage": { "items": { "properties": { "status": { "const": "pass" } } } },
+          "findings": {
+            "items": { "properties": { "requires_change": { "const": false } } }
+          },
+          "gaps": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "fail" } }, "required": ["verdict"] },
+      "then": {
+        "anyOf": [
+          { "properties": { "coverage": { "contains": { "properties": { "status": { "const": "fail" } }, "required": ["status"] } } } },
+          { "properties": { "findings": { "contains": { "properties": { "requires_change": { "const": true } }, "required": ["requires_change"] } } } }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "not_verified" } }, "required": ["verdict"] },
+      "then": {
+        "anyOf": [
+          { "properties": { "coverage": { "contains": { "properties": { "status": { "const": "not_verified" } }, "required": ["status"] } } } },
+          { "properties": { "gaps": { "minItems": 1 } } }
+        ]
+      }
+    }
+  ],
   "$defs": {
     "coverage": {
       "type": "array",
@@ -33,7 +75,17 @@
           "line": { "type": "integer", "minimum": 1 },
           "title": { "type": "string", "minLength": 1, "maxLength": 300 },
           "description": { "type": "string", "minLength": 1, "maxLength": 4000 }
-        }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "severity": { "enum": ["critical", "high"] } }, "required": ["severity"] },
+            "then": { "properties": { "requires_change": { "const": true } } }
+          },
+          {
+            "if": { "properties": { "severity": { "enum": ["low", "info"] } }, "required": ["severity"] },
+            "then": { "properties": { "requires_change": { "const": false } } }
+          }
+        ]
       }
     },
     "gaps": {
