@@ -44,6 +44,16 @@ const UNWIRED_SUITE_EXEMPTIONS = {
     'Green but redundant: both suites it runs (src/cli/kit-observability-contract.test.mjs and src/cli/kit-observability-conformance.test.mjs) already execute in the CI-covered unit corpus, and this wrapper rebuilds the universal bundles first. Wiring it into run_static would add a bundle rebuild to a required lane for zero additional coverage. Kept as a standalone developer entry point.',
 };
 
+// Node proof wrappers whose shell subject is deliberately outside run_static().
+// The exact CHECKS command is the reviewed contract: arbitrary wrapper source,
+// including comments that merely name a shell suite, never establishes coverage.
+const REVIEWED_DIRECT_STATIC_WRAPPERS = {
+  'node --test evals/ci/codex-pr-review-action.test.mjs': {
+    wrapper: 'evals/ci/codex-pr-review-action.test.mjs',
+    subject: 'evals/static/test_codex_pr_review_action.sh',
+  },
+};
+
 // CHECKS entries that are deliberately in no lane at all. A lane-less entry runs
 // in no CI job, so it gates nothing; it must be justified, not merely absent.
 const LANELESS_CHECK_EXEMPTIONS = {};
@@ -250,20 +260,39 @@ if (!runStatic) {
 const wiredStatic = new Set(
   runStatic ? [...runStatic[0].matchAll(/static\/(test_[A-Za-z0-9_-]+\.sh)/g)].map((match) => `evals/static/${match[1]}`) : [],
 );
+
+function directStaticSubjects(command) {
+  const directShell = command.match(/^bash (evals\/static\/test_[A-Za-z0-9_-]+\.sh)$/);
+  if (directShell) return [directShell[1]];
+  const reviewedWrapper = REVIEWED_DIRECT_STATIC_WRAPPERS[command];
+  return reviewedWrapper ? [reviewedWrapper.subject] : [];
+}
+
+// Negative control: the old implementation scanned wrapper text, so this
+// comment alone could counterfeit execution. Coverage now depends only on an
+// exact executable command or the reviewed mapping above.
+const commentOnlyWrapper = '// bash evals/static/test_codex_pr_review_action.sh';
+if (!commentOnlyWrapper.includes('evals/static/test_codex_pr_review_action.sh') ||
+    directStaticSubjects('node --test evals/ci/comment-only-proof.test.mjs').length !== 0) {
+  problems.push('A comment-only shell path counted as direct static execution.');
+}
+
 const directlyCheckedStatic = new Set();
+const usedReviewedWrappers = new Set();
 for (const check of checks.values()) {
   if (check.lanes.length === 0) continue;
-  for (const match of check.command.matchAll(/evals\/static\/(test_[A-Za-z0-9_-]+\.sh)/g)) {
-    directlyCheckedStatic.add(`evals/static/${match[1]}`);
+  for (const subject of directStaticSubjects(check.command)) directlyCheckedStatic.add(subject);
+  if (Object.hasOwn(REVIEWED_DIRECT_STATIC_WRAPPERS, check.command)) usedReviewedWrappers.add(check.command);
+}
+for (const [command, binding] of Object.entries(REVIEWED_DIRECT_STATIC_WRAPPERS)) {
+  if (!usedReviewedWrappers.has(command)) {
+    problems.push(`Reviewed direct static wrapper is not a required-lane CHECKS command: ${command}`);
   }
-  for (const match of check.command.matchAll(/src\/cli\/[A-Za-z0-9_-]+\.test\.mjs/g)) {
-    const wrapper = match[0];
-    const wrapperPath = path.join(root, wrapper);
-    if (!fs.existsSync(wrapperPath)) continue;
-    const wrapperText = fs.readFileSync(wrapperPath, 'utf8');
-    for (const staticMatch of wrapperText.matchAll(/evals\/static\/(test_[A-Za-z0-9_-]+\.sh)/g)) {
-      directlyCheckedStatic.add(`evals/static/${staticMatch[1]}`);
-    }
+  if (!fs.existsSync(path.join(root, binding.wrapper))) {
+    problems.push(`Reviewed direct static wrapper is missing: ${binding.wrapper}`);
+  }
+  if (!fs.existsSync(path.join(root, binding.subject))) {
+    problems.push(`Reviewed direct static subject is missing: ${binding.subject}`);
   }
 }
 const coveredStatic = new Set([...wiredStatic, ...directlyCheckedStatic]);
