@@ -120,6 +120,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check static-eval-suite
 
+      - name: Codex PR review action
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check codex-pr-review-action
+
       - name: Public API unit tests
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check public-api-unit-tests
