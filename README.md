@@ -201,6 +201,7 @@ URL/ref and reject `--record-source`.
 - [Kit Authoring Guide](docs/kit-authoring-guide.md) — build your own kit from scratch: directory layout, `kit.json`, a flow file, validation, install, and activation.
 - [Flow Kit Repository Contract](docs/flow-kit-repository-contract.md) — the full validation rules, registry schema, and activation diagnostics.
 - [Knowledge Kit docs](kits/knowledge/docs/README.md) — store contract, record types, mutation ops, similarity detectors, and the Obsidian adapter.
+- [Builder Codex PR review](docs/codex-pr-review-adoption.md) — advisory exact-head Codex review at publish-learn merge readiness, inline PR findings, route-back, and Station dogfood guidance.
 
 **Release Evidence Kit** — a minimal flows-only kit that proves agentless gate evaluation over trusted `release.evidence` claims in CI.
 
