@@ -19,7 +19,7 @@ CHECKS=(
   "Capability matrix drift|npm run capability-matrix -- --check"
   "Host conformance drift|npm run host-conformance:check --"
   "Static eval suite|bash evals/run.sh static"
-  "Codex PR review action|bash evals/static/test_codex_pr_review_action.sh"
+  "Codex PR review action|node --test src/cli/codex-pr-review-action.test.mjs"
   "Public API unit tests|node --test src/cli/public-api.test.mjs"
   "Ablation arm parity unit tests|node --test src/cli/ablation-arm-parity.test.mjs"
   "Sealed execution authority unit tests|node --test src/cli/sealed-execution-authority.test.mjs"

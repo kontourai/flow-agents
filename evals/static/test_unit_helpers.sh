@@ -20,7 +20,10 @@ fi
 
 node scripts/build-test-support.mjs
 
-if node --test src/cli/*.test.mjs; then
+# The Codex PR review wrapper owns a dedicated required-lane check so Trust
+# Reconcile receives exact local execution proof without running its shell suite
+# a second time through this aggregate corpus.
+if FLOW_AGENTS_STATIC_AGGREGATE=1 node --test src/cli/*.test.mjs; then
   echo "  PASS: workflow-sidecar pure-helper unit tests"
 else
   echo "  FAIL: workflow-sidecar pure-helper unit tests"

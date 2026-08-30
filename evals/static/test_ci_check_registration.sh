@@ -256,6 +256,15 @@ for (const check of checks.values()) {
   for (const match of check.command.matchAll(/evals\/static\/(test_[A-Za-z0-9_-]+\.sh)/g)) {
     directlyCheckedStatic.add(`evals/static/${match[1]}`);
   }
+  for (const match of check.command.matchAll(/src\/cli\/[A-Za-z0-9_-]+\.test\.mjs/g)) {
+    const wrapper = match[0];
+    const wrapperPath = path.join(root, wrapper);
+    if (!fs.existsSync(wrapperPath)) continue;
+    const wrapperText = fs.readFileSync(wrapperPath, 'utf8');
+    for (const staticMatch of wrapperText.matchAll(/evals\/static\/(test_[A-Za-z0-9_-]+\.sh)/g)) {
+      directlyCheckedStatic.add(`evals/static/${staticMatch[1]}`);
+    }
+  }
 }
 const coveredStatic = new Set([...wiredStatic, ...directlyCheckedStatic]);
 
