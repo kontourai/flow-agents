@@ -223,6 +223,12 @@ const hiddenBlocker = structuredClone(result);
 hiddenBlocker.verdict = "not_verified";
 hiddenBlocker.gaps = ["A gap cannot conceal an implementation defect."];
 if (validate(hiddenBlocker)) process.exit(6);
+const missingCodeLane = structuredClone(result);
+missingCodeLane.verdict = "pass";
+missingCodeLane.coverage = [{ lane: "security", status: "pass", summary: "Security-only coverage is incomplete." }];
+missingCodeLane.findings = [];
+missingCodeLane.gaps = [];
+if (validate(missingCodeLane)) process.exit(7);
 NODE
 if [[ "$?" -eq 0 ]]; then
   ok "public result schema validates core arrays and rejects malformed entries"
