@@ -219,6 +219,10 @@ if (validate(inconsistentHigh)) process.exit(4);
 const inconsistentLow = structuredClone(result);
 inconsistentLow.findings[0].severity = "low";
 if (validate(inconsistentLow)) process.exit(5);
+const hiddenBlocker = structuredClone(result);
+hiddenBlocker.verdict = "not_verified";
+hiddenBlocker.gaps = ["A gap cannot conceal an implementation defect."];
+if (validate(hiddenBlocker)) process.exit(6);
 NODE
 if [[ "$?" -eq 0 ]]; then
   ok "public result schema validates core arrays and rejects malformed entries"

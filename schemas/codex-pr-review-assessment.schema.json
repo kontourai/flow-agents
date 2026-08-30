@@ -38,6 +38,10 @@
     {
       "if": { "properties": { "verdict": { "const": "not_verified" } }, "required": ["verdict"] },
       "then": {
+        "properties": {
+          "coverage": { "items": { "properties": { "status": { "enum": ["pass", "not_verified"] } } } },
+          "findings": { "items": { "properties": { "requires_change": { "const": false } } } }
+        },
         "anyOf": [
           { "properties": { "coverage": { "contains": { "properties": { "status": { "const": "not_verified" } }, "required": ["status"] } } } },
           { "properties": { "gaps": { "minItems": 1 } } }
