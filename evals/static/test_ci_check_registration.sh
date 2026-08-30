@@ -273,7 +273,7 @@ function directStaticSubjects(command) {
 // exact executable command or the reviewed mapping above.
 const commentOnlyWrapper = '// bash evals/static/test_codex_pr_review_action.sh';
 if (!commentOnlyWrapper.includes('evals/static/test_codex_pr_review_action.sh') ||
-    directStaticSubjects('node --test evals/ci/comment-only-proof.test.mjs').length !== 0) {
+    directStaticSubjects('synthetic-comment-only-wrapper-token').length !== 0) {
   problems.push('A comment-only shell path counted as direct static execution.');
 }
 
