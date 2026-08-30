@@ -233,9 +233,8 @@ for (const [lane, job] of laneJobs) {
 // ---------------------------------------------------------------------------
 // Suites that exist must run somewhere CI reaches
 // ---------------------------------------------------------------------------
-// The eval entry point invoked by a CI-covered check. Derived, not assumed: find
-// the CHECKS command that runs `evals/run.sh static`, then read which static
-// suites its run_static() actually invokes.
+// Static evals may be reached through the aggregate runner or registered as an
+// exact required-lane command. Derive both paths and reject duplicate execution.
 const staticEntryCheck = [...checks.values()].find((check) => /evals\/run\.sh\s+static\b/.test(check.command));
 if (!staticEntryCheck) {
   problems.push('No CHECKS entry runs `evals/run.sh static`; the static eval layer would gate nothing.');
@@ -251,6 +250,14 @@ if (!runStatic) {
 const wiredStatic = new Set(
   runStatic ? [...runStatic[0].matchAll(/static\/(test_[A-Za-z0-9_-]+\.sh)/g)].map((match) => `evals/static/${match[1]}`) : [],
 );
+const directlyCheckedStatic = new Set();
+for (const check of checks.values()) {
+  if (check.lanes.length === 0) continue;
+  for (const match of check.command.matchAll(/evals\/static\/(test_[A-Za-z0-9_-]+\.sh)/g)) {
+    directlyCheckedStatic.add(`evals/static/${match[1]}`);
+  }
+}
+const coveredStatic = new Set([...wiredStatic, ...directlyCheckedStatic]);
 
 const allStatic = fs
   .readdirSync(path.join(root, 'evals/static'))
@@ -259,25 +266,31 @@ const allStatic = fs
   .sort();
 
 for (const suite of allStatic) {
-  if (wiredStatic.has(suite)) continue;
+  if (coveredStatic.has(suite)) continue;
   const exemption = UNWIRED_SUITE_EXEMPTIONS[suite];
   if (typeof exemption === 'string' && exemption.trim().length >= 12) continue;
-  problems.push(`Static eval '${suite}' exists but run_static() never invokes it, so it gates nothing and has no reasoned exemption.`);
+  problems.push(`Static eval '${suite}' exists but no required-lane check reaches it, so it gates nothing and has no reasoned exemption.`);
 }
 
 for (const [suite, reason] of Object.entries(UNWIRED_SUITE_EXEMPTIONS)) {
   if (!allStatic.includes(suite)) {
     problems.push(`UNWIRED_SUITE_EXEMPTIONS references a missing static eval: ${suite}`);
-  } else if (wiredStatic.has(suite)) {
-    problems.push(`Exempted static eval is now wired into run_static(); remove the exemption: ${suite}`);
+  } else if (coveredStatic.has(suite)) {
+    problems.push(`Exempted static eval is now reached by a required-lane check; remove the exemption: ${suite}`);
   } else if (typeof reason !== 'string' || reason.trim().length < 12) {
     problems.push(`Exemption for ${suite} must include a concrete reason.`);
   }
 }
 
-for (const suite of wiredStatic) {
+for (const suite of coveredStatic) {
   if (!fs.existsSync(path.join(root, suite))) {
-    problems.push(`run_static() invokes a missing static eval: ${suite}`);
+    problems.push(`A required-lane check reaches a missing static eval: ${suite}`);
+  }
+}
+
+for (const suite of directlyCheckedStatic) {
+  if (wiredStatic.has(suite)) {
+    problems.push(`Static eval '${suite}' runs both directly and through run_static(); keep exactly one hosted execution path.`);
   }
 }
 
@@ -286,8 +299,8 @@ for (const suite of wiredStatic) {
 // ---------------------------------------------------------------------------
 // Most unit suites are NOT named individually in CHECKS. They gate as a corpus:
 // evals/static/test_unit_helpers.sh runs `node --test src/cli/*.test.mjs`, which
-// run_static() invokes, which the "Static eval suite" check runs in a required
-// lane. That whole chain is load-bearing and nothing asserted it. Narrowing the
+// a required-lane static path invokes. That whole chain is load-bearing and
+// nothing asserted it. Narrowing the
 // glob to a hand-written list — the obvious way to speed the suite up — would
 // silently drop every file left out. So: expand what the wired runners actually
 // pass to `node --test`, and require the union to cover the corpus.
@@ -319,7 +332,7 @@ for (const check of checks.values()) {
   }
 }
 
-for (const suite of [...wiredStatic].sort()) {
+for (const suite of [...coveredStatic].sort()) {
   const suitePath = path.join(root, suite);
   if (!fs.existsSync(suitePath)) continue;
   const text = fs.readFileSync(suitePath, 'utf8');
@@ -332,7 +345,7 @@ for (const file of unitFiles) {
   if (coveredUnits.has(file)) continue;
   problems.push(
     `Unit suite '${file}' is not run by any CI-covered check: it is neither named in a lane-covered CHECKS command ` +
-      'nor matched by a `node --test` invocation in a static eval that run_static() runs. It gates nothing.',
+      'nor matched by a `node --test` invocation in a required-lane-covered static eval. It gates nothing.',
   );
 }
 
