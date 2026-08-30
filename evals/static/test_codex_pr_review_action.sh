@@ -6,7 +6,12 @@ SCRIPT="$ROOT_DIR/scripts/ci/codex-pr-review.mjs"
 ACTION="$ROOT_DIR/.github/actions/codex-pr-review/action.yml"
 DOC="$ROOT_DIR/docs/codex-pr-review-adoption.md"
 TMP_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TMP_ROOT"' EXIT
+SERVER_PID=""
+cleanup() {
+  [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true
+  rm -rf "$TMP_ROOT"
+}
+trap cleanup EXIT
 
 pass=0
 fail=0
@@ -82,18 +87,25 @@ node -e 'const fs=require("fs"); const [file,head]=process.argv.slice(1); const 
   && ok "final result binds runner-owned target and reviewer identity" \
   || bad "final result should bind runner-owned target and reviewer identity"
 
-printf '%s\n' '{"verdict":"fail","summary":"Blocking correctness finding.","coverage":[{"lane":"code","status":"fail","summary":"A changed line is incorrect."}],"findings":[{"id":"correctness-1","severity":"high","file":"src/value.js","line":2,"title":"Incorrect behavior","description":"The changed expression does not satisfy the stated invariant."}],"gaps":[]}' > "$ASSESSMENT_FILE"
+printf '%s\n' '{"verdict":"fail","summary":"Blocking correctness finding.","coverage":[{"lane":"code","status":"fail","summary":"A changed line is incorrect."}],"findings":[{"id":"correctness-1","severity":"high","requires_change":true,"file":"src/value.js","line":2,"title":"Incorrect behavior","description":"The changed expression does not satisfy the stated invariant."}],"gaps":[]}' > "$ASSESSMENT_FILE"
 if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null; then
   ok "blocking finding finalizes only with fail verdict"
 else
   bad "blocking finding should finalize with fail verdict"
 fi
 
-printf '%s\n' '{"verdict":"pass","summary":"Incorrectly clean.","coverage":[{"lane":"code","status":"pass","summary":"Claimed clean."}],"findings":[{"id":"hidden-blocker","severity":"high","file":"src/value.js","line":2,"title":"Blocker","description":"A blocker cannot be paired with pass."}],"gaps":[]}' > "$ASSESSMENT_FILE"
+printf '%s\n' '{"verdict":"pass","summary":"Incorrectly clean.","coverage":[{"lane":"code","status":"pass","summary":"Claimed clean."}],"findings":[{"id":"hidden-blocker","severity":"high","requires_change":true,"file":"src/value.js","line":2,"title":"Blocker","description":"A blocker cannot be paired with pass."}],"gaps":[]}' > "$ASSESSMENT_FILE"
 if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
   bad "pass verdict should not launder a blocking finding"
 else
   ok "pass verdict cannot launder a blocking finding"
+fi
+
+printf '%s\n' '{"verdict":"comment","summary":"Improperly advisory.","coverage":[{"lane":"code","status":"pass","summary":"A medium defect needs a fix."}],"findings":[{"id":"medium-fix","severity":"medium","requires_change":true,"file":"src/value.js","line":2,"title":"Fix required","description":"This medium finding requires a code change before delivery."}],"gaps":[]}' > "$ASSESSMENT_FILE"
+if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
+  bad "comment verdict should not launder a medium finding that requires change"
+else
+  ok "medium requires_change finding routes as fail"
 fi
 
 printf '%s\n' '{"verdict":"not_verified","summary":"Coverage unavailable.","coverage":[{"lane":"code","status":"not_verified","summary":"Reviewer could not inspect the change."}],"findings":[],"gaps":["Required source coverage was unavailable."]}' > "$ASSESSMENT_FILE"
@@ -135,6 +147,12 @@ grep -Fq 'openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e' "$ACTION
 grep -Fq 'sandbox: read-only' "$ACTION" && grep -Fq 'safety-strategy: drop-sudo' "$ACTION" \
   && ok "Codex review is report-only and drops sudo" \
   || bad "Codex review must be report-only and drop sudo"
+grep -Fq 'project_doc_max_bytes=0' "$ACTION" \
+  && grep -Fq 'project_doc_fallback_filenames=[]' "$ACTION" \
+  && grep -Fq "steps.prepare.outputs['review-working-directory']" "$ACTION" \
+  && ! grep -Fq -- '--ignore-user-config' "$ACTION" \
+  && ok "protected Codex args disable project instruction discovery from a separate trusted cwd" \
+  || bad "Codex action must use protected-compatible args and a trusted non-project cwd"
 grep -Fq 'openai-api-key:' "$ACTION" \
   && grep -Fq "inputs['openai-api-key']" "$ACTION" \
   && ! grep -Eq '^\s+OPENAI_API_KEY:' "$ACTION" \
@@ -156,6 +174,87 @@ node -e 'const fs=require("fs"); for (const file of process.argv.slice(1)) JSON.
   "$ROOT_DIR/schemas/codex-pr-review-result.schema.json" \
   && ok "review schemas are valid JSON" \
   || bad "review schemas should be valid JSON"
+
+# Validate the public result schema with the same Ajv 2020 implementation used
+# elsewhere in this repository. The schema must reject malformed core arrays,
+# not merely rely on the producer's private validation.
+printf '%s\n' '{"verdict":"fail","summary":"Blocking correctness finding.","coverage":[{"lane":"code","status":"fail","summary":"A changed line is incorrect."}],"findings":[{"id":"correctness-1","severity":"high","requires_change":true,"file":"src/value.js","line":2,"title":"Incorrect behavior","description":"The changed expression does not satisfy the stated invariant."}],"gaps":[]}' > "$ASSESSMENT_FILE"
+env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null
+node --input-type=module - "$ROOT_DIR/schemas/codex-pr-review-result.schema.json" "$RESULT_FILE" <<'NODE'
+import fs from "node:fs";
+import Ajv2020 from "ajv/dist/2020.js";
+const [schemaFile, resultFile] = process.argv.slice(2);
+const schema = JSON.parse(fs.readFileSync(schemaFile, "utf8"));
+const result = JSON.parse(fs.readFileSync(resultFile, "utf8"));
+const validate = new Ajv2020({ strict: false, allErrors: true, formats: { "date-time": true } }).compile(schema);
+if (!validate(result)) process.exit(1);
+for (const [field, invalid] of [["coverage", [42]], ["findings", ["bad"]], ["gaps", [{}]]]) {
+  const candidate = structuredClone(result);
+  candidate[field] = invalid;
+  if (validate(candidate)) process.exit(2);
+}
+NODE
+if [[ "$?" -eq 0 ]]; then
+  ok "public result schema validates core arrays and rejects malformed entries"
+else
+  bad "public result schema must validate core arrays and reject malformed entries"
+fi
+
+# Exercise the GitHub review boundary against a loopback fake. It captures the
+# exact request, returns the posted review for deduplication, and can reject a
+# token to prove API failures stay visible.
+MOCK_SERVER="$TMP_ROOT/mock-github-api.mjs"
+PORT_FILE="$TMP_ROOT/mock-port"
+REQUEST_FILE="$TMP_ROOT/mock-posts.json"
+cat > "$MOCK_SERVER" <<'NODE'
+import fs from "node:fs";
+import http from "node:http";
+const [portFile, requestFile] = process.argv.slice(2);
+const posts = [];
+const server = http.createServer(async (request, response) => {
+  const reject = request.headers.authorization === "Bearer reject";
+  if (request.method === "GET") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(reject ? [] : posts.map((body, id) => ({ id: id + 1, body: body.body }))));
+    return;
+  }
+  if (reject) {
+    response.writeHead(500, { "content-type": "application/json" });
+    response.end('{"message":"injected failure"}');
+    return;
+  }
+  let raw = "";
+  for await (const chunk of request) raw += chunk;
+  const body = JSON.parse(raw);
+  posts.push(body);
+  fs.writeFileSync(requestFile, JSON.stringify(posts));
+  response.writeHead(200, { "content-type": "application/json" });
+  response.end(JSON.stringify({ id: posts.length, body: body.body }));
+});
+server.listen(0, "127.0.0.1", () => fs.writeFileSync(portFile, String(server.address().port)));
+NODE
+node "$MOCK_SERVER" "$PORT_FILE" "$REQUEST_FILE" &
+SERVER_PID=$!
+for _ in $(seq 1 50); do [[ -s "$PORT_FILE" ]] && break; sleep 0.05; done
+MOCK_URL="http://127.0.0.1:$(cat "$PORT_FILE")"
+publish_env=("${common_env[@]}" "REVIEW_TARGET_FILE=$TARGET_FILE" "REVIEW_RESULT_FILE=$RESULT_FILE" "FLOW_AGENTS_TEST_MODE=1" "FLOW_AGENTS_TEST_GITHUB_API_URL=$MOCK_URL")
+if env "${publish_env[@]}" REVIEW_GITHUB_TOKEN=test node "$SCRIPT" publish >/dev/null; then
+  ok "publish creates an advisory GitHub review through the external API boundary"
+else
+  bad "publish should create an advisory GitHub review"
+fi
+node -e 'const fs=require("fs"); const posts=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const body=posts[0]; if(posts.length!==1||body.event!=="COMMENT"||body.commit_id!==process.argv[2]||body.comments.length!==1||body.comments[0].path!=="src/value.js"||body.comments[0].line!==2||!body.comments[0].body.includes("requires a code change")) process.exit(1)' "$REQUEST_FILE" "$HEAD_SHA" \
+  && ok "publish attaches the finding to the changed right-side line with fix rationale" \
+  || bad "publish should attach the finding to the changed right-side line with fix rationale"
+env "${publish_env[@]}" REVIEW_GITHUB_TOKEN=test node "$SCRIPT" publish >/dev/null
+node -e 'const fs=require("fs"); if(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).length!==1) process.exit(1)' "$REQUEST_FILE" \
+  && ok "same-head publication is idempotent" \
+  || bad "same-head publication should be idempotent"
+if env "${publish_env[@]}" REVIEW_GITHUB_TOKEN=reject node "$SCRIPT" publish >/dev/null 2>&1; then
+  bad "GitHub API rejection should be visible to the advisory publication step"
+else
+  ok "GitHub API rejection remains visible without changing the validated artifact"
+fi
 
 echo ""
 echo "Results: ${pass}/$((pass + fail)) passed, ${fail} failed"

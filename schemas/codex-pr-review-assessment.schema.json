@@ -44,7 +44,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "severity", "file", "line", "title", "description"],
+        "required": ["id", "severity", "requires_change", "file", "line", "title", "description"],
         "properties": {
           "id": {
             "type": "string",
@@ -53,6 +53,9 @@
           "severity": {
             "type": "string",
             "enum": ["critical", "high", "medium", "low", "info"]
+          },
+          "requires_change": {
+            "type": "boolean"
           },
           "file": {
             "type": "string",

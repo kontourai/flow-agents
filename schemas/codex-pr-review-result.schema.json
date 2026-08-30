@@ -4,6 +4,43 @@
   "title": "Builder Codex pull request review result",
   "type": "object",
   "additionalProperties": false,
+  "$defs": {
+    "coverage": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lane", "status", "summary"],
+        "properties": {
+          "lane": { "enum": ["code", "security", "dependency", "architecture"] },
+          "status": { "enum": ["pass", "fail", "not_verified"] },
+          "summary": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "requires_change", "file", "line", "title", "description"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+          "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+          "requires_change": { "type": "boolean" },
+          "file": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "line": { "type": "integer", "minimum": 1 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 4000 }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+    }
+  },
   "required": [
     "schema_version",
     "role",
@@ -58,9 +95,9 @@
     },
     "verdict": { "enum": ["pass", "comment", "fail", "not_verified"] },
     "summary": { "type": "string", "minLength": 1 },
-    "coverage": { "type": "array", "minItems": 1 },
-    "findings": { "type": "array" },
-    "gaps": { "type": "array" },
+    "coverage": { "$ref": "#/$defs/coverage" },
+    "findings": { "$ref": "#/$defs/findings" },
+    "gaps": { "$ref": "#/$defs/gaps" },
     "reviewed_at": { "type": "string", "format": "date-time" },
     "integrity": {
       "type": "object",

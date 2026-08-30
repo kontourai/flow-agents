@@ -69,12 +69,12 @@ runs:
         prompt-file: ${{ steps.prepare.outputs['prompt-file'] }}
         output-file: ${{ steps.prepare.outputs['assessment-file'] }}
         output-schema-file: ${{ github.action_path }}/../../../schemas/codex-pr-review-assessment.schema.json
-        working-directory: ${{ github.workspace }}
+        working-directory: ${{ steps.prepare.outputs['review-working-directory'] }}
         model: ${{ inputs.model }}
         effort: ${{ inputs.effort }}
         sandbox: read-only
         safety-strategy: drop-sudo
-        codex-args: '["--ephemeral","--ignore-user-config"]'
+        codex-args: '["--ephemeral","--skip-git-repo-check","-c","project_doc_max_bytes=0","-c","project_doc_fallback_filenames=[]"]'
 
     - name: Bind and validate Codex review
       id: finalize

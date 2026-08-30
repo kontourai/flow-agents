@@ -56,7 +56,8 @@ terms or treating absence as success.
    head. It is distinct from the pre-publication `review-work` critique and from
    deterministic verification. Confirm its repository, PR, base/head SHA, diff
    digest, reviewer runtime/model, coverage, findings, gaps, and integrity
-   fields. A blocking implementation finding records failed
+   fields. A critical/high finding, or a medium finding whose validated
+   `requires_change` field is true, records failed
    `ci-merge-readiness` evidence with `--route-reason implementation_defect`;
    an unavailable or incomplete required review records failed readiness with
    `--route-reason missing_evidence`. The artifact's own `not_verified` verdict

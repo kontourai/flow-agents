@@ -29,6 +29,13 @@ The result remains probabilistic review evidence. It does not prove tests,
 Veritas readiness, human authority, or correctness, and it cannot merge,
 release, deploy, or modify the branch.
 
+Codex itself runs from a fresh trusted temporary directory rather than the PR
+checkout. The action sets `project_doc_max_bytes=0`, clears fallback instruction
+filenames, and points the prompt at the source checkout as read-only data. This
+prevents a PR-authored `AGENTS.md` or `AGENTS.override.md` from entering Codex's
+instruction chain; the reviewer may inspect those files only as untrusted
+repository content.
+
 ## Advisory workflow
 
 Start advisory. Do not make the check required until its signal, coverage,
@@ -97,6 +104,9 @@ The action publishes one advisory GitHub review per exact head when
 `github-token` is supplied. Findings on changed right-side lines become inline
 comments explaining what should change and why. Findings that GitHub cannot
 attach to a changed line stay in the review summary with `file:line` evidence.
+Every finding records `requires_change`; a medium finding with that flag is
+blocking just like a high or critical finding and cannot be laundered through a
+`comment` verdict.
 Comment publication is presentation only: a GitHub API failure warns but does
 not rewrite the validated verdict.
 
