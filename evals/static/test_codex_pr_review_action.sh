@@ -192,6 +192,35 @@ node -e 'const fs=require("fs"); for (const file of process.argv.slice(1)) JSON.
   && ok "review schemas are valid JSON" \
   || bad "review schemas should be valid JSON"
 
+node - "$ROOT_DIR/schemas/codex-pr-review-assessment.schema.json" <<'NODE'
+const fs = require("node:fs");
+const schema = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const unsupported = new Set([
+  "allOf",
+  "contains",
+  "dependentRequired",
+  "dependentSchemas",
+  "else",
+  "if",
+  "not",
+  "then",
+]);
+function walk(value, path = "$") {
+  if (Array.isArray(value)) return value.forEach((entry, index) => walk(entry, `${path}[${index}]`));
+  if (!value || typeof value !== "object") return;
+  for (const [key, entry] of Object.entries(value)) {
+    if (unsupported.has(key)) throw new Error(`${path}.${key} is unsupported by OpenAI Structured Outputs`);
+    walk(entry, `${path}.${key}`);
+  }
+}
+walk(schema);
+NODE
+if [[ "$?" -eq 0 ]]; then
+  ok "provider assessment schema uses the OpenAI Structured Outputs subset"
+else
+  bad "provider assessment schema must avoid unsupported Structured Outputs keywords"
+fi
+
 # Validate the public result schema with the same Ajv 2020 implementation used
 # elsewhere in this repository. The schema must reject malformed core arrays,
 # not merely rely on the producer's private validation.

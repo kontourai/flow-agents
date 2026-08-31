@@ -29,6 +29,12 @@ The result remains probabilistic review evidence. It does not prove tests,
 Veritas readiness, human authority, or correctness, and it cannot merge,
 release, deploy, or modify the branch.
 
+The model-facing assessment schema deliberately uses OpenAI's supported
+Structured Outputs subset. Cross-field verdict, coverage, severity, and
+required-change invariants are enforced again by the trusted runner before it
+binds the public result; unsupported composition keywords are not sent to the
+provider.
+
 Codex itself runs from a fresh trusted temporary directory rather than the PR
 checkout. The action sets `project_doc_max_bytes=0`, clears fallback instruction
 filenames, and points the prompt at the source checkout as read-only data. This
