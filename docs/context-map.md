@@ -58,6 +58,8 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | backlog-provider-settings.schema.json | Flow Agents Backlog Provider Settings | https://flow-agents.dev/schemas/backlog-provider-settings.schema.json |
 | builder-lifecycle-authorization.schema.json | Builder Lifecycle Authorization | https://kontourai.dev/schemas/builder-lifecycle-authorization.schema.json |
 | change-provider-settings.schema.json | Flow Agents Change Provider Settings | https://flow-agents.dev/schemas/change-provider-settings.schema.json |
+| codex-pr-review-assessment.schema.json | Codex pull request review assessment | https://flow-agents.dev/schemas/codex-pr-review-assessment.schema.json |
+| codex-pr-review-result.schema.json | Builder Codex pull request review result | https://flow-agents.dev/schemas/codex-pr-review-result.schema.json |
 | decision-record.schema.json | Flow Agents Decision Record | https://flow-agents.dev/schemas/decision-record.schema.json |
 | delegation-envelope.schema.json | Provider-neutral delegation envelope | https://kontourai.dev/schemas/flow-agents/delegation-envelope/1.0.json |
 | flow-agents-core-config.schema.json | Flow Agents committed core configuration |  |

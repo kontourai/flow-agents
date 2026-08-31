@@ -1,0 +1,145 @@
+name: "Builder Codex PR Review"
+description: >
+  Run an advisory, exact-head Codex review and emit a validated Builder
+  publish-learn provider observation.
+
+inputs:
+  openai-api-key:
+    description: "OpenAI API key. The value is forwarded only to the pinned official Codex action."
+    required: false
+    default: ""
+  github-token:
+    description: "Optional GitHub token used only to publish advisory review comments."
+    required: false
+    default: ""
+  repository:
+    description: "Repository in owner/name form."
+    required: true
+  pull-request:
+    description: "Pull request number."
+    required: true
+  base-sha:
+    description: "Full pull request base SHA."
+    required: true
+  head-sha:
+    description: "Full pull request head SHA. The checkout HEAD must match."
+    required: true
+  model:
+    description: "Caller-selected Codex review model."
+    required: true
+  effort:
+    description: "Caller-selected Codex reasoning effort."
+    required: false
+    default: "xhigh"
+
+outputs:
+  result-file:
+    description: "Validated CodexPullRequestReview JSON artifact."
+    value: ${{ steps.result.outputs['result-file'] }}
+  verdict:
+    description: "pass, comment, fail, or not_verified."
+    value: ${{ steps.result.outputs.verdict }}
+  head-sha:
+    description: "Exact reviewed pull request head SHA."
+    value: ${{ steps.result.outputs['head-sha'] }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Prepare exact-head review target
+      id: prepare
+      shell: bash
+      env:
+        REVIEW_REPOSITORY: ${{ inputs.repository }}
+        REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
+        REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
+        REVIEW_HEAD_SHA: ${{ inputs['head-sha'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+        REVIEW_RUN_ID: ${{ github.run_id }}
+        REVIEW_TRIGGER_ACTOR: ${{ github.actor }}
+        REVIEW_WORKSPACE: ${{ github.workspace }}
+      run: node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" prepare
+
+    - name: Run report-only Codex review
+      if: inputs['openai-api-key'] != ''
+      uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e
+      with:
+        openai-api-key: ${{ inputs['openai-api-key'] }}
+        prompt-file: ${{ steps.prepare.outputs['prompt-file'] }}
+        output-file: ${{ steps.prepare.outputs['assessment-file'] }}
+        output-schema-file: ${{ github.action_path }}/../../../schemas/codex-pr-review-assessment.schema.json
+        working-directory: ${{ steps.prepare.outputs['review-working-directory'] }}
+        model: ${{ inputs.model }}
+        effort: ${{ inputs.effort }}
+        sandbox: read-only
+        safety-strategy: drop-sudo
+        codex-args: '["--ephemeral","-c","project_doc_max_bytes=0","-c","project_doc_fallback_filenames=[]"]'
+
+    - name: Bind and validate Codex review
+      id: finalize
+      if: inputs['openai-api-key'] != ''
+      shell: bash
+      env:
+        REVIEW_REPOSITORY: ${{ inputs.repository }}
+        REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
+        REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
+        REVIEW_HEAD_SHA: ${{ inputs['head-sha'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+        REVIEW_RUN_ID: ${{ github.run_id }}
+        REVIEW_TRIGGER_ACTOR: ${{ github.actor }}
+        REVIEW_WORKSPACE: ${{ github.workspace }}
+        REVIEW_TARGET_FILE: ${{ steps.prepare.outputs['target-file'] }}
+        REVIEW_ASSESSMENT_FILE: ${{ steps.prepare.outputs['assessment-file'] }}
+        REVIEW_RESULT_FILE: ${{ steps.prepare.outputs['result-file'] }}
+      run: node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" finalize
+
+    - name: Record unavailable reviewer as NOT_VERIFIED
+      id: skip
+      if: inputs['openai-api-key'] == ''
+      shell: bash
+      env:
+        REVIEW_REPOSITORY: ${{ inputs.repository }}
+        REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
+        REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
+        REVIEW_HEAD_SHA: ${{ inputs['head-sha'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+        REVIEW_RUN_ID: ${{ github.run_id }}
+        REVIEW_TRIGGER_ACTOR: ${{ github.actor }}
+        REVIEW_WORKSPACE: ${{ github.workspace }}
+        REVIEW_TARGET_FILE: ${{ steps.prepare.outputs['target-file'] }}
+        REVIEW_RESULT_FILE: ${{ steps.prepare.outputs['result-file'] }}
+      run: node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" skip
+
+    - name: Publish composite outputs
+      id: result
+      shell: bash
+      env:
+        RESULT_FILE: ${{ steps.finalize.outputs['result-file'] || steps.skip.outputs['result-file'] }}
+        RESULT_VERDICT: ${{ steps.finalize.outputs.verdict || steps.skip.outputs.verdict }}
+        RESULT_HEAD_SHA: ${{ steps.finalize.outputs['head-sha'] || steps.skip.outputs['head-sha'] }}
+      run: |
+        echo "result-file=$RESULT_FILE" >> "$GITHUB_OUTPUT"
+        echo "verdict=$RESULT_VERDICT" >> "$GITHUB_OUTPUT"
+        echo "head-sha=$RESULT_HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+    - name: Publish advisory PR review comments
+      if: inputs['github-token'] != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        REVIEW_REPOSITORY: ${{ inputs.repository }}
+        REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
+        REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
+        REVIEW_HEAD_SHA: ${{ inputs['head-sha'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+        REVIEW_RUN_ID: ${{ github.run_id }}
+        REVIEW_TRIGGER_ACTOR: ${{ github.actor }}
+        REVIEW_WORKSPACE: ${{ github.workspace }}
+        REVIEW_TARGET_FILE: ${{ steps.prepare.outputs['target-file'] }}
+        REVIEW_RESULT_FILE: ${{ steps.result.outputs['result-file'] }}
+        REVIEW_GITHUB_TOKEN: ${{ inputs['github-token'] }}
+      run: node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" publish
