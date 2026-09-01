@@ -7,9 +7,14 @@ description: >
 # - codex runs inside the pinned openai/codex-action with an OS-level
 #   read-only sandbox and drop-sudo, plus provider-side schema enforcement.
 # - kiro has no equivalent OS sandbox. Containment is CLI tool policy only:
-#   the run trusts the three read-only file tools — fs_read (the CLI's alias
-#   for `read`), grep, and glob — and nothing else: no shell, no writes,
-#   never the blanket all-tools trust flag. grep and glob must be named
+#   --trust-tools names the three read-only file tools — fs_read (the CLI's
+#   alias for `read`), grep, and glob — and nothing else: no shell, no
+#   writes, never the blanket all-tools trust flag. Two built-ins sit
+#   outside the flag under every setting (`code`, read-only ops only, and
+#   `introspect`), and none of the trusted tools is path-scoped: they read
+#   whatever the runner user can, the same boundary fs_read alone already
+#   had; nothing here has been shown to confine reads to the checkout.
+#   grep and glob must be named
 #   because their default is "trust working directory" and the working
 #   directory is deliberately NOT the checkout: it is a trusted temp dir so
 #   repository .kiro configs are not loaded, which put every search of the

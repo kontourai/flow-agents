@@ -90,7 +90,11 @@ difference is disclosed rather than papered over:
   rather than written by the model. `grep` and `glob` have to be named: their
   default is "trust working directory", and the checkout is not the working
   directory, so under `--trust-tools=fs_read` non-interactive mode denied
-  every search of the checkout (see the first-run findings below). Because `kiro-cli` cannot run git without shell trust, the
+  every search of the checkout (see the first-run findings below). None of
+  the three is path-scoped: each reads whatever the runner user can read,
+  which is the boundary `fs_read` alone already had — the change widens the
+  tool list, not the filesystem reach, and no evidence here confines reads
+  (or symlink following) to the checkout. Because `kiro-cli` cannot run git without shell trust, the
   prepare step materializes the exact merge-base diff as `diff.patch` for
   read-only inspection. A defect in the CLI's tool policy would not be caught
   by an OS sandbox; weigh that when choosing the engine.

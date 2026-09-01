@@ -396,7 +396,14 @@ grep -Fq "if: inputs.engine == 'kiro' && inputs['api-key'] != ''" "$ACTION" \
   || bad "failed engine runs must route to NOT_VERIFIED with a distinguishable reason"
 # Exact list, not a substring: fs_read alone left grep/glob at their
 # "trust working directory" default, which the trusted empty cwd defeats.
-[[ "$(grep -Ec -- '^\s+--trust-tools=fs_read,grep,glob \\$' "$ACTION")" -eq 1 ]] \
+# The flag is asserted INSIDE the single kiro-cli chat invocation (the
+# continuation block that starts at the chat line), and --trust-tools may
+# appear nowhere else, so a decoy line or an env-var/second-invocation
+# indirection cannot satisfy the check.
+kiro_chat_block="$(awk '/"\$HOME\/\.local\/bin\/kiro-cli" chat \\$/{p=1} p{print} p && !/\\$/{exit}' "$ACTION")"
+[[ "$(grep -Fc 'kiro-cli" chat' "$ACTION")" -eq 1 ]] \
+  && [[ "$(printf '%s\n' "$kiro_chat_block" | grep -Ec -- '^\s+--trust-tools=fs_read,grep,glob \\$')" -eq 1 ]] \
+  && [[ "$(grep -Ev '^\s*#' "$ACTION" | grep -Fc -- '--trust-tools')" -eq 1 ]] \
   && ! grep -Eq -- '--trust-tools=[^ ]*(shell|write|execute_bash|fs_write|web)' "$ACTION" \
   && ! grep -Fq -- '--trust-all-tools' "$ACTION" \
   && grep -Fq -- '--model "$REVIEW_MODEL"' "$ACTION" \
