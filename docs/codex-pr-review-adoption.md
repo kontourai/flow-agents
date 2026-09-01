@@ -71,10 +71,15 @@ Two behavior changes apply to existing callers that pass only
   check"; the first live kiro run showed what that buys — a red step with
   no result, no comment, no artifact, and the rejected assessment discarded
   with the runner (#1399). A bound `NOT_VERIFIED` naming the violation is
-  the louder signal, and `release-readiness` already routes it to
-  `missing_evidence`. Finalize still hard-fails on runner-side faults: an
-  unreadable target or assessment file, or a target that no longer matches
-  the expected head.
+  the louder signal, and the route-back contract below already specifies
+  `missing_evidence` for every `not_verified` result — a contract for
+  consumers, not something this action enforces. Finalize still hard-fails
+  on runner-side faults: an unreadable target or assessment file, a target
+  that no longer matches the expected head, or git being unable to inspect
+  the checkout while checking a finding's path. Only the verdict vocabulary
+  is echoed from a rejected document; other engine-controlled text reaches
+  the record solely through the bounded validation message, which the
+  publisher sanitizes like every other engine-authored string.
 - **The result schema change is one-directional.** Artifacts produced by this
   version validate against this version's schema only: new skip results carry
   `not_verified_reason`, which the pre-change schema rejects under
@@ -227,6 +232,10 @@ jobs:
       # said when the result is NOT_VERIFIED or the run went red; without it
       # a rejected assessment is unrecoverable. `if: always()` so it survives
       # a failed step; `warn` because prepare itself may not have run.
+      # It holds the prompt, the exact diff, and raw engine output that echoes
+      # whatever checkout content the reviewer read — visible to anyone who
+      # can download this run's artifacts, which for a public repository is
+      # everyone. Nothing in it is redacted.
       - name: Retain the review directory on every outcome
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

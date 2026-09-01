@@ -361,6 +361,37 @@ if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_HEAD_SHA="$BASE_SHA" REVIEW_
 else
   ok "finalize hard-fails on a target mismatch without recording a result"
 fi
+# git failing while a finding's path is checked is a runner fault, not a
+# reviewer fault: an otherwise-valid assessment whose finding names an
+# unchanged file, evaluated with a workspace that is not a repository, must
+# hard-fail rather than be recorded as assessment_invalid.
+NOT_A_REPO="$TMP_ROOT/not-a-repo"; mkdir -p "$NOT_A_REPO"
+printf '%s\n' '{"verdict":"fail","summary":"Blocking finding on an unchanged file.","coverage":[{"lane":"code","status":"fail","summary":"Defect."}],"findings":[{"id":"unchanged-1","severity":"high","requires_change":true,"file":"README.md","line":1,"title":"Defect","description":"A defect in an unchanged file."}],"gaps":[]}' > "$INVALID_ASSESSMENT_FILE"
+finalize_stderr="$(env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_WORKSPACE="$NOT_A_REPO" REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$INVALID_ASSESSMENT_FILE" REVIEW_RESULT_FILE="$TMP_ROOT/never-written-7.json" node "$SCRIPT" finalize 2>&1 >/dev/null || true)"
+if [[ ! -e "$TMP_ROOT/never-written-7.json" ]] && grep -Fq "git could not inspect" <<< "$finalize_stderr"; then
+  ok "finalize hard-fails when git cannot inspect the checkout instead of blaming the reviewer"
+else
+  bad "finalize should hard-fail when git cannot inspect the checkout (got: $finalize_stderr)"
+fi
+# With a working checkout the same assessment IS a reviewer fault (README.md
+# is absent from the head tree) and records assessment_invalid.
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$INVALID_ASSESSMENT_FILE" REVIEW_RESULT_FILE="$INVALID_RESULT_FILE" node "$SCRIPT" finalize >/dev/null \
+  && node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(v.not_verified_reason!=="assessment_invalid"||!v.gaps.some(g=>g.includes("absent from the reviewed change and head tree"))) process.exit(1)' "$INVALID_RESULT_FILE"; then
+  ok "finalize records a finding on an absent file as assessment_invalid when git can answer"
+else
+  bad "finalize should record a finding on an absent file as assessment_invalid when git can answer"
+fi
+# Engine-controlled text: a non-vocabulary verdict is reported as "invalid"
+# in the retention gap, and the validation message quotes at most a clipped
+# prefix of it, so the record stays bounded and schema-valid.
+node -e 'process.stdout.write(JSON.stringify({verdict:"# pwned ".repeat(700),summary:"x",coverage:[{lane:"code",status:"pass",summary:"x"}],findings:[],gaps:[]}))' > "$INVALID_ASSESSMENT_FILE"
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$INVALID_ASSESSMENT_FILE" REVIEW_RESULT_FILE="$INVALID_RESULT_FILE" node "$SCRIPT" finalize >/dev/null \
+  && node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(v.not_verified_reason!=="assessment_invalid"||JSON.stringify(v).includes("# pwned ".repeat(10))||!v.gaps.some(g=>g.includes("claimed verdict invalid"))||v.gaps.some(g=>g.length>1000)||v.summary.length>2000) process.exit(1)' "$INVALID_RESULT_FILE" \
+  && node --input-type=module -e 'import fs from "node:fs"; import Ajv2020 from "ajv/dist/2020.js"; const [s,r]=process.argv.slice(1); const validate=new Ajv2020({strict:false,allErrors:true,formats:{"date-time":true}}).compile(JSON.parse(fs.readFileSync(s,"utf8"))); if(!validate(JSON.parse(fs.readFileSync(r,"utf8")))) process.exit(1)' "$ROOT_DIR/schemas/codex-pr-review-result.schema.json" "$INVALID_RESULT_FILE"; then
+  ok "finalize clips a non-vocabulary verdict and keeps the rejection record bounded"
+else
+  bad "finalize should clip a non-vocabulary verdict and keep the rejection record bounded"
+fi
 
 # Restore the shared RESULT_FILE to a publishable codex fail-verdict result
 # for the publication tests below.
