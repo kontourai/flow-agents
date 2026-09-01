@@ -20,10 +20,12 @@ bad() { echo "  ✗ $1" >&2; fail=$((fail + 1)); }
 expect_success() { if "$@"; then ok "$1 succeeds"; else bad "$1 should succeed"; fi; }
 expect_failure() { if "$@" >/dev/null 2>&1; then bad "$1 should fail"; else ok "$1 fails closed"; fi; }
 
+INSTALLER="$ROOT_DIR/scripts/ci/install-kiro-cli.sh"
 for file in \
   "$SCRIPT" \
   "$ACTION" \
   "$DOC" \
+  "$INSTALLER" \
   "$ROOT_DIR/schemas/codex-pr-review-assessment.schema.json" \
   "$ROOT_DIR/schemas/codex-pr-review-result.schema.json"; do
   [[ -f "$file" ]] && ok "${file#$ROOT_DIR/} exists" || bad "${file#$ROOT_DIR/} is missing"
@@ -157,6 +159,146 @@ else
   ok "finalize rejects missing trigger identity"
 fi
 
+# Engine dispatch: unknown engines are refused fail-closed, kiro is a first
+# class engine with its own prompt/diff materialization, and provenance is
+# derived from the engine that actually ran.
+if env "${common_env[@]}" REVIEW_ENGINE=goose GITHUB_OUTPUT="$TMP_ROOT/goose-output" RUNNER_TEMP="$TMP_ROOT" node "$SCRIPT" prepare >/dev/null 2>&1; then
+  bad "prepare should refuse an unknown engine"
+else
+  ok "prepare refuses an unknown engine fail-closed"
+fi
+
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_EFFORT=ultra GITHUB_OUTPUT="$TMP_ROOT/ultra-output" RUNNER_TEMP="$TMP_ROOT" node "$SCRIPT" prepare >/dev/null 2>&1; then
+  bad "prepare should refuse kiro with a codex-only effort"
+else
+  ok "prepare refuses kiro with the codex-only ultra effort"
+fi
+
+KIRO_OUTPUT_FILE="$TMP_ROOT/kiro-github-output"
+: > "$KIRO_OUTPUT_FILE"
+if env "${common_env[@]}" REVIEW_ENGINE=kiro GITHUB_OUTPUT="$KIRO_OUTPUT_FILE" RUNNER_TEMP="$TMP_ROOT" node "$SCRIPT" prepare >/dev/null; then
+  ok "prepare accepts the kiro engine"
+else
+  bad "prepare should accept the kiro engine"
+fi
+
+kiro_output_value() {
+  local key="$1"
+  sed -n "s/^${key}=//p" "$KIRO_OUTPUT_FILE" | tail -n 1
+}
+KIRO_TARGET_FILE="$(kiro_output_value target-file)"
+KIRO_PROMPT_FILE="$(kiro_output_value prompt-file)"
+KIRO_ASSESSMENT_FILE="$(kiro_output_value assessment-file)"
+KIRO_RESULT_FILE="$(kiro_output_value result-file)"
+KIRO_RAW_FILE="$(kiro_output_value raw-output-file)"
+KIRO_WORKDIR="$(kiro_output_value review-working-directory)"
+
+[[ -s "$KIRO_WORKDIR/diff.patch" ]] \
+  && grep -Fq 'export const doubled' "$KIRO_WORKDIR/diff.patch" \
+  && ok "kiro prepare materializes the exact merge-base diff for a shell-less reviewer" \
+  || bad "kiro prepare should materialize the exact merge-base diff"
+
+grep -Fq "$KIRO_WORKDIR/diff.patch" "$KIRO_PROMPT_FILE" \
+  && grep -Fq 'no shell, no writes, no network' "$KIRO_PROMPT_FILE" \
+  && grep -Fq 'exactly one JSON object' "$KIRO_PROMPT_FILE" \
+  && grep -Fq '"$id": "https://flow-agents.dev/schemas/codex-pr-review-assessment.schema.json"' "$KIRO_PROMPT_FILE" \
+  && ok "kiro prompt embeds the diff path, read-only contract, and assessment schema" \
+  || bad "kiro prompt should embed the diff path, read-only contract, and assessment schema"
+
+# extract: the exact headless stdout shape kiro-cli 2.20.2 produces (ANSI
+# styling around a "> " response marker) must yield the embedded JSON, and
+# non-JSON output must fail closed.
+printf '\033[38;5;141m> \033[0mHere is the review.\n{"verdict":"pass","summary":"No material findings.","coverage":[{"lane":"code","status":"pass","summary":"Reviewed the changed code."}],"findings":[],"gaps":[]}' > "$KIRO_RAW_FILE"
+if env REVIEW_RAW_OUTPUT_FILE="$KIRO_RAW_FILE" REVIEW_ASSESSMENT_FILE="$KIRO_ASSESSMENT_FILE" node "$SCRIPT" extract >/dev/null \
+  && node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(value.verdict!=="pass"||value.summary!=="No material findings.") process.exit(1)' "$KIRO_ASSESSMENT_FILE"; then
+  ok "extract recovers the assessment from ANSI-wrapped headless output"
+else
+  bad "extract should recover the assessment from ANSI-wrapped headless output"
+fi
+
+printf '\033[38;5;141m> \033[0mI could not produce the requested JSON, sorry.' > "$KIRO_RAW_FILE"
+if env REVIEW_RAW_OUTPUT_FILE="$KIRO_RAW_FILE" REVIEW_ASSESSMENT_FILE="$TMP_ROOT/never-written.json" node "$SCRIPT" extract >/dev/null 2>&1; then
+  bad "extract should fail closed on JSON-free engine output"
+else
+  ok "extract fails closed on JSON-free engine output"
+fi
+
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$KIRO_ASSESSMENT_FILE" REVIEW_RESULT_FILE="$KIRO_RESULT_FILE" node "$SCRIPT" finalize >/dev/null; then
+  ok "kiro assessment finalizes through the same validation path"
+else
+  bad "kiro assessment should finalize through the same validation path"
+fi
+
+node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const r=value.reviewer; if(r.runtime!=="kiro"||r.provider!=="kiro-cli"||!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(r.provider_revision)||r.model!=="gpt-5.6-sol") process.exit(1)' "$KIRO_RESULT_FILE" \
+  && ok "kiro result records kiro engine provenance, never a codex label" \
+  || bad "kiro result should record kiro engine provenance"
+
+node --input-type=module - "$ROOT_DIR/schemas/codex-pr-review-result.schema.json" "$KIRO_RESULT_FILE" <<'NODE'
+import fs from "node:fs";
+import Ajv2020 from "ajv/dist/2020.js";
+const [schemaFile, resultFile] = process.argv.slice(2);
+const schema = JSON.parse(fs.readFileSync(schemaFile, "utf8"));
+const result = JSON.parse(fs.readFileSync(resultFile, "utf8"));
+const validate = new Ajv2020({ strict: false, allErrors: true, formats: { "date-time": true } }).compile(schema);
+if (!validate(result)) process.exit(1);
+const mislabeled = structuredClone(result);
+mislabeled.reviewer.provider = "openai/codex-action";
+mislabeled.reviewer.provider_revision = "86365089eb2b84e0a8fb0717b304f8bdcb13b20e";
+if (validate(mislabeled)) process.exit(2);
+const fakeVersion = structuredClone(result);
+fakeVersion.reviewer.provider_revision = "not-a-version";
+if (validate(fakeVersion)) process.exit(3);
+const reasonOnPass = structuredClone(result);
+reasonOnPass.not_verified_reason = "reviewer_unavailable";
+if (validate(reasonOnPass)) process.exit(4);
+NODE
+if [[ "$?" -eq 0 ]]; then
+  ok "public schema couples kiro provenance and restricts not_verified_reason to not_verified"
+else
+  bad "public schema should couple kiro provenance and restrict not_verified_reason"
+fi
+
+# Crash routing: a withheld credential and a crashed engine both record
+# NOT_VERIFIED, with distinguishable machine-readable reasons.
+if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" skip >/dev/null \
+  && node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(value.not_verified_reason!=="reviewer_withheld"||!value.gaps[0].includes("OpenAI credential")) process.exit(1)' "$RESULT_FILE"; then
+  ok "default skip records reviewer_withheld with the credential gap"
+else
+  bad "default skip should record reviewer_withheld"
+fi
+
+if env "${common_env[@]}" REVIEW_SKIP_REASON=reviewer_unavailable REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" skip >/dev/null \
+  && node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(value.verdict!=="not_verified"||value.not_verified_reason!=="reviewer_unavailable"||!value.gaps[0].includes("failed or crashed")) process.exit(1)' "$RESULT_FILE"; then
+  ok "crashed engine skip records reviewer_unavailable NOT_VERIFIED"
+else
+  bad "crashed engine skip should record reviewer_unavailable NOT_VERIFIED"
+fi
+
+if env "${common_env[@]}" REVIEW_SKIP_REASON=because-i-said-so REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" skip >/dev/null 2>&1; then
+  bad "skip should refuse an unknown skip reason"
+else
+  ok "skip refuses an unknown skip reason"
+fi
+
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_SKIP_REASON=reviewer_unavailable REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_RESULT_FILE="$KIRO_RESULT_FILE" node "$SCRIPT" skip >/dev/null \
+  && node -e 'const fs=require("fs"); const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(value.reviewer.runtime!=="kiro"||value.reviewer.provider!=="kiro-cli"||value.not_verified_reason!=="reviewer_unavailable") process.exit(1)' "$KIRO_RESULT_FILE"; then
+  ok "kiro crash skip keeps kiro provenance in the NOT_VERIFIED record"
+else
+  bad "kiro crash skip should keep kiro provenance"
+fi
+
+# Restore the shared RESULT_FILE to a publishable codex fail-verdict result
+# for the publication tests below.
+printf '%s\n' '{"verdict":"fail","summary":"Blocking correctness finding.","coverage":[{"lane":"code","status":"fail","summary":"A changed line is incorrect."}],"findings":[{"id":"correctness-1","severity":"high","requires_change":true,"file":"src/value.js","line":2,"title":"Incorrect behavior","description":"The changed expression does not satisfy the stated invariant."}],"gaps":[]}' > "$ASSESSMENT_FILE"
+env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null
+
+mismatch_stderr="$(env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" REVIEW_GITHUB_TOKEN=test node "$SCRIPT" publish 2>&1 >/dev/null || true)"
+if [[ "$mismatch_stderr" == *"does not match the expected target, engine, and reviewer"* ]]; then
+  ok "publish refuses engine-provenance mismatch fail-closed"
+else
+  bad "publish should refuse a result whose engine provenance mismatches the selected engine"
+fi
+
 grep -Fq 'openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e' "$ACTION" \
   && ok "official Codex action is pinned to an exact revision" \
   || bad "official Codex action must be pinned to an exact revision"
@@ -178,6 +320,51 @@ grep -Fq 'openai-api-key:' "$ACTION" \
 grep -Fq 'continue-on-error: true' "$ACTION" \
   && ok "comment publication cannot rewrite the review verdict" \
   || bad "comment publication should remain advisory"
+
+# Engine-agnostic composite contract: engine dispatch, key precedence, crash
+# routing, and a least-privilege pinned kiro path.
+grep -Fq 'engine:' "$ACTION" \
+  && grep -Fq 'default: "codex"' "$ACTION" \
+  && grep -Fq "inputs.engine == 'codex'" "$ACTION" \
+  && grep -Fq "inputs.engine == 'kiro'" "$ACTION" \
+  && ok "composite declares the engine input with codex as the default engine" \
+  || bad "composite must declare the engine input defaulting to codex"
+grep -Fq 'api-key:' "$ACTION" \
+  && [[ "$(grep -Fc "inputs['api-key'] != '' && inputs['api-key'] || inputs['openai-api-key']" "$ACTION")" -eq 2 ]] \
+  && ok "api-key takes precedence over openai-api-key for both engines" \
+  || bad "api-key must take precedence over openai-api-key for both engines"
+[[ "$(grep -Fc 'continue-on-error: true' "$ACTION")" -eq 4 ]] \
+  && grep -Fq "if: steps.codex.outcome == 'success' || steps.kiro.outcome == 'success'" "$ACTION" \
+  && grep -Fq "if: steps.codex.outcome != 'success' && steps.kiro.outcome != 'success'" "$ACTION" \
+  && grep -Fq "REVIEW_SKIP_REASON: \${{ (inputs['api-key'] == '' && inputs['openai-api-key'] == '') && 'reviewer_withheld' || 'reviewer_unavailable' }}" "$ACTION" \
+  && ok "failed engine runs route to NOT_VERIFIED with a distinguishable reason" \
+  || bad "failed engine runs must route to NOT_VERIFIED with a distinguishable reason"
+grep -Fq -- '--trust-tools=fs_read' "$ACTION" \
+  && ! grep -Fq -- '--trust-all-tools' "$ACTION" \
+  && grep -Fq -- '--model "$REVIEW_MODEL"' "$ACTION" \
+  && grep -Fq 'install-kiro-cli.sh' "$ACTION" \
+  && grep -Fq "working-directory: \${{ steps.prepare.outputs['review-working-directory'] }}" "$ACTION" \
+  && ok "kiro engine step is pinned, read-only-trusted, and model-wired" \
+  || bad "kiro engine step must be pinned, read-only-trusted, and model-wired"
+grep -Fq 'KIRO_API_KEY:' "$ACTION" \
+  && [[ "$(grep -Fc 'KIRO_API_KEY:' "$ACTION")" -eq 1 ]] \
+  && ! grep -Eq '^\s+OPENAI_API_KEY:' "$ACTION" \
+  && ok "engine credentials stay step-scoped rather than job environment state" \
+  || bad "engine credentials must stay step-scoped"
+
+kiro_pin_installer="$(sed -n 's/^KIRO_CLI_VERSION="\(.*\)"$/\1/p' "$INSTALLER")"
+kiro_pin_script="$(sed -n 's/^const KIRO_CLI_VERSION = "\(.*\)";$/\1/p' "$SCRIPT")"
+[[ -n "$kiro_pin_installer" && "$kiro_pin_installer" == "$kiro_pin_script" ]] \
+  && ok "kiro-cli version pin is exact and consistent across installer and script" \
+  || bad "kiro-cli version pin must be exact and consistent across installer and script"
+grep -Eq '^    expected_sha256="[0-9a-f]{64}"$' "$INSTALLER" \
+  && ! grep -Eq '^[^#]*/latest/' "$INSTALLER" \
+  && grep -Fq '"$BASE_URL/$KIRO_CLI_VERSION/$filename"' "$INSTALLER" \
+  && grep -Fq 'checksum mismatch' "$INSTALLER" \
+  && grep -Fq 'KIRO_CLI_SKIP_SETUP=1' "$INSTALLER" \
+  && grep -Fq 'expected '"'"'kiro-cli $KIRO_CLI_VERSION'"'"'' "$INSTALLER" \
+  && ok "kiro-cli installer downloads a pinned versioned artifact with checksum and version verification" \
+  || bad "kiro-cli installer must pin, checksum-verify, and version-verify"
 grep -Fq 'model: gpt-5.6-sol' "$DOC" && grep -Fq 'Station is a useful first consumer' "$DOC" \
   && ok "adoption docs target Sol and preserve Station as consumer" \
   || bad "adoption docs should target Sol and preserve Station as consumer"

@@ -42,6 +42,63 @@ prevents a PR-authored `AGENTS.md` or `AGENTS.override.md` from entering Codex's
 instruction chain; the reviewer may inspect those files only as untrusted
 repository content.
 
+## Engines
+
+The composite is engine-agnostic. `engine: codex` (the default) preserves the
+original behavior exactly; `engine: kiro` runs the same exact-head contract
+through a pinned `kiro-cli` headless session. Unknown engine names fail closed
+at the prepare step. The generic `api-key` input carries the credential for
+either engine and takes precedence over the compatibility alias
+`openai-api-key`; existing callers that pass only `openai-api-key` are
+unchanged.
+
+Both engines share every trust boundary except the sandbox, and that
+difference is disclosed rather than papered over:
+
+- **codex** executes inside the pinned official `openai/codex-action` with an
+  OS-level read-only sandbox, `drop-sudo`, and provider-side schema
+  enforcement of the assessment.
+- **kiro** has no equivalent OS sandbox. Containment is CLI tool policy only:
+  the run trusts `fs_read` alone — no shell, no write tools, no network tools,
+  never blanket tool trust — the working directory is a trusted temporary
+  directory so a PR-authored `.kiro/` configuration is never loaded, and the
+  assessment is captured from the model's stdout response rather than written
+  by the model. Because `kiro-cli` cannot run git without shell trust, the
+  prepare step materializes the exact merge-base diff as `diff.patch` for
+  read-only inspection. A defect in the CLI's tool policy would not be caught
+  by an OS sandbox; weigh that when choosing the engine.
+
+The kiro toolchain is pinned exactly: `scripts/ci/install-kiro-cli.sh`
+downloads one immutable versioned artifact from the official Kiro CLI
+distribution origin (the same origin `https://cli.kiro.dev/install` uses),
+verifies a SHA-256 recorded in reviewed source, verifies the archive layout,
+and verifies the installed binary reports the pinned version. It never fetches
+`latest`, and a mismatch anywhere refuses to install.
+
+Model and effort are caller policy for both engines. For kiro the model is
+passed to `kiro-cli chat --model`, which refuses a model the service does not
+offer (verified: an unknown model exits non-zero with an explicit error, no
+silent substitution), so the artifact can never carry a model name the engine
+did not accept. Kiro supports efforts `low` through `max`; `ultra` is
+codex-only and fails closed at prepare.
+
+Both engines produce the assessment through the same finalize validation and
+the same public result schema. Provenance is engine-derived, never a fixed
+label: `reviewer.runtime`, `reviewer.provider`, and
+`reviewer.provider_revision` record the engine that actually ran (`codex` /
+`openai/codex-action` / action revision, or `kiro` / `kiro-cli` / pinned CLI
+version), and the schema couples those fields so a kiro review cannot validate
+while labeled codex. The `role` field keeps the historical
+`CodexPullRequestReview` type name for consumer compatibility;
+`reviewer.runtime` is the authoritative engine record.
+
+A failed or crashed engine run — install failure, CLI crash, refused model,
+unparseable output — is routed to the NOT_VERIFIED recording instead of
+failing the workflow, with `not_verified_reason: reviewer_unavailable`. A
+withheld credential records `not_verified_reason: reviewer_withheld` as
+before. Consumers can distinguish "no reviewer was authorized" from "the
+reviewer broke" without parsing prose.
+
 ## Advisory workflow
 
 Start advisory. Do not make the check required until its signal, coverage,

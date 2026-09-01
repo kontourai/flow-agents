@@ -48,6 +48,36 @@
           { "properties": { "gaps": { "minItems": 1 } } }
         ]
       }
+    },
+    {
+      "if": { "required": ["not_verified_reason"] },
+      "then": { "properties": { "verdict": { "const": "not_verified" } } }
+    },
+    {
+      "if": { "properties": { "reviewer": { "properties": { "runtime": { "const": "codex" } }, "required": ["runtime"] } }, "required": ["reviewer"] },
+      "then": {
+        "properties": {
+          "reviewer": {
+            "properties": {
+              "provider": { "const": "openai/codex-action" },
+              "provider_revision": { "pattern": "^[0-9a-f]{40}$" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "reviewer": { "properties": { "runtime": { "const": "kiro" } }, "required": ["runtime"] } }, "required": ["reviewer"] },
+      "then": {
+        "properties": {
+          "reviewer": {
+            "properties": {
+              "provider": { "const": "kiro-cli" },
+              "provider_revision": { "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -145,16 +175,17 @@
       "additionalProperties": false,
       "required": ["runtime", "model", "reasoning_effort", "provider", "provider_revision", "run_id", "trigger_actor"],
       "properties": {
-        "runtime": { "const": "codex" },
+        "runtime": { "enum": ["codex", "kiro"] },
         "model": { "type": "string", "minLength": 1 },
         "reasoning_effort": { "enum": ["low", "medium", "high", "xhigh", "max", "ultra"] },
-        "provider": { "const": "openai/codex-action" },
-        "provider_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "provider": { "enum": ["openai/codex-action", "kiro-cli"] },
+        "provider_revision": { "type": "string", "pattern": "^([0-9a-f]{40}|[0-9]+\\.[0-9]+\\.[0-9]+)$" },
         "run_id": { "type": "string", "minLength": 1 },
         "trigger_actor": { "type": "string", "minLength": 1 }
       }
     },
     "verdict": { "enum": ["pass", "comment", "fail", "not_verified"] },
+    "not_verified_reason": { "enum": ["reviewer_withheld", "reviewer_unavailable"] },
     "summary": { "type": "string", "minLength": 1 },
     "coverage": { "$ref": "#/$defs/coverage" },
     "findings": { "$ref": "#/$defs/findings" },

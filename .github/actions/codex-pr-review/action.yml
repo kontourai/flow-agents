@@ -1,11 +1,36 @@
-name: "Builder Codex PR Review"
+name: "Builder PR Review"
 description: >
-  Run an advisory, exact-head Codex review and emit a validated Builder
-  publish-learn provider observation.
+  Run an advisory, exact-head PR review with a selectable engine (codex or
+  kiro) and emit a validated Builder publish-learn provider observation.
+
+# Engine trust difference (disclosed, not papered over):
+# - codex runs inside the pinned openai/codex-action with an OS-level
+#   read-only sandbox and drop-sudo, plus provider-side schema enforcement.
+# - kiro has no equivalent OS sandbox. Containment is CLI tool policy only:
+#   the run trusts fs_read alone (no shell, no writes, never the blanket
+#   all-tools trust flag),
+#   the working directory is a trusted temp dir so repository .kiro configs
+#   are not loaded, and output is captured from stdout rather than written by
+#   the model. A policy bug in the CLI would not be caught by an OS sandbox.
+#   Both engines' outputs pass the same finalize validation; a failed or
+#   crashed engine run is recorded as NOT_VERIFIED, never as a review.
 
 inputs:
+  engine:
+    description: "Review engine: codex (default) or kiro. Unknown engines fail closed at prepare."
+    required: false
+    default: "codex"
+  api-key:
+    description: >-
+      Engine credential. Takes precedence over openai-api-key. Forwarded only
+      to the selected pinned engine step (codex: openai/codex-action input;
+      kiro: KIRO_API_KEY on the kiro-cli step), never as job environment state.
+    required: false
+    default: ""
   openai-api-key:
-    description: "OpenAI API key. The value is forwarded only to the pinned official Codex action."
+    description: >-
+      OpenAI API key (compatibility alias; used when api-key is empty). The
+      value is forwarded only to the pinned official Codex action.
     required: false
     default: ""
   github-token:
@@ -25,10 +50,13 @@ inputs:
     description: "Full pull request head SHA. The checkout HEAD must match."
     required: true
   model:
-    description: "Caller-selected Codex review model."
+    description: >-
+      Caller-selected review model. For kiro this is passed to kiro-cli chat
+      --model, which fails closed on a model the service does not offer; no
+      silent substitution can occur.
     required: true
   effort:
-    description: "Caller-selected Codex reasoning effort."
+    description: "Caller-selected reasoning effort. kiro supports low..max; ultra is codex-only and fails closed at prepare."
     required: false
     default: "xhigh"
 
@@ -50,6 +78,7 @@ runs:
       id: prepare
       shell: bash
       env:
+        REVIEW_ENGINE: ${{ inputs.engine }}
         REVIEW_REPOSITORY: ${{ inputs.repository }}
         REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
         REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
@@ -61,11 +90,16 @@ runs:
         REVIEW_WORKSPACE: ${{ github.workspace }}
       run: node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" prepare
 
+    # A failed engine run (crash, refusal, invalid model, install failure) is
+    # routed to the NOT_VERIFIED skip step below instead of failing the
+    # composite; continue-on-error makes that routing possible.
     - name: Run report-only Codex review
-      if: inputs['openai-api-key'] != ''
+      id: codex
+      if: inputs.engine == 'codex' && (inputs['api-key'] != '' || inputs['openai-api-key'] != '')
+      continue-on-error: true
       uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e
       with:
-        openai-api-key: ${{ inputs['openai-api-key'] }}
+        openai-api-key: ${{ inputs['api-key'] != '' && inputs['api-key'] || inputs['openai-api-key'] }}
         prompt-file: ${{ steps.prepare.outputs['prompt-file'] }}
         output-file: ${{ steps.prepare.outputs['assessment-file'] }}
         output-schema-file: ${{ github.action_path }}/../../../schemas/codex-pr-review-assessment.schema.json
@@ -76,11 +110,42 @@ runs:
         safety-strategy: drop-sudo
         codex-args: '["--ephemeral","-c","project_doc_max_bytes=0","-c","project_doc_fallback_filenames=[]"]'
 
-    - name: Bind and validate Codex review
+    - name: Install pinned Kiro CLI
+      id: kiro-install
+      if: inputs.engine == 'kiro' && (inputs['api-key'] != '' || inputs['openai-api-key'] != '')
+      continue-on-error: true
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../scripts/ci/install-kiro-cli.sh"
+
+    - name: Run report-only Kiro review
+      id: kiro
+      if: steps.kiro-install.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ steps.prepare.outputs['review-working-directory'] }}
+      env:
+        KIRO_API_KEY: ${{ inputs['api-key'] != '' && inputs['api-key'] || inputs['openai-api-key'] }}
+        NO_COLOR: "1"
+        REVIEW_PROMPT_FILE: ${{ steps.prepare.outputs['prompt-file'] }}
+        REVIEW_RAW_OUTPUT_FILE: ${{ steps.prepare.outputs['raw-output-file'] }}
+        REVIEW_ASSESSMENT_FILE: ${{ steps.prepare.outputs['assessment-file'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+      run: |
+        "$HOME/.local/bin/kiro-cli" chat \
+          --no-interactive \
+          --trust-tools=fs_read \
+          --model "$REVIEW_MODEL" \
+          --effort "$REVIEW_EFFORT" \
+          "$(cat "$REVIEW_PROMPT_FILE")" > "$REVIEW_RAW_OUTPUT_FILE"
+        node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" extract
+
+    - name: Bind and validate engine review
       id: finalize
-      if: inputs['openai-api-key'] != ''
+      if: steps.codex.outcome == 'success' || steps.kiro.outcome == 'success'
       shell: bash
       env:
+        REVIEW_ENGINE: ${{ inputs.engine }}
         REVIEW_REPOSITORY: ${{ inputs.repository }}
         REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
         REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
@@ -97,9 +162,11 @@ runs:
 
     - name: Record unavailable reviewer as NOT_VERIFIED
       id: skip
-      if: inputs['openai-api-key'] == ''
+      if: steps.codex.outcome != 'success' && steps.kiro.outcome != 'success'
       shell: bash
       env:
+        REVIEW_ENGINE: ${{ inputs.engine }}
+        REVIEW_SKIP_REASON: ${{ (inputs['api-key'] == '' && inputs['openai-api-key'] == '') && 'reviewer_withheld' || 'reviewer_unavailable' }}
         REVIEW_REPOSITORY: ${{ inputs.repository }}
         REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
         REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
@@ -130,6 +197,7 @@ runs:
       continue-on-error: true
       shell: bash
       env:
+        REVIEW_ENGINE: ${{ inputs.engine }}
         REVIEW_REPOSITORY: ${{ inputs.repository }}
         REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
         REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
