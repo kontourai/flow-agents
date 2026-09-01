@@ -12,6 +12,10 @@ description: >
 #   the working directory is a trusted temp dir so repository .kiro configs
 #   are not loaded, and output is captured from stdout rather than written by
 #   the model. A policy bug in the CLI would not be caught by an OS sandbox.
+#   The output channel differs too: codex's assessment file is written by the
+#   pinned action's harness under provider-side schema enforcement; kiro's is
+#   parsed from mixed stdout (anchored to the final response marker, trailing
+#   JSON suffix only) — weaker provenance, equalized by finalize validation.
 #   Both engines' outputs pass the same finalize validation; a failed or
 #   crashed engine run is recorded as NOT_VERIFIED, never as a review.
 
@@ -22,15 +26,18 @@ inputs:
     default: "codex"
   api-key:
     description: >-
-      Engine credential. Takes precedence over openai-api-key. Forwarded only
-      to the selected pinned engine step (codex: openai/codex-action input;
-      kiro: KIRO_API_KEY on the kiro-cli step), never as job environment state.
+      Engine credential. For codex it takes precedence over openai-api-key;
+      for kiro it is the ONLY accepted credential (openai-api-key never
+      reaches the Kiro service). Forwarded only to the selected pinned engine
+      step (codex: openai/codex-action input; kiro: KIRO_API_KEY on the
+      kiro-cli step), never as job environment state.
     required: false
     default: ""
   openai-api-key:
     description: >-
-      OpenAI API key (compatibility alias; used when api-key is empty). The
-      value is forwarded only to the pinned official Codex action.
+      OpenAI API key (compatibility alias; used when api-key is empty and the
+      engine is codex). The value is forwarded only to the pinned official
+      Codex action; the kiro engine never reads it.
     required: false
     default: ""
   github-token:
@@ -110,9 +117,13 @@ runs:
         safety-strategy: drop-sudo
         codex-args: '["--ephemeral","-c","project_doc_max_bytes=0","-c","project_doc_fallback_filenames=[]"]'
 
+    # The kiro engine accepts only the generic api-key input. It never falls
+    # back to openai-api-key: transmitting an OpenAI secret as a bearer to the
+    # Kiro service would be a cross-vendor credential leak. engine=kiro with an
+    # empty api-key routes to reviewer_withheld exactly like a missing codex key.
     - name: Install pinned Kiro CLI
       id: kiro-install
-      if: inputs.engine == 'kiro' && (inputs['api-key'] != '' || inputs['openai-api-key'] != '')
+      if: inputs.engine == 'kiro' && inputs['api-key'] != ''
       continue-on-error: true
       shell: bash
       run: bash "${{ github.action_path }}/../../../scripts/ci/install-kiro-cli.sh"
@@ -124,7 +135,7 @@ runs:
       shell: bash
       working-directory: ${{ steps.prepare.outputs['review-working-directory'] }}
       env:
-        KIRO_API_KEY: ${{ inputs['api-key'] != '' && inputs['api-key'] || inputs['openai-api-key'] }}
+        KIRO_API_KEY: ${{ inputs['api-key'] }}
         NO_COLOR: "1"
         REVIEW_PROMPT_FILE: ${{ steps.prepare.outputs['prompt-file'] }}
         REVIEW_RAW_OUTPUT_FILE: ${{ steps.prepare.outputs['raw-output-file'] }}
@@ -166,7 +177,7 @@ runs:
       shell: bash
       env:
         REVIEW_ENGINE: ${{ inputs.engine }}
-        REVIEW_SKIP_REASON: ${{ (inputs['api-key'] == '' && inputs['openai-api-key'] == '') && 'reviewer_withheld' || 'reviewer_unavailable' }}
+        REVIEW_SKIP_REASON: ${{ ((inputs.engine == 'kiro' && inputs['api-key'] == '') || (inputs.engine != 'kiro' && inputs['api-key'] == '' && inputs['openai-api-key'] == '')) && 'reviewer_withheld' || 'reviewer_unavailable' }}
         REVIEW_REPOSITORY: ${{ inputs.repository }}
         REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
         REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}

@@ -45,12 +45,35 @@ repository content.
 ## Engines
 
 The composite is engine-agnostic. `engine: codex` (the default) preserves the
-original behavior exactly; `engine: kiro` runs the same exact-head contract
-through a pinned `kiro-cli` headless session. Unknown engine names fail closed
-at the prepare step. The generic `api-key` input carries the credential for
-either engine and takes precedence over the compatibility alias
-`openai-api-key`; existing callers that pass only `openai-api-key` are
-unchanged.
+original success-path behavior; `engine: kiro` runs the same exact-head
+contract through a pinned `kiro-cli` headless session. Unknown engine names
+fail closed at the prepare step.
+
+Credentials are engine-scoped. For codex the generic `api-key` input takes
+precedence over the compatibility alias `openai-api-key`. For kiro, `api-key`
+is the only accepted credential: `openai-api-key` never reaches the Kiro
+service, so legacy wiring plus `engine: kiro` cannot leak an OpenAI secret
+cross-vendor — it records `reviewer_withheld` exactly like a missing key.
+
+Two behavior changes apply to existing callers that pass only
+`openai-api-key`, both deliberate:
+
+- **A reviewer crash no longer reds the check.** The engine steps run with
+  `continue-on-error`; a crashed or failed engine run publishes a validated
+  `not_verified` result with `not_verified_reason: reviewer_unavailable`
+  instead of failing the workflow. Callers that previously relied on a red
+  check to notice reviewer breakage must gate on the `verdict` output (and
+  `not_verified_reason` in the artifact) instead. One asymmetry is
+  intentional: an engine run that *succeeds* but emits a parseable,
+  schema-invalid assessment still hard-fails the composite at finalize —
+  that is a contract violation worth a red check, not a quiet
+  `NOT_VERIFIED`.
+- **The result schema change is one-directional.** Artifacts produced by this
+  version validate against this version's schema only: new skip results carry
+  `not_verified_reason`, which the pre-change schema rejects under
+  `additionalProperties: false`. Consumers that pin the old schema must
+  upgrade it together with the action; old artifacts still validate against
+  the new schema.
 
 Both engines share every trust boundary except the sandbox, and that
 difference is disclosed rather than papered over:
@@ -67,6 +90,20 @@ difference is disclosed rather than papered over:
   prepare step materializes the exact merge-base diff as `diff.patch` for
   read-only inspection. A defect in the CLI's tool policy would not be caught
   by an OS sandbox; weigh that when choosing the engine.
+
+The output channel differs too: codex's assessment is written by the pinned
+action's harness under provider-side schema enforcement, while kiro's is
+parsed out of a mixed stdout stream (the extractor anchors to the CLI's final
+response marker and requires the assessment to be the stream's trailing JSON
+suffix; anything else routes to `NOT_VERIFIED`). A stdout-parsed channel is
+inherently weaker evidence of "the model said exactly this" than a
+harness-written file; the strict finalize validation is the equalizer both
+engines pass through.
+
+Not yet verified for kiro (until the first Linux CI run): the `fs_read`
+tool-policy binding under `--trust-tools`, and whether tool traces appear on
+stdout during a multi-step headless run. Treat the first live kiro review as
+that probe and read its raw artifacts before trusting the lane.
 
 The kiro toolchain is pinned exactly: `scripts/ci/install-kiro-cli.sh`
 downloads one immutable versioned artifact from the official Kiro CLI

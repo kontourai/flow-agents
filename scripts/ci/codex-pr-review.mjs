@@ -147,23 +147,30 @@ function extract() {
   } catch {
     throw new Error("raw engine output is not readable");
   }
-  // kiro-cli headless stdout wraps the response in ANSI styling and a "> "
-  // response marker. Strip terminal control sequences, then take the outermost
-  // JSON object. Anything that does not parse fails closed here; the strict
-  // finalize validation re-checks every field afterwards.
+  // kiro-cli headless stdout wraps the model reply in ANSI styling behind a
+  // "> " response marker (verified against live 2.20.2 output). Strip
+  // terminal control sequences, then anchor extraction to the region after
+  // the FINAL response marker: stream content before it (tool traces, echoed
+  // diff lines) can contain brace spans and must never be mistaken for the
+  // assessment. The assessment must be the trailing JSON suffix of that
+  // region (whitespace-tolerant); anything else fails closed here, and the
+  // strict finalize validation re-checks every field afterwards.
   const plain = raw
     .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
     .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "");
-  const start = plain.indexOf("{");
-  const end = plain.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) throw new Error("raw engine output contains no JSON object");
+  let markerEnd = -1;
+  for (const match of plain.matchAll(/^> ?/gm)) markerEnd = match.index + match[0].length;
+  if (markerEnd === -1) throw new Error("raw engine output contains no response marker");
+  const response = plain.slice(markerEnd);
+  const start = response.indexOf("{");
+  if (start === -1) throw new Error("model response contains no JSON object");
   let assessment;
   try {
-    assessment = JSON.parse(plain.slice(start, end + 1));
+    assessment = JSON.parse(response.slice(start).trimEnd());
   } catch {
-    throw new Error("raw engine output is not a parseable JSON object");
+    throw new Error("model response does not end in a single parseable JSON object");
   }
-  if (!plainObject(assessment)) throw new Error("raw engine output must contain a JSON object");
+  if (!plainObject(assessment)) throw new Error("model response must be a JSON object");
   writeJson(assessmentFile, assessment);
   console.log("Extracted the engine assessment from raw headless output.");
 }
