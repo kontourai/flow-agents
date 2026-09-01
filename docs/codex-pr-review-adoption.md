@@ -103,7 +103,12 @@ engines pass through.
 Not yet verified for kiro (until the first Linux CI run): the `fs_read`
 tool-policy binding under `--trust-tools`, and whether tool traces appear on
 stdout during a multi-step headless run. Treat the first live kiro review as
-that probe and read its raw artifacts before trusting the lane.
+that probe and read its raw artifacts before trusting the lane. In
+particular, the extractor assumes nothing untrusted follows the model's
+final reply on stdout (the last `> `-marked region is model-authored and
+terminal, as the live 2.20.2 probe showed); the first-run artifact must
+confirm that ordering, because content after the final marker is what the
+extractor trusts.
 
 The kiro toolchain is pinned exactly: `scripts/ci/install-kiro-cli.sh`
 downloads one immutable versioned artifact from the official Kiro CLI
