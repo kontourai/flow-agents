@@ -124,6 +124,10 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
     <strong>Workflow Usage Guide</strong>
     <span>Every stage from shaping ideas to learning review, with example prompts and expected behavior.</span>
   </a>
+  <a class="doc-card" href="codex-pr-review-adoption.html">
+    <strong>Builder Codex PR Review</strong>
+    <span>Adopt advisory exact-head Codex review in publish-learn, publish inline findings, and route blocking evidence back to implementation without giving the reviewer write authority.</span>
+  </a>
   <a class="doc-card" href="agent-system-guidebook.html">
     <strong>System Guidebook</strong>
     <span>The plain-language map of how Flow Agents is assembled and how it should feel to use.</span>

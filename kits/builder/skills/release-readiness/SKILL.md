@@ -51,6 +51,18 @@ terms or treating absence as success.
 1. Confirm the confidence report remains applicable to the proposed scope.
 2. Reconcile current provider checks and review state with the revision covered
    by acceptance evidence. Stale or mismatched evidence is `NOT_VERIFIED`.
+   A validated `CodexPullRequestReview` from the optional Builder Codex PR
+   review action is a `CheckProvider` review observation for the exact published
+   head. It is distinct from the pre-publication `review-work` critique and from
+   deterministic verification. Confirm its repository, PR, base/head SHA, diff
+   digest, reviewer runtime/model, coverage, findings, gaps, and integrity
+   fields. A critical/high finding, or a medium finding whose validated
+   `requires_change` field is true, records failed
+   `ci-merge-readiness` evidence with `--route-reason implementation_defect`;
+   an unavailable or incomplete required review records failed readiness with
+   `--route-reason missing_evidence`. The artifact's own `not_verified` verdict
+   remains visible even though the readiness expectation fails to select the
+   declared route-back. A changed PR head makes the observation stale.
    When a required provider check reports only that a delivery bundle is missing, do not record
    that structural lifecycle ordering gap as a product CI failure and do not manufacture PASS.
    At `merge-ready-ci`, first run `workflow publish-provisional-delivery-request`, have the
@@ -105,9 +117,15 @@ terms or treating absence as success.
 flow-agents workflow evidence --session-dir <session-dir> \
   --expectation ci-merge-readiness \
   --status <pass|fail|not_verified> \
+  [--route-reason <implementation_defect|missing_evidence>] \
   --summary "Release-readiness decision and residual risks are recorded." \
   --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/release.json","summary":"Release-readiness decision, authorization, rollback, and observability state."}'
 ```
+
+`--route-reason` is used only with `--status fail`. Do not route a clean or
+advisory-only review, and do not let the reviewer invoke the repair itself. The
+separate implementation actor follows the Flow-projected `next_action`, pushes
+a new head, and requires a fresh provider review.
 
 ## Output
 

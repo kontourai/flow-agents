@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flow-agents.dev/schemas/codex-pr-review-result.schema.json",
+  "title": "Builder Codex pull request review result",
+  "type": "object",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "verdict": { "const": "pass" } }, "required": ["verdict"] },
+      "then": {
+        "properties": {
+          "coverage": { "items": { "properties": { "status": { "const": "pass" } } } },
+          "findings": { "maxItems": 0 },
+          "gaps": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "comment" } }, "required": ["verdict"] },
+      "then": {
+        "properties": {
+          "coverage": { "items": { "properties": { "status": { "const": "pass" } } } },
+          "findings": {
+            "items": { "properties": { "requires_change": { "const": false } } }
+          },
+          "gaps": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "fail" } }, "required": ["verdict"] },
+      "then": {
+        "anyOf": [
+          { "properties": { "coverage": { "contains": { "properties": { "status": { "const": "fail" } }, "required": ["status"] } } } },
+          { "properties": { "findings": { "contains": { "properties": { "requires_change": { "const": true } }, "required": ["requires_change"] } } } }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "verdict": { "const": "not_verified" } }, "required": ["verdict"] },
+      "then": {
+        "properties": {
+          "coverage": { "items": { "properties": { "status": { "enum": ["pass", "not_verified"] } } } },
+          "findings": { "items": { "properties": { "requires_change": { "const": false } } } }
+        },
+        "anyOf": [
+          { "properties": { "coverage": { "contains": { "properties": { "status": { "const": "not_verified" } }, "required": ["status"] } } } },
+          { "properties": { "gaps": { "minItems": 1 } } }
+        ]
+      }
+    },
+    {
+      "if": { "required": ["not_verified_reason"] },
+      "then": { "properties": { "verdict": { "const": "not_verified" } } }
+    },
+    {
+      "if": { "properties": { "reviewer": { "properties": { "runtime": { "const": "codex" } }, "required": ["runtime"] } }, "required": ["reviewer"] },
+      "then": {
+        "properties": {
+          "reviewer": {
+            "properties": {
+              "provider": { "const": "openai/codex-action" },
+              "provider_revision": { "pattern": "^[0-9a-f]{40}$" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "reviewer": { "properties": { "runtime": { "const": "kiro" } }, "required": ["runtime"] } }, "required": ["reviewer"] },
+      "then": {
+        "properties": {
+          "reviewer": {
+            "properties": {
+              "provider": { "const": "kiro-cli" },
+              "provider_revision": { "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "coverage": {
+      "type": "array",
+      "minItems": 1,
+      "contains": {
+        "type": "object",
+        "properties": { "lane": { "const": "code" } },
+        "required": ["lane"]
+      },
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lane", "status", "summary"],
+        "properties": {
+          "lane": { "enum": ["code", "security", "dependency", "architecture"] },
+          "status": { "enum": ["pass", "fail", "not_verified"] },
+          "summary": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "requires_change", "file", "line", "title", "description"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+          "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+          "requires_change": { "type": "boolean" },
+          "file": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "line": { "type": "integer", "minimum": 1 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 4000 }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "severity": { "enum": ["critical", "high"] } }, "required": ["severity"] },
+            "then": { "properties": { "requires_change": { "const": true } } }
+          },
+          {
+            "if": { "properties": { "severity": { "enum": ["low", "info"] } }, "required": ["severity"] },
+            "then": { "properties": { "requires_change": { "const": false } } }
+          }
+        ]
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+    }
+  },
+  "required": [
+    "schema_version",
+    "role",
+    "target",
+    "reviewer",
+    "verdict",
+    "summary",
+    "coverage",
+    "findings",
+    "gaps",
+    "reviewed_at",
+    "integrity"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "role": { "const": "CodexPullRequestReview" },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "pull_request",
+        "base_sha",
+        "head_sha",
+        "merge_base_sha",
+        "diff_sha256",
+        "changed_file_count"
+      ],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
+        "pull_request": { "type": "integer", "minimum": 1 },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "merge_base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "diff_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "changed_file_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "model", "reasoning_effort", "provider", "provider_revision", "run_id", "trigger_actor"],
+      "properties": {
+        "runtime": { "enum": ["codex", "kiro"] },
+        "model": { "type": "string", "minLength": 1 },
+        "reasoning_effort": { "enum": ["low", "medium", "high", "xhigh", "max", "ultra"] },
+        "provider": { "enum": ["openai/codex-action", "kiro-cli"] },
+        "provider_revision": { "type": "string", "pattern": "^([0-9a-f]{40}|[0-9]+\\.[0-9]+\\.[0-9]+)$" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "trigger_actor": { "type": "string", "minLength": 1 }
+      }
+    },
+    "verdict": { "enum": ["pass", "comment", "fail", "not_verified"] },
+    "not_verified_reason": { "enum": ["reviewer_withheld", "reviewer_unavailable"] },
+    "summary": { "type": "string", "minLength": 1 },
+    "coverage": { "$ref": "#/$defs/coverage" },
+    "findings": { "$ref": "#/$defs/findings" },
+    "gaps": { "$ref": "#/$defs/gaps" },
+    "reviewed_at": { "type": "string", "format": "date-time" },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_sha256", "assessment_sha256"],
+      "properties": {
+        "target_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "assessment_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

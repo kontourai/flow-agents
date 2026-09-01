@@ -36,6 +36,7 @@
 /context/scripts/hooks/stop-goal-fit.js @briananderson1222
 /context/scripts/hooks/lib/effective-flow-agents-config.js @briananderson1222
 /schemas/flow-agents-*-config.schema.json @briananderson1222
+/schemas/codex-pr-review-*.schema.json @briananderson1222
 /.flow-agents/config/              @briananderson1222
 
 # FlowDefinition resolution + the trust producer/checkpoint/signing the gate depends on

@@ -1,0 +1,224 @@
+name: "Builder PR Review"
+description: >
+  Run an advisory, exact-head PR review with a selectable engine (codex or
+  kiro) and emit a validated Builder publish-learn provider observation.
+
+# Engine trust difference (disclosed, not papered over):
+# - codex runs inside the pinned openai/codex-action with an OS-level
+#   read-only sandbox and drop-sudo, plus provider-side schema enforcement.
+# - kiro has no equivalent OS sandbox. Containment is CLI tool policy only:
+#   the run trusts fs_read alone (no shell, no writes, never the blanket
+#   all-tools trust flag),
+#   the working directory is a trusted temp dir so repository .kiro configs
+#   are not loaded, and output is captured from stdout rather than written by
+#   the model. A policy bug in the CLI would not be caught by an OS sandbox.
+#   The output channel differs too: codex's assessment file is written by the
+#   pinned action's harness under provider-side schema enforcement; kiro's is
+#   parsed from mixed stdout (anchored to the final response marker, trailing
+#   JSON suffix only) — weaker provenance, equalized by finalize validation.
+#   Both engines' outputs pass the same finalize validation; a failed or
+#   crashed engine run is recorded as NOT_VERIFIED, never as a review.
+
+inputs:
+  engine:
+    description: "Review engine: codex (default) or kiro. Unknown engines fail closed at prepare."
+    required: false
+    default: "codex"
+  api-key:
+    description: >-
+      Engine credential. For codex it takes precedence over openai-api-key;
+      for kiro it is the ONLY accepted credential (openai-api-key never
+      reaches the Kiro service). Forwarded only to the selected pinned engine
+      step (codex: openai/codex-action input; kiro: KIRO_API_KEY on the
+      kiro-cli step), never as job environment state.
+    required: false
+    default: ""
+  openai-api-key:
+    description: >-
+      OpenAI API key (compatibility alias; used when api-key is empty and the
+      engine is codex). The value is forwarded only to the pinned official
+      Codex action; the kiro engine never reads it.
+    required: false
+    default: ""
+  github-token:
+    description: "Optional GitHub token used only to publish advisory review comments."
+    required: false
+    default: ""
+  repository:
+    description: "Repository in owner/name form."
+    required: true
+  pull-request:
+    description: "Pull request number."
+    required: true
+  base-sha:
+    description: "Full pull request base SHA."
+    required: true
+  head-sha:
+    description: "Full pull request head SHA. The checkout HEAD must match."
+    required: true
+  model:
+    description: >-
+      Caller-selected review model. For kiro this is passed to kiro-cli chat
+      --model, which fails closed on a model the service does not offer; no
+      silent substitution can occur.
+    required: true
+  effort:
+    description: "Caller-selected reasoning effort. kiro supports low..max; ultra is codex-only and fails closed at prepare."
+    required: false
+    default: "xhigh"
+
+outputs:
+  result-file:
+    description: "Validated CodexPullRequestReview JSON artifact."
+    value: ${{ steps.result.outputs['result-file'] }}
+  verdict:
+    description: "pass, comment, fail, or not_verified."
+    value: ${{ steps.result.outputs.verdict }}
+  head-sha:
+    description: "Exact reviewed pull request head SHA."
+    value: ${{ steps.result.outputs['head-sha'] }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Prepare exact-head review target
+      id: prepare
+      shell: bash
+      env:
+        REVIEW_ENGINE: ${{ inputs.engine }}
+        REVIEW_REPOSITORY: ${{ inputs.repository }}
+        REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
+        REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
+        REVIEW_HEAD_SHA: ${{ inputs['head-sha'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+        REVIEW_RUN_ID: ${{ github.run_id }}
+        REVIEW_TRIGGER_ACTOR: ${{ github.actor }}
+        REVIEW_WORKSPACE: ${{ github.workspace }}
+      run: node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" prepare
+
+    # A failed engine run (crash, refusal, invalid model, install failure) is
+    # routed to the NOT_VERIFIED skip step below instead of failing the
+    # composite; continue-on-error makes that routing possible.
+    - name: Run report-only Codex review
+      id: codex
+      if: inputs.engine == 'codex' && (inputs['api-key'] != '' || inputs['openai-api-key'] != '')
+      continue-on-error: true
+      uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e
+      with:
+        openai-api-key: ${{ inputs['api-key'] != '' && inputs['api-key'] || inputs['openai-api-key'] }}
+        prompt-file: ${{ steps.prepare.outputs['prompt-file'] }}
+        output-file: ${{ steps.prepare.outputs['assessment-file'] }}
+        output-schema-file: ${{ github.action_path }}/../../../schemas/codex-pr-review-assessment.schema.json
+        working-directory: ${{ steps.prepare.outputs['review-working-directory'] }}
+        model: ${{ inputs.model }}
+        effort: ${{ inputs.effort }}
+        sandbox: read-only
+        safety-strategy: drop-sudo
+        codex-args: '["--ephemeral","-c","project_doc_max_bytes=0","-c","project_doc_fallback_filenames=[]"]'
+
+    # The kiro engine accepts only the generic api-key input. It never falls
+    # back to openai-api-key: transmitting an OpenAI secret as a bearer to the
+    # Kiro service would be a cross-vendor credential leak. engine=kiro with an
+    # empty api-key routes to reviewer_withheld exactly like a missing codex key.
+    - name: Install pinned Kiro CLI
+      id: kiro-install
+      if: inputs.engine == 'kiro' && inputs['api-key'] != ''
+      continue-on-error: true
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../scripts/ci/install-kiro-cli.sh"
+
+    - name: Run report-only Kiro review
+      id: kiro
+      if: steps.kiro-install.outcome == 'success'
+      continue-on-error: true
+      shell: bash
+      working-directory: ${{ steps.prepare.outputs['review-working-directory'] }}
+      env:
+        KIRO_API_KEY: ${{ inputs['api-key'] }}
+        NO_COLOR: "1"
+        REVIEW_PROMPT_FILE: ${{ steps.prepare.outputs['prompt-file'] }}
+        REVIEW_RAW_OUTPUT_FILE: ${{ steps.prepare.outputs['raw-output-file'] }}
+        REVIEW_ASSESSMENT_FILE: ${{ steps.prepare.outputs['assessment-file'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+      run: |
+        "$HOME/.local/bin/kiro-cli" chat \
+          --no-interactive \
+          --trust-tools=fs_read \
+          --model "$REVIEW_MODEL" \
+          --effort "$REVIEW_EFFORT" \
+          "$(cat "$REVIEW_PROMPT_FILE")" > "$REVIEW_RAW_OUTPUT_FILE"
+        node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" extract
+
+    - name: Bind and validate engine review
+      id: finalize
+      if: steps.codex.outcome == 'success' || steps.kiro.outcome == 'success'
+      shell: bash
+      env:
+        REVIEW_ENGINE: ${{ inputs.engine }}
+        REVIEW_REPOSITORY: ${{ inputs.repository }}
+        REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
+        REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
+        REVIEW_HEAD_SHA: ${{ inputs['head-sha'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+        REVIEW_RUN_ID: ${{ github.run_id }}
+        REVIEW_TRIGGER_ACTOR: ${{ github.actor }}
+        REVIEW_WORKSPACE: ${{ github.workspace }}
+        REVIEW_TARGET_FILE: ${{ steps.prepare.outputs['target-file'] }}
+        REVIEW_ASSESSMENT_FILE: ${{ steps.prepare.outputs['assessment-file'] }}
+        REVIEW_RESULT_FILE: ${{ steps.prepare.outputs['result-file'] }}
+      run: node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" finalize
+
+    - name: Record unavailable reviewer as NOT_VERIFIED
+      id: skip
+      if: steps.codex.outcome != 'success' && steps.kiro.outcome != 'success'
+      shell: bash
+      env:
+        REVIEW_ENGINE: ${{ inputs.engine }}
+        REVIEW_SKIP_REASON: ${{ ((inputs.engine == 'kiro' && inputs['api-key'] == '') || (inputs.engine != 'kiro' && inputs['api-key'] == '' && inputs['openai-api-key'] == '')) && 'reviewer_withheld' || 'reviewer_unavailable' }}
+        REVIEW_REPOSITORY: ${{ inputs.repository }}
+        REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
+        REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
+        REVIEW_HEAD_SHA: ${{ inputs['head-sha'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+        REVIEW_RUN_ID: ${{ github.run_id }}
+        REVIEW_TRIGGER_ACTOR: ${{ github.actor }}
+        REVIEW_WORKSPACE: ${{ github.workspace }}
+        REVIEW_TARGET_FILE: ${{ steps.prepare.outputs['target-file'] }}
+        REVIEW_RESULT_FILE: ${{ steps.prepare.outputs['result-file'] }}
+      run: node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" skip
+
+    - name: Publish composite outputs
+      id: result
+      shell: bash
+      env:
+        RESULT_FILE: ${{ steps.finalize.outputs['result-file'] || steps.skip.outputs['result-file'] }}
+        RESULT_VERDICT: ${{ steps.finalize.outputs.verdict || steps.skip.outputs.verdict }}
+        RESULT_HEAD_SHA: ${{ steps.finalize.outputs['head-sha'] || steps.skip.outputs['head-sha'] }}
+      run: |
+        echo "result-file=$RESULT_FILE" >> "$GITHUB_OUTPUT"
+        echo "verdict=$RESULT_VERDICT" >> "$GITHUB_OUTPUT"
+        echo "head-sha=$RESULT_HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+    - name: Publish advisory PR review comments
+      if: inputs['github-token'] != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        REVIEW_ENGINE: ${{ inputs.engine }}
+        REVIEW_REPOSITORY: ${{ inputs.repository }}
+        REVIEW_PULL_REQUEST: ${{ inputs['pull-request'] }}
+        REVIEW_BASE_SHA: ${{ inputs['base-sha'] }}
+        REVIEW_HEAD_SHA: ${{ inputs['head-sha'] }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEW_EFFORT: ${{ inputs.effort }}
+        REVIEW_RUN_ID: ${{ github.run_id }}
+        REVIEW_TRIGGER_ACTOR: ${{ github.actor }}
+        REVIEW_WORKSPACE: ${{ github.workspace }}
+        REVIEW_TARGET_FILE: ${{ steps.prepare.outputs['target-file'] }}
+        REVIEW_RESULT_FILE: ${{ steps.result.outputs['result-file'] }}
+        REVIEW_GITHUB_TOKEN: ${{ inputs['github-token'] }}
+      run: node "${{ github.action_path }}/../../../scripts/ci/codex-pr-review.mjs" publish

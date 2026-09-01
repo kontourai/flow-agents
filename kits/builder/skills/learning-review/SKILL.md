@@ -51,6 +51,13 @@ produces its local record only.
    to the backlog, workflow defects to the owning workflow, regression risks to
    tests, durable operating knowledge to the knowledge system, and binding
    decisions or changed contracts to documentation or an ADR.
+   For post-publication Codex PR review, distinguish a product defect found in
+   the reviewed repository from a review-system defect such as stale scope,
+   noisy severity, missing coverage, unsafe publication, or route-back failure.
+   Route the former to the repository backlog and the latter to Builder Kit or
+   the owning provider adapter. Repeated model wording alone is not a lesson;
+   require the exact-head review artifact and observed disposition or repair
+   outcome.
 5. Record follow-up creation or linkage as observed evidence. A recommendation
    without a durable destination remains open; do not report it as captured.
 6. Preserve `NOT_VERIFIED` for outcomes that could not be observed. Do not infer
