@@ -394,7 +394,10 @@ grep -Fq "if: inputs.engine == 'kiro' && inputs['api-key'] != ''" "$ACTION" \
   && grep -Fq "REVIEW_SKIP_REASON: \${{ ((inputs.engine == 'kiro' && inputs['api-key'] == '') || (inputs.engine != 'kiro' && inputs['api-key'] == '' && inputs['openai-api-key'] == '')) && 'reviewer_withheld' || 'reviewer_unavailable' }}" "$ACTION" \
   && ok "failed engine runs route to NOT_VERIFIED with a distinguishable reason" \
   || bad "failed engine runs must route to NOT_VERIFIED with a distinguishable reason"
-grep -Fq -- '--trust-tools=fs_read' "$ACTION" \
+# Exact list, not a substring: fs_read alone left grep/glob at their
+# "trust working directory" default, which the trusted empty cwd defeats.
+[[ "$(grep -Ec -- '^\s+--trust-tools=fs_read,grep,glob \\$' "$ACTION")" -eq 1 ]] \
+  && ! grep -Eq -- '--trust-tools=[^ ]*(shell|write|execute_bash|fs_write|web)' "$ACTION" \
   && ! grep -Fq -- '--trust-all-tools' "$ACTION" \
   && grep -Fq -- '--model "$REVIEW_MODEL"' "$ACTION" \
   && grep -Fq 'install-kiro-cli.sh' "$ACTION" \

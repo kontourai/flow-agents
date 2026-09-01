@@ -7,11 +7,16 @@ description: >
 # - codex runs inside the pinned openai/codex-action with an OS-level
 #   read-only sandbox and drop-sudo, plus provider-side schema enforcement.
 # - kiro has no equivalent OS sandbox. Containment is CLI tool policy only:
-#   the run trusts fs_read alone (no shell, no writes, never the blanket
-#   all-tools trust flag),
-#   the working directory is a trusted temp dir so repository .kiro configs
-#   are not loaded, and output is captured from stdout rather than written by
-#   the model. A policy bug in the CLI would not be caught by an OS sandbox.
+#   the run trusts the three read-only file tools — fs_read (the CLI's alias
+#   for `read`), grep, and glob — and nothing else: no shell, no writes,
+#   never the blanket all-tools trust flag. grep and glob must be named
+#   because their default is "trust working directory" and the working
+#   directory is deliberately NOT the checkout: it is a trusted temp dir so
+#   repository .kiro configs are not loaded, which put every search of the
+#   checkout outside the default trust and had non-interactive mode deny
+#   them (station run 33571203065 — the model reported the gaps and finalize
+#   rejected the review). Output is captured from stdout rather than written
+#   by the model. A policy bug in the CLI would not be caught by an OS sandbox.
 #   The output channel differs too: codex's assessment file is written by the
 #   pinned action's harness under provider-side schema enforcement; kiro's is
 #   parsed from mixed stdout (anchored to the final response marker, trailing
@@ -145,7 +150,7 @@ runs:
       run: |
         "$HOME/.local/bin/kiro-cli" chat \
           --no-interactive \
-          --trust-tools=fs_read \
+          --trust-tools=fs_read,grep,glob \
           --model "$REVIEW_MODEL" \
           --effort "$REVIEW_EFFORT" \
           "$(cat "$REVIEW_PROMPT_FILE")" > "$REVIEW_RAW_OUTPUT_FILE"

@@ -82,11 +82,15 @@ difference is disclosed rather than papered over:
   OS-level read-only sandbox, `drop-sudo`, and provider-side schema
   enforcement of the assessment.
 - **kiro** has no equivalent OS sandbox. Containment is CLI tool policy only:
-  the run trusts `fs_read` alone — no shell, no write tools, no network tools,
-  never blanket tool trust — the working directory is a trusted temporary
-  directory so a PR-authored `.kiro/` configuration is never loaded, and the
-  assessment is captured from the model's stdout response rather than written
-  by the model. Because `kiro-cli` cannot run git without shell trust, the
+  the run trusts the three read-only file tools, `fs_read` (the CLI's alias
+  for `read`), `grep`, and `glob` — no shell, no write tools, no network
+  tools, never blanket tool trust — the working directory is a trusted
+  temporary directory so a PR-authored `.kiro/` configuration is never
+  loaded, and the assessment is captured from the model's stdout response
+  rather than written by the model. `grep` and `glob` have to be named: their
+  default is "trust working directory", and the checkout is not the working
+  directory, so under `--trust-tools=fs_read` non-interactive mode denied
+  every search of the checkout (see the first-run findings below). Because `kiro-cli` cannot run git without shell trust, the
   prepare step materializes the exact merge-base diff as `diff.patch` for
   read-only inspection. A defect in the CLI's tool policy would not be caught
   by an OS sandbox; weigh that when choosing the engine.
@@ -100,15 +104,29 @@ inherently weaker evidence of "the model said exactly this" than a
 harness-written file; the strict finalize validation is the equalizer both
 engines pass through.
 
-Not yet verified for kiro (until the first Linux CI run): the `fs_read`
-tool-policy binding under `--trust-tools`, and whether tool traces appear on
-stdout during a multi-step headless run. Treat the first live kiro review as
-that probe and read its raw artifacts before trusting the lane. In
-particular, the extractor assumes nothing untrusted follows the model's
-final reply on stdout (the last `> `-marked region is model-authored and
-terminal, as the live 2.20.2 probe showed); the first-run artifact must
-confirm that ordering, because content after the final marker is what the
-extractor trusts.
+What the first live kiro run showed (kontourai/station run 33571203065,
+kiro-cli 2.20.2, `--trust-tools=fs_read`, the trusted empty cwd):
+
+- The tool-policy binding holds: `fs_read` trusted `read`; `shell` and
+  `write` stayed untrusted. But `grep` and `glob` were denied
+  ("non-interactive mode (no user to approve)") because their default is
+  "trust working directory" and the checkout is outside it. The model
+  reported the gaps and finalize rejected the review (`coverage gaps
+  require verdict not_verified or fail`). Measured locally with kiro-cli
+  2.21.0 (`printf '/tools\n' | kiro-cli chat --no-interactive
+  --trust-tools=<X>`): `fs_read,grep,glob` trusts exactly those three and
+  leaves `shell`/`write` untrusted, which is what the run now passes. Two
+  built-ins are outside the flag's control under every setting — `code`
+  ("trust read-only operations") and `introspect` ("trusted") — both
+  read-only.
+- Tool denial traces went to the job log (stderr), not the captured stdout;
+  the extractor found the assessment in the raw output.
+- Still unverified: the extractor's ordering assumption (nothing untrusted
+  follows the model's final reply on stdout), and what the service did with
+  the caller's model id. Both need the raw output, which the composite does
+  not retain and which a finalize rejection discards without a record —
+  tracked as #1399. Until that lands, read the raw artifact of the first
+  run that retains one before trusting the lane.
 
 The kiro toolchain is pinned exactly: `scripts/ci/install-kiro-cli.sh`
 downloads one immutable versioned artifact from the official Kiro CLI
