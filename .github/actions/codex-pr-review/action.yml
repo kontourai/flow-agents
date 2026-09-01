@@ -26,8 +26,14 @@ description: >
 #   pinned action's harness under provider-side schema enforcement; kiro's is
 #   parsed from mixed stdout (anchored to the final response marker, trailing
 #   JSON suffix only) — weaker provenance, equalized by finalize validation.
-#   Both engines' outputs pass the same finalize validation; a failed or
-#   crashed engine run is recorded as NOT_VERIFIED, never as a review.
+#   Both engines' outputs pass the same finalize validation. A failed or
+#   crashed engine run is recorded as NOT_VERIFIED (reviewer_unavailable),
+#   and so is an engine that answered with a contract-invalid assessment
+#   (assessment_invalid, carrying the validation message) — never as a
+#   review, and never as a bare red step with nothing retained. The review
+#   directory (prompt, diff, raw engine output, extracted assessment,
+#   result) is exposed as an output so callers can upload it on every
+#   outcome; the composite does not retain it itself.
 
 inputs:
   engine:
@@ -87,6 +93,13 @@ outputs:
   head-sha:
     description: "Exact reviewed pull request head SHA."
     value: ${{ steps.result.outputs['head-sha'] }}
+  review-directory:
+    description: >-
+      The run's review working directory: target.json, prompt.md, the kiro
+      diff.patch and raw-engine-output.txt, assessment.json, and the result.
+      Set as soon as prepare succeeds, so a caller can upload it with
+      `if: always()` and keep the evidence behind a NOT_VERIFIED or red run.
+    value: ${{ steps.prepare.outputs['review-working-directory'] }}
 
 runs:
   using: "composite"

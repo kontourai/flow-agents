@@ -94,11 +94,46 @@ function finalize() {
   const target = readJson(targetFile, "review target");
   validateTarget(target, input);
   const assessment = readJson(assessmentFile, "Codex assessment");
-  validateAssessment(assessment, target, input.headSha);
-  const result = bindResult(target, assessment, input);
+  let result;
+  let rejection;
+  try {
+    validateAssessment(assessment, target, input.headSha);
+    result = bindResult(target, assessment, input);
+  } catch (error) {
+    // The engine ran and answered, but the answer violates the assessment
+    // contract. That is a reviewer that produced no evidence for this head,
+    // not a broken runner: record it as NOT_VERIFIED with the validation
+    // message so the caller gets a bound result and a PR comment instead of
+    // a red step that retains nothing (the first live kiro run, #1399).
+    // Unreadable inputs and a target mismatch above stay hard failures.
+    rejection = message(error);
+    result = bindResult(target, rejectedAssessment(input, assessment, rejection), input, { notVerifiedReason: "assessment_invalid" });
+  }
   writeJson(resultFile, result);
   appendGithubOutput({ "result-file": resultFile, verdict: result.verdict, "head-sha": input.headSha });
-  console.log(`Validated ${result.verdict} ${engineDisplayName(input.engine)} review for exact head ${input.headSha}.`);
+  if (rejection) {
+    console.log(`Recorded NOT_VERIFIED ${engineDisplayName(input.engine)} review for exact head ${input.headSha}; finalize rejected the engine assessment: ${rejection}`);
+  } else {
+    console.log(`Validated ${result.verdict} ${engineDisplayName(input.engine)} review for exact head ${input.headSha}.`);
+  }
+}
+
+function rejectedAssessment(input, assessment, rejection) {
+  const engineName = engineDisplayName(input.engine);
+  // The rejected document stays on disk unmodified; its digest ties this
+  // record to that file for anyone who retains the review directory.
+  const digest = sha256(Buffer.from(canonicalJson(assessment)));
+  const claimed = plainObject(assessment) && typeof assessment.verdict === "string" ? assessment.verdict : "unknown";
+  return {
+    verdict: "not_verified",
+    summary: `${engineName} PR review produced an assessment that failed finalize validation and is not review evidence for this head: ${rejection}`.slice(0, 2000),
+    coverage: [{ lane: "code", status: "not_verified", summary: `The ${engineName} assessment (claimed verdict ${claimed}) was rejected at finalize validation.` }],
+    findings: [],
+    gaps: [
+      `Finalize rejected the ${engineName} assessment: ${rejection}`.slice(0, 1000),
+      `The rejected assessment (claimed verdict ${claimed}, sha256 ${digest}) is left unmodified as assessment.json in the review directory; retain that directory to inspect it.`,
+    ],
+  };
 }
 
 function skip() {

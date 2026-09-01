@@ -63,11 +63,18 @@ Two behavior changes apply to existing callers that pass only
   `not_verified` result with `not_verified_reason: reviewer_unavailable`
   instead of failing the workflow. Callers that previously relied on a red
   check to notice reviewer breakage must gate on the `verdict` output (and
-  `not_verified_reason` in the artifact) instead. One asymmetry is
-  intentional: an engine run that *succeeds* but emits a parseable,
-  schema-invalid assessment still hard-fails the composite at finalize —
-  that is a contract violation worth a red check, not a quiet
-  `NOT_VERIFIED`.
+  `not_verified_reason` in the artifact) instead. An engine run that
+  *succeeds* but emits a parseable, contract-invalid assessment is recorded
+  the same way, with `not_verified_reason: assessment_invalid` and the
+  validation message in `summary` and `gaps`. An earlier revision
+  deliberately hard-failed that case as "a contract violation worth a red
+  check"; the first live kiro run showed what that buys — a red step with
+  no result, no comment, no artifact, and the rejected assessment discarded
+  with the runner (#1399). A bound `NOT_VERIFIED` naming the violation is
+  the louder signal, and `release-readiness` already routes it to
+  `missing_evidence`. Finalize still hard-fails on runner-side faults: an
+  unreadable target or assessment file, or a target that no longer matches
+  the expected head.
 - **The result schema change is one-directional.** Artifacts produced by this
   version validate against this version's schema only: new skip results carry
   `not_verified_reason`, which the pre-change schema rejects under
@@ -127,10 +134,12 @@ kiro-cli 2.20.2, `--trust-tools=fs_read`, the trusted empty cwd):
   the extractor found the assessment in the raw output.
 - Still unverified: the extractor's ordering assumption (nothing untrusted
   follows the model's final reply on stdout), and what the service did with
-  the caller's model id. Both need the raw output, which the composite does
-  not retain and which a finalize rejection discards without a record —
-  tracked as #1399. Until that lands, read the raw artifact of the first
-  run that retains one before trusting the lane.
+  the caller's model id. Both need the raw output. That run's composite
+  retained nothing and its finalize rejection left no record (#1399); the
+  composite now records the rejection as `assessment_invalid` and exposes
+  the review directory as the `review-directory` output for the caller to
+  upload on every outcome. Read the raw artifact of the first run that
+  retains one before trusting the lane.
 
 The kiro toolchain is pinned exactly: `scripts/ci/install-kiro-cli.sh`
 downloads one immutable versioned artifact from the official Kiro CLI
@@ -158,10 +167,13 @@ while labeled codex. The `role` field keeps the historical
 
 A failed or crashed engine run — install failure, CLI crash, refused model,
 unparseable output — is routed to the NOT_VERIFIED recording instead of
-failing the workflow, with `not_verified_reason: reviewer_unavailable`. A
-withheld credential records `not_verified_reason: reviewer_withheld` as
-before. Consumers can distinguish "no reviewer was authorized" from "the
-reviewer broke" without parsing prose.
+failing the workflow, with `not_verified_reason: reviewer_unavailable`. An
+engine that answered with an assessment finalize rejects records
+`not_verified_reason: assessment_invalid`, with the validation message and
+the rejected document's SHA-256 in `gaps`. A withheld credential records
+`not_verified_reason: reviewer_withheld` as before. Consumers can
+distinguish "no reviewer was authorized", "the reviewer broke", and "the
+reviewer answered but broke the contract" without parsing prose.
 
 ## Advisory workflow
 
@@ -209,6 +221,19 @@ jobs:
           name: builder-codex-pr-review-${{ github.event.pull_request.head.sha }}
           path: ${{ steps.review.outputs.result-file }}
           if-no-files-found: error
+          retention-days: 30
+
+      # The review directory is the only record of what the engine actually
+      # said when the result is NOT_VERIFIED or the run went red; without it
+      # a rejected assessment is unrecoverable. `if: always()` so it survives
+      # a failed step; `warn` because prepare itself may not have run.
+      - name: Retain the review directory on every outcome
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: builder-codex-pr-review-evidence-${{ github.event.pull_request.head.sha }}
+          path: ${{ steps.review.outputs.review-directory }}
+          if-no-files-found: warn
           retention-days: 30
 ```
 
