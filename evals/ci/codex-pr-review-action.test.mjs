@@ -16,7 +16,7 @@ test("Codex PR review action focused shell suite reports its full passing contra
   assert.equal(result.status, 0, diagnostic || "focused shell suite exited without output");
   assert.match(
     result.stdout,
-    /Results: 63\/63 passed, 0 failed(?:\r?\n|$)/,
+    /Results: 71\/71 passed, 0 failed(?:\r?\n|$)/,
     "focused shell suite must report every expected contract assertion passing",
   );
 });
