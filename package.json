@@ -194,11 +194,11 @@
     "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs"
   },
   "devDependencies": {
-    "@kontourai/lookout": "0.3.2",
-    "@kontourai/traverse": "0.19.1",
-    "@types/node": "^26.1.1",
-    "gcp-metadata": "7.0.1",
-    "promptfoo": "^0.121.18",
+    "@kontourai/lookout": "0.5.2",
+    "@kontourai/traverse": "0.25.1",
+    "@types/node": "^26.4.0",
+    "gcp-metadata": "9.0.3",
+    "promptfoo": "^0.122.2",
     "typescript": "^7.0.2"
   },
   "dependencies": {
