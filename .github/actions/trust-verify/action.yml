@@ -114,14 +114,34 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
 
+    # The pnpm version must come from THIS repository's packageManager field, not
+    # the consumer's. action-setup's own `package_json_file` input cannot be used
+    # for that: `github.action_path` is empty when a nested action's `with:`
+    # block is evaluated, so the input resolved to nothing and the step failed
+    # with "No pnpm version is specified" (caught on kontourai/plumb#31, which is
+    # the reason #1401 requires a consumer canary -- this repository's own CI
+    # never invokes the action in this shape). `github.action_path` IS available
+    # in a composite `run:` step, so the version is read there and handed over
+    # explicitly. One source of truth, no second place to drift.
+    - name: Resolve the anchor's pnpm version
+      id: anchor-pnpm
+      shell: bash
+      run: |
+        ACTION_REPO_ROOT="${{ github.action_path }}/../../.."
+        DECLARED="$(node -p "JSON.parse(require('node:fs').readFileSync('$ACTION_REPO_ROOT/package.json','utf8')).packageManager ?? ''")"
+        case "$DECLARED" in
+          pnpm@*) ;;
+          *) echo "trust-verify anchor declares packageManager '$DECLARED'; expected pnpm@<version>" >&2; exit 1 ;;
+        esac
+        echo "version=${DECLARED#pnpm@}" >> "$GITHUB_OUTPUT"
+
     # This action runs inside a merge-gating check on every consumer, so the
     # installer is SHA-pinned like every other action here rather than tracked by
-    # tag. The pnpm version itself comes from this repository's packageManager
-    # field, which is what makes the install reproducible across consumers.
+    # tag.
     - name: Set up pnpm
       uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
       with:
-        package_json_file: ${{ github.action_path }}/../../../package.json
+        version: ${{ steps.anchor-pnpm.outputs.version }}
 
     # Composite-action checkouts contain source files but not node_modules. Install the
     # anchor's locked runtime dependencies at its own repository root so helpers such as

@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { buildSync } from "esbuild";
@@ -710,19 +711,51 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
  * Flow's complete schema, lifecycle, amendment-ledger, and retry-history checks
  * without resolving code from the consumer checkout.
  */
+/**
+ * Locate an installed package's root directory by resolution rather than by
+ * assuming a flat `node_modules/<name>` path. Only DIRECT dependencies sit at
+ * the top level under pnpm's isolated layout, and five of the six packages this
+ * bundle stages are transitives of @kontourai/flow -- under npm's hoisting they
+ * happened to be reachable at the root, and the copy below silently depended on
+ * that. Resolving from Flow's own entry is also the more accurate statement of
+ * intent: these are the packages Flow's validator needs, so Flow's graph is
+ * where they should be found.
+ *
+ * `<name>/package.json` is tried first and falls back to the main entry,
+ * because a package whose `exports` map omits "./package.json" throws
+ * ERR_PACKAGE_PATH_NOT_EXPORTED on the direct subpath.
+ */
+function installedPackageRoot(specifier: string, resolveFrom: string): string {
+  const requireFrom = createRequire(resolveFrom);
+  try {
+    return path.dirname(requireFrom.resolve(`${specifier}/package.json`));
+  } catch {
+    let directory = path.dirname(requireFrom.resolve(specifier));
+    const { root: filesystemRoot } = path.parse(directory);
+    while (!fs.existsSync(path.join(directory, "package.json")) && directory !== filesystemRoot) {
+      directory = path.dirname(directory);
+    }
+    return directory;
+  }
+}
+
 function writeBundledFlowValidator(targetRoot: string): void {
-  const flowSchemas = path.join(root, "node_modules/@kontourai/flow/schemas");
+  const flowRoot = installedPackageRoot("@kontourai/flow", `${root}/`);
+  const flowEntry = createRequire(`${root}/`).resolve("@kontourai/flow");
+  const flowSchemas = path.join(flowRoot, "schemas");
   const stateSchema = loadJson<Record<string, unknown>>(path.join(flowSchemas, "flow-run.schema.json"));
   const manifestSchema = loadJson<Record<string, unknown>>(path.join(flowSchemas, "gate-evidence.schema.json"));
   const temporaryFlowRoot = path.join(targetRoot, "build/.flow-validator-source");
   const temporaryFlowDist = path.join(temporaryFlowRoot, "dist");
   let outputText: string | null = null;
   try {
-    fs.cpSync(path.join(root, "node_modules/@kontourai/flow/dist"), temporaryFlowDist, { recursive: true });
+    fs.cpSync(path.join(flowRoot, "dist"), temporaryFlowDist, { recursive: true });
     for (const dependency of ["ajv", "ajv-formats", "fast-deep-equal", "fast-uri", "json-schema-traverse", "require-from-string"]) {
       const destination = path.join(temporaryFlowRoot, "node_modules", dependency);
       fs.mkdirSync(path.dirname(destination), { recursive: true });
-      fs.cpSync(path.join(root, "node_modules", dependency), destination, { recursive: true });
+      // The staged tree stays flat by design -- the generated validator imports
+      // these by bare name -- but the SOURCE is resolved, not assumed.
+      fs.cpSync(installedPackageRoot(dependency, flowEntry), destination, { recursive: true });
     }
     const validatorSource = path.join(temporaryFlowRoot, "flow-run-validator.mjs");
     writeText(validatorSource, `
