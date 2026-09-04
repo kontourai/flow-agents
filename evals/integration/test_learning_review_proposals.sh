@@ -305,7 +305,7 @@ console.log(JSON.stringify({docOk, badOk, errors: v.errors}));
   echo "$SCHEMA_CHECK" | grep -q '"docOk":true' && pass "pattern-present output validates against learning-review-proposals.schema.json" || fail "pattern-present output did NOT validate: $SCHEMA_CHECK"
   echo "$SCHEMA_CHECK" | grep -q '"badOk":false' && pass "cost-only proposal (defect deleted) FAILS validation — Goodhart co-required guard holds" || fail "cost-only proposal wrongly validated: $SCHEMA_CHECK"
 else
-  echo "  NOT_VERIFIED: ajv module unavailable (no node_modules/ajv) — schema validation skipped. Run \`npm ci\` to enable this check."
+  echo "  NOT_VERIFIED: ajv module unavailable (no node_modules/ajv) — schema validation skipped. Run \`pnpm install --frozen-lockfile\` to enable this check."
 fi
 
 # ── static guard: neither script writes to kits/** or .datum/config.json (mirrors #415's guard) ───
