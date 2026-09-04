@@ -1,5 +1,18 @@
 # Changelog
 
+## [6.3.0](https://github.com/kontourai/flow-agents/compare/v6.2.0...v6.3.0) (2026-09-04)
+
+
+### Features
+
+* **review:** engine-agnostic exact-head PR review — codex default, kiro headless, crash routes to NOT_VERIFIED ([#1396](https://github.com/kontourai/flow-agents/issues/1396)) ([b0adbb4](https://github.com/kontourai/flow-agents/commit/b0adbb4a5defdff0b0d2c7641f1735c06dd121e8))
+
+
+### Fixes
+
+* **ci:** a provisional delivery must reconcile something to satisfy bundle-required ([#1389](https://github.com/kontourai/flow-agents/issues/1389)) ([4d7f023](https://github.com/kontourai/flow-agents/commit/4d7f02314b9905791ba462642b54dec6535ff070))
+* **ci:** check that a PR body's file references resolve on its own branch ([#1390](https://github.com/kontourai/flow-agents/issues/1390)) ([6be137d](https://github.com/kontourai/flow-agents/commit/6be137d1bbd92ecc47e08a68ca4b052ef54c39d7))
+
 ## [6.2.0](https://github.com/kontourai/flow-agents/compare/v6.1.0...v6.2.0) (2026-08-26)
 
 
