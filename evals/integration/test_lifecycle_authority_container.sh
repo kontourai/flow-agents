@@ -12,18 +12,29 @@ ROOT_DIR=/work
 # Fresh-checkout proof: coordinator sources and focused recovery tests cannot
 # depend on pre-existing runtime artifacts from the developer checkout.
 rm -rf /work/.kontourai
+# `cp -a /src /work` copies the developer's or runner's node_modules in with
+# everything else, which the fresh-checkout proof above does not want and which
+# npm never made visible: `npm ci` deletes node_modules itself, silently, so the
+# stale copy was always discarded without anyone noticing it had been made.
+# pnpm instead asks before purging a modules directory it did not create, and in
+# this container there is no TTY to answer, so the install aborts with
+# ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY. Deleting it here states the intent
+# that was previously an accident of npm's behaviour.
+rm -rf /work/node_modules
 # The repository root installs with pnpm. The pinned reducer closure below stays
 # on npm deliberately: its whole contract is npm integrity hashes read back out
 # of node_modules/.package-lock.json, which pnpm does not write.
 #
-# COREPACK_ENABLE_DOWNLOAD_PROMPT=0 is required, not cosmetic. corepack asks
-# "Corepack is about to download ..." before fetching the pnpm tarball, and in
-# this container there is no TTY to answer it, so the install stalls and the
-# check fails with the prompt as its last line. The version still comes from
-# packageManager -- corepack reads it -- so nothing is pinned twice here.
+# COREPACK_ENABLE_DOWNLOAD_PROMPT=0 is required, not cosmetic: corepack asks
+# "Corepack is about to download ..." before fetching the pnpm tarball, and the
+# same missing TTY applies. The version still comes from packageManager --
+# corepack reads it -- so nothing is pinned twice here.
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-corepack enable pnpm >/dev/null 2>&1 || npm i -g pnpm@11.25.0 >/dev/null 2>&1
-pnpm install --frozen-lockfile --ignore-scripts --silent
+# Not silenced. The previous revision sent both of these to /dev/null, so when
+# the install failed the log ended mid-apt with no reason in it and the failure
+# had to be reproduced locally to be read at all.
+corepack enable pnpm || npm i -g pnpm@11.25.0
+pnpm install --frozen-lockfile --ignore-scripts
 npm run build --silent
 # AC-5 capacity boundary: the direct privileged installer source must name and
 # use the isolated canonical-manifest cap.  The focused Node test exercises the
