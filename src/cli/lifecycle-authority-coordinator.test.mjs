@@ -652,20 +652,50 @@ function explicitSecondTransition(fixture, resolutionEvents) {
  * involved and neither /etc nor /var nor an installed helper are touched.
  */
 function copyPinnedFlowClosure(installRoot) {
-  const sourceModules = path.resolve("node_modules");
   const targetModules = path.join(installRoot, "flow-reducer", "node_modules");
   const copied = new Set();
-  const copyPackage = (name) => {
+  // Walk the real graph rather than a flat node_modules/<name>. Only DIRECT
+  // dependencies sit at the top level under pnpm's isolated layout, so every
+  // transitive below @kontourai/flow -- ajv, ajv-formats, fast-deep-equal and
+  // the rest -- has to be found next to the package that depends on it. npm's
+  // hoisting made the flat path work by accident. The TARGET tree stays flat,
+  // because that is the layout the staged reducer closure expects.
+  //
+  // This searches upward for an enclosing `node_modules/<name>` instead of
+  // using require.resolve, which is not usable here: @kontourai/flow does not
+  // export "./package.json", and at least one package in the closure has no
+  // CJS-reachable entry at all, so both the subpath and the main-entry forms
+  // throw ERR_PACKAGE_PATH_NOT_EXPORTED. Walking directories answers "where is
+  // this package installed", which is the actual question, and it is correct
+  // under both layouts: under pnpm the parent sits in the virtual store beside
+  // its own dependencies, and under npm the walk reaches the hoisted root.
+  const packageDirectory = (name, searchFrom) => {
+    // realpath first: pnpm links top-level packages into the virtual store, so
+    // walking up from the LINK path leaves the store and lands at the workspace
+    // root, where a transitive is not present. The real path walks up inside
+    // .pnpm/<pkg>@<version>/node_modules, which is where the dependencies are.
+    let directory = fs.realpathSync(searchFrom);
+    const { root: filesystemRoot } = path.parse(directory);
+    while (directory !== filesystemRoot) {
+      const candidate = path.join(directory, "node_modules", name);
+      if (fs.existsSync(path.join(candidate, "package.json"))) return fs.realpathSync(candidate);
+      directory = path.dirname(directory);
+    }
+    throw new Error(`pinned Flow closure: cannot locate ${name} from ${searchFrom}`);
+  };
+  const copyPackage = (name, searchFrom) => {
     if (copied.has(name)) return;
     copied.add(name);
-    const source = path.join(sourceModules, name);
+    const source = packageDirectory(name, searchFrom);
     const target = path.join(targetModules, name);
     const metadata = JSON.parse(fs.readFileSync(path.join(source, "package.json"), "utf8"));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.cpSync(source, target, { recursive: true, dereference: true });
-    for (const dependency of Object.keys(metadata.dependencies ?? {})) copyPackage(dependency);
+    for (const dependency of Object.keys(metadata.dependencies ?? {})) {
+      copyPackage(dependency, source);
+    }
   };
-  copyPackage("@kontourai/flow");
+  copyPackage("@kontourai/flow", process.cwd());
   fs.copyFileSync("packaging/lifecycle-authority/flow-reducer-v1.json", path.join(installRoot, "flow-reducer-v1.json"));
 }
 
