@@ -3418,8 +3418,35 @@ fi
 
 # Conformance vectors: assert Surface's deriveClaimStatus produces canonical statuses
 # for hachure's reference sf-*.json vectors (sf-verified-commit → verified, sf-disputed-blocking → disputed).
-HACHURE_CONF="$ROOT/node_modules/hachure/conformance"
-if [[ -d "$HACHURE_CONF" ]]; then
+# hachure is not a dependency of this repository and must not become one: the
+# Portfolio Layer Doctrine has products speak the open trust format through
+# Surface, and check:hachure-boundary enforces that with an empty allowlist.
+# These are reference VECTORS, not the format's implementation -- the assertion
+# below runs them through Surface. So locate the directory through the graph of
+# a package that does legitimately depend on hachure rather than declaring it,
+# and never through a hoisted `node_modules/hachure` path, which only ever
+# existed under npm's flat layout.
+HACHURE_CONF="$(node --input-type=module -e '
+import { createRequire } from "node:module";
+import { dirname, join, parse } from "node:path";
+import { existsSync } from "node:fs";
+// @kontourai/flow does not export "./package.json", so anchor on its main entry
+// and walk up to the package root -- resolving the subpath directly throws
+// ERR_PACKAGE_PATH_NOT_EXPORTED. hachure does not export it either.
+const rootRequire = createRequire(process.cwd() + "/");
+const flowRequire = createRequire(rootRequire.resolve("@kontourai/flow"));
+let dir = dirname(flowRequire.resolve("hachure"));
+const { root } = parse(dir);
+while (!existsSync(join(dir, "package.json")) && dir !== root) dir = dirname(dir);
+process.stdout.write(join(dir, "conformance"));
+' 2>/dev/null || true)"
+if [[ -z "$HACHURE_CONF" || ! -d "$HACHURE_CONF" ]]; then
+  # A silent skip here would retire the question: before this repository moved to
+  # pnpm the path was a hoisted `node_modules/hachure`, which pnpm does not
+  # create, so an unguarded skip would have quietly stopped running the whole
+  # conformance assertion while still reporting green.
+  _fail "hachure conformance vectors unavailable: could not resolve hachure/conformance through @kontourai/flow"
+else
   if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-conf-vectors.err"
 import { readFileSync, readdirSync } from 'node:fs';
 import { deriveClaimStatus, statusFunctionVersion } from '@kontourai/surface';

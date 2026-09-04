@@ -1,7 +1,7 @@
 {
   "name": "@kontourai/flow-agents",
   "version": "6.2.0",
-  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
+  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows \u2014 a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi \u2014 with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
     "ai-agents",
@@ -197,6 +197,7 @@
     "@kontourai/lookout": "0.3.2",
     "@kontourai/traverse": "0.19.1",
     "@types/node": "^26.1.1",
+    "ajv": "8.20.0",
     "gcp-metadata": "7.0.1",
     "promptfoo": "^0.121.18",
     "typescript": "^7.0.2"
@@ -213,5 +214,6 @@
   "optionalDependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
     "neo4j-driver": "^5.28.0"
-  }
+  },
+  "packageManager": "pnpm@11.25.0"
 }

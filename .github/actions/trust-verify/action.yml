@@ -114,16 +114,34 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
 
+    # This action runs inside a merge-gating check on every consumer, so the
+    # installer is SHA-pinned like every other action here rather than tracked by
+    # tag. The pnpm version itself comes from this repository's packageManager
+    # field, which is what makes the install reproducible across consumers.
+    - name: Set up pnpm
+      uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      with:
+        package_json_file: ${{ github.action_path }}/../../../package.json
+
     # Composite-action checkouts contain source files but not node_modules. Install the
     # anchor's locked runtime dependencies at its own repository root so helpers such as
     # derive-claim-status.mjs can resolve @kontourai/surface without depending on the
     # consumer repository's package graph. Lifecycle scripts stay disabled because this
     # action only needs the published runtime modules.
+    #
+    # Flag translation from the npm form this replaces: `--prefix` is `--dir`,
+    # `--omit=dev` is `--prod`, and optional dependencies are installed by
+    # default so `--include=optional` has no pnpm equivalent to carry. Dependency
+    # build scripts are already blocked by default; `--ignore-scripts` stays
+    # explicit so the intent survives a future default change. `--frozen-lockfile`
+    # is what makes this an install of the anchor's locked graph rather than a
+    # resolution -- it fails rather than silently updating if the lockfile and
+    # manifest disagree.
     - name: Install trust verifier dependencies
       shell: bash
       run: |
         ACTION_REPO_ROOT="${{ github.action_path }}/../../.."
-        npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund --prefix "$ACTION_REPO_ROOT"
+        pnpm install --prod --frozen-lockfile --ignore-scripts --dir "$ACTION_REPO_ROOT"
 
     # Explicit caller paths remain explicit. When omitted, trust-reconcile.js owns
     # discovery so its ownership, staleness, and prefer-newest checks cannot be bypassed

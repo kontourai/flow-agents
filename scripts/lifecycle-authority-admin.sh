@@ -62,6 +62,14 @@ case "$action" in
   install|upgrade)
     test -f "$source_file" && test -f "$runtime_file" && test -f "$reducer_pin_file" && test -f "$drop_source"
     test -f "$flow_node_modules/@kontourai/flow/package.json" && test -f "$flow_node_modules/@kontourai/flow/dist/index.js"
+    # The staged closure must be an npm install: the integrity check below reads
+    # npm's hidden lockfile, which pnpm does not write. The repository root moved
+    # to pnpm, so the historical `${3:-node_modules}` default no longer satisfies
+    # this -- pass the staged closure explicitly, as every caller already does.
+    if [ ! -f "$flow_node_modules/.package-lock.json" ]; then
+      echo "staged closure $flow_node_modules has no .package-lock.json: pass an npm-installed closure (see packaging/lifecycle-authority/flow-reducer-closure/)" >&2
+      exit 1
+    fi
     node - "$flow_node_modules" "$reducer_pin_file" <<'NODE'
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const modules = path.resolve(process.argv[2]), root = path.resolve(modules, '@kontourai/flow');

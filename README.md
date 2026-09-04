@@ -120,7 +120,7 @@ The default root is `${XDG_CONFIG_HOME:-$HOME/.config}/opencode`. Managed suppor
 
 Runtime auto-detection is best-effort: it first checks environment markers set by the invoking coding agent (e.g. `CLAUDECODE`, Codex's preferred `CODEX_THREAD_ID`, the backward-compatible `CODEX_SESSION_ID`, or `OPENCODE_SESSION_ID`), then falls back to checking whether exactly one of `~/.claude`, `~/.codex` (or `$CODEX_HOME`), or opencode's global config dir already exists. If neither signal is unambiguous, it defaults to `base`. Pass `--runtime` explicitly to override the detected default at any time. Codex thread identifiers are never written into actor keys verbatim; Flow Agents derives a stable, domain-separated opaque token instead.
 
-Working from a checkout (for contributors): `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
+Working from a checkout (for contributors): `pnpm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`. The pnpm version is pinned in `package.json` (`packageManager`); scripts still run with `npm run`, which only invokes `package.json` scripts and does not depend on which tool installed `node_modules`.
 
 The installer copies the bundled agents, skills, context, scripts, evals, the kit catalog, and the Flow Agents-owned `console.telemetry.json` descriptor into the target workspace. Kits are opt-in at activation time: pass `--activate-kit <kit-id>` for a specific kit, or `--activate-kits` when you intentionally want every catalog kit. Telemetry writes to local files by default; optional sinks mirror it to a local, hosted, or self-hosted Kontour Console (`--telemetry-sink local-kontour-console | kontour-hosted-console | user-hosted-console --console-url …`).
 

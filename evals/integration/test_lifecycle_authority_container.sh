@@ -12,7 +12,11 @@ ROOT_DIR=/work
 # Fresh-checkout proof: coordinator sources and focused recovery tests cannot
 # depend on pre-existing runtime artifacts from the developer checkout.
 rm -rf /work/.kontourai
-npm ci --ignore-scripts --silent
+# The repository root installs with pnpm. The pinned reducer closure below stays
+# on npm deliberately: its whole contract is npm integrity hashes read back out
+# of node_modules/.package-lock.json, which pnpm does not write.
+corepack enable pnpm >/dev/null 2>&1 || npm i -g pnpm@11.25.0 >/dev/null 2>&1
+pnpm install --frozen-lockfile --ignore-scripts --silent
 npm run build --silent
 # AC-5 capacity boundary: the direct privileged installer source must name and
 # use the isolated canonical-manifest cap.  The focused Node test exercises the

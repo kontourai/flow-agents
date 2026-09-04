@@ -208,7 +208,12 @@ if node -e '
   const root=process.argv[1];
   const actionDir=path.join(root,".github/actions/trust-verify");
   const y=fs.readFileSync(path.join(actionDir,"action.yml"),"utf8");
-  const refs=[...y.matchAll(/action_path \}\}\/([^"]+\.js)/g)].map(m=>m[1]);
+  // The extension must END the reference. Unanchored, the .js pattern also
+  // matches the "package.js" prefix of "package.json", which made the
+  // package_json_file input on the pnpm setup step look like an unresolvable
+  // script ref. (No apostrophes in here: this whole block is a shell
+  // single-quoted string.)
+  const refs=[...y.matchAll(/action_path \}\}\/([^"\s]+\.js)(?![A-Za-z0-9])/g)].map(m=>m[1]);
   if(refs.length===0){console.error("no action_path script refs found");process.exit(1);}
   let ok=true;
   for(const r of refs){ if(!fs.existsSync(path.resolve(actionDir,r))){console.error("UNRESOLVED: "+r);ok=false;} }
@@ -259,32 +264,37 @@ fi
 # resolves @kontourai/surface from the action repository, so the composite action must install
 # the action's own locked runtime dependencies rather than relying on the consumer repo.
 #
-# The requirement is that the action's `npm ci --omit=dev` actually installs Surface, so what
+# The requirement is that the action's `pnpm install --prod` actually installs Surface, so what
 # has to hold is that Surface is declared somewhere that flag set installs -- `dependencies`,
-# or `optionalDependencies` given the action also passes `--include=optional`. This used to
+# or `optionalDependencies`, which pnpm installs by default. This used to
 # read `optionalDependencies` alone, which named the field rather than the requirement.
 # kontourai/flow-agents#1362 collapsed Surface's duplicate devDependencies/optionalDependencies
 # declarations into one exact `dependencies` entry -- a strictly stronger guarantee, since
 # `dependencies` installs unconditionally while an optional dependency may legitimately be
 # skipped. A devDependencies-only declaration is the one shape that breaks the action, and is
 # rejected explicitly below rather than left to fall out of the section lookup.
+#
+# The lockfile check reads pnpm-lock.yaml by regex rather than parsing it. Reaching for a YAML
+# parser here would mean importing an undeclared transitive -- the exact phantom-dependency
+# shape this repository's pnpm migration had to fix in two other files.
 if node -e '
   const fs=require("fs"), path=require("path");
   const root=process.argv[1];
   const action=fs.readFileSync(path.join(root,".github/actions/trust-verify/action.yml"),"utf8");
   const pkg=JSON.parse(fs.readFileSync(path.join(root,"package.json"),"utf8"));
-  const lock=JSON.parse(fs.readFileSync(path.join(root,"package-lock.json"),"utf8"));
+  const lock=fs.readFileSync(path.join(root,"pnpm-lock.yaml"),"utf8");
   const installsAtActionRoot=/ACTION_REPO_ROOT="\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\."/.test(action)
-    && /npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund --prefix "\$ACTION_REPO_ROOT"/.test(action);
+    && /pnpm install --prod --frozen-lockfile --ignore-scripts --dir "\$ACTION_REPO_ROOT"/.test(action)
+    && /pnpm\/action-setup@[0-9a-f]{40}/.test(action);
   const surfaceField=(pkg.dependencies||{})["@kontourai/surface"] ? "dependencies"
     : (pkg.optionalDependencies||{})["@kontourai/surface"] ? "optionalDependencies" : null;
   const surfaceDeclared=surfaceField!==null;
   const surfaceDevOnly=!surfaceDeclared && Boolean((pkg.devDependencies||{})["@kontourai/surface"]);
-  const surfaceLocked=Boolean(lock.packages && lock.packages["node_modules/@kontourai/surface"]);
+  const surfaceLocked=/^\s*\x27?@kontourai\/surface@[0-9]/m.test(lock);
   if(!installsAtActionRoot) console.error("trust-verify action does not install locked runtime dependencies at the action root");
-  if(surfaceDevOnly) console.error("@kontourai/surface is declared only in devDependencies, which the composite action npm ci --omit=dev skips");
+  if(surfaceDevOnly) console.error("@kontourai/surface is declared only in devDependencies, which the composite action pnpm install --prod skips");
   else if(!surfaceDeclared) console.error("@kontourai/surface is not a declared runtime dependency (expected in dependencies or optionalDependencies)");
-  if(!surfaceLocked) console.error("@kontourai/surface is absent from package-lock.json");
+  if(!surfaceLocked) console.error("@kontourai/surface is absent from pnpm-lock.yaml");
   process.exit(installsAtActionRoot && surfaceDeclared && surfaceLocked ? 0 : 1);
 ' "$ROOT"; then
   _pass "ACTION-DEPS: action installs its locked Surface dependency at the action root"
