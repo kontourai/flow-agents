@@ -15,6 +15,13 @@ rm -rf /work/.kontourai
 # The repository root installs with pnpm. The pinned reducer closure below stays
 # on npm deliberately: its whole contract is npm integrity hashes read back out
 # of node_modules/.package-lock.json, which pnpm does not write.
+#
+# COREPACK_ENABLE_DOWNLOAD_PROMPT=0 is required, not cosmetic. corepack asks
+# "Corepack is about to download ..." before fetching the pnpm tarball, and in
+# this container there is no TTY to answer it, so the install stalls and the
+# check fails with the prompt as its last line. The version still comes from
+# packageManager -- corepack reads it -- so nothing is pinned twice here.
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 corepack enable pnpm >/dev/null 2>&1 || npm i -g pnpm@11.25.0 >/dev/null 2>&1
 pnpm install --frozen-lockfile --ignore-scripts --silent
 npm run build --silent
