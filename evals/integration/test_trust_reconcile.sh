@@ -281,7 +281,7 @@ PY
     grep -q "trust-reconcile" "$WORKFLOW_FILE" || structural_ok=0
     grep -q "ubuntu-latest" "$WORKFLOW_FILE" || structural_ok=0
     grep -q "node-version" "$WORKFLOW_FILE" || structural_ok=0
-    grep -q "npm ci" "$WORKFLOW_FILE" || structural_ok=0
+    grep -q "pnpm install --frozen-lockfile" "$WORKFLOW_FILE" || structural_ok=0
     grep -q "trust-reconcile.js" "$WORKFLOW_FILE" || structural_ok=0
     if [[ $structural_ok -eq 1 ]]; then
       _pass "YAML-VALID: trust-reconcile.yml has expected structure (yaml parser not available)"

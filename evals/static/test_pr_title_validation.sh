@@ -101,12 +101,12 @@ fi
 source_and_static="$(sed -n '/^  source-and-static:/,/^  workflow-contracts:/p' "$WORKFLOW")"
 node_setup_index="$(printf '%s' "$source_and_static" | grep -b -o 'name: Set up Node.js' | head -1 | cut -d: -f1 || true)"
 title_step_index="$(printf '%s' "$source_and_static" | grep -b -o 'name: Validate pull request title' | head -1 | cut -d: -f1 || true)"
-npm_ci_index="$(printf '%s' "$source_and_static" | grep -b -o 'run: npm ci' | head -1 | cut -d: -f1 || true)"
+npm_ci_index="$(printf '%s' "$source_and_static" | grep -b -o 'run: pnpm install --frozen-lockfile' | head -1 | cut -d: -f1 || true)"
 
 if [[ -n "$node_setup_index" && -n "$title_step_index" && -n "$npm_ci_index" && "$node_setup_index" -lt "$title_step_index" && "$title_step_index" -lt "$npm_ci_index" ]]; then
-  pass "CI validates the title after Node setup and before npm ci"
+  pass "CI validates the title after Node setup and before the dependency install"
 else
-  fail "CI title-validation step is not ordered between Node setup and npm ci"
+  fail "CI title-validation step is not ordered between Node setup and the dependency install"
 fi
 
 if [[ "$source_and_static" == *"if: github.event_name == 'pull_request'"* && "$source_and_static" == *'PR_TITLE: ${{ github.event.pull_request.title }}'* && "$source_and_static" == *"run: node scripts/ci/validate-pr-title.mjs"* ]]; then
