@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -21,6 +21,10 @@ const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max", "ultra"]);
 const KIRO_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 const SKIP_REASONS = new Set(["reviewer_withheld", "reviewer_unavailable"]);
 const SHA = /^[0-9a-f]{40}$/;
+
+// Thrown by runner-side operations that validation depends on (git access to
+// the checkout). finalize must never record one as a reviewer fault.
+class RunnerFault extends Error {}
 
 const [command] = process.argv.slice(2);
 try {
@@ -93,12 +97,54 @@ function finalize() {
   const resultFile = path.resolve(required("REVIEW_RESULT_FILE"));
   const target = readJson(targetFile, "review target");
   validateTarget(target, input);
+  // Resolved before validation so a missing workspace is a runner fault here,
+  // never a reviewer fault inside the catch below.
+  const workspace = path.resolve(required("REVIEW_WORKSPACE"));
   const assessment = readJson(assessmentFile, "Codex assessment");
-  validateAssessment(assessment, target, input.headSha);
-  const result = bindResult(target, assessment, input);
+  let rejection;
+  try {
+    validateAssessment(assessment, target, input.headSha, workspace);
+  } catch (error) {
+    if (error instanceof RunnerFault) throw error;
+    // The engine ran and answered, but the answer violates the assessment
+    // contract. That is a reviewer that produced no evidence for this head,
+    // not a broken runner: record it as NOT_VERIFIED with the validation
+    // message so the caller gets a bound result and a PR comment instead of
+    // a red step that retains nothing (the first live kiro run, #1399).
+    // Unreadable inputs, a target mismatch, and git failures while checking
+    // a finding's path stay hard failures.
+    rejection = message(error);
+  }
+  const result = rejection
+    ? bindResult(target, rejectedAssessment(input, assessment, rejection), input, { notVerifiedReason: "assessment_invalid" })
+    : bindResult(target, assessment, input);
   writeJson(resultFile, result);
   appendGithubOutput({ "result-file": resultFile, verdict: result.verdict, "head-sha": input.headSha });
-  console.log(`Validated ${result.verdict} ${engineDisplayName(input.engine)} review for exact head ${input.headSha}.`);
+  if (rejection) {
+    console.log(`Recorded NOT_VERIFIED ${engineDisplayName(input.engine)} review for exact head ${input.headSha}; finalize rejected the engine assessment: ${rejection}`);
+  } else {
+    console.log(`Validated ${result.verdict} ${engineDisplayName(input.engine)} review for exact head ${input.headSha}.`);
+  }
+}
+
+function rejectedAssessment(input, assessment, rejection) {
+  const engineName = engineDisplayName(input.engine);
+  // The rejected document stays on disk unmodified; its digest ties this
+  // record to that file for anyone who retains the review directory.
+  const digest = sha256(Buffer.from(canonicalJson(assessment)));
+  // Only a vocabulary verdict is echoed; anything else is engine-controlled
+  // text and is reported as "invalid" rather than copied into the record.
+  const claimed = plainObject(assessment) && VERDICTS.has(assessment.verdict) ? assessment.verdict : "invalid";
+  return {
+    verdict: "not_verified",
+    summary: `${engineName} PR review produced an assessment that failed finalize validation and is not review evidence for this head: ${rejection}`.slice(0, 2000),
+    coverage: [{ lane: "code", status: "not_verified", summary: `The ${engineName} assessment (claimed verdict ${claimed}) was rejected at finalize validation.` }],
+    findings: [],
+    gaps: [
+      `Finalize rejected the ${engineName} assessment: ${rejection}`.slice(0, 1000),
+      `The rejected assessment (claimed verdict ${claimed}, sha256 ${digest}) is left unmodified as assessment.json in the review directory; retain that directory to inspect it.`,
+    ],
+  };
 }
 
 function skip() {
@@ -281,25 +327,25 @@ function validateTarget(target, input) {
   }
 }
 
-function validateAssessment(value, target, headSha) {
+function validateAssessment(value, target, headSha, workspace) {
   if (!plainObject(value)) throw new Error("Codex assessment must be a JSON object");
   exactKeys(value, ["coverage", "findings", "gaps", "summary", "verdict"], "Codex assessment");
-  if (!VERDICTS.has(value.verdict)) throw new Error(`unsupported verdict ${String(value.verdict)}`);
+  if (!VERDICTS.has(value.verdict)) throw new Error(`unsupported verdict ${shown(value.verdict)}`);
   boundedString(value.summary, "summary", 4000);
   if (!Array.isArray(value.coverage) || value.coverage.length === 0) throw new Error("coverage must contain at least one lane");
   const laneIds = new Set();
   for (const lane of value.coverage) {
     if (!plainObject(lane)) throw new Error("coverage entries must be objects");
     exactKeys(lane, ["lane", "status", "summary"], "coverage entry");
-    if (!LANES.has(lane.lane) || laneIds.has(lane.lane)) throw new Error(`invalid or duplicate coverage lane ${String(lane.lane)}`);
+    if (!LANES.has(lane.lane) || laneIds.has(lane.lane)) throw new Error(`invalid or duplicate coverage lane ${shown(lane.lane)}`);
     laneIds.add(lane.lane);
-    if (!LANE_STATUSES.has(lane.status)) throw new Error(`invalid coverage status ${String(lane.status)}`);
+    if (!LANE_STATUSES.has(lane.status)) throw new Error(`invalid coverage status ${shown(lane.status)}`);
     boundedString(lane.summary, "coverage summary", 2000);
   }
   if (!laneIds.has("code")) throw new Error("the code review lane is required");
   if (!Array.isArray(value.findings)) throw new Error("findings must be an array");
   const findingIds = new Set();
-  for (const finding of value.findings) validateFinding(finding, findingIds, target, headSha);
+  for (const finding of value.findings) validateFinding(finding, findingIds, target, headSha, workspace);
   if (!Array.isArray(value.gaps)) throw new Error("gaps must be an array");
   for (const gap of value.gaps) boundedString(gap, "gap", 1000);
   const blocking = value.findings.some((finding) => finding.severity === "critical" || finding.severity === "high" || finding.requires_change === true);
@@ -312,12 +358,12 @@ function validateAssessment(value, target, headSha) {
   if (value.verdict === "not_verified" && !incomplete) throw new Error("not_verified verdict must name an incomplete lane or gap");
 }
 
-function validateFinding(finding, ids, target, headSha) {
+function validateFinding(finding, ids, target, headSha, workspace) {
   if (!plainObject(finding)) throw new Error("finding entries must be objects");
   exactKeys(finding, ["description", "file", "id", "line", "requires_change", "severity", "title"], "finding");
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(finding.id) || ids.has(finding.id)) throw new Error(`invalid or duplicate finding id ${String(finding.id)}`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(finding.id) || ids.has(finding.id)) throw new Error(`invalid or duplicate finding id ${shown(finding.id)}`);
   ids.add(finding.id);
-  if (!SEVERITIES.has(finding.severity)) throw new Error(`invalid finding severity ${String(finding.severity)}`);
+  if (!SEVERITIES.has(finding.severity)) throw new Error(`invalid finding severity ${shown(finding.severity)}`);
   if (typeof finding.requires_change !== "boolean") throw new Error(`finding ${finding.id} requires_change must be boolean`);
   if (["critical", "high"].includes(finding.severity) && finding.requires_change !== true) {
     throw new Error(`finding ${finding.id} ${finding.severity} severity requires requires_change=true`);
@@ -328,8 +374,8 @@ function validateFinding(finding, ids, target, headSha) {
   boundedString(finding.file, "finding file", 1024);
   if (path.isAbsolute(finding.file) || finding.file.split("/").includes("..")) throw new Error(`finding ${finding.id} uses a non-repository path`);
   const changed = new Set(target.changed_files.flatMap((entry) => [entry.path, entry.previous_path].filter(Boolean)));
-  if (!changed.has(finding.file) && !gitObjectExists(required("REVIEW_WORKSPACE"), `${headSha}:${finding.file}`)) {
-    throw new Error(`finding ${finding.id} references ${finding.file}, which is absent from the reviewed change and head tree`);
+  if (!changed.has(finding.file) && !headTreeHas(workspace, headSha, finding.file)) {
+    throw new Error(`finding ${finding.id} references ${shown(finding.file)}, which is absent from the reviewed change and head tree`);
   }
   if (!Number.isSafeInteger(finding.line) || finding.line < 1) throw new Error(`finding ${finding.id} line must be positive`);
   boundedString(finding.title, "finding title", 300);
@@ -498,13 +544,16 @@ function gitBuffer(cwd, argv) {
   return execFileSync("git", argv, { cwd, encoding: "buffer", maxBuffer: 512 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
 }
 
-function gitObjectExists(cwd, object) {
-  try {
-    execFileSync("git", ["cat-file", "-e", object], { cwd, stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
+function headTreeHas(cwd, headSha, file) {
+  // ls-tree exits 0 with empty output for a path absent from a valid tree and
+  // non-zero only when git itself cannot answer (bad cwd, bad head, no git).
+  // `cat-file -e sha:path` could not tell those apart, so a broken runner
+  // read as "the finding names an absent file", a reviewer fault.
+  const result = spawnSync("git", ["ls-tree", "--name-only", headSha, "--", file], { cwd, encoding: "utf8" });
+  if (result.error || result.status !== 0) {
+    throw new RunnerFault(`git could not inspect ${headSha}:${file} in ${cwd}: ${result.error ? message(result.error) : (result.stderr || `exit ${result.status}`).trim()}`);
   }
+  return result.stdout.trim().length > 0;
 }
 
 function exactKeys(value, expected, label) {
@@ -554,6 +603,16 @@ function sha256(buffer) {
 
 function plainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+// Engine-authored scalars quoted in a validation message reach the recorded
+// gaps and the published comment; render them bounded so a hostile or merely
+// enormous value cannot carry through. Validated values (a finding id that
+// passed its pattern, a severity in the vocabulary) are echoed as-is.
+function shown(value) {
+  if (typeof value !== "string") return `<${value === null ? "null" : typeof value}>`;
+  const clipped = value.length > 64 ? `${value.slice(0, 61)}...` : value;
+  return JSON.stringify(clipped);
 }
 
 function message(error) {
