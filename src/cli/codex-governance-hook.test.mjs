@@ -85,13 +85,24 @@ test("Codex user hook follows Git worktrees, stays quiet elsewhere, and carries 
     input: JSON.stringify({ cwd, hook_event_name: "PreToolUse", tool_name: "apply_patch", tool_input: { patch: "test" } }),
     encoding: "utf8",
     env: { ...process.env, FLOW_HOOK_CAPTURE: capture },
+    ...(process.platform === "win32" ? { windowsVerbatimArguments: true } : {}),
   });
   const matched = invoke(groups[1].hooks[0], worktree);
   assert.equal(matched.status, 0, matched.stderr);
   assert.match(matched.stdout, /hookSpecificOutput/);
   assert.equal(JSON.parse(fs.readFileSync(capture, "utf8")).cwd, worktree);
   fs.unlinkSync(capture);
-  if (process.platform !== "win32") {
+  if (process.platform === "win32") {
+    const powershell = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", groups[1].hooks[0].commandWindows], {
+      cwd: worktree,
+      input: JSON.stringify({ cwd: worktree, tool_name: "apply_patch", tool_input: { command: "test" } }),
+      encoding: "utf8",
+      env: { ...process.env, FLOW_HOOK_CAPTURE: capture },
+    });
+    assert.equal(powershell.status, 0, powershell.stderr);
+    assert.match(powershell.stdout, /hookSpecificOutput/);
+    fs.unlinkSync(capture);
+  } else {
     const windowsForm = spawnSync("sh", ["-c", groups[1].hooks[0].commandWindows], {
       cwd: worktree,
       input: JSON.stringify({ cwd: worktree, tool_name: "apply_patch", tool_input: { command: "test" } }),

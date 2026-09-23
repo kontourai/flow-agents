@@ -912,3 +912,6 @@ jobs:
 
       - name: Hook smoke (a hook must actually fire on Windows)
         run: node scripts/ci/windows-hook-smoke.mjs
+
+      - name: User-level Codex Veritas hook across Git worktrees
+        run: node --test src/cli/codex-governance-hook.test.mjs
