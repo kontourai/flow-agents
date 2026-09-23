@@ -21,6 +21,7 @@ function codexGovernanceScript(repository: string): string {
   const root = fs.realpathSync(gitValue(repository, "--show-toplevel"));
   const common = gitValue(root, "--git-common-dir");
   const commonDir = fs.realpathSync(path.resolve(root, common));
+  const commonHash = crypto.createHash("sha256").update(commonDir).digest("hex");
   const packageFile = path.join(root, "package.json");
   const packageName = JSON.parse(fs.readFileSync(packageFile, "utf8")).name as unknown;
   if (typeof packageName !== "string" || packageName.length === 0) throw new Error("repository package.json must name its package");
@@ -32,7 +33,9 @@ function codexGovernanceScript(repository: string): string {
 const fs = require("node:fs");
 const path = require("node:path");
 const cp = require("node:child_process");
+const crypto = require("node:crypto");
 const expectedCommon = ${JSON.stringify(commonDir)};
+const expectedCommonHash = ${JSON.stringify(commonHash)};
 const expectedPackage = ${JSON.stringify(packageName)};
 const input = fs.readFileSync(0);
 let event;
@@ -44,7 +47,7 @@ try {
   common = cp.execFileSync("git", ["-C", event.cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   common = fs.realpathSync(path.resolve(root, common));
 } catch { process.exit(0); }
-if (common !== expectedCommon) process.exit(0);
+if (common !== expectedCommon || crypto.createHash("sha256").update(common).digest("hex") !== expectedCommonHash) process.exit(0);
 try {
   if (JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).name !== expectedPackage) process.exit(0);
   if (!fs.statSync(path.join(root, ".veritas", "repo-map.json")).isFile()) process.exit(0);
@@ -127,7 +130,8 @@ export async function installCodexGovernanceHook(repository: string, codexHome: 
   const commandWindows = codexGovernanceWindowsCommand(repository);
   const root = gitValue(repository, "--show-toplevel");
   const commonDir = fs.realpathSync(path.resolve(root, gitValue(root, "--git-common-dir")));
-  const status = `${STATUS_PREFIX} ${crypto.createHash("sha256").update(commonDir).digest("hex").slice(0, 12)}`;
+  const commonHash = crypto.createHash("sha256").update(commonDir).digest("hex");
+  const status = `${STATUS_PREFIX} ${commonHash.slice(0, 12)}`;
   verifyVeritasCodexProtocol(repository);
   let existing: Record<string, unknown> = {};
   if (fs.existsSync(target)) {
@@ -142,11 +146,14 @@ export async function installCodexGovernanceHook(repository: string, codexHome: 
     const record = group as { hooks?: { type?: string; command?: string; statusMessage?: string }[] };
     if (!Array.isArray(record.hooks)) throw new Error("Codex PreToolUse group has no handler array");
     const identity = `const expectedCommon = ${JSON.stringify(commonDir)};`;
+    const stableIdentity = `const expectedCommonHash = ${JSON.stringify(commonHash)};`;
     const remaining = record.hooks.filter((handler) => {
       const owned = handler.type === "command"
         && (handler.statusMessage === status || handler.statusMessage === LEGACY_STATUS)
         && typeof handler.command === "string"
-        && handler.command.includes(identity)
+        && (handler.command.includes(stableIdentity)
+          || (handler.statusMessage === LEGACY_STATUS
+            && handler.command.includes(quoteShell(identity).slice(1, -1))))
         && handler.command.includes("pre-tool-use");
       return !owned;
     });

@@ -146,3 +146,17 @@ test("same status label does not authorize removal of an unrelated user handler"
   const commands = after.hooks.PreToolUse.flatMap((group) => group.hooks.map((handler) => handler.command));
   assert.deepEqual(commands, ["echo user-owned", managed.command]);
 });
+
+test("reinstall stays idempotent when the Git path contains an apostrophe", async (t) => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "flow-codex-quoted-path-"));
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  const root = repository(parent, "o'brien");
+  const home = path.join(parent, "codex-home");
+  const first = await installCodexGovernanceHook(root, home);
+  const bytes = fs.readFileSync(path.join(home, "hooks.json"));
+  const second = await installCodexGovernanceHook(root, home);
+  const groups = JSON.parse(fs.readFileSync(path.join(home, "hooks.json"), "utf8")).hooks.PreToolUse;
+  assert.equal(groups.length, 1);
+  assert.deepEqual(fs.readFileSync(path.join(home, "hooks.json")), bytes);
+  assert.equal(second.installed[0].digest, first.installed[0].digest);
+});
