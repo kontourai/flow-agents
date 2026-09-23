@@ -34,8 +34,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-_pass() { echo "  ✓ $1"; pass=$((pass + 1)); }
-_fail() { echo "  ✗ $1"; fail=$((fail + 1)); }
+_pass() { pass=$((pass + 1)); echo "  ✓ $1"; echo "ok $((pass + fail)) - $1"; }
+_fail() { fail=$((fail + 1)); echo "  ✗ $1"; echo "not ok $((pass + fail)) - $1"; }
 
 echo "=== Install Merge-Aware Tests (claude-code) ==="
 echo ""
