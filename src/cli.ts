@@ -13,6 +13,7 @@ import { main as consoleProcessProjection } from "./cli/console-process-projecti
 import { main as livenessFleet } from "./cli/liveness-fleet.js";
 import { main as consoleTrustProjection } from "./cli/console-trust-projection.js";
 import { main as kit } from "./cli/kit.js";
+import { main as codexGovernanceHook } from "./cli/codex-governance-hook.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
 import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
@@ -54,6 +55,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["fixture-retirement-audit", fixtureRetirementAudit],
   ["kit", kit],
+  ["codex-governance-hook", codexGovernanceHook],
   ["liveness-fleet", livenessFleet],
   ["narrative-render", narrativeRender],
   ["narrative-sources", narrativeSources],
