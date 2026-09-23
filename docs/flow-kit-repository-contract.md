@@ -195,7 +195,7 @@ Provision a catalog kit, an installed-registry kit, or a kit at a direct local p
 flow-agents kit provision <kit-id-or-path> [--target <consumer-repo>] [--force] [--dry-run]
 ```
 
-`--target` defaults to the current working directory and must already be a directory. The engine resolves the real path of the deepest existing destination ancestor before writing, so a symlink cannot redirect a provision outside the target repository. It preflights the whole declaration: by default, any existing destination reports every conflict, exits nonzero, and writes none of the provisioned files. `--force` replaces declared destination files. `--dry-run` prints every source-to-target mapping and writes nothing.
+`--target` defaults to the current working directory and must already be a directory. The engine resolves the real path of the deepest existing destination ancestor before writing, so a symlink cannot redirect a provision outside the target repository. It preflights the whole declaration: an existing destination for an ordinary copy reports a conflict and writes nothing; a declared `hooks-json` merge accepts an existing hook config after validating it. `--force` replaces declared ordinary-copy destinations. `--dry-run` prints every source-to-target mapping and writes nothing.
 
 After a successful non-dry-run copy, Flow Agents writes or replaces this bookkeeping manifest:
 
