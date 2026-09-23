@@ -1374,6 +1374,53 @@ else
   _fail "CH4: installed scripts/kit.js could not run with installed build bundle"
 fi
 
+# Exercise Conduit's published host adapter from the installed, standalone
+# bundle. A mere `kit list` would miss an unresolved dependency on provision.
+CH4_KIT="$TMPDIR_EVAL/ch4-conduit-kit"
+CH4_PROVISION_DEST="$TMPDIR_EVAL/ch4-conduit-target"
+node - "$CH4_KIT" "$CH4_PROVISION_DEST" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [kit, target] = process.argv.slice(2);
+fs.mkdirSync(path.join(kit, 'flows'), { recursive: true });
+fs.mkdirSync(path.join(kit, 'payload'), { recursive: true });
+fs.mkdirSync(path.join(target, '.codex'), { recursive: true });
+fs.writeFileSync(path.join(kit, 'flows/review.flow.json'), JSON.stringify({
+  id: 'fixture.review', version: '1.0',
+  steps: [{ id: 'review', next: 'done' }, { id: 'done', next: null }], gates: {},
+}));
+fs.writeFileSync(path.join(kit, 'payload/hook.json'), JSON.stringify({ hooks: {
+  PreToolUse: [{ matcher: 'apply_patch', hooks: [{ type: 'command', command: 'veritas-test-hook', timeout: 30 }] }],
+} }));
+fs.writeFileSync(path.join(kit, 'kit.json'), JSON.stringify({
+  schema_version: '1.0', id: 'fixture', name: 'Fixture',
+  flows: [{ id: 'fixture.review', path: 'flows/review.flow.json' }],
+  provisions: [{ id: 'fixture.governance', path: 'payload/hook.json', target: '.codex/hooks.json', host: 'codex', kind: 'hook', merge: 'hooks-json' }],
+}));
+fs.writeFileSync(path.join(target, '.codex/hooks.json'), JSON.stringify({ hooks: {
+  PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'user-hook' }] }],
+} }));
+NODE
+CH4_PROVISION_LOG="$TMPDIR_EVAL/ch4-provision.log"
+if node "$CH4_DEST/scripts/kit.js" provision "$CH4_KIT" --target "$CH4_PROVISION_DEST" --dest "$CH4_DEST" >"$CH4_PROVISION_LOG" 2>&1 \
+  && node "$CH4_DEST/scripts/kit.js" provision "$CH4_KIT" --target "$CH4_PROVISION_DEST" --dest "$CH4_DEST" >>"$CH4_PROVISION_LOG" 2>&1 \
+  && node - "$CH4_PROVISION_DEST" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const target = process.argv[2];
+const hooks = JSON.parse(fs.readFileSync(path.join(target, '.codex/hooks.json'), 'utf8'));
+const commands = hooks.hooks.PreToolUse.flatMap((group) => group.hooks.map((hook) => hook.command));
+if (JSON.stringify(commands) !== JSON.stringify(['user-hook', 'veritas-test-hook'])) throw new Error('hook merge was not preserved and idempotent');
+const manifest = JSON.parse(fs.readFileSync(path.join(target, '.kontourai/flow-agents/provisions/fixture.json'), 'utf8'));
+if (!/^sha256:[a-f0-9]{64}$/.test(manifest.conduit_receipts?.[0]?.installed?.[0]?.digest ?? '')) throw new Error('Conduit receipt missing');
+NODE
+then
+  _pass "CH4: installed Kit provision preserves user hook and Conduit receipt on rerun"
+else
+  _fail "CH4: installed Kit provision failed or lost hook/receipt fidelity"
+  tail -12 "$CH4_PROVISION_LOG" 2>/dev/null || true
+fi
+
 CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$CH4_SKILLS" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH4_DEST" >/dev/null 2>&1
 CH4_GENERIC_PRESERVED=1
 for CH4_DIR in "${CH4_GENERIC_DIRS[@]}"; do

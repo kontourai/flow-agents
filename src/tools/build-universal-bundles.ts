@@ -768,6 +768,20 @@ function writeBundledConduit(targetRoot: string): void {
 
 function writeBundledFlowValidator(targetRoot: string): void {
   const flowRoot = installedPackageRoot("@kontourai/flow", `${root}/`);
+  // The installed Kit CLI validates the core container through Flow's public
+  // implementation. Ship that published function for standalone host homes too.
+  const kitContainer = buildSync({
+    entryPoints: [path.join(flowRoot, "dist/kit/flow-kit-container.js")],
+    bundle: true, platform: "node", format: "esm", target: "node22",
+    minifyWhitespace: true, legalComments: "none", write: false,
+  }).outputFiles?.[0];
+  if (!kitContainer) throw new Error("Flow Kit container bundle produced no output");
+  writeText(path.join(targetRoot, "build/src/vendor/flow-kit-container.mjs"), kitContainer.text);
+  const kitValidatePath = path.join(targetRoot, "build/src/flow-kit/validate.js");
+  const kitValidate = readText(kitValidatePath);
+  const flowImport = 'import("@kontourai/flow")';
+  if (!kitValidate.includes(flowImport)) throw new Error("Kit validation no longer imports the expected Flow contract");
+  writeText(kitValidatePath, kitValidate.replace(flowImport, 'import("../vendor/flow-kit-container.mjs")'));
   const flowEntry = createRequire(`${root}/`).resolve("@kontourai/flow");
   const flowSchemas = path.join(flowRoot, "schemas");
   const stateSchema = loadJson<Record<string, unknown>>(path.join(flowSchemas, "flow-run.schema.json"));
