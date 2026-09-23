@@ -161,10 +161,33 @@ Optional fields:
 - `description`: non-empty summary.
 - `skills`, `docs`, `adapters`, `evals`, `assets`: lists of relative asset paths or objects with `id`, `path`, and optional `description`.
 - `provisions`: a list of objects with kit-id-prefixed `id`, source `path`, consumer-repository-relative `target`, and optional `description`.
+  A host asset also declares `host` (`codex`, `claude-code`, `opencode`, `kiro`, or `pi`)
+  and Conduit `kind` (`skill`, `agent`, `hook`, `prompt`, `command`, or `context`)
+  together. Neither field is inferred from a target path. A host hook may opt
+  into `merge: "hooks-json"` for an idempotent merge into a host `hooks` object.
 
 ## Repository Provisioning
 
 Provision entries declare inert files; kits do not execute installer code. Source paths follow the other extension-asset rules: they must be relative, stay inside the kit directory, and name an existing regular file. Targets must be non-empty relative paths, must not contain traversal segments or resolve outside the consumer repository, must not be inside `.git`, and must be unique after normalization.
+
+For entries with explicit `host` and `kind`, Flow Agents passes the verified
+UTF-8 asset (at most 1,000,000 bytes, including any merged result) and
+caller-supplied target mapping through that host's Conduit
+adapter. A host profile that reports the kind unavailable refuses the entire
+provision before writing any file. The provision manifest includes Conduit's
+installation receipt (asset id, kind, digest, skipped status) without asset
+contents or resolved filesystem paths. The receipt proves projection and copy,
+not that a host has trusted or executed a hook; use host-bound conformance for
+that claim. Ordinary entries without `host` and `kind` retain the existing
+byte-for-byte inert copy path.
+
+`hooks-json` merges by event and command handler: it preserves other handlers,
+adds each declared group once, and refuses malformed JSON or the same command
+with different settings before any provision writes. Conduit receives the
+resulting bytes, so its receipt digest names what was actually installed.
+Re-running the provision leaves the handler set unchanged; a surrounding host
+installer may reorder unrelated groups, in which case the next Conduit receipt
+names the newly installed bytes.
 
 Provision a catalog kit, an installed-registry kit, or a kit at a direct local path with:
 
@@ -180,7 +203,7 @@ After a successful non-dry-run copy, Flow Agents writes or replaces this bookkee
 <target>/.kontourai/flow-agents/provisions/<kit-id>.json
 ```
 
-The schema is `{ schema_version: "1.0", kit_id, kit_hash, provisioned_at, files: [{ id, target }] }`. Provisioned files become consumer-repository content; uninstalling or deactivating the kit does not remove them.
+The schema is `{ schema_version: "1.0", kit_id, kit_hash, provisioned_at, files: [{ id, target }], conduit_receipts }`. Provisioned files become consumer-repository content; uninstalling or deactivating the kit does not remove them.
 
 When `flow-agents init --activate-kit <id>` successfully activates a selected kit, init invokes the same provisioning engine against its destination with create-only semantics. Existing destinations are reported as skipped warnings and do not fail an init rerun. Provisions never enter the runtime projection directory.
 

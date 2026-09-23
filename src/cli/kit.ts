@@ -1442,6 +1442,11 @@ async function provision(argv: string[]): Promise<number> {
       dryRun: flagBool(args.flags, "dry-run"),
     });
     for (const file of result.files) console.log(`${result.dry_run ? "would provision" : "provisioned"}: ${file.source} -> ${file.destination}`);
+    for (const receipt of result.conduit_receipts ?? []) {
+      for (const asset of receipt.installed) {
+        console.log(`conduit installed: ${receipt.hostId} ${asset.kind} ${asset.id} ${asset.digest}`);
+      }
+    }
     if (result.dry_run) console.log(`dry-run: ${result.files.length} file(s) declared by kit '${result.kit_id}'; no files written`);
     else if (result.files.length === 0) console.log(`kit '${result.kit_id}' declares no provisions`);
     else console.log(`provisioned ${result.files.length} file(s) from kit '${result.kit_id}' into ${target}`);

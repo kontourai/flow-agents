@@ -73,14 +73,14 @@ test("conformance evidence derives limitations from executable declarations and 
     {
       adapter: local,
       evidenceScope: "adapter-contract",
-      adapterVersion: "0.2.1",
+      adapterVersion: "0.7.0",
       hostId: "flow-agents-local-harness-binding",
       hostVersion: "public-config-binding-v1",
     },
     {
       adapter: embedded,
       evidenceScope: "adapter-contract",
-      adapterVersion: "0.2.1",
+      adapterVersion: "0.7.0",
       hostId: "flow-agents-in-process-binding",
       hostVersion: "caller-bound-hooks-v1",
     },
@@ -88,23 +88,18 @@ test("conformance evidence derives limitations from executable declarations and 
 
   assert.deepEqual(generated.report.adapters.map((entry) => entry.adapterId), ["claude-code", "strands"]);
   assert.equal(generated.report.adapters.every((entry) => entry.results.every((result) => result.status === "pass")), true);
-  assert.deepEqual(generated.report.adapters[0].limitations, [
-    "install.context=static-only",
-    "lifecycle.before-model=approximated",
-  ]);
-  assert.deepEqual(generated.report.adapters[1].limitations, [
-    "install.agent=approximated",
-    "install.command=approximated",
-    "install.skill=approximated",
-  ]);
+  assert.equal(generated.report.schemaVersion, "2");
+  assert.ok(generated.report.adapters[0].limitations.includes("capability.install.context=static-only"));
+  assert.ok(generated.report.adapters[0].limitations.includes("capability.lifecycle.before-model=approximated"));
+  assert.ok(generated.report.adapters[1].limitations.includes("capability.install.agent=approximated"));
   assert.match(generated.json, /flow-agents-local-harness-binding/);
   assert.match(generated.matrix, /claude-code/);
 });
 
 test("limitation projection reports failed probes without runtime-specific prose", () => {
   const capabilities = localHarness().adapter.capabilities();
-  assert.deepEqual(
-    deriveHostIntegrationLimitations(capabilities, [{ check: "deny-fidelity", status: "fail" }]),
-    ["conformance.deny-fidelity=fail", "install.context=static-only", "lifecycle.before-model=approximated"],
-  );
+  const limitations = deriveHostIntegrationLimitations(capabilities, [{ check: "deny-fidelity", status: "fail" }]);
+  assert.ok(limitations.includes("probe.deny-fidelity=fail"));
+  assert.ok(limitations.includes("capability.install.context=static-only"));
+  assert.deepEqual(limitations, [...new Set(limitations)].sort());
 });

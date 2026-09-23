@@ -196,6 +196,14 @@ Each adapter copies declared assets into `.kontourai/flow-agents/projections/<ad
 
 Assets in `skipped_assets` are recorded in `activation.json` for diagnostics but are not an error. They are not activated because no activation path is defined for those classes in the current adapters.
 
+Host hook files use the separate `provisions` path. A provision with explicit
+`host` and Conduit `kind` is installed through that host's Conduit adapter by
+`flow-agents kit provision` or by `flow-agents init --activate-kit`; it is not
+an active runtime projection merely because `kit activate` copied flows and
+skills. Use `merge: "hooks-json"` only for a reviewed hooks configuration. The
+Conduit receipt proves the installed bytes, while the host's own trust and
+execution checks remain separate. See the [Flow Kit Repository Contract](flow-kit-repository-contract.md#repository-provisioning).
+
 Flows with a missing `id` field in `kit.json` are also placed in `skipped_assets` with an explicit reason.
 
 When installing through `npx @kontourai/flow-agents init` with the Codex runtime, pass `--activate-kits` to run activation as part of init:
