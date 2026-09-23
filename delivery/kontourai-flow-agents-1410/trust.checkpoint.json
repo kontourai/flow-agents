@@ -2,12 +2,12 @@
   "schema_version": "1.0",
   "slug": "kontourai-flow-agents-1410",
   "work_item": null,
-  "status": "provisional",
-  "phase": "ci-readiness",
-  "sealed_at": "2026-09-23T21:10:57.438Z",
-  "commit_sha": "aebc5bba2266fbc14418330d34dd84f59cb6355b",
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-09-23T22:02:21.130Z",
+  "commit_sha": "df22e584f609ddef36f7e67a08ccb2326c48fa56",
   "checkpoint": {
-    "asOf": "2026-09-23T21:10:57.438Z",
+    "asOf": "2026-09-23T22:02:21.131Z",
     "statusByClaimId": {
       "kontourai-flow-agents-1410-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1410-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-ccaac1f8674b03f8fc8b5ec00a859219b710a504d06cd6b275af30db040f1a42-gate-visit-2026-09-23t19-29-39z": "verified",
       "kontourai-flow-agents-1410-gate-claim-pickup-probe-readiness.flow-agents-workflow.issue-1410-is-claimed-for-this-actor-remaining-review-and-delivery-scope-dependencies-and-acceptance-checks-are-explicit-gate-visit-2026-09-23t19-30-11-309z": "verified",
@@ -16,6 +16,9 @@
       "kontourai-flow-agents-1410-gate-claim-implementation-scope.flow-agents-workflow.post-start-commit-569b913a-fixes-multi-repository-ownership-windows-command-projection-and-direct-pinned-veritas-cli-invocation-initial-installer-commit-6abc9049-predates-this-run-gate-visit-2026-09-23t19-41-05-240z": "verified",
       "kontourai-flow-agents-1410-gate-claim-tests-evidence.flow-agents-workflow.required-lane-codex-hook-command-passes-four-exact-head-tests-independent-critique-is-clean-all-substantive-hosted-lanes-are-green-trust-reconcile-awaits-provisional-delivery-gate-visit-2026-09-23t21-05-40-633z": "verified",
       "kontourai-flow-agents-1410-gate-claim-merge-readiness.flow-agents-workflow.scope-independent-critique-and-exact-required-lane-test-evidence-are-ready-for-pr-review-trust-reconcile-requires-provisional-delivery-at-the-later-merge-ready-ci-step-gate-visit-2026-09-23t21-07-30-465z": "verified",
+      "kontourai-flow-agents-1410-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-recommended-after-terminal-delivery-and-exact-signed-merge-authorization-five-required-hosted-checks-pass-at-df22e584-pinned-veritas-local-timeout-is-a-disclosed-observe-stage-not-verified-gap-not-a-pass-gate-visit-2026-09-23t21-56-30-057z": "verified",
+      "kontourai-flow-agents-1410-gate-claim-decision-evidence.flow-agents-workflow.conditional-merge-readiness-decision-is-recorded-with-five-required-green-checks-the-local-veritas-timeout-gap-and-a-separate-exact-merge-authorization-requirement-gate-visit-2026-09-23t22-01-25-545z": "verified",
+      "kontourai-flow-agents-1410-gate-claim-learning-evidence.flow-agents-workflow.observed-host-ci-outcomes-and-six-corrections-are-routed-to-source-fixes-or-durable-issues-release-and-merge-remain-unverified-gate-visit-2026-09-23t22-01-50-369z": "verified",
       "kontourai-flow-agents-1410-ac1.flow-agents-workflow.cross-worktree-installation-and-preservation-of-unrelated-hooks-verified-2026-09-23t21-05-40-633z": "verified",
       "kontourai-flow-agents-1410-ac2.flow-agents-workflow.normal-trusted-codex-pre-edit-guidance-with-supported-output-verified-2026-09-23t21-05-40-633z": "verified",
       "kontourai-flow-agents-1410-ac3.flow-agents-workflow.exact-head-checks-and-explicit-coverage-limits-verified-2026-09-23t21-05-40-633z": "verified",
@@ -26,15 +29,18 @@
       "kontourai-flow-agents-1410-review.flow-agents-workflow.verify-visit-2-recheck-unchanged-e01c92d9-source-is-clean-route-back-concerns-missing-ci-reconciliation-evidence-reviewed-2026-09-23t20-19-00-418z": "proposed",
       "kontourai-flow-agents-1410-review.flow-agents-workflow.exact-head-aebc5bba-source-review-passes-runtime-and-kit-source-and-static-and-windows-checks-passed-integration-coverage-checkout-and-delivery-bundle-remain-separate-blockers-reviewed-2026-09-23t20-54-34-009z": "verified"
     },
-    "throughEventCreatedAt": "2026-09-23T21:07:30.465Z",
+    "throughEventCreatedAt": "2026-09-23T22:01:50.369Z",
     "throughEventCreatedAtByClaimId": {
-      "kontourai-flow-agents-1410-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1410-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-ccaac1f8674b03f8fc8b5ec00a859219b710a504d06cd6b275af30db040f1a42-gate-visit-2026-09-23t19-29-39z": "2026-09-23T21:07:30.465Z",
-      "kontourai-flow-agents-1410-gate-claim-pickup-probe-readiness.flow-agents-workflow.issue-1410-is-claimed-for-this-actor-remaining-review-and-delivery-scope-dependencies-and-acceptance-checks-are-explicit-gate-visit-2026-09-23t19-30-11-309z": "2026-09-23T21:07:30.465Z",
-      "kontourai-flow-agents-1410-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decision-treat-pr-1409-source-as-pre-existing-this-run-reviews-and-delivers-it-and-will-not-claim-implementation-provenance-gate-visit-2026-09-23t19-30-21-172z": "2026-09-23T21:07:30.465Z",
-      "kontourai-flow-agents-1410-gate-claim-implementation-plan.flow-agents-workflow.review-exact-head-verification-station-host-proof-and-honest-delivery-steps-are-planned-against-ac1-ac4-gate-visit-2026-09-23t19-31-20-109z": "2026-09-23T21:07:30.465Z",
-      "kontourai-flow-agents-1410-gate-claim-implementation-scope.flow-agents-workflow.post-start-commit-569b913a-fixes-multi-repository-ownership-windows-command-projection-and-direct-pinned-veritas-cli-invocation-initial-installer-commit-6abc9049-predates-this-run-gate-visit-2026-09-23t19-41-05-240z": "2026-09-23T21:07:30.465Z",
-      "kontourai-flow-agents-1410-gate-claim-tests-evidence.flow-agents-workflow.required-lane-codex-hook-command-passes-four-exact-head-tests-independent-critique-is-clean-all-substantive-hosted-lanes-are-green-trust-reconcile-awaits-provisional-delivery-gate-visit-2026-09-23t21-05-40-633z": "2026-09-23T21:07:30.465Z",
-      "kontourai-flow-agents-1410-gate-claim-merge-readiness.flow-agents-workflow.scope-independent-critique-and-exact-required-lane-test-evidence-are-ready-for-pr-review-trust-reconcile-requires-provisional-delivery-at-the-later-merge-ready-ci-step-gate-visit-2026-09-23t21-07-30-465z": "2026-09-23T21:07:30.465Z",
+      "kontourai-flow-agents-1410-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1410-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-ccaac1f8674b03f8fc8b5ec00a859219b710a504d06cd6b275af30db040f1a42-gate-visit-2026-09-23t19-29-39z": "2026-09-23T22:01:50.369Z",
+      "kontourai-flow-agents-1410-gate-claim-pickup-probe-readiness.flow-agents-workflow.issue-1410-is-claimed-for-this-actor-remaining-review-and-delivery-scope-dependencies-and-acceptance-checks-are-explicit-gate-visit-2026-09-23t19-30-11-309z": "2026-09-23T22:01:50.369Z",
+      "kontourai-flow-agents-1410-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decision-treat-pr-1409-source-as-pre-existing-this-run-reviews-and-delivers-it-and-will-not-claim-implementation-provenance-gate-visit-2026-09-23t19-30-21-172z": "2026-09-23T22:01:50.369Z",
+      "kontourai-flow-agents-1410-gate-claim-implementation-plan.flow-agents-workflow.review-exact-head-verification-station-host-proof-and-honest-delivery-steps-are-planned-against-ac1-ac4-gate-visit-2026-09-23t19-31-20-109z": "2026-09-23T22:01:50.369Z",
+      "kontourai-flow-agents-1410-gate-claim-implementation-scope.flow-agents-workflow.post-start-commit-569b913a-fixes-multi-repository-ownership-windows-command-projection-and-direct-pinned-veritas-cli-invocation-initial-installer-commit-6abc9049-predates-this-run-gate-visit-2026-09-23t19-41-05-240z": "2026-09-23T22:01:50.369Z",
+      "kontourai-flow-agents-1410-gate-claim-tests-evidence.flow-agents-workflow.required-lane-codex-hook-command-passes-four-exact-head-tests-independent-critique-is-clean-all-substantive-hosted-lanes-are-green-trust-reconcile-awaits-provisional-delivery-gate-visit-2026-09-23t21-05-40-633z": "2026-09-23T22:01:50.369Z",
+      "kontourai-flow-agents-1410-gate-claim-merge-readiness.flow-agents-workflow.scope-independent-critique-and-exact-required-lane-test-evidence-are-ready-for-pr-review-trust-reconcile-requires-provisional-delivery-at-the-later-merge-ready-ci-step-gate-visit-2026-09-23t21-07-30-465z": "2026-09-23T22:01:50.369Z",
+      "kontourai-flow-agents-1410-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-recommended-after-terminal-delivery-and-exact-signed-merge-authorization-five-required-hosted-checks-pass-at-df22e584-pinned-veritas-local-timeout-is-a-disclosed-observe-stage-not-verified-gap-not-a-pass-gate-visit-2026-09-23t21-56-30-057z": "2026-09-23T22:01:50.369Z",
+      "kontourai-flow-agents-1410-gate-claim-decision-evidence.flow-agents-workflow.conditional-merge-readiness-decision-is-recorded-with-five-required-green-checks-the-local-veritas-timeout-gap-and-a-separate-exact-merge-authorization-requirement-gate-visit-2026-09-23t22-01-25-545z": "2026-09-23T22:01:50.369Z",
+      "kontourai-flow-agents-1410-gate-claim-learning-evidence.flow-agents-workflow.observed-host-ci-outcomes-and-six-corrections-are-routed-to-source-fixes-or-durable-issues-release-and-merge-remain-unverified-gate-visit-2026-09-23t22-01-50-369z": "2026-09-23T22:01:50.369Z",
       "kontourai-flow-agents-1410-ac1.flow-agents-workflow.cross-worktree-installation-and-preservation-of-unrelated-hooks-verified-2026-09-23t21-05-40-633z": "2026-09-23T21:05:40.633Z",
       "kontourai-flow-agents-1410-ac2.flow-agents-workflow.normal-trusted-codex-pre-edit-guidance-with-supported-output-verified-2026-09-23t21-05-40-633z": "2026-09-23T21:05:40.633Z",
       "kontourai-flow-agents-1410-ac3.flow-agents-workflow.exact-head-checks-and-explicit-coverage-limits-verified-2026-09-23t21-05-40-633z": "2026-09-23T21:05:40.633Z",
@@ -43,7 +49,7 @@
       "kontourai-flow-agents-1410-review.flow-agents-workflow.recheck-at-82a14068-confirms-copied-marker-fix-but-finds-duplicate-managed-hooks-for-apostrophe-git-paths-reviewed-2026-09-23t19-47-30-318z": null,
       "kontourai-flow-agents-1410-review.flow-agents-workflow.exact-head-recheck-at-e01c92d9-resolves-f1-and-f2-local-and-windows-latest-focused-installer-tests-passed-reviewed-2026-09-23t19-54-55-653z": null,
       "kontourai-flow-agents-1410-review.flow-agents-workflow.verify-visit-2-recheck-unchanged-e01c92d9-source-is-clean-route-back-concerns-missing-ci-reconciliation-evidence-reviewed-2026-09-23t20-19-00-418z": null,
-      "kontourai-flow-agents-1410-review.flow-agents-workflow.exact-head-aebc5bba-source-review-passes-runtime-and-kit-source-and-static-and-windows-checks-passed-integration-coverage-checkout-and-delivery-bundle-remain-separate-blockers-reviewed-2026-09-23t20-54-34-009z": "2026-09-23T21:07:30.465Z"
+      "kontourai-flow-agents-1410-review.flow-agents-workflow.exact-head-aebc5bba-source-review-passes-runtime-and-kit-source-and-static-and-windows-checks-passed-integration-coverage-checkout-and-delivery-bundle-remain-separate-blockers-reviewed-2026-09-23t20-54-34-009z": "2026-09-23T22:01:50.369Z"
     },
     "statusFunctionVersion": "2"
   }

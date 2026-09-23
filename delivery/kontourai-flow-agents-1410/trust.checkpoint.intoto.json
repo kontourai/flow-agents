@@ -4,7 +4,7 @@
     {
       "name": "trust.checkpoint.json",
       "digest": {
-        "sha256": "a4ab13650a8d26022a4acef232534a6b625a1886528d135f6544aeacd908d19a"
+        "sha256": "095ff22d4dcad37a875d2415855389dcbacf05fcc446f26f8451f60a6c9957e9"
       }
     }
   ],
@@ -21,8 +21,8 @@
         "claimType": "builder.pull-work.selected",
         "fieldOrBehavior": "Work Item kontourai/flow-agents#1410 is durably assigned to the active workflow actor (assignment sha256:ccaac1f8674b03f8fc8b5ec00a859219b710a504d06cd6b275af30db040f1a42).",
         "value": "pass",
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "updatedAt": "2026-09-23T21:07:30.465Z",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
         "metadata": {
@@ -82,8 +82,8 @@
         "claimType": "builder.design-probe.pickup-readiness",
         "fieldOrBehavior": "Issue #1410 is claimed for this actor; remaining review and delivery scope, dependencies, and acceptance checks are explicit",
         "value": "pass",
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "updatedAt": "2026-09-23T21:07:30.465Z",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
         "metadata": {
@@ -133,8 +133,8 @@
         "claimType": "builder.design-probe.decisions",
         "fieldOrBehavior": "Decision: treat PR #1409 source as pre-existing; this run reviews and delivers it, and will not claim implementation provenance",
         "value": "pass",
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "updatedAt": "2026-09-23T21:07:30.465Z",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
         "metadata": {
@@ -188,8 +188,8 @@
         "claimType": "builder.plan.implementation",
         "fieldOrBehavior": "Review, exact-head verification, Station host proof, and honest delivery steps are planned against AC1-AC4",
         "value": "pass",
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "updatedAt": "2026-09-23T21:07:30.465Z",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.plan.implementation:attestation",
         "metadata": {
@@ -272,8 +272,8 @@
         "claimType": "builder.execute.scope",
         "fieldOrBehavior": "Post-start commit 569b913a fixes multi-repository ownership, Windows command projection, and direct pinned Veritas CLI invocation; initial installer commit 6abc9049 predates this run",
         "value": "pass",
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "updatedAt": "2026-09-23T21:07:30.465Z",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.execute.scope:attestation",
         "metadata": {
@@ -328,8 +328,8 @@
         "claimType": "builder.verify.tests",
         "fieldOrBehavior": "Required-lane Codex hook command passes four exact-head tests; independent critique is clean; all substantive hosted lanes are green; Trust Reconcile awaits provisional delivery.",
         "value": "pass",
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "updatedAt": "2026-09-23T21:07:30.465Z",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.verify.tests:test_output",
         "metadata": {
@@ -429,8 +429,8 @@
         "claimType": "builder.merge-ready.readiness",
         "fieldOrBehavior": "Scope, independent critique, and exact required-lane test evidence are ready for PR review; Trust Reconcile requires provisional delivery at the later merge-ready-ci step",
         "value": "pass",
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "updatedAt": "2026-09-23T21:07:30.465Z",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.merge-ready.readiness:attestation",
         "metadata": {
@@ -474,6 +474,183 @@
             "identity_version": 2,
             "recorded_at": "2026-09-23T21:07:30.465Z",
             "flow_run_head": "49e2aeb1bed459e63523aa35bcdb6585ded5c9e5df0ddf1bdd624ccd5b1f09dc",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1410-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-recommended-after-terminal-delivery-and-exact-signed-merge-authorization-five-required-hosted-checks-pass-at-df22e584-pinned-veritas-local-timeout-is-a-disclosed-observe-stage-not-verified-gap-not-a-pass-gate-visit-2026-09-23t21-56-30-057z",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-1410/gate-claim-ci-merge-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.merge-ready-ci.readiness",
+        "fieldOrBehavior": "MERGE recommended after terminal delivery and exact signed merge authorization: five required hosted checks pass at df22e584; pinned Veritas local timeout is a disclosed Observe-stage NOT_VERIFIED gap, not a pass",
+        "value": "pass",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.merge-ready-ci.readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1410",
+          "expected_producer": "builder.release-readiness",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "ci-merge-readiness"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1410/release.json",
+              "summary": "Required checks, independent review, governance residual, rollback, and post-merge plan"
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/veritas/evidence/veritas-1790200434912.json",
+              "summary": "Exact base/head Veritas rejected verdict from the 600000 ms timeout"
+            },
+            {
+              "kind": "provider",
+              "url": "https://github.com/kontourai/flow-agents/pull/1409"
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "d947ee841e39d47ca2753e209c72582d583990ea76307ad1dac32e0418e39b5a",
+            "head_sha": "df22e584f609ddef36f7e67a08ccb2326c48fa56",
+            "worktree_clean": true
+          },
+          "gate_claim": {
+            "expectation_id": "ci-merge-readiness",
+            "claim_type": "builder.merge-ready-ci.readiness",
+            "subject_type": "pull-request",
+            "step_id": "merge-ready-ci",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T21:56:30.057Z",
+            "flow_run_head": "a8efb3a53513b9d7a61ead347655c30e13a5ed9284023d1a4e89700d96bf18db",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1410-gate-claim-decision-evidence.flow-agents-workflow.conditional-merge-readiness-decision-is-recorded-with-five-required-green-checks-the-local-veritas-timeout-gap-and-a-separate-exact-merge-authorization-requirement-gate-visit-2026-09-23t22-01-25-545z",
+        "subjectType": "decision",
+        "subjectId": "kontourai-flow-agents-1410/gate-claim-decision-evidence",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.learn.decisions",
+        "fieldOrBehavior": "Conditional merge-readiness decision is recorded with five required green checks, the local Veritas timeout gap, and a separate exact merge authorization requirement",
+        "value": "pass",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.learn.decisions:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1410",
+          "expected_producer": "builder.learning-review",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "decision-evidence",
+            "learning-evidence"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1410/learning.json",
+              "summary": "Observed decisions, source provenance, and unresolved authorizations"
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1410/release.json",
+              "summary": "Exact-head release-readiness recommendation and residual governance gap"
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "d947ee841e39d47ca2753e209c72582d583990ea76307ad1dac32e0418e39b5a",
+            "head_sha": "df22e584f609ddef36f7e67a08ccb2326c48fa56",
+            "worktree_clean": true
+          },
+          "gate_claim": {
+            "expectation_id": "decision-evidence",
+            "claim_type": "builder.learn.decisions",
+            "subject_type": "decision",
+            "step_id": "learn",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T22:01:25.545Z",
+            "flow_run_head": "c34f7b53d10f2fba544654a7765ac3f9c610ef6ecb23ee2e3f1a4970b5457e40",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1410-gate-claim-learning-evidence.flow-agents-workflow.observed-host-ci-outcomes-and-six-corrections-are-routed-to-source-fixes-or-durable-issues-release-and-merge-remain-unverified-gate-visit-2026-09-23t22-01-50-369z",
+        "subjectType": "release",
+        "subjectId": "kontourai-flow-agents-1410/gate-claim-learning-evidence",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.learn.evidence",
+        "fieldOrBehavior": "Observed host/CI outcomes and six corrections are routed to source fixes or durable issues; release and merge remain unverified",
+        "value": "pass",
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "updatedAt": "2026-09-23T22:01:50.369Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.learn.evidence:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1410",
+          "expected_producer": "builder.learning-review",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "decision-evidence",
+            "learning-evidence"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1410/learning.json",
+              "summary": "Observed outcomes, correction dispositions, and retained worktree decision"
+            },
+            {
+              "kind": "provider",
+              "url": "https://github.com/kontourai/flow-agents/issues/1411"
+            },
+            {
+              "kind": "provider",
+              "url": "https://github.com/kontourai/flow-agents/issues/1412"
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "d947ee841e39d47ca2753e209c72582d583990ea76307ad1dac32e0418e39b5a",
+            "head_sha": "df22e584f609ddef36f7e67a08ccb2326c48fa56",
+            "worktree_clean": true
+          },
+          "gate_claim": {
+            "expectation_id": "learning-evidence",
+            "claim_type": "builder.learn.evidence",
+            "subject_type": "release",
+            "step_id": "learn",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T22:01:50.369Z",
+            "flow_run_head": "c34f7b53d10f2fba544654a7765ac3f9c610ef6ecb23ee2e3f1a4970b5457e40",
             "flow_id": "builder.build",
             "definition_version": "1.4",
             "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
@@ -1403,7 +1580,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1410/evidence.json",
         "excerptOrSummary": "Work Item kontourai/flow-agents#1410 is durably assigned to the active workflow actor (assignment sha256:ccaac1f8674b03f8fc8b5ec00a859219b710a504d06cd6b275af30db040f1a42).",
-        "observedAt": "2026-09-23T21:07:30.465Z",
+        "observedAt": "2026-09-23T22:01:50.369Z",
         "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
         "passing": true
       },
@@ -1414,7 +1591,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1410/evidence.json",
         "excerptOrSummary": "Issue #1410 is claimed for this actor; remaining review and delivery scope, dependencies, and acceptance checks are explicit",
-        "observedAt": "2026-09-23T21:07:30.465Z",
+        "observedAt": "2026-09-23T22:01:50.369Z",
         "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
         "passing": true
       },
@@ -1425,7 +1602,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1410/evidence.json",
         "excerptOrSummary": "Decision: treat PR #1409 source as pre-existing; this run reviews and delivers it, and will not claim implementation provenance",
-        "observedAt": "2026-09-23T21:07:30.465Z",
+        "observedAt": "2026-09-23T22:01:50.369Z",
         "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
         "passing": true
       },
@@ -1436,7 +1613,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1410/evidence.json",
         "excerptOrSummary": "Review, exact-head verification, Station host proof, and honest delivery steps are planned against AC1-AC4",
-        "observedAt": "2026-09-23T21:07:30.465Z",
+        "observedAt": "2026-09-23T22:01:50.369Z",
         "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
         "passing": true
       },
@@ -1447,7 +1624,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1410/evidence.json",
         "excerptOrSummary": "Post-start commit 569b913a fixes multi-repository ownership, Windows command projection, and direct pinned Veritas CLI invocation; initial installer commit 6abc9049 predates this run",
-        "observedAt": "2026-09-23T21:07:30.465Z",
+        "observedAt": "2026-09-23T22:01:50.369Z",
         "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
         "passing": true
       },
@@ -1458,7 +1635,7 @@
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1410/command-log.jsonl",
         "excerptOrSummary": "Required-lane Codex hook command passes four exact-head tests; independent critique is clean; all substantive hosted lanes are green; Trust Reconcile awaits provisional delivery.",
-        "observedAt": "2026-09-23T21:07:30.465Z",
+        "observedAt": "2026-09-23T22:01:50.369Z",
         "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
         "supportStrength": "entails",
         "passing": true,
@@ -1476,7 +1653,40 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1410/evidence.json",
         "excerptOrSummary": "Scope, independent critique, and exact required-lane test evidence are ready for PR review; Trust Reconcile requires provisional delivery at the later merge-ready-ci step",
-        "observedAt": "2026-09-23T21:07:30.465Z",
+        "observedAt": "2026-09-23T22:01:50.369Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1410-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-recommended-after-terminal-delivery-and-exact-signed-merge-authorization-five-required-hosted-checks-pass-at-df22e584-pinned-veritas-local-timeout-is-a-disclosed-observe-stage-not-verified-gap-not-a-pass-gate-visit-2026-09-23t21-56-30-057z",
+        "claimId": "kontourai-flow-agents-1410-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-recommended-after-terminal-delivery-and-exact-signed-merge-authorization-five-required-hosted-checks-pass-at-df22e584-pinned-veritas-local-timeout-is-a-disclosed-observe-stage-not-verified-gap-not-a-pass-gate-visit-2026-09-23t21-56-30-057z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1410/evidence.json",
+        "excerptOrSummary": "MERGE recommended after terminal delivery and exact signed merge authorization: five required hosted checks pass at df22e584; pinned Veritas local timeout is a disclosed Observe-stage NOT_VERIFIED gap, not a pass",
+        "observedAt": "2026-09-23T22:01:50.369Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1410-gate-claim-decision-evidence.flow-agents-workflow.conditional-merge-readiness-decision-is-recorded-with-five-required-green-checks-the-local-veritas-timeout-gap-and-a-separate-exact-merge-authorization-requirement-gate-visit-2026-09-23t22-01-25-545z",
+        "claimId": "kontourai-flow-agents-1410-gate-claim-decision-evidence.flow-agents-workflow.conditional-merge-readiness-decision-is-recorded-with-five-required-green-checks-the-local-veritas-timeout-gap-and-a-separate-exact-merge-authorization-requirement-gate-visit-2026-09-23t22-01-25-545z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1410/evidence.json",
+        "excerptOrSummary": "Conditional merge-readiness decision is recorded with five required green checks, the local Veritas timeout gap, and a separate exact merge authorization requirement",
+        "observedAt": "2026-09-23T22:01:50.369Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1410-gate-claim-learning-evidence.flow-agents-workflow.observed-host-ci-outcomes-and-six-corrections-are-routed-to-source-fixes-or-durable-issues-release-and-merge-remain-unverified-gate-visit-2026-09-23t22-01-50-369z",
+        "claimId": "kontourai-flow-agents-1410-gate-claim-learning-evidence.flow-agents-workflow.observed-host-ci-outcomes-and-six-corrections-are-routed-to-source-fixes-or-durable-issues-release-and-merge-remain-unverified-gate-visit-2026-09-23t22-01-50-369z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1410/evidence.json",
+        "excerptOrSummary": "Observed host/CI outcomes and six corrections are routed to source fixes or durable issues; release and merge remain unverified",
+        "observedAt": "2026-09-23T22:01:50.369Z",
         "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
         "passing": true
       },
@@ -1708,6 +1918,57 @@
         "impactLevel": "high"
       },
       {
+        "id": "policy:builder.merge-ready-ci.readiness:attestation",
+        "claimType": "builder.merge-ready-ci.readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.merge-ready-ci.readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.learn.decisions:attestation",
+        "claimType": "builder.learn.decisions",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.learn.decisions claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.learn.evidence:attestation",
+        "claimType": "builder.learn.evidence",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.learn.evidence claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
         "id": "policy:workflow.acceptance.criterion:test_output",
         "claimType": "workflow.acceptance.criterion",
         "requiredEvidence": [
@@ -1750,8 +2011,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1410-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1410-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-ccaac1f8674b03f8fc8b5ec00a859219b710a504d06cd6b275af30db040f1a42-gate-visit-2026-09-23t19-29-39z"
         ],
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "verifiedAt": "2026-09-23T21:07:30.465Z"
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1410-gate-claim-pickup-probe-readiness.flow-agents-workflow.issue-1410-is-claimed-for-this-actor-remaining-review-and-delivery-scope-dependencies-and-acceptance-checks-are-explicit-gate-visit-2026-09-23t19-30-11-309z",
@@ -1762,8 +2023,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1410-gate-claim-pickup-probe-readiness.flow-agents-workflow.issue-1410-is-claimed-for-this-actor-remaining-review-and-delivery-scope-dependencies-and-acceptance-checks-are-explicit-gate-visit-2026-09-23t19-30-11-309z"
         ],
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "verifiedAt": "2026-09-23T21:07:30.465Z"
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1410-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decision-treat-pr-1409-source-as-pre-existing-this-run-reviews-and-delivers-it-and-will-not-claim-implementation-provenance-gate-visit-2026-09-23t19-30-21-172z",
@@ -1774,8 +2035,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1410-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.decision-treat-pr-1409-source-as-pre-existing-this-run-reviews-and-delivers-it-and-will-not-claim-implementation-provenance-gate-visit-2026-09-23t19-30-21-172z"
         ],
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "verifiedAt": "2026-09-23T21:07:30.465Z"
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1410-gate-claim-implementation-plan.flow-agents-workflow.review-exact-head-verification-station-host-proof-and-honest-delivery-steps-are-planned-against-ac1-ac4-gate-visit-2026-09-23t19-31-20-109z",
@@ -1786,8 +2047,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1410-gate-claim-implementation-plan.flow-agents-workflow.review-exact-head-verification-station-host-proof-and-honest-delivery-steps-are-planned-against-ac1-ac4-gate-visit-2026-09-23t19-31-20-109z"
         ],
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "verifiedAt": "2026-09-23T21:07:30.465Z"
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1410-gate-claim-implementation-scope.flow-agents-workflow.post-start-commit-569b913a-fixes-multi-repository-ownership-windows-command-projection-and-direct-pinned-veritas-cli-invocation-initial-installer-commit-6abc9049-predates-this-run-gate-visit-2026-09-23t19-41-05-240z",
@@ -1798,8 +2059,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1410-gate-claim-implementation-scope.flow-agents-workflow.post-start-commit-569b913a-fixes-multi-repository-ownership-windows-command-projection-and-direct-pinned-veritas-cli-invocation-initial-installer-commit-6abc9049-predates-this-run-gate-visit-2026-09-23t19-41-05-240z"
         ],
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "verifiedAt": "2026-09-23T21:07:30.465Z"
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1410-gate-claim-tests-evidence.flow-agents-workflow.required-lane-codex-hook-command-passes-four-exact-head-tests-independent-critique-is-clean-all-substantive-hosted-lanes-are-green-trust-reconcile-awaits-provisional-delivery-gate-visit-2026-09-23t21-05-40-633z",
@@ -1810,8 +2071,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1410-gate-claim-tests-evidence.flow-agents-workflow.required-lane-codex-hook-command-passes-four-exact-head-tests-independent-critique-is-clean-all-substantive-hosted-lanes-are-green-trust-reconcile-awaits-provisional-delivery-gate-visit-2026-09-23t21-05-40-633z:1"
         ],
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "verifiedAt": "2026-09-23T21:07:30.465Z"
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1410-gate-claim-merge-readiness.flow-agents-workflow.scope-independent-critique-and-exact-required-lane-test-evidence-are-ready-for-pr-review-trust-reconcile-requires-provisional-delivery-at-the-later-merge-ready-ci-step-gate-visit-2026-09-23t21-07-30-465z",
@@ -1822,8 +2083,44 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1410-gate-claim-merge-readiness.flow-agents-workflow.scope-independent-critique-and-exact-required-lane-test-evidence-are-ready-for-pr-review-trust-reconcile-requires-provisional-delivery-at-the-later-merge-ready-ci-step-gate-visit-2026-09-23t21-07-30-465z"
         ],
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "verifiedAt": "2026-09-23T21:07:30.465Z"
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1410-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-recommended-after-terminal-delivery-and-exact-signed-merge-authorization-five-required-hosted-checks-pass-at-df22e584-pinned-veritas-local-timeout-is-a-disclosed-observe-stage-not-verified-gap-not-a-pass-gate-visit-2026-09-23t21-56-30-057z",
+        "claimId": "kontourai-flow-agents-1410-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-recommended-after-terminal-delivery-and-exact-signed-merge-authorization-five-required-hosted-checks-pass-at-df22e584-pinned-veritas-local-timeout-is-a-disclosed-observe-stage-not-verified-gap-not-a-pass-gate-visit-2026-09-23t21-56-30-057z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1410-gate-claim-ci-merge-readiness.flow-agents-workflow.merge-recommended-after-terminal-delivery-and-exact-signed-merge-authorization-five-required-hosted-checks-pass-at-df22e584-pinned-veritas-local-timeout-is-a-disclosed-observe-stage-not-verified-gap-not-a-pass-gate-visit-2026-09-23t21-56-30-057z"
+        ],
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1410-gate-claim-decision-evidence.flow-agents-workflow.conditional-merge-readiness-decision-is-recorded-with-five-required-green-checks-the-local-veritas-timeout-gap-and-a-separate-exact-merge-authorization-requirement-gate-visit-2026-09-23t22-01-25-545z",
+        "claimId": "kontourai-flow-agents-1410-gate-claim-decision-evidence.flow-agents-workflow.conditional-merge-readiness-decision-is-recorded-with-five-required-green-checks-the-local-veritas-timeout-gap-and-a-separate-exact-merge-authorization-requirement-gate-visit-2026-09-23t22-01-25-545z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1410-gate-claim-decision-evidence.flow-agents-workflow.conditional-merge-readiness-decision-is-recorded-with-five-required-green-checks-the-local-veritas-timeout-gap-and-a-separate-exact-merge-authorization-requirement-gate-visit-2026-09-23t22-01-25-545z"
+        ],
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1410-gate-claim-learning-evidence.flow-agents-workflow.observed-host-ci-outcomes-and-six-corrections-are-routed-to-source-fixes-or-durable-issues-release-and-merge-remain-unverified-gate-visit-2026-09-23t22-01-50-369z",
+        "claimId": "kontourai-flow-agents-1410-gate-claim-learning-evidence.flow-agents-workflow.observed-host-ci-outcomes-and-six-corrections-are-routed-to-source-fixes-or-durable-issues-release-and-merge-remain-unverified-gate-visit-2026-09-23t22-01-50-369z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1410-gate-claim-learning-evidence.flow-agents-workflow.observed-host-ci-outcomes-and-six-corrections-are-routed-to-source-fixes-or-durable-issues-release-and-merge-remain-unverified-gate-visit-2026-09-23t22-01-50-369z"
+        ],
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1410-ac1.flow-agents-workflow.cross-worktree-installation-and-preservation-of-unrelated-hooks-verified-2026-09-23t21-05-40-633z",
@@ -1880,8 +2177,8 @@
         "actor": "codex:thread-50271a94953ceaeb813a9001:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-09-23T21:07:30.465Z",
-        "verifiedAt": "2026-09-23T21:07:30.465Z"
+        "createdAt": "2026-09-23T22:01:50.369Z",
+        "verifiedAt": "2026-09-23T22:01:50.369Z"
       }
     ]
   }
