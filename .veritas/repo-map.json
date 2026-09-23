@@ -140,8 +140,9 @@
       {
         "id": "required-evidence-check",
         "command": "npm run eval:static",
+        "timeoutMs": 1200000,
         "method": "validation",
-        "summary": "Default repository evidenceCheck. The static eval includes source validation and the full node:test corpus; running both again before it exceeds Veritas's per-check timeout without adding coverage."
+        "summary": "Default repository evidenceCheck. The static eval includes source validation and the full node:test corpus; its 20-minute liveness bound allows the observed 1,912-test phase to finish without reducing coverage."
       }
     ],
     "requiredEvidenceCheckIds": [

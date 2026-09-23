@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "id": "policy-change-2026-09-23T21-20-34-470Z-7f464513557e",
+  "kind": "policy-change",
+  "actor": {
+    "id": "briananderson1222",
+    "displayName": "Brian Anderson",
+    "identityEvidence": {
+      "gitEmail": "brian.anderson@kontourai.io",
+      "signingKeyFingerprint": null
+    }
+  },
+  "attestedAt": "2026-09-23T21:20:34.470Z",
+  "repoStandardsHash": "sha256:f817da36459341be0352b8f7f87a2ffa1996c8d9339b7e77fe22f66c0d15d552",
+  "repoMapHash": "sha256:57ec80951b8c9ed1c539b888229a76591057b356186ea5f3483efaf6d839eb12",
+  "repoMapHashAlgorithm": "public-policy-v1",
+  "authoritySettingsHash": "sha256:429472c4c5c6802d85c72eb161f403eef06c73849475ee533fead481db9d39f2",
+  "priorAttestationId": "legacy-attestation-v0:216f4bb5f3be43a7",
+  "validUntilDays": 90,
+  "notes": "Owner approved the exact 1200000 ms timeout for the unchanged required eval:static Evidence Check after the 600000 ms limit killed a 1912-test phase; Veritas 1.7.3 supplies the matching Repo Map schema.",
+  "metadata": {
+    "protectedStandardsPaths": {
+      "repoStandardsPath": ".veritas/repo-standards/default.repo-standards.json",
+      "repoMapPath": ".veritas/repo-map.json",
+      "authoritySettingsPath": ".veritas/authority/default.authority-settings.json"
+    },
+    "supersedes": "legacy-attestation-v0:216f4bb5f3be43a7",
+    "approvalRef": "user-conversation-2026-09-23-flow-static-timeout-1200000",
+    "approvalRefPolicy": {
+      "mode": "reference-only",
+      "matchedPrefix": null,
+      "requiresResolution": false
+    },
+    "approvalResolution": null
+  },
+  "surface": {
+    "claim": {
+      "id": "veritas.attestation.policy-change-2026-09-23T21-20-34-470Z-7f464513557e",
+      "subjectType": "veritas-protected-standards",
+      "subjectId": "protected-standards",
+      "facet": "veritas.attestations",
+      "claimType": "veritas-human-attestation",
+      "fieldOrBehavior": "policy-change",
+      "value": {
+        "contentHash": "f77eb0941bd59ea1b54be49c59550357c5c78d1304165004505045a5f2773440",
+        "validUntil": "2026-12-22T21:20:34.470Z"
+      },
+      "createdAt": "2026-09-23T21:20:34.470Z",
+      "updatedAt": "2026-09-23T21:20:34.470Z",
+      "status": "verified",
+      "impactLevel": "high",
+      "confidenceBasis": {
+        "sourceQuality": "strong",
+        "reviewerAuthority": "human",
+        "evidenceStrength": "strong",
+        "impactLevel": "high"
+      }
+    },
+    "evidence": {
+      "id": "evidence.attestation.veritas.attestation.policy-change-2026-09-23T21-20-34-470Z-7f464513557e",
+      "claimId": "veritas.attestation.policy-change-2026-09-23T21-20-34-470Z-7f464513557e",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "veritas:protected-standards",
+      "excerptOrSummary": "Owner approved the exact 1200000 ms timeout for the unchanged required eval:static Evidence Check after the 600000 ms limit killed a 1912-test phase; Veritas 1.7.3 supplies the matching Repo Map schema.",
+      "observedAt": "2026-09-23T21:20:34.470Z",
+      "collectedBy": "briananderson1222",
+      "integrityRef": "f77eb0941bd59ea1b54be49c59550357c5c78d1304165004505045a5f2773440",
+      "metadata": {
+        "actor": {
+          "id": "briananderson1222",
+          "displayName": "Brian Anderson"
+        },
+        "attestedAt": "2026-09-23T21:20:34.470Z",
+        "validUntil": "2026-12-22T21:20:34.470Z",
+        "contentHash": "f77eb0941bd59ea1b54be49c59550357c5c78d1304165004505045a5f2773440"
+      },
+      "sourceLocator": ".veritas/attestations"
+    },
+    "event": {
+      "id": "veritas.attestation.policy-change-2026-09-23T21-20-34-470Z-7f464513557e.verified",
+      "claimId": "veritas.attestation.policy-change-2026-09-23T21-20-34-470Z-7f464513557e",
+      "status": "verified",
+      "actor": "briananderson1222",
+      "method": "human attestation",
+      "evidenceIds": [
+        "evidence.attestation.veritas.attestation.policy-change-2026-09-23T21-20-34-470Z-7f464513557e"
+      ],
+      "createdAt": "2026-09-23T21:20:34.470Z",
+      "verifiedAt": "2026-09-23T21:20:34.470Z"
+    }
+  }
+}
