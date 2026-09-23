@@ -695,6 +695,7 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
   writeBundledFlowValidator(targetRoot);
+  writeBundledConduit(targetRoot);
   // #620: ship the build-only capability-declarations JSON inside each bundle so an
   // installed economics-record emitter (and hooks) can read it at build/generated/
   // relative to the bundle root. It is generated unconditionally by `npm run build`
@@ -739,8 +740,48 @@ function installedPackageRoot(specifier: string, resolveFrom: string): string {
   }
 }
 
+/** Standalone host bundles must carry the published Conduit contract they invoke. */
+function writeBundledConduit(targetRoot: string): void {
+  const conduitRoot = fs.realpathSync(path.join(root, "node_modules/@kontourai/conduit"));
+  for (const [name, entryName] of [["conduit", "index"], ["conduit-pi", "pi"], ["conduit-kiro", "kiro"]]) {
+    const entry = path.join(conduitRoot, `dist/src/${entryName}.js`);
+    const result = buildSync({
+      entryPoints: [entry], bundle: true, platform: "node", format: "esm", target: "node22",
+      minifyWhitespace: true, legalComments: "none", write: false,
+    });
+    const output = result.outputFiles?.[0];
+    if (!output) throw new Error(`${name} host integration bundle produced no output`);
+    writeText(path.join(targetRoot, `build/src/vendor/${name}.mjs`), output.text);
+  }
+  for (const relativeFile of ["conduit-host-integration.js", "flow-kit/provision.js", "cli/init.js"]) {
+    const file = path.join(targetRoot, "build/src", relativeFile);
+    let source = readText(file);
+    for (const [specifier, vendor] of [["@kontourai/conduit", "conduit"], ["@kontourai/conduit/pi", "conduit-pi"], ["@kontourai/conduit/kiro", "conduit-kiro"]]) {
+      const importText = `from "${specifier}"`;
+      if (!source.includes(importText)) continue;
+      const relativeVendor = path.relative(path.dirname(file), path.join(targetRoot, `build/src/vendor/${vendor}.mjs`)).replaceAll(path.sep, "/");
+      source = source.replaceAll(importText, `from "${relativeVendor.startsWith(".") ? relativeVendor : `./${relativeVendor}`}"`);
+    }
+    writeText(file, source);
+  }
+}
+
 function writeBundledFlowValidator(targetRoot: string): void {
   const flowRoot = installedPackageRoot("@kontourai/flow", `${root}/`);
+  // The installed Kit CLI validates the core container through Flow's public
+  // implementation. Ship that published function for standalone host homes too.
+  const kitContainer = buildSync({
+    entryPoints: [path.join(flowRoot, "dist/kit/flow-kit-container.js")],
+    bundle: true, platform: "node", format: "esm", target: "node22",
+    minifyWhitespace: true, legalComments: "none", write: false,
+  }).outputFiles?.[0];
+  if (!kitContainer) throw new Error("Flow Kit container bundle produced no output");
+  writeText(path.join(targetRoot, "build/src/vendor/flow-kit-container.mjs"), kitContainer.text);
+  const kitValidatePath = path.join(targetRoot, "build/src/flow-kit/validate.js");
+  const kitValidate = readText(kitValidatePath);
+  const flowImport = 'import("@kontourai/flow")';
+  if (!kitValidate.includes(flowImport)) throw new Error("Kit validation no longer imports the expected Flow contract");
+  writeText(kitValidatePath, kitValidate.replace(flowImport, 'import("../vendor/flow-kit-container.mjs")'));
   const flowEntry = createRequire(`${root}/`).resolve("@kontourai/flow");
   const flowSchemas = path.join(flowRoot, "schemas");
   const stateSchema = loadJson<Record<string, unknown>>(path.join(flowSchemas, "flow-run.schema.json"));

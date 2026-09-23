@@ -35,6 +35,10 @@ export interface KitProvisionEntry {
   path: string;
   target: string;
   description?: string;
+  /** Explicit caller binding for a host asset; both fields are required together. */
+  host?: "codex" | "claude-code" | "opencode" | "kiro" | "pi";
+  kind?: "skill" | "agent" | "hook" | "prompt" | "command" | "context";
+  merge?: "hooks-json";
 }
 
 // Consumer-repo-relative directory (posix, lowercase) where the engine writes its own
@@ -779,6 +783,21 @@ function validateExtensionAssets(kitDir: string, manifestPath: string, manifest:
       const record = entry as Record<string, unknown>;
       if (record.description !== undefined && typeof record.description !== "string") {
         errors.push(`${manifestPath}: provisions[${index}].description must be a string when present`);
+      }
+      if ((record.host === undefined) !== (record.kind === undefined)) {
+        errors.push(`${manifestPath}: provisions[${index}].host and kind must be declared together`);
+      }
+      if (record.host !== undefined && !["codex", "claude-code", "opencode", "kiro", "pi"].includes(String(record.host))) {
+        errors.push(`${manifestPath}: provisions[${index}].host must name a supported Conduit harness`);
+      }
+      if (record.kind !== undefined && !["skill", "agent", "hook", "prompt", "command", "context"].includes(String(record.kind))) {
+        errors.push(`${manifestPath}: provisions[${index}].kind must name a Conduit asset kind`);
+      }
+      if (record.merge !== undefined && record.merge !== "hooks-json") {
+        errors.push(`${manifestPath}: provisions[${index}].merge must be hooks-json when present`);
+      }
+      if (record.merge === "hooks-json" && (record.kind !== "hook" || record.host === undefined)) {
+        errors.push(`${manifestPath}: provisions[${index}].hooks-json merge requires an explicit host hook asset`);
       }
       const target = record.target;
       if (typeof target !== "string" || target.trim().length === 0) {

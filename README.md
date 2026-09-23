@@ -209,9 +209,15 @@ URL/ref and reject `--record-source`.
 
 ```bash
 npx @kontourai/flow-agents kit install \
-  https://github.com/kontourai/veritas.git#v1.5.1 --dest .
+  https://github.com/kontourai/veritas.git#v1.7.2 --dest .
 npx @kontourai/flow-agents kit activate --dest . --format json
+npx @kontourai/flow-agents kit provision veritas-governance --target .
 ```
+
+The provision merges the Veritas pre-edit command into the existing Codex
+`PreToolUse` hooks through Conduit and records an installation receipt. Codex
+must separately trust the changed project hooks before they execute; the
+receipt does not claim hook execution. Run `veritas readiness` after changes.
 
 **Direction**: domain kits that compose this substrate — a Sales Kit (territory/customer/initiative schema with side-effect adapters for CRM logging), a Research Kit (transcript capture→compile→recall), and community-contributed kits discovered through a marketplace. Marketplace labels such as official or first-party describe provenance; they do not grant runtime privilege.
 

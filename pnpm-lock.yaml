@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@kontourai/conduit':
-        specifier: 0.2.1
-        version: 0.2.1
+        specifier: 0.7.1
+        version: 0.7.1
       '@kontourai/dispatch':
         specifier: 0.3.0
         version: 0.3.0(@ai-sdk/provider@3.0.10)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))
@@ -1005,8 +1005,8 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
-  '@kontourai/conduit@0.2.1':
-    resolution: {integrity: sha512-xhMLtE89WRoa7/MU8C9/Bl676hPKT+niKmp/fj26gW5aL6QVfaBx/ywlgyoEAmmLxkMpjk4PVKLksvslXyzM+A==}
+  '@kontourai/conduit@0.7.1':
+    resolution: {integrity: sha512-EiAd0KYVnysVy6I1lvW6vHoGTocLmG81HotMDsqJTIcqhMBImFAyojMs1qPqXrBnH/HpjrLI+yBlUSOzKtJwjw==}
     engines: {node: '>=22'}
 
   '@kontourai/datum@0.3.0':
@@ -5237,7 +5237,7 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
-  '@kontourai/conduit@0.2.1': {}
+  '@kontourai/conduit@0.7.1': {}
 
   '@kontourai/datum@0.3.0': {}
 

@@ -36,6 +36,10 @@ allowBuilds:
 #   minimumReleaseAgeExclude:
 #     - some-package@1.2.3
 minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  # Exact internal release built from merged Conduit PRs #30 and #32; the
+  # provider-backed publish receipt is verified before this consumer lands.
+  - '@kontourai/conduit@0.7.1'
 
 # mise supplies node and pnpm on developer machines; CI installs the exact
 # version pinned in package.json. Do not reject a same-major pnpm from mise.

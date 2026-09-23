@@ -1,10 +1,10 @@
 {
-  "schemaVersion": "1",
+  "schemaVersion": "2",
   "adapters": [
     {
       "evidenceScope": "adapter-contract",
       "adapterId": "claude-code",
-      "adapterVersion": "0.2.1",
+      "adapterVersion": "0.7.1",
       "hostId": "flow-agents-local-harness-binding",
       "hostVersion": "public-config-binding-v1",
       "capabilities": {
@@ -15,8 +15,28 @@
           "after-tool": "native",
           "stop": "native"
         },
-        "contextInjection": "native",
-        "blocking": "native",
+        "influence": {
+          "session-start": {
+            "decision": "unavailable",
+            "contextInjection": "native"
+          },
+          "before-model": {
+            "decision": "unavailable",
+            "contextInjection": "native"
+          },
+          "before-tool": {
+            "decision": "native",
+            "contextInjection": "native"
+          },
+          "after-tool": {
+            "decision": "unavailable",
+            "contextInjection": "unavailable"
+          },
+          "stop": {
+            "decision": "native",
+            "contextInjection": "unavailable"
+          }
+        },
         "install": {
           "skill": "native",
           "agent": "native",
@@ -27,8 +47,13 @@
         }
       },
       "limitations": [
-        "install.context=static-only",
-        "lifecycle.before-model=approximated"
+        "capability.influence.after-tool.contextInjection=unavailable",
+        "capability.influence.after-tool.decision=unavailable",
+        "capability.influence.before-model.decision=unavailable",
+        "capability.influence.session-start.decision=unavailable",
+        "capability.influence.stop.contextInjection=unavailable",
+        "capability.install.context=static-only",
+        "capability.lifecycle.before-model=approximated"
       ],
       "results": [
         {
@@ -36,11 +61,182 @@
           "status": "pass"
         },
         {
-          "check": "context-fidelity",
+          "check": "context-after-tool",
           "status": "pass"
         },
         {
-          "check": "deny-fidelity",
+          "check": "context-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "context-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "context-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "context-stop",
+          "status": "pass"
+        },
+        {
+          "check": "decision-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "decision-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "decision-stop",
+          "status": "pass"
+        },
+        {
+          "check": "install-fidelity",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "lifecycle-stop",
+          "status": "pass"
+        },
+        {
+          "check": "secret-free-install-receipt",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "evidenceScope": "adapter-contract",
+      "adapterId": "codex",
+      "adapterVersion": "0.7.1",
+      "hostId": "flow-agents-codex-kit-provision-binding",
+      "hostVersion": "caller-bound-hooks-v1",
+      "capabilities": {
+        "lifecycle": {
+          "session-start": "unavailable",
+          "before-model": "unavailable",
+          "before-tool": "native",
+          "after-tool": "unavailable",
+          "stop": "observational"
+        },
+        "influence": {
+          "session-start": {
+            "decision": "unavailable",
+            "contextInjection": "unavailable"
+          },
+          "before-model": {
+            "decision": "unavailable",
+            "contextInjection": "unavailable"
+          },
+          "before-tool": {
+            "decision": "native",
+            "contextInjection": "native"
+          },
+          "after-tool": {
+            "decision": "unavailable",
+            "contextInjection": "unavailable"
+          },
+          "stop": {
+            "decision": "unavailable",
+            "contextInjection": "unavailable"
+          }
+        },
+        "install": {
+          "skill": "native",
+          "agent": "unavailable",
+          "hook": "approximated",
+          "prompt": "static-only",
+          "command": "unavailable",
+          "context": "static-only"
+        }
+      },
+      "limitations": [
+        "capability.influence.after-tool.contextInjection=unavailable",
+        "capability.influence.after-tool.decision=unavailable",
+        "capability.influence.before-model.contextInjection=unavailable",
+        "capability.influence.before-model.decision=unavailable",
+        "capability.influence.session-start.contextInjection=unavailable",
+        "capability.influence.session-start.decision=unavailable",
+        "capability.influence.stop.contextInjection=unavailable",
+        "capability.influence.stop.decision=unavailable",
+        "capability.install.agent=unavailable",
+        "capability.install.command=unavailable",
+        "capability.install.context=static-only",
+        "capability.install.hook=approximated",
+        "capability.install.prompt=static-only",
+        "capability.lifecycle.after-tool=unavailable",
+        "capability.lifecycle.before-model=unavailable",
+        "capability.lifecycle.session-start=unavailable",
+        "capability.lifecycle.stop=observational"
+      ],
+      "results": [
+        {
+          "check": "capability-completeness",
+          "status": "pass"
+        },
+        {
+          "check": "context-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "context-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "context-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "context-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "context-stop",
+          "status": "pass"
+        },
+        {
+          "check": "decision-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "decision-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "decision-stop",
           "status": "pass"
         },
         {
@@ -76,7 +272,7 @@
     {
       "evidenceScope": "adapter-contract",
       "adapterId": "strands",
-      "adapterVersion": "0.2.1",
+      "adapterVersion": "0.7.1",
       "hostId": "flow-agents-in-process-binding",
       "hostVersion": "caller-bound-hooks-v1",
       "capabilities": {
@@ -87,8 +283,28 @@
           "after-tool": "native",
           "stop": "native"
         },
-        "contextInjection": "native",
-        "blocking": "native",
+        "influence": {
+          "session-start": {
+            "decision": "native",
+            "contextInjection": "native"
+          },
+          "before-model": {
+            "decision": "native",
+            "contextInjection": "native"
+          },
+          "before-tool": {
+            "decision": "native",
+            "contextInjection": "native"
+          },
+          "after-tool": {
+            "decision": "native",
+            "contextInjection": "native"
+          },
+          "stop": {
+            "decision": "native",
+            "contextInjection": "native"
+          }
+        },
         "install": {
           "skill": "approximated",
           "agent": "approximated",
@@ -99,9 +315,9 @@
         }
       },
       "limitations": [
-        "install.agent=approximated",
-        "install.command=approximated",
-        "install.skill=approximated"
+        "capability.install.agent=approximated",
+        "capability.install.command=approximated",
+        "capability.install.skill=approximated"
       ],
       "results": [
         {
@@ -109,11 +325,43 @@
           "status": "pass"
         },
         {
-          "check": "context-fidelity",
+          "check": "context-after-tool",
           "status": "pass"
         },
         {
-          "check": "deny-fidelity",
+          "check": "context-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "context-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "context-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "context-stop",
+          "status": "pass"
+        },
+        {
+          "check": "decision-after-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-before-model",
+          "status": "pass"
+        },
+        {
+          "check": "decision-before-tool",
+          "status": "pass"
+        },
+        {
+          "check": "decision-session-start",
+          "status": "pass"
+        },
+        {
+          "check": "decision-stop",
           "status": "pass"
         },
         {

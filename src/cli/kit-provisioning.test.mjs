@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { validateKitRepository } from "../../build/src/flow-kit/validate.js";
 import { provisionKit, ProvisionConflictError } from "../../build/src/flow-kit/provision.js";
@@ -23,6 +24,9 @@ function fixture(provisions) {
   fs.writeFileSync(path.join(dir, "flows", "review.flow.json"), JSON.stringify(FLOW));
   fs.writeFileSync(path.join(dir, "payload", "one.txt"), "one-new\n");
   fs.writeFileSync(path.join(dir, "payload", "two.txt"), "two-new\n");
+  fs.writeFileSync(path.join(dir, "payload", "hook.json"), JSON.stringify({ hooks: {
+    PreToolUse: [{ matcher: "apply_patch", hooks: [{ type: "command", command: "npm exec -- veritas hooks codex pre-tool-use", timeout: 30 }] }],
+  } }, null, 2));
   fs.writeFileSync(path.join(dir, "kit.json"), JSON.stringify({
     schema_version: "1.0",
     id: "fixture",
@@ -34,6 +38,96 @@ function fixture(provisions) {
 }
 
 const entry = (id, source, target) => ({ id: `fixture.${id}`, path: `payload/${source}`, target });
+
+test("host-bound provisions install through Conduit with content-safe receipts", async () => {
+  const kit = fixture([
+    { ...entry("codex", "one.txt", ".codex/hooks.json"), host: "codex", kind: "hook" },
+    { ...entry("claude", "two.txt", ".claude/settings.json"), host: "claude-code", kind: "hook" },
+  ]);
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-conduit-"));
+  const result = await provisionKit(kit, target);
+  assert.equal(fs.readFileSync(path.join(target, ".codex/hooks.json"), "utf8"), "one-new\n");
+  assert.equal(fs.readFileSync(path.join(target, ".claude/settings.json"), "utf8"), "two-new\n");
+  assert.deepEqual(result.conduit_receipts?.map((receipt) => receipt.hostId), ["codex", "claude-code"]);
+  for (const receipt of result.conduit_receipts ?? []) {
+    assert.equal(receipt.installed[0]?.kind, "hook");
+    assert.match(receipt.installed[0]?.digest ?? "", /^sha256:[a-f0-9]{64}$/);
+    assert.doesNotMatch(JSON.stringify(receipt), /one-new|two-new|\.codex\/hooks|\.claude\/settings/);
+  }
+  const manifest = JSON.parse(fs.readFileSync(result.manifest_path, "utf8"));
+  assert.deepEqual(manifest.conduit_receipts, result.conduit_receipts);
+});
+
+test("host-bound provisions refuse unsupported asset kinds before any write", async () => {
+  const kit = fixture([
+    { ...entry("unsupported", "one.txt", ".codex/agent.json"), host: "codex", kind: "agent" },
+    entry("ordinary", "two.txt", "docs/two.txt"),
+  ]);
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-unsupported-"));
+  await assert.rejects(() => provisionKit(kit, target), /Conduit host codex cannot install agent/);
+  assert.equal(fs.existsSync(path.join(target, ".codex/agent.json")), false);
+  assert.equal(fs.existsSync(path.join(target, "docs/two.txt")), false);
+});
+
+test("host-bound provisions reject oversized content before writing", async () => {
+  const kit = fixture([{ ...entry("oversized", "one.txt", ".codex/hooks.json"), host: "codex", kind: "hook" }]);
+  fs.writeFileSync(path.join(kit, "payload/one.txt"), "x".repeat(1_000_001));
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-provision-oversized-"));
+  await assert.rejects(() => provisionKit(kit, target), /Conduit host asset exceeds 1000000 bytes/);
+  assert.equal(fs.existsSync(path.join(target, ".codex/hooks.json")), false);
+});
+
+test("host and asset kind must be declared together", async () => {
+  const kit = fixture([{ ...entry("incomplete", "one.txt", ".codex/hooks.json"), host: "codex" }]);
+  const errors = await validateKitRepository(kit);
+  assert.ok(errors.some((error) => error.includes("host and kind must be declared together")));
+});
+
+test("hooks-json refuses conflicting commands before writing another provision", async () => {
+  const kit = fixture([
+    { ...entry("governance", "hook.json", ".codex/hooks.json"), host: "codex", kind: "hook", merge: "hooks-json" },
+    entry("ordinary", "two.txt", "docs/two.txt"),
+  ]);
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-hook-conflict-"));
+  fs.mkdirSync(path.join(target, ".codex"));
+  const previous = JSON.stringify({ hooks: {
+    PreToolUse: [{ matcher: "apply_patch", hooks: [{ type: "command", command: "npm exec -- veritas hooks codex pre-tool-use", timeout: 1 }] }],
+  } });
+  fs.writeFileSync(path.join(target, ".codex/hooks.json"), previous);
+  await assert.rejects(() => provisionKit(kit, target), /hooks-json merge conflicts with an existing command/);
+  assert.equal(fs.readFileSync(path.join(target, ".codex/hooks.json"), "utf8"), previous);
+  assert.equal(fs.existsSync(path.join(target, "docs/two.txt")), false);
+});
+
+test("hooks-json refuses malformed existing host configuration before any write", async () => {
+  const kit = fixture([
+    { ...entry("governance", "hook.json", ".codex/hooks.json"), host: "codex", kind: "hook", merge: "hooks-json" },
+    entry("ordinary", "two.txt", "docs/two.txt"),
+  ]);
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-hook-malformed-"));
+  fs.mkdirSync(path.join(target, ".codex"));
+  fs.writeFileSync(path.join(target, ".codex/hooks.json"), "{broken");
+  await assert.rejects(() => provisionKit(kit, target), /hooks-json merge requires valid JSON/);
+  assert.equal(fs.readFileSync(path.join(target, ".codex/hooks.json"), "utf8"), "{broken");
+  assert.equal(fs.existsSync(path.join(target, "docs/two.txt")), false);
+});
+
+test("hooks-json adds a host handler once while preserving existing handlers", async () => {
+  const kit = fixture([{ ...entry("governance", "hook.json", ".codex/hooks.json"), host: "codex", kind: "hook", merge: "hooks-json" }]);
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-hook-idempotent-"));
+  fs.mkdirSync(path.join(target, ".codex"));
+  fs.writeFileSync(path.join(target, ".codex/hooks.json"), JSON.stringify({ hooks: {
+    PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "existing-hook" }] }],
+  } }));
+  const first = await provisionKit(kit, target);
+  const firstBytes = fs.readFileSync(path.join(target, ".codex/hooks.json"));
+  const second = await provisionKit(kit, target);
+  const secondBytes = fs.readFileSync(path.join(target, ".codex/hooks.json"));
+  assert.deepEqual(secondBytes, firstBytes);
+  const commands = JSON.parse(secondBytes.toString("utf8")).hooks.PreToolUse.flatMap((group) => group.hooks.map((hook) => hook.command));
+  assert.deepEqual(commands, ["existing-hook", "npm exec -- veritas hooks codex pre-tool-use"]);
+  assert.equal(first.conduit_receipts[0].installed[0].digest, second.conduit_receipts[0].installed[0].digest);
+});
 
 test("provision validation rejects unsafe and duplicate normalized targets", async () => {
   const cases = [
@@ -120,4 +214,32 @@ test("init activation provisions create-only and reports rerun conflicts without
   assert.equal(second.status, 0, `${second.stdout}\n${second.stderr}`);
   assert.match(`${second.stdout}\n${second.stderr}`, /skipped existing provision 'docs\/one.txt'/);
   assert.equal(fs.readFileSync(path.join(target, "docs", "one.txt"), "utf8"), "consumer-owned\n");
+});
+
+test("Git-style kit install and Codex init publish a Conduit hook receipt", () => {
+  const kit = fixture([{ ...entry("governance", "hook.json", ".codex/hooks.json"), host: "codex", kind: "hook", merge: "hooks-json" }]);
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), "kit-conduit-init-"));
+  const install = spawnSync(process.execPath, ["build/src/cli.js", "kit", "install", kit, "--dest", target], { encoding: "utf8" });
+  assert.equal(install.status, 0, `${install.stdout}\n${install.stderr}`);
+  const activate = spawnSync(process.execPath, ["build/src/cli.js", "init", "--runtime", "codex", "--dest", target, "--telemetry-sink", "local-files", "--activate-kit", "fixture", "--yes"], { encoding: "utf8" });
+  assert.equal(activate.status, 0, `${activate.stdout}\n${activate.stderr}`);
+  const firstBytes = fs.readFileSync(path.join(target, ".codex/hooks.json"));
+  const firstConfig = JSON.parse(firstBytes.toString("utf8"));
+  const commands = Object.values(firstConfig.hooks).flatMap((groups) => groups.flatMap((group) => group.hooks.map((hook) => hook.command)));
+  assert.equal(commands.filter((command) => command === "npm exec -- veritas hooks codex pre-tool-use").length, 1);
+  assert.ok(commands.some((command) => command.includes("flow-agents")));
+  const manifest = JSON.parse(fs.readFileSync(path.join(target, ".kontourai/flow-agents/provisions/fixture.json"), "utf8"));
+  assert.equal(manifest.conduit_receipts[0].hostId, "codex");
+  assert.equal(manifest.conduit_receipts[0].installed[0].kind, "hook");
+  assert.equal(manifest.conduit_receipts[0].installed[0].digest, `sha256:${createHash("sha256").update(firstBytes).digest("hex")}`);
+  assert.doesNotMatch(JSON.stringify(manifest.conduit_receipts), /veritas hooks|\.codex\/hooks/);
+  const rerun = spawnSync(process.execPath, ["build/src/cli.js", "init", "--runtime", "codex", "--dest", target, "--telemetry-sink", "local-files", "--activate-kit", "fixture", "--yes"], { encoding: "utf8" });
+  assert.equal(rerun.status, 0, `${rerun.stdout}\n${rerun.stderr}`);
+  const afterBytes = fs.readFileSync(path.join(target, ".codex/hooks.json"));
+  const afterConfig = JSON.parse(afterBytes.toString("utf8"));
+  const afterCommands = Object.values(afterConfig.hooks).flatMap((groups) => groups.flatMap((group) => group.hooks.map((hook) => hook.command)));
+  assert.deepEqual([...afterCommands].sort(), [...commands].sort());
+  assert.equal(afterCommands.filter((command) => command === "npm exec -- veritas hooks codex pre-tool-use").length, 1);
+  const afterManifest = JSON.parse(fs.readFileSync(path.join(target, ".kontourai/flow-agents/provisions/fixture.json"), "utf8"));
+  assert.equal(afterManifest.conduit_receipts[0].installed[0].digest, `sha256:${createHash("sha256").update(afterBytes).digest("hex")}`);
 });

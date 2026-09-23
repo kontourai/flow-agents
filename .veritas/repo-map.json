@@ -139,9 +139,9 @@
     "evidenceChecks": [
       {
         "id": "required-evidence-check",
-        "command": "npm run validate:source && npm run test:unit && npm run eval:static",
+        "command": "npm run eval:static",
         "method": "validation",
-        "summary": "Default repository evidenceCheck."
+        "summary": "Default repository evidenceCheck. The static eval includes source validation and the full node:test corpus; running both again before it exceeds Veritas's per-check timeout without adding coverage."
       }
     ],
     "requiredEvidenceCheckIds": [

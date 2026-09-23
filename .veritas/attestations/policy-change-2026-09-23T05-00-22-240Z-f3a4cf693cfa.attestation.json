@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "id": "policy-change-2026-09-23T05-00-22-240Z-f3a4cf693cfa",
+  "kind": "policy-change",
+  "actor": {
+    "id": "briananderson1222",
+    "displayName": "Brian Anderson",
+    "identityEvidence": {
+      "gitEmail": "brian.anderson@kontourai.io",
+      "signingKeyFingerprint": null
+    }
+  },
+  "attestedAt": "2026-09-23T05:00:22.240Z",
+  "repoStandardsHash": "sha256:f817da36459341be0352b8f7f87a2ffa1996c8d9339b7e77fe22f66c0d15d552",
+  "repoMapHash": "sha256:ce165843168c7bfa60fdbd34b2a655873ed82b986708c6d0cd88971e8fa5536a",
+  "authoritySettingsHash": "sha256:429472c4c5c6802d85c72eb161f403eef06c73849475ee533fead481db9d39f2",
+  "priorAttestationId": "policy-change-2026-07-20T15-16-09-332Z-427746bd5735",
+  "validUntilDays": 90,
+  "notes": "Owner requested the complete cross-harness Veritas governance chain; route the required check through eval:static, which already runs source validation and the full unit corpus, without duplicate execution that exceeds the per-check timeout.",
+  "metadata": {
+    "protectedStandardsPaths": {
+      "repoStandardsPath": ".veritas/repo-standards/default.repo-standards.json",
+      "repoMapPath": ".veritas/repo-map.json",
+      "authoritySettingsPath": ".veritas/authority/default.authority-settings.json"
+    },
+    "supersedes": "policy-change-2026-07-20T15-16-09-332Z-427746bd5735",
+    "approvalRef": "user-conversation-2026-09-22-cross-harness-governance",
+    "approvalRefPolicy": {
+      "mode": "reference-only",
+      "matchedPrefix": null,
+      "requiresResolution": false
+    },
+    "approvalResolution": null
+  },
+  "surface": {
+    "claim": {
+      "id": "veritas.attestation.policy-change-2026-09-23T05-00-22-240Z-f3a4cf693cfa",
+      "subjectType": "veritas-protected-standards",
+      "subjectId": "protected-standards",
+      "facet": "veritas.attestations",
+      "claimType": "veritas-human-attestation",
+      "fieldOrBehavior": "policy-change",
+      "value": {
+        "contentHash": "ed75fc48ba3a19a4702fd065b6befcbff94cc9134382b6b9821226d55bde6ecd",
+        "validUntil": "2026-12-22T05:00:22.240Z"
+      },
+      "createdAt": "2026-09-23T05:00:22.240Z",
+      "updatedAt": "2026-09-23T05:00:22.240Z",
+      "status": "verified",
+      "impactLevel": "high",
+      "confidenceBasis": {
+        "sourceQuality": "strong",
+        "reviewerAuthority": "human",
+        "evidenceStrength": "strong",
+        "impactLevel": "high"
+      }
+    },
+    "evidence": {
+      "id": "evidence.attestation.veritas.attestation.policy-change-2026-09-23T05-00-22-240Z-f3a4cf693cfa",
+      "claimId": "veritas.attestation.policy-change-2026-09-23T05-00-22-240Z-f3a4cf693cfa",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "veritas:protected-standards",
+      "excerptOrSummary": "Owner requested the complete cross-harness Veritas governance chain; route the required check through eval:static, which already runs source validation and the full unit corpus, without duplicate execution that exceeds the per-check timeout.",
+      "observedAt": "2026-09-23T05:00:22.240Z",
+      "collectedBy": "briananderson1222",
+      "integrityRef": "ed75fc48ba3a19a4702fd065b6befcbff94cc9134382b6b9821226d55bde6ecd",
+      "metadata": {
+        "actor": {
+          "id": "briananderson1222",
+          "displayName": "Brian Anderson"
+        },
+        "attestedAt": "2026-09-23T05:00:22.240Z",
+        "validUntil": "2026-12-22T05:00:22.240Z",
+        "contentHash": "ed75fc48ba3a19a4702fd065b6befcbff94cc9134382b6b9821226d55bde6ecd"
+      },
+      "sourceLocator": ".veritas/attestations"
+    },
+    "event": {
+      "id": "veritas.attestation.policy-change-2026-09-23T05-00-22-240Z-f3a4cf693cfa.verified",
+      "claimId": "veritas.attestation.policy-change-2026-09-23T05-00-22-240Z-f3a4cf693cfa",
+      "status": "verified",
+      "actor": "briananderson1222",
+      "method": "human attestation",
+      "evidenceIds": [
+        "evidence.attestation.veritas.attestation.policy-change-2026-09-23T05-00-22-240Z-f3a4cf693cfa"
+      ],
+      "createdAt": "2026-09-23T05:00:22.240Z",
+      "verifiedAt": "2026-09-23T05:00:22.240Z"
+    }
+  }
+}
