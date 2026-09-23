@@ -5,7 +5,8 @@ import * as path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createCodexAdapter, type InstallationReceipt } from "@kontourai/conduit";
 
-const STATUS = "Flow Agents: Veritas guidance for this repository";
+const LEGACY_STATUS = "Flow Agents: Veritas guidance for this repository";
+const STATUS_PREFIX = "Flow Agents: Veritas guidance for";
 const MATCHER = "apply_patch|Edit|Write";
 
 function quoteShell(value: string): string {
@@ -16,7 +17,7 @@ function gitValue(repo: string, ...args: string[]): string {
   return execFileSync("git", ["-C", repo, "rev-parse", ...args], { encoding: "utf8" }).trim();
 }
 
-export function codexGovernanceCommand(repository: string): string {
+function codexGovernanceScript(repository: string): string {
   const root = fs.realpathSync(gitValue(repository, "--show-toplevel"));
   const common = gitValue(root, "--git-common-dir");
   const commonDir = fs.realpathSync(path.resolve(root, common));
@@ -48,18 +49,52 @@ try {
   if (JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).name !== expectedPackage) process.exit(0);
   if (!fs.statSync(path.join(root, ".veritas", "repo-map.json")).isFile()) process.exit(0);
 } catch { process.exit(0); }
-const result = cp.spawnSync("npm", ["exec", "--", "veritas", "hooks", "codex", "pre-tool-use"], { cwd: root, input, maxBuffer: 4 * 1024 * 1024 });
+let veritasBin;
+try {
+  const packageRoot = fs.realpathSync(path.join(root, "node_modules", "@kontourai", "veritas"));
+  const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"));
+  if (manifest.name !== "@kontourai/veritas" || typeof manifest.bin?.veritas !== "string") throw new Error("missing Veritas CLI");
+  veritasBin = fs.realpathSync(path.resolve(packageRoot, manifest.bin.veritas));
+  if (!veritasBin.startsWith(packageRoot + path.sep)) throw new Error("Veritas CLI escapes its package");
+} catch {
+  process.stdout.write(JSON.stringify({ systemMessage: "Veritas is not installed in this worktree; install its pinned dependencies before editing." }));
+  process.exit(0);
+}
+const result = cp.spawnSync(process.execPath, [veritasBin, "hooks", "codex", "pre-tool-use"], { cwd: root, input, maxBuffer: 4 * 1024 * 1024 });
 if (result.stdout) process.stdout.write(result.stdout);
 if (result.stderr) process.stderr.write(result.stderr);
 if (result.error) { process.stderr.write(String(result.error)); process.exit(1); }
 process.exit(result.status ?? 1);
 `;
-  return `node -e ${quoteShell(code)}`;
+  return code;
+}
+
+export function codexGovernanceCommand(repository: string): string {
+  return `node -e ${quoteShell(codexGovernanceScript(repository))}`;
+}
+
+function codexGovernanceWindowsCommand(repository: string): string {
+  const encoded = Buffer.from(codexGovernanceScript(repository), "utf8").toString("base64");
+  return `node -e "eval(Buffer.from('${encoded}','base64').toString('utf8'))"`;
+}
+
+function localVeritasEntrypoint(root: string): string {
+  const packageRoot = fs.realpathSync(path.join(root, "node_modules", "@kontourai", "veritas"));
+  const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8")) as { name?: string; bin?: { veritas?: string } };
+  if (manifest.name !== "@kontourai/veritas" || typeof manifest.bin?.veritas !== "string") {
+    throw new Error("the repository's pinned Veritas package has no declared CLI entry");
+  }
+  const entrypoint = fs.realpathSync(path.resolve(packageRoot, manifest.bin.veritas));
+  if (!entrypoint.startsWith(`${packageRoot}${path.sep}`)) throw new Error("the repository's Veritas CLI escapes its package");
+  return entrypoint;
 }
 
 function verifyVeritasCodexProtocol(repository: string): void {
   const root = gitValue(repository, "--show-toplevel");
-  const probe = spawnSync("npm", ["exec", "--", "veritas", "hooks", "codex", "pre-tool-use"], {
+  let entrypoint: string;
+  try { entrypoint = localVeritasEntrypoint(root); }
+  catch { throw new Error("the repository's pinned Veritas package is not installed or has no usable CLI"); }
+  const probe = spawnSync(process.execPath, [entrypoint, "hooks", "codex", "pre-tool-use"], {
     cwd: root,
     encoding: "utf8",
     timeout: 30_000,
@@ -89,6 +124,10 @@ export async function installCodexGovernanceHook(repository: string, codexHome: 
   const home = path.resolve(codexHome);
   const target = path.join(home, "hooks.json");
   const command = codexGovernanceCommand(repository);
+  const commandWindows = codexGovernanceWindowsCommand(repository);
+  const root = gitValue(repository, "--show-toplevel");
+  const commonDir = fs.realpathSync(path.resolve(root, gitValue(root, "--git-common-dir")));
+  const status = `${STATUS_PREFIX} ${crypto.createHash("sha256").update(commonDir).digest("hex").slice(0, 12)}`;
   verifyVeritasCodexProtocol(repository);
   let existing: Record<string, unknown> = {};
   if (fs.existsSync(target)) {
@@ -100,16 +139,17 @@ export async function installCodexGovernanceHook(repository: string, codexHome: 
   const groups = (hooks as Record<string, unknown>).PreToolUse ?? [];
   if (!Array.isArray(groups)) throw new Error("Codex PreToolUse groups must be an array");
   const retained = groups.flatMap((group) => {
-    const record = group as { hooks?: { statusMessage?: string }[] };
+    const record = group as { hooks?: { command?: string; statusMessage?: string }[] };
     if (!Array.isArray(record.hooks)) throw new Error("Codex PreToolUse group has no handler array");
-    const remaining = record.hooks.filter((handler) => handler.statusMessage !== STATUS);
+    const remaining = record.hooks.filter((handler) => handler.statusMessage !== status
+      && !(handler.statusMessage === LEGACY_STATUS && handler.command?.includes(JSON.stringify(commonDir))));
     return remaining.length > 0 ? [{ ...record, hooks: remaining }] : [];
   });
   const updated = {
     ...existing,
     hooks: {
       ...hooks,
-      PreToolUse: [...retained, { matcher: MATCHER, hooks: [{ type: "command", command, statusMessage: STATUS, timeout: 30 }] }],
+      PreToolUse: [...retained, { matcher: MATCHER, hooks: [{ type: "command", command, commandWindows, statusMessage: status, timeout: 30 }] }],
     },
   };
   const content = `${JSON.stringify(updated, null, 2)}\n`;

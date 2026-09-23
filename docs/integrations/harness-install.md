@@ -97,6 +97,12 @@ For a repository with a Veritas Repo Map, install one user-level Codex
 flow-agents codex-governance-hook install /path/to/governed/repository
 ```
 
+Install the repository's pinned Veritas dependency first. The installer checks
+its Codex output protocol and the runtime hook warns if a worktree lacks that
+dependency; it invokes the package's declared CLI with Node and never asks npm
+to fetch a missing package during an edit. The installed handler includes a
+Windows command override; review both command forms in `/hooks` on their hosts.
+
 Flow Agents resolves the repository's shared Git directory and package name,
 merges one handler into `$CODEX_HOME/hooks.json` (or `~/.codex/hooks.json`), and
 uses Conduit to install it with a digest receipt. The handler exits quietly in
@@ -104,7 +110,8 @@ other repositories. In matching worktrees it forwards `apply_patch` input to
 the worktree's installed Veritas CLI. Reinstalling preserves unrelated handlers
 and leaves the same bytes when the definition is unchanged. Installation first
 probes the worktree's Veritas hook output and refuses versions that emit fields
-current Codex rejects.
+current Codex rejects. Each repository gets a distinct ownership marker, so
+installing another governed repository does not replace the first one's hook.
 
 Enable `features.hooks` in the user Codex config, then review and trust the
 handler's exact command through `/hooks`. The install receipt reports
