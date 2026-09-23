@@ -208,7 +208,7 @@
     "@kontourai/flow": "5.0.0",
     "@kontourai/relay": "0.6.0",
     "@kontourai/surface": "2.17.0",
-    "@kontourai/survey": "2.0.0",
+    "@kontourai/survey": "3.0.0",
     "esbuild": "0.28.1"
   },
   "optionalDependencies": {
