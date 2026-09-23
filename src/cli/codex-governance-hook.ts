@@ -139,10 +139,17 @@ export async function installCodexGovernanceHook(repository: string, codexHome: 
   const groups = (hooks as Record<string, unknown>).PreToolUse ?? [];
   if (!Array.isArray(groups)) throw new Error("Codex PreToolUse groups must be an array");
   const retained = groups.flatMap((group) => {
-    const record = group as { hooks?: { command?: string; statusMessage?: string }[] };
+    const record = group as { hooks?: { type?: string; command?: string; statusMessage?: string }[] };
     if (!Array.isArray(record.hooks)) throw new Error("Codex PreToolUse group has no handler array");
-    const remaining = record.hooks.filter((handler) => handler.statusMessage !== status
-      && !(handler.statusMessage === LEGACY_STATUS && handler.command?.includes(JSON.stringify(commonDir))));
+    const identity = `const expectedCommon = ${JSON.stringify(commonDir)};`;
+    const remaining = record.hooks.filter((handler) => {
+      const owned = handler.type === "command"
+        && (handler.statusMessage === status || handler.statusMessage === LEGACY_STATUS)
+        && typeof handler.command === "string"
+        && handler.command.includes(identity)
+        && handler.command.includes("pre-tool-use");
+      return !owned;
+    });
     return remaining.length > 0 ? [{ ...record, hooks: remaining }] : [];
   });
   const updated = {

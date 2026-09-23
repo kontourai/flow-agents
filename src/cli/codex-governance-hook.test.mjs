@@ -128,3 +128,21 @@ test("installer refuses a Veritas hook whose allow response current Codex reject
   await assert.rejects(() => installCodexGovernanceHook(root, home), /fields current Codex rejects/);
   assert.equal(fs.existsSync(path.join(home, "hooks.json")), false);
 });
+
+test("same status label does not authorize removal of an unrelated user handler", async (t) => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "flow-codex-marker-collision-"));
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  const root = repository(parent, "station");
+  const home = path.join(parent, "codex-home");
+  await installCodexGovernanceHook(root, home);
+  const target = path.join(home, "hooks.json");
+  const config = JSON.parse(fs.readFileSync(target, "utf8"));
+  const managed = config.hooks.PreToolUse[0].hooks[0];
+  config.hooks.PreToolUse[0].hooks.unshift({ type: "command", command: "echo user-owned", statusMessage: managed.statusMessage });
+  fs.writeFileSync(target, JSON.stringify(config));
+
+  await installCodexGovernanceHook(root, home);
+  const after = JSON.parse(fs.readFileSync(target, "utf8"));
+  const commands = after.hooks.PreToolUse.flatMap((group) => group.hooks.map((handler) => handler.command));
+  assert.deepEqual(commands, ["echo user-owned", managed.command]);
+});
