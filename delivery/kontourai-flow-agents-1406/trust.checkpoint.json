@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-1406",
+  "work_item": null,
+  "status": "provisional",
+  "phase": "ci-readiness",
+  "sealed_at": "2026-09-23T12:47:57.711Z",
+  "commit_sha": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+  "checkpoint": {
+    "asOf": "2026-09-23T12:47:57.713Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-1406-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1406-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec-gate-visit-2026-09-23t06-48-02z": "verified",
+      "kontourai-flow-agents-1406-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-confirms-provider-ownership-exact-source-anchor-scope-risks-and-planning-readiness-gate-visit-2026-09-23t06-49-07-314z": "verified",
+      "kontourai-flow-agents-1406-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decision-and-prior-source-provenance-gap-are-recorded-without-a-retrospective-implementation-claim-gate-visit-2026-09-23t06-49-07-887z": "verified",
+      "kontourai-flow-agents-1406-gate-claim-implementation-plan.flow-agents-workflow.corrected-plan-separates-ac1-ac3-pre-delivery-verification-from-d1-d2-terminal-delivery-checks-after-a-recorded-plan-gap-route-back-gate-visit-2026-09-23t07-05-55-191z": "verified",
+      "kontourai-flow-agents-1406-gate-claim-implementation-scope.flow-agents-workflow.follow-up-implementation-now-includes-standalone-flow-validation-bundling-and-tap-countable-installed-integration-evidence-both-changes-were-made-after-run-start-and-are-scoped-gate-visit-2026-09-23t07-32-53-405z": "verified",
+      "kontourai-flow-agents-1406-gate-claim-tests-evidence.flow-agents-workflow.ac1-ac3-pass-at-source-head-6f0ad4e3-distinct-clean-critique-and-hosted-source-static-integration-runtime-kit-windows-and-workflow-checks-green-in-run-35833348206-the-tap-countable-installed-bundle-integration-is-re-observed-by-this-writer-trust-reconcile-and-merge-remain-d1-d2-gate-visit-2026-09-23t08-05-24-641z": "verified",
+      "kontourai-flow-agents-1406-gate-claim-merge-readiness.flow-agents-workflow.source-evidence-and-clean-distinct-critique-support-merge-review-at-head-6f0ad4e3-required-trust-reconcile-and-merge-are-explicit-d1-d2-future-gates-gate-visit-2026-09-23t08-07-38-854z": "verified",
+      "kontourai-flow-agents-1406-ac1.flow-agents-workflow.independent-exact-source-review-finds-no-blocking-defect-verified-2026-09-23t08-05-24-641z": "verified",
+      "kontourai-flow-agents-1406-ac2.flow-agents-workflow.source-integration-windows-and-runtime-kit-checks-pass-at-the-delivered-revision-verified-2026-09-23t08-05-24-641z": "verified",
+      "kontourai-flow-agents-1406-ac3.flow-agents-workflow.conduit-kit-provision-preserves-user-hooks-and-content-safe-receipts-verified-2026-09-23t08-05-24-641z": "verified",
+      "kontourai-flow-agents-1406-review.flow-agents-workflow.independent-exact-head-source-security-dependency-packaging-and-policy-review-found-no-blocking-source-defect-hosted-verification-remains-separate-reviewed-2026-09-23t07-06-46-831z": "proposed",
+      "kontourai-flow-agents-1406-review.flow-agents-workflow.fresh-review-of-6f0ad4e3-tap-case-output-closes-the-exact-builder-evidence-count-defect-no-blocking-source-finding-remains-reviewed-2026-09-23t07-39-02-887z": "verified"
+    },
+    "throughEventCreatedAt": "2026-09-23T08:07:38.854Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-1406-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1406-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec-gate-visit-2026-09-23t06-48-02z": "2026-09-23T08:07:38.854Z",
+      "kontourai-flow-agents-1406-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-confirms-provider-ownership-exact-source-anchor-scope-risks-and-planning-readiness-gate-visit-2026-09-23t06-49-07-314z": "2026-09-23T08:07:38.854Z",
+      "kontourai-flow-agents-1406-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decision-and-prior-source-provenance-gap-are-recorded-without-a-retrospective-implementation-claim-gate-visit-2026-09-23t06-49-07-887z": "2026-09-23T08:07:38.854Z",
+      "kontourai-flow-agents-1406-gate-claim-implementation-plan.flow-agents-workflow.corrected-plan-separates-ac1-ac3-pre-delivery-verification-from-d1-d2-terminal-delivery-checks-after-a-recorded-plan-gap-route-back-gate-visit-2026-09-23t07-05-55-191z": "2026-09-23T08:07:38.854Z",
+      "kontourai-flow-agents-1406-gate-claim-implementation-scope.flow-agents-workflow.follow-up-implementation-now-includes-standalone-flow-validation-bundling-and-tap-countable-installed-integration-evidence-both-changes-were-made-after-run-start-and-are-scoped-gate-visit-2026-09-23t07-32-53-405z": "2026-09-23T08:07:38.854Z",
+      "kontourai-flow-agents-1406-gate-claim-tests-evidence.flow-agents-workflow.ac1-ac3-pass-at-source-head-6f0ad4e3-distinct-clean-critique-and-hosted-source-static-integration-runtime-kit-windows-and-workflow-checks-green-in-run-35833348206-the-tap-countable-installed-bundle-integration-is-re-observed-by-this-writer-trust-reconcile-and-merge-remain-d1-d2-gate-visit-2026-09-23t08-05-24-641z": "2026-09-23T08:07:38.854Z",
+      "kontourai-flow-agents-1406-gate-claim-merge-readiness.flow-agents-workflow.source-evidence-and-clean-distinct-critique-support-merge-review-at-head-6f0ad4e3-required-trust-reconcile-and-merge-are-explicit-d1-d2-future-gates-gate-visit-2026-09-23t08-07-38-854z": "2026-09-23T08:07:38.854Z",
+      "kontourai-flow-agents-1406-ac1.flow-agents-workflow.independent-exact-source-review-finds-no-blocking-defect-verified-2026-09-23t08-05-24-641z": "2026-09-23T08:05:24.641Z",
+      "kontourai-flow-agents-1406-ac2.flow-agents-workflow.source-integration-windows-and-runtime-kit-checks-pass-at-the-delivered-revision-verified-2026-09-23t08-05-24-641z": "2026-09-23T08:05:24.641Z",
+      "kontourai-flow-agents-1406-ac3.flow-agents-workflow.conduit-kit-provision-preserves-user-hooks-and-content-safe-receipts-verified-2026-09-23t08-05-24-641z": "2026-09-23T08:05:24.641Z",
+      "kontourai-flow-agents-1406-review.flow-agents-workflow.independent-exact-head-source-security-dependency-packaging-and-policy-review-found-no-blocking-source-defect-hosted-verification-remains-separate-reviewed-2026-09-23t07-06-46-831z": null,
+      "kontourai-flow-agents-1406-review.flow-agents-workflow.fresh-review-of-6f0ad4e3-tap-case-output-closes-the-exact-builder-evidence-count-defect-no-blocking-source-finding-remains-reviewed-2026-09-23t07-39-02-887z": "2026-09-23T08:07:38.854Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}

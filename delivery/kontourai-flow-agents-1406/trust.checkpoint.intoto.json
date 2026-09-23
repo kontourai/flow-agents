@@ -1,0 +1,1371 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "34d9e96846bf913e3a346139c358b30a363372a4ca552a8edd87e2a47da53a56"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-1406-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1406-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec-gate-visit-2026-09-23t06-48-02z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-1406/gate-claim-selected-work",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Work Item kontourai/flow-agents#1406 is durably assigned to the active workflow actor (assignment sha256:17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec).",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "updatedAt": "2026-09-23T08:07:38.854Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1406",
+          "expected_producer": "builder.pull-work",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "selected-work"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/assignment/kontourai-flow-agents-1406.json",
+              "summary": "Durable local assignment record for the selected Work Item and active actor; sha256:17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/assignment-provider-state.json",
+              "summary": "Provider assignment state confirming ownership before the local runtime lease was mirrored; sha256:08b0b8b0beedca6ded300a2841df397cb57e8762b199024df16b4be272db0862."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--pull-work.md",
+              "summary": "Concrete pull-work selection report for kontourai/flow-agents#1406."
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "7f1e52dae42d356b86e5a30b9db0015e0b3be6f349d67ec2abb1e42544a8883e",
+            "head_sha": "83824e5f08a821f60ecc1bf8e79c028b26f15995",
+            "worktree_clean": true
+          },
+          "gate_claim": {
+            "expectation_id": "selected-work",
+            "claim_type": "builder.pull-work.selected",
+            "subject_type": "work-item",
+            "step_id": "pull-work",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T06:48:02Z",
+            "flow_run_head": "f13a7d0eec8e719d84ebd24603f4cc3c75738ae5333682576a445936fe7e8d80",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-confirms-provider-ownership-exact-source-anchor-scope-risks-and-planning-readiness-gate-visit-2026-09-23t06-49-07-314z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-1406/gate-claim-pickup-probe-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "fieldOrBehavior": "Pickup probe confirms provider ownership, exact source anchor, scope, risks, and planning readiness.",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "updatedAt": "2026-09-23T08:07:38.854Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1406",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--pull-work.md",
+              "summary": "Provider-grounded pickup readiness and provenance gap disclosure."
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "7f1e52dae42d356b86e5a30b9db0015e0b3be6f349d67ec2abb1e42544a8883e",
+            "head_sha": "83824e5f08a821f60ecc1bf8e79c028b26f15995",
+            "worktree_clean": true
+          },
+          "gate_claim": {
+            "expectation_id": "pickup-probe-readiness",
+            "claim_type": "builder.design-probe.pickup-readiness",
+            "subject_type": "work-item",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T06:49:07.314Z",
+            "flow_run_head": "42720c2d5aa851ef2ad398e72931a32329a4d7dab2eaaa432e3e83cee9fa3f78",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decision-and-prior-source-provenance-gap-are-recorded-without-a-retrospective-implementation-claim-gate-visit-2026-09-23t06-49-07-887z",
+        "subjectType": "decision",
+        "subjectId": "kontourai-flow-agents-1406/gate-claim-probe-decisions-or-accepted-gaps",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.decisions",
+        "fieldOrBehavior": "Probe decision and prior-source provenance gap are recorded without a retrospective implementation claim.",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "updatedAt": "2026-09-23T08:07:38.854Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1406",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--pull-work.md",
+              "summary": "Decisions, accepted gap, current revision, and route-back risks."
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "7f1e52dae42d356b86e5a30b9db0015e0b3be6f349d67ec2abb1e42544a8883e",
+            "head_sha": "83824e5f08a821f60ecc1bf8e79c028b26f15995",
+            "worktree_clean": true
+          },
+          "gate_claim": {
+            "expectation_id": "probe-decisions-or-accepted-gaps",
+            "claim_type": "builder.design-probe.decisions",
+            "subject_type": "decision",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T06:49:07.887Z",
+            "flow_run_head": "42720c2d5aa851ef2ad398e72931a32329a4d7dab2eaaa432e3e83cee9fa3f78",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-gate-claim-implementation-plan.flow-agents-workflow.corrected-plan-separates-ac1-ac3-pre-delivery-verification-from-d1-d2-terminal-delivery-checks-after-a-recorded-plan-gap-route-back-gate-visit-2026-09-23t07-05-55-191z",
+        "subjectType": "artifact",
+        "subjectId": "kontourai-flow-agents-1406/gate-claim-implementation-plan",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.plan.implementation",
+        "fieldOrBehavior": "Corrected plan separates AC1-AC3 pre-delivery verification from D1/D2 terminal delivery checks after a recorded plan-gap route-back.",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "updatedAt": "2026-09-23T08:07:38.854Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.plan.implementation:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1406",
+          "expected_producer": "builder.plan-work",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "implementation-plan"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--plan-work.md",
+              "summary": "Revised plan with noncircular acceptance and terminal delivery checks."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/acceptance.json",
+              "summary": "AC1-AC3 verify criteria and D1-D2 terminal exit checks."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/handoff.json",
+              "summary": "Provider-bound handoff and next actions."
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "21f3f8ee74f31411834633599eef31772e82175be834644fe9343648c98ddf7d",
+            "head_sha": "ffc66872fa474344a0c92a183ad095e135d3d476",
+            "worktree_clean": true
+          },
+          "acceptance_contract": {
+            "version": 1,
+            "algorithm": "sha256",
+            "digest": "9b40ead77b207663c2be5e43e63559fbe39be4596bec511e0555b7f9d3b0fc59",
+            "criteria": [
+              {
+                "id": "AC1",
+                "description": "Independent exact-source review finds no blocking defect"
+              },
+              {
+                "id": "AC2",
+                "description": "Source, integration, Windows, and Runtime/Kit checks pass at the delivered revision"
+              },
+              {
+                "id": "AC3",
+                "description": "Conduit Kit provision preserves user hooks and content-safe receipts"
+              }
+            ]
+          },
+          "acceptance_contract_history": [
+            {
+              "predecessor": {
+                "version": 1,
+                "algorithm": "sha256",
+                "digest": "71babe2f2eea3d94d1c9c74f95a385e64303fa06400b96e904d3e5575abd750d",
+                "criteria": [
+                  {
+                    "id": "AC1",
+                    "description": "Independent exact-source review finds no blocking defect"
+                  },
+                  {
+                    "id": "AC2",
+                    "description": "Source, integration, Windows, and Runtime/Kit checks pass at the delivered revision"
+                  },
+                  {
+                    "id": "AC3",
+                    "description": "Conduit Kit provision preserves user hooks and content-safe receipts"
+                  },
+                  {
+                    "id": "AC4",
+                    "description": "Required Trust Reconcile accepts a genuine Builder delivery bundle"
+                  },
+                  {
+                    "id": "AC5",
+                    "description": "The PR lands under protected branch policy"
+                  }
+                ]
+              },
+              "superseded_at": "2026-09-23T07:05:55.191Z",
+              "superseded_by_actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+              "reason": "Corrected plan separates AC1-AC3 pre-delivery verification from D1/D2 terminal delivery checks after a recorded plan-gap route-back."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "implementation-plan",
+            "claim_type": "builder.plan.implementation",
+            "subject_type": "artifact",
+            "step_id": "plan",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T07:05:55.191Z",
+            "flow_run_head": "949e6dcdc01197349b0e71308b0f09f5b5d499a704af86f8b2a41ef71be23c0b",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-gate-claim-implementation-scope.flow-agents-workflow.follow-up-implementation-now-includes-standalone-flow-validation-bundling-and-tap-countable-installed-integration-evidence-both-changes-were-made-after-run-start-and-are-scoped-gate-visit-2026-09-23t07-32-53-405z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-1406/gate-claim-implementation-scope",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Follow-up implementation now includes standalone Flow validation bundling and TAP-countable installed integration evidence; both changes were made after run start and are scoped.",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "updatedAt": "2026-09-23T08:07:38.854Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1406",
+          "expected_producer": "builder.execute-plan",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "implementation-scope"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--deliver.md",
+              "summary": "Two post-start repairs, failed and restored test proof, and acceptance mapping."
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "e9ca94253b59e13073756dc609c13ed686afc6b60d61037f4e5393ef18eb199c",
+            "head_sha": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+            "worktree_clean": true
+          },
+          "gate_claim": {
+            "expectation_id": "implementation-scope",
+            "claim_type": "builder.execute.scope",
+            "subject_type": "change",
+            "step_id": "execute",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T07:32:53.405Z",
+            "flow_run_head": "bfb2aa3f6027baeb98773a70aaa32ca1ad0e08e530b850485b46b0d4e349d064",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-gate-claim-tests-evidence.flow-agents-workflow.ac1-ac3-pass-at-source-head-6f0ad4e3-distinct-clean-critique-and-hosted-source-static-integration-runtime-kit-windows-and-workflow-checks-green-in-run-35833348206-the-tap-countable-installed-bundle-integration-is-re-observed-by-this-writer-trust-reconcile-and-merge-remain-d1-d2-gate-visit-2026-09-23t08-05-24-641z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-1406/gate-claim-tests-evidence",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "AC1-AC3 pass at source HEAD 6f0ad4e3: distinct clean critique and hosted Source/Static, Integration, Runtime/Kit, Windows and Workflow checks green in run 35833348206; the TAP-countable installed-bundle integration is re-observed by this writer. Trust Reconcile and merge remain D1/D2.",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "updatedAt": "2026-09-23T08:07:38.854Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "command": "bash evals/integration/test_install_merge.sh",
+          "workflow_subject_ref": "kontourai/flow-agents#1406",
+          "expected_producer": "builder.verify-work",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "acceptance-criteria",
+            "tests-evidence",
+            "policy-compliance"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "command",
+              "excerpt": "bash evals/integration/test_install_merge.sh",
+              "summary": "Exact CI-manifest installed bundle integration, including Conduit Kit provision and rerun."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+              "summary": "Distinct reviewer critique of current source at 6f0ad4e3."
+            }
+          ],
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "98ebfc60f098cbf1e331fbf66cb89c084eead742be3b98f27d95cd324cb941bd"
+          },
+          "observed_commands": [
+            {
+              "command": "bash evals/integration/test_install_merge.sh",
+              "exit_code": 0,
+              "output_sha256": "98ebfc60f098cbf1e331fbf66cb89c084eead742be3b98f27d95cd324cb941bd",
+              "source": "canonical-writer-execution",
+              "observed_at_commit": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+              "worktree_clean": true,
+              "verification_workspace_snapshot": {
+                "version": 1,
+                "kind": "git-worktree",
+                "algorithm": "sha256",
+                "digest": "e9ca94253b59e13073756dc609c13ed686afc6b60d61037f4e5393ef18eb199c",
+                "head_sha": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+                "worktree_clean": true
+              },
+              "test_count": 4,
+              "execution_proof": {
+                "kind": "local-process-exit",
+                "runner": "bash",
+                "static_test_units": 4
+              }
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "e9ca94253b59e13073756dc609c13ed686afc6b60d61037f4e5393ef18eb199c",
+            "head_sha": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+            "worktree_clean": true
+          },
+          "gate_claim": {
+            "expectation_id": "tests-evidence",
+            "claim_type": "builder.verify.tests",
+            "subject_type": "flow-step",
+            "step_id": "verify",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T08:05:24.641Z",
+            "flow_run_head": "b558a137869e54bff8068bae0dacb4f11522becc507dfd2b9aa266186dbafdc2",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-gate-claim-merge-readiness.flow-agents-workflow.source-evidence-and-clean-distinct-critique-support-merge-review-at-head-6f0ad4e3-required-trust-reconcile-and-merge-are-explicit-d1-d2-future-gates-gate-visit-2026-09-23t08-07-38-854z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-1406/gate-claim-merge-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.merge-ready.readiness",
+        "fieldOrBehavior": "Source evidence and clean distinct critique support merge review at HEAD 6f0ad4e3; required Trust Reconcile and merge are explicit D1/D2 future gates.",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "updatedAt": "2026-09-23T08:07:38.854Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.merge-ready.readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#1406",
+          "expected_producer": "builder.evidence-gate",
+          "recorded_by": "codexthread-a42a995668b3e1d26e710de3Kontour",
+          "self_produced_trust_slices": [
+            "merge-readiness"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--evidence-gate.md",
+              "summary": "AC1-AC3 evidence confidence, exact scope, and pending provider delivery gates."
+            }
+          ],
+          "verification_workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "e9ca94253b59e13073756dc609c13ed686afc6b60d61037f4e5393ef18eb199c",
+            "head_sha": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+            "worktree_clean": true
+          },
+          "gate_claim": {
+            "expectation_id": "merge-readiness",
+            "claim_type": "builder.merge-ready.readiness",
+            "subject_type": "change",
+            "step_id": "merge-ready",
+            "identity_version": 2,
+            "recorded_at": "2026-09-23T08:07:38.854Z",
+            "flow_run_head": "894b93777a4d6fdb20a816aba7b9083cfcec644d96536f778fc0c28e74635f87",
+            "flow_id": "builder.build",
+            "definition_version": "1.4",
+            "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-ac1.flow-agents-workflow.independent-exact-source-review-finds-no-blocking-defect-verified-2026-09-23t08-05-24-641z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-1406/AC1",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "Independent exact-source review finds no blocking defect",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:05:24.641Z",
+        "updatedAt": "2026-09-23T08:05:24.641Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "AC1",
+            "description": "Independent exact-source review finds no blocking defect",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Installed source behavior passes the new negative/positive case."
+              },
+              {
+                "kind": "artifact",
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                "summary": "Independent review found no blocking source defect."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "98ebfc60f098cbf1e331fbf66cb89c084eead742be3b98f27d95cd324cb941bd",
+                "source": "canonical-writer-execution",
+                "observed_at_commit": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+                "worktree_clean": true,
+                "verification_workspace_snapshot": {
+                  "version": 1,
+                  "kind": "git-worktree",
+                  "algorithm": "sha256",
+                  "digest": "e9ca94253b59e13073756dc609c13ed686afc6b60d61037f4e5393ef18eb199c",
+                  "head_sha": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+                  "worktree_clean": true
+                },
+                "test_count": 4,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 4
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-09-23T08:05:24.641Z",
+            "verified_by": "codexthread-a42a995668b3e1d26e710de3Kontour"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#1406"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-ac2.flow-agents-workflow.source-integration-windows-and-runtime-kit-checks-pass-at-the-delivered-revision-verified-2026-09-23t08-05-24-641z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-1406/AC2",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "Source, integration, Windows, and Runtime/Kit checks pass at the delivered revision",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:05:24.641Z",
+        "updatedAt": "2026-09-23T08:05:24.641Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "AC2",
+            "description": "Source, integration, Windows, and Runtime/Kit checks pass at the delivered revision",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Exact local installed integration."
+              },
+              {
+                "kind": "external",
+                "url": "https://github.com/kontourai/flow-agents/actions/runs/35833348206",
+                "summary": "Hosted source and integration checks passed for source head 6f0ad4e3; Trust Reconcile remains separate."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "98ebfc60f098cbf1e331fbf66cb89c084eead742be3b98f27d95cd324cb941bd",
+                "source": "canonical-writer-execution",
+                "observed_at_commit": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+                "worktree_clean": true,
+                "verification_workspace_snapshot": {
+                  "version": 1,
+                  "kind": "git-worktree",
+                  "algorithm": "sha256",
+                  "digest": "e9ca94253b59e13073756dc609c13ed686afc6b60d61037f4e5393ef18eb199c",
+                  "head_sha": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+                  "worktree_clean": true
+                },
+                "test_count": 4,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 4
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-09-23T08:05:24.641Z",
+            "verified_by": "codexthread-a42a995668b3e1d26e710de3Kontour"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#1406"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-ac3.flow-agents-workflow.conduit-kit-provision-preserves-user-hooks-and-content-safe-receipts-verified-2026-09-23t08-05-24-641z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-1406/AC3",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "Conduit Kit provision preserves user hooks and content-safe receipts",
+        "value": "pass",
+        "createdAt": "2026-09-23T08:05:24.641Z",
+        "updatedAt": "2026-09-23T08:05:24.641Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "AC3",
+            "description": "Conduit Kit provision preserves user hooks and content-safe receipts",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Actual installed provision and rerun preserve user hook and Conduit digest receipt."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "98ebfc60f098cbf1e331fbf66cb89c084eead742be3b98f27d95cd324cb941bd",
+                "source": "canonical-writer-execution",
+                "observed_at_commit": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+                "worktree_clean": true,
+                "verification_workspace_snapshot": {
+                  "version": 1,
+                  "kind": "git-worktree",
+                  "algorithm": "sha256",
+                  "digest": "e9ca94253b59e13073756dc609c13ed686afc6b60d61037f4e5393ef18eb199c",
+                  "head_sha": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+                  "worktree_clean": true
+                },
+                "test_count": 4,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 4
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-09-23T08:05:24.641Z",
+            "verified_by": "codexthread-a42a995668b3e1d26e710de3Kontour"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#1406"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-review.flow-agents-workflow.independent-exact-head-source-security-dependency-packaging-and-policy-review-found-no-blocking-source-defect-hosted-verification-remains-separate-reviewed-2026-09-23t07-06-46-831z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-1406/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Independent exact-head source, security, dependency, packaging and policy review found no blocking source defect; hosted verification remains separate.",
+        "value": "pass",
+        "createdAt": "2026-09-23T07:06:46.831Z",
+        "updatedAt": "2026-09-23T07:06:46.831Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex:thread-1e9daadaabc4a7c54409b67f:Kontour",
+          "reviewed_at": "2026-09-23T07:06:46.831Z",
+          "identity_version": 2,
+          "critique_sequence": 1,
+          "critique_predecessor_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "critique_record_hash": "1aebef0509ea9c5374ce91bed3752b808f531b1025ace10af4cffd084a2dd573",
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "Reviewed all 21 changed files and Kit provisioning callers; target safety, capability refusal, hook merge idempotence, and receipt binding have no blocking finding at ffc6687.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                  "summary": "Exact-head code and architecture review with direct focused tests."
+                }
+              ]
+            },
+            {
+              "id": "security-review",
+              "status": "pass",
+              "summary": "Reviewed untrusted Kit paths, JSON merge, symlink and size guards, and content-safe Conduit receipts; host trust remains separately unverified.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                  "summary": "Security and data-handling review."
+                }
+              ]
+            },
+            {
+              "id": "dependency-packaging-review",
+              "status": "pass",
+              "summary": "Reviewed Conduit 0.7.1 pin, age exception, standalone Flow and Conduit vendor bundles, and installed Kit provision/rerun regression.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                  "summary": "Dependency and standalone packaging review."
+                }
+              ]
+            },
+            {
+              "id": "policy-review",
+              "status": "pass",
+              "summary": "Reviewed protected Repo Map command, attestation, and static evidence route without claiming hosted verification.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                  "summary": "Veritas policy review."
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--deliver.md",
+                "sha256": "046bc78fbea11354f44d08b99b4233be581fddf869cbef68bed9008612dbdded"
+              },
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                "sha256": "d2e56bab76ca43e5e4432d928b05e73dcabe3d44752b029e8c22cac3d4e66abe"
+              },
+              {
+                "file": "src/flow-kit/provision.ts",
+                "sha256": "742787d67914a0f6811792e500dd39ddf1f654cf20fdedb97b2f53a187e673e9"
+              },
+              {
+                "file": "src/flow-kit/validate.ts",
+                "sha256": "1de564cad4484c9313e3ad1d561356dde365e21da6bde9f70aec5e2b55a75e01"
+              },
+              {
+                "file": "src/tools/build-universal-bundles.ts",
+                "sha256": "cbce347c0d0f2a90e33ede4f9a4667e8ced9325fa27d82c13c88df320d0f03a0"
+              },
+              {
+                "file": "evals/integration/test_install_merge.sh",
+                "sha256": "ce91d5bc471a844babf1774b11e5e86fa5b6b71e2f2cd8ce1b23025b40c0e9b6"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "21f3f8ee74f31411834633599eef31772e82175be834644fe9343648c98ddf7d",
+              "head_sha": "ffc66872fa474344a0c92a183ad095e135d3d476",
+              "worktree_clean": true
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--deliver.md",
+            ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+            "src/flow-kit/provision.ts",
+            "src/flow-kit/validate.ts",
+            "src/tools/build-universal-bundles.ts",
+            "evals/integration/test_install_merge.sh"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#1406",
+          "superseded_by": "critique:cc23b9275caa42c117654f35eec21a13505b841dcf82f899f2eb590ce5b9d53e",
+          "critique_resolution": {
+            "schema_version": "1.0",
+            "kind": "same-reviewer-recheck",
+            "prior_record_id": "critique:1aebef0509ea9c5374ce91bed3752b808f531b1025ace10af4cffd084a2dd573",
+            "resolving_record_id": "critique:cc23b9275caa42c117654f35eec21a13505b841dcf82f899f2eb590ce5b9d53e",
+            "resolver": "codex:thread-1e9daadaabc4a7c54409b67f:Kontour",
+            "resolved_lane_ids": [],
+            "resolved_finding_ids": [],
+            "resolved_at": "2026-09-23T07:39:02.887Z"
+          },
+          "critique_record_id": "critique:1aebef0509ea9c5374ce91bed3752b808f531b1025ace10af4cffd084a2dd573"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-1406-review.flow-agents-workflow.fresh-review-of-6f0ad4e3-tap-case-output-closes-the-exact-builder-evidence-count-defect-no-blocking-source-finding-remains-reviewed-2026-09-23t07-39-02-887z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-1406/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Fresh review of 6f0ad4e3: TAP case output closes the exact Builder evidence-count defect; no blocking source finding remains.",
+        "value": "pass",
+        "createdAt": "2026-09-23T07:39:02.887Z",
+        "updatedAt": "2026-09-23T07:39:02.887Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex:thread-1e9daadaabc4a7c54409b67f:Kontour",
+          "reviewer_source": "explicit",
+          "reviewed_at": "2026-09-23T07:39:02.887Z",
+          "identity_version": 2,
+          "critique_sequence": 2,
+          "critique_predecessor_hash": "1aebef0509ea9c5374ce91bed3752b808f531b1025ace10af4cffd084a2dd573",
+          "critique_record_hash": "cc23b9275caa42c117654f35eec21a13505b841dcf82f899f2eb590ce5b9d53e",
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "Compared the fix round with ffc66872; only the integration TAP output changed, exactly where the countability remedy belongs. 110/110 cases passed with 110 numbered ok lines and zero not ok lines.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                  "summary": "Current-head code and behavioral review."
+                }
+              ]
+            },
+            {
+              "id": "security-review",
+              "status": "pass",
+              "summary": "The TAP output change adds no new input, write, or host-install path; prior Kit path, JSON, symlink, size, and content-safe receipt review still applies at 6f0ad4e3.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                  "summary": "Current-head security delta review."
+                }
+              ]
+            },
+            {
+              "id": "dependency-packaging-review",
+              "status": "pass",
+              "summary": "No dependency or standalone packaging file changed since prior critique; installed bundle path was exercised by direct 110/110 integration rerun at 6f0ad4e3.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                  "summary": "Current-head dependency and bundle scope review."
+                }
+              ]
+            },
+            {
+              "id": "policy-review",
+              "status": "pass",
+              "summary": "No protected policy file changed in this fix round; numbered TAP output now supplies countable local test evidence while hosted verification remains separate.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                  "summary": "Current-head policy and evidence contract review."
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--deliver.md",
+                "sha256": "f08579d370dc6a7139becd49e45fa788666e4f7091cff7ce9fe00b4806efe8f2"
+              },
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+                "sha256": "5e8f2c0049c3e11b33f24c69979cf51e650c2ceae8470b66e5724d4c4124d833"
+              },
+              {
+                "file": "evals/integration/test_install_merge.sh",
+                "sha256": "54b8c11e395f080c84e77897f8fc706d90944e70787e6d8de040be7c933049a9"
+              },
+              {
+                "file": "src/tools/build-universal-bundles.ts",
+                "sha256": "cbce347c0d0f2a90e33ede4f9a4667e8ced9325fa27d82c13c88df320d0f03a0"
+              },
+              {
+                "file": "src/flow-kit/provision.ts",
+                "sha256": "742787d67914a0f6811792e500dd39ddf1f654cf20fdedb97b2f53a187e673e9"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "e9ca94253b59e13073756dc609c13ed686afc6b60d61037f4e5393ef18eb199c",
+              "head_sha": "6f0ad4e3aad48a5f8a0ed227d04a754fed29c310",
+              "worktree_clean": true
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/flow-agents/kontourai-flow-agents-1406/kontourai-flow-agents-1406--deliver.md",
+            ".kontourai/flow-agents/kontourai-flow-agents-1406/review-work-2026-09-23.md",
+            "evals/integration/test_install_merge.sh",
+            "src/tools/build-universal-bundles.ts",
+            "src/flow-kit/provision.ts"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#1406",
+          "critique_record_id": "critique:cc23b9275caa42c117654f35eec21a13505b841dcf82f899f2eb590ce5b9d53e"
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-1406-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1406-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec-gate-visit-2026-09-23t06-48-02z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1406-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec-gate-visit-2026-09-23t06-48-02z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1406/evidence.json",
+        "excerptOrSummary": "Work Item kontourai/flow-agents#1406 is durably assigned to the active workflow actor (assignment sha256:17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec).",
+        "observedAt": "2026-09-23T08:07:38.854Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1406-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-confirms-provider-ownership-exact-source-anchor-scope-risks-and-planning-readiness-gate-visit-2026-09-23t06-49-07-314z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-confirms-provider-ownership-exact-source-anchor-scope-risks-and-planning-readiness-gate-visit-2026-09-23t06-49-07-314z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1406/evidence.json",
+        "excerptOrSummary": "Pickup probe confirms provider ownership, exact source anchor, scope, risks, and planning readiness.",
+        "observedAt": "2026-09-23T08:07:38.854Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1406-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decision-and-prior-source-provenance-gap-are-recorded-without-a-retrospective-implementation-claim-gate-visit-2026-09-23t06-49-07-887z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decision-and-prior-source-provenance-gap-are-recorded-without-a-retrospective-implementation-claim-gate-visit-2026-09-23t06-49-07-887z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1406/evidence.json",
+        "excerptOrSummary": "Probe decision and prior-source provenance gap are recorded without a retrospective implementation claim.",
+        "observedAt": "2026-09-23T08:07:38.854Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1406-gate-claim-implementation-plan.flow-agents-workflow.corrected-plan-separates-ac1-ac3-pre-delivery-verification-from-d1-d2-terminal-delivery-checks-after-a-recorded-plan-gap-route-back-gate-visit-2026-09-23t07-05-55-191z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-implementation-plan.flow-agents-workflow.corrected-plan-separates-ac1-ac3-pre-delivery-verification-from-d1-d2-terminal-delivery-checks-after-a-recorded-plan-gap-route-back-gate-visit-2026-09-23t07-05-55-191z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1406/evidence.json",
+        "excerptOrSummary": "Corrected plan separates AC1-AC3 pre-delivery verification from D1/D2 terminal delivery checks after a recorded plan-gap route-back.",
+        "observedAt": "2026-09-23T08:07:38.854Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1406-gate-claim-implementation-scope.flow-agents-workflow.follow-up-implementation-now-includes-standalone-flow-validation-bundling-and-tap-countable-installed-integration-evidence-both-changes-were-made-after-run-start-and-are-scoped-gate-visit-2026-09-23t07-32-53-405z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-implementation-scope.flow-agents-workflow.follow-up-implementation-now-includes-standalone-flow-validation-bundling-and-tap-countable-installed-integration-evidence-both-changes-were-made-after-run-start-and-are-scoped-gate-visit-2026-09-23t07-32-53-405z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1406/evidence.json",
+        "excerptOrSummary": "Follow-up implementation now includes standalone Flow validation bundling and TAP-countable installed integration evidence; both changes were made after run start and are scoped.",
+        "observedAt": "2026-09-23T08:07:38.854Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1406-gate-claim-tests-evidence.flow-agents-workflow.ac1-ac3-pass-at-source-head-6f0ad4e3-distinct-clean-critique-and-hosted-source-static-integration-runtime-kit-windows-and-workflow-checks-green-in-run-35833348206-the-tap-countable-installed-bundle-integration-is-re-observed-by-this-writer-trust-reconcile-and-merge-remain-d1-d2-gate-visit-2026-09-23t08-05-24-641z:1",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-tests-evidence.flow-agents-workflow.ac1-ac3-pass-at-source-head-6f0ad4e3-distinct-clean-critique-and-hosted-source-static-integration-runtime-kit-windows-and-workflow-checks-green-in-run-35833348206-the-tap-countable-installed-bundle-integration-is-re-observed-by-this-writer-trust-reconcile-and-merge-remain-d1-d2-gate-visit-2026-09-23t08-05-24-641z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-1406/command-log.jsonl",
+        "excerptOrSummary": "AC1-AC3 pass at source HEAD 6f0ad4e3: distinct clean critique and hosted Source/Static, Integration, Runtime/Kit, Windows and Workflow checks green in run 35833348206; the TAP-countable installed-bundle integration is re-observed by this writer. Trust Reconcile and merge remain D1/D2.",
+        "observedAt": "2026-09-23T08:07:38.854Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "supportStrength": "entails",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1406-gate-claim-merge-readiness.flow-agents-workflow.source-evidence-and-clean-distinct-critique-support-merge-review-at-head-6f0ad4e3-required-trust-reconcile-and-merge-are-explicit-d1-d2-future-gates-gate-visit-2026-09-23t08-07-38-854z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-merge-readiness.flow-agents-workflow.source-evidence-and-clean-distinct-critique-support-merge-review-at-head-6f0ad4e3-required-trust-reconcile-and-merge-are-explicit-d1-d2-future-gates-gate-visit-2026-09-23t08-07-38-854z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-1406/evidence.json",
+        "excerptOrSummary": "Source evidence and clean distinct critique support merge review at HEAD 6f0ad4e3; required Trust Reconcile and merge are explicit D1/D2 future gates.",
+        "observedAt": "2026-09-23T08:07:38.854Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1406-ac1.flow-agents-workflow.independent-exact-source-review-finds-no-blocking-defect-verified-2026-09-23t08-05-24-641z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-1406-ac1.flow-agents-workflow.independent-exact-source-review-finds-no-blocking-defect-verified-2026-09-23t08-05-24-641z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-1406/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-09-23T08:05:24.641Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "supportStrength": "entails",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1406-ac2.flow-agents-workflow.source-integration-windows-and-runtime-kit-checks-pass-at-the-delivered-revision-verified-2026-09-23t08-05-24-641z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-1406-ac2.flow-agents-workflow.source-integration-windows-and-runtime-kit-checks-pass-at-the-delivered-revision-verified-2026-09-23t08-05-24-641z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-1406/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-09-23T08:05:24.641Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "supportStrength": "entails",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-1406-ac3.flow-agents-workflow.conduit-kit-provision-preserves-user-hooks-and-content-safe-receipts-verified-2026-09-23t08-05-24-641z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-1406-ac3.flow-agents-workflow.conduit-kit-provision-preserves-user-hooks-and-content-safe-receipts-verified-2026-09-23t08-05-24-641z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-1406/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-09-23T08:05:24.641Z",
+        "collectedBy": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "supportStrength": "entails",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.external:attestation",
+        "claimType": "workflow.check.external",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.external claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:attestation",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.pickup-readiness:attestation",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.pickup-readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.decisions:attestation",
+        "claimType": "builder.design-probe.decisions",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.decisions claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.plan.implementation:attestation",
+        "claimType": "builder.plan.implementation",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.plan.implementation claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope:attestation",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.command:test_output",
+        "claimType": "workflow.check.command",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.command claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.verify.tests:test_output",
+        "claimType": "builder.verify.tests",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.verify.tests claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.merge-ready.readiness:attestation",
+        "claimType": "builder.merge-ready.readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.merge-ready.readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion:test_output",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.critique.review",
+        "claimType": "workflow.critique.review",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.critique.review claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-1406-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1406-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec-gate-visit-2026-09-23t06-48-02z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1406-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec-gate-visit-2026-09-23t06-48-02z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1406-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-17e82bf4d0f88418a3907696530e9088e4b1af7844ec4331da75ec6db6dce3ec-gate-visit-2026-09-23t06-48-02z"
+        ],
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "verifiedAt": "2026-09-23T08:07:38.854Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-confirms-provider-ownership-exact-source-anchor-scope-risks-and-planning-readiness-gate-visit-2026-09-23t06-49-07-314z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-confirms-provider-ownership-exact-source-anchor-scope-risks-and-planning-readiness-gate-visit-2026-09-23t06-49-07-314z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-confirms-provider-ownership-exact-source-anchor-scope-risks-and-planning-readiness-gate-visit-2026-09-23t06-49-07-314z"
+        ],
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "verifiedAt": "2026-09-23T08:07:38.854Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decision-and-prior-source-provenance-gap-are-recorded-without-a-retrospective-implementation-claim-gate-visit-2026-09-23t06-49-07-887z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decision-and-prior-source-provenance-gap-are-recorded-without-a-retrospective-implementation-claim-gate-visit-2026-09-23t06-49-07-887z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decision-and-prior-source-provenance-gap-are-recorded-without-a-retrospective-implementation-claim-gate-visit-2026-09-23t06-49-07-887z"
+        ],
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "verifiedAt": "2026-09-23T08:07:38.854Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-gate-claim-implementation-plan.flow-agents-workflow.corrected-plan-separates-ac1-ac3-pre-delivery-verification-from-d1-d2-terminal-delivery-checks-after-a-recorded-plan-gap-route-back-gate-visit-2026-09-23t07-05-55-191z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-implementation-plan.flow-agents-workflow.corrected-plan-separates-ac1-ac3-pre-delivery-verification-from-d1-d2-terminal-delivery-checks-after-a-recorded-plan-gap-route-back-gate-visit-2026-09-23t07-05-55-191z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-gate-claim-implementation-plan.flow-agents-workflow.corrected-plan-separates-ac1-ac3-pre-delivery-verification-from-d1-d2-terminal-delivery-checks-after-a-recorded-plan-gap-route-back-gate-visit-2026-09-23t07-05-55-191z"
+        ],
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "verifiedAt": "2026-09-23T08:07:38.854Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-gate-claim-implementation-scope.flow-agents-workflow.follow-up-implementation-now-includes-standalone-flow-validation-bundling-and-tap-countable-installed-integration-evidence-both-changes-were-made-after-run-start-and-are-scoped-gate-visit-2026-09-23t07-32-53-405z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-implementation-scope.flow-agents-workflow.follow-up-implementation-now-includes-standalone-flow-validation-bundling-and-tap-countable-installed-integration-evidence-both-changes-were-made-after-run-start-and-are-scoped-gate-visit-2026-09-23t07-32-53-405z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-gate-claim-implementation-scope.flow-agents-workflow.follow-up-implementation-now-includes-standalone-flow-validation-bundling-and-tap-countable-installed-integration-evidence-both-changes-were-made-after-run-start-and-are-scoped-gate-visit-2026-09-23t07-32-53-405z"
+        ],
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "verifiedAt": "2026-09-23T08:07:38.854Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-gate-claim-tests-evidence.flow-agents-workflow.ac1-ac3-pass-at-source-head-6f0ad4e3-distinct-clean-critique-and-hosted-source-static-integration-runtime-kit-windows-and-workflow-checks-green-in-run-35833348206-the-tap-countable-installed-bundle-integration-is-re-observed-by-this-writer-trust-reconcile-and-merge-remain-d1-d2-gate-visit-2026-09-23t08-05-24-641z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-tests-evidence.flow-agents-workflow.ac1-ac3-pass-at-source-head-6f0ad4e3-distinct-clean-critique-and-hosted-source-static-integration-runtime-kit-windows-and-workflow-checks-green-in-run-35833348206-the-tap-countable-installed-bundle-integration-is-re-observed-by-this-writer-trust-reconcile-and-merge-remain-d1-d2-gate-visit-2026-09-23t08-05-24-641z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-gate-claim-tests-evidence.flow-agents-workflow.ac1-ac3-pass-at-source-head-6f0ad4e3-distinct-clean-critique-and-hosted-source-static-integration-runtime-kit-windows-and-workflow-checks-green-in-run-35833348206-the-tap-countable-installed-bundle-integration-is-re-observed-by-this-writer-trust-reconcile-and-merge-remain-d1-d2-gate-visit-2026-09-23t08-05-24-641z:1"
+        ],
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "verifiedAt": "2026-09-23T08:07:38.854Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-gate-claim-merge-readiness.flow-agents-workflow.source-evidence-and-clean-distinct-critique-support-merge-review-at-head-6f0ad4e3-required-trust-reconcile-and-merge-are-explicit-d1-d2-future-gates-gate-visit-2026-09-23t08-07-38-854z",
+        "claimId": "kontourai-flow-agents-1406-gate-claim-merge-readiness.flow-agents-workflow.source-evidence-and-clean-distinct-critique-support-merge-review-at-head-6f0ad4e3-required-trust-reconcile-and-merge-are-explicit-d1-d2-future-gates-gate-visit-2026-09-23t08-07-38-854z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-gate-claim-merge-readiness.flow-agents-workflow.source-evidence-and-clean-distinct-critique-support-merge-review-at-head-6f0ad4e3-required-trust-reconcile-and-merge-are-explicit-d1-d2-future-gates-gate-visit-2026-09-23t08-07-38-854z"
+        ],
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "verifiedAt": "2026-09-23T08:07:38.854Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-ac1.flow-agents-workflow.independent-exact-source-review-finds-no-blocking-defect-verified-2026-09-23t08-05-24-641z",
+        "claimId": "kontourai-flow-agents-1406-ac1.flow-agents-workflow.independent-exact-source-review-finds-no-blocking-defect-verified-2026-09-23t08-05-24-641z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-ac1.flow-agents-workflow.independent-exact-source-review-finds-no-blocking-defect-verified-2026-09-23t08-05-24-641z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-09-23T08:05:24.641Z",
+        "verifiedAt": "2026-09-23T08:05:24.641Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-ac2.flow-agents-workflow.source-integration-windows-and-runtime-kit-checks-pass-at-the-delivered-revision-verified-2026-09-23t08-05-24-641z",
+        "claimId": "kontourai-flow-agents-1406-ac2.flow-agents-workflow.source-integration-windows-and-runtime-kit-checks-pass-at-the-delivered-revision-verified-2026-09-23t08-05-24-641z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-ac2.flow-agents-workflow.source-integration-windows-and-runtime-kit-checks-pass-at-the-delivered-revision-verified-2026-09-23t08-05-24-641z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-09-23T08:05:24.641Z",
+        "verifiedAt": "2026-09-23T08:05:24.641Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-ac3.flow-agents-workflow.conduit-kit-provision-preserves-user-hooks-and-content-safe-receipts-verified-2026-09-23t08-05-24-641z",
+        "claimId": "kontourai-flow-agents-1406-ac3.flow-agents-workflow.conduit-kit-provision-preserves-user-hooks-and-content-safe-receipts-verified-2026-09-23t08-05-24-641z",
+        "status": "verified",
+        "actor": "codexthread-a42a995668b3e1d26e710de3Kontour",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-1406-ac3.flow-agents-workflow.conduit-kit-provision-preserves-user-hooks-and-content-safe-receipts-verified-2026-09-23t08-05-24-641z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-09-23T08:05:24.641Z",
+        "verifiedAt": "2026-09-23T08:05:24.641Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1406-review.flow-agents-workflow.fresh-review-of-6f0ad4e3-tap-case-output-closes-the-exact-builder-evidence-count-defect-no-blocking-source-finding-remains-reviewed-2026-09-23t07-39-02-887z",
+        "claimId": "kontourai-flow-agents-1406-review.flow-agents-workflow.fresh-review-of-6f0ad4e3-tap-case-output-closes-the-exact-builder-evidence-count-defect-no-blocking-source-finding-remains-reviewed-2026-09-23t07-39-02-887z",
+        "status": "verified",
+        "actor": "codex:thread-1e9daadaabc4a7c54409b67f:Kontour",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-09-23T08:07:38.854Z",
+        "verifiedAt": "2026-09-23T08:07:38.854Z"
+      }
+    ]
+  }
+}
