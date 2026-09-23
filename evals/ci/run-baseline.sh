@@ -21,6 +21,7 @@ CHECKS=(
   "Static eval suite|bash evals/run.sh static"
   "Codex PR review action|node --test evals/ci/codex-pr-review-action.test.mjs"
   "Public API unit tests|node --test src/cli/public-api.test.mjs"
+  "Codex governance hook unit tests|node --test src/cli/codex-governance-hook.test.mjs"
   "Ablation arm parity unit tests|node --test src/cli/ablation-arm-parity.test.mjs"
   "Sealed execution authority unit tests|node --test src/cli/sealed-execution-authority.test.mjs"
   "Liveness fleet unit tests|node --test src/cli/liveness-fleet.test.mjs"
@@ -220,6 +221,7 @@ LANE_WORKFLOW_CONTRACTS=(
 )
 
 LANE_RUNTIME_AND_KIT=(
+  "Codex governance hook unit tests"
   "Goal Fit hook integration"
   "Goal Fit committed config integration"
   "Effective Flow Agents config unit"

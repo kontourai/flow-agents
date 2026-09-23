@@ -88,6 +88,38 @@ The install appends rather than replaces, so existing hooks are not removed. Rev
     flow-agents/           ← runtime workflow artifacts (not committed)
 ```
 
+## Codex Veritas guidance across worktrees
+
+For a repository with a Veritas Repo Map, install one user-level Codex
+`PreToolUse` dispatcher for all Git worktrees of that repository:
+
+```bash
+flow-agents codex-governance-hook install /path/to/governed/repository
+```
+
+Install the repository's pinned Veritas dependency first. The installer checks
+its Codex output protocol and the runtime hook warns if a worktree lacks that
+dependency; it invokes the package's declared CLI with Node and never asks npm
+to fetch a missing package during an edit. The installed handler includes a
+Windows command override; review both command forms in `/hooks` on their hosts.
+
+Flow Agents resolves the repository's shared Git directory and package name,
+merges one handler into `$CODEX_HOME/hooks.json` (or `~/.codex/hooks.json`), and
+uses Conduit to install it with a digest receipt. The handler exits quietly in
+other repositories. In matching worktrees it forwards `apply_patch` input to
+the worktree's installed Veritas CLI. Reinstalling preserves unrelated handlers
+and leaves the same bytes when the definition is unchanged. Installation first
+probes the worktree's Veritas hook output and refuses versions that emit fields
+current Codex rejects. Each repository gets a distinct ownership marker, so
+installing another governed repository does not replace the first one's hook.
+
+Enable `features.hooks` in the user Codex config, then review and trust the
+handler's exact command through `/hooks`. The install receipt reports
+`hostActivation: "not_verified"`; only a host edit that receives Veritas guidance
+proves activation. Codex also requires each matching tool path to support hooks.
+Keep `veritas readiness` as an independent completion gate for shell edits and
+other paths the pre-edit hook cannot observe.
+
 ## opencode
 
 opencode is an L1 adapter. It has no native `prompt.submit`-equivalent event, so workflow steering is approximated at `session.created` rather than at each user turn. This is a documented gap: see <a href="../spec/runtime-hook-surface.html">the spec, section 2.1</a>.
