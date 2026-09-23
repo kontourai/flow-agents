@@ -1,5 +1,29 @@
 # Changelog
 
+## [6.3.0](https://github.com/kontourai/flow-agents/compare/v6.2.0...v6.3.0) (2026-09-23)
+
+
+### Features
+
+* **kit:** route host provisions through Conduit ([66b148d](https://github.com/kontourai/flow-agents/commit/66b148dbae85f1195dd9e0d0da5d24dbd89c8141))
+* **kit:** route host provisions through Conduit ([#1405](https://github.com/kontourai/flow-agents/issues/1405)) ([e979c24](https://github.com/kontourai/flow-agents/commit/e979c24cf8776d3d1c923150048f1ef7d75e5f4b))
+* **review:** engine-agnostic exact-head PR review — codex default, kiro headless, crash routes to NOT_VERIFIED ([#1396](https://github.com/kontourai/flow-agents/issues/1396)) ([b0adbb4](https://github.com/kontourai/flow-agents/commit/b0adbb4a5defdff0b0d2c7641f1735c06dd121e8))
+
+
+### Fixes
+
+* bundle Flow Kit validation for installed host homes ([ffc6687](https://github.com/kontourai/flow-agents/commit/ffc66872fa474344a0c92a183ad095e135d3d476))
+* **ci:** a provisional delivery must reconcile something to satisfy bundle-required ([#1389](https://github.com/kontourai/flow-agents/issues/1389)) ([4d7f023](https://github.com/kontourai/flow-agents/commit/4d7f02314b9905791ba462642b54dec6535ff070))
+* **ci:** check that a PR body's file references resolve on its own branch ([#1390](https://github.com/kontourai/flow-agents/issues/1390)) ([6be137d](https://github.com/kontourai/flow-agents/commit/6be137d1bbd92ecc47e08a68ca4b052ef54c39d7))
+* emit countable install integration case evidence ([6f0ad4e](https://github.com/kontourai/flow-agents/commit/6f0ad4e3aad48a5f8a0ed227d04a754fed29c310))
+* include Conduit contracts in standalone host bundles ([7ff8c18](https://github.com/kontourai/flow-agents/commit/7ff8c18d8cf31bd0d611666ce44a38cb2bac4e9b))
+
+
+### Documentation
+
+* pin Veritas route-compatible Governance Kit ([83824e5](https://github.com/kontourai/flow-agents/commit/83824e5f08a821f60ecc1bf8e79c028b26f15995))
+* show Veritas hook provisioning through Conduit ([7824ff0](https://github.com/kontourai/flow-agents/commit/7824ff088680df64bd5afbf1684afe11f2d98231))
+
 ## [6.2.0](https://github.com/kontourai/flow-agents/compare/v6.1.0...v6.2.0) (2026-08-26)
 
 
