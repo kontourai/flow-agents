@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.4.0](https://github.com/kontourai/flow-agents/compare/v6.3.0...v6.4.0) (2026-09-23)
+
+
+### Features
+
+* **codex:** install repository-scoped global Veritas hook ([#1409](https://github.com/kontourai/flow-agents/issues/1409)) ([c598d6b](https://github.com/kontourai/flow-agents/commit/c598d6bd828307505f54937f9c475dd62e2b70c9))
+
 ## [6.3.0](https://github.com/kontourai/flow-agents/compare/v6.2.0...v6.3.0) (2026-09-23)
 
 
