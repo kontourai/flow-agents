@@ -209,7 +209,7 @@ URL/ref and reject `--record-source`.
 
 ```bash
 npx @kontourai/flow-agents kit install \
-  https://github.com/kontourai/veritas.git#v1.7.1 --dest .
+  https://github.com/kontourai/veritas.git#v1.7.2 --dest .
 npx @kontourai/flow-agents kit activate --dest . --format json
 npx @kontourai/flow-agents kit provision veritas-governance --target .
 ```
