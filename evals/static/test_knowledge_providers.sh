@@ -22,7 +22,8 @@
 #                                                 derived conditional_get, single-flight cache)
 #   - adapters/shared/ingest-graph.test.js               (issue #1214: edge-preserving provider-graph
 #                                                 ingest; blocks round-trip; projection not blind)
-# Deterministic, dependency-free, fixture-driven — never touches a real board.
+# Fixture-driven — never touches a real board. Surface projection tests use the
+# pinned package; the isolated public-entry test deliberately has no dependencies.
 set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
@@ -31,6 +32,7 @@ echo "── Knowledge store provider conformance + health + promote sub-flow (n
 
 if node --test \
   kits/knowledge/providers/conformance/suite.test.js \
+  kits/knowledge/providers/conformance/installed-entry.test.js \
   kits/knowledge/providers/health/health-pass.test.js \
   kits/knowledge/promote/promote.test.js \
   kits/knowledge/providers/neo4j/neo4j.test.js \

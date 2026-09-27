@@ -9,7 +9,6 @@
  */
 
 import { MarkdownVaultProvider } from "../markdown-vault/index.js";
-import { TrustBundleBuilder } from "@kontourai/surface";
 
 const PROVIDER_ID = "knowledge-surface";
 
@@ -70,6 +69,8 @@ function compactMutationLog(mutationLog) {
  * @returns {Promise<import("@kontourai/surface").TrustBundle>}
  */
 export async function buildKnowledgeTrustBundle(options = {}) {
+  // Vault and health consumers do not require the optional Surface projection.
+  const { TrustBundleBuilder } = await import("@kontourai/surface");
   const {
     storeRoot,
     store,
