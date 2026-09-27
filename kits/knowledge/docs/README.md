@@ -462,6 +462,12 @@ single batch (concept first, then candidates).
 
 ## Graph provider (opt-in)
 
+The built-in `MarkdownVaultProvider` exposes canonical records through the
+generic graph contract. Node `attributes.record_provenance` retains creation
+metadata. Edge `attributes.vault_link_kind` and optional `vault_link_label`
+retain the source relationship and its display text. Top-level provenance
+identifies the provider read; preserving a source claim does not verify it.
+
 The `neo4j` provider is a real, queryable graph implementation of the store
 provider read interface (issue #327). It is the **owner's opt-in personal
 default** — the file providers (`markdown-vault`, `git-repo`, `work-item`) remain

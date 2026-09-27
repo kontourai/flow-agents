@@ -174,6 +174,13 @@ Every finding cites its evidence (the compared titles + similarity, or the edge
 | `git-repo` | `docs/decisions/*` (tombstones → `supersedes`/`merged-into`; `evidence[]` → `evidence-of`), CONTEXT.md glossary, `docs/learnings/*`. | `decision`, `note` | `decision-topic` shaped for the promote sub-flow. |
 | `work-item` | GitHub issues via an INJECTABLE runner (default `gh`), `flow-agents:work-item-metadata` blockers + prose refs → `blocks`/`relates`. | `issue` | `comment` / `label` draft. |
 
+The `markdown-vault` projection keeps original record provenance in node
+`attributes.record_provenance`, and the original link kind and optional display
+label in edge `attributes.vault_link_kind` and `attributes.vault_link_label`.
+The top-level `provenance` still describes the provider read (§1.4), and the
+closed edge vocabulary is unchanged. These attributes retain source metadata;
+they do not certify that an original claim or review label is true.
+
 ## 5. Conformance
 
 `kits/knowledge/providers/conformance/suite.test.js` is the parameterized
