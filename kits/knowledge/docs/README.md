@@ -140,8 +140,9 @@ All tests pass and exit 0. Any failure indicates a contract regression or an ada
 
 ## Default Adapter Details
 
-Located at `adapters/default-store/index.js`. Zero runtime dependencies; uses Node.js
-built-ins only.
+Located at `adapters/default-store/index.js`. It uses Node.js built-ins and the
+bundled YAML reader described in the [store contract](store-contract.md#9-yaml-frontmatter-convention-default-adapter).
+No external runtime installation is required.
 
 **Storage layout**
 

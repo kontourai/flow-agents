@@ -1,0 +1,359 @@
+{
+  "oldWriterRevision": "4da2ce550dc296a36b63ff59c33917527ac6f7f0",
+  "records": [
+    {
+      "adapter": "default-store",
+      "file": "default-store-item.md",
+      "record": {
+        "id": "0ad1a2f6-0949-458f-b572-8921649d4ea7",
+        "type": "raw",
+        "title": "- item",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:09:53.263Z",
+        "updated_at": "2026-09-27T17:09:53.263Z",
+        "provenance": {
+          "agent": "independent-old-writer-review"
+        },
+        "links": [],
+        "mutation_log": [],
+        "body": "Original canonical body\n\nNo rewrite permitted."
+      },
+      "sha256": "928651559f5736670d41a62830c5c6bc4bc955822954577bbe626f21d19d0a81"
+    },
+    {
+      "adapter": "default-store",
+      "file": "default-store-dash.md",
+      "record": {
+        "id": "c58df6aa-6709-4848-970b-dccf24e53aa5",
+        "type": "raw",
+        "title": "-",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:09:53.271Z",
+        "updated_at": "2026-09-27T17:09:53.271Z",
+        "provenance": {
+          "agent": "independent-old-writer-review"
+        },
+        "links": [],
+        "mutation_log": [],
+        "body": "Original canonical body\n\nNo rewrite permitted."
+      },
+      "sha256": "3b39b5468e13d2e26fa20c1d77c73a93d2ee5fb7acb23556eb4bf42aa6c764ee"
+    },
+    {
+      "adapter": "obsidian-store",
+      "file": "obsidian-store-item.md",
+      "record": {
+        "id": "5ecb563e-d3b1-4dab-adf7-102d34e8a589",
+        "type": "raw",
+        "title": "- item",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:09:53.366Z",
+        "updated_at": "2026-09-27T17:09:53.366Z",
+        "provenance": {
+          "agent": "independent-old-writer-review"
+        },
+        "links": [],
+        "mutation_log": [],
+        "body": "Original canonical body\n\nNo rewrite permitted."
+      },
+      "sha256": "add8794f78886b589475d880de2d67f35384b40604085885e31a82457a81d7e7"
+    },
+    {
+      "adapter": "obsidian-store",
+      "file": "obsidian-store-dash.md",
+      "record": {
+        "id": "7d40f1d5-374e-4263-8139-e7349d904490",
+        "type": "raw",
+        "title": "-",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:09:53.382Z",
+        "updated_at": "2026-09-27T17:09:53.382Z",
+        "provenance": {
+          "agent": "independent-old-writer-review"
+        },
+        "links": [],
+        "mutation_log": [],
+        "body": "Original canonical body\n\nNo rewrite permitted."
+      },
+      "sha256": "c76a6590c17a9acd72d2c5e96863ff40cb16c7907cf9a1ef25e21fef24b9b5ab"
+    },
+    {
+      "adapter": "default-store",
+      "file": "default-store-proposal-21cdbfa5.md",
+      "record": {
+        "id": "21cdbfa5-5ad8-4280-b074-388f19ab840f",
+        "type": "raw",
+        "title": "Regular",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:14:44.194Z",
+        "updated_at": "2026-09-27T17:14:44.194Z",
+        "provenance": {
+          "agent": "review"
+        },
+        "links": [],
+        "mutation_log": [
+          {
+            "op": "propose",
+            "at": "2026-09-27T17:14:44.196Z",
+            "agent": "review",
+            "evidence": {
+              "proposer_id": "e9eb6249-762c-4107-95d5-e57e29e95241",
+              "proposal": "- replace"
+            }
+          }
+        ],
+        "body": "Text"
+      },
+      "sha256": "e56e32bf180248a43e76777cf4387153ab5e5c6719246cdefa964949fd767951"
+    },
+    {
+      "adapter": "default-store",
+      "file": "default-store-proposal-e9eb6249.md",
+      "record": {
+        "id": "e9eb6249-762c-4107-95d5-e57e29e95241",
+        "type": "raw",
+        "title": "Regular",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:14:44.195Z",
+        "updated_at": "2026-09-27T17:14:44.196Z",
+        "provenance": {
+          "agent": "review"
+        },
+        "links": [
+          {
+            "target_id": "21cdbfa5-5ad8-4280-b074-388f19ab840f",
+            "kind": "proposes"
+          }
+        ],
+        "mutation_log": [
+          {
+            "op": "propose",
+            "at": "2026-09-27T17:14:44.196Z",
+            "agent": "review",
+            "evidence": {
+              "concept_id": "21cdbfa5-5ad8-4280-b074-388f19ab840f",
+              "proposal": "- replace"
+            }
+          }
+        ],
+        "body": "Text"
+      },
+      "sha256": "e710e25fcccf84cbb583dbca20612a71515c99729f7d231e62be3f66a0a707f1"
+    },
+    {
+      "adapter": "obsidian-store",
+      "file": "obsidian-store-proposal-1af6dd19.md",
+      "record": {
+        "id": "1af6dd19-bbcf-4bb6-866a-487d94201678",
+        "type": "raw",
+        "title": "Regular",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:14:44.225Z",
+        "updated_at": "2026-09-27T17:14:44.225Z",
+        "provenance": {
+          "agent": "review"
+        },
+        "links": [],
+        "mutation_log": [
+          {
+            "op": "propose",
+            "at": "2026-09-27T17:14:44.228Z",
+            "agent": "review",
+            "evidence": {
+              "proposer_id": "6ffb1d6c-7fa8-453c-801b-913ac193dbde",
+              "proposal": "- replace"
+            }
+          }
+        ],
+        "body": "Text"
+      },
+      "sha256": "695fcdac57a73ee703942e8c26693d55619a21dac5756289bcf2a675cda63e17"
+    },
+    {
+      "adapter": "obsidian-store",
+      "file": "obsidian-store-proposal-6ffb1d6c.md",
+      "record": {
+        "id": "6ffb1d6c-7fa8-453c-801b-913ac193dbde",
+        "type": "raw",
+        "title": "Regular",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:14:44.226Z",
+        "updated_at": "2026-09-27T17:14:44.228Z",
+        "provenance": {
+          "agent": "review"
+        },
+        "links": [
+          {
+            "target_id": "1af6dd19-bbcf-4bb6-866a-487d94201678",
+            "kind": "proposes"
+          }
+        ],
+        "mutation_log": [
+          {
+            "op": "propose",
+            "at": "2026-09-27T17:14:44.228Z",
+            "agent": "review",
+            "evidence": {
+              "concept_id": "1af6dd19-bbcf-4bb6-866a-487d94201678",
+              "proposal": "- replace"
+            }
+          }
+        ],
+        "body": "Text"
+      },
+      "sha256": "da7b38fca5d259e0206d2420e05a1ee7ee7addac7c5bdfcf0d5db1548f85b8ab"
+    },
+    {
+      "adapter": "default-store",
+      "file": "default-store-supersede-96f87704.md",
+      "record": {
+        "id": "96f87704-1c20-4852-8396-fd33ff463a2d",
+        "type": "raw",
+        "title": "Regular",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:20:23.731Z",
+        "updated_at": "2026-09-27T17:20:23.743Z",
+        "provenance": {
+          "agent": "review"
+        },
+        "links": [
+          {
+            "target_id": "a6382fa7-1664-4848-82e4-452ed8d61e98",
+            "kind": "supersedes"
+          }
+        ],
+        "mutation_log": [
+          {
+            "op": "supersede",
+            "at": "2026-09-27T17:20:23.743Z",
+            "agent": "review",
+            "rationale": "- replace",
+            "evidence": {
+              "superseded_count": "1"
+            }
+          }
+        ],
+        "body": "Text"
+      },
+      "sha256": "33b6f02d557c2e41fbc436d37b378bdd0ce8035192a54e4a88d068853357ae53"
+    },
+    {
+      "adapter": "default-store",
+      "file": "default-store-supersede-a6382fa7.md",
+      "record": {
+        "id": "a6382fa7-1664-4848-82e4-452ed8d61e98",
+        "type": "raw",
+        "title": "Regular",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:20:23.732Z",
+        "updated_at": "2026-09-27T17:20:23.732Z",
+        "provenance": {
+          "agent": "review"
+        },
+        "links": [],
+        "mutation_log": [
+          {
+            "op": "superseded-by",
+            "at": "2026-09-27T17:20:23.743Z",
+            "agent": "review",
+            "new_id": "96f87704-1c20-4852-8396-fd33ff463a2d",
+            "rationale": "- replace",
+            "evidence": {
+              "superseded_by_id": "96f87704-1c20-4852-8396-fd33ff463a2d"
+            }
+          }
+        ],
+        "body": "Text"
+      },
+      "sha256": "5559e5542191498fd9c48f8c26f1c37d7a96e2c05411829824bbf8f1b04d62aa"
+    },
+    {
+      "adapter": "obsidian-store",
+      "file": "obsidian-store-supersede-ecf70f1b.md",
+      "record": {
+        "id": "ecf70f1b-9b1d-49ff-b459-41776272bb6b",
+        "type": "raw",
+        "title": "Regular",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:20:23.780Z",
+        "updated_at": "2026-09-27T17:20:23.785Z",
+        "provenance": {
+          "agent": "review"
+        },
+        "links": [
+          {
+            "target_id": "c0fb12fd-4f1a-44a0-9ad4-0a7811ec1b3d",
+            "kind": "supersedes"
+          }
+        ],
+        "mutation_log": [
+          {
+            "op": "supersede",
+            "at": "2026-09-27T17:20:23.785Z",
+            "agent": "review",
+            "rationale": "- replace",
+            "evidence": {
+              "superseded_count": "1"
+            }
+          }
+        ],
+        "body": "Text"
+      },
+      "sha256": "329bbc1ad485a2ca1597f3544de35e36160abce2d65e4ce5766fcd775abb3e7c"
+    },
+    {
+      "adapter": "obsidian-store",
+      "file": "obsidian-store-supersede-c0fb12fd.md",
+      "record": {
+        "id": "c0fb12fd-4f1a-44a0-9ad4-0a7811ec1b3d",
+        "type": "raw",
+        "title": "Regular",
+        "category": "repo",
+        "tags": [],
+        "status": "active",
+        "created_at": "2026-09-27T17:20:23.782Z",
+        "updated_at": "2026-09-27T17:20:23.782Z",
+        "provenance": {
+          "agent": "review"
+        },
+        "links": [],
+        "mutation_log": [
+          {
+            "op": "superseded-by",
+            "at": "2026-09-27T17:20:23.785Z",
+            "agent": "review",
+            "new_id": "ecf70f1b-9b1d-49ff-b459-41776272bb6b",
+            "rationale": "- replace",
+            "evidence": {
+              "superseded_by_id": "ecf70f1b-9b1d-49ff-b459-41776272bb6b"
+            }
+          }
+        ],
+        "body": "Text"
+      },
+      "sha256": "98b5129665a1d7785cce33a7b973bad02ad91afc6bb0b8c033fa738fc6f4ddf6"
+    }
+  ]
+}

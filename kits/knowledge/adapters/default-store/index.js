@@ -17,9 +17,10 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 
 // Record-identity resolution layer (short-id prefix + slug aliases, issue #339).
-// Single-sourced in the shared codec so both bundled adapters resolve
-// identically; the rest of this adapter keeps its own zero-import helpers.
+// Both bundled adapters share identity resolution and frontmatter parsing.
 import {
+  parseMarkdown,
+  yamlScalar,
   resolveRecordId,
   normalizeAliases,
   emptyAliasIndex,
@@ -46,130 +47,6 @@ function notFoundError(id) {
   const err = new Error(`Record not found: ${id}`);
   err.code = "NOT_FOUND";
   return err;
-}
-
-// ---------------------------------------------------------------------------
-// YAML frontmatter codec  (no external deps — handles the subset we need)
-// ---------------------------------------------------------------------------
-
-/**
- * Parse a markdown file that begins with a YAML frontmatter block.
- * Returns { meta, body }.
- */
-function parseMarkdown(text) {
-  if (!text.startsWith("---\n")) {
-    return { meta: {}, body: text };
-  }
-  const end = text.indexOf("\n---\n", 4);
-  if (end === -1) {
-    return { meta: {}, body: text };
-  }
-  const yaml = text.slice(4, end);
-  const body = text.slice(end + 5).replace(/^\n+/, "");
-  return { meta: parseYaml(yaml), body };
-}
-
-/**
- * Minimal YAML parser: handles the scalar/list/nested-object subset
- * emitted by serializeYaml below. Not a general YAML parser.
- */
-function parseYaml(yaml) {
-  const lines = yaml.split("\n");
-  return parseYamlLines(lines, 0, 0).value;
-}
-
-function parseYamlLines(lines, start, baseIndent) {
-  const obj = {};
-  let i = start;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.trim() === "" || line.trim().startsWith("#")) { i++; continue; }
-    const indent = line.search(/\S/);
-    if (indent < baseIndent) break;
-    if (indent > baseIndent) { i++; continue; }
-
-    // key: value  OR  key:
-    const colonIdx = line.indexOf(":");
-    if (colonIdx === -1) { i++; continue; }
-    const key = line.slice(indent, colonIdx).trim();
-    const rest = line.slice(colonIdx + 1).trim();
-
-    if (rest.startsWith("[")) {
-      // Inline array: [a, b, c]
-      const inner = rest.slice(1, rest.lastIndexOf("]"));
-      obj[key] = inner ? inner.split(",").map((s) => unquote(s.trim())).filter(Boolean) : [];
-      i++;
-    } else if (rest === "") {
-      // Block: peek ahead
-      i++;
-      if (i < lines.length) {
-        const nextLine = lines[i];
-        const nextIndent = nextLine.search(/\S/);
-        if (nextIndent > baseIndent && nextLine.trimStart().startsWith("- ")) {
-          // Block sequence
-          const arr = [];
-          while (i < lines.length) {
-            const l = lines[i];
-            if (l.trim() === "") { i++; continue; }
-            const ind = l.search(/\S/);
-            if (ind < nextIndent) break;
-            if (l.trimStart().startsWith("- ")) {
-              const itemText = l.trimStart().slice(2).trim();
-              if (itemText.includes(": ") || (i + 1 < lines.length && lines[i + 1].search(/\S/) > ind + 1)) {
-                // Object item
-                const childLines = [" ".repeat(ind + 2) + itemText];
-                i++;
-                while (i < lines.length) {
-                  const cl = lines[i];
-                  const ci = cl.search(/\S/);
-                  if (cl.trim() === "" || ci <= ind) break;
-                  childLines.push(cl);
-                  i++;
-                }
-                arr.push(parseYamlLines(childLines, 0, ind + 2).value);
-              } else {
-                arr.push(unquote(itemText));
-                i++;
-              }
-            } else {
-              break;
-            }
-          }
-          obj[key] = arr;
-        } else if (nextIndent > baseIndent) {
-          // Nested mapping
-          const result = parseYamlLines(lines, i, nextIndent);
-          obj[key] = result.value;
-          i = result.next;
-        } else {
-          obj[key] = null;
-        }
-      } else {
-        obj[key] = null;
-      }
-    } else {
-      obj[key] = unquote(rest);
-      i++;
-    }
-  }
-  return { value: obj, next: i };
-}
-
-function unquote(s) {
-  if (s.startsWith('"') && s.endsWith('"')) {
-    // Double-quoted scalars are escaped by yamlScalar; reverse those escapes
-    // (backslash, quote, newline, carriage-return, tab) left-to-right so a
-    // frontmatter value can carry newlines/quotes and round-trip intact. This
-    // keeps every scalar on ONE physical line, so an embedded "\n---\n" can
-    // never be mistaken for the frontmatter/body terminator (parseMarkdown).
-    return s.slice(1, -1).replace(/\\(["\\nrt])/g, (_, c) =>
-      c === "n" ? "\n" : c === "r" ? "\r" : c === "t" ? "\t" : c
-    );
-  }
-  if (s.startsWith("'") && s.endsWith("'")) {
-    return s.slice(1, -1);
-  }
-  return s;
 }
 
 /**
@@ -220,28 +97,6 @@ function serializeYaml(obj, indent = 0) {
     }
   }
   return lines.join("\n");
-}
-
-function yamlScalar(v) {
-  if (typeof v === "string") {
-    // Quote if it contains special chars (incl. any whitespace control char that
-    // would otherwise span lines — newline, carriage-return, tab).
-    if (/[:#\[\]{},&*?|<>=!%@`"'\n\r\t]/.test(v) || v.trim() !== v || v === "") {
-      // Escape backslash first, then quote and the control chars, so the value
-      // stays on ONE physical line. Reversed by unquote(). Without newline
-      // escaping a value like a multi-section proposal body would inject a raw
-      // "\n---\n" into the frontmatter and corrupt the record on read.
-      const escaped = v
-        .replace(/\\/g, "\\\\")
-        .replace(/"/g, '\\"')
-        .replace(/\n/g, "\\n")
-        .replace(/\r/g, "\\r")
-        .replace(/\t/g, "\\t");
-      return `"${escaped}"`;
-    }
-    return v;
-  }
-  return String(v);
 }
 
 function serializeMarkdown(meta, body) {

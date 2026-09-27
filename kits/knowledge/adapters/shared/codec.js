@@ -3,7 +3,7 @@
  *
  * Utility functions shared between Knowledge Kit store adapters:
  *   - Error helpers (MISSING_EVIDENCE, NOT_FOUND)
- *   - YAML frontmatter codec (zero-dep subset)
+ *   - YAML frontmatter reader (bundled parser; text scalars)
  *   - Wikilink parser / indexer
  *   - Graph index helpers
  *   - Validation constants and helpers
@@ -13,6 +13,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { readKnowledgeYaml } from "./yaml-reader.js";
+import { stringify } from "./vendor/yaml.mjs";
 
 // ---------------------------------------------------------------------------
 // Error helpers
@@ -31,7 +33,7 @@ export function notFoundError(id) {
 }
 
 // ---------------------------------------------------------------------------
-// YAML frontmatter codec  (no external deps — handles the subset we need)
+// YAML frontmatter codec  (self-contained installed artifact)
 // ---------------------------------------------------------------------------
 
 /**
@@ -51,106 +53,9 @@ export function parseMarkdown(text) {
   return { meta: parseYaml(yaml), body };
 }
 
-/**
- * Minimal YAML parser: handles the scalar/list/nested-object subset
- * emitted by serializeYaml below. Not a general YAML parser.
- */
+/** Read standard YAML syntax under the documented text-scalar schema. */
 export function parseYaml(yaml) {
-  const lines = yaml.split("\n");
-  return parseYamlLines(lines, 0, 0).value;
-}
-
-export function parseYamlLines(lines, start, baseIndent) {
-  const obj = {};
-  let i = start;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.trim() === "" || line.trim().startsWith("#")) { i++; continue; }
-    const indent = line.search(/\S/);
-    if (indent < baseIndent) break;
-    if (indent > baseIndent) { i++; continue; }
-
-    // key: value  OR  key:
-    const colonIdx = line.indexOf(":");
-    if (colonIdx === -1) { i++; continue; }
-    const key = line.slice(indent, colonIdx).trim();
-    const rest = line.slice(colonIdx + 1).trim();
-
-    if (rest.startsWith("[")) {
-      // Inline array: [a, b, c]
-      const inner = rest.slice(1, rest.lastIndexOf("]"));
-      obj[key] = inner ? inner.split(",").map((s) => unquote(s.trim())).filter(Boolean) : [];
-      i++;
-    } else if (rest === "") {
-      // Block: peek ahead
-      i++;
-      if (i < lines.length) {
-        const nextLine = lines[i];
-        const nextIndent = nextLine.search(/\S/);
-        if (nextIndent > baseIndent && nextLine.trimStart().startsWith("- ")) {
-          // Block sequence
-          const arr = [];
-          while (i < lines.length) {
-            const l = lines[i];
-            if (l.trim() === "") { i++; continue; }
-            const ind = l.search(/\S/);
-            if (ind < nextIndent) break;
-            if (l.trimStart().startsWith("- ")) {
-              const itemText = l.trimStart().slice(2).trim();
-              if (itemText.includes(": ") || (i + 1 < lines.length && lines[i + 1].search(/\S/) > ind + 1)) {
-                // Object item
-                const childLines = [" ".repeat(ind + 2) + itemText];
-                i++;
-                while (i < lines.length) {
-                  const cl = lines[i];
-                  const ci = cl.search(/\S/);
-                  if (cl.trim() === "" || ci <= ind) break;
-                  childLines.push(cl);
-                  i++;
-                }
-                arr.push(parseYamlLines(childLines, 0, ind + 2).value);
-              } else {
-                arr.push(unquote(itemText));
-                i++;
-              }
-            } else {
-              break;
-            }
-          }
-          obj[key] = arr;
-        } else if (nextIndent > baseIndent) {
-          // Nested mapping
-          const result = parseYamlLines(lines, i, nextIndent);
-          obj[key] = result.value;
-          i = result.next;
-        } else {
-          obj[key] = null;
-        }
-      } else {
-        obj[key] = null;
-      }
-    } else {
-      obj[key] = unquote(rest);
-      i++;
-    }
-  }
-  return { value: obj, next: i };
-}
-
-export function unquote(s) {
-  if (s.startsWith('"') && s.endsWith('"')) {
-    return s.slice(1, -1).replace(/\\(\\|n|r|")/g, (_, c) => {
-      if (c === "\\") return "\\";
-      if (c === "n") return "\n";
-      if (c === "r") return "\r";
-      if (c === '"') return '"';
-      return c;
-    });
-  }
-  if (s.startsWith("'") && s.endsWith("'")) {
-    return s.slice(1, -1);
-  }
-  return s;
+  return readKnowledgeYaml(yaml);
 }
 
 /**
@@ -205,11 +110,7 @@ export function serializeYaml(obj, indent = 0) {
 
 export function yamlScalar(v) {
   if (typeof v === "string") {
-    // Quote if it contains special chars or actual newlines/carriage returns
-    if (/[:#\[\]{},&*?|<>=!%@`"'\n\r]/.test(v) || v.trim() !== v || v === "") {
-      return `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r")}"`;
-    }
-    return v;
+    return stringify(v, { defaultStringType: "QUOTE_DOUBLE", doubleQuotedAsJSON: true, lineWidth: 0 }).trimEnd();
   }
   return String(v);
 }
@@ -534,7 +435,7 @@ export function freshnessPatch(input) {
 
 /**
  * Coerce freshness fields to their canonical runtime types after a frontmatter
- * read: the zero-dep YAML codec returns every scalar as a string, so a numeric
+ * read: the YAML failsafe schema returns every scalar as a string, so a numeric
  * `ttl_seconds` round-trips as text without this. Mutates and returns the
  * record; a no-op when no freshness field is present.
  */

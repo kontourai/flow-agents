@@ -22,7 +22,7 @@ The Knowledge Kit is a Flow Kit for durable, gated knowledge storage. It package
 
 **Store adapters** — two adapters ship:
 
-- **Default adapter** — flat markdown files with YAML frontmatter, `[[wikilink]]` inline links, and a JSON graph index. Zero runtime dependencies; uses Node.js built-ins only.
+- **Default adapter** — flat markdown files with YAML frontmatter, `[[wikilink]]` inline links, and a JSON graph index. It uses Node.js built-ins and an included YAML parser, with no external runtime installation. The failsafe YAML schema preserves text scalars and resolves bounded, acyclic anchors in nested evidence; see the [store contract](../kits/knowledge/docs/store-contract.md#9-yaml-frontmatter-convention-default-adapter) for limits.
 - **Obsidian adapter** — the same store contract rendered into one human-canonical Obsidian note per record. Category dots map to folder hierarchy; configurable frontmatter dimensions (e.g. territory/customer/initiative as filterable fields); living overview notes at the category root with sources nested below; superseded records moved to `archive/` rather than deleted. The file is the record — no separate database, no sync step.
 
 The output-shape story is why the adapter model matters: the same five flows and the same mutation gates produce a different rendering layer depending on which adapter is active. Authors choose the output shape that fits how they already think. (The Obsidian adapter is shipped; layout/dimensions refinements and person/entity card support are in development.)

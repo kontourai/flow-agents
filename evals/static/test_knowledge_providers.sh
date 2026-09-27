@@ -30,7 +30,7 @@ cd "$ROOT_DIR"
 
 echo "── Knowledge store provider conformance + health + promote sub-flow (node --test) ──"
 
-if node --test \
+if npm run knowledge:yaml:check && node --test \
   kits/knowledge/providers/conformance/suite.test.js \
   kits/knowledge/providers/conformance/installed-entry.test.js \
   kits/knowledge/providers/health/health-pass.test.js \
@@ -39,6 +39,7 @@ if node --test \
   kits/knowledge/providers/surface-adapter/surface-adapter.test.js \
   kits/knowledge/adapters/default-store/cache-version.test.js \
   kits/knowledge/adapters/shared/conditional-get.test.js \
+  kits/knowledge/adapters/shared/yaml-interop.test.js \
   kits/knowledge/providers/work-item/conditional.test.js \
   kits/knowledge/adapters/shared/ingest-graph.test.js; then
   echo "  PASS: knowledge store provider conformance + health verbs + promote sub-flow"
