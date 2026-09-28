@@ -84,6 +84,8 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | workflow-release.schema.json | Flow Agents Workflow Release Readiness | https://flow-agents.dev/schemas/workflow-release.schema.json |
 | workflow-state.schema.json | Flow Agents Workflow State | https://flow-agents.dev/schemas/workflow-state.schema.json |
 | workflow-waves.schema.json | Flow Agents Workflow Waves | https://flow-agents.dev/schemas/workflow-waves.schema.json |
+| workspace-kits-lock.schema.json | workspace-kits-lock | https://flow-agents.dev/schemas/workspace-kits-lock.schema.json |
+| workspace-kits.schema.json | workspace-kits | https://flow-agents.dev/schemas/workspace-kits.schema.json |
 
 Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validation, `scripts/hooks/stop-goal-fit.js`, and `scripts/hooks/workflow-steering.js`. The package-internal writer is not an agent or consumer interface.
 

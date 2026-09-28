@@ -1,3 +1,4 @@
+import { workspaceKitMain } from "./workspace-kit.js";
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -78,7 +79,7 @@ function hasHelp(argv: string[]): boolean {
 }
 
 function printKitUsage(): void {
-  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status> [args]
+  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|workspace> [args]
 
 Commands:
   install    Install a Flow Kit from a local path or Git URL.
@@ -90,6 +91,7 @@ Commands:
   inspect    Report a kit's conformance and consumer targets.
   list       List locally installed Flow Kits.
   status     Report local Flow Kit installation status.
+  workspace  Resolve or inspect an inert portable workspace selection.
 
 Install notes:
   --record-source <locator> is local-path-only caller-declared provenance metadata.
@@ -1507,6 +1509,7 @@ async function inspect(argv: string[]): Promise<number> {
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const [command, ...rest] = argv;
+  if (command === "workspace") return workspaceKitMain(rest);
   if (command === "--help" || command === "-h") {
     printKitUsage();
     return 0;
@@ -1565,7 +1568,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "validate") return await validate(rest);
   if (command === "provision") return await provision(rest);
   if (command === "inspect") return await inspect(rest);
-  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status> ...");
+  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|workspace> ...");
   return 2;
 }
 

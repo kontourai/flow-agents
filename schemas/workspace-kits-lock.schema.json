@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flow-agents.dev/schemas/workspace-kits-lock.schema.json",
+  "title": "workspace-kits-lock",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "declaration_digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "selected": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "maxItems": 32,
+      "uniqueItems": true
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kit_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "scheme": {
+            "const": "flow-agents.kit-tree/v1"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$"
+            },
+            "maxItems": 32,
+            "uniqueItems": true
+          },
+          "manifest_schema_version": {
+            "const": "1.0"
+          },
+          "manifest_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "kit_id",
+          "scheme",
+          "digest",
+          "dependencies",
+          "manifest_schema_version"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "declaration_digest",
+    "selected",
+    "artifacts"
+  ]
+}
