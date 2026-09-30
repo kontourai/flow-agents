@@ -32,4 +32,4 @@ for (const [name, content] of files) {
     if (readFileSync(path, "utf8") !== content) throw new Error(`Stale generated Knowledge YAML artifact: ${name}`);
   } else writeFileSync(path, content);
 }
-console.log(`Knowledge YAML artifacts ${check ? "verified" : "generated"} (yaml ${version}).`);
+console.error(`Knowledge YAML artifacts ${check ? "verified" : "generated"} (yaml ${version}).`);
