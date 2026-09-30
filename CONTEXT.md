@@ -103,6 +103,11 @@ _Avoid_: Pack, plugin, marketplace package
 A local folder or remote repository with a Flow Kit manifest at its root. A Flow Kit Repository can be installed by Flow or Flow Agents from a local path, git URL, GitHub shorthand, or package registry source.
 _Avoid_: Skill repository as the generic term
 
+### Workspace Kit Selection
+
+An explicit directory-scoped selection of Flow Kits, with a portable lock naming verified immutable artifacts. It is separate from a Git repository, Station Project, runtime activation, and committed gate authority.
+_Avoid_: Project installation as the generic term
+
 ### Workflow
 
 A stateful multi-step path with gates, handoffs, evidence, and next actions. Not every task or skill needs a workflow.
