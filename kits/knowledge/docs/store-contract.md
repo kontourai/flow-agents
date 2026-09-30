@@ -431,6 +431,41 @@ Files are stored as `<store_root>/records/<id>.md` — keyed by the full `id`, u
 addendum. The graph index lives at `<store_root>/graph-index.json`; the slug alias map (Addendum H)
 lives at `<store_root>/alias-index.json`.
 
+Both bundled adapters read YAML 1.2 syntax with the **failsafe schema**: scalars
+remain text, including plain `true`, `null`, numerals and timestamps. This preserves
+records written by earlier Kit versions, whose writer did not quote those text
+values. The existing freshness decoder converts `ttl_seconds` to a number. This
+is not the YAML core schema and does not infer booleans, dates or numbers in
+arbitrary evidence. Explicit tags outside the failsafe schema are refused.
+
+The reader resolves anchors and aliases in nested evidence, flow collections and
+block scalars. It rejects duplicate keys, unresolved aliases, cycles, malformed
+syntax, non-string mapping keys and non-mapping roots. Frontmatter is bounded to
+4 MiB, depth 64 and 100,000 visited values; the parser's alias expansion budget
+is 100. Reads do not rewrite canonical files. The legacy writer remains separate
+from this reader; accepting standard YAML does not certify that every structure
+can be round-tripped through that writer.
+
+New writes quote string scalars with the bundled serializer, including dash-led
+text and control characters. Earlier writers emitted bare dash-led text such as
+`title: - item`. For compatibility, parser-identified dash errors in the record's
+string fields (`id`, `type`, `title`, `category`, `status`, timestamps), provenance
+`agent`/`session_id`/`note`, link `target_id`/`kind`/`label`, and mutation
+`op`/`at`/`agent`/`note` (plus `supersede.rationale` and `superseded-by`'s `new_id`/`rationale`)
+are quoted **in memory**, only when the entire scalar
+matches what the earlier writer left bare. The same rule covers the built-in
+operation's evidence strings: proposal/concept/proposer IDs for `propose`,
+rationale for `apply`, reason for `reject`, replacement ID for `superseded-by`,
+and status/rationale/implementation/replacement references for `retire`.
+Block scalar contents and arbitrary evidence fields are excluded. The whole document then passes through the same
+strict parser, duplicate-key, alias, cycle and size checks. Canonical bytes are
+never rewritten, and there is no general permissive fallback.
+
+The installed Kit includes a generated, self-contained `yaml` 2.9.0 parser and
+its ISC license under `adapters/shared/vendor/`. It requires no ambient npm
+installation. Maintainers regenerate it with `npm run knowledge:yaml:generate`;
+`npm run knowledge:yaml:check` and the package build refuse stale artifacts.
+
 ---
 
 ## Addendum A — Snapshot Record Semantics (S6)

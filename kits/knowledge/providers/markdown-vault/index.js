@@ -119,6 +119,7 @@ export class MarkdownVaultProvider {
     const records = await this._allRecords();
     const nodes = records.map((r) => {
       const attributes = { record_type: r.type };
+      if (r.provenance) attributes.record_provenance = r.provenance;
       if (r.category) attributes.category = r.category;
       if (r.status) attributes.status = r.status;
       if (Array.isArray(r.tags) && r.tags.length) attributes.tags = r.tags;
@@ -154,13 +155,15 @@ export class MarkdownVaultProvider {
     for (const r of records) {
       const links = await this.store.getLinks(r.id);
       for (const l of links.forward || []) {
+        const attributes = { vault_link_kind: l.kind };
+        if (l.label !== undefined) attributes.vault_link_label = l.label;
         edges.push(
           edge({
             id: `${r.id}--${l.kind}--${l.target_id}`,
             type: edgeTypeFor(l.kind),
             from: r.id,
             to: l.target_id,
-            attributes: { vault_link_kind: l.kind },
+            attributes,
             provenance: provenance({
               provider: PROVIDER_ID,
               source: `${this.storeRoot}#${r.id}`,

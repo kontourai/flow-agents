@@ -4,10 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null
 source "$ROOT_DIR/scripts/telemetry/console-presets.sh"
-# This test exercises the doctor against confs it writes into a temp dest, so
-# it must not inherit the eval harness's console-free TELEMETRY_CONFIG_FILE
-# default (evals/ci/run-baseline.sh), which would shadow every fixture.
-unset TELEMETRY_CONFIG_FILE
 KONTOUR_HOSTED_CONSOLE_URL="$(flow_agents_kontour_hosted_console_url)"
 FLOW_AGENTS_CLI="${FLOW_AGENTS_CLI:-node}"
 FLOW_AGENTS_CLI_ARGS=()
@@ -32,6 +28,9 @@ echo ""
 DEST="$TMPDIR_EVAL/install"
 mkdir -p "$DEST/scripts/telemetry"
 cp "$ROOT_DIR/scripts/telemetry/telemetry.conf" "$DEST/scripts/telemetry/telemetry.conf"
+# The doctor prefers trusted user-global configuration over shipped defaults.
+# Bind these cases to their fixture so a real Console cannot replace it.
+export TELEMETRY_CONFIG_FILE="$DEST/scripts/telemetry/telemetry.conf"
 
 if $FLOW_AGENTS_CLI "${FLOW_AGENTS_CLI_ARGS[@]}" telemetry-doctor --dest "$DEST" --json --headless >"$TMPDIR_EVAL/local.json"; then
   if jq -e '

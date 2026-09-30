@@ -13,6 +13,20 @@ Any storage backend can adopt this kit by implementing the contract without fork
 
 ---
 
+## Provider entry and optional projections
+
+The installed Kit manifest declares `knowledge.store-providers` at
+`providers/index.js`. Its Markdown vault, Git repository and health APIs can be
+loaded without Surface or Neo4j packages. The providers remain readers and
+proposal producers; importing them does not approve or apply a change.
+
+`buildKnowledgeTrustBundle` loads `@kontourai/surface` only when explicitly
+called. A consuming Node project that uses that projection must supply a
+compatible Surface package (the Flow Agents package manifest records the version
+used by this distribution). If it is unavailable, the projection rejects; it
+does not produce a placeholder bundle or block unrelated vault reads. Neo4j
+likewise needs its driver and service only when that provider is selected.
+
 ## Contract Summary
 
 See [`store-contract.md`](store-contract.md) for the full specification. Quick reference:
@@ -126,8 +140,9 @@ All tests pass and exit 0. Any failure indicates a contract regression or an ada
 
 ## Default Adapter Details
 
-Located at `adapters/default-store/index.js`. Zero runtime dependencies; uses Node.js
-built-ins only.
+Located at `adapters/default-store/index.js`. It uses Node.js built-ins and the
+bundled YAML reader described in the [store contract](store-contract.md#9-yaml-frontmatter-convention-default-adapter).
+No external runtime installation is required.
 
 **Storage layout**
 
@@ -446,6 +461,12 @@ single batch (concept first, then candidates).
 ---
 
 ## Graph provider (opt-in)
+
+The built-in `MarkdownVaultProvider` exposes canonical records through the
+generic graph contract. Node `attributes.record_provenance` retains creation
+metadata. Edge `attributes.vault_link_kind` and optional `vault_link_label`
+retain the source relationship and its display text. Top-level provenance
+identifies the provider read; preserving a source claim does not verify it.
 
 The `neo4j` provider is a real, queryable graph implementation of the store
 provider read interface (issue #327). It is the **owner's opt-in personal

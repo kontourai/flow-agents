@@ -22,21 +22,24 @@
 #                                                 derived conditional_get, single-flight cache)
 #   - adapters/shared/ingest-graph.test.js               (issue #1214: edge-preserving provider-graph
 #                                                 ingest; blocks round-trip; projection not blind)
-# Deterministic, dependency-free, fixture-driven — never touches a real board.
+# Fixture-driven — never touches a real board. Surface projection tests use the
+# pinned package; the isolated public-entry test deliberately has no dependencies.
 set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 echo "── Knowledge store provider conformance + health + promote sub-flow (node --test) ──"
 
-if node --test \
+if npm run knowledge:yaml:check && node --test \
   kits/knowledge/providers/conformance/suite.test.js \
+  kits/knowledge/providers/conformance/installed-entry.test.js \
   kits/knowledge/providers/health/health-pass.test.js \
   kits/knowledge/promote/promote.test.js \
   kits/knowledge/providers/neo4j/neo4j.test.js \
   kits/knowledge/providers/surface-adapter/surface-adapter.test.js \
   kits/knowledge/adapters/default-store/cache-version.test.js \
   kits/knowledge/adapters/shared/conditional-get.test.js \
+  kits/knowledge/adapters/shared/yaml-interop.test.js \
   kits/knowledge/providers/work-item/conditional.test.js \
   kits/knowledge/adapters/shared/ingest-graph.test.js; then
   echo "  PASS: knowledge store provider conformance + health verbs + promote sub-flow"
