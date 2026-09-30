@@ -565,3 +565,33 @@ The standalone `flow-kit` binary was removed in this release. The `flow-agents k
 `install-local` and `install-git` are unified into a single `install` command. The source argument auto-detects whether it is a local path or a git URL (http://, https://, git+, ssh://, file://).
 
 Running the old `flow-kit` command will produce a "command not found" error from your shell — there is no alias or shim. Update any scripts or CI configurations that call `flow-kit` to use `flow-agents kit`.
+
+## Portable workspace selection
+
+Workspace Kits v1 currently requires POSIX no-follow directory and mode semantics; Windows refuses with `unsupported` rather than weakening those checks. Its machine-independent files provide an inert, explicit selection for plain directories, including directories without Git. It does not activate Kits or bind running workflows. The [workspace contract](../context/contracts/workspace-kits.md) defines its supported fields, identity scheme, refusal behavior and proof limits.
+
+Create `.flow-agents/workspace.kits.json` in an existing scope:
+
+```json
+{
+  "schema_version": "1.0",
+  "selected": ["example-kit"],
+  "sources": {"example-kit": {"kind": "local", "alias": "example-source"}},
+  "options": {},
+  "provider_bindings": {},
+  "contributions": "all"
+}
+```
+
+Keep acquisition locations in a separate local JSON file such as `{"example-source":"/absolute/path/to/example-kit"}`. Create an existing cache directory outside the scope and source directories, then run:
+
+```bash
+flow-agents kit workspace resolve --scope /absolute/workspace --cache /absolute/kit-cache --bindings /absolute/local-bindings.json
+flow-agents kit workspace inspect --scope /absolute/workspace --cache /absolute/kit-cache
+```
+
+Commit the declaration and generated `.flow-agents/workspace.kits.lock.json` when appropriate. The lock contains artifact identities and required dependency edges, without machine paths or acquisition timestamps. Declare and bind every required dependency; v1 refuses optional dependencies, version ranges, nonempty options or provider bindings. Additional unselected sources are not read.
+
+A matching lock can resolve offline from verified cached bytes without `--bindings`. Use `--update` explicitly to select changed source bytes. Inspect reports the prior identity when the declaration is stale, never fetches sources and never writes. Both commands emit JSON; `verified` exits 0 and all refusal outcomes exit 2. Library callers use the same implementation through `@kontourai/flow-agents/workspace-kits`.
+
+Artifacts publish before the lock and are never repaired or overwritten in place. Failure before lock replacement preserves the old lock; complete unreferenced entries can remain after interruption. A cleanup failure after replacement returns `recovery-required` with the newly published lock identity. Existing operation markers report `busy` and require deliberate recovery by the owner; v1 has no automatic lock reclamation or cache cleanup. Verification establishes supported manifest/closure checks and exact cached bytes, not publisher trust, coherent source capture, workflow readiness or power-loss durability. Active runs and the legacy install/activation paths are unchanged.

@@ -54,7 +54,11 @@
       "import": "./build/src/narrative/retained-process-projection.js"
     },
     "./package.json": "./package.json",
-    "./schemas/*.json": "./schemas/*.json"
+    "./schemas/*.json": "./schemas/*.json",
+    "./workspace-kits": {
+      "types": "./build/src/workspace-kits.d.ts",
+      "import": "./build/src/workspace-kits.js"
+    }
   },
   "repository": {
     "type": "git",
