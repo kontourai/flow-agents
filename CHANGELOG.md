@@ -1,5 +1,17 @@
 # Changelog
 
+## [6.5.0](https://github.com/kontourai/flow-agents/compare/v6.4.0...v6.5.0) (2026-09-30)
+
+
+### Features
+
+* **workspace-kits:** resolve and inspect immutable workspace artifacts ([#1419](https://github.com/kontourai/flow-agents/issues/1419)) ([08b3bfd](https://github.com/kontourai/flow-agents/commit/08b3bfd76482988311cc0530eb9f9c536e0b5b69))
+
+
+### Fixes
+
+* make Knowledge provider reads self-contained and preserve metadata ([#1420](https://github.com/kontourai/flow-agents/issues/1420)) ([2828c4d](https://github.com/kontourai/flow-agents/commit/2828c4d82a0e02c34811732c1f6647d3419846e5))
+
 ## [6.4.0](https://github.com/kontourai/flow-agents/compare/v6.3.0...v6.4.0) (2026-09-23)
 
 
