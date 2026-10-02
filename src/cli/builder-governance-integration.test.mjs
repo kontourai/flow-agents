@@ -12,7 +12,7 @@ test("Builder release readiness consumes the pinned Veritas verdict contract", (
 
   assert.match(
     skill,
-    /npm exec --yes --package=@kontourai\/veritas@1\.5\.2 -- veritas readiness/,
+    /npm exec --yes --package=@kontourai\/veritas@1\.7\.3 -- veritas readiness/,
   );
   assert.match(skill, /software-readiness-verdict/);
   assert.match(skill, /reportArtifactPath/);
