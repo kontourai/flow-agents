@@ -318,6 +318,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_published_codex_install.sh" || result=1
   echo ""
+  node --test "$EVAL_DIR/integration/public-workflow-cli.test.mjs" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_skill_drift_check.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_bundle_lifecycle.sh" || result=1

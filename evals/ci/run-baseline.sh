@@ -81,7 +81,7 @@ CHECKS=(
   "Runtime hook parity integration|node --test evals/integration/runtime-hook-parity.test.mjs"
   "Bundle install integration|bash evals/integration/test_bundle_install.sh"
   "Published Codex install integration|bash evals/integration/test_published_codex_install.sh"
-  "Public workflow CLI integration|bash evals/integration/test_public_workflow_cli.sh"
+  "Public workflow CLI integration|node --test evals/integration/public-workflow-cli.test.mjs"
   "Bundle lifecycle integration|bash evals/integration/test_bundle_lifecycle.sh"
   "Init uninstall integration|bash evals/integration/test_init_uninstall.sh"
   "Kit activation integration|bash evals/integration/test_kit_activation.sh"
