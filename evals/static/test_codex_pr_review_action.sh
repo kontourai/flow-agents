@@ -98,33 +98,31 @@ else
   bad "blocking finding should finalize with fail verdict"
 fi
 
+# A contract-invalid assessment must not survive into the result: finalize
+# records NOT_VERIFIED / assessment_invalid (exit 0) and the laundered
+# verdict is gone. Args: expected validation message, ok label, bad label.
+rejects_assessment() {
+  local expected="$1" label_ok="$2" label_bad="$3"
+  : > "$RESULT_FILE"
+  if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1 \
+    && node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const m=process.argv[2]; if(v.verdict!=="not_verified"||v.not_verified_reason!=="assessment_invalid"||v.findings.length!==0||!v.gaps.some(g=>g.includes(m))) process.exit(1)' "$RESULT_FILE" "$expected"; then
+    ok "$label_ok"
+  else
+    bad "$label_bad"
+  fi
+}
+
 printf '%s\n' '{"verdict":"pass","summary":"Incorrectly clean.","coverage":[{"lane":"code","status":"pass","summary":"Claimed clean."}],"findings":[{"id":"hidden-blocker","severity":"high","requires_change":true,"file":"src/value.js","line":2,"title":"Blocker","description":"A blocker cannot be paired with pass."}],"gaps":[]}' > "$ASSESSMENT_FILE"
-if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
-  bad "pass verdict should not launder a blocking finding"
-else
-  ok "pass verdict cannot launder a blocking finding"
-fi
+rejects_assessment "blocking findings or failed coverage require verdict fail" "pass verdict cannot launder a blocking finding" "pass verdict should not launder a blocking finding"
 
 printf '%s\n' '{"verdict":"comment","summary":"Improperly advisory.","coverage":[{"lane":"code","status":"pass","summary":"A medium defect needs a fix."}],"findings":[{"id":"medium-fix","severity":"medium","requires_change":true,"file":"src/value.js","line":2,"title":"Fix required","description":"This medium finding requires a code change before delivery."}],"gaps":[]}' > "$ASSESSMENT_FILE"
-if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
-  bad "comment verdict should not launder a medium finding that requires change"
-else
-  ok "medium requires_change finding routes as fail"
-fi
+rejects_assessment "blocking findings or failed coverage require verdict fail" "medium requires_change finding cannot route as comment" "comment verdict should not launder a medium finding that requires change"
 
 printf '%s\n' '{"verdict":"fail","summary":"Inconsistent critical finding.","coverage":[{"lane":"code","status":"fail","summary":"Critical finding."}],"findings":[{"id":"critical-advisory","severity":"critical","requires_change":false,"file":"src/value.js","line":2,"title":"Critical advisory","description":"Critical severity cannot be advisory."}],"gaps":[]}' > "$ASSESSMENT_FILE"
-if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
-  bad "critical finding should require requires_change=true"
-else
-  ok "critical/high findings cannot contradict required-change routing"
-fi
+rejects_assessment "critical severity requires requires_change=true" "critical/high findings cannot contradict required-change routing" "critical finding should require requires_change=true"
 
 printf '%s\n' '{"verdict":"fail","summary":"Inconsistent low finding.","coverage":[{"lane":"code","status":"pass","summary":"Low advisory finding."}],"findings":[{"id":"low-blocking","severity":"low","requires_change":true,"file":"src/value.js","line":2,"title":"Low blocker","description":"Low severity cannot request route-back."}],"gaps":[]}' > "$ASSESSMENT_FILE"
-if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
-  bad "low finding should require requires_change=false"
-else
-  ok "low/info findings cannot contradict advisory routing"
-fi
+rejects_assessment "low severity requires requires_change=false" "low/info findings cannot contradict advisory routing" "low finding should require requires_change=false"
 
 printf '%s\n' '{"verdict":"not_verified","summary":"Coverage unavailable.","coverage":[{"lane":"code","status":"not_verified","summary":"Reviewer could not inspect the change."}],"findings":[],"gaps":["Required source coverage was unavailable."]}' > "$ASSESSMENT_FILE"
 if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null; then
@@ -147,11 +145,7 @@ else
 fi
 
 printf '%s\n' '{"verdict":"pass","summary":"Malformed.","coverage":[{"lane":"code","status":"pass","summary":"Reviewed."}],"findings":[],"gaps":[],"extra":true}' > "$ASSESSMENT_FILE"
-if env "${common_env[@]}" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
-  bad "finalize should reject undeclared assessment fields"
-else
-  ok "finalize rejects undeclared assessment fields"
-fi
+rejects_assessment "fields must be exactly" "finalize rejects undeclared assessment fields into NOT_VERIFIED" "finalize should reject undeclared assessment fields"
 
 if env "${common_env[@]}" REVIEW_TRIGGER_ACTOR="" REVIEW_TARGET_FILE="$TARGET_FILE" REVIEW_ASSESSMENT_FILE="$ASSESSMENT_FILE" REVIEW_RESULT_FILE="$RESULT_FILE" node "$SCRIPT" finalize >/dev/null 2>&1; then
   bad "finalize should reject missing trigger identity"
@@ -334,6 +328,71 @@ else
   bad "kiro withheld skip should record reviewer_withheld naming the Kiro credential"
 fi
 
+# A contract-invalid assessment (the first live kiro run's shape: gaps
+# reported under a pass verdict) is a reviewer that produced no evidence,
+# not a runner fault: finalize exits 0 and records NOT_VERIFIED with
+# assessment_invalid, the validation message, and the rejected document's
+# digest, and the record validates against the public schema.
+INVALID_ASSESSMENT_FILE="$TMP_ROOT/invalid-assessment.json"
+INVALID_RESULT_FILE="$TMP_ROOT/invalid-result.json"
+printf '%s\n' '{"verdict":"pass","summary":"Looks fine.","coverage":[{"lane":"code","status":"pass","summary":"Read the diff."}],"findings":[],"gaps":["Could not search the checkout: grep and glob were denied."]}' > "$INVALID_ASSESSMENT_FILE"
+invalid_digest="$(node -e 'const fs=require("fs");const c=require("crypto");const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const canon=(x)=>Array.isArray(x)?`[${x.map(canon).join(",")}]`:(x&&typeof x==="object")?`{${Object.keys(x).sort().map(k=>`${JSON.stringify(k)}:${canon(x[k])}`).join(",")}}`:JSON.stringify(x);process.stdout.write(c.createHash("sha256").update(canon(v)).digest("hex"))' "$INVALID_ASSESSMENT_FILE")"
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$INVALID_ASSESSMENT_FILE" REVIEW_RESULT_FILE="$INVALID_RESULT_FILE" node "$SCRIPT" finalize > "$TMP_ROOT/invalid-finalize.out" \
+  && grep -Fq "finalize rejected the engine assessment: coverage gaps require verdict not_verified or fail" "$TMP_ROOT/invalid-finalize.out" \
+  && node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const d=process.argv[2]; if(v.verdict!=="not_verified"||v.not_verified_reason!=="assessment_invalid"||v.reviewer.runtime!=="kiro"||v.findings.length!==0||!v.summary.includes("coverage gaps require verdict not_verified or fail")||!v.gaps.some(g=>g.includes("coverage gaps require verdict not_verified or fail"))||!v.gaps.some(g=>g.includes("claimed verdict pass")&&g.includes(d))||v.coverage[0].status!=="not_verified") process.exit(1)' "$INVALID_RESULT_FILE" "$invalid_digest" \
+  && node --input-type=module -e 'import fs from "node:fs"; import Ajv2020 from "ajv/dist/2020.js"; const [s,r]=process.argv.slice(1); const validate=new Ajv2020({strict:false,allErrors:true,formats:{"date-time":true}}).compile(JSON.parse(fs.readFileSync(s,"utf8"))); if(!validate(JSON.parse(fs.readFileSync(r,"utf8")))) process.exit(1)' "$ROOT_DIR/schemas/codex-pr-review-result.schema.json" "$INVALID_RESULT_FILE"; then
+  ok "finalize records a contract-invalid assessment as NOT_VERIFIED assessment_invalid with the message and digest"
+else
+  bad "finalize should record a contract-invalid assessment as NOT_VERIFIED assessment_invalid"
+fi
+# The rejected document itself is left on disk unmodified for retention.
+[[ "$(node -e 'const fs=require("fs");const c=require("crypto");const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const canon=(x)=>Array.isArray(x)?`[${x.map(canon).join(",")}]`:(x&&typeof x==="object")?`{${Object.keys(x).sort().map(k=>`${JSON.stringify(k)}:${canon(x[k])}`).join(",")}}`:JSON.stringify(x);process.stdout.write(c.createHash("sha256").update(canon(v)).digest("hex"))' "$INVALID_ASSESSMENT_FILE")" == "$invalid_digest" ]] \
+  && ok "finalize leaves the rejected assessment file unmodified" \
+  || bad "finalize must leave the rejected assessment file unmodified"
+# Runner-side faults are not reviewer faults and stay hard failures: an
+# unreadable assessment file and a target that no longer matches the head.
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$TMP_ROOT/absent-assessment.json" REVIEW_RESULT_FILE="$TMP_ROOT/never-written-5.json" node "$SCRIPT" finalize >/dev/null 2>&1 || [[ -e "$TMP_ROOT/never-written-5.json" ]]; then
+  bad "finalize should hard-fail on an unreadable assessment file"
+else
+  ok "finalize hard-fails on an unreadable assessment file without recording a result"
+fi
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_HEAD_SHA="$BASE_SHA" REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$INVALID_ASSESSMENT_FILE" REVIEW_RESULT_FILE="$TMP_ROOT/never-written-6.json" node "$SCRIPT" finalize >/dev/null 2>&1 || [[ -e "$TMP_ROOT/never-written-6.json" ]]; then
+  bad "finalize should hard-fail on a target that no longer matches the expected head"
+else
+  ok "finalize hard-fails on a target mismatch without recording a result"
+fi
+# git failing while a finding's path is checked is a runner fault, not a
+# reviewer fault: an otherwise-valid assessment whose finding names an
+# unchanged file, evaluated with a workspace that is not a repository, must
+# hard-fail rather than be recorded as assessment_invalid.
+NOT_A_REPO="$TMP_ROOT/not-a-repo"; mkdir -p "$NOT_A_REPO"
+printf '%s\n' '{"verdict":"fail","summary":"Blocking finding on an unchanged file.","coverage":[{"lane":"code","status":"fail","summary":"Defect."}],"findings":[{"id":"unchanged-1","severity":"high","requires_change":true,"file":"README.md","line":1,"title":"Defect","description":"A defect in an unchanged file."}],"gaps":[]}' > "$INVALID_ASSESSMENT_FILE"
+finalize_stderr="$(env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_WORKSPACE="$NOT_A_REPO" REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$INVALID_ASSESSMENT_FILE" REVIEW_RESULT_FILE="$TMP_ROOT/never-written-7.json" node "$SCRIPT" finalize 2>&1 >/dev/null || true)"
+if [[ ! -e "$TMP_ROOT/never-written-7.json" ]] && grep -Fq "git could not inspect" <<< "$finalize_stderr"; then
+  ok "finalize hard-fails when git cannot inspect the checkout instead of blaming the reviewer"
+else
+  bad "finalize should hard-fail when git cannot inspect the checkout (got: $finalize_stderr)"
+fi
+# With a working checkout the same assessment IS a reviewer fault (README.md
+# is absent from the head tree) and records assessment_invalid.
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$INVALID_ASSESSMENT_FILE" REVIEW_RESULT_FILE="$INVALID_RESULT_FILE" node "$SCRIPT" finalize >/dev/null \
+  && node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(v.not_verified_reason!=="assessment_invalid"||!v.gaps.some(g=>g.includes("absent from the reviewed change and head tree"))) process.exit(1)' "$INVALID_RESULT_FILE"; then
+  ok "finalize records a finding on an absent file as assessment_invalid when git can answer"
+else
+  bad "finalize should record a finding on an absent file as assessment_invalid when git can answer"
+fi
+# Engine-controlled text: a non-vocabulary verdict is reported as "invalid"
+# in the retention gap, and the validation message quotes at most a clipped
+# prefix of it, so the record stays bounded and schema-valid.
+node -e 'process.stdout.write(JSON.stringify({verdict:"# pwned ".repeat(700),summary:"x",coverage:[{lane:"code",status:"pass",summary:"x"}],findings:[],gaps:[]}))' > "$INVALID_ASSESSMENT_FILE"
+if env "${common_env[@]}" REVIEW_ENGINE=kiro REVIEW_TARGET_FILE="$KIRO_TARGET_FILE" REVIEW_ASSESSMENT_FILE="$INVALID_ASSESSMENT_FILE" REVIEW_RESULT_FILE="$INVALID_RESULT_FILE" node "$SCRIPT" finalize >/dev/null \
+  && node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(v.not_verified_reason!=="assessment_invalid"||JSON.stringify(v).includes("# pwned ".repeat(10))||!v.gaps.some(g=>g.includes("claimed verdict invalid"))||v.gaps.some(g=>g.length>1000)||v.summary.length>2000) process.exit(1)' "$INVALID_RESULT_FILE" \
+  && node --input-type=module -e 'import fs from "node:fs"; import Ajv2020 from "ajv/dist/2020.js"; const [s,r]=process.argv.slice(1); const validate=new Ajv2020({strict:false,allErrors:true,formats:{"date-time":true}}).compile(JSON.parse(fs.readFileSync(s,"utf8"))); if(!validate(JSON.parse(fs.readFileSync(r,"utf8")))) process.exit(1)' "$ROOT_DIR/schemas/codex-pr-review-result.schema.json" "$INVALID_RESULT_FILE"; then
+  ok "finalize clips a non-vocabulary verdict and keeps the rejection record bounded"
+else
+  bad "finalize should clip a non-vocabulary verdict and keep the rejection record bounded"
+fi
+
 # Restore the shared RESULT_FILE to a publishable codex fail-verdict result
 # for the publication tests below.
 printf '%s\n' '{"verdict":"fail","summary":"Blocking correctness finding.","coverage":[{"lane":"code","status":"fail","summary":"A changed line is incorrect."}],"findings":[{"id":"correctness-1","severity":"high","requires_change":true,"file":"src/value.js","line":2,"title":"Incorrect behavior","description":"The changed expression does not satisfy the stated invariant."}],"gaps":[]}' > "$ASSESSMENT_FILE"
@@ -394,13 +453,31 @@ grep -Fq "if: inputs.engine == 'kiro' && inputs['api-key'] != ''" "$ACTION" \
   && grep -Fq "REVIEW_SKIP_REASON: \${{ ((inputs.engine == 'kiro' && inputs['api-key'] == '') || (inputs.engine != 'kiro' && inputs['api-key'] == '' && inputs['openai-api-key'] == '')) && 'reviewer_withheld' || 'reviewer_unavailable' }}" "$ACTION" \
   && ok "failed engine runs route to NOT_VERIFIED with a distinguishable reason" \
   || bad "failed engine runs must route to NOT_VERIFIED with a distinguishable reason"
-grep -Fq -- '--trust-tools=fs_read' "$ACTION" \
+# Exact list, not a substring: fs_read alone left grep/glob at their
+# "trust working directory" default, which the trusted empty cwd defeats.
+# The flag is asserted INSIDE the single kiro-cli chat invocation (the
+# continuation block that starts at the chat line), and --trust-tools may
+# appear nowhere else, so a decoy line or an env-var/second-invocation
+# indirection cannot satisfy the check.
+kiro_chat_block="$(awk '/"\$HOME\/\.local\/bin\/kiro-cli" chat \\$/{p=1} p{print} p && !/\\$/{exit}' "$ACTION")"
+[[ "$(grep -Fc 'kiro-cli" chat' "$ACTION")" -eq 1 ]] \
+  && [[ "$(printf '%s\n' "$kiro_chat_block" | grep -Ec -- '^\s+--trust-tools=fs_read,grep,glob \\$')" -eq 1 ]] \
+  && [[ "$(grep -Ev '^\s*#' "$ACTION" | grep -Fc -- '--trust-tools')" -eq 1 ]] \
+  && ! grep -Eq -- '--trust-tools=[^ ]*(shell|write|execute_bash|fs_write|web)' "$ACTION" \
   && ! grep -Fq -- '--trust-all-tools' "$ACTION" \
   && grep -Fq -- '--model "$REVIEW_MODEL"' "$ACTION" \
   && grep -Fq 'install-kiro-cli.sh' "$ACTION" \
   && grep -Fq "working-directory: \${{ steps.prepare.outputs['review-working-directory'] }}" "$ACTION" \
   && ok "kiro engine step is pinned, read-only-trusted, and model-wired" \
   || bad "kiro engine step must be pinned, read-only-trusted, and model-wired"
+# The review directory (raw output, assessment, result) is the only record
+# behind a NOT_VERIFIED or red run; it is exposed from prepare's output so a
+# caller's `if: always()` upload sees it even when a later step failed.
+grep -Fq "review-directory:" "$ACTION" \
+  && grep -Fq "value: \${{ steps.prepare.outputs['review-working-directory'] }}" "$ACTION" \
+  && grep -Fq "steps.review.outputs.review-directory" "$ROOT_DIR/docs/codex-pr-review-adoption.md" \
+  && ok "composite exposes the review directory for retention on every outcome" \
+  || bad "composite must expose the review directory as an output and document its retention"
 grep -Fq 'KIRO_API_KEY:' "$ACTION" \
   && [[ "$(grep -Fc 'KIRO_API_KEY:' "$ACTION")" -eq 1 ]] \
   && ! grep -Eq '^\s+OPENAI_API_KEY:' "$ACTION" \

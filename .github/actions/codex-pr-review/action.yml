@@ -7,17 +7,33 @@ description: >
 # - codex runs inside the pinned openai/codex-action with an OS-level
 #   read-only sandbox and drop-sudo, plus provider-side schema enforcement.
 # - kiro has no equivalent OS sandbox. Containment is CLI tool policy only:
-#   the run trusts fs_read alone (no shell, no writes, never the blanket
-#   all-tools trust flag),
-#   the working directory is a trusted temp dir so repository .kiro configs
-#   are not loaded, and output is captured from stdout rather than written by
-#   the model. A policy bug in the CLI would not be caught by an OS sandbox.
+#   --trust-tools names the three read-only file tools — fs_read (the CLI's
+#   alias for `read`), grep, and glob — and nothing else: no shell, no
+#   writes, never the blanket all-tools trust flag. Two built-ins sit
+#   outside the flag under every setting (`code`, read-only ops only, and
+#   `introspect`), and none of the trusted tools is path-scoped: they read
+#   whatever the runner user can, the same boundary fs_read alone already
+#   had; nothing here has been shown to confine reads to the checkout.
+#   grep and glob must be named
+#   because their default is "trust working directory" and the working
+#   directory is deliberately NOT the checkout: it is a trusted temp dir so
+#   repository .kiro configs are not loaded, which put every search of the
+#   checkout outside the default trust and had non-interactive mode deny
+#   them (station run 33571203065 — the model reported the gaps and finalize
+#   rejected the review). Output is captured from stdout rather than written
+#   by the model. A policy bug in the CLI would not be caught by an OS sandbox.
 #   The output channel differs too: codex's assessment file is written by the
 #   pinned action's harness under provider-side schema enforcement; kiro's is
 #   parsed from mixed stdout (anchored to the final response marker, trailing
 #   JSON suffix only) — weaker provenance, equalized by finalize validation.
-#   Both engines' outputs pass the same finalize validation; a failed or
-#   crashed engine run is recorded as NOT_VERIFIED, never as a review.
+#   Both engines' outputs pass the same finalize validation. A failed or
+#   crashed engine run is recorded as NOT_VERIFIED (reviewer_unavailable),
+#   and so is an engine that answered with a contract-invalid assessment
+#   (assessment_invalid, carrying the validation message) — never as a
+#   review, and never as a bare red step with nothing retained. The review
+#   directory (prompt, diff, raw engine output, extracted assessment,
+#   result) is exposed as an output so callers can upload it on every
+#   outcome; the composite does not retain it itself.
 
 inputs:
   engine:
@@ -77,6 +93,13 @@ outputs:
   head-sha:
     description: "Exact reviewed pull request head SHA."
     value: ${{ steps.result.outputs['head-sha'] }}
+  review-directory:
+    description: >-
+      The run's review working directory: target.json, prompt.md, the kiro
+      diff.patch and raw-engine-output.txt, assessment.json, and the result.
+      Set as soon as prepare succeeds, so a caller can upload it with
+      `if: always()` and keep the evidence behind a NOT_VERIFIED or red run.
+    value: ${{ steps.prepare.outputs['review-working-directory'] }}
 
 runs:
   using: "composite"
@@ -145,7 +168,7 @@ runs:
       run: |
         "$HOME/.local/bin/kiro-cli" chat \
           --no-interactive \
-          --trust-tools=fs_read \
+          --trust-tools=fs_read,grep,glob \
           --model "$REVIEW_MODEL" \
           --effort "$REVIEW_EFFORT" \
           "$(cat "$REVIEW_PROMPT_FILE")" > "$REVIEW_RAW_OUTPUT_FILE"
