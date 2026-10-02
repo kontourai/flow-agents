@@ -55,6 +55,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
+const { execTrustedGitSync } = require('./trusted-git.js');
 const { resolveClaudeGlobalSkillsDir } = require('./skill-drift');
 
 /** The one package this advisory speaks about. Anything else is not ours to comment on. */
@@ -200,23 +201,6 @@ function installedIdentity(env = process.env) {
 }
 
 /**
- * Environment for every git call — the trusted-environment idiom
- * `scripts/hooks/lib/effective-flow-agents-config.js` already establishes for hook-side git.
- * Ambient system/global git config is precisely what an advisory must not be steerable by, and
- * the fixed PATH is why this advisory keeps working in a session whose PATH is unusual.
- */
-function trustedGitEnvironment() {
-  return {
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-    GIT_NO_REPLACE_OBJECTS: '1',
-    LANG: 'C',
-    LC_ALL: 'C',
-    PATH: process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd;C:\\Windows\\System32' : '/usr/bin:/bin',
-  };
-}
-
-/**
  * Bounded, never-throwing git call that PRESERVES THE EXIT STATUS — `merge-base --is-ancestor`
  * answers with its status (0 ancestor, 1 not an ancestor, 128 error/unknown commit), and
  * collapsing "not an ancestor" into "failed" would silently turn a determinable-fresh answer
@@ -228,16 +212,13 @@ function trustedGitEnvironment() {
  */
 function git(cwd, args) {
   try {
-    const executable = process.platform === 'win32' ? 'git' : '/usr/bin/git';
-    const res = spawnSync(executable, ['--no-replace-objects', '-C', cwd, ...args], {
-      encoding: 'utf8',
-      env: trustedGitEnvironment(),
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: GIT_TIMEOUT_MS,
-    });
-    if (!res || res.error || typeof res.status !== 'number') return null;
-    return { status: res.status, stdout: typeof res.stdout === 'string' ? res.stdout : '' };
-  } catch {
+    return { status: 0, stdout: String(execTrustedGitSync(cwd, args, 'utf8', 1024 * 1024, GIT_TIMEOUT_MS)) };
+  } catch (error) {
+    // Git's ancestry answer uses status 1; inspection failures and timeouts have
+    // no exited-process status and remain undeterminable/silent.
+    if (error && !error.signal && Number.isInteger(error.status)) {
+      return { status: error.status, stdout: typeof error.stdout === 'string' ? error.stdout : '' };
+    }
     return null;
   }
 }

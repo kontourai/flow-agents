@@ -4,20 +4,15 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execTrustedGitSync } = require('./trusted-git.js');
 
 const CORE_PATH = '.flow-agents/config/core.config.json';
 const MAX_BYTES = 64 * 1024;
 const DEFAULT = Object.freeze({ mode: 'warn', max_blocks: 3, recheck: false, backstop: 'block', backstop_timeout_ms: 120000, require_sidecars: false, require_critique: false });
 const STRICT = Object.freeze({ mode: 'block', max_blocks: Number.MAX_SAFE_INTEGER, recheck: false, backstop: 'block', backstop_timeout_ms: 1, require_sidecars: true, require_critique: true });
 
-function trustedEnvironment() {
-  return { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_NO_REPLACE_OBJECTS: '1', LANG: 'C', LC_ALL: 'C', PATH: process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd;C:\\Windows\\System32' : '/usr/bin:/bin' };
-}
-
 function git(root, args) {
-  const executable = process.platform === 'win32' ? 'git' : '/usr/bin/git';
-  return execFileSync(executable, ['--no-replace-objects', '-C', root, ...args], { encoding: 'buffer', env: trustedEnvironment(), stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: MAX_BYTES + 1 });
+  return execTrustedGitSync(root, args, 'buffer', MAX_BYTES + 1);
 }
 
 // Do not ask ambient Git whether this is a repository: hostile environment and

@@ -238,6 +238,10 @@ const deliver = skillText('deliver');
 if (!/--work-item <provider-ref>/.test(deliver) || !/human-readable provider reference/i.test(deliver)) failures.push('deliver: start must accept a human-readable provider reference');
 if (/owner\/(?:repository|repo)#(?:<numeric-id>|\d+)/i.test(deliver)) failures.push('deliver: must not restrict Work Item references to GitHub owner/repository numeric syntax');
 if (!/workflow status --session-dir <session-dir> --json/.test(deliver) || !/exact idempotent command/i.test(deliver)) failures.push('deliver: interrupted runs must use public status and the projected recovery command');
+for (const field of ['next_action.execution_action', 'evidence_submission', 'sync_command', 'command_role: synchronization']) {
+  if (!deliver.includes(`\`${field}\``)) failures.push(`deliver: interrupted continuation must describe the public ${field} contract`);
+}
+if (!/workflow resume --session-dir <session-dir> --reason/.test(deliver) || !/only\s+for an existing paused run/i.test(deliver)) failures.push('deliver: resume must be reasoned and reserved for an existing paused run');
 if (/flow-agents workflow resume --session-dir <session-dir>(?! --reason)/.test(deliver)) failures.push('deliver: resume must require --reason');
 const continuation = rows.find((entry) => entry.skill_id === 'builder.continue-work');
 if (!continuation || continuation.artifacts.length !== 0 || !/ephemeral/i.test(skillText('continue-work'))) failures.push('continue-work: artifact metadata and handoff contract must be empty/ephemeral');

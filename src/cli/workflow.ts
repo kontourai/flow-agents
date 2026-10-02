@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
 import { noteActiveFlow, noteGateOutcome } from "../transition-log.js";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
@@ -16,6 +15,7 @@ import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueReso
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { execTrustedGitSync } from "../lib/trusted-git.js";
 import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthorization, invokeExternalLifecycleAuthority, invokeExternalSealedLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion, verifySealedExecutionCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
@@ -562,7 +562,7 @@ async function prepareDeliveryPublication(
   if (!guardedSeal.result) throw new Error("workflow publish-delivery could not emit a fresh checkpoint attestation for the current trust bundle");
   validateFreshCheckpointSeal(sessionDir, guardedSeal.result);
   const checkpoint = readJsonFile(path.join(sessionDir, "trust.checkpoint.json"), "workflow trust checkpoint");
-  const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  const headSha = String(execTrustedGitSync(projectRoot, ["rev-parse", "HEAD"])).trim();
   if (checkpoint.commit_sha !== headSha) throw new Error("workflow publish-delivery requires a checkpoint sealed against the derived project root's current HEAD");
   if (!isDeepStrictEqual(guardedSeal.snapshot, captureVerifiedWorkspace())) throw new Error("workflow publish-delivery source snapshot changed while sealing; re-run canonical review and verification");
   assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
@@ -1032,11 +1032,10 @@ function verifyRecordedProvisionalDelivery(
 }
 
 function assertOnlyOwnedDeliveryDrift(projectRoot: string, base: string, expectedFiles: string[]): void {
-  const listed = (args: string[]) => execFileSync("git", args, { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+  const listed = (args: string[]) => String(execTrustedGitSync(projectRoot, args))
     .split("\n").filter(Boolean);
   try {
-    const ancestor = execFileSync("git", ["merge-base", "--is-ancestor", base, "HEAD"], { cwd: projectRoot, stdio: "ignore" });
-    void ancestor;
+    execTrustedGitSync(projectRoot, ["merge-base", "--is-ancestor", base, "HEAD"]);
     const changed = [
       ...listed(["diff", "--name-only", `${base}..HEAD`, "--"]),
       ...listed(["diff", "--name-only", "HEAD", "--"]),

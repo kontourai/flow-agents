@@ -2,7 +2,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -18,7 +18,7 @@ import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
-import { assertTrustedGitAncestor, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
+import { assertTrustedGitAncestor, execTrustedGitSync, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 // #1315 review FIX-4 / #1316: the canonical-run capability is DECLARED by the run adapter that
 // owns it, and is now DERIVED from what each declaring kit binds rather than enumerated. Both
@@ -490,7 +490,7 @@ function validateBranchValue(value: string, source: string): void {
   // binary cannot hang or crash session creation.
   let result: { status: number | null; stderr: Buffer | string } | undefined;
   try {
-    execFileSync("git", ["check-ref-format", "--branch", value], { stdio: ["ignore", "ignore", "pipe"], timeout: 5000 });
+    execTrustedGitSync(process.cwd(), ["check-ref-format", "--branch", value], "utf8", 1024 * 1024, 5000);
     return; // exit 0 — git accepts the value; nothing further to check.
   } catch (err) {
     const spawnError = err as NodeJS.ErrnoException & { status?: number | null; stderr?: Buffer | string };
@@ -1934,14 +1934,14 @@ function repoIdentifier(): string {
   const explicit = safeRepoIdentifier(process.env.FLOW_AGENTS_REPO ?? "");
   if (explicit) return explicit;
   try {
-    const remote = execFileSync("git", ["config", "--get", "remote.origin.url"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const remote = String(execTrustedGitSync(process.cwd(), ["config", "--get", "remote.origin.url"]));
     const parsed = parseRepoRemote(remote);
     if (parsed) return parsed;
   } catch {
     // Keep sidecar writing independent of Git availability.
   }
   try {
-    const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const top = String(execTrustedGitSync(process.cwd(), ["rev-parse", "--show-toplevel"])).trim();
     if (top) return safeRepoIdentifier(path.basename(top)) || "workspace";
   } catch {
     // Fall through to cwd basename for non-Git workspaces.
@@ -2650,10 +2650,7 @@ function assertCurrentProviderWorktreeBranch(root: string, providerBranch: strin
   const projectRoot = path.dirname(path.dirname(root));
   let actualBranch: string;
   try {
-    actualBranch = execFileSync("git", ["-C", projectRoot, "symbolic-ref", "--quiet", "--short", "HEAD"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    actualBranch = String(execTrustedGitSync(projectRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
   } catch {
     die("ensure-session requires a named Git worktree branch for a provider-backed AssignmentStatus record");
   }
@@ -7086,7 +7083,7 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
 /** Derive the current git HEAD sha — null if unavailable (not in a repo, git absent). */
 function resolveCommitSha(projectRoot?: string): string | null {
   try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { ...(projectRoot ? { cwd: projectRoot } : {}), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    return String(execTrustedGitSync(projectRoot ?? process.cwd(), ["rev-parse", "HEAD"])).trim() || null;
   } catch {
     return null;
   }
@@ -7559,16 +7556,10 @@ function preflightFixHint(type: string): string {
 function classifyAncestry(repoRoot: string, ancestorSha: string, descendantSha: string): "ancestor" | "not-ancestor" | "undeterminable" {
   if (!ancestorSha || !descendantSha) return "undeterminable";
   try {
-    const res = spawnSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], {
-      cwd: repoRoot,
-      stdio: "ignore",
-    });
-    if (!res || res.error) return "undeterminable";
-    if (res.status === 0) return "ancestor";
-    if (res.status === 1) return "not-ancestor";
-    return "undeterminable"; // e.g. 128 (unknown commit, shallow clone missing the object, etc.)
-  } catch {
-    return "undeterminable";
+    execTrustedGitSync(repoRoot, ["merge-base", "--is-ancestor", ancestorSha, descendantSha]);
+    return "ancestor";
+  } catch (error) {
+    return (error as { status?: unknown }).status === 1 ? "not-ancestor" : "undeterminable";
   }
 }
 
@@ -7622,7 +7613,7 @@ function checkpointHeadAncestry(dir: string, repoRoot: string): { commitSha: str
     if (typeof commitSha !== "string" || !commitSha) return { commitSha: null, headSha: null, isAncestor: true, mismatchKind: "none" };
     let headSha = "";
     try {
-      headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      headSha = String(execTrustedGitSync(repoRoot, ["rev-parse", "HEAD"])).trim();
     } catch {
       headSha = "";
     }

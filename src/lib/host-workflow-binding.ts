@@ -511,6 +511,12 @@ export function bindHostWorkflowSession(
     payload,
     () => assertHostPaths(paths),
   );
+  const require = createRequire(import.meta.url);
+  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+  const { publishActorWorkflowScope } = require(path.join(packageRoot, "scripts", "hooks", "lib", "hook-workflow-scope.js")) as {
+    publishActorWorkflowScope(artifactRoot: string, actorKey: string, activate: boolean): void;
+  };
+  publishActorWorkflowScope(paths.artifactRoot, actorKey, true);
   return payload;
 }
 

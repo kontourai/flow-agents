@@ -38,7 +38,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { execTrustedGitSync } = require('./trusted-git.js');
 const { workflowTriggersFor } = require('./kit-catalog');
 const { resolveActor } = require('./actor-identity');
 
@@ -56,14 +56,7 @@ const DECLARED_REQUIRED_FIELDS = ['scope', 'reason', 'approved_by', 'declared_at
 
 function git(cwd, args) {
   try {
-    const res = spawnSync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      timeout: GIT_TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    if (!res || res.error || res.status !== 0 || typeof res.stdout !== 'string') return null;
-    return res.stdout;
+    return String(execTrustedGitSync(cwd, args, 'utf8', 1024 * 1024, GIT_TIMEOUT_MS));
   } catch {
     return null;
   }

@@ -19,6 +19,8 @@ const EXEMPTIONS = {
     'Baseline-red in #297: stop-goal-fit fixture emits no disputed-claim gate hint.',
   'evals/integration/test_init_overwrite_guard_power.sh':
     'Fault-injection power meta-suite (#1288): mutates guard sources in a throwaway git worktree and rebuilds ~10 times (minutes) to prove each regression test reds under six injections. Developer/reviewer-run evidence tool; its subject tests (src/cli/init-overwrite-guard.test.mjs) are CI-covered by the unit-test corpus.',
+  'evals/integration/test_trusted_git_namespace.sh':
+    'Host-specific Linux installed-consumer proof (#1424, Station #3124): requires a live user systemd bus and permitted unprivileged user/mount namespaces unavailable on standard hosted runners. Unsupported prerequisites return 77, never PASS. Real packed-package installed-consumer execution on brian-media is mandatory before release; portable Git, actor/worktree and capture regressions remain covered by the CI unit corpus.',
 
 };
 

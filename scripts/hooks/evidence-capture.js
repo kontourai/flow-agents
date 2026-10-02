@@ -59,10 +59,11 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { execTrustedGitSync } = require('./lib/trusted-git.js');
 const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
 const { resolveActor, isUnresolvedActor } = require('./lib/actor-identity.js');
 const { readOwnCurrentPointer } = require('./lib/current-pointer.js');
+const { resolveHookWorkflowScope } = require('./lib/hook-workflow-scope.js');
 const { isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
 const crypto = require('crypto');
 
@@ -188,6 +189,14 @@ function latestStateDir(flowAgentsDir) {
  */
 function resolveArtifactDir(root) {
   const actorKey = resolveActor(process.env).actor;
+  if (!isUnresolvedActor(actorKey)) {
+    const scope = resolveHookWorkflowScope(root);
+    if (scope.status === 'bound') return scope.artifactDir;
+    if (scope.status !== 'none') {
+      if (scope.reason) process.stderr.write(`[evidence-capture] workflow binding ${scope.status}: ${scope.reason}; command-log left unchanged\n`);
+      return null;
+    }
+  }
   for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
     const { payload: current } = readOwnCurrentPointer(flowAgentsDir, actorKey);
     if (current) {
@@ -322,80 +331,10 @@ function isFailureIndicated(error, response, output) {
   return false;
 }
 
-// Hook-side Git calls use a fixed executable, a bounded argv, and no ambient
-// system/global configuration. This mirrors the existing trusted hook pattern:
-// the command capture must not load repository-configured hooks or fsmonitor
-// helpers merely to observe the worktree that produced a host result.
-function trustedGitEnvironment() {
-  return {
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-    GIT_NO_REPLACE_OBJECTS: '1',
-    LANG: 'C',
-    LC_ALL: 'C',
-    PATH: process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd;C:\\Windows\\System32;C:\\Windows' : '/run/current-system/sw/bin:/usr/bin:/bin:/usr/sbin:/sbin',
-  };
-}
-
-function trustedGitCandidates() {
-  if (process.platform === 'darwin') return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'];
-  if (process.platform === 'win32') return ['C:\\Program Files\\Git\\cmd\\git.exe'];
-  return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/usr/local/bin/git'];
-}
-
-function trustedGitIdentity(candidate) {
-  const resolved = fs.realpathSync(candidate);
-  const stat = fs.statSync(resolved);
-  if (!path.isAbsolute(resolved) || !stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) throw new Error('untrusted Git executable');
-  if (process.platform !== 'win32') {
-    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error('untrusted Git executable ownership');
-    for (let cursor = path.dirname(resolved);;) {
-      const parent = fs.statSync(cursor);
-      if (!parent.isDirectory() || parent.uid !== 0 || (parent.mode & 0o022) !== 0) throw new Error('untrusted Git executable parent');
-      const next = path.dirname(cursor);
-      if (next === cursor) break;
-      cursor = next;
-    }
-  }
-  return { candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode };
-}
-
-function resolveTrustedGitExecutable() {
-  for (const candidate of trustedGitCandidates()) {
-    try { return trustedGitIdentity(candidate); } catch {}
-  }
-  return null;
-}
-
-function revalidateTrustedGit(identity) {
-  const current = trustedGitIdentity(identity.candidate);
-  return current.device === identity.device && current.inode === identity.inode && current.size === identity.size
-    && current.mtimeMs === identity.mtimeMs && current.mode === identity.mode;
-}
-
 function runTrustedGit(root, args, maxOutput) {
   try {
-    const executable = resolveTrustedGitExecutable();
-    if (!executable) return null;
-    const hardenedArgs = args[0] === 'diff'
-      ? ['diff', '--no-ext-diff', '--no-textconv', ...args.slice(1)]
-      : args;
-    const result = spawnSync(executable.path, [
-      '--no-replace-objects',
-      '-c', 'core.fsmonitor=false',
-      '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
-      '-c', 'diff.external=',
-      '-C', root,
-      ...hardenedArgs,
-    ], {
-      encoding: 'buffer',
-      env: trustedGitEnvironment(),
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: GIT_TIMEOUT_MS,
-      maxBuffer: maxOutput + 1,
-    });
-    if (!result || result.error || result.signal || result.status !== 0 || !Buffer.isBuffer(result.stdout) || result.stdout.length > maxOutput || !revalidateTrustedGit(executable)) return null;
-    return result.stdout;
+    const output = execTrustedGitSync(root, args, 'buffer', maxOutput + 1, GIT_TIMEOUT_MS);
+    return Buffer.isBuffer(output) && output.length <= maxOutput ? output : null;
   } catch {
     return null;
   }
@@ -499,13 +438,25 @@ function run(rawInput) {
     const command = input.tool_input && input.tool_input.command;
     if (!isCommandTool(input.tool_name, command)) return rawInput;
 
-    const root = resolveCanonicalGitRoot(input.cwd || process.cwd());
+    // Host tool working directories describe the command's actual workspace.
+    // A bound workflow elsewhere must never silently replace this observation.
+    const toolCwd = input.tool_input && (input.tool_input.workdir || input.tool_input.cwd);
+    if (toolCwd !== undefined && (typeof toolCwd !== 'string' || !path.isAbsolute(toolCwd))) {
+      process.stderr.write('[evidence-capture] command working directory uncertain; command-log left unchanged\n');
+      return rawInput;
+    }
+    const root = resolveCanonicalGitRoot(toolCwd || input.cwd || process.cwd());
     if (!root) {
       process.stderr.write('[evidence-capture] Git observation uncertain; command-log left unchanged\n');
       return rawInput;
     }
     const artifactDir = resolveArtifactDir(root);
     if (!artifactDir) return rawInput; // no active workflow — nothing to anchor the log to
+    const scope = resolveHookWorkflowScope(input.cwd || process.cwd());
+    if (scope.status === 'bound' && fs.realpathSync(scope.projectRoot) !== fs.realpathSync(root)) {
+      process.stderr.write('[evidence-capture] command workspace differs from the bound workflow; command-log left unchanged\n');
+      return rawInput;
+    }
 
     const { exitCode, observedResult } = observeResult({
       tool_response: input.tool_response,
@@ -600,7 +551,6 @@ module.exports = {
   isCommandTool,
   findRepoRoot,
   resolveCanonicalGitRoot,
-  resolveTrustedGitExecutable,
   // Chain helpers exported for testing and gate verification.
   canonicalJsonForChain,
   computeChainHash,

@@ -14,8 +14,8 @@ fi
 
 echo "=== Kit observability contribution contract ==="
 npm run build --silent
-node --test src/cli/kit-observability-contract.test.mjs
-node --test src/cli/kit-observability-conformance.test.mjs
+node --test --import ./src/cli/unit-test-state.mjs src/cli/kit-observability-contract.test.mjs
+node --test --import ./src/cli/unit-test-state.mjs src/cli/kit-observability-conformance.test.mjs
 
 node --input-type=module -e '
 import { KIT_OBSERVABILITY_CONFORMANCE_VECTORS, runKitObservabilityConformance } from "@kontourai/flow-agents/kit-observability-conformance";

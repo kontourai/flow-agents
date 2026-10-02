@@ -148,6 +148,15 @@ function readJson(file) {
  * @returns {{file: string, payload: object, mtimeMs: number}|null}
  */
 function actorScopedWorkflowState(root, actorKey) {
+  const { resolveHookWorkflowScope } = require('./lib/hook-workflow-scope.js');
+  const scope = resolveHookWorkflowScope(root);
+  if (scope.status === 'bound') {
+    const file = path.join(scope.artifactDir, 'state.json');
+    return ACTIVE_STATE_STATUSES.has(scope.state.status)
+      ? { file, payload: scope.state, mtimeMs: fs.statSync(file).mtimeMs }
+      : null;
+  }
+  if (scope.status !== 'none') return null;
   for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
     const { payload: current } = readOwnCurrentPointer(flowAgentsDir, actorKey);
     if (!current) continue;
@@ -811,7 +820,12 @@ function run(rawInput, _options = {}, fencedRunId = null) {
   try {
     const input = JSON.parse(rawInput);
     const event = input.hook_event_name || '';
-    const root = findRepoRoot(input.cwd || process.cwd());
+    const { resolveHookWorkflowScope } = require('./lib/hook-workflow-scope.js');
+    const scope = resolveHookWorkflowScope(input.cwd || process.cwd());
+    if (['invalid', 'ambiguous'].includes(scope.status)) {
+      return `${rawInput}\n\n---\nWORKFLOW BINDING ${scope.status.toUpperCase()}: ${safeStateText(scope.reason)}. Resolve the selected binding through its public workflow interface.\n---`;
+    }
+    const root = scope.projectRoot || findRepoRoot(input.cwd || process.cwd());
     // #1172: reset the STATE hash-guard at every SessionStart, whatever the `source`
     // (startup/resume/compact) and whether or not an active session exists. Done before any
     // steering is composed so a SessionStart that emits nothing still clears the record.

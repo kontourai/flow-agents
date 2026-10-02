@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execTrustedGitSync } from "./trusted-git.js";
 
 export const KONTOURAI_DIR = ".kontourai";
 export const FLOW_AGENTS_RUNTIME_SUBDIR = "flow-agents";
@@ -56,7 +56,7 @@ export function claudeCodeGlobalDest(env: NodeJS.ProcessEnv = process.env, homed
  * `--git-common-dir` resolves to `.git` under cwd itself, so `path.dirname()` of its absolute
  * form is cwd — byte-identical to today's plain `path.resolve(cwd, ...)` result.
  *
- * #413 iteration-2 Fix 3: strips the ambient GIT_DIR/GIT_COMMON_DIR/GIT_WORK_TREE/
+ * Shared trusted Git disables ambient GIT_DIR/GIT_COMMON_DIR/GIT_WORK_TREE/
  * GIT_CEILING_DIRECTORIES env vars before shelling out. Any of these, if set in the calling
  * process's environment (e.g. leaked from an outer `git rebase`/hook invocation, or a stray
  * export in a dev shell), can silently redirect `--git-common-dir` to resolve a DIFFERENT
@@ -66,17 +66,7 @@ export function claudeCodeGlobalDest(env: NodeJS.ProcessEnv = process.env, homed
  */
 export function resolveSharedRepoRoot(cwd: string): string | null {
   try {
-    const env = { ...process.env };
-    delete env["GIT_DIR"];
-    delete env["GIT_COMMON_DIR"];
-    delete env["GIT_WORK_TREE"];
-    delete env["GIT_CEILING_DIRECTORIES"];
-    const out = execFileSync("git", ["rev-parse", "--git-common-dir"], {
-      cwd,
-      env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    const out = String(execTrustedGitSync(cwd, ["rev-parse", "--git-common-dir"])).trim();
     if (!out) return null;
     const absoluteCommonDir = path.resolve(cwd, out);
 
@@ -108,7 +98,7 @@ export function resolveSharedRepoRoot(cwd: string): string | null {
     // `/var` (a symlink to `/private/var`). AC6's byte-identical-to-plain-cwd guarantee catches
     // exactly that, and it caught it here. Relocating live coordination state is a migration, not a
     // bug fix, so it stays out of this change and open on #1055.
-    const coreWorktree = gitCoreWorktree(absoluteCommonDir, env);
+    const coreWorktree = gitCoreWorktree(absoluteCommonDir);
     if (coreWorktree) return path.resolve(absoluteCommonDir, coreWorktree);
     return path.dirname(absoluteCommonDir);
   } catch {
@@ -124,13 +114,9 @@ export function resolveSharedRepoRoot(cwd: string): string | null {
  * Never throws: git absent, an unreadable config, or an unset key all yield null so the caller
  * falls back to the historical `path.dirname` behaviour rather than failing.
  */
-function gitCoreWorktree(commonDir: string, env: NodeJS.ProcessEnv): string | null {
+function gitCoreWorktree(commonDir: string): string | null {
   try {
-    const value = execFileSync("git", ["--git-dir", commonDir, "config", "--get", "core.worktree"], {
-      env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    const value = String(execTrustedGitSync(commonDir, ["config", "--get", "core.worktree"])).trim();
     return value || null;
   } catch {
     return null;

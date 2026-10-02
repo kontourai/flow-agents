@@ -426,13 +426,26 @@ test("provider pickup derives one exact branch-bound claim and start plan withou
     );
     const beforeBranchSwitch = snapshotTree(path.join(repo, ".kontourai"));
     execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/branch-switch"]);
+    const fakeBin = path.join(repo, "fake-git-bin");
+    const fakeMarker = path.join(repo, "fake-git-used");
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(path.join(fakeBin, "git"), `#!${process.execPath}
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(fakeMarker)}, "invoked\\n");
+process.stdout.write("agent/provider-pickup\\n");
+`, { mode: 0o755 });
+    const hostileEnv = { ...process.env, FLOW_AGENTS_ACTOR: "pickup-runtime-actor", PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}` };
+    const forgedBranch = spawnSync("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { encoding: "utf8", env: hostileEnv });
+    assert.equal(forgedBranch.stdout.trim(), "agent/provider-pickup", "the repository-local executable can forge the provider-authorized branch");
+    fs.unlinkSync(fakeMarker);
     const switched = spawnSync(process.execPath, [
       "build/src/cli.js",
       ...pickup.operations.start_workflow.argv.slice(1),
-    ], { encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: "pickup-runtime-actor" } });
+    ], { encoding: "utf8", env: hostileEnv });
     assert.notEqual(switched.status, 0);
     assert.match(switched.stderr, /actual Git worktree branch .* disagrees with validated provider assignment branch/);
     assert.deepEqual(snapshotTree(path.join(repo, ".kontourai")), beforeBranchSwitch, "branch disagreement must not mirror ownership or create session state");
+    assert.equal(fs.existsSync(fakeMarker), false, "public startup branch authority must not execute repository-selected Git");
     execFileSync("git", ["-C", repo, "symbolic-ref", "HEAD", "refs/heads/agent/provider-pickup"]);
     const started = spawnSync(process.execPath, [
       "build/src/cli.js",

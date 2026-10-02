@@ -4088,10 +4088,6 @@ execFileSync(process.execPath, [path.join(root, 'scripts', 'hooks', 'evidence-ca
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 const stop = require(path.join(root, 'scripts', 'hooks', 'stop-goal-fit.js'));
-const executable = stop.resolveTrustedWorkspaceGitExecutable();
-if (!executable || !path.isAbsolute(executable.path) || !['/usr/bin/git', '/run/current-system/sw/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git', 'C:\\Program Files\\Git\\cmd\\git.exe'].includes(executable.candidate)) {
-  throw new Error('trusted Git resolver did not select a fixed allowlisted executable');
-}
 const snapshot = stop.currentCanonicalWorkspaceSnapshot(repo);
 if (!snapshot || snapshot.worktree_clean !== true) throw new Error('could not capture the clean canonical snapshot');
 const logFile = path.join(artifact, 'command-log.jsonl');

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +11,58 @@ import { makeFixtureDir, makeFixtureDirAsync, reclaimFixtureDir } from "./fixtur
 
 const HELPER = fileURLToPath(new URL("./fixture-temp-dir.mjs", import.meta.url));
 const JOURNAL_ROOT = path.join(os.tmpdir(), ".flow-agents-fixture-runs");
+
+test("unit workers isolate global state while CLI children inherit fixture overrides", () => {
+  const root = makeFixtureDir("flow-agents-unit-state-harness-");
+  const preload = fileURLToPath(new URL("./unit-test-state.mjs", import.meta.url));
+  const files = ["first", "second"].map((name) => {
+    const file = path.join(root, `${name}.test.mjs`);
+    fs.writeFileSync(file, `
+import test from "node:test";
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { makeFixtureDir } from ${JSON.stringify(HELPER)};
+test("state is inherited, not actor impersonation", () => {
+  const initialState = process.env.XDG_STATE_HOME;
+  const childState = execFileSync(process.execPath, ["--eval", "process.stdout.write(process.env.XDG_STATE_HOME)"], { encoding: "utf8" });
+  const explicitState = makeFixtureDir("flow-agents-unit-explicit-state-");
+  process.env.XDG_STATE_HOME = explicitState;
+  const explicitChild = execFileSync(process.execPath, ["--eval", "process.stdout.write(process.env.XDG_STATE_HOME)"], { encoding: "utf8" });
+  fs.writeFileSync(${JSON.stringify(path.join(root, `${name}.json`))}, JSON.stringify({ initialState, childState, explicitState, explicitChild,
+    codexThread: process.env.CODEX_THREAD_ID ?? null, actor: process.env.FLOW_AGENTS_ACTOR ?? null }));
+});
+`);
+    return file;
+  });
+  const sharedState = path.join(root, "batch-state");
+  fs.mkdirSync(sharedState);
+  const { NODE_TEST_CONTEXT: _testContext, ...driverEnv } = process.env;
+  const unisolated = spawnSync(process.execPath, ["--test", ...files], {
+    env: { ...driverEnv, XDG_STATE_HOME: sharedState }, encoding: "utf8", timeout: 20_000,
+  });
+  assert.equal(unisolated.status, 0, `${unisolated.stdout}\n${unisolated.stderr}`);
+  for (const name of ["first", "second"]) {
+    const record = JSON.parse(fs.readFileSync(path.join(root, `${name}.json`), "utf8"));
+    assert.equal(record.initialState, sharedState, "without the fixture boundary both workers inherit the same global scope");
+  }
+  const result = spawnSync(process.execPath, ["--import", preload, "--test", ...files], {
+    env: { ...driverEnv, XDG_STATE_HOME: sharedState }, encoding: "utf8", timeout: 20_000,
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const records = ["first", "second"].map((name) => JSON.parse(fs.readFileSync(path.join(root, `${name}.json`), "utf8")));
+  assert.notEqual(records[0].initialState, records[1].initialState, "files with the same inherited actor must not share global workflow discovery state");
+  for (const record of records) {
+    assert.notEqual(record.initialState, sharedState);
+    assert.equal(record.childState, record.initialState, "CLI children continue the file's scope");
+    assert.equal(record.explicitChild, record.explicitState, "fixture-local explicit state overrides remain honored");
+    assert.equal(record.codexThread, process.env.CODEX_THREAD_ID ?? null);
+    assert.equal(record.actor, process.env.FLOW_AGENTS_ACTOR ?? null);
+    assert.equal(fs.existsSync(record.initialState), false, "the worker reclaims its owned global-state fixture on exit");
+    assert.equal(fs.existsSync(record.explicitState), false);
+  }
+  assert.equal(fs.existsSync(sharedState), true, "caller-owned batch state is preserved");
+});
 
 // Every reclamation claim is about what survives a process, so the assertions drive real child
 // processes and inspect the filesystem afterwards. An in-process assertion could only observe

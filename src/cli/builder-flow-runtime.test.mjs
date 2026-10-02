@@ -502,6 +502,40 @@ test("terminal delivery accepts only its own intact provisional CI transport as 
   );
   fs.writeFileSync(bundle, "provisional bundle");
 
+  const deliveryHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  fs.writeFileSync(path.join(root, "implementation.ts"), "export const changedAfterVerification = true;\n");
+  run(["add", "implementation.ts"]);
+  run(["commit", "-m", "source drift after signed provisional delivery"]);
+  const fakeBin = path.join(session, "fake-git-bin");
+  const fakeMarker = path.join(session, "fake-git-used");
+  fs.mkdirSync(fakeBin);
+  const companionPaths = deliveryFiles.map((file) => `delivery/${slug}/${file.path}`).join("\n");
+  fs.writeFileSync(path.join(fakeBin, "git"), `#!${process.execPath}
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(fakeMarker)}, "invoked\\n");
+const args = process.argv.slice(2);
+if (args[0] === "diff" && args.some((arg) => arg.includes("..HEAD"))) process.stdout.write(${JSON.stringify(`${companionPaths}\n`)});
+`, { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${fakeBin}${path.delimiter}${previousPath ?? ""}`;
+  try {
+    assert.equal(execFileSync("git", ["diff", "--name-only", `${base}..HEAD`, "--"], { cwd: root, encoding: "utf8" }).trim(), companionPaths, "the repository-local Git hides the real source change");
+    fs.unlinkSync(fakeMarker);
+    assert.throws(
+      () => assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(session, root, slug, verifyFixtureCompletion),
+      /exactly this session's recorded provisional delivery companions/,
+      "post-verification source drift remains a refusal with hostile PATH",
+    );
+    assert.equal(fs.existsSync(fakeMarker), false, "delivery-only authority must not invoke repository-selected Git");
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+  run(["reset", "--hard", deliveryHead]);
+  assert.deepEqual(assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(session, root, slug, verifyFixtureCompletion), {
+    version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: base,
+  }, "restoring only this disposable fixture's source returns the verified delivery-only outcome");
+
   fs.mkdirSync(path.join(root, "delivery", "other-session"), { recursive: true });
   fs.writeFileSync(path.join(root, "delivery", "other-session", "trust.bundle"), "concurrent transport");
   run(["add", "delivery/other-session"]);
@@ -3413,6 +3447,52 @@ async function writeAndSync(session, entries) {
   writeBundle(session.sessionDir, entries);
   return syncBuilderFlowSession({ sessionDir: session.sessionDir });
 }
+
+test("public next action separates producer work, evidence submission and status observation", async () => {
+  const session = makeGitBackedSession("public-action-responsibility");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const pending = await workflowJson(["status", "--session-dir", session.sessionDir]);
+  const action = pending.next_action;
+  assert.equal(pending.current_step, "pull-work");
+  assert.equal(action.executor, "agent");
+  assert.equal(action.command_role, "synchronization");
+  assert.equal(action.command, action.sync_command);
+  assert.match(action.sync_command, /'workflow' 'status'/);
+  assert.match(action.summary, /agent must execute `pull-work`/);
+  assert.match(action.summary, /continue orchestration/);
+  assert.match(action.summary, /Status does not execute skills or submit evidence/);
+  assert.equal(Object.hasOwn(action, "external_work_running"), false, "status has not observed any external driver");
+  assert.equal(action.execution_action.executor, "agent");
+  assert.deepEqual(action.execution_action.skills.map((skill) => skill.id), ["pull-work"]);
+  const skill = action.execution_action.skills[0];
+  assert.equal(skill.package.version, PACKAGE_VERSION);
+  assert.equal(createHash("sha256").update(fs.readFileSync(path.resolve(import.meta.dirname, "../..", skill.path))).digest("hex"), skill.sha256, "the projected producer source is verifiable before execution");
+  assert.deepEqual(action.evidence_submission.unresolved_expectation_ids, ["selected-work"]);
+  assert.equal(action.evidence_submission.adapter_evidence_is_gate_evidence, false);
+  assert.deepEqual(action.evidence_submission.schemas.evidence_ref_json.examples.find((entry) => entry.kind === "artifact"), { kind: "artifact", file: "<project-relative-artifact-path>", summary: "<what this artifact proves>" });
+  const target = action.execution_action.artifact_targets.find((artifact) => artifact.kind === "file");
+  assert.equal(fs.existsSync(path.join(session.projectRoot, target.path)), false, "status did not produce the missing artifact");
+
+  const assignment = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+  fs.writeFileSync(path.join(session.projectRoot, target.path), `# Pull Work\n\nSelected: ${assignment.work_item_ref}\nActor: ${assignment.actor_key}\nStatus: ${assignment.status}\n`);
+  const produced = await workflowJson(["status", "--session-dir", session.sessionDir]);
+  assert.equal(produced.current_step, "pull-work", "producing an artifact alone is not gate submission");
+  assert.deepEqual(produced.next_action.evidence_submission.unresolved_expectation_ids, ["selected-work"]);
+
+  const mutation = action.evidence_submission.mutations.find((entry) => entry.interface === "workflow.evidence");
+  assert.equal(mutation.expectation_id, "selected-work");
+  const args = mutation.argv.slice(1).filter((arg) => arg !== "--json");
+  args[args.indexOf("--session-dir") + 1] = session.sessionDir;
+  const recorded = await workflowJson([
+    ...args, "--status", "pass", "--summary", "Selected work and ownership were inspected and recorded.",
+    "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: target.path, summary: "Observed selected work and assignment ownership." }),
+  ]);
+  assert.equal(recorded.attached, true);
+  const advanced = await workflowJson(["status", "--session-dir", session.sessionDir]);
+  assert.equal(advanced.current_step, "design-probe", "public evidence submission advances the actual canonical run");
+  assert.deepEqual(advanced.next_action.execution_action.skills.map((entry) => entry.id), ["pickup-probe"]);
+  assert.deepEqual(advanced.next_action.evidence_submission.unresolved_expectation_ids, ["pickup-probe-readiness", "probe-decisions-or-accepted-gaps"]);
+});
 
 test("small-model client can start and advance from projected actions without choosing Flow steps", async () => {
   const session = makeSession();

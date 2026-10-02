@@ -353,7 +353,19 @@ Goal Fit is the local stop condition before a final answer. The working artifact
 
 The `stop-goal-fit` hook also checks the latest workflow artifact and warns when the session is about to stop with missing `Definition Of Done`, incomplete Goal Fit, invalid sidecars, or open final acceptance work. Set `FLOW_AGENTS_GOAL_FIT_STRICT=true` to block incomplete local delivery. Set `FLOW_AGENTS_REQUIRE_SIDECARS=true` when structured workflow state should be mandatory. Set `FLOW_AGENTS_REQUIRE_CRITIQUE=true` when critique records should also be mandatory.
 
-For an active Builder run, inspect and record evidence through the public CLI:
+For an active Builder run, the agent drives the public CLI: execute the required skill,
+produce its artifacts, submit the bound
+evidence, inspect canonical status, and continue from the resulting action until completion or
+a concrete blocker. Starting Builder creates governed state; it does not start an external worker.
+`next_action.execution_action` identifies the producer skills and artifact targets;
+`evidence_submission` supplies the public mutations, unresolved expectations and evidence schemas.
+`sync_command` is a status observation command; legacy `command` is its alias with
+`command_role: synchronization`. `workflow evidence` records and synchronizes evidence for Flow
+evaluation. Status only observes that result: it does not execute skills, submit evidence or
+advance an unsatisfied gate. A produced artifact still needs its evidence submitted. A delegated
+turn's completion hands responsibility back to the orchestrator, which must inspect and continue;
+waiting for a notification requires an actual running task and a known completion mechanism.
+See [the public CLI contract](./public-workflow-cli.md) for the projected fields and bounded driver.
 
 ```bash
 flow-agents workflow status --session-dir .kontourai/flow-agents/<slug> --json
@@ -479,6 +491,11 @@ recovery boundaries; it is not a privilege boundary against a malicious process 
 same user, which can directly rewrite runtime state, candidates, logs, locks, or executable code.
 Hostile same-user ABA namespace manipulation and direct same-user state forgery are explicitly
 out of scope and `NOT_VERIFIED`. No native helper is required for that excluded threat model.
+
+Local Git inspection follows the [system Git provenance policy](./system-git-provenance.md).
+It supports the documented Linux single-caller namespaces without treating an overflow UID as
+proof of host-root ownership. The signed lifecycle coordinator, privileged helper and verification
+keys retain their separate strict authority checks; local inspection support does not weaken them.
 
 If Flow retains an evidence `*.candidate` receipt or the local transaction retains a staged
 candidate, treat it as recovery evidence rather than a retry instruction: do not promote, rename,

@@ -1636,6 +1636,48 @@ test("canonical Flow state rejects an unknown definition step and a replaced run
   }
 });
 
+test("canonical Flow hook validates the published ESM API without Node loader injection", async () => {
+  const flow = await import("@kontourai/flow");
+  const root = makeFixtureDir("continuation-canonical-public-esm-");
+  const slug = "canonical-public-esm";
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", slug);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const definitionFile = new URL("../../kits/builder/flows/build.flow.json", import.meta.url);
+  await flow.startRun(definitionFile.pathname, { cwd: root, runId: slug, params: { subject: "local:canonical-public-esm" } });
+  const canonical = await flow.loadRun(slug, root);
+  const stateFile = path.join(root, ".kontourai", "flow", "runs", slug, "state.json");
+  const originalState = fs.readFileSync(stateFile);
+  const marker = path.join(root, "loader-executed");
+  const loader = path.join(root, "caller-loader.cjs");
+  fs.writeFileSync(loader, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "injected");`);
+  const originalOptions = process.env.NODE_OPTIONS;
+  const originalNodePath = process.env.NODE_PATH;
+  process.env.NODE_OPTIONS = `--require ${JSON.stringify(loader)}`;
+  process.env.NODE_PATH = root;
+  try {
+    const loaded = stopGoalFit.canonicalFlowState(root, sessionDir);
+    assert.equal(loaded.error, null, "published ESM validation must work on the supported Node floor");
+    assert.equal(loaded.state.run_id, slug);
+    assert.equal(loaded.state.current_step, canonical.state.current_step);
+    assert.equal(loaded.state.definition_digest, flow.definitionDigest(canonical.definition));
+    assert.equal(fs.existsSync(marker), false, "canonical validation must not execute a caller-provided Node preload");
+
+    fs.writeFileSync(stateFile, JSON.stringify({ ...canonical.state, run_id: "forged-run" }));
+    await assert.rejects(() => flow.loadRun(slug, root), undefined, "the public Flow validator refuses this state");
+    const rejected = stopGoalFit.canonicalFlowState(root, sessionDir);
+    assert.equal(rejected.state, null);
+    assert.match(rejected.error, /unavailable or malformed/);
+    assert.equal(fs.existsSync(marker), false);
+    fs.writeFileSync(stateFile, originalState);
+    assert.equal(stopGoalFit.canonicalFlowState(root, sessionDir).error, null, "restoring the actual public run restores validation");
+  } finally {
+    if (originalOptions === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = originalOptions;
+    if (originalNodePath === undefined) delete process.env.NODE_PATH;
+    else process.env.NODE_PATH = originalNodePath;
+  }
+});
+
 test("canonical Flow state rejects every Flow-schema-invalid amendment before resolving its successor", async (t) => {
   const root = makeFixtureDir("continuation-canonical-amendment-schema-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -1808,10 +1850,17 @@ test("Stop keeps a base-valid signed session selected across paused and complete
     actor: process.env.FLOW_AGENTS_ACTOR,
     secret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET,
     runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID,
+    stateHome: process.env.XDG_STATE_HOME,
   };
   process.env.FLOW_AGENTS_ACTOR = "pointer-actor";
   process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET = issued.turnSecret;
   process.env.FLOW_AGENTS_CONTINUATION_RUN_ID = issued.runId;
+  process.env.XDG_STATE_HOME = path.join(root, "runtime-state");
+  const pointers = require("../../scripts/hooks/lib/current-pointer.js");
+  const locator = pointers.perActorCurrentFile(path.join(process.env.XDG_STATE_HOME, "flow-agents", "workflow-scopes"), "pointer-actor");
+  fs.mkdirSync(path.dirname(locator), { recursive: true });
+  fs.writeFileSync(locator, JSON.stringify({ schema_version: "1.0", actor_key: "pointer-actor",
+    artifact_root: artifactRoot, artifact_dir: unrelatedSlug, binding_id: "stale-ordinary-generation" }));
   try {
     fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify(canonicalState("active")));
     fs.writeFileSync(path.join(exactDir, "state.json"), JSON.stringify(sidecar(exactSlug, "active", "delivered")));
@@ -1832,10 +1881,15 @@ test("Stop keeps a base-valid signed session selected across paused and complete
     }
     const liveness = path.join(artifactRoot, "liveness", "events.jsonl");
     assert.equal(fs.existsSync(liveness) ? fs.readFileSync(liveness, "utf8").includes('"type":"release"') : false, false);
+    process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET = "Z".repeat(43);
+    const unauthorized = await stopGoalFit.analyze(root);
+    assert.equal(unauthorized.blocking, true, "an unvalidated turn secret cannot override the stale ordinary binding");
+    assert.match(JSON.stringify(unauthorized.warnings), /workflow binding is invalid/);
   } finally {
     if (prior.actor === undefined) delete process.env.FLOW_AGENTS_ACTOR; else process.env.FLOW_AGENTS_ACTOR = prior.actor;
     if (prior.secret === undefined) delete process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET; else process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET = prior.secret;
     if (prior.runId === undefined) delete process.env.FLOW_AGENTS_CONTINUATION_RUN_ID; else process.env.FLOW_AGENTS_CONTINUATION_RUN_ID = prior.runId;
+    if (prior.stateHome === undefined) delete process.env.XDG_STATE_HOME; else process.env.XDG_STATE_HOME = prior.stateHome;
   }
 });
 
