@@ -75,21 +75,28 @@ test("late compound and delegated npm post hooks cannot confirm a skipped-only N
 });
 
 test("output hashes cover omitted middle bytes while retained diagnostics remain bounded", async () => {
-  const root = gitFixture();
-  fs.writeFileSync(path.join(root, "emit.mjs"), 'process.stdout.write("h".repeat(80000) + process.argv[2] + "t".repeat(80000));\n');
-  execFileSync("git", ["add", "."], { cwd: root });
-  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "hash fixture"], { cwd: root });
-  const results = [];
-  for (const middle of ["A", "B"]) {
-    const result = await runObservedCommand(`node emit.mjs ${middle}`, root);
-    const stdout = createHash("sha256").update("h".repeat(80000) + middle + "t".repeat(80000)).digest();
-    const stderr = createHash("sha256").digest();
-    const expected = createHash("sha256").update("stdout\0").update(stdout).update("stderr\0").update(stderr).digest("hex");
-    assert.equal(result.output_sha256, expected);
-    results.push(result);
+  const priorShellopts = process.env.SHELLOPTS;
+  delete process.env.SHELLOPTS;
+  try {
+    const root = gitFixture();
+    fs.writeFileSync(path.join(root, "emit.mjs"), 'process.stdout.write("h".repeat(80000) + process.argv[2] + "t".repeat(80000));\n');
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "hash fixture"], { cwd: root });
+    const results = [];
+    for (const middle of ["A", "B"]) {
+      const result = await runObservedCommand(`node emit.mjs ${middle}`, root);
+      const stdout = createHash("sha256").update("h".repeat(80000) + middle + "t".repeat(80000)).digest();
+      const stderr = createHash("sha256").digest();
+      const expected = createHash("sha256").update("stdout\0").update(stdout).update("stderr\0").update(stderr).digest("hex");
+      assert.equal(result.output_sha256, expected);
+      results.push(result);
+    }
+    assert.equal(results[0].output, results[1].output);
+    assert.notEqual(results[0].output_sha256, results[1].output_sha256);
+  } finally {
+    if (priorShellopts === undefined) delete process.env.SHELLOPTS;
+    else process.env.SHELLOPTS = priorShellopts;
   }
-  assert.equal(results[0].output, results[1].output);
-  assert.notEqual(results[0].output_sha256, results[1].output_sha256);
 });
 
 test("a watchdog expiry cannot confirm a child that handles termination by exiting zero", async () => {
