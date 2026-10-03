@@ -1474,6 +1474,9 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       process.stderr.write(`[trust-reconcile]   FAIL: ${cmd} (TIMED OUT after ${result.timeoutMs}ms — this is a timeout kill, not a real command failure; if this command is a legitimately slow check, raise TRUST_RECONCILE_COMMAND_TIMEOUT_MS)\n`);
     } else {
       process.stderr.write(`[trust-reconcile]   FAIL: ${cmd} (exit ${result.exitCode})\n`);
+      if (result.stdout) {
+        process.stderr.write(`[trust-reconcile]   --- captured stdout ---\n${result.stdout}\n[trust-reconcile]   ---\n`);
+      }
       if (result.stderr) {
         const lines = result.stderr.trim().split('\n');
         const tail = lines.slice(-5).join('\n');
