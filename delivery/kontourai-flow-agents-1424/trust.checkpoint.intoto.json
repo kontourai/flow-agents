@@ -4,7 +4,7 @@
     {
       "name": "trust.checkpoint.json",
       "digest": {
-        "sha256": "3fddab3c56defdd6fe7df02ae30bf7189e69c9c7c4739ea2f8109f91ac2cd3f8"
+        "sha256": "5d8c6aa7792e7fc8f2a45808e1e3daa42423049487a0efb160c9dac0640e06b9"
       }
     }
   ],
@@ -21,8 +21,8 @@
         "claimType": "builder.pull-work.selected",
         "fieldOrBehavior": "Work Item kontourai/flow-agents#1424 is durably assigned to the active workflow actor (assignment sha256:ddf1480212afa75b4be5301074d71a946ac2f167523d457a9e30df49cd3515cf).",
         "value": "pass",
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "updatedAt": "2026-10-03T14:24:08.045Z",
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "updatedAt": "2026-10-03T16:46:41.069Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
         "metadata": {
@@ -82,8 +82,8 @@
         "claimType": "builder.design-probe.pickup-readiness",
         "fieldOrBehavior": "Source-backed probe confirms goal, scope, risks, baseline, ownership and planning readiness.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "updatedAt": "2026-10-03T14:24:08.045Z",
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "updatedAt": "2026-10-03T16:46:41.069Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
         "metadata": {
@@ -133,8 +133,8 @@
         "claimType": "builder.design-probe.decisions",
         "fieldOrBehavior": "User-approved repair decisions, non-goals and recovery boundaries are explicit.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "updatedAt": "2026-10-03T14:24:08.045Z",
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "updatedAt": "2026-10-03T16:46:41.069Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
         "metadata": {
@@ -184,8 +184,8 @@
         "claimType": "builder.plan.implementation",
         "fieldOrBehavior": "User-directed value repair preserves AC1-AC5 and adds measured AC6 for early admission, real terminal proof, stable review inputs and compatible receipt reuse. Consume exact approved existing policy/design work; add no new mandatory gates or rollout flow; preserve actual final package/Station outcomes.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "updatedAt": "2026-10-03T14:24:08.045Z",
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "updatedAt": "2026-10-03T16:46:41.069Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.plan.implementation:attestation",
         "metadata": {
@@ -330,15 +330,15 @@
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.961df202-preservespublished24e-integration-strictrootclosureguards-exactpinoracle-keepernowmatchesverified5-1-3-tuple-independentp2andfullsolefailure-retained-actualkeeper12-12pass-stablecriteria-preserved-sourceactualreview-readinessrequired-gate-visit-2026-10-03t12-55-19-815z",
+        "id": "kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.bcf313fe-isolates-hash-fixture-from-ci-inherited-shellopts-restoresfinally-retains-independentfull-output-middle-byte-assertions-exactubuntu-warning-bytes-reproducehostedhash-mismatch-observercorrectlyhashesstderr-owning19-19pass-no-productionobserver-deadline-pipefail-privacy-weakening-freshreview-currentrequiredverification-follows-gate-visit-2026-10-03t16-37-29-546z",
         "subjectType": "change",
         "subjectId": "kontourai-flow-agents-1424/gate-claim-implementation-scope",
         "facet": "flow-agents.workflow",
         "claimType": "builder.execute.scope",
-        "fieldOrBehavior": "961df202 preservespublished24e integration+strictrootclosureguards; exactpinoracle keepernowmatchesverified5.1.3 tuple, independentP2andfullsolefailure retained, actualkeeper12/12PASS. Stablecriteria preserved; sourceactualreview/readinessrequired.",
+        "fieldOrBehavior": "bcf313fe isolates hash fixture from CI-inherited shellopts, restoresfinally, retains independentfull-output/middle-byte assertions. ExactUbuntu warning bytes reproducehostedhash mismatch; observercorrectlyhashesstderr. Owning19/19PASS, no productionobserver/deadline/pipefail/privacy weakening. Freshreview/currentrequiredverification follows.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "updatedAt": "2026-10-03T14:24:08.045Z",
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "updatedAt": "2026-10-03T16:46:41.069Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.execute.scope:attestation",
         "metadata": {
@@ -354,15 +354,20 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1424/kontourai-flow-agents-1424--deliver.md",
-              "summary": "Ownedscope/publishedboundary/controlsfrozen andactualkeeper12caseproof."
+              "summary": "Declared currentexecution report with precisecause/limitedtest-onlyremedy."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/verification/hash-fixture-hosted-cause-proof.json",
+              "summary": "Exactdigestdiscriminator proveswarningcausesCIexpected-vsactualdifference."
             }
           ],
           "verification_workspace_snapshot": {
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-            "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+            "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+            "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
             "worktree_clean": true
           },
           "gate_claim": {
@@ -371,8 +376,8 @@
             "subject_type": "change",
             "step_id": "execute",
             "identity_version": 2,
-            "recorded_at": "2026-10-03T12:55:19.815Z",
-            "flow_run_head": "6619a0577217df2eebf29f1ae91ea101b562160af60885aa988dadb8e22ebff1",
+            "recorded_at": "2026-10-03T16:37:29.546Z",
+            "flow_run_head": "c9aa900be0820568c103913ec106d4534f3500ad870a7a20db1479270ac442cd",
             "flow_id": "builder.build",
             "definition_version": "1.4",
             "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
@@ -388,8 +393,8 @@
         "claimType": "workflow.acceptance.criterion",
         "fieldOrBehavior": "Acceptance evidence reconciled through retained exact-source readiness and independent critique; postmerge rollout remains pending.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "updatedAt": "2026-10-03T14:24:08.045Z",
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "updatedAt": "2026-10-03T16:46:41.069Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.acceptance.criterion:attestation",
         "metadata": {
@@ -434,15 +439,15 @@
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z",
+        "id": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1424/gate-claim-tests-evidence",
         "facet": "flow-agents.workflow",
         "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "Four exact registered producer acceptance commands at reviewed961df202, after published Flow5.1.3 adoption. Current-source full required Veritas readiness observed PASS on isolated Linux; 99 file hashes/sizes match. Actual native critique and privileged container proof support AC1-AC6. Original packed failure remains unexplained; registry, stable rollout and original task remain pending. Two current packed wrapper timeouts stopped at npm TypeScript metadata revalidation; both retained as failed evidence. Named metadata-only offline/prefer-offline probes read complete privatecache successfully underNode22/24; this transaction uses scoped prefer-offline with normal integrity and unchanged15minute child/16minute observation bounds. Historicala731 failure remains unresolved.",
+        "fieldOrBehavior": "Four exact registered commands at reviewedbcf313fe after precise CI-only shellopts hashfixture repair. Original independenthash/middle-byte/retention assertions unchanged;19ownerchecks PASS. Priorcd fullrequiredreadiness PASS21legacyGitSKIPslimits retained; freshbcf fullrequiredreadiness and requiredCI separatelypending. No productionobserver/gate/deadline/integrity/privacy change; allhistoricalfailures retained.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "updatedAt": "2026-10-03T14:24:08.045Z",
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "updatedAt": "2026-10-03T16:46:41.069Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.verify.tests:test_output",
         "metadata": {
@@ -480,8 +485,8 @@
             },
             {
               "kind": "artifact",
-              "file": ".kontourai/verification/linux-readiness-961df202-summary.json",
-              "summary": "Actual current-source full required readiness PASS with 99 matching source hashes/sizes."
+              "file": ".kontourai/verification/linux-readiness-cd5624ac-summary.json",
+              "summary": "Historical immediately preceding full readiness PASS; current865 fresh required readiness is pending separately."
             },
             {
               "kind": "artifact",
@@ -505,8 +510,8 @@
             },
             {
               "kind": "artifact",
-              "file": ".kontourai/verification/961df202-independent-pin-review.md",
-              "summary": "Distinct registered current native code/security/dependency/docs review; prior keeperP2 resolved."
+              "file": ".kontourai/verification/bcf313fe-independent-hash-fixture-review.md",
+              "summary": "Actual currentdistinctnative review of exacthashfixtureenvironment fix with inheritedsource."
             },
             {
               "kind": "artifact",
@@ -532,31 +537,26 @@
               "kind": "artifact",
               "file": ".kontourai/verification/24e7471c-lifecycle-container.log",
               "summary": "Actual strict installed5.1.3 privileged container conformance; unchanged production bytes."
-            },
-            {
-              "kind": "artifact",
-              "file": ".kontourai/verification/961df202-typescript-npm-cache-probe.json",
-              "summary": "Named cache probes discriminate a concrete supported cache preference remedy; no required test or integrity policy changed."
             }
           ],
           "output_digest": {
             "algorithm": "sha256",
-            "hex": "45207948b4fdbddbb76e3455b514df844e372e9326ec9641391e6abb87ad42a5"
+            "hex": "0f83e86228fc2bc1009ff7719fc2caba527af23c4eeb645255ce37ef02ebe70a"
           },
           "observed_commands": [
             {
               "command": "node --test --import ./src/cli/unit-test-state.mjs src/cli/effective-flow-agents-config.test.mjs",
               "exit_code": 0,
-              "output_sha256": "45207948b4fdbddbb76e3455b514df844e372e9326ec9641391e6abb87ad42a5",
+              "output_sha256": "0f83e86228fc2bc1009ff7719fc2caba527af23c4eeb645255ce37ef02ebe70a",
               "source": "canonical-writer-execution",
-              "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+              "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
               "worktree_clean": true,
               "verification_workspace_snapshot": {
                 "version": 1,
                 "kind": "git-worktree",
                 "algorithm": "sha256",
-                "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true
               },
               "test_count": 8,
@@ -569,16 +569,16 @@
             {
               "command": "node --test --import ./src/cli/unit-test-state.mjs src/cli/public-api.test.mjs",
               "exit_code": 0,
-              "output_sha256": "2a81ca76511493b90e2bd4d696ba98cde6cf1b30d909c21af626908f641dce71",
+              "output_sha256": "e1bacdebc54c7b428e680baf895caa3d942f439a3accf2154415733877695370",
               "source": "canonical-writer-execution",
-              "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+              "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
               "worktree_clean": true,
               "verification_workspace_snapshot": {
                 "version": 1,
                 "kind": "git-worktree",
                 "algorithm": "sha256",
-                "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true
               },
               "test_count": 7,
@@ -591,16 +591,16 @@
             {
               "command": "node --test evals/integration/liveness-worktree-root.test.mjs",
               "exit_code": 0,
-              "output_sha256": "08359fea92c1ccb30ff6714012254c4c62154cbc8e79b0c0f3a43f57af8f2a12",
+              "output_sha256": "3ea53c39377f97d996eeee05a607fdde62c701673f912660079a36dc56b76a76",
               "source": "canonical-writer-execution",
-              "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+              "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
               "worktree_clean": true,
               "verification_workspace_snapshot": {
                 "version": 1,
                 "kind": "git-worktree",
                 "algorithm": "sha256",
-                "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true
               },
               "test_count": 1,
@@ -613,16 +613,16 @@
             {
               "command": "node --test evals/integration/public-workflow-cli.test.mjs",
               "exit_code": 0,
-              "output_sha256": "c66b96d5d8ca3a1d8c820946070b45dc9c1c03896d4d4bfeee8459d300615584",
+              "output_sha256": "a14ab799f6a386744884955c29678019b8f7e9f171ac00f3dc71bec0bd89a279",
               "source": "canonical-writer-execution",
-              "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+              "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
               "worktree_clean": true,
               "verification_workspace_snapshot": {
                 "version": 1,
                 "kind": "git-worktree",
                 "algorithm": "sha256",
-                "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true
               },
               "test_count": 1,
@@ -637,8 +637,8 @@
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-            "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+            "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+            "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
             "worktree_clean": true
           },
           "gate_claim": {
@@ -647,8 +647,8 @@
             "subject_type": "flow-step",
             "step_id": "verify",
             "identity_version": 2,
-            "recorded_at": "2026-10-03T14:12:29.151Z",
-            "flow_run_head": "487a9921fd2ab015fc25ea4b12a99bbdf861c90e1956e9c96ae6bfe229c9ed4f",
+            "recorded_at": "2026-10-03T16:43:18.339Z",
+            "flow_run_head": "e9591b6ec8d833386e636ead896a75af23472c17b7b8b6121e630bbbe3c32f70",
             "flow_id": "builder.build",
             "definition_version": "1.4",
             "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
@@ -657,15 +657,15 @@
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.current-exact-source-confidence-pass-canonical-six-criteria-four-observed-commands-distinct-critique-full-required-readiness-strict-published-reducer-privileged-proof-hosted-delivery-checks-and-mandatory-rollout-remain-pending-failed-historical-evidence-preserved-gate-visit-2026-10-03t14-24-08-045z",
+        "id": "kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.currentbcf-source-confidencepass-canonical6criteria-4observedcommands-distinctcritique-currentfullreadiness-andhostedcanonicalverifypass-onlystaledeliverystructuralgap-remains-beforeexactrequiredci-allhistory-skips-mandatoryrolloutlimitsretained-gate-visit-2026-10-03t16-46-41-069z",
         "subjectType": "change",
         "subjectId": "kontourai-flow-agents-1424/gate-claim-merge-readiness",
         "facet": "flow-agents.workflow",
         "claimType": "builder.merge-ready.readiness",
-        "fieldOrBehavior": "Current exact-source confidence PASS: canonical six criteria/four observed commands, distinct critique, full required readiness, strict published reducer/privileged proof. Hosted delivery checks and mandatory rollout remain pending; failed historical evidence preserved.",
+        "fieldOrBehavior": "Currentbcf source confidencePASS: canonical6criteria/4observedcommands, distinctcritique/currentfullreadiness andhostedcanonicalverifyPASS. Onlystaledeliverystructuralgap remains beforeexactrequiredCI; allhistory/skips/mandatoryrolloutlimitsretained.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "updatedAt": "2026-10-03T14:24:08.045Z",
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "updatedAt": "2026-10-03T16:46:41.069Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:builder.merge-ready.readiness:attestation",
         "metadata": {
@@ -681,15 +681,15 @@
             {
               "kind": "artifact",
               "file": ".kontourai/flow-agents/kontourai-flow-agents-1424/kontourai-flow-agents-1424--evidence-gate.md",
-              "summary": "Current source confidence with exact canonical references and explicit residual gaps."
+              "summary": "Currentconfidence/revision/exactevidenceandresiduallimits."
             }
           ],
           "verification_workspace_snapshot": {
             "version": 1,
             "kind": "git-worktree",
             "algorithm": "sha256",
-            "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-            "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+            "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+            "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
             "worktree_clean": true
           },
           "gate_claim": {
@@ -698,8 +698,8 @@
             "subject_type": "change",
             "step_id": "merge-ready",
             "identity_version": 2,
-            "recorded_at": "2026-10-03T14:24:08.045Z",
-            "flow_run_head": "59ed8a8494b4bb873dad368bd7eef9bfb4c2ac680536ce2c0de0f61cb74d3e44",
+            "recorded_at": "2026-10-03T16:46:41.069Z",
+            "flow_run_head": "aae667275b0703edefc4923f169142530facbf6d8c67bf3dd01437c533b039b2",
             "flow_id": "builder.build",
             "definition_version": "1.4",
             "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
@@ -708,15 +708,15 @@
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t14-12-29-151z",
+        "id": "kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t16-43-18-339z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1424/AC1",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.acceptance.criterion",
         "fieldOrBehavior": "local-git-namespace-trust: committed config and immutable Git reads work through fixed protected system executables in host, systemd and nested Codex namespaces while hostile ownership/configuration/replacement cases fail.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "updatedAt": "2026-10-03T14:12:29.151Z",
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "updatedAt": "2026-10-03T16:43:18.339Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
         "metadata": {
@@ -736,16 +736,16 @@
               {
                 "command": "node --test --import ./src/cli/unit-test-state.mjs src/cli/effective-flow-agents-config.test.mjs",
                 "exit_code": 0,
-                "output_sha256": "45207948b4fdbddbb76e3455b514df844e372e9326ec9641391e6abb87ad42a5",
+                "output_sha256": "0f83e86228fc2bc1009ff7719fc2caba527af23c4eeb645255ce37ef02ebe70a",
                 "source": "canonical-writer-execution",
-                "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true,
                 "verification_workspace_snapshot": {
                   "version": 1,
                   "kind": "git-worktree",
                   "algorithm": "sha256",
-                  "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                  "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                  "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                  "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                   "worktree_clean": true
                 },
                 "test_count": 8,
@@ -757,7 +757,7 @@
               }
             ],
             "identity_version": 2,
-            "verified_at": "2026-10-03T14:12:29.151Z",
+            "verified_at": "2026-10-03T16:43:18.339Z",
             "verified_by": "codexthread-a0a6bea458bb29fd226323ecKontour"
           },
           "workflow_subject_ref": "kontourai/flow-agents#1424"
@@ -765,15 +765,15 @@
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t14-12-29-151z",
+        "id": "kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t16-43-18-339z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1424/AC2",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.acceptance.criterion",
         "fieldOrBehavior": "actor-worktree-hook-binding: shipped Stop, steering and capture hooks find the exact actor-bound physical project run, preserve shared coordination roots and never gate unrelated actors.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "updatedAt": "2026-10-03T14:12:29.151Z",
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "updatedAt": "2026-10-03T16:43:18.339Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
         "metadata": {
@@ -793,16 +793,16 @@
               {
                 "command": "node --test evals/integration/liveness-worktree-root.test.mjs",
                 "exit_code": 0,
-                "output_sha256": "08359fea92c1ccb30ff6714012254c4c62154cbc8e79b0c0f3a43f57af8f2a12",
+                "output_sha256": "3ea53c39377f97d996eeee05a607fdde62c701673f912660079a36dc56b76a76",
                 "source": "canonical-writer-execution",
-                "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true,
                 "verification_workspace_snapshot": {
                   "version": 1,
                   "kind": "git-worktree",
                   "algorithm": "sha256",
-                  "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                  "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                  "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                  "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                   "worktree_clean": true
                 },
                 "test_count": 1,
@@ -814,7 +814,7 @@
               }
             ],
             "identity_version": 2,
-            "verified_at": "2026-10-03T14:12:29.151Z",
+            "verified_at": "2026-10-03T16:43:18.339Z",
             "verified_by": "codexthread-a0a6bea458bb29fd226323ecKontour"
           },
           "workflow_subject_ref": "kontourai/flow-agents#1424"
@@ -822,15 +822,15 @@
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t14-12-29-151z",
+        "id": "kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t16-43-18-339z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1424/AC3",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.acceptance.criterion",
         "fieldOrBehavior": "execute-record-synchronize: next_action derives producer execution, evidence submission and synchronization separately from the canonical envelope; actual public evidence advances gates and status alone does not.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "updatedAt": "2026-10-03T14:12:29.151Z",
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "updatedAt": "2026-10-03T16:43:18.339Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
         "metadata": {
@@ -850,16 +850,16 @@
               {
                 "command": "node --test --import ./src/cli/unit-test-state.mjs src/cli/public-api.test.mjs",
                 "exit_code": 0,
-                "output_sha256": "2a81ca76511493b90e2bd4d696ba98cde6cf1b30d909c21af626908f641dce71",
+                "output_sha256": "e1bacdebc54c7b428e680baf895caa3d942f439a3accf2154415733877695370",
                 "source": "canonical-writer-execution",
-                "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true,
                 "verification_workspace_snapshot": {
                   "version": 1,
                   "kind": "git-worktree",
                   "algorithm": "sha256",
-                  "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                  "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                  "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                  "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                   "worktree_clean": true
                 },
                 "test_count": 7,
@@ -871,7 +871,7 @@
               }
             ],
             "identity_version": 2,
-            "verified_at": "2026-10-03T14:12:29.151Z",
+            "verified_at": "2026-10-03T16:43:18.339Z",
             "verified_by": "codexthread-a0a6bea458bb29fd226323ecKontour"
           },
           "workflow_subject_ref": "kontourai/flow-agents#1424"
@@ -879,15 +879,15 @@
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t14-12-29-151z",
+        "id": "kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t16-43-18-339z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1424/AC4",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.acceptance.criterion",
         "fieldOrBehavior": "reviewed-generated-documented: source, generated distributions, durable documentation, meaningful regressions, independent critique, readiness and required local verification agree; required hosted checks remain mandatory at the publish and merge-readiness gates.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "updatedAt": "2026-10-03T14:12:29.151Z",
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "updatedAt": "2026-10-03T16:43:18.339Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
         "metadata": {
@@ -907,16 +907,16 @@
               {
                 "command": "node --test --import ./src/cli/unit-test-state.mjs src/cli/public-api.test.mjs",
                 "exit_code": 0,
-                "output_sha256": "2a81ca76511493b90e2bd4d696ba98cde6cf1b30d909c21af626908f641dce71",
+                "output_sha256": "e1bacdebc54c7b428e680baf895caa3d942f439a3accf2154415733877695370",
                 "source": "canonical-writer-execution",
-                "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true,
                 "verification_workspace_snapshot": {
                   "version": 1,
                   "kind": "git-worktree",
                   "algorithm": "sha256",
-                  "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                  "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                  "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                  "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                   "worktree_clean": true
                 },
                 "test_count": 7,
@@ -928,7 +928,7 @@
               }
             ],
             "identity_version": 2,
-            "verified_at": "2026-10-03T14:12:29.151Z",
+            "verified_at": "2026-10-03T16:43:18.339Z",
             "verified_by": "codexthread-a0a6bea458bb29fd226323ecKontour"
           },
           "workflow_subject_ref": "kontourai/flow-agents#1424"
@@ -936,15 +936,15 @@
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t14-12-29-151z",
+        "id": "kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t16-43-18-339z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1424/AC5",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.acceptance.criterion",
         "fieldOrBehavior": "installable-station-candidate: an installable candidate package works in an isolated Station consumer on brian-media under the same user-namespace, public workflow and actor-hook contracts; published registry/provenance/stable consumer/original issue closure remain mandatory post-merge rollout milestones.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "updatedAt": "2026-10-03T14:12:29.151Z",
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "updatedAt": "2026-10-03T16:43:18.339Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
         "metadata": {
@@ -964,16 +964,16 @@
               {
                 "command": "node --test evals/integration/public-workflow-cli.test.mjs",
                 "exit_code": 0,
-                "output_sha256": "c66b96d5d8ca3a1d8c820946070b45dc9c1c03896d4d4bfeee8459d300615584",
+                "output_sha256": "a14ab799f6a386744884955c29678019b8f7e9f171ac00f3dc71bec0bd89a279",
                 "source": "canonical-writer-execution",
-                "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true,
                 "verification_workspace_snapshot": {
                   "version": 1,
                   "kind": "git-worktree",
                   "algorithm": "sha256",
-                  "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                  "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                  "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                  "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                   "worktree_clean": true
                 },
                 "test_count": 1,
@@ -985,7 +985,7 @@
               }
             ],
             "identity_version": 2,
-            "verified_at": "2026-10-03T14:12:29.151Z",
+            "verified_at": "2026-10-03T16:43:18.339Z",
             "verified_by": "codexthread-a0a6bea458bb29fd226323ecKontour"
           },
           "workflow_subject_ref": "kontourai/flow-agents#1424"
@@ -993,15 +993,15 @@
         "status": "verified"
       },
       {
-        "id": "kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t14-12-29-151z",
+        "id": "kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t16-43-18-339z",
         "subjectType": "flow-step",
         "subjectId": "kontourai-flow-agents-1424/AC6",
         "facet": "flow-agents.workflow",
         "claimType": "workflow.acceptance.criterion",
         "fieldOrBehavior": "value-focused-gates: supported evidence retains its real terminal outcome; predictable payload/review/command/publication incompatibility is rejected before expensive execution; unchanged reviewed implementation is not invalidated by later progress context; supported revision-bound receipt reuse avoids repeated checks while stale, failed, zero-test and forged evidence stays non-confirming.",
         "value": "pass",
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "updatedAt": "2026-10-03T14:12:29.151Z",
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "updatedAt": "2026-10-03T16:43:18.339Z",
         "impactLevel": "high",
         "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
         "metadata": {
@@ -1031,16 +1031,16 @@
               {
                 "command": "node --test evals/integration/public-workflow-cli.test.mjs",
                 "exit_code": 0,
-                "output_sha256": "c66b96d5d8ca3a1d8c820946070b45dc9c1c03896d4d4bfeee8459d300615584",
+                "output_sha256": "a14ab799f6a386744884955c29678019b8f7e9f171ac00f3dc71bec0bd89a279",
                 "source": "canonical-writer-execution",
-                "observed_at_commit": "961df202e673fea53093c6c6c02feba2836f96b4",
+                "observed_at_commit": "bcf313fe58d7333852451548cdfcdd0265c65134",
                 "worktree_clean": true,
                 "verification_workspace_snapshot": {
                   "version": 1,
                   "kind": "git-worktree",
                   "algorithm": "sha256",
-                  "digest": "9d359f8f5041040ec091508a540fa008e64d74382fb7d40a2a2fa7e6dfe3fcde",
-                  "head_sha": "961df202e673fea53093c6c6c02feba2836f96b4",
+                  "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+                  "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
                   "worktree_clean": true
                 },
                 "test_count": 1,
@@ -1052,7 +1052,7 @@
               }
             ],
             "identity_version": 2,
-            "verified_at": "2026-10-03T14:12:29.151Z",
+            "verified_at": "2026-10-03T16:43:18.339Z",
             "verified_by": "codexthread-a0a6bea458bb29fd226323ecKontour"
           },
           "workflow_subject_ref": "kontourai/flow-agents#1424"
@@ -2596,6 +2596,519 @@
           "critique_record_id": "critique:4e033648ae13c89f0592e9007c7d247676f4592fa8ed6c5b1664b38dfc2c8337"
         },
         "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-1424-review.flow-agents-workflow.independent-native-reviewer-inspected-exact9992bf0b-fixture-only-repair-fromc3-and-actual-prior961-critique-target-inherited-errexit-exit-verified-in-retained-fulltrace-all5-conditional-captures-preserve-real-nonzero-assertions-strict50check-ownergreen-inspected-unchanged-prior-code-security-dependency-docs-hashes-retained-current-fullreadiness-canonical-hosted-merge-release-and-station-rollout-remain-unclaimed-reviewed-2026-10-03t15-43-05-540z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-1424/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Independent native reviewer inspected exact9992bf0b fixture-only repair fromc3 and actual prior961 critique target: inherited-errexit exit verified in retained fulltrace, all5 conditional captures preserve real nonzero assertions, strict50check ownergreen inspected; unchanged prior code/security/dependency/docs hashes retained. Current fullreadiness canonical hosted merge release and Station rollout remain unclaimed.",
+        "value": "pass",
+        "createdAt": "2026-10-03T15:43:05.540Z",
+        "updatedAt": "2026-10-03T15:43:05.540Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex:thread-a5769c37b0dafd6fc9ec7f36:Kontour",
+          "reviewed_at": "2026-10-03T15:43:05.540Z",
+          "identity_version": 2,
+          "critique_sequence": 11,
+          "critique_predecessor_hash": "4e033648ae13c89f0592e9007c7d247676f4592fa8ed6c5b1664b38dfc2c8337",
+          "critique_record_hash": "006b66aca42e98b47f6ce508727e221f7ccec21509312acbc492e6c50386a8f3",
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "Complete committed delta reviewed: expected-negative captures preserve statuses and assertions; production/validator/Git setup/pipefail unchanged. Prior exact source scope retained by hash equality; historical delivery checkpoint stays961 rather than current999 proof.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/9992bf0b-independent-pr-body-review.md",
+                  "summary": "Actual independent exact-head source review, remedy scope, native identity and pending verification boundaries."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/c3d02078-pr-body-wrapper.trace",
+                  "summary": "Retained fullcanonical trace proves inherited errexit after correct validator rejection."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/c3d02078-pr-body-errexit-red-green.json",
+                  "summary": "Retained exactbaseline red owner execution and repaired strictcontext receipt."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/c3d02078-pr-body-errexit-green-local.log",
+                  "summary": "All50 real assertions reached, including status1/misconfiguration/fabricatedclaim negatives."
+                }
+              ]
+            },
+            {
+              "id": "security-dependencies-docs",
+              "status": "pass",
+              "summary": "No security/dependency/production/tracked-doc delta; all14 prior961 noncontext subject hashes match. Prior independent scope retained without claiming new scanner or full acceptance execution.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/961df202-independent-pin-review.md",
+                  "summary": "Preserved exactprior independent review and unresolved historical packed failure distinction."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/9992bf0b-independent-pr-body-review.md",
+                  "summary": "Independently checked unchanged subject hashes and current scope."
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/verification/9992bf0b-independent-pr-body-review.md",
+                "sha256": "fef1794fe426a4dc9ead5ed1dc3a6589470aa6880d811377ad7a8c6f05b9baf3",
+                "role": "review_subject"
+              },
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-1424/review-context/71effae1ba2e2dc23867da7107af6b88bded772746f23a13afd417471add6f3c.md",
+                "sha256": "71effae1ba2e2dc23867da7107af6b88bded772746f23a13afd417471add6f3c",
+                "role": "review_context",
+                "source_file": ".kontourai/flow-agents/kontourai-flow-agents-1424/kontourai-flow-agents-1424--deliver.md",
+                "control_anchors": {
+                  "version": 1,
+                  "execution_mode": "verification_appendix",
+                  "execution_sha256": "b4e09e3c5f155bd1d628b913edd8b30278c1fd55918651b2e9290e1a8842517d",
+                  "plan_sha256": "0b3ed84b6e00e14e0738108f90aac7bdf782d93314a891c7917e6cceca2f8212",
+                  "acceptance_sha256": "aee0de5a4c98778a0d412bd549d42b72dd8df41da41965da0fb4152c8ec87d71",
+                  "scope_claims_sha256": "c290fa17e930d5e5e796231567b12db27c7fa0fc76e711f4fbed3d505c2fb921"
+                }
+              },
+              {
+                "file": "evals/static/test_pr_body_file_refs.sh",
+                "sha256": "a94c670a8ba177d82e4f0330cb97395515456bb649dd1c2e6efb218be0efc5e6",
+                "role": "review_subject"
+              },
+              {
+                "file": ".kontourai/verification/961df202-independent-pin-review.md",
+                "sha256": "6ae2679c1c9a4364b505db62f4e3a00d44fa6a92828f190e6360b0183a130e8a",
+                "role": "review_subject"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "0f2cad525209468a8639abbaadaa3210d587f90cb1d85ff34495f0394326f6cb",
+              "head_sha": "9992bf0b93d7d099caf03e3860db58568fe62a02",
+              "worktree_clean": true
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/verification/9992bf0b-independent-pr-body-review.md",
+            ".kontourai/flow-agents/kontourai-flow-agents-1424/review-context/71effae1ba2e2dc23867da7107af6b88bded772746f23a13afd417471add6f3c.md",
+            "evals/static/test_pr_body_file_refs.sh",
+            ".kontourai/verification/961df202-independent-pin-review.md"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#1424",
+          "superseded_by": "critique:6ca366e23324e81f4853eba2d01542e6abd5d5cee8fbb8ede84a1faec683fca7",
+          "critique_resolution": {
+            "schema_version": "1.0",
+            "kind": "same-reviewer-recheck",
+            "prior_record_id": "critique:006b66aca42e98b47f6ce508727e221f7ccec21509312acbc492e6c50386a8f3",
+            "resolving_record_id": "critique:6ca366e23324e81f4853eba2d01542e6abd5d5cee8fbb8ede84a1faec683fca7",
+            "resolver": "codex:thread-a5769c37b0dafd6fc9ec7f36:Kontour",
+            "resolved_lane_ids": [],
+            "resolved_finding_ids": [],
+            "resolved_at": "2026-10-03T16:42:05.889Z"
+          },
+          "critique_record_id": "critique:006b66aca42e98b47f6ce508727e221f7ccec21509312acbc492e6c50386a8f3"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-1424-review.flow-agents-workflow.independent-actual-native-reviewer-inspected-exactcd5624ac-complete2file-cistdout-diagnostic-delta-against-persisted999-review-target-real-failedstatus-remains1-ownerstdout-nowvisible-in-samecaptured-console-boundedcapture-pipefail-deadline-admission-and-userworkflowprivacy-unchanged-retainedbaseline-fix-andexistingnegative-suite-proof-inspected-remainingcanonical-hosted-failure-fullreadiness-delivery-release-stationrollout-unclaimed-reviewed-2026-10-03t16-09-39-838z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-1424/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Independent actual native reviewer inspected exactcd5624ac complete2file CIstdout diagnostic delta against persisted999 review target: real failedstatus remains1, ownerstdout nowvisible in samecaptured console, boundedcapture pipefail deadline admission and userworkflowprivacy unchanged. Retainedbaseline-fix andexistingnegative-suite proof inspected. Remainingcanonical hosted failure/fullreadiness delivery release Stationrollout unclaimed.",
+        "value": "pass",
+        "createdAt": "2026-10-03T16:09:39.838Z",
+        "updatedAt": "2026-10-03T16:09:39.838Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex:thread-a5769c37b0dafd6fc9ec7f36:Kontour",
+          "reviewed_at": "2026-10-03T16:09:39.838Z",
+          "identity_version": 2,
+          "critique_sequence": 12,
+          "critique_predecessor_hash": "006b66aca42e98b47f6ce508727e221f7ccec21509312acbc492e6c50386a8f3",
+          "critique_record_hash": "98439684e414a0a94cac9a66bb4aabea7b8260f0aa02ecd3624ca4b43aa982de",
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "Complete diagnostic/real negative-owner delta preserves real exit1 and failure collection; stdout is only reported from already captured non-timeout failure. No new test seam/gate/replay.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/cd5624ac-independent-ci-output-review.md",
+                  "summary": "Actual complete delta review, retained evidence and unresolved current completion boundaries."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/ci-stdout-owner-red-green.json",
+                  "summary": "Exact same real failing command baseline and fix both exit1; only fixed exposes stdout marker."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/ci-failure-stdout-green.log",
+                  "summary": "Actual existing negative-suite retained owner assertions pass."
+                }
+              ]
+            },
+            {
+              "id": "security-docs",
+              "status": "pass",
+              "summary": "Existing protected CI anchor still owns command/status/capture/pipefail/deadline; no credential/destination/provider/publicworkflow privacy change. Current canonical decision/ADR/workflow docs accurate; dependencies and prior source scope unchanged.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/cd5624ac-independent-ci-output-review.md",
+                  "summary": "Fresh modified anchor security and documentation review plus exact inherited subject coverage."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/9992bf0b-independent-pr-body-review.md",
+                  "summary": "Preserved exact prior review and pending acceptance/publication boundaries."
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/verification/cd5624ac-independent-ci-output-review.md",
+                "sha256": "e293a30640fb8eef1c8b4ee547af2c625c45ccbbb256c68e7518298b1dcb2d16",
+                "role": "review_subject"
+              },
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-1424/review-context/40575e4ea87b97fb5112e1b03e678eb0631e5188b04a0a9593d12ecd247af851.md",
+                "sha256": "40575e4ea87b97fb5112e1b03e678eb0631e5188b04a0a9593d12ecd247af851",
+                "role": "review_context",
+                "source_file": ".kontourai/flow-agents/kontourai-flow-agents-1424/kontourai-flow-agents-1424--deliver.md",
+                "control_anchors": {
+                  "version": 1,
+                  "execution_mode": "verification_appendix",
+                  "execution_sha256": "b4e09e3c5f155bd1d628b913edd8b30278c1fd55918651b2e9290e1a8842517d",
+                  "plan_sha256": "0b3ed84b6e00e14e0738108f90aac7bdf782d93314a891c7917e6cceca2f8212",
+                  "acceptance_sha256": "aee0de5a4c98778a0d412bd549d42b72dd8df41da41965da0fb4152c8ec87d71",
+                  "scope_claims_sha256": "4ad9d53bfee5c1e2ce75a59c4e3531af08971490b98dcf8c4c66e54a8133f863"
+                }
+              },
+              {
+                "file": "scripts/ci/trust-reconcile.js",
+                "sha256": "982ade1f2ae0813127123c9382868d808f139e03e80de9dc0d6f07b455158642",
+                "role": "review_subject"
+              },
+              {
+                "file": "evals/integration/test_trust_reconcile_negatives.sh",
+                "sha256": "956f094d2bf826c30d77b965994d3c73a6e2723807316275c7d6082b766f6667",
+                "role": "review_subject"
+              },
+              {
+                "file": ".kontourai/verification/9992bf0b-independent-pr-body-review.md",
+                "sha256": "fef1794fe426a4dc9ead5ed1dc3a6589470aa6880d811377ad7a8c6f05b9baf3",
+                "role": "review_subject"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "a9c03bde9b943ca4ba6476c4ce3215638566904b609cea98b7928644fecaab19",
+              "head_sha": "cd5624accb2fd60f3126f0ae6307b3b4fb5c75f1",
+              "worktree_clean": true
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/verification/cd5624ac-independent-ci-output-review.md",
+            ".kontourai/flow-agents/kontourai-flow-agents-1424/review-context/40575e4ea87b97fb5112e1b03e678eb0631e5188b04a0a9593d12ecd247af851.md",
+            "scripts/ci/trust-reconcile.js",
+            "evals/integration/test_trust_reconcile_negatives.sh",
+            ".kontourai/verification/9992bf0b-independent-pr-body-review.md"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#1424",
+          "superseded_by": "critique:6ca366e23324e81f4853eba2d01542e6abd5d5cee8fbb8ede84a1faec683fca7",
+          "critique_resolution": {
+            "schema_version": "1.0",
+            "kind": "same-reviewer-recheck",
+            "prior_record_id": "critique:98439684e414a0a94cac9a66bb4aabea7b8260f0aa02ecd3624ca4b43aa982de",
+            "resolving_record_id": "critique:6ca366e23324e81f4853eba2d01542e6abd5d5cee8fbb8ede84a1faec683fca7",
+            "resolver": "codex:thread-a5769c37b0dafd6fc9ec7f36:Kontour",
+            "resolved_lane_ids": [],
+            "resolved_finding_ids": [],
+            "resolved_at": "2026-10-03T16:42:05.889Z"
+          },
+          "critique_record_id": "critique:98439684e414a0a94cac9a66bb4aabea7b8260f0aa02ecd3624ca4b43aa982de"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-1424-review.flow-agents-workflow.independent-actual-native-reviewer-inspected-exact86538677-twofile-directcli-drain-delta-against-actualpriorcd-critique-exitcode-preserves-same-failclosed-verdict-while-draining-pending-diagnostic-pipes-same128kib-ownercommand-retained-baseline66349bytes-noowner-fixed132107bytes-owner-both-exit1-existingnegative-suite-green-inspected-unchanged-source-security-deps-docs-inherited-remaining-canonical-hosted-failure-current865-readiness-release-stationrollout-unclaimed-reviewed-2026-10-03t16-23-34-312z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-1424/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Independent actual native reviewer inspected exact86538677 twofile directCLI drain delta against actualpriorcd critique. ExitCode preserves same failclosed verdict while draining pending diagnostic pipes. Same128KiB ownercommand retained baseline66349bytes noowner/fixed132107bytes owner, both exit1; existingnegative suite green inspected. Unchanged source/security/deps/docs inherited; remaining canonical hosted failure/current865 readiness/release/Stationrollout unclaimed.",
+        "value": "pass",
+        "createdAt": "2026-10-03T16:23:34.312Z",
+        "updatedAt": "2026-10-03T16:23:34.312Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex:thread-a5769c37b0dafd6fc9ec7f36:Kontour",
+          "reviewed_at": "2026-10-03T16:23:34.312Z",
+          "identity_version": 2,
+          "critique_sequence": 13,
+          "critique_predecessor_hash": "98439684e414a0a94cac9a66bb4aabea7b8260f0aa02ecd3624ca4b43aa982de",
+          "critique_record_hash": "6fa8b7897069660ef3355417fa6321ade5a654941ea39cb1a48764c2b5ade06e",
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "Same synchronous reconciler result assigned as exitCode; arguments/status/error/capture/pipefail/deadline unchanged. Existing real negative owner now exceeds pipe capacity and retains nonzero failure oracle; scoped baseline/fix isolates directCLI truncation.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/86538677-independent-ci-drain-review.md",
+                  "summary": "Actual full exactdelta remedy/caller review and remaining verification limits."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/ci-stdout-flush-red-green.json",
+                  "summary": "Same128KiB failing owner command both exit1; repaired directCLI retains trailing marker."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/ci-stdout-flush-suite-green.log",
+                  "summary": "Retained actual existing negative suite preserves owner/reconciliation controls."
+                }
+              ]
+            },
+            {
+              "id": "security-docs",
+              "status": "pass",
+              "summary": "Existing protectedCI anchor termination change preserves authority/command admission/capture/privacy/destination. Prior immutable source review and canonicaldocs remain accurate; dependencies and other production bytes unchanged.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/86538677-independent-ci-drain-review.md",
+                  "summary": "Fresh modifiedanchor security/docs review, unchanged source coverage and actualnative identity."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/cd5624ac-independent-ci-output-review.md",
+                  "summary": "Preserved prior exacttarget diagnostic review and pending acceptance boundaries."
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/verification/86538677-independent-ci-drain-review.md",
+                "sha256": "f398348ebe6a7e03024662c00136471cb0ab8518b537f6c0a334c882418d2904",
+                "role": "review_subject"
+              },
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-1424/review-context/abece855c2088732b428e77ff40888a0c4a868ee456fc6ead9964d5a843457f1.md",
+                "sha256": "abece855c2088732b428e77ff40888a0c4a868ee456fc6ead9964d5a843457f1",
+                "role": "review_context",
+                "source_file": ".kontourai/flow-agents/kontourai-flow-agents-1424/kontourai-flow-agents-1424--deliver.md",
+                "control_anchors": {
+                  "version": 1,
+                  "execution_mode": "verification_appendix",
+                  "execution_sha256": "b4e09e3c5f155bd1d628b913edd8b30278c1fd55918651b2e9290e1a8842517d",
+                  "plan_sha256": "0b3ed84b6e00e14e0738108f90aac7bdf782d93314a891c7917e6cceca2f8212",
+                  "acceptance_sha256": "aee0de5a4c98778a0d412bd549d42b72dd8df41da41965da0fb4152c8ec87d71",
+                  "scope_claims_sha256": "0bc3e7a0333b2619cc075834e868a8442afcc20872eca5c47c313d5d500cce1a"
+                }
+              },
+              {
+                "file": "scripts/ci/trust-reconcile.js",
+                "sha256": "18d5d6a7c596668819de16d75af37fb942576f47d8564884fb22cc9256fc08ba",
+                "role": "review_subject"
+              },
+              {
+                "file": "evals/integration/test_trust_reconcile_negatives.sh",
+                "sha256": "466b2a1871bf9f0138e175b67dcd2aa18e89993c20ca5a062d4aaad042e3d3d4",
+                "role": "review_subject"
+              },
+              {
+                "file": ".kontourai/verification/cd5624ac-independent-ci-output-review.md",
+                "sha256": "e293a30640fb8eef1c8b4ee547af2c625c45ccbbb256c68e7518298b1dcb2d16",
+                "role": "review_subject"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "2297781759c33e8c0d6a0aeeb4203ee424743e5b573ce6f3104372ee0d4652cd",
+              "head_sha": "865386777b96778336088ff7709b265fef4bd55e",
+              "worktree_clean": true
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/verification/86538677-independent-ci-drain-review.md",
+            ".kontourai/flow-agents/kontourai-flow-agents-1424/review-context/abece855c2088732b428e77ff40888a0c4a868ee456fc6ead9964d5a843457f1.md",
+            "scripts/ci/trust-reconcile.js",
+            "evals/integration/test_trust_reconcile_negatives.sh",
+            ".kontourai/verification/cd5624ac-independent-ci-output-review.md"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#1424",
+          "superseded_by": "critique:6ca366e23324e81f4853eba2d01542e6abd5d5cee8fbb8ede84a1faec683fca7",
+          "critique_resolution": {
+            "schema_version": "1.0",
+            "kind": "same-reviewer-recheck",
+            "prior_record_id": "critique:6fa8b7897069660ef3355417fa6321ade5a654941ea39cb1a48764c2b5ade06e",
+            "resolving_record_id": "critique:6ca366e23324e81f4853eba2d01542e6abd5d5cee8fbb8ede84a1faec683fca7",
+            "resolver": "codex:thread-a5769c37b0dafd6fc9ec7f36:Kontour",
+            "resolved_lane_ids": [],
+            "resolved_finding_ids": [],
+            "resolved_at": "2026-10-03T16:42:05.889Z"
+          },
+          "critique_record_id": "critique:6fa8b7897069660ef3355417fa6321ade5a654941ea39cb1a48764c2b5ade06e"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-1424-review.flow-agents-workflow.actual-independent-native-reviewer-inspected-cleanbcf313fe-singlehashfixture-correction-against-persisted865-critic-exactbyobuwarning-plus-stdout-independently-reproduces-hostedactual-digest-productionobserver-correctlyhashesbothstreams-scopedshellopts-removal-restoration-preserves-original-independentdigest-middlebyte-retention-assertions-retained19ownerpass-inspected-unchanged-prior-ci-security-deps-docs-bytes-retained-currentwhole-canonical-hosted-publication-stationrollout-unclaimed-reviewed-2026-10-03t16-42-05-889z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-1424/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Actual independent native reviewer inspected cleanbcf313fe singlehashfixture correction against persisted865 critic. ExactByobuwarning plus stdout independently reproduces hostedactual digest; productionobserver correctlyhashesbothstreams. ScopedSHELLOPTS removal/restoration preserves original independentdigest/middlebyte/retention assertions; retained19ownerPASS inspected. Unchanged prior CI/security/deps/docs bytes retained. Currentwhole/canonical/hosted/publication/Stationrollout unclaimed.",
+        "value": "pass",
+        "createdAt": "2026-10-03T16:42:05.889Z",
+        "updatedAt": "2026-10-03T16:42:05.889Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex:thread-a5769c37b0dafd6fc9ec7f36:Kontour",
+          "reviewer_source": "explicit",
+          "reviewed_at": "2026-10-03T16:42:05.889Z",
+          "identity_version": 2,
+          "critique_sequence": 14,
+          "critique_predecessor_hash": "6fa8b7897069660ef3355417fa6321ade5a654941ea39cb1a48764c2b5ade06e",
+          "critique_record_hash": "6ca366e23324e81f4853eba2d01542e6abd5d5cee8fbb8ede84a1faec683fca7",
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "Legitimate singlefixture environment correction: exact inherited startupwarning explains hash mismatch; original two-stream independentoracle and A/B-retention assertions unchanged; exactenvironment restored finally. Productionobserver unchanged.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/bcf313fe-independent-hash-fixture-review.md",
+                  "summary": "Actual exactdelta review with independent digest recomputation and retained failure/green evidence."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/hash-fixture-hosted-cause-proof.json",
+                  "summary": "Exactwarning plus fullknownstdout reproduces hostedactualhash; reviewer independently recomputed both A/B cases."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/hash-fixture-shellopts-green.log",
+                  "summary": "Retained actual19ownerchecks pass with no skipped cases."
+                }
+              ]
+            },
+            {
+              "id": "security-dependencies-docs",
+              "status": "pass",
+              "summary": "No productionobserver/CI diagnostic/gate/privacy/deadline/dependency/trackeddocs change; four exactprior865 noncontextsubject hashes stillmatch. Prior sourcecoverage retained, currentcase scoped and restored without disabling productionpolicy.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/bcf313fe-independent-hash-fixture-review.md",
+                  "summary": "Fresh caller/hash/environment boundary review and unchanged source coverage."
+                },
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/verification/86538677-independent-ci-drain-review.md",
+                  "summary": "Preserved exactprior source critique and unresolved completion boundaries."
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/verification/bcf313fe-independent-hash-fixture-review.md",
+                "sha256": "6a69afe358dac15cfabbe0b922b45ecfd8165d2c83e07f0260aa3173a9da731b",
+                "role": "review_subject"
+              },
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-1424/review-context/153f3aca8e4bb8336d97a735cae1cc1d52e7c3ef892e6f6b2365b483152e906a.md",
+                "sha256": "153f3aca8e4bb8336d97a735cae1cc1d52e7c3ef892e6f6b2365b483152e906a",
+                "role": "review_context",
+                "source_file": ".kontourai/flow-agents/kontourai-flow-agents-1424/kontourai-flow-agents-1424--deliver.md",
+                "control_anchors": {
+                  "version": 1,
+                  "execution_mode": "verification_appendix",
+                  "execution_sha256": "b4e09e3c5f155bd1d628b913edd8b30278c1fd55918651b2e9290e1a8842517d",
+                  "plan_sha256": "0b3ed84b6e00e14e0738108f90aac7bdf782d93314a891c7917e6cceca2f8212",
+                  "acceptance_sha256": "aee0de5a4c98778a0d412bd549d42b72dd8df41da41965da0fb4152c8ec87d71",
+                  "scope_claims_sha256": "2b9092e34bc914d835bddaa40ef69dddd2d47fde89c949453d6c7f5c51037f56"
+                }
+              },
+              {
+                "file": "src/cli/observed-command.test.mjs",
+                "sha256": "7c356b949da6db66f75378e77d354e8123237c061743969094236d481d1f315a",
+                "role": "review_subject"
+              },
+              {
+                "file": "src/lib/observed-command.ts",
+                "sha256": "fdd72e4e5045476ed3181889278bbfaec2f3185e8496ec953e4cf616d986d242",
+                "role": "review_subject"
+              },
+              {
+                "file": ".kontourai/verification/86538677-independent-ci-drain-review.md",
+                "sha256": "f398348ebe6a7e03024662c00136471cb0ab8518b537f6c0a334c882418d2904",
+                "role": "review_subject"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "15ca3e148f14219f6723130268e9371507df1508897beea91c37767560a3dad1",
+              "head_sha": "bcf313fe58d7333852451548cdfcdd0265c65134",
+              "worktree_clean": true
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/verification/bcf313fe-independent-hash-fixture-review.md",
+            ".kontourai/flow-agents/kontourai-flow-agents-1424/review-context/153f3aca8e4bb8336d97a735cae1cc1d52e7c3ef892e6f6b2365b483152e906a.md",
+            "src/cli/observed-command.test.mjs",
+            "src/lib/observed-command.ts",
+            ".kontourai/verification/86538677-independent-ci-drain-review.md"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#1424",
+          "critique_record_id": "critique:6ca366e23324e81f4853eba2d01542e6abd5d5cee8fbb8ede84a1faec683fca7"
+        },
+        "status": "verified"
       }
     ],
     "evidence": [
@@ -2606,7 +3119,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1424/evidence.json",
         "excerptOrSummary": "Work Item kontourai/flow-agents#1424 is durably assigned to the active workflow actor (assignment sha256:ddf1480212afa75b4be5301074d71a946ac2f167523d457a9e30df49cd3515cf).",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-bf8a34c1160b7fdbff549c0dKontour",
         "passing": true
       },
@@ -2617,7 +3130,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1424/evidence.json",
         "excerptOrSummary": "Source-backed probe confirms goal, scope, risks, baseline, ownership and planning readiness.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-bf8a34c1160b7fdbff549c0dKontour",
         "passing": true
       },
@@ -2628,7 +3141,7 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1424/evidence.json",
         "excerptOrSummary": "User-approved repair decisions, non-goals and recovery boundaries are explicit.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-bf8a34c1160b7fdbff549c0dKontour",
         "passing": true
       },
@@ -2639,18 +3152,18 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1424/evidence.json",
         "excerptOrSummary": "User-directed value repair preserves AC1-AC5 and adds measured AC6 for early admission, real terminal proof, stable review inputs and compatible receipt reuse. Consume exact approved existing policy/design work; add no new mandatory gates or rollout flow; preserve actual final package/Station outcomes.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-bf8a34c1160b7fdbff549c0dKontour",
         "passing": true
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.961df202-preservespublished24e-integration-strictrootclosureguards-exactpinoracle-keepernowmatchesverified5-1-3-tuple-independentp2andfullsolefailure-retained-actualkeeper12-12pass-stablecriteria-preserved-sourceactualreview-readinessrequired-gate-visit-2026-10-03t12-55-19-815z",
-        "claimId": "kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.961df202-preservespublished24e-integration-strictrootclosureguards-exactpinoracle-keepernowmatchesverified5-1-3-tuple-independentp2andfullsolefailure-retained-actualkeeper12-12pass-stablecriteria-preserved-sourceactualreview-readinessrequired-gate-visit-2026-10-03t12-55-19-815z",
+        "id": "ev:kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.bcf313fe-isolates-hash-fixture-from-ci-inherited-shellopts-restoresfinally-retains-independentfull-output-middle-byte-assertions-exactubuntu-warning-bytes-reproducehostedhash-mismatch-observercorrectlyhashesstderr-owning19-19pass-no-productionobserver-deadline-pipefail-privacy-weakening-freshreview-currentrequiredverification-follows-gate-visit-2026-10-03t16-37-29-546z",
+        "claimId": "kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.bcf313fe-isolates-hash-fixture-from-ci-inherited-shellopts-restoresfinally-retains-independentfull-output-middle-byte-assertions-exactubuntu-warning-bytes-reproducehostedhash-mismatch-observercorrectlyhashesstderr-owning19-19pass-no-productionobserver-deadline-pipefail-privacy-weakening-freshreview-currentrequiredverification-follows-gate-visit-2026-10-03t16-37-29-546z",
         "evidenceType": "attestation",
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1424/evidence.json",
-        "excerptOrSummary": "961df202 preservespublished24e integration+strictrootclosureguards; exactpinoracle keepernowmatchesverified5.1.3 tuple, independentP2andfullsolefailure retained, actualkeeper12/12PASS. Stablecriteria preserved; sourceactualreview/readinessrequired.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "excerptOrSummary": "bcf313fe isolates hash fixture from CI-inherited shellopts, restoresfinally, retains independentfull-output/middle-byte assertions. ExactUbuntu warning bytes reproducehostedhash mismatch; observercorrectlyhashesstderr. Owning19/19PASS, no productionobserver/deadline/pipefail/privacy weakening. Freshreview/currentrequiredverification follows.",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "passing": true
       },
@@ -2661,18 +3174,18 @@
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1424/evidence.json",
         "excerptOrSummary": "Acceptance evidence reconciled through retained exact-source readiness and independent critique; postmerge rollout remains pending.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "passing": true
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z:1",
-        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z:1",
+        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/command-log.jsonl",
-        "excerptOrSummary": "Four exact registered producer acceptance commands at reviewed961df202, after published Flow5.1.3 adoption. Current-source full required Veritas readiness observed PASS on isolated Linux; 99 file hashes/sizes match. Actual native critique and privileged container proof support AC1-AC6. Original packed failure remains unexplained; registry, stable rollout and original task remain pending. Two current packed wrapper timeouts stopped at npm TypeScript metadata revalidation; both retained as failed evidence. Named metadata-only offline/prefer-offline probes read complete privatecache successfully underNode22/24; this transaction uses scoped prefer-offline with normal integrity and unchanged15minute child/16minute observation bounds. Historicala731 failure remains unresolved.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "excerptOrSummary": "Four exact registered commands at reviewedbcf313fe after precise CI-only shellopts hashfixture repair. Original independenthash/middle-byte/retention assertions unchanged;19ownerchecks PASS. Priorcd fullrequiredreadiness PASS21legacyGitSKIPslimits retained; freshbcf fullrequiredreadiness and requiredCI separatelypending. No productionobserver/gate/deadline/integrity/privacy change; allhistoricalfailures retained.",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -2684,13 +3197,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z:2",
-        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z:2",
+        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/command-log.jsonl",
-        "excerptOrSummary": "Four exact registered producer acceptance commands at reviewed961df202, after published Flow5.1.3 adoption. Current-source full required Veritas readiness observed PASS on isolated Linux; 99 file hashes/sizes match. Actual native critique and privileged container proof support AC1-AC6. Original packed failure remains unexplained; registry, stable rollout and original task remain pending. Two current packed wrapper timeouts stopped at npm TypeScript metadata revalidation; both retained as failed evidence. Named metadata-only offline/prefer-offline probes read complete privatecache successfully underNode22/24; this transaction uses scoped prefer-offline with normal integrity and unchanged15minute child/16minute observation bounds. Historicala731 failure remains unresolved.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "excerptOrSummary": "Four exact registered commands at reviewedbcf313fe after precise CI-only shellopts hashfixture repair. Original independenthash/middle-byte/retention assertions unchanged;19ownerchecks PASS. Priorcd fullrequiredreadiness PASS21legacyGitSKIPslimits retained; freshbcf fullrequiredreadiness and requiredCI separatelypending. No productionobserver/gate/deadline/integrity/privacy change; allhistoricalfailures retained.",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -2702,13 +3215,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z:3",
-        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z:3",
+        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/command-log.jsonl",
-        "excerptOrSummary": "Four exact registered producer acceptance commands at reviewed961df202, after published Flow5.1.3 adoption. Current-source full required Veritas readiness observed PASS on isolated Linux; 99 file hashes/sizes match. Actual native critique and privileged container proof support AC1-AC6. Original packed failure remains unexplained; registry, stable rollout and original task remain pending. Two current packed wrapper timeouts stopped at npm TypeScript metadata revalidation; both retained as failed evidence. Named metadata-only offline/prefer-offline probes read complete privatecache successfully underNode22/24; this transaction uses scoped prefer-offline with normal integrity and unchanged15minute child/16minute observation bounds. Historicala731 failure remains unresolved.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "excerptOrSummary": "Four exact registered commands at reviewedbcf313fe after precise CI-only shellopts hashfixture repair. Original independenthash/middle-byte/retention assertions unchanged;19ownerchecks PASS. Priorcd fullrequiredreadiness PASS21legacyGitSKIPslimits retained; freshbcf fullrequiredreadiness and requiredCI separatelypending. No productionobserver/gate/deadline/integrity/privacy change; allhistoricalfailures retained.",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -2720,13 +3233,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z:4",
-        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z:4",
+        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/command-log.jsonl",
-        "excerptOrSummary": "Four exact registered producer acceptance commands at reviewed961df202, after published Flow5.1.3 adoption. Current-source full required Veritas readiness observed PASS on isolated Linux; 99 file hashes/sizes match. Actual native critique and privileged container proof support AC1-AC6. Original packed failure remains unexplained; registry, stable rollout and original task remain pending. Two current packed wrapper timeouts stopped at npm TypeScript metadata revalidation; both retained as failed evidence. Named metadata-only offline/prefer-offline probes read complete privatecache successfully underNode22/24; this transaction uses scoped prefer-offline with normal integrity and unchanged15minute child/16minute observation bounds. Historicala731 failure remains unresolved.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "excerptOrSummary": "Four exact registered commands at reviewedbcf313fe after precise CI-only shellopts hashfixture repair. Original independenthash/middle-byte/retention assertions unchanged;19ownerchecks PASS. Priorcd fullrequiredreadiness PASS21legacyGitSKIPslimits retained; freshbcf fullrequiredreadiness and requiredCI separatelypending. No productionobserver/gate/deadline/integrity/privacy change; allhistoricalfailures retained.",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -2738,24 +3251,24 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.current-exact-source-confidence-pass-canonical-six-criteria-four-observed-commands-distinct-critique-full-required-readiness-strict-published-reducer-privileged-proof-hosted-delivery-checks-and-mandatory-rollout-remain-pending-failed-historical-evidence-preserved-gate-visit-2026-10-03t14-24-08-045z",
-        "claimId": "kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.current-exact-source-confidence-pass-canonical-six-criteria-four-observed-commands-distinct-critique-full-required-readiness-strict-published-reducer-privileged-proof-hosted-delivery-checks-and-mandatory-rollout-remain-pending-failed-historical-evidence-preserved-gate-visit-2026-10-03t14-24-08-045z",
+        "id": "ev:kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.currentbcf-source-confidencepass-canonical6criteria-4observedcommands-distinctcritique-currentfullreadiness-andhostedcanonicalverifypass-onlystaledeliverystructuralgap-remains-beforeexactrequiredci-allhistory-skips-mandatoryrolloutlimitsretained-gate-visit-2026-10-03t16-46-41-069z",
+        "claimId": "kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.currentbcf-source-confidencepass-canonical6criteria-4observedcommands-distinctcritique-currentfullreadiness-andhostedcanonicalverifypass-onlystaledeliverystructuralgap-remains-beforeexactrequiredci-allhistory-skips-mandatoryrolloutlimitsretained-gate-visit-2026-10-03t16-46-41-069z",
         "evidenceType": "attestation",
         "method": "corroboration",
         "sourceRef": "kontourai-flow-agents-1424/evidence.json",
-        "excerptOrSummary": "Current exact-source confidence PASS: canonical six criteria/four observed commands, distinct critique, full required readiness, strict published reducer/privileged proof. Hosted delivery checks and mandatory rollout remain pending; failed historical evidence preserved.",
-        "observedAt": "2026-10-03T14:24:08.045Z",
+        "excerptOrSummary": "Currentbcf source confidencePASS: canonical6criteria/4observedcommands, distinctcritique/currentfullreadiness andhostedcanonicalverifyPASS. Onlystaledeliverystructuralgap remains beforeexactrequiredCI; allhistory/skips/mandatoryrolloutlimitsretained.",
+        "observedAt": "2026-10-03T16:46:41.069Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "passing": true
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t14-12-29-151z:a8f089364ec145f9",
-        "claimId": "kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t16-43-18-339z:a8f089364ec145f9",
+        "claimId": "kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/observed-command",
         "excerptOrSummary": "node --test --import ./src/cli/unit-test-state.mjs src/cli/effective-flow-agents-config.test.mjs",
-        "observedAt": "2026-10-03T14:12:29.151Z",
+        "observedAt": "2026-10-03T16:43:18.339Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -2767,13 +3280,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t14-12-29-151z:3fcfa7e51db0f0ed",
-        "claimId": "kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t16-43-18-339z:3fcfa7e51db0f0ed",
+        "claimId": "kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/observed-command",
         "excerptOrSummary": "node --test evals/integration/liveness-worktree-root.test.mjs",
-        "observedAt": "2026-10-03T14:12:29.151Z",
+        "observedAt": "2026-10-03T16:43:18.339Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -2785,13 +3298,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t14-12-29-151z:18faef7789a3074f",
-        "claimId": "kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t16-43-18-339z:18faef7789a3074f",
+        "claimId": "kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/observed-command",
         "excerptOrSummary": "node --test --import ./src/cli/unit-test-state.mjs src/cli/public-api.test.mjs",
-        "observedAt": "2026-10-03T14:12:29.151Z",
+        "observedAt": "2026-10-03T16:43:18.339Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -2803,13 +3316,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t14-12-29-151z:18faef7789a3074f",
-        "claimId": "kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t16-43-18-339z:18faef7789a3074f",
+        "claimId": "kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/observed-command",
         "excerptOrSummary": "node --test --import ./src/cli/unit-test-state.mjs src/cli/public-api.test.mjs",
-        "observedAt": "2026-10-03T14:12:29.151Z",
+        "observedAt": "2026-10-03T16:43:18.339Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -2821,13 +3334,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t14-12-29-151z:28df8563da93b4c4",
-        "claimId": "kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t16-43-18-339z:28df8563da93b4c4",
+        "claimId": "kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/observed-command",
         "excerptOrSummary": "node --test evals/integration/public-workflow-cli.test.mjs",
-        "observedAt": "2026-10-03T14:12:29.151Z",
+        "observedAt": "2026-10-03T16:43:18.339Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -2839,13 +3352,13 @@
         }
       },
       {
-        "id": "ev:kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t14-12-29-151z:28df8563da93b4c4",
-        "claimId": "kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t14-12-29-151z",
+        "id": "ev:kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t16-43-18-339z:28df8563da93b4c4",
+        "claimId": "kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t16-43-18-339z",
         "evidenceType": "test_output",
         "method": "validation",
         "sourceRef": "kontourai-flow-agents-1424/observed-command",
         "excerptOrSummary": "node --test evals/integration/public-workflow-cli.test.mjs",
-        "observedAt": "2026-10-03T14:12:29.151Z",
+        "observedAt": "2026-10-03T16:43:18.339Z",
         "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "supportStrength": "entails",
         "passing": true,
@@ -3071,8 +3584,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1424-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1424-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-ddf1480212afa75b4be5301074d71a946ac2f167523d457a9e30df49cd3515cf-gate-visit-2026-10-02t19-08-17z"
         ],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-gate-claim-pickup-probe-readiness.flow-agents-workflow.source-backed-probe-confirms-goal-scope-risks-baseline-ownership-and-planning-readiness-gate-visit-2026-10-02t19-09-33-233z",
@@ -3083,8 +3596,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1424-gate-claim-pickup-probe-readiness.flow-agents-workflow.source-backed-probe-confirms-goal-scope-risks-baseline-ownership-and-planning-readiness-gate-visit-2026-10-02t19-09-33-233z"
         ],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.user-approved-repair-decisions-non-goals-and-recovery-boundaries-are-explicit-gate-visit-2026-10-02t19-09-34-922z",
@@ -3095,8 +3608,8 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1424-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.user-approved-repair-decisions-non-goals-and-recovery-boundaries-are-explicit-gate-visit-2026-10-02t19-09-34-922z"
         ],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-gate-claim-implementation-plan.flow-agents-workflow.user-directed-value-repair-preserves-ac1-ac5-and-adds-measured-ac6-for-early-admission-real-terminal-proof-stable-review-inputs-and-compatible-receipt-reuse-consume-exact-approved-existing-policy-design-work-add-no-new-mandatory-gates-or-rollout-flow-preserve-actual-final-package-station-outcomes-gate-visit-2026-10-02t23-49-54-802z",
@@ -3107,20 +3620,20 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1424-gate-claim-implementation-plan.flow-agents-workflow.user-directed-value-repair-preserves-ac1-ac5-and-adds-measured-ac6-for-early-admission-real-terminal-proof-stable-review-inputs-and-compatible-receipt-reuse-consume-exact-approved-existing-policy-design-work-add-no-new-mandatory-gates-or-rollout-flow-preserve-actual-final-package-station-outcomes-gate-visit-2026-10-02t23-49-54-802z"
         ],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.961df202-preservespublished24e-integration-strictrootclosureguards-exactpinoracle-keepernowmatchesverified5-1-3-tuple-independentp2andfullsolefailure-retained-actualkeeper12-12pass-stablecriteria-preserved-sourceactualreview-readinessrequired-gate-visit-2026-10-03t12-55-19-815z",
-        "claimId": "kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.961df202-preservespublished24e-integration-strictrootclosureguards-exactpinoracle-keepernowmatchesverified5-1-3-tuple-independentp2andfullsolefailure-retained-actualkeeper12-12pass-stablecriteria-preserved-sourceactualreview-readinessrequired-gate-visit-2026-10-03t12-55-19-815z",
+        "id": "evt:kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.bcf313fe-isolates-hash-fixture-from-ci-inherited-shellopts-restoresfinally-retains-independentfull-output-middle-byte-assertions-exactubuntu-warning-bytes-reproducehostedhash-mismatch-observercorrectlyhashesstderr-owning19-19pass-no-productionobserver-deadline-pipefail-privacy-weakening-freshreview-currentrequiredverification-follows-gate-visit-2026-10-03t16-37-29-546z",
+        "claimId": "kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.bcf313fe-isolates-hash-fixture-from-ci-inherited-shellopts-restoresfinally-retains-independentfull-output-middle-byte-assertions-exactubuntu-warning-bytes-reproducehostedhash-mismatch-observercorrectlyhashesstderr-owning19-19pass-no-productionobserver-deadline-pipefail-privacy-weakening-freshreview-currentrequiredverification-follows-gate-visit-2026-10-03t16-37-29-546z",
         "status": "verified",
         "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.961df202-preservespublished24e-integration-strictrootclosureguards-exactpinoracle-keepernowmatchesverified5-1-3-tuple-independentp2andfullsolefailure-retained-actualkeeper12-12pass-stablecriteria-preserved-sourceactualreview-readinessrequired-gate-visit-2026-10-03t12-55-19-815z"
+          "ev:kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.bcf313fe-isolates-hash-fixture-from-ci-inherited-shellopts-restoresfinally-retains-independentfull-output-middle-byte-assertions-exactubuntu-warning-bytes-reproducehostedhash-mismatch-observercorrectlyhashesstderr-owning19-19pass-no-productionobserver-deadline-pipefail-privacy-weakening-freshreview-currentrequiredverification-follows-gate-visit-2026-10-03t16-37-29-546z"
         ],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-gate-claim-acceptance-criteria.flow-agents-workflow.acceptance-evidence-reconciled-through-retained-exact-source-readiness-and-independent-critique-postmerge-rollout-remains-pending-gate-visit-2026-10-03t02-40-54-144z",
@@ -3131,107 +3644,107 @@
         "evidenceIds": [
           "ev:kontourai-flow-agents-1424-gate-claim-acceptance-criteria.flow-agents-workflow.acceptance-evidence-reconciled-through-retained-exact-source-readiness-and-independent-critique-postmerge-rollout-remains-pending-gate-visit-2026-10-03t02-40-54-144z"
         ],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z",
-        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z",
+        "id": "evt:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z",
+        "claimId": "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z",
         "status": "verified",
         "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z:1",
-          "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z:2",
-          "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z:3",
-          "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-producer-acceptance-commands-at-reviewed961df202-after-published-flow5-1-3-adoption-current-source-full-required-veritas-readiness-observed-pass-on-isolated-linux-99-file-hashes-sizes-match-actual-native-critique-and-privileged-container-proof-support-ac1-ac6-original-packed-failure-remains-unexplained-registry-stable-rollout-and-original-task-remain-pending-two-current-packed-wrapper-timeouts-stopped-at-npm-typescript-metadata-revalidation-both-retained-as-failed-evidence-named-metadata-only-offline-prefer-offline-probes-read-complete-privatecache-successfully-undernode22-24-this-transaction-uses-scoped-prefer-offline-with-normal-integrity-and-unchanged15minute-child-16minute-observation-bounds-historicala731-failure-remains-unresolved-gate-visit-2026-10-03t14-12-29-151z:4"
+          "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z:1",
+          "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z:2",
+          "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z:3",
+          "ev:kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.four-exact-registered-commands-at-reviewedbcf313fe-after-precise-ci-only-shellopts-hashfixture-repair-original-independenthash-middle-byte-retention-assertions-unchanged-19ownerchecks-pass-priorcd-fullrequiredreadiness-pass21legacygitskipslimits-retained-freshbcf-fullrequiredreadiness-and-requiredci-separatelypending-no-productionobserver-gate-deadline-integrity-privacy-change-allhistoricalfailures-retained-gate-visit-2026-10-03t16-43-18-339z:4"
         ],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.current-exact-source-confidence-pass-canonical-six-criteria-four-observed-commands-distinct-critique-full-required-readiness-strict-published-reducer-privileged-proof-hosted-delivery-checks-and-mandatory-rollout-remain-pending-failed-historical-evidence-preserved-gate-visit-2026-10-03t14-24-08-045z",
-        "claimId": "kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.current-exact-source-confidence-pass-canonical-six-criteria-four-observed-commands-distinct-critique-full-required-readiness-strict-published-reducer-privileged-proof-hosted-delivery-checks-and-mandatory-rollout-remain-pending-failed-historical-evidence-preserved-gate-visit-2026-10-03t14-24-08-045z",
+        "id": "evt:kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.currentbcf-source-confidencepass-canonical6criteria-4observedcommands-distinctcritique-currentfullreadiness-andhostedcanonicalverifypass-onlystaledeliverystructuralgap-remains-beforeexactrequiredci-allhistory-skips-mandatoryrolloutlimitsretained-gate-visit-2026-10-03t16-46-41-069z",
+        "claimId": "kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.currentbcf-source-confidencepass-canonical6criteria-4observedcommands-distinctcritique-currentfullreadiness-andhostedcanonicalverifypass-onlystaledeliverystructuralgap-remains-beforeexactrequiredci-allhistory-skips-mandatoryrolloutlimitsretained-gate-visit-2026-10-03t16-46-41-069z",
         "status": "verified",
         "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.current-exact-source-confidence-pass-canonical-six-criteria-four-observed-commands-distinct-critique-full-required-readiness-strict-published-reducer-privileged-proof-hosted-delivery-checks-and-mandatory-rollout-remain-pending-failed-historical-evidence-preserved-gate-visit-2026-10-03t14-24-08-045z"
+          "ev:kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.currentbcf-source-confidencepass-canonical6criteria-4observedcommands-distinctcritique-currentfullreadiness-andhostedcanonicalverifypass-onlystaledeliverystructuralgap-remains-beforeexactrequiredci-allhistory-skips-mandatoryrolloutlimitsretained-gate-visit-2026-10-03t16-46-41-069z"
         ],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t14-12-29-151z",
-        "claimId": "kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t14-12-29-151z",
+        "id": "evt:kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t16-43-18-339z",
+        "claimId": "kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t16-43-18-339z",
         "status": "verified",
         "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t14-12-29-151z:a8f089364ec145f9"
+          "ev:kontourai-flow-agents-1424-ac1.flow-agents-workflow.local-git-namespace-trust-committed-config-and-immutable-git-reads-work-through-fixed-protected-system-executables-in-host-systemd-and-nested-codex-namespaces-while-hostile-ownership-configuration-replacement-cases-fail-verified-2026-10-03t16-43-18-339z:a8f089364ec145f9"
         ],
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "verifiedAt": "2026-10-03T14:12:29.151Z"
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "verifiedAt": "2026-10-03T16:43:18.339Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t14-12-29-151z",
-        "claimId": "kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t14-12-29-151z",
+        "id": "evt:kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t16-43-18-339z",
+        "claimId": "kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t16-43-18-339z",
         "status": "verified",
         "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t14-12-29-151z:3fcfa7e51db0f0ed"
+          "ev:kontourai-flow-agents-1424-ac2.flow-agents-workflow.actor-worktree-hook-binding-shipped-stop-steering-and-capture-hooks-find-the-exact-actor-bound-physical-project-run-preserve-shared-coordination-roots-and-never-gate-unrelated-actors-verified-2026-10-03t16-43-18-339z:3fcfa7e51db0f0ed"
         ],
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "verifiedAt": "2026-10-03T14:12:29.151Z"
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "verifiedAt": "2026-10-03T16:43:18.339Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t14-12-29-151z",
-        "claimId": "kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t14-12-29-151z",
+        "id": "evt:kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t16-43-18-339z",
+        "claimId": "kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t16-43-18-339z",
         "status": "verified",
         "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t14-12-29-151z:18faef7789a3074f"
+          "ev:kontourai-flow-agents-1424-ac3.flow-agents-workflow.execute-record-synchronize-next-action-derives-producer-execution-evidence-submission-and-synchronization-separately-from-the-canonical-envelope-actual-public-evidence-advances-gates-and-status-alone-does-not-verified-2026-10-03t16-43-18-339z:18faef7789a3074f"
         ],
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "verifiedAt": "2026-10-03T14:12:29.151Z"
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "verifiedAt": "2026-10-03T16:43:18.339Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t14-12-29-151z",
-        "claimId": "kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t14-12-29-151z",
+        "id": "evt:kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t16-43-18-339z",
+        "claimId": "kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t16-43-18-339z",
         "status": "verified",
         "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t14-12-29-151z:18faef7789a3074f"
+          "ev:kontourai-flow-agents-1424-ac4.flow-agents-workflow.reviewed-generated-documented-source-generated-distributions-durable-documentation-meaningful-regressions-independent-critique-readiness-and-required-local-verification-agree-required-hosted-checks-remain-mandatory-at-the-publish-and-merge-readiness-gates-verified-2026-10-03t16-43-18-339z:18faef7789a3074f"
         ],
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "verifiedAt": "2026-10-03T14:12:29.151Z"
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "verifiedAt": "2026-10-03T16:43:18.339Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t14-12-29-151z",
-        "claimId": "kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t14-12-29-151z",
+        "id": "evt:kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t16-43-18-339z",
+        "claimId": "kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t16-43-18-339z",
         "status": "verified",
         "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t14-12-29-151z:28df8563da93b4c4"
+          "ev:kontourai-flow-agents-1424-ac5.flow-agents-workflow.installable-station-candidate-an-installable-candidate-package-works-in-an-isolated-station-consumer-on-brian-media-under-the-same-user-namespace-public-workflow-and-actor-hook-contracts-published-registry-provenance-stable-consumer-original-issue-closure-remain-mandatory-post-merge-rollout-milestones-verified-2026-10-03t16-43-18-339z:28df8563da93b4c4"
         ],
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "verifiedAt": "2026-10-03T14:12:29.151Z"
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "verifiedAt": "2026-10-03T16:43:18.339Z"
       },
       {
-        "id": "evt:kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t14-12-29-151z",
-        "claimId": "kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t14-12-29-151z",
+        "id": "evt:kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t16-43-18-339z",
+        "claimId": "kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t16-43-18-339z",
         "status": "verified",
         "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t14-12-29-151z:28df8563da93b4c4"
+          "ev:kontourai-flow-agents-1424-ac6.flow-agents-workflow.value-focused-gates-supported-evidence-retains-its-real-terminal-outcome-predictable-payload-review-command-publication-incompatibility-is-rejected-before-expensive-execution-unchanged-reviewed-implementation-is-not-invalidated-by-later-progress-context-supported-revision-bound-receipt-reuse-avoids-repeated-checks-while-stale-failed-zero-test-and-forged-evidence-stays-non-confirming-verified-2026-10-03t16-43-18-339z:28df8563da93b4c4"
         ],
-        "createdAt": "2026-10-03T14:12:29.151Z",
-        "verifiedAt": "2026-10-03T14:12:29.151Z"
+        "createdAt": "2026-10-03T16:43:18.339Z",
+        "verifiedAt": "2026-10-03T16:43:18.339Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-native-review-f6fcf28e-3db20018.flow-agents-workflow.independent-native-reviewer-inspected-frozen-commit-f6fcf28e5cc84b2717c2570c62c5a97ba5f9a8eb-corrected-production-owner-findings-security-and-concurrency-invariants-docs-and-actual-packed-dependency-closure-no-open-source-blockers-whole-readiness-installed-consumer-and-hosted-release-proof-remain-separate-pending-verification-reviewed-2026-10-02t21-56-06-215z",
@@ -3240,8 +3753,8 @@
         "actor": "codex:thread-3db20018e3c71299b00692e5:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-native-review-e004634b-3db20018.flow-agents-workflow.genuine-independent-reviewer-rechecked-frozen-delivery-acceptance-table-against-final-e004-readiness-complete-unit-knowledge-ordinary-installed-namespace-archive-integrity-and-actual-native-station-tool-receipts-source-unchanged-and-no-findings-hosted-ci-registry-provenance-stable-station-integration-and-original-task-closure-remain-mandatory-public-seven-file-tests-evidence-transaction-is-still-pending-reviewed-2026-10-02t22-19-11-785z",
@@ -3250,8 +3763,8 @@
         "actor": "codex:thread-3db20018e3c71299b00692e5:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-native-final-296257c0-01a0ff5d.flow-agents-workflow.independent-same-native-session-review-of-frozen-296257c0-five-file-correction-with-retained-whole-branch-context-no-blocking-code-security-docs-findings-earlier-p2-documentation-and-inherited-stream-findings-addressed-bounded-keeper-executed-1-1-owner-51-51-and-multi-command-1-1-receipts-inspected-not-rerun-whole-readiness-hosted-final-package-publication-registry-and-station-closure-remain-unclaimed-reviewed-2026-10-03t01-56-09-724z",
@@ -3260,8 +3773,8 @@
         "actor": "codex:thread-57ced8287c09753a25139a77:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-native-final-0c8ba206.flow-agents-workflow.independent-source-review-of-exact0c8ba206-fixture-correction-obsolete-bash-positives-replaced-by-real-node-assertions-strict-admission-preserved-no-blocking-findings-final-checks-package-hosted-release-pending-reviewed-2026-10-03t03-06-10-154z",
@@ -3270,8 +3783,8 @@
         "actor": "codex:thread-22695aba1b84affb04162e38:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-native-final-f845bb60.flow-agents-workflow.independent-exact-f845-publisher-body-correction-source-review-request-compatible-empty-and-outer-whitespace-forms-exact-intent-and-bounded-safety-preserved-no-blocking-findings-final-readiness-tests-hosted-merge-and-release-remain-separately-pending-reviewed-2026-10-03t04-34-30-621z",
@@ -3280,8 +3793,8 @@
         "actor": "codex:thread-22695aba1b84affb04162e38:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-native-final-30b035da.flow-agents-workflow.distinct-native-reviewer-inspected-frozen-30b035da-fixture-repair-and-resolved-follow-up-findings-with-unchanged-independently-reviewed-f845-production-code-security-docs-source-lanes-pass-with-diagnostic-canonical-readiness-hosted-and-rollout-evidence-kept-separate-reviewed-2026-10-03t05-40-10-381z",
@@ -3290,8 +3803,8 @@
         "actor": "codex:thread-33a883b619e88feabfa957d9:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-native-final-40b0d29c.flow-agents-workflow.actual-distinct-native-reviewer-independently-inspected-frozen40b0d29c-final-surface-fixture-repair-and-current-owned-scope-no-blocking-code-security-docs-finding-retained-green-has60actualpass-0fail-pre-existing-scriptprinted110-source-site-count-is-disclosed-and-corrected-in-owned-evidence-unchanged-prior-production-fixtures-retain-independent-reviews-final-readiness-hosted-and-rollout-completion-remain-separate-reviewed-2026-10-03t06-37-45-517z",
@@ -3300,8 +3813,8 @@
         "actor": "codex:thread-33a883b619e88feabfa957d9:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-native-final-a7312b78.flow-agents-workflow.distinct-actual-native-reviewer-inspected-frozena7312b78-headless-context-watchdog-three-fixture-repair-and-latest-owned-scope-no-new-blocking-code-security-docs-findings-inputs-restore-after-each-case-actual-thirdadapter-sigkill-signedcheckpoints-and-timedout-rawzero-nonconfirmation-controls-remain-prior-unchanged-source-reviews-retained-root-fulllinux-readiness-hosted-rollout-completion-remain-unclaimed-reviewed-2026-10-03t08-23-40-496z",
@@ -3310,8 +3823,8 @@
         "actor": "codex:thread-33a883b619e88feabfa957d9:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       },
       {
         "id": "evt:kontourai-flow-agents-1424-native-final-961df202.flow-agents-workflow.actual-distinct-native-reviewer-inspected-frozen961-keeper-correction-priorp2-resolved-by-exact-verified5literal-pinoracle-andretained12-12green-currentcode-security-dependency-docs-source-lanespass-with-unchangedstrictpublishedclosure-authority-boundaries-originalpackedexit1-stays-unresolved-laterpasses-andbudgetrepair-do-not-diagnose-it-finalreadiness-livehelper-hosted-rollout-outcomes-remainunclaimed-reviewed-2026-10-03t13-07-44-064z",
@@ -3320,8 +3833,18 @@
         "actor": "codex:thread-33a883b619e88feabfa957d9:Kontour",
         "method": "validation",
         "evidenceIds": [],
-        "createdAt": "2026-10-03T14:24:08.045Z",
-        "verifiedAt": "2026-10-03T14:24:08.045Z"
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-1424-review.flow-agents-workflow.actual-independent-native-reviewer-inspected-cleanbcf313fe-singlehashfixture-correction-against-persisted865-critic-exactbyobuwarning-plus-stdout-independently-reproduces-hostedactual-digest-productionobserver-correctlyhashesbothstreams-scopedshellopts-removal-restoration-preserves-original-independentdigest-middlebyte-retention-assertions-retained19ownerpass-inspected-unchanged-prior-ci-security-deps-docs-bytes-retained-currentwhole-canonical-hosted-publication-stationrollout-unclaimed-reviewed-2026-10-03t16-42-05-889z",
+        "claimId": "kontourai-flow-agents-1424-review.flow-agents-workflow.actual-independent-native-reviewer-inspected-cleanbcf313fe-singlehashfixture-correction-against-persisted865-critic-exactbyobuwarning-plus-stdout-independently-reproduces-hostedactual-digest-productionobserver-correctlyhashesbothstreams-scopedshellopts-removal-restoration-preserves-original-independentdigest-middlebyte-retention-assertions-retained19ownerpass-inspected-unchanged-prior-ci-security-deps-docs-bytes-retained-currentwhole-canonical-hosted-publication-stationrollout-unclaimed-reviewed-2026-10-03t16-42-05-889z",
+        "status": "verified",
+        "actor": "codex:thread-a5769c37b0dafd6fc9ec7f36:Kontour",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-10-03T16:46:41.069Z",
+        "verifiedAt": "2026-10-03T16:46:41.069Z"
       }
     ]
   }
