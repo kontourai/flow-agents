@@ -1800,13 +1800,13 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  process.exit(runTrustReconcile({
+  process.exitCode = runTrustReconcile({
     bundle: args.bundle || null,
     commands: args.commands,
     repoRoot: args.repoRoot || null,
     manifest: args.manifest || null,
     missingBundlePolicy: args.missingBundlePolicy || null,
-  }));
+  });
 }
 
 // Export core function for programmatic use (e.g. flow-agents verify CLI subcommand).

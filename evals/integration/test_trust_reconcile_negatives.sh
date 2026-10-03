@@ -818,7 +818,7 @@ fi
 #     Step 2/delivery-DECLARED enforcement does not apply on push.
 CASE7V="$DECLARED_TMPROOT/push-event-failing-verify"
 mkdir -p "$CASE7V"
-printf 'console.log("CI_STDOUT_FAILURE_OWNER"); process.exit(1);\n' > "$CASE7V/verify-failure.mjs"
+printf 'console.log("x".repeat(128 * 1024)); console.log("CI_STDOUT_FAILURE_OWNER"); process.exitCode = 1;\n' > "$CASE7V/verify-failure.mjs"
 out7v="$(TRUST_RECONCILE_EVENT="push" TRUST_RECONCILE_COMMANDS="node verify-failure.mjs" \
   node "$RECONCILE" --repo-root "$CASE7V" 2>&1)"
 code7v=$?
