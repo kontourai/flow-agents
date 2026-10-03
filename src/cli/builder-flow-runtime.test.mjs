@@ -546,7 +546,7 @@ if (args[0] === "diff" && args.some((arg) => arg.includes("..HEAD"))) process.st
   );
 });
 
-test("public provisional request uses hermetic unprivileged coordinator primitives and continues to terminal delivery", async () => {
+test("public provisional request uses hermetic unprivileged coordinator primitives and continues to terminal delivery", async (t) => {
   const session = makeSession("public-provisional-terminal-e2e");
   session.projectRoot = fs.realpathSync(session.projectRoot);
   session.artifactRoot = path.join(session.projectRoot, ".kontourai", "flow-agents");
@@ -812,11 +812,23 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   );
   const refreshedDescriptorBytes = fs.readFileSync(descriptorPath);
   assert.notDeepEqual(refreshedDescriptorBytes, initialDescriptorBytes, "fresh checkpoint identity changes descriptor bytes");
-  assert.equal(JSON.parse(initialDescriptorBytes).checkpoint_sha256, initialCheckpointDigest);
+  const initialDescriptor = JSON.parse(initialDescriptorBytes);
+  assert.equal(initialDescriptor.checkpoint_sha256, initialCheckpointDigest);
   const refreshedCheckpointDigest = createHash("sha256").update(fs.readFileSync(path.join(destination, "trust.checkpoint.json"))).digest("hex");
-  assert.equal(readJson(descriptorPath).checkpoint_sha256, refreshedCheckpointDigest);
-  const statement = readJson(path.join(destination, "trust.checkpoint.intoto.json"));
+  const refreshedDescriptor = JSON.parse(refreshedDescriptorBytes);
+  assert.equal(refreshedDescriptor.checkpoint_sha256, refreshedCheckpointDigest);
+  assert.ok(["signed", "unsigned"].includes(refreshedDescriptor.status));
+  assert.equal(refreshedDescriptor.path, refreshedDescriptor.status === "signed" ? "trust.checkpoint.sig.json" : "trust.checkpoint.intoto.json");
+  const companion = readJson(path.join(destination, refreshedDescriptor.path));
+  if (refreshedDescriptor.status === "signed") {
+    assert.equal(companion.payloadType, "application/vnd.in-toto+json");
+    assert.ok(Array.isArray(companion.signatures) && companion.signatures.length > 0);
+  }
+  const statement = refreshedDescriptor.status === "signed"
+    ? JSON.parse(Buffer.from(companion.payload, "base64").toString("utf8"))
+    : companion;
   assert.equal(statement.subject.find((entry) => entry.name === "trust.checkpoint.json").digest.sha256, refreshedCheckpointDigest);
+  t.diagnostic(`checkpoint signing modes: first=${initialDescriptor.status}, refreshed=${refreshedDescriptor.status}`);
   const repairedCiReadiness = withIdentitySuffix(
     bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" }),
     "after-route-back",
@@ -852,6 +864,48 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   assert.equal(terminalCheckpoint.phase, "release");
   assert.equal(readJson(path.join(session.sessionDir, "provisional-delivery.json")).authority_event_hash, ledger.events.at(-1).event_hash);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+test("public provisional publication exercises signed checkpoint companions through the owning lifecycle journey", () => {
+  const bootstrap = path.join(makeFixtureDir("signed-public-provisional-owner-"), "signer.mjs");
+  const surfaceUrl = import.meta.resolve("@kontourai/surface");
+  const signerModule = `
+    export * from ${JSON.stringify(surfaceUrl)};
+    import { toDsseEnvelope } from ${JSON.stringify(surfaceUrl)};
+    import { generateKeyPairSync, sign } from "node:crypto";
+    const { privateKey } = generateKeyPairSync("ed25519");
+    export async function signStatementWithSigstore(statement) {
+      return {
+        envelope: await toDsseEnvelope(statement, {
+          keyid: "public-owner-fixture",
+          sign: async (bytes) => sign(null, Buffer.from(bytes), privateKey).toString("base64"),
+        }),
+        sigstoreBundle: null,
+        assuranceLevel: "signed",
+      };
+    }
+  `;
+  fs.writeFileSync(bootstrap, `
+    import { registerHooks } from "node:module";
+    registerHooks({ resolve(specifier, context, nextResolve) {
+      if (specifier === "@kontourai/surface") return {
+        url: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(signerModule)}`)},
+        shortCircuit: true,
+      };
+      return nextResolve(specifier, context);
+    }});
+  `);
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT; // The child starts a test runner, rather than inheriting this worker identity.
+  const result = spawnSync(process.execPath, [
+    "--import", path.resolve("src/cli/unit-test-state.mjs"),
+    "--import", bootstrap,
+    "--test", "--test-name-pattern=^public provisional request uses",
+    path.resolve("src/cli/builder-flow-runtime.test.mjs"),
+  ], { cwd: process.cwd(), env, encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /checkpoint signing modes: first=signed, refreshed=signed/);
 });
 
 test("routed-back provenance keeps the manifest bound to the start definition after an authorized amendment", async () => {
