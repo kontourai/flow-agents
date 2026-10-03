@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+import { makeFixtureDir } from "../../src/cli/fixture-temp-dir.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const fixtures = path.join(root, "evals/fixtures/learning-review-proposals");
@@ -116,4 +116,13 @@ test("ratified cost effect waits for a priced follow-up and records a real zero 
   f.analyze([0, 0, 0, 0, 0], "effect-follow-up", f.ledger);
   const effect = entry().effect_observed;
   assert.deepEqual([effect.metric, effect.before, effect.after, effect.moved], ["avg_cost_usd", 0.2, 0, "improved"]);
+});
+
+test("legacy learning-review owner passes with its aggregate, schema and producer-isolation checks", () => {
+  const output = runScript(path.join(root, "evals/integration/test_learning_review_proposals.sh"), []);
+  assert.match(output, /test_learning_review_proposals: all checks passed\./);
+  assert.match(output, /\[PASS\] legacy by_kit\[\] fields equal expected-aggregates\.json exactly/);
+  assert.match(output, /\[PASS\] pattern-present output validates against learning-review-proposals\.schema\.json/);
+  assert.match(output, /\[PASS\] cost-only proposal \(defect deleted\) FAILS validation/);
+  assert.match(output, /\[PASS\] by_kit\[\] is byte-identical with flow_run_record rows present/);
 });

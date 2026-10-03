@@ -117,7 +117,7 @@ CHECKS=(
   "Console receipt relay integration|bash evals/integration/test_console_receipt_relay.sh"
   "Capability declarations integration|bash evals/integration/test_capability_declarations.sh"
   "Install identity stamp integration|bash evals/integration/test_install_identity_stamp.sh"
-  "Learning review proposals integration|bash evals/integration/test_learning_review_proposals.sh"
+  "Learning review proposals integration|node --test evals/integration/learning-review-proposals-cost.test.mjs"
   "Utterance check integration|bash evals/integration/test_utterance_check.sh"
   "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
   "Builder step producers integration|bash evals/integration/test_builder_step_producers.sh"
