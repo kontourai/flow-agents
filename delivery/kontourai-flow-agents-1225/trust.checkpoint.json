@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-1225",
+  "work_item": null,
+  "status": "provisional",
+  "phase": "ci-readiness",
+  "sealed_at": "2026-10-03T22:36:25.351Z",
+  "commit_sha": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+  "checkpoint": {
+    "asOf": "2026-10-03T22:36:25.352Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-1225-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1225-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510-gate-visit-2026-10-03t21-51-09z": "verified",
+      "kontourai-flow-agents-1225-gate-claim-pickup-probe-readiness.flow-agents-workflow.current-actual-issue-baseline-ownership-and-discriminating-fixture-evidence-make-the-bounded-data-fix-ready-gate-visit-2026-10-03t21-52-49-129z": "verified",
+      "kontourai-flow-agents-1225-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.unknowncost-remainsunknown-preserve-realzero-populations-use-real-node-analyzer-owner-no-broader-profile-security-rewrite-gate-visit-2026-10-03t21-52-50-067z": "verified",
+      "kontourai-flow-agents-1225-gate-claim-implementation-plan.flow-agents-workflow.re-grounded-existing-check-owner-registration-realnodebehavior-legacy-schema-proof-once-no-newcigate-or-duplicatewildcardexecution-gate-visit-2026-10-03t22-09-22-767z": "verified",
+      "kontourai-flow-agents-1225-gate-claim-implementation-scope.flow-agents-workflow.committed-bounded-registration-correction-retains-data-logic-and-existing-ci-check-truthful-oneowner5tests-and-actualwave-reconciliation-gate-visit-2026-10-03t22-15-42-674z": "verified",
+      "kontourai-flow-agents-1225-gate-claim-acceptance-criteria.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-37-072z": "verified",
+      "kontourai-flow-agents-1225-gate-claim-tests-evidence.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-41-801z": "verified",
+      "kontourai-flow-agents-1225-gate-claim-merge-readiness.flow-agents-workflow.current-scoped-datafix-actualregisteredowner-discriminatingbaseline-currentcritic-and-exactbranchpinnedreadiness-supportreview-hostedchecks-andterminaldeliveryremainrequired-gate-visit-2026-10-03t22-35-33-448z": "verified",
+      "kontourai-flow-agents-1225-complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid.flow-agents-workflow.complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid-verified-2026-10-03t22-18-41-801z": "verified",
+      "kontourai-flow-agents-1225-economics-review-28a7cc1e.flow-agents-workflow.independent-native-economics-review-approves-bounded-six-file-unknown-cost-data-correctness-fix-at-28a7cc1e-no-findings-no-overall-builder-effectiveness-claim-reviewed-2026-10-03t22-04-35-505z": "verified",
+      "kontourai-flow-agents-1225-economics-review-9cf78e6e.flow-agents-workflow.independent-native-economics-review-approves-current-source-bounded-registration-correction-at-9cf78e6e-zero-findings-prior-data-correctness-approval-retained-no-overall-efficiency-claim-reviewed-2026-10-03t22-17-36-485z": "verified"
+    },
+    "throughEventCreatedAt": "2026-10-03T22:35:33.448Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-1225-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1225-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510-gate-visit-2026-10-03t21-51-09z": "2026-10-03T22:35:33.448Z",
+      "kontourai-flow-agents-1225-gate-claim-pickup-probe-readiness.flow-agents-workflow.current-actual-issue-baseline-ownership-and-discriminating-fixture-evidence-make-the-bounded-data-fix-ready-gate-visit-2026-10-03t21-52-49-129z": "2026-10-03T22:35:33.448Z",
+      "kontourai-flow-agents-1225-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.unknowncost-remainsunknown-preserve-realzero-populations-use-real-node-analyzer-owner-no-broader-profile-security-rewrite-gate-visit-2026-10-03t21-52-50-067z": "2026-10-03T22:35:33.448Z",
+      "kontourai-flow-agents-1225-gate-claim-implementation-plan.flow-agents-workflow.re-grounded-existing-check-owner-registration-realnodebehavior-legacy-schema-proof-once-no-newcigate-or-duplicatewildcardexecution-gate-visit-2026-10-03t22-09-22-767z": "2026-10-03T22:35:33.448Z",
+      "kontourai-flow-agents-1225-gate-claim-implementation-scope.flow-agents-workflow.committed-bounded-registration-correction-retains-data-logic-and-existing-ci-check-truthful-oneowner5tests-and-actualwave-reconciliation-gate-visit-2026-10-03t22-15-42-674z": "2026-10-03T22:35:33.448Z",
+      "kontourai-flow-agents-1225-gate-claim-acceptance-criteria.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-37-072z": "2026-10-03T22:35:33.448Z",
+      "kontourai-flow-agents-1225-gate-claim-tests-evidence.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-41-801z": "2026-10-03T22:35:33.448Z",
+      "kontourai-flow-agents-1225-gate-claim-merge-readiness.flow-agents-workflow.current-scoped-datafix-actualregisteredowner-discriminatingbaseline-currentcritic-and-exactbranchpinnedreadiness-supportreview-hostedchecks-andterminaldeliveryremainrequired-gate-visit-2026-10-03t22-35-33-448z": "2026-10-03T22:35:33.448Z",
+      "kontourai-flow-agents-1225-complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid.flow-agents-workflow.complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid-verified-2026-10-03t22-18-41-801z": "2026-10-03T22:18:41.801Z",
+      "kontourai-flow-agents-1225-economics-review-28a7cc1e.flow-agents-workflow.independent-native-economics-review-approves-bounded-six-file-unknown-cost-data-correctness-fix-at-28a7cc1e-no-findings-no-overall-builder-effectiveness-claim-reviewed-2026-10-03t22-04-35-505z": "2026-10-03T22:35:33.448Z",
+      "kontourai-flow-agents-1225-economics-review-9cf78e6e.flow-agents-workflow.independent-native-economics-review-approves-current-source-bounded-registration-correction-at-9cf78e6e-zero-findings-prior-data-correctness-approval-retained-no-overall-efficiency-claim-reviewed-2026-10-03t22-17-36-485z": "2026-10-03T22:35:33.448Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}

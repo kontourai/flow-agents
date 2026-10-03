@@ -37,6 +37,10 @@
             "properties": {
               "kit_id": { "type": "string" },
               "runs": { "type": "number" },
+              "priced_runs": { "type": "integer", "minimum": 0 },
+              "unpriced_runs": { "type": "integer", "minimum": 0 },
+              "first_half_priced_runs": { "type": "integer", "minimum": 0 },
+              "second_half_priced_runs": { "type": "integer", "minimum": 0 },
               "first_half_avg_cost_usd": { "type": ["number", "null"] },
               "second_half_avg_cost_usd": { "type": ["number", "null"] },
               "cost_trend_pct": { "type": ["number", "null"] },

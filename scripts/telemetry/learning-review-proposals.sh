@@ -140,9 +140,9 @@ fallback_envelope() {
 # record this analyzer was built on, and the canonical Flow-run-derived record. They describe the
 # SAME run from two incompatible vantage points, and every aggregate below would silently mix them:
 # `records_considered` is reported as `runs` (so one run counts twice and sample thresholds trip
-# early), `.cost.estimated_cost_usd // 0` turns the run-derived record's honest "cost is unknown"
-# null into a real $0 that drags cost trends down, and `.time.wall_clock_s` averages a session
-# duration together with a pause-subtracted Flow active duration.
+# early), cost attribution differs between producers, and `.time.wall_clock_s` averages a
+# session duration together with a pause-subtracted Flow active duration. Unknown cost is
+# excluded from priced denominators below; that does not resolve the population mismatch.
 #
 # Filtering here keeps this analyzer's population byte-for-byte what it was before dual emission --
 # a no-behaviour-change fix, not a new opinion about which producer is better. Teaching it to prefer
@@ -244,9 +244,12 @@ main_jq_program+='
           | (($runs / 2) | floor) as $half_point
           | ($sorted[0:$half_point]) as $first_half
           | ($sorted[$half_point:$runs]) as $second_half
-          | (if ($first_half | length) > 0 then (($first_half | map(.rec.cost.estimated_cost_usd // 0) | add) / ($first_half | length)) else null end) as $fh_cost
-          | (if ($second_half | length) > 0 then (($second_half | map(.rec.cost.estimated_cost_usd // 0) | add) / ($second_half | length)) else null end) as $sh_cost
-          | (if $fh_cost == null or $fh_cost == 0 then null else (((($sh_cost // 0) - $fh_cost) / $fh_cost) * 100) end) as $cost_trend_pct
+          | ($first_half | map(.rec.cost.estimated_cost_usd | select(type == "number"))) as $fh_priced_costs
+          | ($second_half | map(.rec.cost.estimated_cost_usd | select(type == "number"))) as $sh_priced_costs
+          | (($fh_priced_costs | length) + ($sh_priced_costs | length)) as $priced_runs
+          | (if ($fh_priced_costs | length) > 0 then ($fh_priced_costs | add / length) else null end) as $fh_cost
+          | (if ($sh_priced_costs | length) > 0 then ($sh_priced_costs | add / length) else null end) as $sh_cost
+          | (if $fh_cost == null or $sh_cost == null or $fh_cost == 0 then null else ((($sh_cost - $fh_cost) / $fh_cost) * 100) end) as $cost_trend_pct
           | ($first_half | map(.rec.defects.findings_by_severity as $f | ($f.critical // 0) + ($f.high // 0) + ($f.medium // 0) + ($f.low // 0)) | add // 0) as $fh_findings
           | ($second_half | map(.rec.defects.findings_by_severity as $f | ($f.critical // 0) + ($f.high // 0) + ($f.medium // 0) + ($f.low // 0)) | add // 0) as $sh_findings
           | (if $fh_findings == 0 then (if $sh_findings == 0 then 0 else null end) else ((($sh_findings - $fh_findings) / $fh_findings) * 100) end) as $findings_delta_pct
@@ -259,6 +262,10 @@ main_jq_program+='
           | {
               kit_id: $kit_id,
               runs: $runs,
+              priced_runs: $priced_runs,
+              unpriced_runs: ($runs - $priced_runs),
+              first_half_priced_runs: ($fh_priced_costs | length),
+              second_half_priced_runs: ($sh_priced_costs | length),
               first_half_avg_cost_usd: ($fh_cost | if . == null then null else round4 end),
               second_half_avg_cost_usd: ($sh_cost | if . == null then null else round4 end),
               cost_trend_pct: ($cost_trend_pct | if . == null then null else round4 end),
@@ -318,7 +325,8 @@ main_jq_program+='
             proposed_change: ("Review " + .kit_id + "'\''s recent-run review depth/scope: cost per run rose " + (.cost_trend_pct | tostring) + "% while findings caught stayed flat/declined (" + (.findings_delta_pct | tostring) + "%)."),
             severity: "advisory",
             evidence: {
-              cost: { first_half_avg_cost_usd: .first_half_avg_cost_usd, second_half_avg_cost_usd: .second_half_avg_cost_usd, cost_trend_pct: .cost_trend_pct },
+              cost: { first_half_avg_cost_usd: .first_half_avg_cost_usd, second_half_avg_cost_usd: .second_half_avg_cost_usd, cost_trend_pct: .cost_trend_pct,
+                      priced_runs: .priced_runs, unpriced_runs: .unpriced_runs, first_half_priced_runs: .first_half_priced_runs, second_half_priced_runs: .second_half_priced_runs },
               defect: { first_half_findings_total: .first_half_findings_total, second_half_findings_total: .second_half_findings_total, findings_delta_pct: .findings_delta_pct, caught_false_completions_total: .caught_false_completions_total }
             },
             expected_effect: { metric: "avg_cost_usd", direction: "decrease", description: "cost should come back down without a corresponding rise in escaped defects" }
