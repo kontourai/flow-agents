@@ -458,7 +458,7 @@ REPO5="$TMPDIR_EVAL/repo5"
 SLUG5="canonical-guidance-616"
 TASK_DIR5="$REPO5/.kontourai/flow-agents/$SLUG5"
 FLOW_DIR5="$REPO5/.kontourai/flow/runs/$SLUG5"
-mkdir -p "$TASK_DIR5" "$FLOW_DIR5" "$REPO5/kits/builder" "$REPO5/docs"
+mkdir -p "$TASK_DIR5" "$REPO5/kits/builder" "$REPO5/docs"
 printf '# Canonical Guidance Fixture\n' > "$REPO5/AGENTS.md"
 printf '# Context Map\n' > "$REPO5/docs/context-map.md"
 cp "$ROOT/kits/builder/kit.json" "$REPO5/kits/builder/kit.json"
@@ -504,7 +504,7 @@ assert.equal(projection.run_correlation.identities.agent.value, actorKey);
 assert.equal(JSON.parse(canonical.params.run_correlation).correlation_id, projection.run_correlation.correlation_id);
 NODE
 then
-  _pass "canonical fixture uses the public claim, start and evidence routes"
+  _pass "canonical fixture uses maintained claim/start seams and public evidence"
 else
   _fail "canonical fixture public setup failed"
   exit 1

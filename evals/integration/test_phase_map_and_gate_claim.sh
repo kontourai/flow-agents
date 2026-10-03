@@ -436,18 +436,24 @@ NODE
       clean_blocked=no
       _fail "$clean_case: Stop attempt $attempt did not block (exit $attempt_exit): $attempt_out"
     fi
-  done
-  clean_out="$clean_out$case_out"
-  if [ "$clean_blocked" = yes ] && node - "$case_out" "$clean_case" "$C_DIR/.kontourai/flow/runs/$CLEAN_SLUG/state.json" <<'NODE'
-const fs = require('node:fs');
-const [output, fixtureCase, stateFile] = process.argv.slice(2);
-const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-if (state.status !== 'active' || state.current_step !== 'design-probe') process.exit(1);
+    if ! node - "$attempt_out" "$clean_case" <<'NODE'
+const [output, fixtureCase] = process.argv.slice(2);
 const prefix = '[flow-agents:stop-control] ';
 const controls = output.split('\n').filter(line => line.startsWith(prefix)).map(line => JSON.parse(line.slice(prefix.length)));
-if (controls.length !== 2 || controls.some(control => control.v !== 1 || control.terminal !== true || control.code !== 'canonical-flow-active')) process.exit(2);
-if (fixtureCase === 'terminal-sidecar' && (!output.includes('canonical Flow run remains active at step design-probe') || output.includes('workflow binding is invalid'))) process.exit(3);
-if (fixtureCase === 'missing-flow-binding' && !output.includes('workflow binding is invalid')) process.exit(4);
+if (controls.length !== 1 || controls[0].v !== 1 || controls[0].terminal !== true || controls[0].code !== 'canonical-flow-active') process.exit(1);
+if (fixtureCase === 'terminal-sidecar' && (!output.includes('canonical Flow run remains active at step design-probe') || output.includes('workflow binding is invalid'))) process.exit(2);
+if (fixtureCase === 'missing-flow-binding' && !output.includes('workflow binding is invalid')) process.exit(3);
+NODE
+    then
+      clean_blocked=no
+      _fail "$clean_case: Stop attempt $attempt lacked its own terminal control or expected guard: $attempt_out"
+    fi
+  done
+  clean_out="$clean_out$case_out"
+  if [ "$clean_blocked" = yes ] && node - "$C_DIR/.kontourai/flow/runs/$CLEAN_SLUG/state.json" <<'NODE'
+const fs = require('node:fs');
+const state = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (state.status !== 'active' || state.current_step !== 'design-probe') process.exit(1);
 NODE
   then
     _pass "$clean_case: both Stop attempts block without auto-release and leave canonical Flow active at design-probe"
