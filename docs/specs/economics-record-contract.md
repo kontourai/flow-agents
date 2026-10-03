@@ -247,9 +247,9 @@ this emitter), never a guessed one.
   identical matching `flow_run_record` for the same `run_id` found in the log's last 1000 lines;
   records outside that bounded tail may duplicate benignly rather than causing an unbounded scan.
 - **Top-level `cost.*` preserves `null`, never coalesces to a fabricated `0` (#925 review finding
-  3).** Scope honesty: this holds at the EMITTER. At least one downstream aggregate
-  (`learning-review-proposals.sh`) still coalesces `null // 0` when consuming `economics.jsonl` —
-  tracked in #1225; the never-fabricate property is not yet system-wide. When `tokens_unattributed` is `true` (any phase has `null` tokens — always true today, since
+  3).** The downstream `learning-review-proposals.sh` consumer also excludes unpriced records
+  from cost means and leaves undefined cost comparisons/effects unmeasured (#1225); see
+  `learning-review-proposals-contract.md`. When `tokens_unattributed` is `true` (any phase has `null` tokens — always true today, since
   this mode never auto-merges transcript-derived tokens), every top-level `cost.input_tokens` /
   `output_tokens` / `cache_creation_input_tokens` / `cache_read_input_tokens` /
   `estimated_cost_usd` is **`null`**, not a summed-with-nulls-as-zero `0`. `cost` stays a *required*

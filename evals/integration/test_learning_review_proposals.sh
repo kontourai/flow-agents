@@ -88,8 +88,9 @@ aeq "$OUT_PP" "by_gate[unit tests pass].avg_human_wait_s_when_fired == 10.0000" 
 # whole-document by_kit/by_gate equal the independently hand-computed expected-aggregates.json exactly.
 EXPECTED_AGG="$(cat "$PP/expected-aggregates.json")"
 GOT_BYKIT="$(printf '%s' "$OUT_PP" | jq -c '.aggregates.by_kit')"
+LEGACY_BYKIT="$(printf '%s' "$GOT_BYKIT" | jq -c 'map(del(.priced_runs, .unpriced_runs, .first_half_priced_runs, .second_half_priced_runs))')"
 EXP_BYKIT="$(printf '%s' "$EXPECTED_AGG" | jq -c '.by_kit')"
-[[ "$GOT_BYKIT" == "$EXP_BYKIT" ]] && pass "by_kit[] equals expected-aggregates.json exactly" || fail "by_kit[] drifted from expected-aggregates.json: got=$GOT_BYKIT want=$EXP_BYKIT"
+[[ "$LEGACY_BYKIT" == "$EXP_BYKIT" ]] && pass "legacy by_kit[] fields equal expected-aggregates.json exactly" || fail "by_kit[] drifted from expected-aggregates.json: got=$LEGACY_BYKIT want=$EXP_BYKIT"
 GOT_BYGATE="$(printf '%s' "$OUT_PP" | jq -c '.aggregates.by_gate')"
 EXP_BYGATE="$(printf '%s' "$EXPECTED_AGG" | jq -c '.by_gate')"
 [[ "$GOT_BYGATE" == "$EXP_BYGATE" ]] && pass "by_gate[] equals expected-aggregates.json exactly" || fail "by_gate[] drifted from expected-aggregates.json: got=$GOT_BYGATE want=$EXP_BYGATE"
@@ -328,8 +329,8 @@ done
 # The Stop hook emits TWO economics records per Builder Stop: the legacy session.usage-derived
 # record these aggregates were built on, and the canonical Flow-run-derived record. They describe
 # the same run from incompatible vantage points. Admitting both would report one run as two
-# (`records_considered` is surfaced as `runs`), coalesce the run-derived record's honest null cost
-# into a real $0, and average a session duration together with a pause-subtracted active duration.
+# (`records_considered` is surfaced as `runs`) and average a session duration together with a
+# pause-subtracted active duration. The pricing counts would also mix incompatible producers.
 #
 # This asserts the population is IDENTICAL with and without those records present — i.e. dual
 # emission cannot move a single number this analyzer reports.

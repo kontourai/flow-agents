@@ -163,9 +163,13 @@ the first `half_point` records are the "first half," the remaining `runs - half_
 | --- | --- |
 | `kit_id` | group key |
 | `runs` | count of records in the group |
-| `first_half_avg_cost_usd` | mean of `.cost.estimated_cost_usd` over the first half (`null` if the first half is empty) |
-| `second_half_avg_cost_usd` | mean of `.cost.estimated_cost_usd` over the second half |
-| `cost_trend_pct` | `((second_half_avg_cost_usd - first_half_avg_cost_usd) / first_half_avg_cost_usd) * 100`; `null` if `first_half_avg_cost_usd` is `null` or `0` |
+| `priced_runs` | count of records with numeric `.cost.estimated_cost_usd`, including actual `0` |
+| `unpriced_runs` | `runs - priced_runs`; null, missing, and nonnumeric cost values are unpriced |
+| `first_half_priced_runs` | count of priced records in the first chronological half |
+| `second_half_priced_runs` | count of priced records in the second chronological half |
+| `first_half_avg_cost_usd` | sum of numeric `.cost.estimated_cost_usd` in the first half divided by `first_half_priced_runs`; `null` when that count is `0` |
+| `second_half_avg_cost_usd` | same priced-only mean for the second half; `null` when `second_half_priced_runs` is `0` |
+| `cost_trend_pct` | `((second_half_avg_cost_usd - first_half_avg_cost_usd) / first_half_avg_cost_usd) * 100`; `null` if either mean is `null` or the first mean is `0` |
 | `first_half_findings_total` | sum of `.defects.findings_by_severity.{critical,high,medium,low}` over the first half |
 | `second_half_findings_total` | same, over the second half |
 | `findings_delta_pct` | `((second_half_findings_total - first_half_findings_total) / first_half_findings_total) * 100`; if `first_half_findings_total == 0`: `0` when `second_half_findings_total == 0` too, else `null` (a rise from a zero base has no defined percentage) |
@@ -173,6 +177,13 @@ the first `half_point` records are the "first half," the remaining `runs - half_
 | `avg_human_wait_s` | mean of `.time.human_wait_s` over ALL records in the group |
 | `route_back_rate` | `sum(.iterations.route_backs) / sum(.iterations.count)` over ALL records in the group; `null` if the count sum is `0` |
 | `caught_false_completions_total` | sum of `.defects.caught_false_completions` over ALL records in the group |
+
+Unknown cost never contributes a fabricated $0 or a priced denominator (#1225). The four
+count fields are additive v0.1 fields and are also included in kit proposal `evidence.cost`.
+Chronological halves, `runs`, defects, time aggregates, and sample gates still use all
+considered records; pricing availability does not change the analyzed population or make
+an otherwise sufficient window's top-level `outcome` insufficient. An undefined cost trend
+cannot trigger a kit cost proposal; gate proposals remain independent of monetary pricing.
 
 ### `by_gate[]`
 
@@ -303,8 +314,10 @@ for the exact same `target`:
   `evidence.defect.false_block_count / evidence.defect.fire_count`.
 
 If no `by_kit`/`by_gate` entry exists for that target in the current window (e.g. the kit/gate
-had zero runs this window), `effect_observed` is left `null` this pass — an honest gap, not a
-fabricated measurement; it is retried on the next invocation that does have data.
+had zero runs this window), or the current metric is `null` (including a kit's newest half
+having no priced records), `effect_observed` is left `null` this pass. It is retried on the
+next invocation with a measurable metric. A real numeric $0 can fill an effect measurement;
+an unknown cost cannot claim improvement.
 
 Writes:
 
