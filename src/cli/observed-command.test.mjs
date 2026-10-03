@@ -364,3 +364,42 @@ test("a command that exits cleanly is NOT failed because something outside its g
     else delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
   }
 });
+
+test("an exited command cannot hold observation open beyond its full deadline through an escaped pipe holder", async () => {
+  const python = spawnSync("python3", ["-c", "import os; print(os.getpid())"], { encoding: "utf8" });
+  assert.equal(python.status, 0, "python3 is required for the actual escaped-child boundary");
+  const root = gitFixture();
+  const pidFile = path.join(root, "holder.pid");
+  fs.writeFileSync(path.join(root, "launcher.py"), `import os,time,sys\npid=os.fork()\nif pid==0:\n os.setsid()\n open(${JSON.stringify(pidFile)},"w").write(str(os.getpid()))\n while True: time.sleep(1)\nprint("parent exits zero");sys.stdout.flush()\n`);
+  const priorTimeout = process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS;
+  const priorGrace = process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
+  process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS = "2000";
+  process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = "200";
+  let outer;
+  const started = Date.now();
+  const observed = runObservedCommand("python3 launcher.py", root).then(
+    (result) => ({ kind: "resolved", result }),
+    (error) => ({ kind: "refused", message: error.message }),
+  );
+  try {
+    const outcome = await Promise.race([
+      observed,
+      new Promise((resolve) => { outer = setTimeout(() => resolve({ kind: "outer-supervision" }), 6000); }),
+    ]);
+    assert.equal(outcome.kind, "refused", "the configured deadline must settle observation without outer intervention");
+    assert.match(outcome.message, /exceeded 2000ms.*inherited streams/);
+    assert.ok(Date.now() - started >= 2000, "normal exit cleanup must not replace the full deadline with kill grace");
+    assert.ok(Date.now() - started < 6000, "the refusal must precede outer supervision");
+  } finally {
+    clearTimeout(outer);
+    assert.ok(fs.existsSync(pidFile), "the escaped holder must actually have started");
+    const holderPid = Number(fs.readFileSync(pidFile, "utf8"));
+    assert.ok(Number.isSafeInteger(holderPid) && holderPid > 1);
+    try { process.kill(holderPid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+    await observed;
+    if (priorTimeout === undefined) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS;
+    else process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS = priorTimeout;
+    if (priorGrace === undefined) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
+    else process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = priorGrace;
+  }
+});

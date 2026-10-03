@@ -4952,18 +4952,18 @@ test("record-gate-claim emits one canonical execution evidence item for each pas
     task_slug: session.slug,
     criteria: [{ id: "writer-multi-command", description: "Both writer-owned commands are observed.", status: "pending", evidence_refs: [] }],
   });
-  const first = "writer-first.test.sh";
-  const second = "writer-second.test.sh";
-  fs.writeFileSync(path.join(session.projectRoot, first), "set -e\ntest 1 -eq 1\nprintf '1..1\\nok 1 - first command\\n'\n");
-  fs.writeFileSync(path.join(session.projectRoot, second), "set -e\ntest 2 -eq 2\nprintf '1..1\\nok 1 - second command\\n'\n");
+  const first = "writer-first.test.mjs";
+  const second = "writer-second.test.mjs";
+  fs.writeFileSync(path.join(session.projectRoot, first), "import test from 'node:test'; import assert from 'node:assert/strict'; import fs from 'node:fs'; test('first command checks implementation',()=>{assert.equal(fs.readFileSync('review-target/implementation.txt','utf8'),'reviewed implementation\\n');});\n");
+  fs.writeFileSync(path.join(session.projectRoot, second), "import test from 'node:test'; import assert from 'node:assert/strict'; import fs from 'node:fs'; test('second command checks delivery artifact',()=>{assert.equal(fs.readFileSync('review-target/delivery.md','utf8'),'reviewed delivery artifact\\n');});\n");
   fixtureGit(session, ["add", first, second]);
   fixtureGit(session, ["commit", "-m", "writer multi-command test fixtures"]);
   await advanceSessionToVerify(session);
   const [critique] = verifiedTestsPrerequisites(session);
   writeBundle(session.sessionDir, [critique]);
 
-  const firstCommand = `sh ${first}`;
-  const secondCommand = `sh ${second}`;
+  const firstCommand = `node --test ${first}`;
+  const secondCommand = `node --test ${second}`;
   await workflowSidecarMain([
     "record-gate-claim", session.sessionDir,
     "--expectation", "tests-evidence",
@@ -4984,6 +4984,7 @@ test("record-gate-claim emits one canonical execution evidence item for each pas
   const commandEvidence = bundle.evidence.filter((evidence) => evidence.claimId === testsClaim.id && typeof evidence.execution?.label === "string");
   assert.deepEqual(commandEvidence.map((evidence) => evidence.execution.label), [firstCommand, secondCommand]);
   assert.ok(commandEvidence.every((evidence) => evidence.execution.exitCode === 0 && evidence.execution.isError === false));
+  assert.deepEqual(testsClaim.metadata.observed_commands.map(({ command, test_count }) => [command, test_count]), [[firstCommand, 1], [secondCommand, 1]], "both real Node executions have positive authoritative terminal counts");
 
   const synchronized = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(synchronized.run.state.current_step, "merge-ready");

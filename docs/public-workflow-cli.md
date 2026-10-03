@@ -181,7 +181,9 @@ assertion count; a successful zero-test run is rejected. Predictable payload, cu
 result-protocol and publication-command incompatibilities are checked before execution and
 revalidated afterward. Bounded diagnostics retain the final stdout result independently of
 late stderr; output hashes cover all bytes. A watchdog termination is non-confirming even if
-the terminated child exits zero. A supported framework must terminate its package-script
+the terminated child exits zero. The full command deadline also bounds inherited output streams
+after the command exits: streams that remain open beyond its grace produce a refusal, rather than
+holding the evidence transaction indefinitely. A supported framework must terminate its package-script
 chain; trailing summary printers and post-script lifecycle hooks cannot supply its proof.
 Node supports its built-in default, spec and TAP reporters. Project-local regular preloads
 remain inside the reviewed source boundary; arbitrary outside preloads or reporters do not.

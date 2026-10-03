@@ -414,9 +414,11 @@ is insufficient. For an existing shell journey, one registered Node test can exe
 whole journey and assert its exit status; that records one executed journey, not fabricated
 counts for its internal assertions. Keep the existing journey's failure semantics.
 
-A declared coordinator can reuse a current receipt. Flow Agents checks its current public
-request, source and environment identity, artifact digests, completion and positive counts.
-It does not import arbitrary receipts or use an old pass after a source or environment change.
+For v3 receipts, a declared coordinator can reuse a current receipt. Flow Agents checks its
+current public request, source and environment identity, artifact digests, completion and positive
+counts. It does not import arbitrary v3 receipts or use an old v3 pass after a source or environment
+change. Legacy v1 receipt admission retains its previous workspace and self-provenance checks;
+it does not provide v3's current-environment and artifact-byte guarantees.
 Evidence Gate aggregates that accepted proof; it does not require another run or a duplicate
 acceptance ledger. Review the changed implementation once, then append verification progress
 under the workflow-owned report's final `## Verification Evidence` section. Source, plan,

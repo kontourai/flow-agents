@@ -49,6 +49,7 @@ export async function runObservedCommand(command: string, projectRoot: string): 
     let settled = false;
     let timeout: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
+    let streamDeadlineTimer: NodeJS.Timeout | undefined;
     let cleanupStarted = false;
     let cleanupComplete = false;
     let streamsClosed = false;
@@ -130,13 +131,20 @@ export async function runObservedCommand(command: string, projectRoot: string): 
       settled = true;
       if (timeout) clearTimeout(timeout);
       if (killTimer) clearTimeout(killTimer);
+      if (streamDeadlineTimer) clearTimeout(streamDeadlineTimer);
       reject(error);
+      if (timedOut) {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        child.unref();
+      }
     };
     const complete = (): void => {
       if (settled || !cleanupComplete || !streamsClosed) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
       if (killTimer) clearTimeout(killTimer);
+      if (streamDeadlineTimer) clearTimeout(streamDeadlineTimer);
       const outputHash = createHash("sha256")
         .update("stdout\0").update(stdoutHash.digest())
         .update("stderr\0").update(stderrHash.digest());
@@ -159,11 +167,8 @@ export async function runObservedCommand(command: string, projectRoot: string): 
         if (!terminateProcessGroup("SIGTERM")) {
           cleanupComplete = true;
           complete();
-          // Only the TIMEOUT path may bound this. On the exit path the command has already
-          // finished, its streams will close on their own, and waiting is both correct and what
-          // main does — there is no runaway left to bound, so rejecting there would discard a
-          // successful observation. (An exit-path stream holder that NEVER closes still hangs;
-          // that is pre-existing, untouched here, and filed rather than silently absorbed.)
+          // Exit cleanup can precede inherited stream settlement. The independent full
+          // command deadline below bounds that wait without shortening it to killGraceMs.
           if (reason === "timeout" && !settled) {
             // #1369 round 2: the group could not be signalled AND the streams are still open, so
             // the child is still running -- this is the TIMEOUT path, not the exit path. complete()
@@ -193,7 +198,16 @@ export async function runObservedCommand(command: string, projectRoot: string): 
         fail(error as Error);
       }
     };
-    timeout = setTimeout(() => beginCleanup("timeout"), timeoutMs);
+    timeout = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      beginCleanup("timeout");
+      if (!settled) {
+        streamDeadlineTimer = setTimeout(() => fail(new Error(
+          `observed command exceeded ${timeoutMs}ms and its inherited streams did not settle within a further ${killGraceMs}ms`,
+        )), killGraceMs);
+      }
+    }, timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => {
       stdoutHash.update(chunk);
       stdoutTail = Buffer.concat([stdoutTail, chunk]).subarray(-tailLimit);
