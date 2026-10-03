@@ -2,5 +2,5 @@
   "status": "unsigned",
   "path": "trust.checkpoint.intoto.json",
   "reason": "no ambient signing identity",
-  "checkpoint_sha256": "bd0f3f7d2d666149230d3e7b28fd99e65b0449a50ee7e1b35faa4aabb5ba05eb"
+  "checkpoint_sha256": "9650e6b95fa79ace92d73fffbd4515527e85699ff4d7f750099176e49ec3c6b9"
 }
