@@ -194,6 +194,16 @@ silently; only a proven-noncanonical session or a proven-absent canonical run
 stays quiet. The signed reseal path is orchestrator-mediated and out of this
 disclosure's scope.
 
+Checkpoint publication emits `trust.checkpoint.attestation.json` with the
+existing signing `status` and companion `path`, plus `checkpoint_sha256`: the
+SHA-256 of the exact `trust.checkpoint.json` bytes also named by the in-toto
+statement's subject digest. Both signed and unsigned descriptors carry this
+identity. Refreshing a provisional checkpoint therefore changes the descriptor
+alongside the bundle, checkpoint, and selected companion, preserving Trust
+Verify's exact four-path publication rule. Readers that consume the existing
+status/path fields remain compatible with older descriptors; this additive
+field does not confer signing authority.
+
 ## Agent Projection
 
 While a run is active, `state.json` contains:

@@ -567,6 +567,69 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   } });
   await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action });
   assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
+  const operatorKeys = generateKeyPairSync("ed25519");
+  const completionKeys = generateKeyPairSync("ed25519");
+  const authorityRoot = makeFixtureDir("public-provisional-keys-");
+  const registryFile = path.join(authorityRoot, "authority-keys.json");
+  const completionPrivateKey = path.join(authorityRoot, "completion-private.pem");
+  const completionPublicKey = path.join(authorityRoot, "completion-public.pem");
+  writeJson(registryFile, {
+    schema_version: "1.0",
+    keys: [{ id: "public-provisional-e2e", algorithm: "ed25519", public_key_pem: operatorKeys.publicKey.export({ type: "spki", format: "pem" }) }],
+  });
+  fs.writeFileSync(completionPrivateKey, completionKeys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(completionPublicKey, completionKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+  const authorizationFile = path.join(authorityRoot, "publish-provisional-delivery.authorization.json");
+  const requestProvisionalPublication = async (publishedHead) => {
+    const requestOutput = [];
+    const originalLog = console.log;
+    console.log = (...values) => requestOutput.push(values.join(" "));
+    try {
+      assert.equal(await workflowMain(["publish-provisional-delivery-request", "--session-dir", session.sessionDir]), 0);
+    } finally {
+      console.log = originalLog;
+    }
+    assert.equal(requestOutput.length, 1);
+    const request = JSON.parse(requestOutput[0]);
+    assert.equal(request.authorization.operation, "publish-provisional-delivery");
+    assert.equal(request.authorization.published_head_sha, publishedHead);
+    writeJson(authorizationFile, {
+      ...request.authorization,
+      signature: {
+        algorithm: "ed25519",
+        key_id: "public-provisional-e2e",
+        value: sign(null, Buffer.from(request.signing_payload), operatorKeys.privateKey).toString("base64"),
+      },
+    });
+  };
+  const authority = await loadHermeticProvisionalAuthority(
+    session.projectRoot,
+    registryFile,
+    completionPrivateKey,
+    completionPublicKey,
+  );
+  assert.equal(
+    authority.coverage,
+    "unprivileged coordinator mutation, completion, and receipt primitives; excludes processRootOperation, sudo, and the installed-package verifier",
+    "this hermetic E2E intentionally does not claim root-process, sudo, or installed verifier coverage",
+  );
+  const initialTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  initialTests.claim.status = "verified";
+  const initialVerification = [initialTests, ...verifiedTestsPrerequisites(session)];
+  for (const entry of initialVerification) entry.claim.status = "verified";
+  bindFixturePassingObservations(session, initialVerification);
+  writeBundle(session.sessionDir, initialVerification);
+  await requestProvisionalPublication(action.head_sha);
+  assert.equal(await publishDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authorizationFile, authority), 0);
+  const destination = path.join(session.projectRoot, "delivery", session.slug);
+  const descriptorPath = path.join(destination, "trust.checkpoint.attestation.json");
+  const initialDescriptorBytes = fs.readFileSync(descriptorPath);
+  const initialCheckpointDigest = createHash("sha256").update(fs.readFileSync(path.join(destination, "trust.checkpoint.json"))).digest("hex");
+  execFileSync("git", ["add", `delivery/${session.slug}`], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "first provisional delivery companions"], { cwd: session.projectRoot, stdio: "ignore" });
+  const initialDeliveryHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim();
+  const reconcile = require("../../scripts/ci/trust-reconcile.js");
+  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(session.projectRoot, path.join(destination, "trust.bundle"), action.head_sha, initialDeliveryHead), true);
   const historicalRouteBack = bundleClaim({
     expectation: "ci-merge-readiness",
     claimType: "builder.merge-ready-ci.readiness",
@@ -586,6 +649,9 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
     "canonical route-back state binds the exact attached evidence digest",
   );
 
+  fs.appendFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "Reviewed correction after the first provisional delivery.\n");
+  execFileSync("git", ["add", "review-target/implementation.txt"], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "reviewed source correction"], { cwd: session.projectRoot, stdio: "ignore" });
   const currentWorkspace = captureReviewWorkspaceSnapshot(session.projectRoot, []);
   const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
   currentTests.claim.status = "verified";
@@ -677,73 +743,28 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action: currentAction });
   assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
 
-  const requestOutput = [];
-  const originalLog = console.log;
-  console.log = (...values) => requestOutput.push(values.join(" "));
-  try {
-    assert.equal(await workflowMain(["publish-provisional-delivery-request", "--session-dir", session.sessionDir]), 0);
-  } finally {
-    console.log = originalLog;
-  }
-  assert.equal(requestOutput.length, 1);
-  const request = JSON.parse(requestOutput[0]);
-  assert.equal(request.authorization.operation, "publish-provisional-delivery");
-  assert.equal(request.authorization.published_head_sha, currentAction.head_sha);
-
-  const operatorKeys = generateKeyPairSync("ed25519");
-  const completionKeys = generateKeyPairSync("ed25519");
-  const authorityRoot = makeFixtureDir("public-provisional-keys-");
-  const registryFile = path.join(authorityRoot, "authority-keys.json");
-  const completionPrivateKey = path.join(authorityRoot, "completion-private.pem");
-  const completionPublicKey = path.join(authorityRoot, "completion-public.pem");
-  writeJson(registryFile, {
-    schema_version: "1.0",
-    keys: [{ id: "public-provisional-e2e", algorithm: "ed25519", public_key_pem: operatorKeys.publicKey.export({ type: "spki", format: "pem" }) }],
-  });
-  fs.writeFileSync(completionPrivateKey, completionKeys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
-  fs.writeFileSync(completionPublicKey, completionKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
-  const authorizationFile = path.join(authorityRoot, "publish-provisional-delivery.authorization.json");
-  writeJson(authorizationFile, {
-    ...request.authorization,
-    signature: {
-      algorithm: "ed25519",
-      key_id: "public-provisional-e2e",
-      value: sign(null, Buffer.from(request.signing_payload), operatorKeys.privateKey).toString("base64"),
-    },
-  });
-  const authority = await loadHermeticProvisionalAuthority(
-    session.projectRoot,
-    registryFile,
-    completionPrivateKey,
-    completionPublicKey,
-  );
-  assert.equal(
-    authority.coverage,
-    "unprivileged coordinator mutation, completion, and receipt primitives; excludes processRootOperation, sudo, and the installed-package verifier",
-    "this hermetic E2E intentionally does not claim root-process, sudo, or installed verifier coverage",
-  );
+  await requestProvisionalPublication(currentAction.head_sha);
   authority.armCrashAfterMutationOnce();
   await assert.rejects(
     () => publishDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authorizationFile, authority),
     /injected crash after provisional ledger append before root completion/,
   );
   const appendedBeforeCompletion = readJson(path.join(session.sessionDir, "lifecycle-authority.provisional-delivery-events.json"));
-  assert.equal(appendedBeforeCompletion.events.length, 1, "the crash boundary occurs after the authority event append");
+  assert.equal(appendedBeforeCompletion.events.length, 2, "the crash boundary occurs after the authority event append");
   assert.equal(authority.preparedNonce()?.status, "prepared", "root-mode simulation retains the exact prepared nonce");
-  assert.equal(fs.existsSync(path.join(session.sessionDir, "provisional-delivery.authority-completion.json")), false);
+  assert.notEqual(readJson(path.join(session.sessionDir, "provisional-delivery.authority-completion.json")).result_core_sha256, authority.digest(appendedBeforeCompletion.events.at(-1)));
   assert.equal(await publishDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authorizationFile, authority), 0);
   const ledger = readJson(path.join(session.sessionDir, "lifecycle-authority.provisional-delivery-events.json"));
   const completion = readJson(path.join(session.sessionDir, "provisional-delivery.authority-completion.json"));
   const record = readJson(path.join(session.sessionDir, "provisional-delivery.json"));
-  assert.equal(ledger.events.length, 1, "the prepared retry recovers the exact tail event without appending a duplicate");
-  assert.deepEqual(ledger.events[0], appendedBeforeCompletion.events[0], "the prepared retry preserves the original authority event");
+  assert.equal(ledger.events.length, 2, "the prepared retry recovers the exact tail event without appending a duplicate");
+  assert.deepEqual(ledger.events.at(-1), appendedBeforeCompletion.events.at(-1), "the prepared retry preserves the original authority event");
   assert.equal(completion.action, "publish-provisional-delivery");
-  assert.equal(completion.result_core_sha256, authority.digest(ledger.events[0]));
+  assert.equal(completion.result_core_sha256, authority.digest(ledger.events.at(-1)));
   assert.equal(authority.preparedNonce()?.status, "applied", "completion advances the exact prepared nonce");
-  assert.equal(record.authority_event_hash, ledger.events[0].event_hash);
+  assert.equal(record.authority_event_hash, ledger.events.at(-1).event_hash);
   assert.deepEqual(record.authority_completion, completion);
 
-  const destination = path.join(session.projectRoot, "delivery", session.slug);
   const retainedBackup = path.join(session.sessionDir, ".delivery-publish-backup-completed-crash");
   const recoveryJournal = path.join(session.sessionDir, ".provisional-delivery.transaction.json");
   fs.mkdirSync(retainedBackup);
@@ -783,6 +804,19 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
 
   execFileSync("git", ["add", `delivery/${session.slug}`], { cwd: session.projectRoot });
   execFileSync("git", ["commit", "-m", "exact provisional delivery companions"], { cwd: session.projectRoot, stdio: "ignore" });
+  const refreshedDeliveryHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim();
+  assert.equal(
+    reconcile.provisionalDeliveryIsExactCheckedRevision(session.projectRoot, path.join(destination, "trust.bundle"), currentAction.head_sha, refreshedDeliveryHead),
+    true,
+    "a refreshed public provisional publication passes the retained exact four-path ownership rule",
+  );
+  const refreshedDescriptorBytes = fs.readFileSync(descriptorPath);
+  assert.notDeepEqual(refreshedDescriptorBytes, initialDescriptorBytes, "fresh checkpoint identity changes descriptor bytes");
+  assert.equal(JSON.parse(initialDescriptorBytes).checkpoint_sha256, initialCheckpointDigest);
+  const refreshedCheckpointDigest = createHash("sha256").update(fs.readFileSync(path.join(destination, "trust.checkpoint.json"))).digest("hex");
+  assert.equal(readJson(descriptorPath).checkpoint_sha256, refreshedCheckpointDigest);
+  const statement = readJson(path.join(destination, "trust.checkpoint.intoto.json"));
+  assert.equal(statement.subject.find((entry) => entry.name === "trust.checkpoint.json").digest.sha256, refreshedCheckpointDigest);
   const repairedCiReadiness = withIdentitySuffix(
     bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" }),
     "after-route-back",
@@ -816,7 +850,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   const terminalCheckpoint = readJson(path.join(session.projectRoot, "delivery", session.slug, "trust.checkpoint.json"));
   assert.equal(terminalCheckpoint.status, "delivered");
   assert.equal(terminalCheckpoint.phase, "release");
-  assert.equal(readJson(path.join(session.sessionDir, "provisional-delivery.json")).authority_event_hash, ledger.events[0].event_hash);
+  assert.equal(readJson(path.join(session.sessionDir, "provisional-delivery.json")).authority_event_hash, ledger.events.at(-1).event_hash);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 

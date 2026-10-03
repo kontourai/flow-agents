@@ -7394,10 +7394,10 @@ async function signCheckpointAttestation(
 
   // Step D: write the attestation record to a SEPARATE companion file.
   // trust.checkpoint.json is NOT modified — it must remain byte-identical to what was signed.
-  // The companion file carries the pointer/status; the subject-digest binding in the
-  // in-toto statement ties it back to the checkpoint without breaking the digest.
+  // The descriptor identifies the checkpoint bytes as well as the companion, so a
+  // refreshed checkpoint changes its delivery transport identity in either signing mode.
   const attestationPath = path.join(dir, "trust.checkpoint.attestation.json");
-  writeJson(attestationPath, attestation);
+  writeJson(attestationPath, { ...attestation, checkpoint_sha256: sha256hex });
   const companionPath = path.join(dir, String(attestation.path));
   return {
     checkpointPath,
