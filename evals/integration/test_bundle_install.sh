@@ -1009,9 +1009,16 @@ git -C "$PACKAGE_PROJECT" add .gitignore
 git -C "$PACKAGE_PROJECT" commit -qm "seed bundle install fixture"
 PACKAGE_AMBIENT="$TMPDIR_EVAL/package-ambient"
 mkdir -p "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT/.kontourai/flow-agents" "$PACKAGE_PROJECT/checks" "$PACKAGE_AMBIENT/kits/builder/flows"
-printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$PACKAGE_PROJECT/checks/check-packed-workflow.sh"
-chmod +x "$PACKAGE_PROJECT/checks/check-packed-workflow.sh"
-git -C "$PACKAGE_PROJECT" add checks/check-packed-workflow.sh
+cat > "$PACKAGE_PROJECT/checks/check-packed-workflow.test.mjs" <<'NODE'
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+test('bound packed session state exists', () => {
+  assert.ok(fs.statSync('.kontourai/flow-agents/acme-builder-901/state.json').isFile());
+});
+NODE
+git -C "$PACKAGE_PROJECT" add checks/check-packed-workflow.test.mjs
 git -C "$PACKAGE_PROJECT" commit -qm "add packed workflow verification command"
 cat >"$PACKAGE_AMBIENT/kits/builder/flows/build.flow.json" <<'JSON'
 {
@@ -1025,7 +1032,7 @@ PACKAGE_PACK_LOG="$TMPDIR_EVAL/package-pack.log"
 PACKAGE_CLI="$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build/src/cli.js"
 PACKAGE_SESSION="$PACKAGE_PROJECT/.kontourai/flow-agents/acme-builder-901"
 PACKAGE_LIFECYCLE_SESSION="$PACKAGE_PROJECT/.kontourai/flow-agents/acme-builder-902"
-PACKAGE_TEST_COMMAND="bash checks/check-packed-workflow.sh .kontourai/flow-agents/acme-builder-901/state.json"
+PACKAGE_TEST_COMMAND="node --test checks/check-packed-workflow.test.mjs"
 PACKAGE_CRITERION_JSON="$(node - "$PACKAGE_TEST_COMMAND" <<'NODE'
 const command = process.argv[2];
 process.stdout.write(JSON.stringify({

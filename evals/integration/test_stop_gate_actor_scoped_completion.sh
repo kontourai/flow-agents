@@ -43,28 +43,9 @@
 #   3. Regression guard: a resolved actor with NO own per-actor pointer at all (the
 #      #440 case) remains unblocked regardless of another actor's active session —
 #      unchanged by this fix.
-#   4. Isolation regression lock (review LOW finding): scenario 2's fixture has a
-#      state.json, so its "IS blocked" result is ALSO independently guaranteed by
-#      sidecarGuidance's "workflow state:"/"next action:" lines (both gated on the
-#      SAME shared nextActionIsDone predicate as the artifact-status line since the
-#      #962 P1 review follow-up) — a fault confined to nextActionIsDone() therefore
-#      breaks all three signals together in scenario 2, which IS the desired
-#      single-sourcing outcome, but does not by itself prove scenario 2 is sensitive
-#      to the artifact-status line SPECIFICALLY as opposed to "any next_action-derived
-#      line". Scenario 4 removes state.json entirely (markdown artifact + a minimal
-#      trust.bundle only, so sidecarValidation/missingBundleOrStateSignal/
-#      bundleEnforcement all stay silent — verified empirically to produce exactly one
-#      warning) so the artifact-status line is the ONLY possible source of a block,
-#      making its assertions maximally direct.
-#
-#      (A literal "next_action.summary empty/omitted" fixture, as first suggested,
-#      does not achieve this: the artifact-status/next-action gating conditions never
-#      inspect summary at all, and the workflow-state schema requires
-#      next_action.summary minLength:1 — an actually-empty summary would instead trip
-#      sidecarValidation's real validator, whose "sidecar validation:" output ALSO
-#      bare-matches FULL_BLOCK, which would keep the fixture blocked in BOTH the real
-#      and the faulted run and defeat the isolation goal. Omitting state.json entirely
-#      sidesteps that trap.)
+#   4. Removing state.json from an actor's selected session invalidates its workflow
+#      binding. The direct hook must refuse with terminal stop control, and the real
+#      adapter must preserve the model-facing block and reason.
 #
 # Deterministic, no model spend, self-cleaning (mktemp -d + trap EXIT).
 # Usage: bash evals/integration/test_stop_gate_actor_scoped_completion.sh
@@ -216,14 +197,8 @@ NODE
 
 # seed_isolated_no_state_session <repo> <slug> — SAME markdown artifact as
 # seed_shared_session, but a minimal (empty claims/evidence) trust.bundle INSTEAD of
-# state.json. Empirically verified (see #962 P1 review follow-up investigation) to
-# produce exactly ONE warning line — the artifact-status "is still status:executing"
-# line — because: sidecarGuidance's two next_action lines both require state.json to
-# exist (state is null here, both no-op); missingBundleOrStateSignal's absence warning
-# only fires when NEITHER trust.bundle NOR state.json exist (trust.bundle exists here,
-# so it no-ops); bundleEnforcement/sidecarValidation have nothing to flag against an
-# empty, schema-clean bundle. This isolates the artifact-status line as the SOLE
-# possible source of a block in this fixture.
+# state.json. The selected actor binding must refuse this missing state before
+# artifact-status guidance can run.
 seed_isolated_no_state_session() {
   local repo="$1" slug="$2"
   local dir="$repo/.kontourai/flow-agents/$slug"
@@ -351,8 +326,8 @@ else
   _fail "3: an actor with no own per-actor pointer was unexpectedly blocked: $(cat "$TMPDIR_EVAL/noptr.err")"
 fi
 
-# ─── 4. Isolation lock: artifact-status line is the ONLY warning source ───────────
-echo "--- 4. Isolation: no state.json at all (only trust.bundle) -> artifact-status line is the sole signal ---"
+# ─── 4. Missing state invalidates the selected actor binding ─────────────────────
+echo "--- 4. Selected actor has no state.json (only trust.bundle) -> binding must refuse ---"
 
 ISO_REPO="$(new_repo repo-isolated)"
 seed_isolated_no_state_session "$ISO_REPO" "$SLUG" >/dev/null
@@ -361,19 +336,23 @@ seed_current_pointer "$ISO_REPO" "$SLUG" "isolate-actor"
 ISO_OUT="$(call_stop_hook_direct "$ISO_REPO" "isolate-actor" 2>"$TMPDIR_EVAL/iso.err")"
 ISO_STATUS=$?
 ISO_ERR="$(cat "$TMPDIR_EVAL/iso.err")"
+ISO_CONTROL="$(sed -n 's/^\[flow-agents:stop-control\] //p' <<<"$ISO_ERR")"
 
-if [[ "$ISO_STATUS" -eq 2 ]] && grep -q "is still status:executing" <<<"$ISO_ERR" \
-  && [[ "$(grep -c '^ - ' <<<"$ISO_ERR")" -eq 1 ]]; then
-  _pass "4a: with NO state.json (only trust.bundle), the artifact-status line is the sole warning and blocks (exit 2)"
+if [[ "$ISO_STATUS" -eq 2 ]] && grep -q 'workflow state: workflow binding is invalid' <<<"$ISO_ERR" \
+  && [[ "$(json_field "$ISO_CONTROL" v)" == 1 && "$(json_field "$ISO_CONTROL" terminal)" == true \
+    && "$(json_field "$ISO_CONTROL" code)" == canonical-flow-active ]]; then
+  _pass "4a: missing selected state blocks (exit 2) with the binding guard and terminal stop control"
 else
-  _fail "4a: isolated fixture did not block on exactly the artifact-status line as expected: status=$ISO_STATUS $ISO_ERR"
+  _fail "4a: missing selected state did not produce a terminal binding refusal: status=$ISO_STATUS $ISO_ERR"
 fi
 
 ISO_ADAPTER_JSON="$(call_stop_hook_adapter "$ISO_REPO" "isolate-actor")"
 ISO_DECISION="$(json_field "$ISO_ADAPTER_JSON" "decision")"
 ISO_CONTINUE="$(json_field "$ISO_ADAPTER_JSON" "continue")"
-if [[ "$ISO_DECISION" == "block" && "$ISO_CONTINUE" == "undefined" ]]; then
-  _pass "4b: real hook path blocks the isolated fixture (decision:block, model-facing reason) via the artifact-status line alone"
+ISO_REASON="$(json_field "$ISO_ADAPTER_JSON" "reason")"
+if [[ "$ISO_DECISION" == "block" && "$ISO_CONTINUE" == "undefined" ]] \
+  && grep -q 'workflow binding is invalid' <<<"$ISO_REASON"; then
+  _pass "4b: real hook path preserves the missing-state binding block and model-facing reason"
 else
   _fail "4b: real hook path did not block the isolated fixture: $ISO_ADAPTER_JSON"
 fi

@@ -62,6 +62,9 @@ CLI="$ROOT_DIR/build/src/cli.js"
 SKILL_DRIFT_LIB="$ROOT_DIR/scripts/hooks/lib/skill-drift.js"
 WORKFLOW_STEERING="$ROOT_DIR/scripts/hooks/workflow-steering.js"
 TMPDIR_EVAL="$(mktemp -d /tmp/skill-drift-check.XXXXXX)"
+export XDG_STATE_HOME="$TMPDIR_EVAL/xdg-state"
+export CODEX_THREAD_ID="skill-drift-$(basename "$TMPDIR_EVAL")"
+unset FLOW_AGENTS_ACTOR CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDECODE
 pass=0
 fail=0
 
@@ -432,8 +435,8 @@ const out = run(JSON.stringify({ hook_event_name: 'SessionStart', cwd: '$FIXTURE
 process.stdout.write(out);
 " > "$S6_CLEAN_OUT" 2>&1
 
-if grep -qF "[SKILL DRIFT]" "$S6_CLEAN_OUT"; then
-  _fail "SessionStart advisory: [SKILL DRIFT] unexpectedly present for a clean fixture repo"; cat "$S6_CLEAN_OUT"
+if grep -qF "[SKILL DRIFT]" "$S6_CLEAN_OUT" || grep -qF "WORKFLOW BINDING" "$S6_CLEAN_OUT"; then
+  _fail "SessionStart advisory: clean fixture reported drift or invalid workflow binding"; cat "$S6_CLEAN_OUT"
 else
   _pass "SessionStart advisory: [SKILL DRIFT] absent when the fixture repo is clean"
 fi
@@ -704,8 +707,8 @@ else
   _fail "corrupt-manifest SessionStart: advisory invocation crashed (exit $S10_RC)"; cat "$S10_OUT"
 fi
 
-if grep -qF "[SKILL DRIFT]" "$S10_OUT"; then
-  _fail "corrupt-manifest SessionStart: [SKILL DRIFT] unexpectedly present despite a clean install"; cat "$S10_OUT"
+if grep -qF "[SKILL DRIFT]" "$S10_OUT" || grep -qF "WORKFLOW BINDING" "$S10_OUT"; then
+  _fail "corrupt-manifest SessionStart: clean install reported drift or invalid workflow binding"; cat "$S10_OUT"
 else
   _pass "corrupt-manifest SessionStart: [SKILL DRIFT] absent (corrupt manifest tolerated as absent, install is clean)"
 fi
@@ -856,8 +859,8 @@ const out = run(JSON.stringify({ hook_event_name: 'SessionStart', cwd: '$FIXTURE
 process.stdout.write(out);
 " > "$S11C_OUT" 2>&1
 
-if grep -qF "[SKILL DRIFT]" "$S11C_OUT"; then
-  _fail "foreign-file SessionStart: [SKILL DRIFT] unexpectedly present despite an in-sync kit"; cat "$S11C_OUT"
+if grep -qF "[SKILL DRIFT]" "$S11C_OUT" || grep -qF "WORKFLOW BINDING" "$S11C_OUT"; then
+  _fail "foreign-file SessionStart: in-sync kit reported drift or invalid workflow binding"; cat "$S11C_OUT"
 else
   _pass "foreign-file SessionStart: [SKILL DRIFT] absent when kit is in sync despite foreign file present"
 fi
