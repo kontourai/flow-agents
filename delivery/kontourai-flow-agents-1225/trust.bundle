@@ -1,0 +1,1250 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-1225-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1225-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510-gate-visit-2026-10-03t21-51-09z",
+      "subjectType": "work-item",
+      "subjectId": "kontourai-flow-agents-1225/gate-claim-selected-work",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Work Item kontourai/flow-agents#1225 is durably assigned to the active workflow actor (assignment sha256:1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510).",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "updatedAt": "2026-10-03T22:35:33.448Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "expected_producer": "builder.pull-work",
+        "recorded_by": "codexthread-a0a6bea458bb29fd226323ecKontour",
+        "self_produced_trust_slices": [
+          "selected-work"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/assignment/kontourai-flow-agents-1225.json",
+            "summary": "Durable local assignment record for the selected Work Item and active actor; sha256:1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510."
+          },
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-1225/assignment-provider-state.json",
+            "summary": "Provider assignment state confirming ownership before the local runtime lease was mirrored; sha256:4ad09891a04d4e254ae5f8e40bacc751fac5e52998e7f958caecc9816f236ad5."
+          },
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-1225/kontourai-flow-agents-1225--pull-work.md",
+            "summary": "Concrete pull-work selection report for kontourai/flow-agents#1225."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "d18ff5bb76d21bb056bff25ce95a3751661cff24af7fc6c54b7b44bbe17daf11",
+          "head_sha": "de466cbfe0aaa1d50426fef4020406bd14999b9d",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "selected-work",
+          "claim_type": "builder.pull-work.selected",
+          "subject_type": "work-item",
+          "step_id": "pull-work",
+          "identity_version": 2,
+          "recorded_at": "2026-10-03T21:51:09Z",
+          "flow_run_head": "7bc54057914a2736242acbf2403a99aa85bbbdc133b0b6e255c1d41fb0d4efe4",
+          "flow_id": "builder.build",
+          "definition_version": "1.4",
+          "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-gate-claim-pickup-probe-readiness.flow-agents-workflow.current-actual-issue-baseline-ownership-and-discriminating-fixture-evidence-make-the-bounded-data-fix-ready-gate-visit-2026-10-03t21-52-49-129z",
+      "subjectType": "work-item",
+      "subjectId": "kontourai-flow-agents-1225/gate-claim-pickup-probe-readiness",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.design-probe.pickup-readiness",
+      "fieldOrBehavior": "Current actual issue/baseline/ownership and discriminating fixture evidence make the bounded data fix ready.",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "updatedAt": "2026-10-03T22:35:33.448Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "expected_producer": "builder.pickup-probe",
+        "recorded_by": "codexthread-a0a6bea458bb29fd226323ecKontour",
+        "self_produced_trust_slices": [
+          "pickup-probe"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-1225/kontourai-flow-agents-1225--pull-work.md",
+            "summary": "Actual ownership/readiness, known defect and bounded evidence mapping."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "d18ff5bb76d21bb056bff25ce95a3751661cff24af7fc6c54b7b44bbe17daf11",
+          "head_sha": "de466cbfe0aaa1d50426fef4020406bd14999b9d",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "pickup-probe-readiness",
+          "claim_type": "builder.design-probe.pickup-readiness",
+          "subject_type": "work-item",
+          "step_id": "design-probe",
+          "identity_version": 2,
+          "recorded_at": "2026-10-03T21:52:49.129Z",
+          "flow_run_head": "4f4c21aa0b8519879a430f51b92de08cef2acb6a9da672480d8ba4d6ace26405",
+          "flow_id": "builder.build",
+          "definition_version": "1.4",
+          "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.unknowncost-remainsunknown-preserve-realzero-populations-use-real-node-analyzer-owner-no-broader-profile-security-rewrite-gate-visit-2026-10-03t21-52-50-067z",
+      "subjectType": "decision",
+      "subjectId": "kontourai-flow-agents-1225/gate-claim-probe-decisions-or-accepted-gaps",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.design-probe.decisions",
+      "fieldOrBehavior": "Unknowncost remainsunknown; preserve realzero/populations; use real Node analyzer owner, no broader profile/security rewrite.",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "updatedAt": "2026-10-03T22:35:33.448Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "expected_producer": "builder.pickup-probe",
+        "recorded_by": "codexthread-a0a6bea458bb29fd226323ecKontour",
+        "self_produced_trust_slices": [
+          "pickup-probe"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-1225/kontourai-flow-agents-1225--pull-work.md",
+            "summary": "Actual ownership/readiness, known defect and bounded evidence mapping."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "d18ff5bb76d21bb056bff25ce95a3751661cff24af7fc6c54b7b44bbe17daf11",
+          "head_sha": "de466cbfe0aaa1d50426fef4020406bd14999b9d",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "probe-decisions-or-accepted-gaps",
+          "claim_type": "builder.design-probe.decisions",
+          "subject_type": "decision",
+          "step_id": "design-probe",
+          "identity_version": 2,
+          "recorded_at": "2026-10-03T21:52:50.067Z",
+          "flow_run_head": "4f4c21aa0b8519879a430f51b92de08cef2acb6a9da672480d8ba4d6ace26405",
+          "flow_id": "builder.build",
+          "definition_version": "1.4",
+          "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-gate-claim-implementation-plan.flow-agents-workflow.re-grounded-existing-check-owner-registration-realnodebehavior-legacy-schema-proof-once-no-newcigate-or-duplicatewildcardexecution-gate-visit-2026-10-03t22-09-22-767z",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-1225/gate-claim-implementation-plan",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.plan.implementation",
+      "fieldOrBehavior": "Re-grounded existing-check owner registration; realNodebehavior+legacy/schema proof once, no newCIgate or duplicatewildcardexecution.",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "updatedAt": "2026-10-03T22:35:33.448Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.plan.implementation:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "expected_producer": "builder.plan-work",
+        "recorded_by": "codexthread-a0a6bea458bb29fd226323ecKontour",
+        "self_produced_trust_slices": [
+          "implementation-plan"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-1225/kontourai-flow-agents-1225--plan-work.md",
+            "summary": "Bounded registration correction with unchanged data semantics and fresh current-source proof."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "ed8dc00fe2c85bef49d9bc0916b5ca264a6a1bf058894e18158c4e49b18a3740",
+          "head_sha": "28a7cc1ef8ba109eed8196f2b72a849355b2e31e",
+          "worktree_clean": true
+        },
+        "acceptance_contract": {
+          "version": 1,
+          "algorithm": "sha256",
+          "digest": "5137b0b47fb3b82b6efd02c185b218521234bd419988932ddffd7a1f89c9177e",
+          "criteria": [
+            {
+              "id": "complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid",
+              "description": "Complete the requested outcome: Unknown cost remains unknown; real zero and existing population semantics remain valid"
+            }
+          ]
+        },
+        "gate_claim": {
+          "expectation_id": "implementation-plan",
+          "claim_type": "builder.plan.implementation",
+          "subject_type": "artifact",
+          "step_id": "plan",
+          "identity_version": 2,
+          "recorded_at": "2026-10-03T22:09:22.767Z",
+          "flow_run_head": "63d9b205f9368905eb033d83b61a91f5d0ca39b43c0c3db56cd571ba75011d93",
+          "flow_id": "builder.build",
+          "definition_version": "1.4",
+          "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-gate-claim-implementation-scope.flow-agents-workflow.committed-bounded-registration-correction-retains-data-logic-and-existing-ci-check-truthful-oneowner5tests-and-actualwave-reconciliation-gate-visit-2026-10-03t22-15-42-674z",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-1225/gate-claim-implementation-scope",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Committed bounded registration correction retains data logic and existing CI check; truthful oneowner5tests and actualwave reconciliation.",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "updatedAt": "2026-10-03T22:35:33.448Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "expected_producer": "builder.execute-plan",
+        "recorded_by": "codexthread-a0a6bea458bb29fd226323ecKontour",
+        "self_produced_trust_slices": [
+          "implementation-scope"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-1225/kontourai-flow-agents-1225--deliver.md",
+            "summary": "Updatedactualscope and registration fix, no newgate/duplicateCI."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "75a3448366927dd0fa7513ace4e7a2e0e0cd7faccc9f93beb1f52d84defefd38",
+          "head_sha": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "implementation-scope",
+          "claim_type": "builder.execute.scope",
+          "subject_type": "change",
+          "step_id": "execute",
+          "identity_version": 2,
+          "recorded_at": "2026-10-03T22:15:42.674Z",
+          "flow_run_head": "a91ac77600a69a14b74848fafdda4c0666784c7567e1e1e4bf671ef65b6005a7",
+          "flow_id": "builder.build",
+          "definition_version": "1.4",
+          "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-gate-claim-acceptance-criteria.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-37-072z",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-1225/gate-claim-acceptance-criteria",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Currentregistered real analyzerowner provesunknowncost/truezero/legacy/effect behavior; actualsource and distinctcleancritique.",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "updatedAt": "2026-10-03T22:35:33.448Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "expected_producer": "builder.verify-work",
+        "recorded_by": "codexthread-a0a6bea458bb29fd226323ecKontour",
+        "self_produced_trust_slices": [
+          "acceptance-criteria",
+          "tests-evidence",
+          "policy-compliance"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/verification/1225-plan/registration-correction.json",
+            "summary": "Actualsourcehashes/5PASS/no-skip/manifestproof and underlyingbaseline/fix."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "75a3448366927dd0fa7513ace4e7a2e0e0cd7faccc9f93beb1f52d84defefd38",
+          "head_sha": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "acceptance-criteria",
+          "claim_type": "workflow.acceptance.criterion",
+          "subject_type": "flow-step",
+          "step_id": "verify",
+          "identity_version": 2,
+          "recorded_at": "2026-10-03T22:18:37.072Z",
+          "flow_run_head": "6ae9b7228b1abec1ea52034b1a577615f0b41792328edc73739b6596619dee26",
+          "flow_id": "builder.build",
+          "definition_version": "1.4",
+          "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-gate-claim-tests-evidence.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-41-801z",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-1225/gate-claim-tests-evidence",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Currentregistered real analyzerowner provesunknowncost/truezero/legacy/effect behavior; actualsource and distinctcleancritique.",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "updatedAt": "2026-10-03T22:35:33.448Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command",
+        "command": "node --test evals/integration/learning-review-proposals-cost.test.mjs",
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "expected_producer": "builder.verify-work",
+        "recorded_by": "codexthread-a0a6bea458bb29fd226323ecKontour",
+        "self_produced_trust_slices": [
+          "acceptance-criteria",
+          "tests-evidence",
+          "policy-compliance"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/verification/1225-plan/registration-correction.json",
+            "summary": "Actualsourcehashes/5PASS/no-skip/manifestproof and underlyingbaseline/fix."
+          },
+          {
+            "kind": "command",
+            "excerpt": "node --test evals/integration/learning-review-proposals-cost.test.mjs",
+            "summary": "ExistingregisteredCIowner actualfive Node cases exercise costlogic and real legacy/schema assertions."
+          }
+        ],
+        "output_digest": {
+          "algorithm": "sha256",
+          "hex": "c92a19a9ec304e20a0e6c72fd5807cd6c9682c7bdb20c8aa92f9f29ea81c97dd"
+        },
+        "observed_commands": [
+          {
+            "command": "node --test evals/integration/learning-review-proposals-cost.test.mjs",
+            "exit_code": 0,
+            "output_sha256": "c92a19a9ec304e20a0e6c72fd5807cd6c9682c7bdb20c8aa92f9f29ea81c97dd",
+            "source": "canonical-writer-execution",
+            "observed_at_commit": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+            "worktree_clean": true,
+            "verification_workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "75a3448366927dd0fa7513ace4e7a2e0e0cd7faccc9f93beb1f52d84defefd38",
+              "head_sha": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+              "worktree_clean": true
+            },
+            "test_count": 5,
+            "execution_proof": {
+              "kind": "local-process-exit",
+              "runner": "node --test",
+              "static_test_units": 5
+            }
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "75a3448366927dd0fa7513ace4e7a2e0e0cd7faccc9f93beb1f52d84defefd38",
+          "head_sha": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "tests-evidence",
+          "claim_type": "builder.verify.tests",
+          "subject_type": "flow-step",
+          "step_id": "verify",
+          "identity_version": 2,
+          "recorded_at": "2026-10-03T22:18:41.801Z",
+          "flow_run_head": "6ae9b7228b1abec1ea52034b1a577615f0b41792328edc73739b6596619dee26",
+          "flow_id": "builder.build",
+          "definition_version": "1.4",
+          "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-gate-claim-merge-readiness.flow-agents-workflow.current-scoped-datafix-actualregisteredowner-discriminatingbaseline-currentcritic-and-exactbranchpinnedreadiness-supportreview-hostedchecks-andterminaldeliveryremainrequired-gate-visit-2026-10-03t22-35-33-448z",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-1225/gate-claim-merge-readiness",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.merge-ready.readiness",
+      "fieldOrBehavior": "Current scoped datafix/actualregisteredowner/discriminatingbaseline/currentcritic and exactbranchpinnedreadiness supportreview; hostedchecks andterminaldeliveryremainrequired.",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "updatedAt": "2026-10-03T22:35:33.448Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.merge-ready.readiness:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "expected_producer": "builder.evidence-gate",
+        "recorded_by": "codexthread-a0a6bea458bb29fd226323ecKontour",
+        "self_produced_trust_slices": [
+          "merge-readiness"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-1225/kontourai-flow-agents-1225--evidence-gate.md",
+            "summary": "Actualevidence confidence and limits; no broaderefficiencyclaim."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "75a3448366927dd0fa7513ace4e7a2e0e0cd7faccc9f93beb1f52d84defefd38",
+          "head_sha": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "merge-readiness",
+          "claim_type": "builder.merge-ready.readiness",
+          "subject_type": "change",
+          "step_id": "merge-ready",
+          "identity_version": 2,
+          "recorded_at": "2026-10-03T22:35:33.448Z",
+          "flow_run_head": "273a301e772968106976b05c50f8c073c61b280c3ba403307ae0efdbf25d8a7b",
+          "flow_id": "builder.build",
+          "definition_version": "1.4",
+          "definition_digest": "2caa5a2ec207150a00a37edad08639677477c8fa2e2d572f64dc6f592017397c"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid.flow-agents-workflow.complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid-verified-2026-10-03t22-18-41-801z",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-1225/complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Complete the requested outcome: Unknown cost remains unknown; real zero and existing population semantics remain valid",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:18:41.801Z",
+      "updatedAt": "2026-10-03T22:18:41.801Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+      "metadata": {
+        "origin": "acceptance",
+        "criterion": {
+          "id": "complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid",
+          "description": "Complete the requested outcome: Unknown cost remains unknown; real zero and existing population semantics remain valid",
+          "status": "pass",
+          "evidence_refs": [
+            {
+              "kind": "command",
+              "excerpt": "node --test evals/integration/learning-review-proposals-cost.test.mjs",
+              "summary": "ExistingregisteredCIowner actualfive Node cases exercise costlogic and real legacy/schema assertions."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/verification/1225-plan/registration-correction.json",
+              "summary": "Actualsourcehashes/5PASS/no-skip/manifestproof and underlyingbaseline/fix."
+            }
+          ],
+          "observed_commands": [
+            {
+              "command": "node --test evals/integration/learning-review-proposals-cost.test.mjs",
+              "exit_code": 0,
+              "output_sha256": "c92a19a9ec304e20a0e6c72fd5807cd6c9682c7bdb20c8aa92f9f29ea81c97dd",
+              "source": "canonical-writer-execution",
+              "observed_at_commit": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+              "worktree_clean": true,
+              "verification_workspace_snapshot": {
+                "version": 1,
+                "kind": "git-worktree",
+                "algorithm": "sha256",
+                "digest": "75a3448366927dd0fa7513ace4e7a2e0e0cd7faccc9f93beb1f52d84defefd38",
+                "head_sha": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+                "worktree_clean": true
+              },
+              "test_count": 5,
+              "execution_proof": {
+                "kind": "local-process-exit",
+                "runner": "node --test",
+                "static_test_units": 5
+              }
+            }
+          ],
+          "identity_version": 2,
+          "verified_at": "2026-10-03T22:18:41.801Z",
+          "verified_by": "codexthread-a0a6bea458bb29fd226323ecKontour"
+        },
+        "workflow_subject_ref": "kontourai/flow-agents#1225"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-economics-review-28a7cc1e.flow-agents-workflow.independent-native-economics-review-approves-bounded-six-file-unknown-cost-data-correctness-fix-at-28a7cc1e-no-findings-no-overall-builder-effectiveness-claim-reviewed-2026-10-03t22-04-35-505z",
+      "subjectType": "workflow-critique",
+      "subjectId": "kontourai-flow-agents-1225/economics-review-28a7cc1e",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Independent native economics_review approves bounded six-file unknown-cost data-correctness fix at 28a7cc1e; no findings, no overall Builder effectiveness claim.",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:04:35.505Z",
+      "updatedAt": "2026-10-03T22:04:35.505Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "codex:thread-bb253019a081e28c5114cf70:Kontour",
+        "reviewer_source": "explicit",
+        "reviewed_at": "2026-10-03T22:04:35.505Z",
+        "identity_version": 2,
+        "critique_sequence": 1,
+        "critique_predecessor_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "critique_record_hash": "c07f0564eceadb75670d3b7b853a95518f74850bb4fb4bb79ab691202db57d8b",
+        "findings": [],
+        "lanes": [
+          {
+            "id": "correctness",
+            "status": "pass",
+            "summary": "Numeric-only priced denominators preserve unknownness and real zero; population, defects, producer exclusion and effect-fill behavior remain correct.",
+            "evidence_refs": [
+              {
+                "kind": "artifact",
+                "file": ".kontourai/verification/1225-independent-review.md",
+                "summary": "Independent exact-commit review of six-file unknown-cost correction, source semantics and recorded test evidence."
+              }
+            ]
+          },
+          {
+            "id": "architecture",
+            "status": "pass",
+            "summary": "Optional additive v0.1 counts remain compatible and docs match owner behavior; no new abstraction or gate.",
+            "evidence_refs": [
+              {
+                "kind": "artifact",
+                "file": ".kontourai/verification/1225-independent-review.md",
+                "summary": "Independent exact-commit review of six-file unknown-cost correction, source semantics and recorded test evidence."
+              }
+            ]
+          },
+          {
+            "id": "test_effectiveness",
+            "status": "pass",
+            "summary": "Real analyzer/decider/ledger owner boundary; recorded baseline three intended failures with zero control passing, fixed four passing; legacy schema and producer control logs inspected, no rerun.",
+            "evidence_refs": [
+              {
+                "kind": "artifact",
+                "file": ".kontourai/verification/1225-independent-review.md",
+                "summary": "Independent exact-commit review of six-file unknown-cost correction, source semantics and recorded test evidence."
+              }
+            ]
+          }
+        ],
+        "review_target": {
+          "artifacts": [
+            {
+              "file": "scripts/telemetry/learning-review-proposals.sh",
+              "sha256": "fbe6953a3d971e67f8bf3788147b76ebf217c23a371f535699e4c348b8959038",
+              "role": "review_subject"
+            },
+            {
+              "file": "scripts/telemetry/learning-review-proposals.schema.json",
+              "sha256": "6682b3186ff88c6edd9e4f83bf0caba79f5c32964543c93c215342ceff4aa997",
+              "role": "review_subject"
+            },
+            {
+              "file": "evals/integration/test_learning_review_proposals.sh",
+              "sha256": "156d7c2ea808c80a0360fea6e1fe1847cfbbe44b6369227cb2bbe02c4ebf0782",
+              "role": "review_subject"
+            },
+            {
+              "file": "src/cli/learning-review-proposals-cost.test.mjs",
+              "sha256": "c8e8bde2c0598f9edce5ea472f8ab1fc2dba4b406f53f65124a09a0877ff4fbd",
+              "role": "review_subject"
+            },
+            {
+              "file": "docs/specs/learning-review-proposals-contract.md",
+              "sha256": "a6168ab03ed25e8a8b25e0a94776a2250563fcafb48fb8a64476d4b38175fa9f",
+              "role": "review_subject"
+            },
+            {
+              "file": "docs/specs/economics-record-contract.md",
+              "sha256": "858e05f7e878c311ee3d17a760ffc294ad55c85e9fd97b0d1036a60636330c10",
+              "role": "review_subject"
+            },
+            {
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1225/review-context/ffaf5957ea150db862e6b2e800740e0f730412186b7fdb18ffba50be9888311d.md",
+              "sha256": "ffaf5957ea150db862e6b2e800740e0f730412186b7fdb18ffba50be9888311d",
+              "role": "review_context",
+              "source_file": ".kontourai/flow-agents/kontourai-flow-agents-1225/kontourai-flow-agents-1225--deliver.md",
+              "control_anchors": {
+                "version": 1,
+                "execution_mode": "verification_appendix",
+                "execution_sha256": "0dd872fb01ca2000311b12488cb918e52466f05eaca5b0597be637c3fe34452d",
+                "plan_sha256": "eb8f0f22fc9c9edddf9d480038a0d41b5c87df9a44c1115e7f59ed73d3c21e1e",
+                "acceptance_sha256": "972f627e34fe3a8eca8237128c6b72d32af44d1ec85b0a3177a4f5c5011639e5",
+                "scope_claims_sha256": "d67a0d48a6369af0645070511b043c19c5679c8263458dc4011dea8d942f119e"
+              }
+            }
+          ],
+          "workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "ed8dc00fe2c85bef49d9bc0916b5ca264a6a1bf058894e18158c4e49b18a3740",
+            "head_sha": "28a7cc1ef8ba109eed8196f2b72a849355b2e31e",
+            "worktree_clean": true
+          }
+        },
+        "artifact_refs": [
+          "scripts/telemetry/learning-review-proposals.sh",
+          "scripts/telemetry/learning-review-proposals.schema.json",
+          "evals/integration/test_learning_review_proposals.sh",
+          "src/cli/learning-review-proposals-cost.test.mjs",
+          "docs/specs/learning-review-proposals-contract.md",
+          "docs/specs/economics-record-contract.md",
+          ".kontourai/flow-agents/kontourai-flow-agents-1225/review-context/ffaf5957ea150db862e6b2e800740e0f730412186b7fdb18ffba50be9888311d.md"
+        ],
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "critique_record_id": "critique:c07f0564eceadb75670d3b7b853a95518f74850bb4fb4bb79ab691202db57d8b"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-1225-economics-review-9cf78e6e.flow-agents-workflow.independent-native-economics-review-approves-current-source-bounded-registration-correction-at-9cf78e6e-zero-findings-prior-data-correctness-approval-retained-no-overall-efficiency-claim-reviewed-2026-10-03t22-17-36-485z",
+      "subjectType": "workflow-critique",
+      "subjectId": "kontourai-flow-agents-1225/economics-review-9cf78e6e",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Independent native economics_review approves current-source bounded registration correction at 9cf78e6e; zero findings, prior data-correctness approval retained, no overall efficiency claim.",
+      "value": "pass",
+      "createdAt": "2026-10-03T22:17:36.485Z",
+      "updatedAt": "2026-10-03T22:17:36.485Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "codex:thread-bb253019a081e28c5114cf70:Kontour",
+        "reviewer_source": "explicit",
+        "reviewed_at": "2026-10-03T22:17:36.485Z",
+        "identity_version": 2,
+        "critique_sequence": 2,
+        "critique_predecessor_hash": "c07f0564eceadb75670d3b7b853a95518f74850bb4fb4bb79ab691202db57d8b",
+        "critique_record_hash": "76fbea1bc29135aec2f7639ca0201ebed86f8cf5f9fd4ab42336b38da1fde52a",
+        "findings": [],
+        "lanes": [
+          {
+            "id": "correctness",
+            "status": "pass",
+            "summary": "Cost logic unchanged; existing owner registration reaches real analyzer and legacy schema/producer checks without duplicate unit coverage.",
+            "evidence_refs": [
+              {
+                "kind": "artifact",
+                "file": ".kontourai/verification/1225-independent-review-9cf78e6e.md",
+                "summary": "Exact registration delta review and unchanged prior cost-owner compatibility; raw five-pass and manifest-routing logs inspected."
+              }
+            ]
+          },
+          {
+            "id": "architecture",
+            "status": "pass",
+            "summary": "Existing check ID/lane and CI workflow retained, v0.1 cost compatibility unchanged, no added gate.",
+            "evidence_refs": [
+              {
+                "kind": "artifact",
+                "file": ".kontourai/verification/1225-independent-review-9cf78e6e.md",
+                "summary": "Exact registration delta review and unchanged prior cost-owner compatibility; raw five-pass and manifest-routing logs inspected."
+              }
+            ]
+          },
+          {
+            "id": "test_effectiveness",
+            "status": "pass",
+            "summary": "Fifth case invokes legacy owner and requires actual Ajv/assertion successes; recorded five passes/no skips and manifest145/145 inspected, no reruns.",
+            "evidence_refs": [
+              {
+                "kind": "artifact",
+                "file": ".kontourai/verification/1225-independent-review-9cf78e6e.md",
+                "summary": "Exact registration delta review and unchanged prior cost-owner compatibility; raw five-pass and manifest-routing logs inspected."
+              }
+            ]
+          }
+        ],
+        "review_target": {
+          "artifacts": [
+            {
+              "file": "scripts/telemetry/learning-review-proposals.sh",
+              "sha256": "fbe6953a3d971e67f8bf3788147b76ebf217c23a371f535699e4c348b8959038",
+              "role": "review_subject"
+            },
+            {
+              "file": "scripts/telemetry/learning-review-proposals.schema.json",
+              "sha256": "6682b3186ff88c6edd9e4f83bf0caba79f5c32964543c93c215342ceff4aa997",
+              "role": "review_subject"
+            },
+            {
+              "file": "evals/integration/test_learning_review_proposals.sh",
+              "sha256": "156d7c2ea808c80a0360fea6e1fe1847cfbbe44b6369227cb2bbe02c4ebf0782",
+              "role": "review_subject"
+            },
+            {
+              "file": "evals/integration/learning-review-proposals-cost.test.mjs",
+              "sha256": "c1b35da6b50f19bcbdf52c2babeeebbe2eedf3935763631efbe579ea532066c4",
+              "role": "review_subject"
+            },
+            {
+              "file": "evals/ci/run-baseline.sh",
+              "sha256": "b7a972cd00ab9105c5f00f0982234a5a1b07826f57e3514c57f19c57dda8780f",
+              "role": "review_subject"
+            },
+            {
+              "file": "docs/specs/learning-review-proposals-contract.md",
+              "sha256": "a6168ab03ed25e8a8b25e0a94776a2250563fcafb48fb8a64476d4b38175fa9f",
+              "role": "review_subject"
+            },
+            {
+              "file": "docs/specs/economics-record-contract.md",
+              "sha256": "858e05f7e878c311ee3d17a760ffc294ad55c85e9fd97b0d1036a60636330c10",
+              "role": "review_subject"
+            },
+            {
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-1225/review-context/30d5f3034b43c7bfd4c43534a0cfd6e9393d16109d073fbbe1115a1589eaa139.md",
+              "sha256": "30d5f3034b43c7bfd4c43534a0cfd6e9393d16109d073fbbe1115a1589eaa139",
+              "role": "review_context",
+              "source_file": ".kontourai/flow-agents/kontourai-flow-agents-1225/kontourai-flow-agents-1225--deliver.md",
+              "control_anchors": {
+                "version": 1,
+                "execution_mode": "verification_appendix",
+                "execution_sha256": "086506299e3139bc200e980174927f63bc8be8a48145876d7a1d289599a8366e",
+                "plan_sha256": "07a2cc35a235f078314f53b2ecd6a11a3c8f0f4692ad0f999a56b722117516ab",
+                "acceptance_sha256": "972f627e34fe3a8eca8237128c6b72d32af44d1ec85b0a3177a4f5c5011639e5",
+                "scope_claims_sha256": "f897261c44d07ab56312a3052b06cd9fcd2f2713a43a3a872d4c24faff91ebe7"
+              }
+            }
+          ],
+          "workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "75a3448366927dd0fa7513ace4e7a2e0e0cd7faccc9f93beb1f52d84defefd38",
+            "head_sha": "9cf78e6ee03eca38fc0e17e369b46d555e62d6b3",
+            "worktree_clean": true
+          }
+        },
+        "artifact_refs": [
+          "scripts/telemetry/learning-review-proposals.sh",
+          "scripts/telemetry/learning-review-proposals.schema.json",
+          "evals/integration/test_learning_review_proposals.sh",
+          "evals/integration/learning-review-proposals-cost.test.mjs",
+          "evals/ci/run-baseline.sh",
+          "docs/specs/learning-review-proposals-contract.md",
+          "docs/specs/economics-record-contract.md",
+          ".kontourai/flow-agents/kontourai-flow-agents-1225/review-context/30d5f3034b43c7bfd4c43534a0cfd6e9393d16109d073fbbe1115a1589eaa139.md"
+        ],
+        "workflow_subject_ref": "kontourai/flow-agents#1225",
+        "critique_record_id": "critique:76fbea1bc29135aec2f7639ca0201ebed86f8cf5f9fd4ab42336b38da1fde52a"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:kontourai-flow-agents-1225-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1225-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510-gate-visit-2026-10-03t21-51-09z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1225-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510-gate-visit-2026-10-03t21-51-09z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-1225/evidence.json",
+      "excerptOrSummary": "Work Item kontourai/flow-agents#1225 is durably assigned to the active workflow actor (assignment sha256:1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510).",
+      "observedAt": "2026-10-03T22:35:33.448Z",
+      "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-1225-gate-claim-pickup-probe-readiness.flow-agents-workflow.current-actual-issue-baseline-ownership-and-discriminating-fixture-evidence-make-the-bounded-data-fix-ready-gate-visit-2026-10-03t21-52-49-129z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-pickup-probe-readiness.flow-agents-workflow.current-actual-issue-baseline-ownership-and-discriminating-fixture-evidence-make-the-bounded-data-fix-ready-gate-visit-2026-10-03t21-52-49-129z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-1225/evidence.json",
+      "excerptOrSummary": "Current actual issue/baseline/ownership and discriminating fixture evidence make the bounded data fix ready.",
+      "observedAt": "2026-10-03T22:35:33.448Z",
+      "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-1225-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.unknowncost-remainsunknown-preserve-realzero-populations-use-real-node-analyzer-owner-no-broader-profile-security-rewrite-gate-visit-2026-10-03t21-52-50-067z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.unknowncost-remainsunknown-preserve-realzero-populations-use-real-node-analyzer-owner-no-broader-profile-security-rewrite-gate-visit-2026-10-03t21-52-50-067z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-1225/evidence.json",
+      "excerptOrSummary": "Unknowncost remainsunknown; preserve realzero/populations; use real Node analyzer owner, no broader profile/security rewrite.",
+      "observedAt": "2026-10-03T22:35:33.448Z",
+      "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-1225-gate-claim-implementation-plan.flow-agents-workflow.re-grounded-existing-check-owner-registration-realnodebehavior-legacy-schema-proof-once-no-newcigate-or-duplicatewildcardexecution-gate-visit-2026-10-03t22-09-22-767z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-implementation-plan.flow-agents-workflow.re-grounded-existing-check-owner-registration-realnodebehavior-legacy-schema-proof-once-no-newcigate-or-duplicatewildcardexecution-gate-visit-2026-10-03t22-09-22-767z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-1225/evidence.json",
+      "excerptOrSummary": "Re-grounded existing-check owner registration; realNodebehavior+legacy/schema proof once, no newCIgate or duplicatewildcardexecution.",
+      "observedAt": "2026-10-03T22:35:33.448Z",
+      "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-1225-gate-claim-implementation-scope.flow-agents-workflow.committed-bounded-registration-correction-retains-data-logic-and-existing-ci-check-truthful-oneowner5tests-and-actualwave-reconciliation-gate-visit-2026-10-03t22-15-42-674z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-implementation-scope.flow-agents-workflow.committed-bounded-registration-correction-retains-data-logic-and-existing-ci-check-truthful-oneowner5tests-and-actualwave-reconciliation-gate-visit-2026-10-03t22-15-42-674z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-1225/evidence.json",
+      "excerptOrSummary": "Committed bounded registration correction retains data logic and existing CI check; truthful oneowner5tests and actualwave reconciliation.",
+      "observedAt": "2026-10-03T22:35:33.448Z",
+      "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-1225-gate-claim-acceptance-criteria.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-37-072z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-acceptance-criteria.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-37-072z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-1225/evidence.json",
+      "excerptOrSummary": "Currentregistered real analyzerowner provesunknowncost/truezero/legacy/effect behavior; actualsource and distinctcleancritique.",
+      "observedAt": "2026-10-03T22:35:33.448Z",
+      "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-1225-gate-claim-tests-evidence.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-41-801z:1",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-tests-evidence.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-41-801z",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-1225/command-log.jsonl",
+      "excerptOrSummary": "Currentregistered real analyzerowner provesunknowncost/truezero/legacy/effect behavior; actualsource and distinctcleancritique.",
+      "observedAt": "2026-10-03T22:35:33.448Z",
+      "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "supportStrength": "entails",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "node --test evals/integration/learning-review-proposals-cost.test.mjs",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-1225-gate-claim-merge-readiness.flow-agents-workflow.current-scoped-datafix-actualregisteredowner-discriminatingbaseline-currentcritic-and-exactbranchpinnedreadiness-supportreview-hostedchecks-andterminaldeliveryremainrequired-gate-visit-2026-10-03t22-35-33-448z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-merge-readiness.flow-agents-workflow.current-scoped-datafix-actualregisteredowner-discriminatingbaseline-currentcritic-and-exactbranchpinnedreadiness-supportreview-hostedchecks-andterminaldeliveryremainrequired-gate-visit-2026-10-03t22-35-33-448z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-1225/evidence.json",
+      "excerptOrSummary": "Current scoped datafix/actualregisteredowner/discriminatingbaseline/currentcritic and exactbranchpinnedreadiness supportreview; hostedchecks andterminaldeliveryremainrequired.",
+      "observedAt": "2026-10-03T22:35:33.448Z",
+      "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-1225-complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid.flow-agents-workflow.complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid-verified-2026-10-03t22-18-41-801z:79ceb79f0fc8d41e",
+      "claimId": "kontourai-flow-agents-1225-complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid.flow-agents-workflow.complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid-verified-2026-10-03t22-18-41-801z",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-1225/observed-command",
+      "excerptOrSummary": "node --test evals/integration/learning-review-proposals-cost.test.mjs",
+      "observedAt": "2026-10-03T22:18:41.801Z",
+      "collectedBy": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "supportStrength": "entails",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "node --test evals/integration/learning-review-proposals-cost.test.mjs",
+        "isError": false,
+        "exitCode": 0
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:attestation",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.design-probe.pickup-readiness:attestation",
+      "claimType": "builder.design-probe.pickup-readiness",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.design-probe.pickup-readiness claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.design-probe.decisions:attestation",
+      "claimType": "builder.design-probe.decisions",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.design-probe.decisions claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.plan.implementation:attestation",
+      "claimType": "builder.plan.implementation",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.plan.implementation claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:attestation",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion:attestation",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:test_output",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.merge-ready.readiness:attestation",
+      "claimType": "builder.merge-ready.readiness",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.merge-ready.readiness claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion:test_output",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-1225-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1225-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510-gate-visit-2026-10-03t21-51-09z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1225-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510-gate-visit-2026-10-03t21-51-09z",
+      "status": "verified",
+      "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-1225-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-1225-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-1ec5877fb13adc1ff8d4e7e52e3faeb8d9c3693b2796dec68619763563cc4510-gate-visit-2026-10-03t21-51-09z"
+      ],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-gate-claim-pickup-probe-readiness.flow-agents-workflow.current-actual-issue-baseline-ownership-and-discriminating-fixture-evidence-make-the-bounded-data-fix-ready-gate-visit-2026-10-03t21-52-49-129z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-pickup-probe-readiness.flow-agents-workflow.current-actual-issue-baseline-ownership-and-discriminating-fixture-evidence-make-the-bounded-data-fix-ready-gate-visit-2026-10-03t21-52-49-129z",
+      "status": "verified",
+      "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-1225-gate-claim-pickup-probe-readiness.flow-agents-workflow.current-actual-issue-baseline-ownership-and-discriminating-fixture-evidence-make-the-bounded-data-fix-ready-gate-visit-2026-10-03t21-52-49-129z"
+      ],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.unknowncost-remainsunknown-preserve-realzero-populations-use-real-node-analyzer-owner-no-broader-profile-security-rewrite-gate-visit-2026-10-03t21-52-50-067z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.unknowncost-remainsunknown-preserve-realzero-populations-use-real-node-analyzer-owner-no-broader-profile-security-rewrite-gate-visit-2026-10-03t21-52-50-067z",
+      "status": "verified",
+      "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-1225-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.unknowncost-remainsunknown-preserve-realzero-populations-use-real-node-analyzer-owner-no-broader-profile-security-rewrite-gate-visit-2026-10-03t21-52-50-067z"
+      ],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-gate-claim-implementation-plan.flow-agents-workflow.re-grounded-existing-check-owner-registration-realnodebehavior-legacy-schema-proof-once-no-newcigate-or-duplicatewildcardexecution-gate-visit-2026-10-03t22-09-22-767z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-implementation-plan.flow-agents-workflow.re-grounded-existing-check-owner-registration-realnodebehavior-legacy-schema-proof-once-no-newcigate-or-duplicatewildcardexecution-gate-visit-2026-10-03t22-09-22-767z",
+      "status": "verified",
+      "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-1225-gate-claim-implementation-plan.flow-agents-workflow.re-grounded-existing-check-owner-registration-realnodebehavior-legacy-schema-proof-once-no-newcigate-or-duplicatewildcardexecution-gate-visit-2026-10-03t22-09-22-767z"
+      ],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-gate-claim-implementation-scope.flow-agents-workflow.committed-bounded-registration-correction-retains-data-logic-and-existing-ci-check-truthful-oneowner5tests-and-actualwave-reconciliation-gate-visit-2026-10-03t22-15-42-674z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-implementation-scope.flow-agents-workflow.committed-bounded-registration-correction-retains-data-logic-and-existing-ci-check-truthful-oneowner5tests-and-actualwave-reconciliation-gate-visit-2026-10-03t22-15-42-674z",
+      "status": "verified",
+      "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-1225-gate-claim-implementation-scope.flow-agents-workflow.committed-bounded-registration-correction-retains-data-logic-and-existing-ci-check-truthful-oneowner5tests-and-actualwave-reconciliation-gate-visit-2026-10-03t22-15-42-674z"
+      ],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-gate-claim-acceptance-criteria.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-37-072z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-acceptance-criteria.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-37-072z",
+      "status": "verified",
+      "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-1225-gate-claim-acceptance-criteria.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-37-072z"
+      ],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-gate-claim-tests-evidence.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-41-801z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-tests-evidence.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-41-801z",
+      "status": "verified",
+      "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-1225-gate-claim-tests-evidence.flow-agents-workflow.currentregistered-real-analyzerowner-provesunknowncost-truezero-legacy-effect-behavior-actualsource-and-distinctcleancritique-gate-visit-2026-10-03t22-18-41-801z:1"
+      ],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-gate-claim-merge-readiness.flow-agents-workflow.current-scoped-datafix-actualregisteredowner-discriminatingbaseline-currentcritic-and-exactbranchpinnedreadiness-supportreview-hostedchecks-andterminaldeliveryremainrequired-gate-visit-2026-10-03t22-35-33-448z",
+      "claimId": "kontourai-flow-agents-1225-gate-claim-merge-readiness.flow-agents-workflow.current-scoped-datafix-actualregisteredowner-discriminatingbaseline-currentcritic-and-exactbranchpinnedreadiness-supportreview-hostedchecks-andterminaldeliveryremainrequired-gate-visit-2026-10-03t22-35-33-448z",
+      "status": "verified",
+      "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-1225-gate-claim-merge-readiness.flow-agents-workflow.current-scoped-datafix-actualregisteredowner-discriminatingbaseline-currentcritic-and-exactbranchpinnedreadiness-supportreview-hostedchecks-andterminaldeliveryremainrequired-gate-visit-2026-10-03t22-35-33-448z"
+      ],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid.flow-agents-workflow.complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid-verified-2026-10-03t22-18-41-801z",
+      "claimId": "kontourai-flow-agents-1225-complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid.flow-agents-workflow.complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid-verified-2026-10-03t22-18-41-801z",
+      "status": "verified",
+      "actor": "codexthread-a0a6bea458bb29fd226323ecKontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-1225-complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid.flow-agents-workflow.complete-the-requested-outcome-unknown-cost-remains-unknown-real-zero-and-existing-population-semantics-remain-valid-verified-2026-10-03t22-18-41-801z:79ceb79f0fc8d41e"
+      ],
+      "createdAt": "2026-10-03T22:18:41.801Z",
+      "verifiedAt": "2026-10-03T22:18:41.801Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-economics-review-28a7cc1e.flow-agents-workflow.independent-native-economics-review-approves-bounded-six-file-unknown-cost-data-correctness-fix-at-28a7cc1e-no-findings-no-overall-builder-effectiveness-claim-reviewed-2026-10-03t22-04-35-505z",
+      "claimId": "kontourai-flow-agents-1225-economics-review-28a7cc1e.flow-agents-workflow.independent-native-economics-review-approves-bounded-six-file-unknown-cost-data-correctness-fix-at-28a7cc1e-no-findings-no-overall-builder-effectiveness-claim-reviewed-2026-10-03t22-04-35-505z",
+      "status": "verified",
+      "actor": "codex:thread-bb253019a081e28c5114cf70:Kontour",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-1225-economics-review-9cf78e6e.flow-agents-workflow.independent-native-economics-review-approves-current-source-bounded-registration-correction-at-9cf78e6e-zero-findings-prior-data-correctness-approval-retained-no-overall-efficiency-claim-reviewed-2026-10-03t22-17-36-485z",
+      "claimId": "kontourai-flow-agents-1225-economics-review-9cf78e6e.flow-agents-workflow.independent-native-economics-review-approves-current-source-bounded-registration-correction-at-9cf78e6e-zero-findings-prior-data-correctness-approval-retained-no-overall-efficiency-claim-reviewed-2026-10-03t22-17-36-485z",
+      "status": "verified",
+      "actor": "codex:thread-bb253019a081e28c5114cf70:Kontour",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-10-03T22:35:33.448Z",
+      "verifiedAt": "2026-10-03T22:35:33.448Z"
+    }
+  ]
+}
