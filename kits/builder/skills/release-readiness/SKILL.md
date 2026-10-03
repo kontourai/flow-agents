@@ -73,7 +73,7 @@ terms or treating absence as success.
    is CI visibility only; it is not this readiness decision and cannot satisfy it by itself.
    When the repository has `.veritas/repo-map.json`, run the pinned Veritas
    engine for the same base/head revision (prefer
-   `npm exec --yes --package=@kontourai/veritas@1.5.2 -- veritas readiness
+   `npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas readiness
    --check evidence --changed-from <base> --changed-to <head> --format json`),
    follow its returned `reportArtifactPath`, and record the
    `software-readiness-verdict` claim plus that artifact reference in

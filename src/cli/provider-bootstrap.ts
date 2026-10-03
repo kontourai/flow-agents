@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { execTrustedGitSync } from "../lib/trusted-git.js";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -122,10 +123,7 @@ function parseRepoRemote(remote: string): Repo | null {
 export function detectGitHubRepo(repoPath: string): Repo {
   let remote: string;
   try {
-    remote = execFileSync("git", ["-C", repoPath, "remote", "get-url", "origin"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    remote = String(execTrustedGitSync(repoPath, ["remote", "get-url", "origin"]));
   } catch {
     throw new Error(`cannot detect a GitHub repository from ${repoPath}; pass --provider-repo-path for a checkout with an origin remote`);
   }
@@ -157,10 +155,7 @@ function ensureGhAuth(ghBin: string): void {
 function currentGitBranch(repoPath: string): string {
   let branch: string;
   try {
-    branch = execFileSync("git", ["-C", repoPath, "symbolic-ref", "--quiet", "--short", "HEAD"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    branch = String(execTrustedGitSync(repoPath, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
   } catch {
     throw new Error("provider pickup requires a named Git worktree branch; detached HEAD is not a safe assignment authority");
   }
@@ -509,7 +504,7 @@ function readDocument(file: string): { document: Record<string, unknown>; raw: s
 // unknown tracking state must fail the consent gate closed, not bypass it.
 function gitTrackingState(repoPath: string, file: string): "tracked" | "untracked" {
   try {
-    execFileSync("git", ["-C", repoPath, "ls-files", "--error-unmatch", "--", file], { stdio: ["ignore", "ignore", "pipe"] });
+    execTrustedGitSync(repoPath, ["ls-files", "--error-unmatch", "--", file]);
     return "tracked";
   } catch (error) {
     if ((error as { status?: unknown }).status === 1) return "untracked";

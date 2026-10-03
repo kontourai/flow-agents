@@ -196,7 +196,21 @@ test("review hardening: adversarial claims cannot silence the gate, and the warn
   assert.equal(hook.isHardStopWarning(warn, path.relative(root, dir), false), false);
 });
 
-test("skip id is reserved and repeated skips preserve waiver history (#798 Codex findings)", async () => {
+test("skip id is reserved and repeated skips preserve waiver history (#798 Codex findings)", async (t) => {
+  const runtimeRoot = makeFixtureDir("learning-gate-runtime-");
+  const contextNames = ["FLOW_AGENTS_ACTOR", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDECODE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"];
+  const previousContext = new Map(contextNames.map((name) => [name, process.env[name]]));
+  t.after(() => {
+    for (const [name, value] of previousContext) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  for (const name of contextNames) delete process.env[name];
+  process.env.CODEX_THREAD_ID = path.basename(runtimeRoot);
+  process.env.XDG_CONFIG_HOME = path.join(runtimeRoot, "config");
+  process.env.XDG_CACHE_HOME = path.join(runtimeRoot, "cache");
+  process.env.XDG_STATE_HOME = path.join(runtimeRoot, "state");
   // Collision: a genuine check already using the reserved id refuses the skip.
   const rootA = mkSessionRepo();
   ensureSession(rootA, "collide");
@@ -260,5 +274,8 @@ test("skip id is reserved and repeated skips preserve waiver history (#798 Codex
   const relC = path.join(".kontourai", "flow-agents", "analyzed");
   sidecar(rootC, ["advance-state", relC, "--status", "delivered", "--phase", "release"]);
   const analysis = await hook.analyze(rootC);
+  assert.ok(analysis.latestArtifactDir, "analysis selects the current actor's parked session");
+  assert.equal(fs.realpathSync(analysis.latestArtifactDir), fs.realpathSync(path.join(rootC, relC)), "analysis reaches the selected physical session");
   assert.match(JSON.stringify(analysis), /learning outstanding/, "analyze() must surface the warning");
+  assert.equal(analysis.blocking, false, "outstanding learning stays visible without hard-blocking a parked session");
 });

@@ -1,7 +1,6 @@
 import * as fs from "node:fs";
 import { noteActiveFlow, noteGateOutcome } from "../transition-log.js";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
@@ -16,6 +15,7 @@ import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueReso
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { execTrustedGitSync } from "../lib/trusted-git.js";
 import { buildUnsignedSealedExecutionRequest, buildUnsignedSealedWorkloadAuthorization, invokeExternalLifecycleAuthority, invokeExternalSealedLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, lifecycleAuthorityResultDigest, verifyHistoricalLifecycleAuthorityCompletion, verifyLifecycleAuthorityCompletion, verifyProvisionalDeliveryLifecycleCompletion, verifySealedExecutionCompletion } from "../external-lifecycle-authority.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
@@ -23,7 +23,8 @@ import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { publicJsonFlagShapes, WORKFLOW_CRITIQUE_PARAMETERS, WORKFLOW_EVIDENCE_PARAMETERS, type ParameterSpec } from "./public-contracts.js";
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
-import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, declaredVerificationChecks, hasDeclaredVerificationChecks, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, preflightGateClaimEvidence, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { kitFlowSourceRoots, resolveKitFlowBinding } from "../lib/kit-flow-binding.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
@@ -562,7 +563,7 @@ async function prepareDeliveryPublication(
   if (!guardedSeal.result) throw new Error("workflow publish-delivery could not emit a fresh checkpoint attestation for the current trust bundle");
   validateFreshCheckpointSeal(sessionDir, guardedSeal.result);
   const checkpoint = readJsonFile(path.join(sessionDir, "trust.checkpoint.json"), "workflow trust checkpoint");
-  const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  const headSha = String(execTrustedGitSync(projectRoot, ["rev-parse", "HEAD"])).trim();
   if (checkpoint.commit_sha !== headSha) throw new Error("workflow publish-delivery requires a checkpoint sealed against the derived project root's current HEAD");
   if (!isDeepStrictEqual(guardedSeal.snapshot, captureVerifiedWorkspace())) throw new Error("workflow publish-delivery source snapshot changed while sealing; re-run canonical review and verification");
   assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
@@ -1032,11 +1033,10 @@ function verifyRecordedProvisionalDelivery(
 }
 
 function assertOnlyOwnedDeliveryDrift(projectRoot: string, base: string, expectedFiles: string[]): void {
-  const listed = (args: string[]) => execFileSync("git", args, { cwd: projectRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+  const listed = (args: string[]) => String(execTrustedGitSync(projectRoot, args))
     .split("\n").filter(Boolean);
   try {
-    const ancestor = execFileSync("git", ["merge-base", "--is-ancestor", base, "HEAD"], { cwd: projectRoot, stdio: "ignore" });
-    void ancestor;
+    execTrustedGitSync(projectRoot, ["merge-base", "--is-ancestor", base, "HEAD"]);
     const changed = [
       ...listed(["diff", "--name-only", `${base}..HEAD`, "--"]),
       ...listed(["diff", "--name-only", "HEAD", "--"]),
@@ -1552,6 +1552,13 @@ async function start(argv: string[]): Promise<number> {
 async function status(sessionDir: string, json: boolean): Promise<number> {
   const inspected = await inspectBuilderFlowSession({ sessionDir });
   const result = inspected.run;
+  let verificationChecks;
+  try {
+    const checks = declaredVerificationChecks(inspected.projectRoot, { executeEmitter: false });
+    verificationChecks = checks ? { status: "declared", checks } : { status: "not_declared", checks: [] };
+  } catch (error) {
+    verificationChecks = { status: errorMessage(error).includes("committed dynamic manifest") ? "deferred" : "unavailable", checks: [], reason: errorMessage(error) };
+  }
   const report = {
     run_id: result.runId,
     definition_id: result.definitionId,
@@ -1560,6 +1567,7 @@ async function status(sessionDir: string, json: boolean): Promise<number> {
     current_step: result.state.current_step,
     session_dir: sessionDir,
     next_action: inspected.projection.next_action ?? null,
+    verification_checks: verificationChecks,
   };
   if (json) console.log(JSON.stringify(report));
   else {
@@ -1610,7 +1618,6 @@ function validateEvidenceArguments(parsed: ReturnType<typeof parseArgs>, project
   const expectation = flagString(parsed.flags, "expectation")!;
   const requestedStatus = flagString(parsed.flags, "status")!;
   assertRunnableEvidenceCommands(commands, projectRoot, expectation === "tests-evidence" && requestedStatus === "pass");
-  warnIfEvidenceCommandUnreconcilable(commands, projectRoot);
   return { expectation, requestedStatus, commands, requestSha256: canonicalSha256(evidenceAuthorizationRequest(parsed)) };
 }
 
@@ -1877,12 +1884,24 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     requestedStatus,
     flagString(parsed.flags, "route-reason"),
   );
+  await assertMatchingAssignmentActor(sessionDir, slug);
+  const ciPublished = ciReconciliationEnabled(inspected.run, projectRoot);
+  preflightGateClaimEvidence(sessionDir, {
+    expectation, status: requestedStatus, commands: validated.commands,
+    evidenceRefs: flagList(parsed.flags, "evidence-ref-json"), criteria: flagList(parsed.flags, "criterion-json"),
+    requirePublicationCompatibility: ciPublished,
+  });
   const outcome = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
     // Validate the owner after the lock is held, then keep the lock through command
     // execution, evidence recording, and postcondition capture so assignment and
     // session state cannot change mid-invocation.
     const repaired = await recoverBuilderFlowSession({ sessionDir });
     const caller = await assertMatchingAssignmentActor(sessionDir, slug);
+    preflightGateClaimEvidence(sessionDir, {
+      expectation, status: requestedStatus, commands: validated.commands,
+      evidenceRefs: flagList(parsed.flags, "evidence-ref-json"), criteria: flagList(parsed.flags, "criterion-json"),
+      requirePublicationCompatibility: ciReconciliationEnabled(repaired.run, repaired.projectRoot),
+    });
     assertGateFreshnessTurnstile(sessionDir, repaired.run, expectation, requestedStatus);
     // #1304 PRE: declared route map + persisted per-identity attempt history, emitted under the
     // lock after authorization and immediately before the mutation — facts only, never a
@@ -2949,6 +2968,20 @@ function builderOperationForExpectation(flowId: string, expectationId: string): 
     if (binding?.interface === "operation") return binding.operation ?? "the declared external operation";
   }
   return null;
+}
+
+function flowDeclaresPublication(flowId: string, projectRoot: string): boolean {
+  const binding = resolveKitFlowBinding(flowId, kitFlowSourceRoots(PACKAGE_ROOT, projectRoot));
+  if (!binding) throw new Error("workflow evidence cannot resolve the declaring kit's publication contract");
+  const actions = parseKitFlowStepActions(binding.manifest, binding.manifestPath);
+  if (actions.errors.length) throw new Error(`workflow publication metadata is invalid: ${actions.errors.join("; ")}`);
+  return actions.entries.some(action => action.flow_id === flowId && action.operations.includes("publish-change"));
+}
+
+function ciReconciliationEnabled(run: Awaited<ReturnType<typeof inspectBuilderFlowSession>>["run"], projectRoot: string): boolean {
+  return Object.values(run.definition.gates ?? {}).some(gate => gate !== null && typeof gate === "object" && !Array.isArray(gate) && gate.requires_current_verification === true)
+    && flowDeclaresPublication(run.definitionId, projectRoot)
+    && hasDeclaredVerificationChecks(projectRoot);
 }
 
 async function critique(sessionDir: string, argv: string[], json: boolean): Promise<number> {

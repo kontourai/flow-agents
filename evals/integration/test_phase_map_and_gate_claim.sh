@@ -392,14 +392,13 @@ flow_agents_node "workflow-sidecar" init-plan "$C_DIR/.kontourai/flow-agents/$CL
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
-# Fix next_action so it reads as "done" for the gate
+# Spoof terminal sidecar status while retaining the authenticated canonical binding.
 node -e "
   const fs = require('fs');
   const f = '$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/state.json';
   const s = JSON.parse(fs.readFileSync(f, 'utf8'));
   s.next_action = { status: 'done', summary: 'Work complete.' };
   s.status = 'verified';
-  delete s.flow_run;
   fs.writeFileSync(f, JSON.stringify(s, null, 2) + '\n');
 " 2>/dev/null
 rm -f "$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/$CLEAN_SLUG--deliver.md"
@@ -414,22 +413,54 @@ rm -f "$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/$CLEAN_SLUG--deliver.md"
 # setup step silently suppresses that transition, a real behavior difference, not just a
 # fixture-reachability issue.
 clean_out=""
-clean_exit=0
-for attempt in 1 2; do
-  set +e
-  attempt_out="$(FLOW_AGENTS_ACTOR=clean-fixture-actor FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=2 FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
-      node "$GATE" 2>&1 <<< "{\"hook_event_name\":\"Stop\",\"cwd\":\"$C_DIR\"}")"
-  attempt_exit="$?"
-  set -e
-  clean_out="$clean_out$attempt_out"
-  if [ "$attempt_exit" -ne 2 ]; then clean_exit="$attempt_exit"; fi
+for clean_case in terminal-sidecar missing-flow-binding; do
+  if [ "$clean_case" = missing-flow-binding ]; then
+    node - "$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/state.json" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+delete state.flow_run;
+fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
+NODE
+  fi
+  clean_blocked=yes
+  case_out=""
+  for attempt in 1 2; do
+    set +e
+    attempt_out="$(FLOW_AGENTS_ACTOR=clean-fixture-actor FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=2 FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
+        node "$GATE" 2>&1 <<< "{\"hook_event_name\":\"Stop\",\"cwd\":\"$C_DIR\"}")"
+    attempt_exit="$?"
+    set -e
+    case_out="$case_out$attempt_out"$'\n'
+    if [ "$attempt_exit" -ne 2 ]; then
+      clean_blocked=no
+      _fail "$clean_case: Stop attempt $attempt did not block (exit $attempt_exit): $attempt_out"
+    fi
+    if ! node - "$attempt_out" "$clean_case" <<'NODE'
+const [output, fixtureCase] = process.argv.slice(2);
+const prefix = '[flow-agents:stop-control] ';
+const controls = output.split('\n').filter(line => line.startsWith(prefix)).map(line => JSON.parse(line.slice(prefix.length)));
+if (controls.length !== 1 || controls[0].v !== 1 || controls[0].terminal !== true || controls[0].code !== 'canonical-flow-active') process.exit(1);
+if (fixtureCase === 'terminal-sidecar' && (!output.includes('canonical Flow run remains active at step design-probe') || output.includes('workflow binding is invalid'))) process.exit(2);
+if (fixtureCase === 'missing-flow-binding' && !output.includes('workflow binding is invalid')) process.exit(3);
+NODE
+    then
+      clean_blocked=no
+      _fail "$clean_case: Stop attempt $attempt lacked its own terminal control or expected guard: $attempt_out"
+    fi
+  done
+  clean_out="$clean_out$case_out"
+  if [ "$clean_blocked" = yes ] && node - "$C_DIR/.kontourai/flow/runs/$CLEAN_SLUG/state.json" <<'NODE'
+const fs = require('node:fs');
+const state = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (state.status !== 'active' || state.current_step !== 'design-probe') process.exit(1);
+NODE
+  then
+    _pass "$clean_case: both Stop attempts block without auto-release and leave canonical Flow active at design-probe"
+  else
+    _fail "$clean_case: canonical Flow or binding guard did not retain the active run: $case_out"
+  fi
 done
-
-if [ "$clean_exit" -eq 0 ] && echo "$clean_out" | grep -q 'canonical Flow run remains active at step design-probe'; then
-  _pass "canonical Flow blocks repeated Stop after the sidecar projection and Markdown are removed"
-else
-  _fail "canonical Flow could be hidden or auto-released after sidecar rewrite (exit $clean_exit): $clean_out"
-fi
 
 if echo "$clean_out" | grep -q "caught false-completion"; then
   _fail "clean bundle incorrectly emits caught false-completion: $clean_out"

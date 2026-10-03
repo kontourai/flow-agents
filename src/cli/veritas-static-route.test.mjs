@@ -16,5 +16,6 @@ test("Veritas's static evidence route includes source validation and the unit co
   const sourceProbe = fs.readFileSync(path.join(root, "evals/static/test_validate_source_kit_asset_scope.sh"), "utf8");
   const unitProbe = fs.readFileSync(path.join(root, "evals/static/test_unit_helpers.sh"), "utf8");
   assert.match(sourceProbe, /npm run validate:source/);
-  assert.match(unitProbe, /node --test src\/cli\/\*\.test\.mjs/);
+  assert.match(unitProbe, /node --test --import \.\/src\/cli\/unit-test-state\.mjs src\/cli\/\*\.test\.mjs/);
+  assert.equal([...unitProbe.matchAll(/src\/cli\/\*\.test\.mjs/g)].length, 1, "the static route runs the whole unit corpus once with its runtime-state preload");
 });

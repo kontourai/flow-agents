@@ -261,10 +261,11 @@ export function installedBuilderSkillIdentity(definitionId: string, skill: strin
   return skillIdentity(kit, kitBinding, packageMetadata.version, skill);
 }
 
-export function installedBuilderImplementationAllowed(definitionId: string, currentStep: string, projectRoot?: string): boolean {
+export function installedBuilderImplementationAllowed(definitionId: string, currentStep: string | undefined, projectRoot?: string): boolean {
   const { manifest: kit, manifestRef } = declaringKitForFlow(definitionId, projectRoot);
   const parsed = parseKitFlowStepActions(kit, manifestRef);
   if (parsed.errors.length) throw new Error(`Builder gate-action metadata is invalid: ${parsed.errors.join("; ")}`);
+  if (currentStep === undefined) return parsed.entries.some(entry => entry.flow_id === definitionId && entry.implementation_allowed);
   const selected = parsed.entries.filter((entry) => entry.flow_id === definitionId && entry.step_id === currentStep);
   if (selected.length !== 1) throw new Error(`Builder gate-action metadata must declare exactly one action for ${definitionId}/${currentStep}`);
   return selected[0]!.implementation_allowed;

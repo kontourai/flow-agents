@@ -161,9 +161,11 @@ copy_isolated_goal_fit_hook() { # $1=isolated hook directory
   cp "$GATE" "$dir/stop-goal-fit.js"
   local dependency
   for dependency in \
+    trusted-git.js \
     local-artifact-paths.js \
     actor-identity.js \
     current-pointer.js \
+    hook-workflow-scope.js \
     runnable-command.js \
     flow-recovery-fence.js \
     effective-flow-agents-config.js \
@@ -937,7 +939,7 @@ else
 fi
 
 echo ""
-echo "--- AC3.1b: Low-impact-only bundle with unavailable surface → NOT blocked ---"
+echo "--- AC3.1b: Low-impact-only bundle → no Surface-specific warning ---"
 
 ISO2_DIR="$TMP/surface-iso2"
 mkdir -p "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest"
@@ -986,10 +988,16 @@ surf2_out=$(NODE_PATH="$ISO2_DIR" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GO
 surf2_exit=$?
 set -e
 
-if ! echo "$surf2_out" | grep -q "surface unavailable"; then
-  _pass "AC3.1: low-impact-only bundle → no surface-unavailable warning (noise reduction)"
+# This in-progress fixture still owes its next action, so ordinary Stop blocking is
+# expected. Surface unavailability must add no blocker, and a crash is not proof.
+echo "  Low-impact isolated gate exit: $surf2_exit (expected 2 for unfinished work)"
+if [ "$surf2_exit" -eq 2 ] \
+  && echo "$surf2_out" | grep -q 'lowtest.*next action: running' \
+  && ! echo "$surf2_out" | grep -qE 'MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|Goal Fit async error' \
+  && ! echo "$surf2_out" | grep -q "surface unavailable"; then
+  _pass "AC3.1: low-impact-only bundle completes normal Stop evaluation without a surface-unavailable warning"
 else
-  _fail "AC3.1: low-impact bundle should NOT emit surface-unavailable warning. out=$surf2_out"
+  _fail "AC3.1: low-impact Surface control did not complete normally or emitted a Surface warning. exit=$surf2_exit out=$surf2_out"
 fi
 
 

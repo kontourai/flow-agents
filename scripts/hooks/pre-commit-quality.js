@@ -13,6 +13,7 @@
 'use strict';
 
 const { spawnSync } = require('child_process');
+const { execTrustedGitSync } = require('./lib/trusted-git.js');
 const path = require('path');
 const fs = require('fs');
 
@@ -27,13 +28,19 @@ const SECRET_PATTERNS = [
 ];
 
 function getStagedFiles() {
-  const r = spawnSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-  return r.status === 0 ? r.stdout.trim().split('\n').filter(Boolean) : [];
+  try {
+    return String(execTrustedGitSync(process.cwd(), ['diff', '--cached', '--name-only', '--diff-filter=ACMR'])).trim().split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function getStagedContent(filePath) {
-  const r = spawnSync('git', ['show', `:${filePath}`], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-  return r.status === 0 ? r.stdout : null;
+  try {
+    return String(execTrustedGitSync(process.cwd(), ['show', `:${filePath}`]));
+  } catch {
+    return null;
+  }
 }
 
 function findFileIssues(filePath) {

@@ -172,7 +172,7 @@ export function buildChangeProviderResult(input: {
     throw new ChangeProviderError("provider_observation_mismatch", "provider observation does not match the canonical request");
   }
   const title = boundedProviderString(providerRecord.title, "provider record title", MAX_TITLE_BYTES);
-  const body = boundedProviderString(providerRecord.body, "provider record body", MAX_BODY_BYTES);
+  const body = boundedProviderString(providerRecord.body, "provider record body", MAX_BODY_BYTES, true);
   const isDraft = providerRecord.isDraft;
   if (title !== request.intent.title || body !== request.intent.body || typeof isDraft !== "boolean" || isDraft !== Boolean(request.intent.draft)) {
     throw new ChangeProviderError("provider_observation_mismatch", "provider observation does not match the canonical change intent");

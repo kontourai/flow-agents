@@ -118,8 +118,11 @@ LAST_OUTPUT=""
 LAST_STATUS=0
 run_check() {
   local body="$1" head="${2:-$HEAD_SHA}" base="${3:-$BASE_SHA}" author="${4:-a-human}"
-  LAST_OUTPUT="$(cd "$REPO" && PR_BODY="$body" PR_HEAD_SHA="$head" PR_BASE_SHA="$base" PR_AUTHOR="$author" node "$VALIDATOR" 2>&1)"
-  LAST_STATUS=$?
+  if LAST_OUTPUT="$(cd "$REPO" && PR_BODY="$body" PR_HEAD_SHA="$head" PR_BASE_SHA="$base" PR_AUTHOR="$author" node "$VALIDATOR" 2>&1)"; then
+    LAST_STATUS=0
+  else
+    LAST_STATUS=$?
+  fi
 }
 
 expect_pass() {
@@ -310,24 +313,33 @@ expect_fail_naming "resolves at the PR head, not anywhere in the repository" \
   "does not exist at the PR head"
 
 # --- 6. fails loudly on misconfiguration -------------------------------------------
-missing_body_output="$(cd "$REPO" && env -u PR_BODY PR_HEAD_SHA="$HEAD_SHA" PR_BASE_SHA="$BASE_SHA" node "$VALIDATOR" 2>&1)"
-missing_body_status=$?
+if missing_body_output="$(cd "$REPO" && env -u PR_BODY PR_HEAD_SHA="$HEAD_SHA" PR_BASE_SHA="$BASE_SHA" node "$VALIDATOR" 2>&1)"; then
+  missing_body_status=0
+else
+  missing_body_status=$?
+fi
 if [[ "$missing_body_status" -ne 0 && "$missing_body_output" == *"PR_BODY is required"* ]]; then
   pass "fails loudly when PR_BODY is unset"
 else
   fail "unset PR_BODY should fail loudly (exit $missing_body_status: $missing_body_output)"
 fi
 
-missing_sha_output="$(cd "$REPO" && PR_BODY="x" env -u PR_HEAD_SHA -u PR_BASE_SHA node "$VALIDATOR" 2>&1)"
-missing_sha_status=$?
+if missing_sha_output="$(cd "$REPO" && PR_BODY="x" env -u PR_HEAD_SHA -u PR_BASE_SHA node "$VALIDATOR" 2>&1)"; then
+  missing_sha_status=0
+else
+  missing_sha_status=$?
+fi
 if [[ "$missing_sha_status" -ne 0 && "$missing_sha_output" == *"PR_HEAD_SHA and PR_BASE_SHA are required"* ]]; then
   pass "fails loudly when the head/base SHAs are unset"
 else
   fail "unset SHAs should fail loudly (exit $missing_sha_status: $missing_sha_output)"
 fi
 
-absent_head_output="$(cd "$REPO" && PR_BODY="x" PR_HEAD_SHA="0000000000000000000000000000000000000000" PR_BASE_SHA="$BASE_SHA" node "$VALIDATOR" 2>&1)"
-absent_head_status=$?
+if absent_head_output="$(cd "$REPO" && PR_BODY="x" PR_HEAD_SHA="0000000000000000000000000000000000000000" PR_BASE_SHA="$BASE_SHA" node "$VALIDATOR" 2>&1)"; then
+  absent_head_status=0
+else
+  absent_head_status=$?
+fi
 if [[ "$absent_head_status" -ne 0 && "$absent_head_output" == *"is not in this checkout"* ]]; then
   pass "fails loudly, and names the checkout, when the PR head object is absent"
 else
@@ -335,8 +347,11 @@ else
 fi
 
 # --- 7. the rejection is a real process exit ---------------------------------------
-(cd "$REPO" && PR_BODY="Ran \`src/cli/never-existed.test.mjs\`." PR_HEAD_SHA="$HEAD_SHA" PR_BASE_SHA="$BASE_SHA" node "$VALIDATOR" >/dev/null 2>&1)
-real_exit=$?
+if (cd "$REPO" && PR_BODY="Ran \`src/cli/never-existed.test.mjs\`." PR_HEAD_SHA="$HEAD_SHA" PR_BASE_SHA="$BASE_SHA" node "$VALIDATOR" >/dev/null 2>&1); then
+  real_exit=0
+else
+  real_exit=$?
+fi
 if [[ "$real_exit" -eq 1 ]]; then
   pass "the rejection path exits the process with status 1"
 else

@@ -4,9 +4,8 @@ import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
-import { flowAgentsPackageVersion } from "./lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "./lib/pinned-cli-command.js";
-import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapshot, type GateActionEnvelope, type GateActionProgressSnapshot } from "./builder-gate-action-envelope.js";
+import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapshot, installedBuilderImplementationAllowed, type GateActionEnvelope, type GateActionProgressSnapshot } from "./builder-gate-action-envelope.js";
 import {
   evaluateGate,
   expectationsForGate,
@@ -19,6 +18,7 @@ import {
 } from "@kontourai/flow";
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { captureReviewWorkspaceSnapshot, isGitWorktreeSnapshot } from "./lib/review-workspace-snapshot.js";
+import { assertReviewArtifactRole, ReviewControlDriftError } from "./lib/review-context.js";
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, readLocalRecord, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
@@ -2297,6 +2297,11 @@ function reviewedWorkspaceFiles(snapshot: AnyRecord): Array<{ file: string; sha2
 }
 
 async function assertReviewedArtifactDigest(artifact: AnyRecord, projectRoot: string): Promise<void> {
+  try { assertReviewArtifactRole(projectRoot, artifact); }
+  catch (error) {
+    if (error instanceof ReviewControlDriftError) throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.sha256", error.message);
+    throw error;
+  }
   const canonicalArtifact = safeReviewedArtifactPath(projectRoot, artifact.file);
   if (createHash("sha256").update(fs.readFileSync(canonicalArtifact)).digest("hex") !== artifact.sha256) {
     throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.sha256", `does not match ${artifact.file}`);
@@ -2420,10 +2425,31 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
     .map((expectation: FlowExpectation) => `${expectation.id} (${expectation.bundle_claim.claimType}/${expectation.bundle_claim.subjectType ?? "any"})`));
   const skills = action.skills;
   const operations = action.operations;
-  const syncCommand = pinnedFlowAgentsCommand(flowAgentsPackageVersion(), ["workflow", "status", "--session-dir", `.kontourai/flow-agents/${context.slug}`, "--json"]);
+  const syncCommand = envelope
+    ? pinnedFlowAgentsCommand(envelope.public_interfaces.status.package.version, envelope.public_interfaces.status.argv)
+    : null;
+  const execution = envelope ? {
+    executor: "agent",
+    execution_action: {
+      executor: "agent",
+      skills: envelope.action.skills,
+      operations: envelope.action.operations,
+      artifact_targets: envelope.stop_condition.required.artifact_refs,
+      sequence: envelope.stop_condition.sequence,
+    },
+    evidence_submission: {
+      mutations: envelope.public_interfaces.mutations,
+      schemas: envelope.public_interfaces.schemas,
+      unresolved_expectation_ids: envelope.stop_condition.required.unresolved_evidence_ids,
+      adapter_evidence_is_gate_evidence: envelope.stop_condition.adapter_evidence_is_gate_evidence,
+    },
+    sync_command: syncCommand,
+    command: syncCommand,
+    command_role: "synchronization",
+  } : {};
   const routeBack = latestRouteBack(run.state);
   const externalCapability = envelope?.stop_condition.external_capability;
-  const skillText = skills.length ? `Activate ${skills.map((skill) => `\`${skill}\``).join(" then ")}.` : "No Builder skill is required.";
+  const skillText = skills.length ? `The agent must execute ${skills.map((skill) => `\`${skill}\``).join(" then ")}.` : "No Builder skill is required.";
   const operationText = operations.length ? ` Perform ${operations.map((operation) => `\`${operation}\``).join(" then ")}.` : "";
   const gateText = gates.length
     ? `Complete ${gates.map((gate) => `\`${gate.id}\``).join(", ")} by recording: ${required.join(", ") || "its declared evidence"}.`
@@ -2432,7 +2458,7 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
     ? ` Route-back history: attempt ${routeBack.attempt ?? "n/a"}${routeBack.max_attempts ? `/${routeBack.max_attempts}` : ""} returned to \`${routeBack.route_back_to ?? "an earlier step"}\`${routeBack.route_reason ? ` for \`${routeBack.route_reason}\`` : ""}.`
     : "";
   const nextAction = complete
-    ? { status: "done", summary: "Canonical Flow run is complete." }
+    ? { status: "done", summary: "The selected Flow process is complete. Reconcile any remaining publication or consumer obligations from the user goal before reporting full delivery." }
     : canceled
       ? { status: "done", summary: "Canonical Flow run was canceled by an authorized external request. Artifacts are retained until separately archived." }
       : paused
@@ -2447,24 +2473,33 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
             summary: `Flow step \`${run.state.current_step}\` is waiting for external capability \`${externalCapability.capability}\`. Flow Agents has no authenticated executor and cannot record provider completion.`,
             skills,
             operations,
+            ...execution,
             external_capability: externalCapability,
           }
     : {
         status: "continue",
-        summary: `Flow step \`${run.state.current_step}\`: ${skillText}${operationText} ${gateText}${routeText} Then synchronize the recorded evidence.`,
+        summary: `Flow step \`${run.state.current_step}\`: ${skillText}${operationText} Produce the declared artifacts and submit their evidence through the bound public interfaces. ${gateText}${routeText} Then run sync_command to inspect canonical state, inspect the resulting next action, and continue orchestration. Status does not execute skills or submit evidence.`,
         skills,
         operations,
-        command: syncCommand,
+        ...execution,
       };
   const phase = phaseForStep(definition.phase_map, run.state.current_step) ?? sidecar.phase;
-  const verificationStatus = verificationStatusFromFlowGateOutcomes(run.state.gate_outcomes);
+  const verificationGateIds = Object.entries(definition.gates ?? {}).filter(([, gate]) =>
+    (expectationsForGate(gate, run.config) as FlowExpectation[]).some(expectation => expectation.id === "tests-evidence" && expectation.required))
+    .map(([id]) => id);
+  let verificationStatus = verificationStatusFromFlowGateOutcomes(run.state.gate_outcomes, verificationGateIds);
+  const codeProducing = complete && installedBuilderImplementationAllowed(run.definitionId, undefined, context.projectRoot);
+  if (codeProducing && verificationStatus === "PASS") {
+    try { assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(context.sessionDir, context.projectRoot, context.slug, verifyProvisionalDeliveryLifecycleCompletion); }
+    catch { verificationStatus = "NOT_VERIFIED"; }
+  }
   return { gateActionEnvelope: envelope, progressSnapshot, projection: {
     ...sidecar,
     run_correlation: run.correlation.status === "present"
       ? run.correlation.envelope
       : { status: "incomplete", reason: run.correlation.reason },
     workflow_outcome: deriveWorkflowOutcome(run.state.status, verificationStatus),
-    status: complete ? "delivered" : canceled ? "canceled" : failed ? "failed" : (paused || needsDecision) ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
+    status: complete ? (codeProducing ? (verificationStatus === "PASS" ? "verified" : "not_verified") : "delivered") : canceled ? "canceled" : failed ? "failed" : (paused || needsDecision) ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
     phase: complete || canceled || failed ? "done" : phase,
     updated_at: run.state.updated_at,
     flow_run: {
@@ -2517,6 +2552,7 @@ function writeProjection(
     {
       expectedGlobalRaw: globalTarget?.raw ?? null,
       expectedActorEntries: prepared.actorEntries,
+      ...(binding ? { activateWorkflowActor: binding.actorKey } : {}),
     },
     () => {
       if (!replaceStateIfUnchanged(
@@ -2891,6 +2927,7 @@ function currentPointerHelper(): {
     options?: {
       expectedGlobalRaw?: string | null;
       expectedActorEntries?: string[] | null;
+      activateWorkflowActor?: string;
     },
     commit?: () => void | (() => void),
   ): "updated" | "changed";

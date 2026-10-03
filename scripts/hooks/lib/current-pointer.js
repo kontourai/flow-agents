@@ -93,6 +93,14 @@ const heldPointerParentIdentities = new Map();
 const pointerLockContext = new AsyncLocalStorage();
 const activeAsyncPointerLocks = new Map();
 
+function publishWorkflowDiscovery(flowAgentsDir, actorKey, beforeRaw, activate = false) {
+  const root = path.resolve(flowAgentsDir);
+  if (path.basename(root) !== 'flow-agents' || path.basename(path.dirname(root)) !== '.kontourai') return;
+  const before = beforeRaw === null ? null : JSON.parse(beforeRaw);
+  const own = readOwnCurrentPointerRecord(root, actorKey).payload;
+  require('./hook-workflow-scope.js').publishActorWorkflowScope(root, actorKey, activate || before?.binding_id !== own?.binding_id);
+}
+
 function sleepSync(ms) {
   const buffer = new SharedArrayBuffer(4);
   Atomics.wait(new Int32Array(buffer), 0, 0, ms);
@@ -727,10 +735,17 @@ function rollbackValidatedPointer(file, beforeRaw, writtenRaw, error) {
   throw error;
 }
 
-function writePerActorCurrent(flowAgentsDir, actorKey, payload, validate) {
+function writePerActorCurrentConditionally(flowAgentsDir, actorKey, payload, predicate, validate) {
   const file = perActorCurrentFile(flowAgentsDir, actorKey);
-  withPointerLock(flowAgentsDir, actorKey, () => {
+  return withPointerLock(flowAgentsDir, actorKey, () => {
     const beforeRaw = assertRegularPointerOrMissing(file);
+    if (typeof predicate === 'function') {
+      let current = null;
+      if (beforeRaw !== null) {
+        try { current = JSON.parse(beforeRaw); } catch { current = undefined; }
+      }
+      if (!predicate(current)) return 'skipped';
+    }
     const writtenRaw = `${JSON.stringify(payload, null, 2)}\n`;
     if (typeof validate === 'function') validate();
     atomicWriteRaw(file, writtenRaw);
@@ -739,7 +754,13 @@ function writePerActorCurrent(flowAgentsDir, actorKey, payload, validate) {
     } catch (error) {
       rollbackValidatedPointer(file, beforeRaw, writtenRaw, error);
     }
+    publishWorkflowDiscovery(flowAgentsDir, actorKey, beforeRaw);
+    return 'written';
   });
+}
+
+function writePerActorCurrent(flowAgentsDir, actorKey, payload, validate) {
+  writePerActorCurrentConditionally(flowAgentsDir, actorKey, payload, undefined, validate);
 }
 
 /**
@@ -756,13 +777,18 @@ function writePerActorCurrent(flowAgentsDir, actorKey, payload, validate) {
 function retireOwnCurrentPointer(flowAgentsDir, actorKey, artifactDir, bindingId, reason, updatedAt, validate) {
   return withPointerLock(flowAgentsDir, actorKey, () => {
     if (typeof validate === 'function') validate();
-    const own = readOwnCurrentPointer(flowAgentsDir, actorKey);
+    const own = readOwnCurrentPointerRecord(flowAgentsDir, actorKey);
     if (!own.file || !own.payload || own.payload.artifact_dir !== artifactDir) return 'not-bound';
     if (own.payload.binding_id !== bindingId) return 'changed';
     const raw = assertRegularPointerOrMissing(own.file);
     if (raw === null) return 'changed';
     const payload = JSON.parse(raw);
     if (!payload || payload.artifact_dir !== artifactDir || payload.binding_id !== bindingId) return 'changed';
+    if (payload.binding_status === 'retired') {
+      if (payload.binding_reason !== reason) return 'changed';
+      publishWorkflowDiscovery(flowAgentsDir, actorKey, raw);
+      return 'retired';
+    }
     const retiredPayload = {
       ...payload,
       updated_at: updatedAt,
@@ -776,6 +802,7 @@ function retireOwnCurrentPointer(flowAgentsDir, actorKey, artifactDir, bindingId
     } catch (error) {
       rollbackValidatedPointer(own.file, raw, writtenRaw, error);
     }
+    publishWorkflowDiscovery(flowAgentsDir, actorKey, raw);
     return 'retired';
   });
 }
@@ -997,6 +1024,11 @@ function replaceCurrentPointersIfUnchanged(
       }
       throw error;
     }
+    const actorKey = require('./actor-identity.js').resolveActor(process.env).actor;
+    const actorFile = perActorCurrentFile(root, actorKey);
+    const ownWrite = normalized.find(replacement => replacement.file === actorFile);
+    if (ownWrite && !isUnresolvedActor(actorKey)) publishWorkflowDiscovery(root, actorKey, ownWrite.expectedRaw,
+      options.activateWorkflowActor === actorKey);
     return 'updated';
   });
 }
@@ -1082,6 +1114,7 @@ module.exports = {
   readOwnCurrentPointerRecord,
   readOwnCurrentPointerSnapshot,
   writePerActorCurrent,
+  writePerActorCurrentConditionally,
   retireOwnCurrentPointer,
   replacePerActorCurrentIfUnchanged,
   publishCurrentPointers,

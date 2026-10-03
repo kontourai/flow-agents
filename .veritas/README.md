@@ -36,17 +36,20 @@ This repo was bootstrapped for `flow-agents` with a conservative starter kit for
 
 ## Suggested Commands
 
+Use Veritas 1.7.3 or later for this Repo Map: its published schema declares
+the required static check's `timeoutMs` field.
+
 ```bash
-npm exec --yes --package=@kontourai/veritas@1.5.2 -- veritas readiness --working-tree
-npm exec --yes --package=@kontourai/veritas@1.5.2 -- veritas readiness --check coverage --working-tree
-npm exec --yes --package=@kontourai/veritas@1.5.2 -- veritas integrations codex status
-npm exec --yes --package=@kontourai/veritas@1.5.2 -- veritas attest bootstrap --actor <authority-id> --approval-ref <human-approval-reference> --non-interactive
+npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas readiness --working-tree
+npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas readiness --check coverage --working-tree
+npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas integrations codex status
+npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas attest bootstrap --actor <authority-id> --approval-ref <human-approval-reference> --non-interactive
 ```
 
 If you prefer explicit paths:
 
 ```bash
-npm exec --yes --package=@kontourai/veritas@1.5.2 -- veritas readiness --check evidence \
+npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas readiness --check evidence \
   --repo-map ./.veritas/repo-map.json \
   --repo-standards ./.veritas/repo-standards/default.repo-standards.json \
   package.json

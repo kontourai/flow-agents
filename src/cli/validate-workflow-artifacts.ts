@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { assertReviewArtifactRole } from "../lib/review-context.js";
 import { lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 // #783: the mini JSON-Schema validator (validateSchemaValue) and its Issue type moved to a
 // shared lib so workflow-sidecar.ts's `fixture write --from-json` validates against the SAME
@@ -529,6 +530,7 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
             const artifacts = Array.isArray(critique.review_target?.artifacts) ? critique.review_target.artifacts : [];
             try {
               const currentArtifacts = artifacts.map((artifact: any) => {
+                assertReviewArtifactRole(projectRoot, artifact, dir);
                 const file = path.resolve(projectRoot, String(artifact.file));
                 const relative = path.relative(fs.realpathSync(projectRoot), fs.realpathSync(file));
                 if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("artifact escapes project root");

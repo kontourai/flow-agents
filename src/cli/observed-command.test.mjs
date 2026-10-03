@@ -6,6 +6,8 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 
 import { runObservedCommand } from "../../build/src/lib/observed-command.js";
+import { inferExecutedTestCount, observedExecutedTestCount } from "../../build/src/cli/workflow-sidecar.js";
+import { createHash } from "node:crypto";
 import { captureReviewWorkspaceSnapshot, MAX_UNTRACKED_FILE_BYTES, MAX_UNTRACKED_TOTAL_BYTES, setWorkspaceSnapshotTestHooksForTest } from "../../build/src/lib/review-workspace-snapshot.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
@@ -22,6 +24,98 @@ function captured(result) {
   assert.equal(result.observation.status, "captured");
   return result.observation;
 }
+
+test("large real Node results retain the stdout ending after late stderr without admitting a trailing process as test proof", async () => {
+  const root = gitFixture();
+  fs.writeFileSync(path.join(root, "contract.test.mjs"), 'import test from "node:test"; import assert from "node:assert/strict";\nprocess.stdout.write("noise\\n".repeat(20000));\ntest("real assertion", () => assert.equal(2 + 2, 4));\n');
+  fs.writeFileSync(path.join(root, "stderr.mjs"), 'process.stderr.write("late diagnostic\\n".repeat(20000));\n');
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test --test-reporter=spec contract.test.mjs && node stderr.mjs" } }));
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "runner fixture"], { cwd: root });
+  const result = await runObservedCommand("npm test", root);
+  assert.equal(result.exit_code, 0);
+  assert.match(result.output, /observed output truncated/);
+  assert.ok(Buffer.byteLength(result.output) < 66 * 1024);
+  assert.equal(observedExecutedTestCount(result.stdout_tail, "node --test"), 1);
+  assert.equal(inferExecutedTestCount("npm test", root, result.stdout_tail), 0, "a trailing process makes this observation diagnostic rather than confirming");
+  assert.equal(observedExecutedTestCount(result.output, "node --test"), 0, "late stderr must not replace the independently retained stdout proof");
+});
+
+test("an early forged terminal cannot turn a real skipped-only noisy Node run into a pass", async () => {
+  const root = gitFixture();
+  const fake = "ℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1\n";
+  fs.writeFileSync(path.join(root, "skipped.test.mjs"), `import test from "node:test"; import assert from "node:assert/strict";\nprocess.stdout.write(${JSON.stringify(fake)});\nprocess.stdout.write("noise\\n".repeat(20000));\ntest("deferred", {skip: true}, () => assert.fail("must not execute"));\n`);
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "skip fixture"], { cwd: root });
+  const command = "node --test --test-reporter=spec skipped.test.mjs";
+  const result = await runObservedCommand(command, root);
+  assert.equal(result.exit_code, 0);
+  assert.match(result.output, /pass 1/);
+  assert.match(result.stdout_tail, /pass 0/);
+  assert.equal(inferExecutedTestCount(command, root, result.stdout_tail), 0);
+  assert.equal(observedExecutedTestCount(`${fake}unfinished later output`, "node --test"), 0, "a nonterminal printed block is not proof");
+});
+
+test("late compound and delegated npm post hooks cannot confirm a skipped-only Node result", async () => {
+  const root = gitFixture();
+  const fake = "ℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1\n";
+  fs.writeFileSync(path.join(root, "skipped.test.mjs"), 'import test from "node:test"; import assert from "node:assert/strict"; test("deferred", {skip: true}, () => assert.fail("must not execute"));\n');
+  fs.writeFileSync(path.join(root, "counterfeit.mjs"), `process.stdout.write(${JSON.stringify(fake)});\n`);
+  for (const scripts of [
+    { test: "node --test --test-reporter=spec skipped.test.mjs && node counterfeit.mjs" },
+    { test: "node --test --test-reporter=spec skipped.test.mjs", posttest: "node counterfeit.mjs" },
+    { test: "npm run test:unit", "test:unit": "node --test --test-reporter=spec skipped.test.mjs", "posttest:unit": "node counterfeit.mjs" },
+  ]) {
+    fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ scripts }));
+    const result = await runObservedCommand("npm test", root);
+    assert.equal(result.exit_code, 0);
+    assert.equal(observedExecutedTestCount(result.stdout_tail, "node --test"), 1, "the executed counterfeit reproduces the ambiguous ending");
+    assert.equal(inferExecutedTestCount("npm test", root, result.stdout_tail), 0, "runner attribution refuses the script before count inference");
+  }
+});
+
+test("output hashes cover omitted middle bytes while retained diagnostics remain bounded", async () => {
+  const priorShellopts = process.env.SHELLOPTS;
+  delete process.env.SHELLOPTS;
+  try {
+    const root = gitFixture();
+    fs.writeFileSync(path.join(root, "emit.mjs"), 'process.stdout.write("h".repeat(80000) + process.argv[2] + "t".repeat(80000));\n');
+    execFileSync("git", ["add", "."], { cwd: root });
+    execFileSync("git", ["-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "hash fixture"], { cwd: root });
+    const results = [];
+    for (const middle of ["A", "B"]) {
+      const result = await runObservedCommand(`node emit.mjs ${middle}`, root);
+      const stdout = createHash("sha256").update("h".repeat(80000) + middle + "t".repeat(80000)).digest();
+      const stderr = createHash("sha256").digest();
+      const expected = createHash("sha256").update("stdout\0").update(stdout).update("stderr\0").update(stderr).digest("hex");
+      assert.equal(result.output_sha256, expected);
+      results.push(result);
+    }
+    assert.equal(results[0].output, results[1].output);
+    assert.notEqual(results[0].output_sha256, results[1].output_sha256);
+  } finally {
+    if (priorShellopts === undefined) delete process.env.SHELLOPTS;
+    else process.env.SHELLOPTS = priorShellopts;
+  }
+});
+
+test("a watchdog expiry cannot confirm a child that handles termination by exiting zero", async () => {
+  const root = gitFixture();
+  const prior = { timeout: process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS, grace: process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS };
+  process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS = "600";
+  process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = "1000";
+  try {
+    const result = await runObservedCommand("trap 'printf \"terminal-after-watchdog\\n\"; exit 0' TERM; printf 'ready\\n'; while :; do :; done", root);
+    assert.match(result.stdout_tail, /ready\n/);
+    assert.equal(result.process_exit_code, 0);
+    assert.equal(result.timed_out, true);
+    assert.equal(result.exit_code, null);
+    assert.match(result.stdout_tail, /terminal-after-watchdog/);
+  } finally {
+    if (prior.timeout === undefined) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS; else process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS = prior.timeout;
+    if (prior.grace === undefined) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS; else process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = prior.grace;
+  }
+});
 
 test("observed command captures a clean canonical Git workspace at process completion", async () => {
   const root = gitFixture();
@@ -275,5 +369,44 @@ test("a command that exits cleanly is NOT failed because something outside its g
   } finally {
     if (previousGrace) process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = previousGrace;
     else delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
+  }
+});
+
+test("an exited command cannot hold observation open beyond its full deadline through an escaped pipe holder", async () => {
+  const python = spawnSync("python3", ["-c", "import os; print(os.getpid())"], { encoding: "utf8" });
+  assert.equal(python.status, 0, "python3 is required for the actual escaped-child boundary");
+  const root = gitFixture();
+  const pidFile = path.join(root, "holder.pid");
+  fs.writeFileSync(path.join(root, "launcher.py"), `import os,time,sys\npid=os.fork()\nif pid==0:\n os.setsid()\n open(${JSON.stringify(pidFile)},"w").write(str(os.getpid()))\n while True: time.sleep(1)\nprint("parent exits zero");sys.stdout.flush()\n`);
+  const priorTimeout = process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS;
+  const priorGrace = process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
+  process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS = "2000";
+  process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = "200";
+  let outer;
+  const started = Date.now();
+  const observed = runObservedCommand("python3 launcher.py", root).then(
+    (result) => ({ kind: "resolved", result }),
+    (error) => ({ kind: "refused", message: error.message }),
+  );
+  try {
+    const outcome = await Promise.race([
+      observed,
+      new Promise((resolve) => { outer = setTimeout(() => resolve({ kind: "outer-supervision" }), 6000); }),
+    ]);
+    assert.equal(outcome.kind, "refused", "the configured deadline must settle observation without outer intervention");
+    assert.match(outcome.message, /exceeded 2000ms.*inherited streams/);
+    assert.ok(Date.now() - started >= 2000, "normal exit cleanup must not replace the full deadline with kill grace");
+    assert.ok(Date.now() - started < 6000, "the refusal must precede outer supervision");
+  } finally {
+    clearTimeout(outer);
+    assert.ok(fs.existsSync(pidFile), "the escaped holder must actually have started");
+    const holderPid = Number(fs.readFileSync(pidFile, "utf8"));
+    assert.ok(Number.isSafeInteger(holderPid) && holderPid > 1);
+    try { process.kill(holderPid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+    await observed;
+    if (priorTimeout === undefined) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS;
+    else process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS = priorTimeout;
+    if (priorGrace === undefined) delete process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS;
+    else process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = priorGrace;
   }
 });

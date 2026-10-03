@@ -808,7 +808,7 @@ function parseProviderRecord(value: unknown, request: ChangeProviderRequest): Gi
     headRefName: head.ref,
     headRefOid: head.sha,
     title: record.title,
-    body: record.body,
+    body: record.body === null ? "" : record.body,
     isDraft: record.draft,
   });
 }

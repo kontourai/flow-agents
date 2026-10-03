@@ -162,6 +162,45 @@ being summed as independent runs.
 do not impersonate an independent task-quality grade. Artifact-derived status and eval
 attempt/grade records remain separate sources.
 
+#### Policy workflow discovery and command workspaces
+
+Policy hooks resolve the selected workflow separately from shared coordination.
+They consider the physical Git working tree and its shared repository root,
+then select the resolved actor's own binding. Canonical Flow state and recovery
+fences belong to the selected session's physical project. Liveness and other
+shared coordination keep their existing Git common-directory store.
+
+For a native Builder session selected outside the agent's startup checkout,
+the runtime locator under `$XDG_STATE_HOME/flow-agents/workflow-scopes` (default
+`~/.local/state/flow-agents/workflow-scopes`) supplies discovery only. Hooks
+still validate the exact actor pointer, correlation generation, canonical run,
+and assignment. The locator grants no mutation, evidence, or lifecycle
+authority. A stale, malformed, or ambiguous binding produces a visible
+diagnostic; another actor's workflow and a newest-modified-file scan cannot
+substitute for the selected binding.
+
+An authenticated public `flow-agents workflow start` selection activates that
+binding. Retry it with the selected Work Item and configured provider to refresh
+a stale locator; an existing canonical run is reused. The same preflight and
+assignment checks apply. `workflow status` inspects the run and does not repair
+the binding. See the [public workflow usage guide](../workflow-usage-guide.md)
+for required inputs and continuation behavior. An unsafe filesystem path needs
+operator repair rather than repeated workflow retries. Locator comparison and
+publication run under the destination pointer lock, so an older update or
+retirement cannot overwrite a concurrent newer selection.
+
+The cross-workspace locator covers native Builder correlation generations.
+Host recovery uses its existing capability contract; a host recovery session
+in another clone must declare that project through
+`SA_PROTECTED_WORKSPACE_ROOTS`. Recovery validation invokes the existing public
+ESM API in a bounded Node child, with a fixed package path, timeout and output
+limit, preserving Node 22 compatibility without a second authority policy.
+
+Command capture uses host-reported `tool_input.workdir` or `tool_input.cwd` when
+available, otherwise the event's execution directory. It never substitutes the
+bound project for the command's directory. An uncertain directory or a
+different workspace leaves captured evidence unchanged and reports the gap.
+
 ### Exit Code Protocol (Canonical Hook Scripts)
 
 Canonical hook scripts in `scripts/hooks/` use the following exit code contract — originally derived from Kiro conventions and shared across all harness adapters via the adapter translation layer:

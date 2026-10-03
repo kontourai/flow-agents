@@ -461,7 +461,7 @@ public_review() {
 }
 
 ensure_public_fixture_clean_baseline() {
-  git -C "$TMP/public" add checks/check-public-session.sh
+  git -C "$TMP/public" add "checks/check-public-session-$(basename "$PUBLIC_SESSION").test.mjs"
   if ! git -C "$TMP/public" diff --cached --quiet; then
     git -C "$TMP/public" commit -qm "add public producer verification command"
   fi
@@ -514,7 +514,7 @@ record_public_expectation() {
   if [ "$expectation" = "tests-evidence" ] && [ "$status" = "pass" ]; then
     ensure_public_fixture_clean_baseline
     local test_command criterion_one criterion_two command_ref
-    test_command="bash checks/check-public-session.sh .kontourai/flow-agents/$slug/state.json"
+    test_command="node --test checks/check-public-session-$slug.test.mjs"
     criterion_one="$(node - "$test_command" <<'NODE'
 const command = process.argv[2];
 process.stdout.write(JSON.stringify({ id: 'AC-1', status: 'pass', evidence_refs: [{ kind: 'command', excerpt: command, summary: 'Substantive fixture assertion for AC-1.' }] }));
@@ -548,9 +548,15 @@ const write = (name, body) => fs.writeFileSync(path.join(session, name), body, '
 const projectRoot = path.dirname(path.dirname(path.dirname(session)));
 const checksDir = path.join(projectRoot, 'checks');
 fs.mkdirSync(checksDir, { recursive: true });
-const checkScript = path.join(checksDir, 'check-public-session.sh');
-fs.writeFileSync(checkScript, '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n', 'utf8');
-fs.chmodSync(checkScript, 0o755);
+const checkScript = path.join(checksDir, `check-public-session-${slug}.test.mjs`);
+fs.writeFileSync(checkScript, `import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+test('bound session state exists', () => {
+  assert.ok(fs.statSync(${JSON.stringify(`.kontourai/flow-agents/${slug}/state.json`)}).isFile());
+});
+`, 'utf8');
 write(`${slug}--idea-to-backlog.md`, '# Idea To Backlog Report\n\nShaped problem, slices, and filed work are reviewable here.\n');
 write(`${slug}--pull-work.md`, '# Pull and Probe Report\n\nSelected work, scope, decisions, and accepted gaps are reviewable here.\n');
 write(`${slug}--plan-work.md`, '# Plan\n\n## Definition Of Done\n\n- AC-1: The producer fixture records criterion-backed evidence.\n- AC-2: Every accepted criterion is backed by the exact test command.\n');
@@ -590,7 +596,7 @@ PUBLIC_CRITIQUE_OUTPUT="$(public_review critique --session-dir "$PUBLIC_SESSION"
   --artifact-ref "$PUBLIC_SESSION/$(basename "$PUBLIC_SESSION")--deliver.md" \
   --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Public fixture code review completed.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$PUBLIC_SESSION/$(basename "$PUBLIC_SESSION")--deliver.md\",\"summary\":\"Reviewed public fixture delivery artifact.\"}]}" 2>&1)" \
   || _fail "public authenticated critique failed before tests-evidence: $PUBLIC_CRITIQUE_OUTPUT"
-PUBLIC_TEST_COMMAND="bash checks/check-public-session.sh .kontourai/flow-agents/$(basename "$PUBLIC_SESSION")/state.json"
+PUBLIC_TEST_COMMAND="node --test checks/check-public-session-$(basename "$PUBLIC_SESSION").test.mjs"
 if public_flow evidence --session-dir "$PUBLIC_SESSION" --expectation tests-evidence --status pass --command "bash -c true" --summary "Wrapped no-op must not count as tests evidence." \
   --criterion-json '{"id":"AC-1","status":"pass","evidence_refs":[{"kind":"command","excerpt":"bash -c true","summary":"Wrapped no-op."}]}' \
   --criterion-json '{"id":"AC-2","status":"pass","evidence_refs":[{"kind":"command","excerpt":"bash -c true","summary":"Wrapped no-op."}]}' >/dev/null 2>&1; then
@@ -607,7 +613,7 @@ else
 fi
 if public_flow evidence --session-dir "$PUBLIC_SESSION" --expectation tests-evidence --status pass --command "$PUBLIC_TEST_COMMAND" --summary "Every criterion must cite the exact command." \
   --criterion-json "{\"id\":\"AC-1\",\"status\":\"pass\",\"evidence_refs\":[{\"kind\":\"command\",\"excerpt\":\"$PUBLIC_TEST_COMMAND\",\"summary\":\"Exact command for AC-1.\"}]}" \
-  --criterion-json '{"id":"AC-2","status":"pass","evidence_refs":[{"kind":"command","excerpt":"bash checks/check-public-session.sh .kontourai/flow-agents/missing/state.json","summary":"Different command for AC-2."}]}' >/dev/null 2>&1; then
+  --criterion-json '{"id":"AC-2","status":"pass","evidence_refs":[{"kind":"command","excerpt":"node --test checks/check-public-session-missing.test.mjs","summary":"Different command for AC-2."}]}' >/dev/null 2>&1; then
   _fail "public tests-evidence accepted a criterion without the exact command"
 else
   _pass "public tests-evidence requires the exact command for every criterion"
@@ -680,7 +686,7 @@ ROUTE_CRITIQUE_OUTPUT="$(public_review critique --session-dir "$PUBLIC_SESSION" 
 # without synchronizing Flow. The subsequent public failed tests claim replaces
 # the provisional passing tests check, preserves these criteria + the clean
 # critique, and is the only attachment/evaluation for this gate visit.
-ROUTE_TEST_COMMAND="bash checks/check-public-session.sh .kontourai/flow-agents/$(basename "$PUBLIC_SESSION")/state.json"
+ROUTE_TEST_COMMAND="node --test checks/check-public-session-$(basename "$PUBLIC_SESSION").test.mjs"
 ROUTE_COMMAND_REF="$(node - "$ROUTE_TEST_COMMAND" <<'NODE'
 const command = process.argv[2];
 process.stdout.write(JSON.stringify({ kind: 'command', excerpt: command, summary: 'Current route-back prerequisite command.' }));

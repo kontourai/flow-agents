@@ -82,8 +82,9 @@ the work has already been changed without a bound run, record the gap and create
 Item; do not manufacture a prior session, use a private writer, or use a `delivery/DECLARED`
 exemption for agent-delivered work.
 
-Follow the reported public `next_action` through planning, implementation, review, verification,
-and release readiness. A repository may make CI reconciliation of the session's delivery bundle
+The agent executes the reported public `next_action` through planning, implementation, review,
+verification, and release readiness, produces the required artifacts, and records their evidence.
+Starting the run does not launch a worker. A repository may make CI reconciliation of the session's delivery bundle
 a required pull-request check. In that case, publish a **provisional** delivery after the pull
 request is open and before recording `ci-merge-readiness`:
 
@@ -176,7 +177,25 @@ and one or more substantive commands that were actually run. Repeat `--command`
 when criteria require different checks. Every command needs a matching
 top-level command reference, and every passing criterion must cite at least one
 of those exact commands. A passing observation must also report a positive executed-test or
-assertion count; a successful zero-test run is rejected. Do not use placeholders such as `true`
+assertion count; a successful zero-test run is rejected. Predictable payload, current-review,
+result-protocol and publication-command incompatibilities are checked before execution and
+revalidated afterward. Bounded diagnostics retain the final stdout result independently of
+late stderr; output hashes cover all bytes. A watchdog termination is non-confirming even if
+the terminated child exits zero. The full command deadline also bounds inherited output streams
+after the command exits: streams that remain open beyond its grace produce a refusal, rather than
+holding the evidence transaction indefinitely. A supported framework must terminate its package-script
+chain; trailing summary printers and post-script lifecycle hooks cannot supply its proof.
+Node supports its built-in default, spec and TAP reporters. Project-local regular preloads
+remain inside the reviewed source boundary; arbitrary outside preloads or reporters do not.
+Repository test code and the host runner remain the local trust boundary; these counts are
+execution evidence, not cryptographic proof of assertion quality.
+
+For a committed manifest command that directly delegates to a local Node coordinator,
+Flow Agents also supports committed v3 verification receipts. Admission uses the producer's
+current public `explain <lane>` request and its exact canonical receipt path and commit sidecar.
+Both freshly executed and reused summaries must match the current source, request, environment,
+toolchain, provenance, artifact digests, cleanup and positive counts. Missing, stale, failed or
+incompatible receipts remain non-confirming. Do not use placeholders such as `true`
 or a version command as behavior proof:
 
 ```bash
@@ -210,6 +229,11 @@ For an item to contribute to a passing gate, its captured commit must resolve th
 and be an ancestor of current `HEAD`, its cleanliness must be `true`, and its exact captured
 Git-worktree snapshot must equal the current snapshot. Ancestry is not byte proof; the snapshot
 comparison is required as well.
+
+Trusted local reads use the [system Git provenance policy](./system-git-provenance.md), including
+its bounded Linux namespace support and protected system-path checks. Namespace-visible UID0 is
+not a universal host-root identity, and an overflow UID alone is not trusted provenance. Signed
+lifecycle helpers and verification keys retain their stricter ownership and authentication rules.
 
 Dirty, missing, non-Git, malformed, unavailable, unresolved/shallow, or non-ancestor provenance
 is `NOT_VERIFIED`/`not_verified`, never an implicit pass. Schema v1 is rejected and must be
@@ -368,7 +392,11 @@ verdict and at least one substantive `--lane-json`. Passing critiques additional
 require local reviewed `--artifact-ref` values and every lane to pass; reviewed
 files and the workspace snapshot are
 hashed into the stored review target so later implementation changes invalidate
-stale clean critiques.
+stale clean critiques. The writer captures the workflow-owned execution report as immutable
+historical context and always includes its controls. Verification notes may grow only in its
+single final `## Verification Evidence` appendix without another source review. Source files,
+unowned reports, the execution prefix, accepted plan, criterion identity and live scope claims
+remain review subjects. Ambiguous markers and malformed role metadata fail closed.
 
 Current local runtime actor IDs provide coordination-level separation, not a
 cryptographic identity guarantee. A policy that requires externally attested
@@ -539,6 +567,35 @@ flow_agents workflow archive --authorization-file archive.json
 state, and the canonical Flow run without rewriting either store. Its `next_action` is freshly
 derived from the canonical run, so a stale sidecar projection cannot misdirect recovery.
 
+For an actionable run, `next_action` separates the work from evidence submission and observation:
+
+| Field | Responsibility |
+| --- | --- |
+| `executor` | `agent`: the calling agent owns orchestration. |
+| `execution_action` | Execute the version/hash-bound skill sources, perform the declared operations through their authorized executors, and produce the declared artifact targets in the canonical stop-condition sequence. |
+| `evidence_submission` | Use the canonical public mutation bindings and parameters to submit genuine evidence for the unresolved expectations. Its `schemas` supplies the evidence-reference format and examples. |
+| `sync_command` | Run the version-pinned public status command to inspect canonical state after submission. |
+| `command`, `command_role` | Compatibility alias of `sync_command`, explicitly labeled `synchronization`. |
+
+Mutation parameter `value_schema_ref` values retain their canonical gate-action-envelope scope.
+In particular, `#/public_interfaces/schemas/evidence_ref_json` names the schema that a status
+response projects at `next_action.evidence_submission.schemas.evidence_ref_json`; it is not a
+JSON pointer into the status response. Driver clients resolve the reference against the supplied
+canonical envelope, while status clients use that explicit projected schema location.
+
+`workflow evidence` records and synchronizes evidence for Flow evaluation. Status does not execute
+skills, produce artifacts, submit evidence, or advance a missing-evidence gate. Producing a file
+alone also does not satisfy its gate: submit its evidence through the declared mutation, then
+inspect status and execute the resulting next action. The action fields are projections of the
+canonical gate-action envelope, not a second step map or authority source.
+
+An agent follows a `continue` action until the selected run completes or reaches a concrete
+blocker. Returning a delegated turn's result returns orchestration to its caller. Starting or
+inspecting a run does not establish a running external task or a notification mechanism; wait
+only when an actual task and its completion mechanism have been established. An external
+capability block retains its declared operation authority and cannot be replaced with invented
+provider evidence.
+
 ## Bounded Continuation Driver
 
 `workflow drive` lets the active implementation assignment run multiple Flow steps without a
@@ -645,7 +702,8 @@ declared artifacts/evidence, requirement satisfaction and unresolved ids, typed 
 `workflow.evidence`/`workflow.critique` argv or product-operation bindings, one-turn stop semantics,
 product-declared implementation policy, and prior canonical progress/stagnation. Parameter values are
 appended as separate argv entries; adapters must not perform string substitution into a shell command. The
-envelope is request-only and is not duplicated in projected `next_action` or durable `state.json`. It
+full envelope is request-only and is not duplicated in projected `next_action` or durable `state.json`;
+the execution, submission and observation fields above project its relevant bindings. It
 does not mutate or replace the runtime system prompt. Adapter errors are recorded as failed turns
 and fail open to canonical resynchronization and the next bounded turn; they cannot bypass the
 persisted mission budget. The Builder Flow projection supplies the canonical continue/wait/done/failed

@@ -35,6 +35,11 @@ Use `WorkItemProvider` for item detail and acceptance criteria, `BoardProvider` 
 
 ## Probe Method
 
+Scale the probe to actual uncertainty and risk. A bounded fix with established
+scope and decisions needs a concise record of those observations, not a new
+interview or invented questions. State when no material question remains;
+never fabricate investigation or a probe artifact to fill the gate.
+
 1. Re-read the selected item and its upstream artifact. Check that selected identifiers, scope, acceptance criteria, grouping rationale, and next action agree.
 2. Confirm goal fit, user or operator outcome, scope, non-goals, acceptance-criteria quality, dependencies, blockers, provider state, assignment, WIP, and conflict context. When drift now makes a selected item `reclaimable`, re-confirm the recorded takeover opt-in and consequence; do not silently carry an earlier opt-in across changed holder or freshness evidence.
 3. Check target revision against the recorded base and planning scope. Record whether it is fresh, stale, or `NOT_VERIFIED`; identify changed intersections and acceptance-criteria drift.

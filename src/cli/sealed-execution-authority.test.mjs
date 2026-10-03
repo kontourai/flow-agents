@@ -369,21 +369,43 @@ for (const [label, controllerScript, options] of [
   });
 });
 
+test("sealed runtime budget includes launcher startup before the controller executes", async () => {
+  await withFixtureCaller(async () => {
+    const fixture = await sealedCoordinatorFixture({ runtimeBytes: fs.readFileSync(process.execPath), maxRuntimeMs: 100 });
+    const marker = path.join(fixture.root, "controller-started");
+    fs.writeFileSync(fixture.controller, `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(marker)}, 'started');`);
+    fixture.workload.controller = fixture.sourceRef(fixture.controller, "entry/controller.mjs");
+    fs.writeFileSync(fixture.workloadFile, JSON.stringify(fixture.workload));
+    fixture.write("fake-drop", "#!/bin/sh\nshift 2\nsleep 1\nexec \"$@\"\n", 0o755);
+    const result = await fixture.invoke("startup-budget", fixture.signAuthorization("startup-budget", "startup-budget-nonce"));
+    assert.equal(result.result.safe_result.status, "timeout");
+    assert.equal(fs.existsSync(marker), false, "startup consumes the signed runtime budget before controller code runs");
+    assert.deepEqual(fs.readdirSync(fixture.execution), [], "startup timeout still removes the protected stage");
+  });
+});
+
 test("sealed timeout kills the detached process group including a provider descendant", async () => {
   await withFixtureCaller(async () => {
     const pidFile = path.join(os.tmpdir(), `sealed-descendant-${process.pid}-${Date.now()}`);
-    const fixture = await sealedCoordinatorFixture({ runtimeBytes: fs.readFileSync(process.execPath), controllerScript: `import { spawn } from 'node:child_process'; import fs from 'node:fs'; const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setInterval(() => {}, 1000);`, maxRuntimeMs: 3_000 });
+    // The signed runtime budget includes launcher and Node startup. Match the
+    // existing bounded startup allowance so this descendant-cleanup assertion
+    // is reached under host load rather than timing out before its prerequisite.
+    const runtimeBudgetMs = 30_000;
+    const fixture = await sealedCoordinatorFixture({ runtimeBytes: fs.readFileSync(process.execPath), controllerScript: `import { spawn } from 'node:child_process'; import fs from 'node:fs'; const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setInterval(() => {}, 1000);`, maxRuntimeMs: runtimeBudgetMs });
     let descendantIdentity = null;
     let invocation = null;
+    let terminal = null;
     try {
       invocation = fixture.invoke("group-kill", fixture.signAuthorization("group-kill", "group-kill-nonce"));
+      invocation.then(result => { terminal = { result }; }, error => { terminal = { error: error.message }; });
       const pidDeadline = Date.now() + 30_000;
       let descendant = null;
       while (descendant === null && Date.now() < pidDeadline) {
         descendant = readFixturePid(pidFile);
+        if (descendant === null && terminal !== null) break;
         if (descendant === null) await delay(10);
       }
-      assert.ok(descendant, "timeout fixture descendant did not report a PID before its wall-clock deadline");
+      assert.ok(descendant, `timeout fixture descendant did not report a PID; terminal=${JSON.stringify(terminal?.result?.result?.safe_result ?? terminal)}; startup_deadline_ms=30000; signed_runtime_ms=${runtimeBudgetMs}`);
       // A slow observer can reach this durable PID after the timeout group has
       // already exited. That is the success condition; identity is needed only
       // to constrain finally-cleanup if it remains live.

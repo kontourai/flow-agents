@@ -16,6 +16,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CURRENT_POINTER_HELPER="$ROOT/scripts/hooks/lib/current-pointer.js"
 
 TMPDIR_EVAL="$(mktemp -d)"
+TMPDIR_EVAL="$(node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$TMPDIR_EVAL")"
+export XDG_STATE_HOME="$TMPDIR_EVAL/xdg-state"
+export CODEX_THREAD_ID="session-resume-$(basename "$TMPDIR_EVAL")"
+unset FLOW_AGENTS_ACTOR CODEX_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDECODE
 errors=0
 
 cleanup() {
@@ -454,74 +458,58 @@ REPO5="$TMPDIR_EVAL/repo5"
 SLUG5="canonical-guidance-616"
 TASK_DIR5="$REPO5/.kontourai/flow-agents/$SLUG5"
 FLOW_DIR5="$REPO5/.kontourai/flow/runs/$SLUG5"
-mkdir -p "$TASK_DIR5" "$FLOW_DIR5" "$REPO5/kits/builder" "$REPO5/docs"
+mkdir -p "$TASK_DIR5" "$REPO5/kits/builder" "$REPO5/docs"
 printf '# Canonical Guidance Fixture\n' > "$REPO5/AGENTS.md"
 printf '# Context Map\n' > "$REPO5/docs/context-map.md"
 cp "$ROOT/kits/builder/kit.json" "$REPO5/kits/builder/kit.json"
 cat > "$REPO5/kits/catalog.json" <<'JSON'
 {"schema_version":"1.0","kits":[{"id":"builder","name":"Builder Kit","path":"kits/builder","description":"Builder fixture"}]}
 JSON
-cat > "$TASK_DIR5/state.json" <<'JSON'
-{
-  "schema_version": "1.0",
-  "task_slug": "canonical-guidance-616",
-  "status": "in_progress",
-  "phase": "pickup",
-  "next_action": {
-    "status": "continue",
-    "summary": "Complete design-probe with pickup-probe evidence.",
-    "skills": ["pickup-probe"]
-  },
-  "flow_run": {
-    "run_id": "canonical-guidance-616",
-    "definition_id": "builder.build",
-    "definition_version": "1.0",
-    "status": "active",
-    "current_step": "design-probe"
-  },
-  "artifact_paths": []
-}
-JSON
-cat > "$FLOW_DIR5/state.json" <<'JSON'
-{
-  "schema_version": "0.1",
-  "run_id": "canonical-guidance-616",
-  "definition_id": "builder.build",
-  "definition_version": "1.0",
-  "subject": "local:work-item/canonical-guidance-616",
-  "status": "active",
-  "current_step": "design-probe",
-  "params": {"subject":"local:work-item/canonical-guidance-616"},
-  "gate_outcomes": [],
-  "transitions": [],
-  "lifecycle": [],
-  "exceptions": []
-}
-JSON
-cat > "$FLOW_DIR5/definition.json" <<'JSON'
-{
-  "id": "builder.build",
-  "version": "1.0",
-  "steps": [
-    {"id":"pull-work"},
-    {"id":"design-probe"},
-    {"id":"plan"},
-    {"id":"execute"},
-    {"id":"verify"},
-    {"id":"merge-ready"},
-    {"id":"pr-open"},
-    {"id":"merge-ready-ci"},
-    {"id":"learn"},
-    {"id":"done"}
-  ],
-  "gates": {
-    "design-probe-gate": {
-      "step": "design-probe",
-      "expects": []
-    }
-  }
-}
-JSON
+if ROOT_FOR_NODE="$ROOT" REPO_FOR_NODE="$REPO5" SLUG_FOR_NODE="$SLUG5" node --input-type=module <<'NODE'
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const root = process.env.ROOT_FOR_NODE;
+const { resolveCurrentAssignmentActor, performLocalClaim } = await import(pathToFileURL(path.join(root, 'build/src/cli/assignment-provider.js')));
+const { startBuilderFlowSession } = await import(pathToFileURL(path.join(root, 'build/src/builder-flow-runtime.js')));
+const { main: workflowMain } = await import(pathToFileURL(path.join(root, 'build/src/cli/workflow.js')));
+const projectRoot = fs.realpathSync(process.env.REPO_FOR_NODE);
+const slug = process.env.SLUG_FOR_NODE;
+const subject = `local:work-item/${slug}`;
+const artifactRoot = path.join(projectRoot, '.kontourai/flow-agents');
+const sessionDir = path.join(artifactRoot, slug);
+const stateFile = path.join(sessionDir, 'state.json');
+fs.writeFileSync(stateFile, JSON.stringify({
+  schema_version: '1.0', task_slug: slug, status: 'planned', phase: 'planning',
+  updated_at: new Date().toISOString(), work_item_refs: [subject],
+  next_action: { status: 'continue', summary: 'Start the selected fixture work.' },
+  artifact_paths: [],
+}) + '\n');
+const { actor, actorKey } = resolveCurrentAssignmentActor();
+performLocalClaim(artifactRoot, slug, actor, {
+  actorKey, artifactDir: slug, branch: 'fixture-lane', ttlSeconds: 3600, workItemRef: subject,
+});
+await startBuilderFlowSession({ sessionDir });
+const selection = path.join(sessionDir, `${slug}--pull-work.md`);
+fs.writeFileSync(selection, `# Selected Work\n\nWork Item: ${subject}\nActor: ${actorKey}\n`);
+assert.equal(await workflowMain(['evidence', '--session-dir', sessionDir,
+  '--expectation', 'selected-work', '--status', 'pass', '--summary', 'Selected fixture Work Item and assignment were recorded.',
+  '--evidence-ref-json', JSON.stringify({ kind: 'artifact', file: selection, summary: 'Selected Work Item and actual fixture actor.' }), '--json']), 0);
+const projection = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+const canonical = JSON.parse(fs.readFileSync(path.join(projectRoot, '.kontourai/flow/runs', slug, 'state.json'), 'utf8'));
+assert.equal(canonical.current_step, 'design-probe');
+assert.equal(projection.flow_run.current_step, canonical.current_step);
+assert.equal(projection.run_correlation.identities.agent.value, actorKey);
+assert.equal(JSON.parse(canonical.params.run_correlation).correlation_id, projection.run_correlation.correlation_id);
+NODE
+then
+  _pass "canonical fixture uses maintained claim/start seams and public evidence"
+else
+  _fail "canonical fixture public setup failed"
+  exit 1
+fi
+FLOW_VERSION5="$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).flow_run.definition_version)' "$TASK_DIR5/state.json")"
 cat > "$TASK_DIR5/handoff.json" <<'JSON'
 {
   "schema_version": "1.0",
@@ -529,12 +517,11 @@ cat > "$TASK_DIR5/handoff.json" <<'JSON'
   "blockers": []
 }
 JSON
-seed_current_pointer "$REPO5/.kontourai/flow-agents" "$SLUG5" "canonical-actor"
 
 echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO5\"}" | \
-  FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-start.out" 2>&1
+  (cd "$REPO5" && node "$ROOT/scripts/hooks/workflow-steering.js") > "$TMPDIR_EVAL/canonical-start.out" 2>&1
 
-if grep -qF 'Canonical Flow: builder.build@1.0/canonical-guidance-616 status:active current_step:design-probe.' "$TMPDIR_EVAL/canonical-start.out" \
+if grep -qF "Canonical Flow: builder.build@$FLOW_VERSION5/$SLUG5 status:active current_step:design-probe." "$TMPDIR_EVAL/canonical-start.out" \
   && grep -qF 'Gate skills: pickup-probe.' "$TMPDIR_EVAL/canonical-start.out" \
   && grep -qF 'Implementation allowed: no.' "$TMPDIR_EVAL/canonical-start.out" \
   && ! grep -q 'Canonical guidance identity: sha256:' "$TMPDIR_EVAL/canonical-start.out"; then
@@ -552,9 +539,9 @@ else
 fi
 
 echo "{\"hook_event_name\":\"UserPromptSubmit\",\"cwd\":\"$REPO5\",\"prompt\":\"Please implement the settings API.\"}" | \
-  FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-prompt.out" 2>&1
+  (cd "$REPO5" && node "$ROOT/scripts/hooks/workflow-steering.js") > "$TMPDIR_EVAL/canonical-prompt.out" 2>&1
 
-if grep -qF 'Canonical Flow: builder.build@1.0/canonical-guidance-616 status:active current_step:design-probe.' "$TMPDIR_EVAL/canonical-prompt.out" \
+if grep -qF "Canonical Flow: builder.build@$FLOW_VERSION5/$SLUG5 status:active current_step:design-probe." "$TMPDIR_EVAL/canonical-prompt.out" \
   && grep -qF 'Gate skills: pickup-probe.' "$TMPDIR_EVAL/canonical-prompt.out" \
   && ! grep -qF 'KIT WORKFLOW ROUTE' "$TMPDIR_EVAL/canonical-prompt.out" \
   && ! grep -qF 'activate `deliver`' "$TMPDIR_EVAL/canonical-prompt.out"; then
@@ -568,7 +555,7 @@ fi
 # reached by a synthetic payload. The canonical gate is re-grounded on the SessionStart and
 # UserPromptSubmit paths asserted above; this now asserts silence rather than competing guidance.
 echo "{\"hook_event_name\":\"PostToolUse\",\"cwd\":\"$REPO5\",\"tool_input\":{\"command\":\"InvokeSubagents\",\"content\":{\"subagents\":[{\"agent_name\":\"tool-planner\"}]}}}" | \
-  FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-subagent.out" 2>&1
+  (cd "$REPO5" && node "$ROOT/scripts/hooks/workflow-steering.js") > "$TMPDIR_EVAL/canonical-subagent.out" 2>&1
 if ! grep -qF 'current_step:design-probe.' "$TMPDIR_EVAL/canonical-subagent.out" \
   && ! grep -qF 'Gate skills: pickup-probe.' "$TMPDIR_EVAL/canonical-subagent.out" \
   && ! grep -qF 'PLAN COMPLETE' "$TMPDIR_EVAL/canonical-subagent.out" \
@@ -588,9 +575,9 @@ state.flow_run.current_step = 'plan';
 fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`);
 NODE
 echo "{\"hook_event_name\":\"UserPromptSubmit\",\"cwd\":\"$REPO5\",\"prompt\":\"Please implement the settings API.\"}" | \
-  FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-conflict.out" 2>&1
-if grep -qF 'GUIDANCE_CONFLICT:' "$TMPDIR_EVAL/canonical-conflict.out" \
-  && grep -qF 'No executable workflow recommendation is available' "$TMPDIR_EVAL/canonical-conflict.out" \
+  (cd "$REPO5" && node "$ROOT/scripts/hooks/workflow-steering.js") > "$TMPDIR_EVAL/canonical-conflict.out" 2>&1
+if grep -qF 'WORKFLOW BINDING INVALID:' "$TMPDIR_EVAL/canonical-conflict.out" \
+  && grep -qF 'workflow scope projection is stale relative to its canonical run' "$TMPDIR_EVAL/canonical-conflict.out" \
   && ! grep -qF 'KIT WORKFLOW ROUTE' "$TMPDIR_EVAL/canonical-conflict.out" \
   && ! grep -qF 'resume the next step' "$TMPDIR_EVAL/canonical-conflict.out" \
   && ! grep -qF 'Start the canonical Flow run' "$TMPDIR_EVAL/canonical-conflict.out"; then
@@ -629,7 +616,7 @@ fs.writeFileSync(sidecarFile, `${JSON.stringify(sidecar, null, 2)}\n`);
 fs.writeFileSync(flowFile, `${JSON.stringify(flow, null, 2)}\n`);
 NODE
   echo "{\"hook_event_name\":\"UserPromptSubmit\",\"cwd\":\"$REPO5\",\"prompt\":\"Please implement the settings API.\"}" | \
-    FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-$status.out" 2>&1
+    (cd "$REPO5" && node "$ROOT/scripts/hooks/workflow-steering.js") > "$TMPDIR_EVAL/canonical-$status.out" 2>&1
   if grep -qF "status:$status" "$TMPDIR_EVAL/canonical-$status.out" \
     && ! grep -qF 'NON-CANONICAL FALLBACK' "$TMPDIR_EVAL/canonical-$status.out" \
     && ! grep -qF 'KIT WORKFLOW ROUTE' "$TMPDIR_EVAL/canonical-$status.out"; then
@@ -699,7 +686,7 @@ for (const file of process.argv.slice(2)) {
 }
 NODE
 echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO5\"}" | \
-  FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-terminal.out" 2>&1
+  (cd "$REPO5" && node "$ROOT/scripts/hooks/workflow-steering.js") > "$TMPDIR_EVAL/canonical-terminal.out" 2>&1
 if grep -qF 'status:canceled' "$TMPDIR_EVAL/canonical-terminal.out" \
   && grep -qF 'no gate action or implementation is authorized' "$TMPDIR_EVAL/canonical-terminal.out" \
   && ! grep -qF 'Gate skills:' "$TMPDIR_EVAL/canonical-terminal.out" \
@@ -714,8 +701,9 @@ fi
 # A projected run with missing canonical artifacts is a conflict, never a legacy session.
 rm "$FLOW_DIR5/state.json"
 echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO5\"}" | \
-  FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-missing.out" 2>&1
-if grep -qF 'GUIDANCE_CONFLICT:' "$TMPDIR_EVAL/canonical-missing.out" \
+  (cd "$REPO5" && node "$ROOT/scripts/hooks/workflow-steering.js") > "$TMPDIR_EVAL/canonical-missing.out" 2>&1
+if grep -qF 'WORKFLOW BINDING INVALID:' "$TMPDIR_EVAL/canonical-missing.out" \
+  && grep -qF "$FLOW_DIR5/state.json" "$TMPDIR_EVAL/canonical-missing.out" \
   && ! grep -qF 'NON-CANONICAL FALLBACK' "$TMPDIR_EVAL/canonical-missing.out" \
   && ! grep -qF 'RESUME:' "$TMPDIR_EVAL/canonical-missing.out" \
   && ! grep -qF 'KIT WORKFLOW ROUTE' "$TMPDIR_EVAL/canonical-missing.out"; then

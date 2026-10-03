@@ -353,7 +353,19 @@ Goal Fit is the local stop condition before a final answer. The working artifact
 
 The `stop-goal-fit` hook also checks the latest workflow artifact and warns when the session is about to stop with missing `Definition Of Done`, incomplete Goal Fit, invalid sidecars, or open final acceptance work. Set `FLOW_AGENTS_GOAL_FIT_STRICT=true` to block incomplete local delivery. Set `FLOW_AGENTS_REQUIRE_SIDECARS=true` when structured workflow state should be mandatory. Set `FLOW_AGENTS_REQUIRE_CRITIQUE=true` when critique records should also be mandatory.
 
-For an active Builder run, inspect and record evidence through the public CLI:
+For an active Builder run, the agent drives the public CLI: execute the required skill,
+produce its artifacts, submit the bound
+evidence, inspect canonical status, and continue from the resulting action until completion or
+a concrete blocker. Starting Builder creates governed state; it does not start an external worker.
+`next_action.execution_action` identifies the producer skills and artifact targets;
+`evidence_submission` supplies the public mutations, unresolved expectations and evidence schemas.
+`sync_command` is a status observation command; legacy `command` is its alias with
+`command_role: synchronization`. `workflow evidence` records and synchronizes evidence for Flow
+evaluation. Status only observes that result: it does not execute skills, submit evidence or
+advance an unsatisfied gate. A produced artifact still needs its evidence submitted. A delegated
+turn's completion hands responsibility back to the orchestrator, which must inspect and continue;
+waiting for a notification requires an actual running task and a known completion mechanism.
+See [the public CLI contract](./public-workflow-cli.md) for the projected fields and bounded driver.
 
 ```bash
 flow-agents workflow status --session-dir .kontourai/flow-agents/<slug> --json
@@ -389,49 +401,28 @@ flow-agents workflow critique \
 
 ### Which commands can be evidence
 
-Two independent rules govern `--command`, and a claim must satisfy both:
+Use the checks declared by the repository's committed reconciliation manifest for
+CI-published command evidence. The public interface checks command compatibility,
+payload completeness and current review before launching verification. An unsupported
+result protocol or an unregistered command is an actionable refusal, rather than a
+late publication failure. Measurements such as a diff belong in an artifact reference
+or the summary, without `--command`.
 
-1. **`tests-evidence` requires a recognised test runner.** A shell script scores zero test units
-   unless it contains `set -e` and matches the inline-assertion pattern, so this repository's
-   tally-style integration evals — which deliberately run every check, count failures, and exit
-   non-zero at the end — are refused. `set -e` would abort at the first failing check and destroy
-   the tally, so the suites are right and the heuristic simply does not fit them.
-2. **`publish-delivery` requires a CI-manifest command.** CI cannot self-declare an arbitrary
-   command, so any command claim whose text is not in the reconcile manifest is refused at
-   publication — long after the step that recorded it has passed, and after the run can be rebound.
+A passing `tests-evidence` observation needs positive executed counts from a supported
+Node, Go or Cargo runner, or a declared coordinator's committed receipt. Exit zero alone
+is insufficient. For an existing shell journey, one registered Node test can execute the
+whole journey and assert its exit status; that records one executed journey, not fabricated
+counts for its internal assertions. Keep the existing journey's failure semantics.
 
-Taken together these once made a suite either citable or reconcilable, never both.
-
-**The pattern that satisfies both** is a thin `node --test` wrapper, registered in a CI lane as the
-lane's command:
-
-```js
-// evals/integration/<name>.test.mjs
-import test from "node:test";
-import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-
-test("<name> eval passes", () => {
-  const result = spawnSync("bash", ["evals/integration/test_<name>.sh"], { encoding: "utf8" });
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-});
-```
-
-Register the **wrapper** as the lane command, not the `.sh`:
-
-```
-"<Label>|node --test evals/integration/<name>.test.mjs"
-```
-
-It is then a recognised runner *and* a manifest entry, and the eval still runs exactly once with
-unchanged failure semantics. The CI coverage audit follows the wrapper to the `.sh` it spawns, so
-the eval stays attributed. Three suites use this today.
-
-**Do not attach `--command` to evidence that is not a test.** A measured diff is the right evidence
-for a scope claim, but `git diff --stat origin/main...HEAD` is not a manifest command and will be
-refused at publication. Put the measurement in `--summary` and reference the artifact that records
-it. `workflow evidence` warns at record time when a command will not reconcile, while the owning
-step can still fix it.
+For v3 receipts, a declared coordinator can reuse a current receipt. Flow Agents checks its
+current public request, source and environment identity, artifact digests, completion and positive
+counts. It does not import arbitrary v3 receipts or use an old v3 pass after a source or environment
+change. Legacy v1 receipt admission retains its previous workspace and self-provenance checks;
+it does not provide v3's current-environment and artifact-byte guarantees.
+Evidence Gate aggregates that accepted proof; it does not require another run or a duplicate
+acceptance ledger. Review the changed implementation once, then append verification progress
+under the workflow-owned report's final `## Verification Evidence` section. Source, plan,
+criterion identity and execution controls remain bound to the review.
 
 Only the step skill declared for that Flow expectation should publish it.
 The requested gate verdict remains authoritative: a successful command never upgrades or replaces
@@ -479,6 +470,11 @@ recovery boundaries; it is not a privilege boundary against a malicious process 
 same user, which can directly rewrite runtime state, candidates, logs, locks, or executable code.
 Hostile same-user ABA namespace manipulation and direct same-user state forgery are explicitly
 out of scope and `NOT_VERIFIED`. No native helper is required for that excluded threat model.
+
+Local Git inspection follows the [system Git provenance policy](./system-git-provenance.md).
+It supports the documented Linux single-caller namespaces without treating an overflow UID as
+proof of host-root ownership. The signed lifecycle coordinator, privileged helper and verification
+keys retain their separate strict authority checks; local inspection support does not weaken them.
 
 If Flow retains an evidence `*.candidate` receipt or the local transaction retains a staged
 candidate, treat it as recovery evidence rather than a retry instruction: do not promote, rename,

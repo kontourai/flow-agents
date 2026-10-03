@@ -502,6 +502,40 @@ test("terminal delivery accepts only its own intact provisional CI transport as 
   );
   fs.writeFileSync(bundle, "provisional bundle");
 
+  const deliveryHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  fs.writeFileSync(path.join(root, "implementation.ts"), "export const changedAfterVerification = true;\n");
+  run(["add", "implementation.ts"]);
+  run(["commit", "-m", "source drift after signed provisional delivery"]);
+  const fakeBin = path.join(session, "fake-git-bin");
+  const fakeMarker = path.join(session, "fake-git-used");
+  fs.mkdirSync(fakeBin);
+  const companionPaths = deliveryFiles.map((file) => `delivery/${slug}/${file.path}`).join("\n");
+  fs.writeFileSync(path.join(fakeBin, "git"), `#!${process.execPath}
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(fakeMarker)}, "invoked\\n");
+const args = process.argv.slice(2);
+if (args[0] === "diff" && args.some((arg) => arg.includes("..HEAD"))) process.stdout.write(${JSON.stringify(`${companionPaths}\n`)});
+`, { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${fakeBin}${path.delimiter}${previousPath ?? ""}`;
+  try {
+    assert.equal(execFileSync("git", ["diff", "--name-only", `${base}..HEAD`, "--"], { cwd: root, encoding: "utf8" }).trim(), companionPaths, "the repository-local Git hides the real source change");
+    fs.unlinkSync(fakeMarker);
+    assert.throws(
+      () => assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(session, root, slug, verifyFixtureCompletion),
+      /exactly this session's recorded provisional delivery companions/,
+      "post-verification source drift remains a refusal with hostile PATH",
+    );
+    assert.equal(fs.existsSync(fakeMarker), false, "delivery-only authority must not invoke repository-selected Git");
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+  run(["reset", "--hard", deliveryHead]);
+  assert.deepEqual(assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(session, root, slug, verifyFixtureCompletion), {
+    version: 1, kind: "git-worktree", algorithm: "sha256", digest: "a".repeat(64), head_sha: base,
+  }, "restoring only this disposable fixture's source returns the verified delivery-only outcome");
+
   fs.mkdirSync(path.join(root, "delivery", "other-session"), { recursive: true });
   fs.writeFileSync(path.join(root, "delivery", "other-session", "trust.bundle"), "concurrent transport");
   run(["add", "delivery/other-session"]);
@@ -512,7 +546,7 @@ test("terminal delivery accepts only its own intact provisional CI transport as 
   );
 });
 
-test("public provisional request uses hermetic unprivileged coordinator primitives and continues to terminal delivery", async () => {
+test("public provisional request uses hermetic unprivileged coordinator primitives and continues to terminal delivery", async (t) => {
   const session = makeSession("public-provisional-terminal-e2e");
   session.projectRoot = fs.realpathSync(session.projectRoot);
   session.artifactRoot = path.join(session.projectRoot, ".kontourai", "flow-agents");
@@ -533,6 +567,69 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   } });
   await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action });
   assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
+  const operatorKeys = generateKeyPairSync("ed25519");
+  const completionKeys = generateKeyPairSync("ed25519");
+  const authorityRoot = makeFixtureDir("public-provisional-keys-");
+  const registryFile = path.join(authorityRoot, "authority-keys.json");
+  const completionPrivateKey = path.join(authorityRoot, "completion-private.pem");
+  const completionPublicKey = path.join(authorityRoot, "completion-public.pem");
+  writeJson(registryFile, {
+    schema_version: "1.0",
+    keys: [{ id: "public-provisional-e2e", algorithm: "ed25519", public_key_pem: operatorKeys.publicKey.export({ type: "spki", format: "pem" }) }],
+  });
+  fs.writeFileSync(completionPrivateKey, completionKeys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(completionPublicKey, completionKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+  const authorizationFile = path.join(authorityRoot, "publish-provisional-delivery.authorization.json");
+  const requestProvisionalPublication = async (publishedHead) => {
+    const requestOutput = [];
+    const originalLog = console.log;
+    console.log = (...values) => requestOutput.push(values.join(" "));
+    try {
+      assert.equal(await workflowMain(["publish-provisional-delivery-request", "--session-dir", session.sessionDir]), 0);
+    } finally {
+      console.log = originalLog;
+    }
+    assert.equal(requestOutput.length, 1);
+    const request = JSON.parse(requestOutput[0]);
+    assert.equal(request.authorization.operation, "publish-provisional-delivery");
+    assert.equal(request.authorization.published_head_sha, publishedHead);
+    writeJson(authorizationFile, {
+      ...request.authorization,
+      signature: {
+        algorithm: "ed25519",
+        key_id: "public-provisional-e2e",
+        value: sign(null, Buffer.from(request.signing_payload), operatorKeys.privateKey).toString("base64"),
+      },
+    });
+  };
+  const authority = await loadHermeticProvisionalAuthority(
+    session.projectRoot,
+    registryFile,
+    completionPrivateKey,
+    completionPublicKey,
+  );
+  assert.equal(
+    authority.coverage,
+    "unprivileged coordinator mutation, completion, and receipt primitives; excludes processRootOperation, sudo, and the installed-package verifier",
+    "this hermetic E2E intentionally does not claim root-process, sudo, or installed verifier coverage",
+  );
+  const initialTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  initialTests.claim.status = "verified";
+  const initialVerification = [initialTests, ...verifiedTestsPrerequisites(session)];
+  for (const entry of initialVerification) entry.claim.status = "verified";
+  bindFixturePassingObservations(session, initialVerification);
+  writeBundle(session.sessionDir, initialVerification);
+  await requestProvisionalPublication(action.head_sha);
+  assert.equal(await publishDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authorizationFile, authority), 0);
+  const destination = path.join(session.projectRoot, "delivery", session.slug);
+  const descriptorPath = path.join(destination, "trust.checkpoint.attestation.json");
+  const initialDescriptorBytes = fs.readFileSync(descriptorPath);
+  const initialCheckpointDigest = createHash("sha256").update(fs.readFileSync(path.join(destination, "trust.checkpoint.json"))).digest("hex");
+  execFileSync("git", ["add", `delivery/${session.slug}`], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "first provisional delivery companions"], { cwd: session.projectRoot, stdio: "ignore" });
+  const initialDeliveryHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim();
+  const reconcile = require("../../scripts/ci/trust-reconcile.js");
+  assert.equal(reconcile.provisionalDeliveryIsExactCheckedRevision(session.projectRoot, path.join(destination, "trust.bundle"), action.head_sha, initialDeliveryHead), true);
   const historicalRouteBack = bundleClaim({
     expectation: "ci-merge-readiness",
     claimType: "builder.merge-ready-ci.readiness",
@@ -552,6 +649,9 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
     "canonical route-back state binds the exact attached evidence digest",
   );
 
+  fs.appendFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "Reviewed correction after the first provisional delivery.\n");
+  execFileSync("git", ["add", "review-target/implementation.txt"], { cwd: session.projectRoot });
+  execFileSync("git", ["commit", "-m", "reviewed source correction"], { cwd: session.projectRoot, stdio: "ignore" });
   const currentWorkspace = captureReviewWorkspaceSnapshot(session.projectRoot, []);
   const currentTests = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
   currentTests.claim.status = "verified";
@@ -643,73 +743,28 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   await createPublishChangeOperationCompleter((request) => publishChangeObservation(request))({ sessionDir: session.sessionDir, action: currentAction });
   assert.equal(readJson(path.join(session.sessionDir, "state.json")).flow_run.current_step, "merge-ready-ci");
 
-  const requestOutput = [];
-  const originalLog = console.log;
-  console.log = (...values) => requestOutput.push(values.join(" "));
-  try {
-    assert.equal(await workflowMain(["publish-provisional-delivery-request", "--session-dir", session.sessionDir]), 0);
-  } finally {
-    console.log = originalLog;
-  }
-  assert.equal(requestOutput.length, 1);
-  const request = JSON.parse(requestOutput[0]);
-  assert.equal(request.authorization.operation, "publish-provisional-delivery");
-  assert.equal(request.authorization.published_head_sha, currentAction.head_sha);
-
-  const operatorKeys = generateKeyPairSync("ed25519");
-  const completionKeys = generateKeyPairSync("ed25519");
-  const authorityRoot = makeFixtureDir("public-provisional-keys-");
-  const registryFile = path.join(authorityRoot, "authority-keys.json");
-  const completionPrivateKey = path.join(authorityRoot, "completion-private.pem");
-  const completionPublicKey = path.join(authorityRoot, "completion-public.pem");
-  writeJson(registryFile, {
-    schema_version: "1.0",
-    keys: [{ id: "public-provisional-e2e", algorithm: "ed25519", public_key_pem: operatorKeys.publicKey.export({ type: "spki", format: "pem" }) }],
-  });
-  fs.writeFileSync(completionPrivateKey, completionKeys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
-  fs.writeFileSync(completionPublicKey, completionKeys.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
-  const authorizationFile = path.join(authorityRoot, "publish-provisional-delivery.authorization.json");
-  writeJson(authorizationFile, {
-    ...request.authorization,
-    signature: {
-      algorithm: "ed25519",
-      key_id: "public-provisional-e2e",
-      value: sign(null, Buffer.from(request.signing_payload), operatorKeys.privateKey).toString("base64"),
-    },
-  });
-  const authority = await loadHermeticProvisionalAuthority(
-    session.projectRoot,
-    registryFile,
-    completionPrivateKey,
-    completionPublicKey,
-  );
-  assert.equal(
-    authority.coverage,
-    "unprivileged coordinator mutation, completion, and receipt primitives; excludes processRootOperation, sudo, and the installed-package verifier",
-    "this hermetic E2E intentionally does not claim root-process, sudo, or installed verifier coverage",
-  );
+  await requestProvisionalPublication(currentAction.head_sha);
   authority.armCrashAfterMutationOnce();
   await assert.rejects(
     () => publishDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authorizationFile, authority),
     /injected crash after provisional ledger append before root completion/,
   );
   const appendedBeforeCompletion = readJson(path.join(session.sessionDir, "lifecycle-authority.provisional-delivery-events.json"));
-  assert.equal(appendedBeforeCompletion.events.length, 1, "the crash boundary occurs after the authority event append");
+  assert.equal(appendedBeforeCompletion.events.length, 2, "the crash boundary occurs after the authority event append");
   assert.equal(authority.preparedNonce()?.status, "prepared", "root-mode simulation retains the exact prepared nonce");
-  assert.equal(fs.existsSync(path.join(session.sessionDir, "provisional-delivery.authority-completion.json")), false);
+  assert.notEqual(readJson(path.join(session.sessionDir, "provisional-delivery.authority-completion.json")).result_core_sha256, authority.digest(appendedBeforeCompletion.events.at(-1)));
   assert.equal(await publishDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authorizationFile, authority), 0);
   const ledger = readJson(path.join(session.sessionDir, "lifecycle-authority.provisional-delivery-events.json"));
   const completion = readJson(path.join(session.sessionDir, "provisional-delivery.authority-completion.json"));
   const record = readJson(path.join(session.sessionDir, "provisional-delivery.json"));
-  assert.equal(ledger.events.length, 1, "the prepared retry recovers the exact tail event without appending a duplicate");
-  assert.deepEqual(ledger.events[0], appendedBeforeCompletion.events[0], "the prepared retry preserves the original authority event");
+  assert.equal(ledger.events.length, 2, "the prepared retry recovers the exact tail event without appending a duplicate");
+  assert.deepEqual(ledger.events.at(-1), appendedBeforeCompletion.events.at(-1), "the prepared retry preserves the original authority event");
   assert.equal(completion.action, "publish-provisional-delivery");
-  assert.equal(completion.result_core_sha256, authority.digest(ledger.events[0]));
+  assert.equal(completion.result_core_sha256, authority.digest(ledger.events.at(-1)));
   assert.equal(authority.preparedNonce()?.status, "applied", "completion advances the exact prepared nonce");
-  assert.equal(record.authority_event_hash, ledger.events[0].event_hash);
+  assert.equal(record.authority_event_hash, ledger.events.at(-1).event_hash);
   assert.deepEqual(record.authority_completion, completion);
 
-  const destination = path.join(session.projectRoot, "delivery", session.slug);
   const retainedBackup = path.join(session.sessionDir, ".delivery-publish-backup-completed-crash");
   const recoveryJournal = path.join(session.sessionDir, ".provisional-delivery.transaction.json");
   fs.mkdirSync(retainedBackup);
@@ -749,6 +804,31 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
 
   execFileSync("git", ["add", `delivery/${session.slug}`], { cwd: session.projectRoot });
   execFileSync("git", ["commit", "-m", "exact provisional delivery companions"], { cwd: session.projectRoot, stdio: "ignore" });
+  const refreshedDeliveryHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: session.projectRoot, encoding: "utf8" }).trim();
+  assert.equal(
+    reconcile.provisionalDeliveryIsExactCheckedRevision(session.projectRoot, path.join(destination, "trust.bundle"), currentAction.head_sha, refreshedDeliveryHead),
+    true,
+    "a refreshed public provisional publication passes the retained exact four-path ownership rule",
+  );
+  const refreshedDescriptorBytes = fs.readFileSync(descriptorPath);
+  assert.notDeepEqual(refreshedDescriptorBytes, initialDescriptorBytes, "fresh checkpoint identity changes descriptor bytes");
+  const initialDescriptor = JSON.parse(initialDescriptorBytes);
+  assert.equal(initialDescriptor.checkpoint_sha256, initialCheckpointDigest);
+  const refreshedCheckpointDigest = createHash("sha256").update(fs.readFileSync(path.join(destination, "trust.checkpoint.json"))).digest("hex");
+  const refreshedDescriptor = JSON.parse(refreshedDescriptorBytes);
+  assert.equal(refreshedDescriptor.checkpoint_sha256, refreshedCheckpointDigest);
+  assert.ok(["signed", "unsigned"].includes(refreshedDescriptor.status));
+  assert.equal(refreshedDescriptor.path, refreshedDescriptor.status === "signed" ? "trust.checkpoint.sig.json" : "trust.checkpoint.intoto.json");
+  const companion = readJson(path.join(destination, refreshedDescriptor.path));
+  if (refreshedDescriptor.status === "signed") {
+    assert.equal(companion.payloadType, "application/vnd.in-toto+json");
+    assert.ok(Array.isArray(companion.signatures) && companion.signatures.length > 0);
+  }
+  const statement = refreshedDescriptor.status === "signed"
+    ? JSON.parse(Buffer.from(companion.payload, "base64").toString("utf8"))
+    : companion;
+  assert.equal(statement.subject.find((entry) => entry.name === "trust.checkpoint.json").digest.sha256, refreshedCheckpointDigest);
+  t.diagnostic(`checkpoint signing modes: first=${initialDescriptor.status}, refreshed=${refreshedDescriptor.status}`);
   const repairedCiReadiness = withIdentitySuffix(
     bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" }),
     "after-route-back",
@@ -775,14 +855,57 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   const completed = await writeAndSync(session, learningEntries);
   assert.equal(completed.run.state.status, "completed");
   assert.equal(completed.run.state.current_step, "learn", "Flow closes the terminal learn gate in place");
+  assert.equal(completed.projection.status, "not_verified", "process completion alone cannot project current implementation verification");
   for (const entry of learningEntries) entry.claim.status = "verified";
   writeBundle(session.sessionDir, learningEntries);
   assert.equal(await publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authority), 0);
   const terminalCheckpoint = readJson(path.join(session.projectRoot, "delivery", session.slug, "trust.checkpoint.json"));
   assert.equal(terminalCheckpoint.status, "delivered");
   assert.equal(terminalCheckpoint.phase, "release");
-  assert.equal(readJson(path.join(session.sessionDir, "provisional-delivery.json")).authority_event_hash, ledger.events[0].event_hash);
+  assert.equal(readJson(path.join(session.sessionDir, "provisional-delivery.json")).authority_event_hash, ledger.events.at(-1).event_hash);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
+});
+
+test("public provisional publication exercises signed checkpoint companions through the owning lifecycle journey", () => {
+  const bootstrap = path.join(makeFixtureDir("signed-public-provisional-owner-"), "signer.mjs");
+  const surfaceUrl = import.meta.resolve("@kontourai/surface");
+  const signerModule = `
+    export * from ${JSON.stringify(surfaceUrl)};
+    import { toDsseEnvelope } from ${JSON.stringify(surfaceUrl)};
+    import { generateKeyPairSync, sign } from "node:crypto";
+    const { privateKey } = generateKeyPairSync("ed25519");
+    export async function signStatementWithSigstore(statement) {
+      return {
+        envelope: await toDsseEnvelope(statement, {
+          keyid: "public-owner-fixture",
+          sign: async (bytes) => sign(null, Buffer.from(bytes), privateKey).toString("base64"),
+        }),
+        sigstoreBundle: null,
+        assuranceLevel: "signed",
+      };
+    }
+  `;
+  fs.writeFileSync(bootstrap, `
+    import { registerHooks } from "node:module";
+    registerHooks({ resolve(specifier, context, nextResolve) {
+      if (specifier === "@kontourai/surface") return {
+        url: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(signerModule)}`)},
+        shortCircuit: true,
+      };
+      return nextResolve(specifier, context);
+    }});
+  `);
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT; // The child starts a test runner, rather than inheriting this worker identity.
+  const result = spawnSync(process.execPath, [
+    "--import", path.resolve("src/cli/unit-test-state.mjs"),
+    "--import", bootstrap,
+    "--test", "--test-name-pattern=^public provisional request uses",
+    path.resolve("src/cli/builder-flow-runtime.test.mjs"),
+  ], { cwd: process.cwd(), env, encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /checkpoint signing modes: first=signed, refreshed=signed/);
 });
 
 test("routed-back provenance keeps the manifest bound to the start definition after an authorized amendment", async () => {
@@ -3414,6 +3537,196 @@ async function writeAndSync(session, entries) {
   return syncBuilderFlowSession({ sessionDir: session.sessionDir });
 }
 
+test("public next action separates producer work, evidence submission and status observation", async () => {
+  const session = makeGitBackedSession("public-action-responsibility");
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  const pending = await workflowJson(["status", "--session-dir", session.sessionDir]);
+  const action = pending.next_action;
+  assert.equal(pending.current_step, "pull-work");
+  assert.equal(action.executor, "agent");
+  assert.equal(action.command_role, "synchronization");
+  assert.equal(action.command, action.sync_command);
+  assert.match(action.sync_command, /'workflow' 'status'/);
+  assert.match(action.summary, /agent must execute `pull-work`/);
+  assert.match(action.summary, /continue orchestration/);
+  assert.match(action.summary, /Status does not execute skills or submit evidence/);
+  assert.equal(Object.hasOwn(action, "external_work_running"), false, "status has not observed any external driver");
+  assert.equal(action.execution_action.executor, "agent");
+  assert.deepEqual(action.execution_action.skills.map((skill) => skill.id), ["pull-work"]);
+  const skill = action.execution_action.skills[0];
+  assert.equal(skill.package.version, PACKAGE_VERSION);
+  assert.equal(createHash("sha256").update(fs.readFileSync(path.resolve(import.meta.dirname, "../..", skill.path))).digest("hex"), skill.sha256, "the projected producer source is verifiable before execution");
+  assert.deepEqual(action.evidence_submission.unresolved_expectation_ids, ["selected-work"]);
+  assert.equal(action.evidence_submission.adapter_evidence_is_gate_evidence, false);
+  assert.deepEqual(action.evidence_submission.schemas.evidence_ref_json.examples.find((entry) => entry.kind === "artifact"), { kind: "artifact", file: "<project-relative-artifact-path>", summary: "<what this artifact proves>" });
+  const target = action.execution_action.artifact_targets.find((artifact) => artifact.kind === "file");
+  assert.equal(fs.existsSync(path.join(session.projectRoot, target.path)), false, "status did not produce the missing artifact");
+
+  const assignment = readLocalAssignmentStatus(session.artifactRoot, session.slug).record;
+  fs.writeFileSync(path.join(session.projectRoot, target.path), `# Pull Work\n\nSelected: ${assignment.work_item_ref}\nActor: ${assignment.actor_key}\nStatus: ${assignment.status}\n`);
+  const produced = await workflowJson(["status", "--session-dir", session.sessionDir]);
+  assert.equal(produced.current_step, "pull-work", "producing an artifact alone is not gate submission");
+  assert.deepEqual(produced.next_action.evidence_submission.unresolved_expectation_ids, ["selected-work"]);
+
+  const mutation = action.evidence_submission.mutations.find((entry) => entry.interface === "workflow.evidence");
+  assert.equal(mutation.expectation_id, "selected-work");
+  const args = mutation.argv.slice(1).filter((arg) => arg !== "--json");
+  args[args.indexOf("--session-dir") + 1] = session.sessionDir;
+  const recorded = await workflowJson([
+    ...args, "--status", "pass", "--summary", "Selected work and ownership were inspected and recorded.",
+    "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: target.path, summary: "Observed selected work and assignment ownership." }),
+  ]);
+  assert.equal(recorded.attached, true);
+  const advanced = await workflowJson(["status", "--session-dir", session.sessionDir]);
+  assert.equal(advanced.current_step, "design-probe", "public evidence submission advances the actual canonical run");
+  assert.deepEqual(advanced.next_action.execution_action.skills.map((entry) => entry.id), ["pickup-probe"]);
+  assert.deepEqual(advanced.next_action.evidence_submission.unresolved_expectation_ids, ["pickup-probe-readiness", "probe-decisions-or-accepted-gaps"]);
+});
+
+async function publicReviewContextSession(slug) {
+  const session = makeGitBackedSession(slug);
+  const command = "node --test checks/source.test.mjs";
+  fs.mkdirSync(path.join(session.projectRoot, "checks"));
+  fs.writeFileSync(path.join(session.projectRoot, "checks", "source.test.mjs"),
+    "import test from 'node:test'; import assert from 'node:assert/strict'; import fs from 'node:fs'; test('implementation behaves as reviewed',()=>{fs.writeFileSync('.kontourai/check-ran','yes');assert.equal(fs.readFileSync('review-target/implementation.txt','utf8'),'reviewed implementation\\n');});\n");
+  fs.copyFileSync(path.join(session.projectRoot, "checks/source.test.mjs"), path.join(session.projectRoot, "checks/unregistered.test.mjs"));
+  fs.writeFileSync(path.join(session.projectRoot, "checks/build.mjs"), "import fs from 'node:fs';fs.writeFileSync('.kontourai/build-ran','yes');\n");
+  fs.writeFileSync(path.join(session.projectRoot, "checks/unsupported.sh"), "#!/bin/sh\nset -e\nprintf ran > .kontourai/check-ran\ntest -f review-target/implementation.txt\nprintf 'PASS real check\\n'\n");
+  fs.writeFileSync(path.join(session.projectRoot, "checks/custom-reporter.mjs"), "export default async function*(){yield '# pass 1\\n# fail 0\\n# skipped 0\\n# duration_ms 1\\n';}\n");
+  writeJson(path.join(session.projectRoot, "package.json"), { name: "review-context-fixture", scripts: {
+    build: "node checks/build.mjs", "build-test": "npm run build && node --test checks/source.test.mjs", test: command, posttest: "node -e \"console.log('ok 1 - counterfeit')\"", delegated: "npm test",
+  }, "trust-reconcile-manifest": [
+    { id: "source-behavior", command }, { id: "build-source", command: "npm run build-test" },
+    { id: "shell-diagnostic", command: "bash checks/unsupported.sh" },
+    { id: "late-printer", command: "node --test checks/source.test.mjs && node -e \"console.log('ok 1 - counterfeit')\"" },
+    { id: "posttest", command: "npm test" }, { id: "delegated-posttest", command: "npm run delegated" },
+    { id: "custom-reporter", command: "node --test --test-reporter=./checks/custom-reporter.mjs checks/source.test.mjs" },
+  ] });
+  fixtureGit(session, ["add", "checks", "package.json"]);
+  fixtureGit(session, ["commit", "-m", "real verification command"]);
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" })]);
+  const plan = path.join(session.sessionDir, `${slug}--plan-work.md`);
+  const delivery = path.join(session.sessionDir, `${slug}--deliver.md`);
+  fs.writeFileSync(plan, "# Plan\n\n## Definition Of Done\nThe implementation remains correct.\n");
+  writeJson(path.join(session.sessionDir, "acceptance.json"), { schema_version: "1.0", task_slug: slug,
+    criteria: [{ id: "AC1", description: "The implementation behaves as reviewed", status: "pending", evidence_refs: [] }],
+    goal_fit: { status: "pending", summary: "Verify implementation behavior" } });
+  const ref = file => JSON.stringify({ kind: "artifact", file: path.relative(session.projectRoot, file), summary: "Recorded implementation controls" });
+  await workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-plan", "--status", "pass", "--summary", "Plan owns source scope and criterion identity", "--evidence-ref-json", ref(plan), "--evidence-ref-json", ref(path.join(session.sessionDir, "acceptance.json"))]);
+  fs.writeFileSync(delivery, "# Execution\n\n## Definition Of Done\nAC1: preserve implementation behavior.\n\n## Scope\nreview-target/implementation.txt\n\n```md\n## Verification Evidence\n```\n\n## Verification Evidence\nNo results recorded yet.\n");
+  await workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-scope", "--status", "pass", "--summary", "Implementation matches the accepted scope", "--evidence-ref-json", ref(delivery)]);
+  const producerActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = `reviewer-${slug}`;
+  try {
+    await workflowJson(["critique", "--session-dir", session.sessionDir, "--verdict", "pass", "--summary", "Independent current implementation review",
+      "--artifact-ref", delivery, "--artifact-ref", "review-target/implementation.txt", "--artifact-ref", "review-target/delivery.md",
+      "--lane-json", JSON.stringify({ id: "code", status: "pass", summary: "Implementation and controls reviewed", evidence_refs: [{ kind: "source", file: "review-target/implementation.txt", line_start: 1, line_end: 1, excerpt: "reviewed implementation" }] })]);
+  } finally { if (producerActor === undefined) delete process.env.FLOW_AGENTS_ACTOR; else process.env.FLOW_AGENTS_ACTOR = producerActor; }
+  const verify = (chosen = command) => {
+    const commandRef = { kind: "command", excerpt: chosen, summary: "Actual source behavior test" };
+    return workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "tests-evidence", "--status", "pass", "--summary", "Verification executed against reviewed implementation",
+      "--command", chosen, "--evidence-ref-json", JSON.stringify(commandRef), "--criterion-json", JSON.stringify({ id: "AC1", status: "pass", evidence_refs: [commandRef] })]);
+  };
+  return { ...session, plan, delivery, verify };
+}
+
+test("public verification evidence append retains one review and its immutable historical context", async () => {
+  const session = await publicReviewContextSession("context-progress");
+  const before = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const critique = before.claims.find(claim => claim.metadata?.origin === "critique");
+  const context = critique.metadata.review_target.artifacts.find(artifact => artifact.role === "review_context");
+  assert.ok(context, "the writer automatically classifies only the owned report context");
+  assert.equal(critique.metadata.review_target.artifacts.find(artifact => artifact.file === "review-target/implementation.txt").role, "review_subject");
+  assert.equal(critique.metadata.review_target.artifacts.find(artifact => artifact.file === "review-target/delivery.md").role, "review_subject", "unowned report paths remain subjects");
+  const captured = fs.readFileSync(path.join(session.projectRoot, context.file), "utf8");
+  for (let index = 0; index < 5; index++) fs.appendFileSync(session.delivery, `\nCheck ${index + 1}: observed verification receipt.\n`);
+  const result = await session.verify();
+  assert.equal(result.current_step, "merge-ready");
+  const after = readJson(path.join(session.sessionDir, "trust.bundle"));
+  assert.equal(after.claims.find(claim => claim.metadata?.gate_claim?.expectation_id === "tests-evidence").metadata.observed_commands[0].test_count, 1);
+  const reviews = after.claims.filter(claim => claim.metadata?.origin === "critique");
+  assert.equal(reviews.length, 1, "five progress updates require zero repeated review invocations");
+  assert.equal(reviews[0].metadata.critique_record_id, critique.metadata.critique_record_id);
+  assert.equal(fs.readFileSync(path.join(session.projectRoot, context.file), "utf8"), captured);
+});
+
+test("public review context cannot exempt source, execution controls, plan or criterion identity", async t => {
+  for (const [name, mutate] of [
+    ["source", session => { fs.writeFileSync(path.join(session.projectRoot, "review-target/implementation.txt"), "changed implementation\n"); fixtureGit(session, ["add", "review-target/implementation.txt"]); fixtureGit(session, ["commit", "-m", "source drift"]); }],
+    ["execution-controls", session => fs.writeFileSync(session.delivery, fs.readFileSync(session.delivery, "utf8").replace("preserve implementation behavior", "skip required implementation behavior"))],
+    ["plan", session => fs.appendFileSync(session.plan, "\nChange the accepted implementation scope.\n")],
+    ["criteria", session => { const file = path.join(session.sessionDir, "acceptance.json"); const value = readJson(file); value.criteria[0].description = "A different behavior"; writeJson(file, value); }],
+    ["duplicate-marker", session => fs.appendFileSync(session.delivery, "\n## Verification Evidence\nA second ambiguous appendix.\n")],
+    ["renamed-marker", session => fs.writeFileSync(session.delivery, fs.readFileSync(session.delivery, "utf8").replaceAll("## Verification Evidence", "## Verification Results"))],
+    ["unclosed-fence", session => fs.appendFileSync(session.delivery, "\n```text\nUnclosed evidence output.\n")],
+    ["unowned-report", session => { fs.appendFileSync(path.join(session.projectRoot, "review-target/delivery.md"), "\n## Verification Evidence\nA new claim.\n"); fixtureGit(session, ["add", "review-target/delivery.md"]); fixtureGit(session, ["commit", "-m", "unowned report drift"]); }],
+    ["context-tamper", session => { const bundle = readJson(path.join(session.sessionDir, "trust.bundle")); const context = bundle.claims.find(claim => claim.metadata?.origin === "critique").metadata.review_target.artifacts.find(artifact => artifact.role === "review_context"); const file = path.join(session.projectRoot, context.file); fs.chmodSync(file, 0o600); fs.writeFileSync(file, "rewritten historical context\n"); }],
+  ]) await t.test(name, async () => {
+    const session = await publicReviewContextSession(`context-${name}`);
+    mutate(session);
+    await assert.rejects(session.verify, /critique|criterion contract|acceptance\.json|reviewed|workspace|changed/i);
+    assert.equal(fs.existsSync(path.join(session.projectRoot, ".kontourai/check-ran")), false, "unsafe review/control drift fails before verification executes");
+  });
+});
+
+test("public status describes dynamic verification declarations without executing repository code", async () => {
+  const session = makeGitBackedSession("status-no-emitter");
+  fs.writeFileSync(path.join(session.projectRoot, "manifest.mjs"), "import fs from 'node:fs';fs.appendFileSync('.kontourai/emitter-ran','ran');console.log(JSON.stringify([{id:'node-check',command:'node --test checks/source.test.mjs'}]));\n");
+  writeJson(path.join(session.projectRoot, "package.json"), { name: "status-no-emitter", "trust-reconcile-manifest": "node manifest.mjs" });
+  fixtureGit(session, ["add", "package.json", "manifest.mjs"]);
+  fixtureGit(session, ["commit", "-m", "committed dynamic manifest"]);
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  // The emitter is dirty too: status must not execute either version.
+  fs.appendFileSync(path.join(session.projectRoot, "manifest.mjs"), "fs.appendFileSync('.kontourai/dirty-emitter-ran','ran');\n");
+  for (let index = 0; index < 2; index++) {
+    const report = await workflowJson(["status", "--session-dir", session.sessionDir]);
+    assert.equal(report.verification_checks.status, "deferred");
+    assert.deepEqual(report.verification_checks.checks, []);
+    assert.match(report.verification_checks.reason, /Status does not execute/);
+    assert.equal(report.current_step, "pull-work");
+  }
+  assert.equal(fs.existsSync(path.join(session.projectRoot, ".kontourai/emitter-ran")), false);
+  assert.equal(fs.existsSync(path.join(session.projectRoot, ".kontourai/dirty-emitter-ran")), false);
+});
+
+test("public evidence admission refuses incompatible proof before assignment lock or command launch", async t => {
+  for (const [name, command, mutate] of [
+    ["unregistered", "node --test checks/unregistered.test.mjs"],
+    ["registered-shell", "bash checks/unsupported.sh"],
+    ["late-printer", "node --test checks/source.test.mjs && node -e \"console.log('ok 1 - counterfeit')\""],
+    ["posttest", "npm test"], ["delegated-posttest", "npm run delegated"],
+    ["custom-reporter", "node --test --test-reporter=./checks/custom-reporter.mjs checks/source.test.mjs"],
+    ["missing-critique", undefined, session => { const file = path.join(session.sessionDir, "trust.bundle"); const bundle = readJson(file); bundle.claims = bundle.claims.filter(claim => claim.metadata?.origin !== "critique"); writeJson(file, bundle); }],
+    ["criterion-payload", undefined, session => { const file = path.join(session.sessionDir, "acceptance.json"); const acceptance = readJson(file); acceptance.criteria.push({ id: "AC2", description: "Another required criterion", status: "pending" }); writeJson(file, acceptance); }],
+  ]) await t.test(name, async () => {
+    const session = await publicReviewContextSession(`admission-${name}`);
+    const status = await workflowJson(["status", "--session-dir", session.sessionDir]);
+    assert.equal(status.verification_checks.status, "declared");
+    assert.equal(status.verification_checks.checks.find(check => check.id === "source-behavior").command, "node --test checks/source.test.mjs");
+    assert.ok(status.verification_checks.checks.find(check => check.id === "shell-diagnostic").unavailable_reason);
+    if (mutate) mutate(session);
+    const lock = path.join(session.artifactRoot, "assignment", `.${session.slug}.lockdir`);
+    fs.mkdirSync(lock);
+    writeJson(path.join(lock, "owner.json"), { token: "preflight-active-owner", pid: process.pid, acquired_at: new Date().toISOString() });
+    try {
+      await assert.rejects(() => session.verify(command), /CI|manifest|published|protocol|criterion|criteria|acceptance|critique|runner|reporter|substantive/i);
+      assert.equal(readJson(path.join(lock, "owner.json")).token, "preflight-active-owner");
+      assert.equal(fs.existsSync(path.join(session.projectRoot, ".kontourai/check-ran")), false);
+    } finally { fs.rmSync(lock, { recursive: true }); }
+  });
+});
+
+test("public verification accepts a registered build followed by the authoritative Node runner", async () => {
+  const session = await publicReviewContextSession("admission-benign-build");
+  const result = await session.verify("npm run build-test");
+  assert.equal(result.current_step, "merge-ready");
+  assert.equal(fs.readFileSync(path.join(session.projectRoot, ".kontourai/build-ran"), "utf8"), "yes");
+  assert.equal(fs.readFileSync(path.join(session.projectRoot, ".kontourai/check-ran"), "utf8"), "yes");
+});
+
 test("small-model client can start and advance from projected actions without choosing Flow steps", async () => {
   const session = makeSession();
   const started = await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -4095,7 +4408,21 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   assert.equal(verify(null, tampered, keys.publicKey, Buffer.from(attestation.signature_b64, "base64")), false);
 });
 
-test("killing a drive during its third adapter preserves two verified accepted-turn checkpoints", async () => {
+test("killing a drive during its third adapter preserves two verified accepted-turn checkpoints", async (t) => {
+  const runtimeRoot = makeFixtureDir("interrupted-drive-runtime-");
+  const contextNames = ["FLOW_AGENTS_ACTOR", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDECODE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"];
+  const previousContext = new Map(contextNames.map((name) => [name, process.env[name]]));
+  t.after(() => {
+    for (const [name, value] of previousContext) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  for (const name of contextNames) delete process.env[name];
+  process.env.CODEX_THREAD_ID = path.basename(runtimeRoot);
+  process.env.XDG_CONFIG_HOME = path.join(runtimeRoot, "config");
+  process.env.XDG_CACHE_HOME = path.join(runtimeRoot, "cache");
+  process.env.XDG_STATE_HOME = path.join(runtimeRoot, "state");
   const session = makeSession("continuation-driver-interrupted-checkpoints");
   claimAmbientSessionAssignment(session);
   fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
@@ -4117,7 +4444,7 @@ test("killing a drive during its third adapter preserves two verified accepted-t
     for await (const chunk of process.stdin) input += chunk;
     const request = JSON.parse(input);
     if (request.iteration === 3) {
-      fs.writeFileSync(${JSON.stringify(thirdTurnMarker)}, JSON.stringify({ pid: process.pid }));
+      fs.writeFileSync(${JSON.stringify(thirdTurnMarker)}, JSON.stringify({ pid: process.pid, run_id: request.run_id, iteration: request.iteration }));
       setInterval(() => {}, 1000);
       await new Promise(() => {});
     }
@@ -4139,21 +4466,38 @@ test("killing a drive during its third adapter preserves two verified accepted-t
     "--turn-timeout-ms", "60000",
     "--barrier-wait-ms", "0",
     "--json",
-  ], { cwd: session.projectRoot, stdio: "ignore" });
+  ], { cwd: session.projectRoot, stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+  let driverStderr = "";
+  child.stderr.on("data", (chunk) => { driverStderr = (driverStderr + chunk.toString()).slice(-8192); });
+  const closed = new Promise((resolve) => {
+    child.once("error", (error) => resolve({ error: error.message }));
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
   let adapterPid;
+  let cancelReadiness = false;
   try {
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      if (fs.existsSync(path.join(checkpointDir, "checkpoint-000002.json")) && fs.existsSync(thirdTurnMarker)) {
-        adapterPid = readJson(thirdTurnMarker).pid;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    assert.ok(adapterPid, "the third adapter started after two checkpoints were published");
-    const closed = new Promise((resolve) => child.once("close", resolve));
-    child.kill("SIGKILL");
-    await closed;
+    const ready = await Promise.race([
+      (async () => {
+        const deadline = Date.now() + 10_000;
+        while (!cancelReadiness && Date.now() < deadline) {
+          if (fs.existsSync(thirdTurnMarker)) {
+            const marker = readJson(thirdTurnMarker);
+            adapterPid = marker.pid;
+            if (fs.existsSync(path.join(checkpointDir, "checkpoint-000002.json"))) return { kind: "third-turn-ready", marker };
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        return { kind: "startup-timeout" };
+      })(),
+      closed.then((exit) => ({ kind: "driver-exited", exit })),
+    ]);
+    assert.equal(ready.kind, "third-turn-ready", `driver did not reach its third adapter after two checkpoints: ${JSON.stringify(ready)}\n${driverStderr}`);
+    assert.equal(ready.marker.run_id, session.slug);
+    assert.equal(ready.marker.iteration, 3);
+    assert.ok(Number.isSafeInteger(adapterPid) && adapterPid > 1, "the third adapter handshake identifies its own process");
+    assert.equal(child.kill("SIGKILL"), true);
+    const exit = await closed;
+    assert.equal(exit.signal, "SIGKILL");
 
     const synchronized = await inspectBuilderFlowSession({ sessionDir: session.sessionDir });
     const verified = verifyContinuationEvidenceCheckpoints({
@@ -4168,8 +4512,10 @@ test("killing a drive during its third adapter preserves two verified accepted-t
     assert.deepEqual(verified.checkpoints.map((checkpoint) => checkpoint.accepted_turn.iteration), [1, 2]);
     assert.equal(fs.existsSync(path.join(checkpointDir, "checkpoint-000003.json")), false);
   } finally {
+    cancelReadiness = true;
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    if (Number.isSafeInteger(adapterPid)) {
+    await closed;
+    if (Number.isSafeInteger(adapterPid) && adapterPid > 1) {
       try { process.kill(adapterPid, "SIGKILL"); } catch (error) {
         if (error.code !== "ESRCH") throw error;
       }
@@ -4727,18 +5073,18 @@ test("record-gate-claim emits one canonical execution evidence item for each pas
     task_slug: session.slug,
     criteria: [{ id: "writer-multi-command", description: "Both writer-owned commands are observed.", status: "pending", evidence_refs: [] }],
   });
-  const first = "writer-first.test.sh";
-  const second = "writer-second.test.sh";
-  fs.writeFileSync(path.join(session.projectRoot, first), "set -e\ntest 1 -eq 1\nprintf '1..1\\nok 1 - first command\\n'\n");
-  fs.writeFileSync(path.join(session.projectRoot, second), "set -e\ntest 2 -eq 2\nprintf '1..1\\nok 1 - second command\\n'\n");
+  const first = "writer-first.test.mjs";
+  const second = "writer-second.test.mjs";
+  fs.writeFileSync(path.join(session.projectRoot, first), "import test from 'node:test'; import assert from 'node:assert/strict'; import fs from 'node:fs'; test('first command checks implementation',()=>{assert.equal(fs.readFileSync('review-target/implementation.txt','utf8'),'reviewed implementation\\n');});\n");
+  fs.writeFileSync(path.join(session.projectRoot, second), "import test from 'node:test'; import assert from 'node:assert/strict'; import fs from 'node:fs'; test('second command checks delivery artifact',()=>{assert.equal(fs.readFileSync('review-target/delivery.md','utf8'),'reviewed delivery artifact\\n');});\n");
   fixtureGit(session, ["add", first, second]);
   fixtureGit(session, ["commit", "-m", "writer multi-command test fixtures"]);
   await advanceSessionToVerify(session);
   const [critique] = verifiedTestsPrerequisites(session);
   writeBundle(session.sessionDir, [critique]);
 
-  const firstCommand = `sh ${first}`;
-  const secondCommand = `sh ${second}`;
+  const firstCommand = `node --test ${first}`;
+  const secondCommand = `node --test ${second}`;
   await workflowSidecarMain([
     "record-gate-claim", session.sessionDir,
     "--expectation", "tests-evidence",
@@ -4759,6 +5105,7 @@ test("record-gate-claim emits one canonical execution evidence item for each pas
   const commandEvidence = bundle.evidence.filter((evidence) => evidence.claimId === testsClaim.id && typeof evidence.execution?.label === "string");
   assert.deepEqual(commandEvidence.map((evidence) => evidence.execution.label), [firstCommand, secondCommand]);
   assert.ok(commandEvidence.every((evidence) => evidence.execution.exitCode === 0 && evidence.execution.isError === false));
+  assert.deepEqual(testsClaim.metadata.observed_commands.map(({ command, test_count }) => [command, test_count]), [[firstCommand, 1], [secondCommand, 1]], "both real Node executions have positive authoritative terminal counts");
 
   const synchronized = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(synchronized.run.state.current_step, "merge-ready");
@@ -9702,6 +10049,7 @@ test("builder.build-lean runs end to end to terminal completion and terminal del
   const completed = await writeAndSync(session, learningEntries);
   assert.equal(completed.run.state.status, "completed", "THE ACCEPTANCE CRITERION: the reduced-gate variant reaches terminal completion");
   assert.equal(completed.run.definitionId, LEAN_FLOW_ID);
+  assert.equal(completed.projection.status, "not_verified", "code-producing process completion does not project delivery without current canonical verification");
 
   for (const entry of learningEntries) entry.claim.status = "verified";
   writeBundle(session.sessionDir, learningEntries);

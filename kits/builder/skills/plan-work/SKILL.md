@@ -49,6 +49,12 @@ Ask `tool-planner` to produce an implementation plan containing:
 - execution handoff and next action
 
 Require evidence that is proportionate to the change and named by the accepted criteria.
+Scale the plan to the actual uncertainty and dependencies. Reuse established
+decisions; do not create extra research or bookkeeping for a mechanical fix.
+Preserve the full user goal while identifying the outcomes this producer run
+can prove and the publication or consumer milestones that require later work.
+Carry those actual remaining obligations into the handoff; do not require
+post-publication results before publication or report them as already satisfied.
 
 ## Procedure
 

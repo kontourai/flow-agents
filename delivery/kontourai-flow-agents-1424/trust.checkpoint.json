@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-1424",
+  "work_item": null,
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-10-03T20:27:42.761Z",
+  "commit_sha": "0680d3ea320389c0aba4b6899bb9c9c5e7132402",
+  "checkpoint": {
+    "asOf": "2026-10-03T20:27:42.762Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-1424-gate-claim-selected-work.flow-agents-workflow.user-selected-pr1425-tail-repair-has-fresh-actual-ownership-and-a-bounded-failing-ci-owner-gate-visit-2026-10-03t19-10-56-440z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-pickup-probe-readiness.flow-agents-workflow.ready-actual-source-and-failed-ci-owner-are-observed-bounded-test-repair-has-no-missing-decision-gate-visit-2026-10-03t19-11-26-351z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.use-bash-membership-for-only-two-case7v-assertions-preserve-production-failure-event-semantics-and-historical-run-current-exact-source-review-and-evidence-remain-mandatory-gate-visit-2026-10-03t19-11-30-742z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-implementation-plan.flow-agents-workflow.bounded-execution-ready-two-assertion-plan-preserves-actual-failure-semantics-and-ordinary-authority-task-maps-to-existing-acceptance-gate-visit-2026-10-03t19-14-59-901z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.one-declared-worker-reported-exact-two-assertion-repair-committed-clean-with-actual-source-bound-baseline-and-owner-proof-no-production-changes-gate-visit-2026-10-03t19-22-21-663z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-acceptance-criteria.flow-agents-workflow.actual-case7v-owner-passed-preserving-genuine128kib-exit1-linux-baseline141-and-both-absencecontrols-discriminate-whole-direct-ssh-suite-has-separate-stable-identity-setup-limits-retained-gate-visit-2026-10-03t19-27-41-339z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.current-registered-production-api-proof-plus-distinct-real-shell-owner-regression-proof-cover-the-bounded-criterion-no-smoke-to-shell-attribution-gate-visit-2026-10-03t19-28-25-950z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.exact-two-assertion-scope-distinct-current-critique-discriminating-owner-controls-canonical-api-evidence-and-required-pinned-readiness-pass-support-review-final-hosted-checks-remain-mandatory-gate-visit-2026-10-03t19-47-02-500z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-ci-merge-readiness.flow-agents-workflow.all-five-required-checks-pass-exact0680d3ea-current-verified-ready-pinned-veritas-exactbase-head-and-matching-file-references-scoped-acceptance-and-distinct-critique-support-authorized-merge-after-terminal-publication-gate-visit-2026-10-03t20-25-57-124z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-decision-evidence.flow-agents-workflow.current-source-required-checks-and-pinned-exact-head-readiness-support-authorized-merge-after-terminal-evidence-release-consumer-original-acceptance-obligations-remain-explicit-gate-visit-2026-10-03t20-27-40-685z": "verified",
+      "kontourai-flow-agents-1424-gate-claim-learning-evidence.flow-agents-workflow.actual-assertion-env-lease-failures-and-public-corrections-are-preserved-existing-diagnostic-signing-ci-follow-ups-and-mandatory-downstream-work-remain-linked-gate-visit-2026-10-03t20-27-41-298z": "verified",
+      "kontourai-flow-agents-1424-complete-the-requested-outcome-bounded-test-only-ci-repair-preserve-production-behavior-and-required-authority.flow-agents-workflow.complete-the-requested-outcome-bounded-test-only-ci-repair-preserve-production-behavior-and-required-authority-verified-2026-10-03t19-28-25-950z": "verified",
+      "kontourai-flow-agents-1424-review.flow-agents-workflow.actual-distinct-native-reviewer-inspected-cleanc8126d3f-exact2condition-delta-frombd878cbe-realhostedoutput-contains-bothmessages-linuxlegacyassertion141-fixedmembership-bothabsencecontrolspass-andmacrealnegativeownerpass-inspected-withidenticalsource-outputhashes-originalverifier128kib-exit1-marker-otherchecks-unchanged-nodepublicapi-isseparateproductionprotocolproof-notcase7vproof-currentlinuxwhole-veritas-publictests-hosted-publication-rollout-outcomesunclaimed-reviewed-2026-10-03t19-25-34-554z": "verified"
+    },
+    "throughEventCreatedAt": "2026-10-03T20:27:41.298Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-1424-gate-claim-selected-work.flow-agents-workflow.user-selected-pr1425-tail-repair-has-fresh-actual-ownership-and-a-bounded-failing-ci-owner-gate-visit-2026-10-03t19-10-56-440z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-pickup-probe-readiness.flow-agents-workflow.ready-actual-source-and-failed-ci-owner-are-observed-bounded-test-repair-has-no-missing-decision-gate-visit-2026-10-03t19-11-26-351z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.use-bash-membership-for-only-two-case7v-assertions-preserve-production-failure-event-semantics-and-historical-run-current-exact-source-review-and-evidence-remain-mandatory-gate-visit-2026-10-03t19-11-30-742z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-implementation-plan.flow-agents-workflow.bounded-execution-ready-two-assertion-plan-preserves-actual-failure-semantics-and-ordinary-authority-task-maps-to-existing-acceptance-gate-visit-2026-10-03t19-14-59-901z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-implementation-scope.flow-agents-workflow.one-declared-worker-reported-exact-two-assertion-repair-committed-clean-with-actual-source-bound-baseline-and-owner-proof-no-production-changes-gate-visit-2026-10-03t19-22-21-663z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-acceptance-criteria.flow-agents-workflow.actual-case7v-owner-passed-preserving-genuine128kib-exit1-linux-baseline141-and-both-absencecontrols-discriminate-whole-direct-ssh-suite-has-separate-stable-identity-setup-limits-retained-gate-visit-2026-10-03t19-27-41-339z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-tests-evidence.flow-agents-workflow.current-registered-production-api-proof-plus-distinct-real-shell-owner-regression-proof-cover-the-bounded-criterion-no-smoke-to-shell-attribution-gate-visit-2026-10-03t19-28-25-950z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-merge-readiness.flow-agents-workflow.exact-two-assertion-scope-distinct-current-critique-discriminating-owner-controls-canonical-api-evidence-and-required-pinned-readiness-pass-support-review-final-hosted-checks-remain-mandatory-gate-visit-2026-10-03t19-47-02-500z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-ci-merge-readiness.flow-agents-workflow.all-five-required-checks-pass-exact0680d3ea-current-verified-ready-pinned-veritas-exactbase-head-and-matching-file-references-scoped-acceptance-and-distinct-critique-support-authorized-merge-after-terminal-publication-gate-visit-2026-10-03t20-25-57-124z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-decision-evidence.flow-agents-workflow.current-source-required-checks-and-pinned-exact-head-readiness-support-authorized-merge-after-terminal-evidence-release-consumer-original-acceptance-obligations-remain-explicit-gate-visit-2026-10-03t20-27-40-685z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-gate-claim-learning-evidence.flow-agents-workflow.actual-assertion-env-lease-failures-and-public-corrections-are-preserved-existing-diagnostic-signing-ci-follow-ups-and-mandatory-downstream-work-remain-linked-gate-visit-2026-10-03t20-27-41-298z": "2026-10-03T20:27:41.298Z",
+      "kontourai-flow-agents-1424-complete-the-requested-outcome-bounded-test-only-ci-repair-preserve-production-behavior-and-required-authority.flow-agents-workflow.complete-the-requested-outcome-bounded-test-only-ci-repair-preserve-production-behavior-and-required-authority-verified-2026-10-03t19-28-25-950z": "2026-10-03T19:28:25.950Z",
+      "kontourai-flow-agents-1424-review.flow-agents-workflow.actual-distinct-native-reviewer-inspected-cleanc8126d3f-exact2condition-delta-frombd878cbe-realhostedoutput-contains-bothmessages-linuxlegacyassertion141-fixedmembership-bothabsencecontrolspass-andmacrealnegativeownerpass-inspected-withidenticalsource-outputhashes-originalverifier128kib-exit1-marker-otherchecks-unchanged-nodepublicapi-isseparateproductionprotocolproof-notcase7vproof-currentlinuxwhole-veritas-publictests-hosted-publication-rollout-outcomesunclaimed-reviewed-2026-10-03t19-25-34-554z": "2026-10-03T20:27:41.298Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}

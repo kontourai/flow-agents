@@ -818,7 +818,8 @@ fi
 #     Step 2/delivery-DECLARED enforcement does not apply on push.
 CASE7V="$DECLARED_TMPROOT/push-event-failing-verify"
 mkdir -p "$CASE7V"
-out7v="$(TRUST_RECONCILE_EVENT="push" TRUST_RECONCILE_COMMANDS="node -e 'process.exit(1)'" \
+printf 'console.log("x".repeat(128 * 1024)); console.log("CI_STDOUT_FAILURE_OWNER"); process.exitCode = 1;\n' > "$CASE7V/verify-failure.mjs"
+out7v="$(TRUST_RECONCILE_EVENT="push" TRUST_RECONCILE_COMMANDS="node verify-failure.mjs" \
   node "$RECONCILE" --repo-root "$CASE7V" 2>&1)"
 code7v=$?
 if [[ $code7v -ne 0 ]]; then
@@ -826,12 +827,17 @@ if [[ $code7v -ne 0 ]]; then
 else
   _fail "push-event-failing-verify: expected non-zero exit, got 0 -- output: $out7v"
 fi
-if echo "$out7v" | grep -qF "verification failed in CI"; then
+if [[ "$out7v" == *"--- captured stdout ---"* && "$out7v" == *"CI_STDOUT_FAILURE_OWNER"* ]]; then
+  _pass "push-event-failing-verify: captured failing verifier stdout identifies its owner without replay"
+else
+  _fail "push-event-failing-verify: failed verifier stdout was lost -- output: $out7v"
+fi
+if [[ "$out7v" == *"verification failed in CI"* ]]; then
   _pass "push-event-failing-verify: emitted 'verification failed in CI' (Step 1 failure, unaffected by event scoping)"
 else
   _fail "push-event-failing-verify: expected 'verification failed in CI' -- output: $out7v"
 fi
-if echo "$out7v" | grep -qF "push event:"; then
+if [[ "$out7v" == *"push event:"* ]]; then
   _pass "push-event-failing-verify: still emits the push-event Step-2 no-op line even though the overall run fails on Step 1 (the two are independent)"
 else
   _fail "push-event-failing-verify: expected the push-event no-op line -- output: $out7v"

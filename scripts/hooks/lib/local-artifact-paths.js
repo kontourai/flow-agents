@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execTrustedGitSync } = require('./trusted-git.js');
 
 const KONTOURAI_DIR = '.kontourai';
 const FLOW_AGENTS_RUNTIME_SUBDIR = 'flow-agents';
@@ -25,17 +25,7 @@ const DURABLE_FLOW_AGENTS_DIR = '.flow-agents';
  */
 function resolveSharedRepoRoot(cwd) {
   try {
-    const env = { ...process.env };
-    delete env.GIT_DIR;
-    delete env.GIT_COMMON_DIR;
-    delete env.GIT_WORK_TREE;
-    delete env.GIT_CEILING_DIRECTORIES;
-    const out = execFileSync('git', ['rev-parse', '--git-common-dir'], {
-      cwd,
-      env,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const out = String(execTrustedGitSync(cwd, ['rev-parse', '--git-common-dir'])).trim();
     if (!out) return null;
     const absoluteCommonDir = path.resolve(cwd, out);
     return path.dirname(absoluteCommonDir);

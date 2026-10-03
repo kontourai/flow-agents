@@ -110,12 +110,29 @@ if (!fs.readFileSync(path.join(session, "acme-widgets-44--deliver.md"), "utf8").
 NODE
 pass "packed provider bootstrap hides raw runtime identity and preserves the actual provider branch across every workflow projection"
 
-printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$CONSUMER/checks/check-public-workflow.sh"
-chmod +x "$CONSUMER/checks/check-public-workflow.sh"
+cat > "$CONSUMER/checks/check-public-workflow.test.mjs" <<'NODE'
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+test('session state exists', () => {
+  assert.ok(fs.statSync('.kontourai/flow-agents/acme-widgets-101/state.json').isFile());
+});
+NODE
 printf '#!/usr/bin/env bash\nset -eu\ntouch "$1"\nsleep 1\n' > "$CONSUMER/checks/check-command-lock.sh"
 chmod +x "$CONSUMER/checks/check-command-lock.sh"
-printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "run\\n" >> "$2"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$CONSUMER/checks/check-multi-command.sh"
-chmod +x "$CONSUMER/checks/check-multi-command.sh"
+for marker in one two; do
+  cat > "$CONSUMER/checks/check-multi-command-$marker.test.mjs" <<NODE
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+test('session state exists for additional $marker command', () => {
+  assert.ok(fs.statSync('.kontourai/flow-agents/acme-widgets-101/state.json').isFile());
+  fs.appendFileSync('../multi-command-$marker', 'run\n');
+});
+NODE
+done
 printf '#!/usr/bin/env bash\nset -eu\ntrap "" TERM\n( trap "" TERM; sleep 5; touch "$2" ) &\nchild=$!\nprintf "%s\\n" "$child" > "$1"\nwait "$child"\ntouch "$2"\n' > "$CONSUMER/checks/check-command-timeout.sh"
 chmod +x "$CONSUMER/checks/check-command-timeout.sh"
 printf '#!/usr/bin/env bash\nset -eu\n( trap "" TERM; while ! sleep 5; do :; done; touch "$2" ) &\nprintf "%s\\n" "$!" > "$1"\n' > "$CONSUMER/checks/check-success-background.sh"
@@ -390,11 +407,11 @@ AFTER_CRITIQUE_BUNDLE="$(shasum -a 256 "$RELEASE_SESSION/trust.bundle" | awk '{p
 [[ "$BEFORE_CRITIQUE_MANIFEST" == "$AFTER_CRITIQUE_MANIFEST" && "$BEFORE_CRITIQUE_BUNDLE" != "$AFTER_CRITIQUE_BUNDLE" ]] || fail "public critique attached to Flow or did not change trust.bundle"
 pass "critique requires an active assignment but rejects self-review by its implementation actor"
 CRITERION_ID="$(node -p "JSON.parse(require('fs').readFileSync('$RELEASE_SESSION/acceptance.json')).criteria[0].id")"
-TEST_COMMAND="bash checks/check-public-workflow.sh .kontourai/flow-agents/$(basename "$RELEASE_SESSION")/state.json"
+TEST_COMMAND="node --test checks/check-public-workflow.test.mjs"
 MULTI_COMMAND_ONE="$TMP/multi-command-one"
 MULTI_COMMAND_TWO="$TMP/multi-command-two"
-TEST_COMMAND_TWO="bash checks/check-multi-command.sh .kontourai/flow-agents/$(basename "$RELEASE_SESSION")/state.json '$MULTI_COMMAND_ONE'"
-TEST_COMMAND_THREE="bash checks/check-multi-command.sh .kontourai/flow-agents/$(basename "$RELEASE_SESSION")/state.json '$MULTI_COMMAND_TWO'"
+TEST_COMMAND_TWO="node --test checks/check-multi-command-one.test.mjs"
+TEST_COMMAND_THREE="node --test checks/check-multi-command-two.test.mjs"
 CRITERION_JSON="$(node - "$CRITERION_ID" "$TEST_COMMAND" "$TEST_COMMAND_TWO" "$TEST_COMMAND_THREE" <<'NODE'
 const [id, ...commands] = process.argv.slice(2);
 process.stdout.write(JSON.stringify({ id, status: 'pass', evidence_refs: commands.map((excerpt) => ({ kind: 'command', excerpt, summary: 'Asserts the bound session state exists.' })) }));

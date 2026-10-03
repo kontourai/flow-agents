@@ -38,6 +38,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
+const { execTrustedGitSync } = require('./lib/trusted-git.js');
 
 // Hash-chain primitives + the exit-code-laundering heuristic come from ONE shared
 // module, so this verifier can never drift from the writer (evidence-capture.js).
@@ -57,6 +58,7 @@ const {
 const { withFlowRecoveryFenceReadAsync } = require('./lib/flow-recovery-fence');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
 const { readCurrentPointer, readOwnCurrentPointer } = require('./lib/current-pointer.js');
+const { resolveHookWorkflowScope } = require('./lib/hook-workflow-scope.js');
 const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
 const { resolveGoalFitConfig } = require('./lib/effective-flow-agents-config.js');
 const { unstartedDeliveryWarning, UNSTARTED_DELIVERY_PATTERN } = require('./lib/unstarted-delivery.js');
@@ -887,76 +889,10 @@ function isCleanCanonicalWorkspaceSnapshot(snapshot) {
     && snapshot.worktree_clean === true;
 }
 
-function trustedWorkspaceGitEnvironment() {
-  return {
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-    GIT_NO_REPLACE_OBJECTS: '1',
-    LANG: 'C',
-    LC_ALL: 'C',
-    PATH: process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd;C:\\Windows\\System32' : '/usr/bin:/bin',
-  };
-}
-
-function trustedWorkspaceGitCandidates() {
-  if (process.platform === 'darwin') return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'];
-  if (process.platform === 'win32') return ['C:\\Program Files\\Git\\cmd\\git.exe'];
-  return ['/usr/bin/git', '/run/current-system/sw/bin/git', '/usr/local/bin/git'];
-}
-
-function resolveTrustedWorkspaceGitExecutable() {
-  for (const candidate of trustedWorkspaceGitCandidates()) {
-    try { return trustedWorkspaceGitIdentity(candidate); } catch {}
-  }
-  return null;
-}
-
-function trustedWorkspaceGitIdentity(candidate) {
-  const resolved = fs.realpathSync(candidate);
-  const stat = fs.statSync(resolved);
-  if (!path.isAbsolute(resolved) || !stat.isFile() || (process.platform !== 'win32' && (stat.mode & 0o111) === 0)) throw new Error('untrusted Git executable');
-  if (process.platform !== 'win32') {
-    if (stat.uid !== 0 || (stat.mode & 0o022) !== 0) throw new Error('untrusted Git executable ownership');
-    for (let cursor = path.dirname(resolved);;) {
-      const parent = fs.statSync(cursor);
-      if (!parent.isDirectory() || parent.uid !== 0 || (parent.mode & 0o022) !== 0) throw new Error('untrusted Git executable parent');
-      const next = path.dirname(cursor);
-      if (next === cursor) break;
-      cursor = next;
-    }
-  }
-  return { candidate, path: resolved, device: stat.dev, inode: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, mode: stat.mode };
-}
-
-function revalidateTrustedWorkspaceGit(identity) {
-  const current = trustedWorkspaceGitIdentity(identity.candidate);
-  return current.device === identity.device && current.inode === identity.inode && current.size === identity.size
-    && current.mtimeMs === identity.mtimeMs && current.mode === identity.mode;
-}
-
 function runTrustedWorkspaceGit(root, args, maxOutput) {
   try {
-    const executable = resolveTrustedWorkspaceGitExecutable();
-    if (!executable) return null;
-    const hardenedArgs = args[0] === 'diff'
-      ? ['diff', '--no-ext-diff', '--no-textconv', ...args.slice(1)]
-      : args;
-    const result = spawnSync(executable.path, [
-      '--no-replace-objects',
-      '-c', 'core.fsmonitor=false',
-      '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
-      '-c', 'diff.external=',
-      '-C', root,
-      ...hardenedArgs,
-    ], {
-      encoding: 'buffer',
-      env: trustedWorkspaceGitEnvironment(),
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: WORKSPACE_GIT_TIMEOUT_MS,
-      maxBuffer: maxOutput + 1,
-    });
-    if (!result || result.error || result.signal || result.status !== 0 || !Buffer.isBuffer(result.stdout) || result.stdout.length > maxOutput || !revalidateTrustedWorkspaceGit(executable)) return null;
-    return result.stdout;
+    const output = execTrustedGitSync(root, args, 'buffer', maxOutput + 1, WORKSPACE_GIT_TIMEOUT_MS);
+    return Buffer.isBuffer(output) && output.length <= maxOutput ? output : null;
   } catch {
     return null;
   }
@@ -2494,7 +2430,6 @@ function loadCanonicalFlowValidator() {
   const scriptsContainer = path.dirname(scriptsDir);
   const bundleRoot = path.basename(scriptsContainer) === 'context' ? path.dirname(scriptsContainer) : scriptsContainer;
   const bundledValidator = path.join(bundleRoot, 'build', 'src', 'vendor', 'flow-validator.cjs');
-  let flow;
   if (fs.existsSync(bundledValidator)) {
     const validatorStat = fs.lstatSync(bundledValidator);
     const realBundleRoot = fs.realpathSync(bundleRoot);
@@ -2503,19 +2438,96 @@ function loadCanonicalFlowValidator() {
     if (validatorStat.isSymbolicLink() || !validatorStat.isFile() || relativeValidator.startsWith(`..${path.sep}`) || relativeValidator === '..' || path.isAbsolute(relativeValidator)) {
       throw new Error('bundled Flow validator must be a regular file contained by the hook-owned bundle root');
     }
-    flow = require(bundledValidator);
-  } else {
-    const packageFile = path.join(bundleRoot, 'package.json');
-    const packageIdentity = fs.existsSync(packageFile) ? JSON.parse(fs.readFileSync(packageFile, 'utf8')) : null;
-    if (!packageIdentity || packageIdentity.name !== '@kontourai/flow-agents') {
-      throw new Error(`hook-owned bundled Flow validator is unavailable at ${bundledValidator}`);
+    const flow = require(bundledValidator);
+    if (typeof flow.definitionDigest !== 'function' || typeof flow.validateRunStateConsistency !== 'function') {
+      throw new Error('hook-owned Flow validator does not expose the required consistency API');
     }
-    flow = require('@kontourai/flow');
+    return (definition, state, runId) => {
+      const validated = flow.validateRunStateConsistency(definition, state, { runId });
+      return { ...validated, digest: flow.definitionDigest(validated.definition) };
+    };
   }
-  if (typeof flow.definitionDigest !== 'function' || typeof flow.validateRunStateConsistency !== 'function') {
-    throw new Error('hook-owned Flow validator does not expose the required consistency API');
+  const packageFile = path.join(bundleRoot, 'package.json');
+  const packageIdentity = fs.existsSync(packageFile) ? JSON.parse(fs.readFileSync(packageFile, 'utf8')) : null;
+  if (!packageIdentity || packageIdentity.name !== '@kontourai/flow-agents') {
+    throw new Error(`hook-owned bundled Flow validator is unavailable at ${bundledValidator}`);
   }
-  return flow;
+  const realPackageRoot = fs.realpathSync(bundleRoot);
+  const ownedRequire = require('node:module').createRequire(path.join(realPackageRoot, 'package.json'));
+  const flowEntry = fs.realpathSync(ownedRequire.resolve('@kontourai/flow'));
+  // npm can hoist a dependency alongside this package; pnpm puts its declared
+  // dependency links in the package's containing node_modules scope. Authorize
+  // those installed slots, never cwd or a global NODE_PATH resolution.
+  const dependencyScopes = [realPackageRoot];
+  let cursor = path.dirname(realPackageRoot);
+  for (let depth = 0; depth < 40; depth++) {
+    if (path.basename(cursor) === 'node_modules') {
+      dependencyScopes.push(path.dirname(cursor));
+      break;
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+  let flowRoot;
+  for (const scope of dependencyScopes) {
+    try {
+      flowRoot = fs.realpathSync(path.join(scope, 'node_modules', '@kontourai', 'flow'));
+      break;
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error;
+    }
+  }
+  if (!flowRoot) throw new Error('hook-owned declared Flow dependency is unavailable in its installed dependency scope');
+  const flowIdentity = JSON.parse(fs.readFileSync(path.join(flowRoot, 'package.json'), 'utf8'));
+  const entryRelative = path.relative(flowRoot, flowEntry);
+  if (flowIdentity.name !== '@kontourai/flow' || flowIdentity.version !== packageIdentity.dependencies?.['@kontourai/flow'] || entryRelative === '..'
+    || entryRelative.startsWith(`..${path.sep}`) || path.isAbsolute(entryRelative)) {
+    throw new Error('hook-owned Flow entry must resolve inside its installed published package');
+  }
+  let nativeFlow;
+  try {
+    nativeFlow = require(flowEntry);
+  } catch (error) {
+    if (!['ERR_REQUIRE_ESM', 'ERR_REQUIRE_ASYNC_MODULE'].includes(error.code)) throw error;
+  }
+  if (nativeFlow) {
+    if (typeof nativeFlow.definitionDigest !== 'function' || typeof nativeFlow.validateRunStateConsistency !== 'function') {
+      throw new Error('hook-owned Flow validator does not expose the required consistency API');
+    }
+    return (definition, state, runId) => {
+      const validated = nativeFlow.validateRunStateConsistency(definition, state, { runId });
+      return { ...validated, digest: nativeFlow.definitionDigest(validated.definition) };
+    };
+  }
+  const entryUrl = require('node:url').pathToFileURL(flowEntry).href;
+  const inputLimit = MAX_CANONICAL_FLOW_STATE_BYTES + MAX_CANONICAL_FLOW_DEFINITION_BYTES + 1024;
+  const outputLimit = 2 * (MAX_CANONICAL_FLOW_STATE_BYTES + MAX_CANONICAL_FLOW_DEFINITION_BYTES) + 8192;
+  const script = `
+    import fs from 'node:fs';
+    const flow = await import(process.argv[1]);
+    if (typeof flow.definitionDigest !== 'function' || typeof flow.validateRunStateConsistency !== 'function') throw new Error('Flow consistency API unavailable');
+    const { definition, state, runId } = JSON.parse(fs.readFileSync(0, 'utf8'));
+    const validated = flow.validateRunStateConsistency(definition, state, { runId });
+    process.stdout.write(JSON.stringify({ state: validated.state, definition: validated.definition, digest: flow.definitionDigest(validated.definition) }));
+  `;
+  // Node 22.0 cannot require the published ESM entry from this synchronous hook.
+  // The child uses the same public validator; secure parent reads remain pinned.
+  return (definition, state, runId) => {
+    const input = JSON.stringify({ definition, state, runId });
+    if (Buffer.byteLength(input, 'utf8') > inputLimit) throw new Error('canonical Flow validation input exceeds maximum size');
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('NODE_')));
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script, entryUrl], {
+      cwd: bundleRoot, env, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 5000, maxBuffer: outputLimit, killSignal: 'SIGKILL', windowsHide: true,
+    });
+    if (result.error || result.signal || result.status !== 0) throw new Error('hook-owned Flow validator could not validate canonical state');
+    const validated = JSON.parse(result.stdout);
+    if (!validated || typeof validated !== 'object' || !/^[a-f0-9]{64}$/.test(validated.digest)) {
+      throw new Error('hook-owned Flow validator returned malformed validation');
+    }
+    return validated;
+  };
 }
 
 function canonicalFlowState(root, artifactDir) {
@@ -2535,9 +2547,8 @@ function canonicalFlowState(root, artifactDir) {
     const definitionRead = readSecureCanonicalJson(path.join(runDir, 'definition.json'), 'canonical Flow definition', parents, MAX_CANONICAL_FLOW_DEFINITION_BYTES);
     const persistedState = stateRead.value;
     const startDefinition = definitionRead.value;
-    const flow = loadCanonicalFlowValidator();
-    const { definitionDigest, validateRunStateConsistency } = flow;
-    const validated = validateRunStateConsistency(startDefinition, persistedState, { runId: slug });
+    const validate = loadCanonicalFlowValidator();
+    const validated = validate(startDefinition, persistedState, slug);
     const state = validated.state;
     const definition = validated.definition;
     if (!state || typeof state !== 'object' || Array.isArray(state)
@@ -2555,7 +2566,7 @@ function canonicalFlowState(root, artifactDir) {
       || definition.steps.some(step => !step || typeof step !== 'object' || Array.isArray(step) || typeof step.id !== 'string' || !step.id)) {
       return { state: null, definition: null, error: 'canonical Flow definition is malformed' };
     }
-    const digest = definitionDigest(definition);
+    const digest = validated.digest;
     if (state.definition_id !== definition.id || state.definition_version !== definition.version) {
       return { state: null, definition: null, error: 'canonical Flow effective definition id or version does not match state' };
     }
@@ -2629,13 +2640,20 @@ function validatedActiveTurnScope(root) {
     const runId = process.env.FLOW_AGENTS_CONTINUATION_RUN_ID;
     const turnSecret = process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET;
     if (typeof runId !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(runId) || typeof turnSecret !== 'string' || !turnSecret) return null;
-    const artifactRoot = path.resolve(flowAgentsArtifactRoot(root));
-    const candidate = path.resolve(artifactRoot, runId);
-    if (path.dirname(candidate) !== artifactRoot) return null;
-    const base = validateSignedActiveTurnAssignmentAuthority({ sessionDir: candidate, runId, turnSecret });
-    if (!base.valid) return null;
-    const canonicalFlow = canonicalFlowState(root, candidate);
-    return { artifactDir: candidate, canonicalFlow, baseAuthority: base };
+    const artifactRoots = [...new Set([
+      path.join(path.resolve(root), '.kontourai', 'flow-agents'),
+      path.resolve(flowAgentsArtifactRoot(root)),
+    ])];
+    for (const artifactRoot of artifactRoots) {
+      const candidate = path.resolve(artifactRoot, runId);
+      if (path.dirname(candidate) !== artifactRoot) continue;
+      const base = validateSignedActiveTurnAssignmentAuthority({ sessionDir: candidate, runId, turnSecret });
+      if (!base.valid) continue;
+      const projectRoot = path.dirname(path.dirname(artifactRoot));
+      const canonicalFlow = canonicalFlowState(projectRoot, candidate);
+      return { artifactDir: candidate, projectRoot, canonicalFlow, baseAuthority: base };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -2858,12 +2876,25 @@ function learningGateOutstandingWarning(root, artifactDir, state) {
 }
 
 async function analyze(root, now = Date.now(), fencedRunId = null, workspaceRoot = root) {
-  const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
+  // A validated signed adapter turn owns its exact session independently of
+  // ordinary actor routing, which may be stale or retired during continuation.
+  const activeTurnScope = validatedActiveTurnScope(root) || (workspaceRoot !== root ? validatedActiveTurnScope(workspaceRoot) : null);
+  const hookScope = activeTurnScope ? { status: 'none' } : resolveHookWorkflowScope(workspaceRoot);
+  if (['invalid', 'ambiguous'].includes(hookScope.status)) {
+    return {
+      warnings: [`workflow state: workflow binding is ${hookScope.status}: ${safeOneLine(hookScope.reason, 500)}. Resolve the selected workflow binding before stopping.`],
+      blocking: true, activeFlowRun: true, latestArtifactDir: null, gatePrefix: '[stop-gate]',
+    };
+  }
+  if (hookScope.status === 'retired') return { warnings: [], blocking: false, activeFlowRun: false, latestArtifactDir: null };
+  if (activeTurnScope) root = activeTurnScope.projectRoot;
+  else if (hookScope.status === 'bound') root = hookScope.projectRoot;
+  const flowAgentsDirs = activeTurnScope ? [path.dirname(activeTurnScope.artifactDir)]
+    : hookScope.status === 'bound' ? [hookScope.artifactRoot] : flowAgentsArtifactRootsForRead(root);
   const { actor: actorKey } = resolveActor(process.env);
-  const activeTurnScope = validatedActiveTurnScope(root);
   // Scope to the session's current task when current.json names one, so an
   // unrelated active workflow elsewhere in the repo does not gate this stop.
-  const scoped = activeTurnScope?.artifactDir || flowAgentsDirs.map(preferredArtifactDir).find(Boolean);
+  const scoped = activeTurnScope?.artifactDir || hookScope.artifactDir || flowAgentsDirs.map(preferredArtifactDir).find(Boolean);
 
   // #440 D1/D2: a RESOLVED actor with no scoped own artifactDir (no per-actor pointer, or an
   // own pointer naming a nonexistent dir) never falls back to the legacy current.json or a
@@ -3593,7 +3624,11 @@ function recordStopGateSummary(root, result) {
 async function run(rawInput) {
   const input = parseJson(rawInput);
   const inputCwd = input.cwd || process.cwd();
-  const root = findRepoRoot(inputCwd);
+  const ordinaryRoot = findRepoRoot(inputCwd);
+  const activeTurnScope = validatedActiveTurnScope(ordinaryRoot) || validatedActiveTurnScope(inputCwd);
+  const hookScope = activeTurnScope ? { status: 'none' } : resolveHookWorkflowScope(inputCwd);
+  const root = activeTurnScope ? activeTurnScope.projectRoot
+    : hookScope.projectRoot || ordinaryRoot;
   // A non-Git invocation still runs any configured backstop in its supplied
   // working directory, but canonical observation remains unavailable and so
   // cannot confirm the claim.
@@ -3769,4 +3804,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { STOP_CONTROL_PREFIX, analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning, currentCanonicalWorkspaceSnapshot, resolveObservedWorkspaceRoot, resolveTrustedWorkspaceGitExecutable };
+module.exports = { STOP_CONTROL_PREFIX, analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning, currentCanonicalWorkspaceSnapshot, resolveObservedWorkspaceRoot };

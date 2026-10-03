@@ -37,12 +37,12 @@ test("reference coordinator pins the published Flow reducer identity rather than
   const pin = JSON.parse(fs.readFileSync(new URL("../../packaging/lifecycle-authority/flow-reducer-v1.json", import.meta.url), "utf8"));
   assert.deepEqual(pin, {
     package: "@kontourai/flow",
-    package_version: "5.0.0",
-    release_commit: "99f139b",
-    closure_sha256: "fc514563c79e01ef9087e1e5650c8d10892faa6b5b2fd342a9e5c14d7f838e69",
+    package_version: "5.1.3",
+    release_commit: "947e5cc96d0253b5273ce5f7e3bc012126d1ba3d",
+    closure_sha256: "72742504e44e9ce6969eee6a42167c6eeaa1dfee213ec1487ca36f3c8fdceda5",
     reducer: {
       artifact_id: "kontourai.flow.trust-attachment-reducer",
-      version: "1.3.7",
+      version: "1.3.8",
       dependency_versions: { hachure: "0.15.0", surface: "2.14.0" },
       dependency_integrities: {
         hachure: { validate: "sha256:596c2a02b6e60e52ad4378a97c40b1d84d217dfc203a7a3beb7cfe732c68951d" },
@@ -52,7 +52,7 @@ test("reference coordinator pins the published Flow reducer identity rather than
           checkAuthorityActive: "sha256:a178202300849b421527fb0972d2fc2b98b0340fb9332578556e206046e49b04",
         },
       },
-      hash: "sha256:66979295847695639e21a8d563544c2f03a5107616712ddabab748db0f3ea97d",
+      hash: "sha256:b0228f202175faaee18f8ae71bccf6602b281740c52d9e5abcf3eed94a8bd8fd",
     },
   });
 });

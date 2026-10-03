@@ -20,7 +20,7 @@ fi
 
 node scripts/build-test-support.mjs
 
-if node --test src/cli/*.test.mjs; then
+if node --test --import ./src/cli/unit-test-state.mjs src/cli/*.test.mjs; then
   echo "  PASS: workflow-sidecar pure-helper unit tests"
 else
   echo "  FAIL: workflow-sidecar pure-helper unit tests"

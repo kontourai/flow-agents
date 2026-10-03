@@ -40,6 +40,9 @@ minimumReleaseAgeExclude:
   # Exact internal release built from merged Conduit PRs #30 and #32; the
   # provider-backed publish receipt is verified before this consumer lands.
   - '@kontourai/conduit@0.7.1'
+  # Exact Flow budget repair from merged PR #262 and release PR #263; registry
+  # gitHead, tarball integrity and tag-bound publish provenance verified before adoption.
+  - '@kontourai/flow@5.1.3'
 
 # mise supplies node and pnpm on developer machines; CI installs the exact
 # version pinned in package.json. Do not reject a same-major pnpm from mise.

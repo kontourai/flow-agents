@@ -167,8 +167,107 @@
           "uniqueItems": true
         },
         "command": {
+          "description": "Compatibility alias of sync_command; observes canonical state and does not execute producer skills or submit evidence.",
           "type": "string",
           "minLength": 1
+        },
+        "command_role": {
+          "const": "synchronization"
+        },
+        "sync_command": {
+          "description": "Version-pinned public status command derived from the canonical gate-action envelope.",
+          "type": "string",
+          "minLength": 1
+        },
+        "executor": {
+          "description": "The agent owns orchestration; starting a run does not establish an external worker.",
+          "const": "agent"
+        },
+        "execution_action": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["executor", "skills", "operations", "artifact_targets", "sequence"],
+          "properties": {
+            "executor": { "const": "agent" },
+            "skills": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "package", "path", "sha256"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "package": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "version"],
+                    "properties": {
+                      "name": { "const": "@kontourai/flow-agents" },
+                      "version": { "type": "string", "minLength": 1 }
+                    }
+                  },
+                  "path": { "type": "string", "minLength": 1 },
+                  "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+                }
+              }
+            },
+            "operations": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "uniqueItems": true
+            },
+            "artifact_targets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["kind", "ref", "direct_write_allowed"],
+                "properties": {
+                  "kind": { "enum": ["file", "trust_slice"] },
+                  "ref": { "type": "string", "minLength": 1 },
+                  "direct_write_allowed": { "type": "boolean" }
+                }
+              }
+            },
+            "sequence": {
+              "description": "Ordered producer, recording and synchronization sequence projected from the canonical stop condition.",
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "evidence_submission": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mutations", "schemas", "unresolved_expectation_ids", "adapter_evidence_is_gate_evidence"],
+          "properties": {
+            "schemas": {
+              "description": "Schema definitions referenced by the canonical public mutation parameter metadata.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["evidence_ref_json"],
+              "properties": {
+                "evidence_ref_json": { "type": "object" }
+              }
+            },
+            "mutations": {
+              "description": "Canonical public mutation bindings, including their parameters and operation authority.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["expectation_id", "interface"],
+                "properties": {
+                  "expectation_id": { "type": "string", "minLength": 1 },
+                  "interface": { "enum": ["workflow.evidence", "workflow.critique", "operation"] }
+                }
+              }
+            },
+            "unresolved_expectation_ids": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "uniqueItems": true
+            },
+            "adapter_evidence_is_gate_evidence": { "const": false }
+          }
         },
         "enforcement": {
           "description": "Deprecated compatibility field. Runtime steering ignores this value; session orchestration owns Builder Flow startup.",

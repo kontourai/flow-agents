@@ -34,11 +34,11 @@ export function deriveWorkflowOutcome(
   };
 }
 
-export function verificationStatusFromFlowGateOutcomes(value: unknown): WorkflowVerificationStatus {
+export function verificationStatusFromFlowGateOutcomes(value: unknown, verificationGateIds: readonly string[] = ["verify-gate"]): WorkflowVerificationStatus {
   if (!Array.isArray(value)) return "NOT_VERIFIED";
   for (let index = value.length - 1; index >= 0; index -= 1) {
     const outcome = value[index];
-    if (!isRecord(outcome) || outcome.gate_id !== "verify-gate") continue;
+    if (!isRecord(outcome) || !verificationGateIds.includes(String(outcome.gate_id))) continue;
     if (outcome.status === "pass") return "PASS";
     if (outcome.status === "route-back") return "FAIL";
     return "NOT_VERIFIED";

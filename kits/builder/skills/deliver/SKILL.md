@@ -19,10 +19,11 @@ the `tdd-workflow` `builder.build` profile instead.
 `review-work` -> `verify-work`, followed by the applicable publish and learning
 activities.
 
-It does not reproduce those primitives' detailed procedure, write source code,
-or own **any step-gate evidence**. Each primitive produces and records the
-evidence for its own step. `deliver` consumes their results only to select the
-next primitive or surface a blocker.
+It does not reproduce those primitives' detailed procedure or own **any
+step-gate evidence**. The orchestrating agent executes each primitive or
+delegates its execution, ensures its artifacts and evidence are produced and
+recorded, and consumes its results to select the next primitive or surface a
+blocker. Starting a run creates governed state; it does not launch a worker.
 
 ## Model Routing
 
@@ -68,8 +69,15 @@ flow-agents workflow start --flow builder.build --work-item <provider-ref> \
 
 Use `flow-agents workflow status --session-dir <session-dir> --json` to inspect
 an existing canonical run. For an interrupted active run, follow the returned
-`next_action` and use its exact idempotent command. Use `flow-agents workflow
-resume --session-dir <session-dir> --reason "Continue the bound Work Item"` only
+`next_action.execution_action` and its version-bound skill sources. Its
+`evidence_submission` identifies the public mutations and unresolved evidence
+expectations. Use the exact idempotent command returned in `sync_command` to
+observe canonical status after evidence submission;
+the legacy `command` field is the same synchronization command, identified by
+`command_role: synchronization`. Neither command executes the skills or
+produces or submits their evidence. The evidence mutation records and
+synchronizes evidence; status observes the resulting canonical state. Use
+`flow-agents workflow resume --session-dir <session-dir> --reason "Continue the bound Work Item"` only
 for an existing paused run. Use no private workflow interface, internal writer,
 or caller-selected run/step recovery command.
 
@@ -81,6 +89,16 @@ selected.
 
 ## Orchestration Rules
 
+- For every actionable step, activate and execute the required skill, produce
+  its declared artifacts, submit evidence through the bound public interfaces,
+  run `sync_command`, inspect the resulting next action, and continue. Follow
+  the canonical gate-action envelope's sequence and stop condition for each
+  delegated turn; returning that turn's result returns responsibility to the
+  orchestrator, not to an unstarted external worker.
+- A `continue` action requires further orchestration. Do not end with a promise
+  to continue or wait for a notification unless a real running external task
+  and its completion mechanism have been established. A blocked external
+  capability requires its declared executor or a concrete blocker report.
 - Delegate planning, implementation, review, and verification to their named
   primitives. Keep model routing and worker parallelism in those primitives;
   this entrypoint sets neither a worker count nor a coverage threshold.
@@ -108,6 +126,12 @@ Work Item, actual changed scope, criterion verdicts, critique, and Flow status.
 Do not describe delivery as complete while required behavior, evidence, or
 follow-up remains unresolved. Route eligible outcomes into publish/readiness and
 learning through their owning Builder skills.
+Canonical Flow completion reports completion of the selected process. A code
+run with verified behavior remains `verified` until the actual delivery work is
+observed; it does not establish registry publication, installation, or the
+original user goal's downstream outcomes. List any remaining milestones and
+continue authorized work from the real provider state. Do not close the overall
+goal merely because this producer run reports `done`.
 
 After learning completes, follow `learning-review`'s Repository-adapter
 closeout. Keep the worktree while its change is open or needs review fixes.

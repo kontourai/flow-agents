@@ -14,6 +14,12 @@ report-only: verifiers may inspect, test, and write evidence artifacts, but do
 not patch source files or apply autofixes.
 
 Critique belongs to `review-work`; behavior proof belongs here.
+The canonical writer records verification results. Do not duplicate its
+criterion ledger or rerun unchanged checks to refresh a narrative report.
+When a human-readable addendum adds value, place observations in the owned
+execution report's final `## Verification Evidence` appendix. Preserve its
+execution controls and planning records; the existing review remains applicable
+when only that informational appendix changes.
 
 ## Binding
 

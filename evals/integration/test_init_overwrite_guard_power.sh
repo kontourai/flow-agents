@@ -95,7 +95,7 @@ build() { (cd "$WT" && npm run build --silent) >/dev/null 2>&1; }
 
 # run_guard_test <name-pattern>; captures output, returns node --test's exit code.
 run_guard_test() {
-  (cd "$WT" && node --test --test-name-pattern "$1" src/cli/init-overwrite-guard.test.mjs) >/tmp/guard-power-run.log 2>&1
+  (cd "$WT" && node --test --import "$ROOT_DIR/src/cli/unit-test-state.mjs" --test-name-pattern "$1" src/cli/init-overwrite-guard.test.mjs) >/tmp/guard-power-run.log 2>&1
 }
 
 # expect_red <label> <name-pattern> <assertion-signature>

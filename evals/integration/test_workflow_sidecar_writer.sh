@@ -3981,10 +3981,27 @@ MULTI_ROOT="$MULTI_PROJECT/.kontourai/flow-agents"
 MULTI_SLUG="multi-observed"
 MULTI_DIR="$MULTI_ROOT/$MULTI_SLUG"
 mkdir -p "$MULTI_ROOT" "$MULTI_PROJECT/checks" "$MULTI_PROJECT/test"
-printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - fixture exists\\n"\n' > "$MULTI_PROJECT/checks/test-one.sh"
-printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - fixture exists\\n"\n' > "$MULTI_PROJECT/checks/test-two.sh"
-chmod +x "$MULTI_PROJECT/checks/test-one.sh" "$MULTI_PROJECT/checks/test-two.sh"
-printf 'import test from "node:test";\nimport assert from "node:assert/strict";\ntest("fixture", () => assert.equal(1, 1));\n' > "$MULTI_PROJECT/test/sample.test.mjs"
+for marker in one two; do
+  cat > "$MULTI_PROJECT/checks/test-$marker.test.mjs" <<NODE
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+test('bound session state exists for $marker command', () => {
+  assert.ok(fs.statSync('.kontourai/flow-agents/multi-observed/state.json').isFile());
+  fs.appendFileSync('../multi-command-$marker.started', 'run\n');
+});
+NODE
+done
+cat > "$MULTI_PROJECT/test/sample.test.mjs" <<'NODE'
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+test('bound session state exists', () => {
+  assert.ok(fs.statSync('.kontourai/flow-agents/multi-observed/state.json').isFile());
+});
+NODE
 cat > "$MULTI_PROJECT/package.json" <<'JSON'
 {"scripts":{"test":"true","check":"echo check"}}
 JSON
@@ -4008,8 +4025,8 @@ else
   _fail "tests-evidence fixture critique failed: $(cat "$TMPDIR_EVAL/multi-critique.out" "$TMPDIR_EVAL/multi-critique.err")"
 fi
 
-MULTI_ONE="bash checks/test-one.sh test/sample.test.mjs"
-MULTI_TWO="bash checks/test-two.sh test/sample.test.mjs"
+MULTI_ONE="node --test checks/test-one.test.mjs"
+MULTI_TWO="node --test checks/test-two.test.mjs"
 MULTI_REF_ONE="{\"kind\":\"command\",\"excerpt\":\"$MULTI_ONE\",\"summary\":\"First exact command.\"}"
 MULTI_REF_TWO="{\"kind\":\"command\",\"excerpt\":\"$MULTI_TWO\",\"summary\":\"Second exact command.\"}"
 
@@ -4168,8 +4185,10 @@ else
   _pass "tests-evidence rejects unknown criterion fields"
 fi
 
-# A zero exit while the observation sees untracked content is explicitly non-confirming.
-# The writer must refuse the requested pass instead of re-snapshotting after this command.
+# Untracked content invalidates the clean critique before any verification command starts.
+MULTI_ONE_MARKER="$TMPDIR_EVAL/multi-command-one.started"
+MULTI_TWO_MARKER="$TMPDIR_EVAL/multi-command-two.started"
+rm -f "$MULTI_ONE_MARKER" "$MULTI_TWO_MARKER"
 touch "$MULTI_PROJECT/dirty-provenance"
 if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
   --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Dirty provenance must not confirm." \
@@ -4178,8 +4197,10 @@ if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
   --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
   >"$TMPDIR_EVAL/multi-dirty.out" 2>"$TMPDIR_EVAL/multi-dirty.err"; then
   _fail "tests-evidence accepted a requested pass from a dirty observed workspace"
-elif rg -q 'captured clean Git provenance' "$TMPDIR_EVAL/multi-dirty.out" "$TMPDIR_EVAL/multi-dirty.err"; then
-  _pass "tests-evidence refuses a requested pass from a dirty observed workspace"
+elif rg -q 'requires a current clean critique first' "$TMPDIR_EVAL/multi-dirty.out" "$TMPDIR_EVAL/multi-dirty.err" \
+  && rg -q 'critique predates the current workspace state' "$TMPDIR_EVAL/multi-dirty.out" "$TMPDIR_EVAL/multi-dirty.err" \
+  && [[ ! -e "$MULTI_ONE_MARKER" ]]; then
+  _pass "tests-evidence refuses a dirty workspace at clean-critique preflight before launching its command"
 else
   _fail "tests-evidence dirty-provenance refusal was unclear: $(cat "$TMPDIR_EVAL/multi-dirty.out" "$TMPDIR_EVAL/multi-dirty.err")"
 fi
@@ -4207,7 +4228,9 @@ if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
   --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
   --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_TWO]}" \
   --timestamp "2026-07-11T11:00:30Z" >"$TMPDIR_EVAL/multi-pass.out" 2>"$TMPDIR_EVAL/multi-pass.err"; then
-  if node - "$MULTI_DIR/acceptance.json" "$MULTI_DIR/trust.bundle" <<'NODE'
+  if [[ -f "$MULTI_ONE_MARKER" && -f "$MULTI_TWO_MARKER" ]] \
+    && [[ "$(wc -l < "$MULTI_ONE_MARKER" | tr -d ' ')" == 1 && "$(wc -l < "$MULTI_TWO_MARKER" | tr -d ' ')" == 1 ]] \
+    && node - "$MULTI_DIR/acceptance.json" "$MULTI_DIR/trust.bundle" <<'NODE'
 const fs = require('node:fs');
 const [acceptanceFile, bundleFile] = process.argv.slice(2);
 const acceptance = JSON.parse(fs.readFileSync(acceptanceFile, 'utf8'));
@@ -4949,6 +4972,8 @@ UNRESOLVABLE_SLUG="unresolvable-270"
 UNRESOLVABLE_DIR="$UNRESOLVABLE_ROOT/$UNRESOLVABLE_SLUG"
 mkdir -p "$UNRESOLVABLE_ROOT"
 mkdir -p "$UNRESOLVABLE_DIR"
+mkdir -p "$TMPDIR_EVAL/unresolvable-project/src"
+printf 'export const workItem = "unresolvable:270";\n' > "$TMPDIR_EVAL/unresolvable-project/src/work-item.mjs"
 printf '%s\n' "# Pull Work Report" "" "Selected Work Item: unresolvable:270" > "$UNRESOLVABLE_DIR/${UNRESOLVABLE_SLUG}--pull-work.md"
 
 FLOW_AGENTS_ACTOR=unresolvable-actor node "$ROOT/build/src/cli.js" workflow start \
@@ -5001,6 +5026,7 @@ if flow_agents_node "$WRITER" record-critique "$UNRESOLVABLE_DIR" \
   --verdict pass \
   --summary "Rebuild attempt against an unresolvable FlowDefinition" \
   --artifact-ref "$(canonical_review_target "$UNRESOLVABLE_DIR")" \
+  --artifact-ref "src/work-item.mjs" \
   --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-07-05T09:17:30Z" >"$TMPDIR_EVAL/unresolvable-critique.out" 2>"$TMPDIR_EVAL/unresolvable-critique.err"; then
   _pass "#270 MEDIUM: record-critique ignores poisoned navigation pointers and validates stamped claims against the exact session FlowDefinition"
