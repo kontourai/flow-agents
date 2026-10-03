@@ -148,15 +148,28 @@ test("GitHub adapter truthfully recovers a matching merged PR without creating a
   assert.deepEqual(list.argv.slice(list.argv.indexOf("--state"), list.argv.indexOf("--state") + 2), ["--state", "all"]);
 });
 
-test("GitHub adapter creates once with direct argv and verifies through a fresh bounded observation", async () => {
-  const fake = fakeExecutor([...prefix(), [], "https://github.com/kontourai/flow-agents/pull/610\n", [listRecord({ isDraft: true })], providerRecord({ draft: true }), ...finalPrefix()]);
-  await provider(fake).createOrRecover(request({ intent: { draft: true } }));
+test("GitHub adapter creates once with direct argv and verifies exact canonical body bytes through a fresh observation", async (t) => {
+  for (const [label, body, observedBody] of [
+    ["ordinary", "Closes #604", "Closes #604"],
+    ["trailing LF", "Closes #604\n", "Closes #604\n"],
+    ["leading LF", "\nCloses #604", "\nCloses #604"],
+    ["empty", "", ""],
+    ["empty REST null", "", null],
+  ]) {
+    await t.test(label, async () => {
+      const fake = fakeExecutor([...prefix(), [], "https://github.com/kontourai/flow-agents/pull/610\n", [listRecord({ body, isDraft: true })], providerRecord({ body: observedBody, draft: true }), ...finalPrefix()]);
+      const result = await provider(fake).createOrRecover(request({ intent: { body, draft: true } }));
 
-  const create = fake.calls[5];
-  assert.deepEqual(create.argv.slice(0, 2), ["pr", "create"]);
-  assert.equal(create.argv.includes("--draft"), true);
-  assert.equal(create.argv.includes("kontourai/flow-agents"), true);
-  assert.equal(create.argv.includes("bash"), false);
+      const create = fake.calls[5];
+      assert.deepEqual(create.argv.slice(0, 2), ["pr", "create"]);
+      assert.equal(create.argv[create.argv.indexOf("--body") + 1], body);
+      assert.equal(fake.calls.filter((call) => call.argv[0] === "pr" && call.argv[1] === "create").length, 1);
+      assert.equal(create.argv.includes("--draft"), true);
+      assert.equal(create.argv.includes("kontourai/flow-agents"), true);
+      assert.equal(create.argv.includes("bash"), false);
+      assert.equal(result.change_ref.number, 610);
+    });
+  }
 });
 
 test("GitHub adapter re-observes after an ambiguous create timeout without a second create", async () => {
@@ -191,6 +204,13 @@ test("GitHub adapter rejects ambiguity, stale SHA, wrong observations, and malfo
     ["wrong-repository", [...prefix(), [listRecord()], providerRecord({ base: { repo: { full_name: "other/repo" } } }), ...finalPrefix()], "provider_observation_mismatch"],
     ["wrong-title", [...prefix(), [listRecord({ title: "different intent" })]], "provider_observation_mismatch"],
     ["wrong-body", [...prefix(), [listRecord({ body: "different intent" })]], "provider_observation_mismatch"],
+    ["changed-final-body", [...prefix(), [listRecord()], providerRecord({ body: "Closes #604\n" }), ...finalPrefix()], "provider_observation_mismatch"],
+    ["final-body-null-mismatch", [...prefix(), [listRecord()], providerRecord({ body: null }), ...finalPrefix()], "provider_observation_mismatch"],
+    ["final-body-missing", [...prefix(), [listRecord()], providerRecord({ body: undefined }), ...finalPrefix()], "provider_observation_mismatch"],
+    ["final-body-nonstring", [...prefix(), [listRecord()], providerRecord({ body: 42 }), ...finalPrefix()], "provider_observation_mismatch"],
+    ["final-body-CR", [...prefix(), [listRecord()], providerRecord({ body: "Closes #604\r\n" }), ...finalPrefix()], "provider_observation_mismatch"],
+    ["final-body-NUL", [...prefix(), [listRecord()], providerRecord({ body: "Closes #604\0" }), ...finalPrefix()], "provider_observation_mismatch"],
+    ["final-body-oversize", [...prefix(), [listRecord()], providerRecord({ body: "é".repeat(32_769) }), ...finalPrefix()], "provider_observation_mismatch"],
     ["wrong-draft", [...prefix(), [listRecord({ isDraft: true })]], "provider_observation_mismatch"],
     ["malformed", [...prefix(), "not-json"], "malformed_provider_output"],
   ]) {
