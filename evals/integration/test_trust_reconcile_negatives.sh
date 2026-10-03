@@ -832,12 +832,12 @@ if [[ "$out7v" == *"--- captured stdout ---"* && "$out7v" == *"CI_STDOUT_FAILURE
 else
   _fail "push-event-failing-verify: failed verifier stdout was lost -- output: $out7v"
 fi
-if echo "$out7v" | grep -qF "verification failed in CI"; then
+if [[ "$out7v" == *"verification failed in CI"* ]]; then
   _pass "push-event-failing-verify: emitted 'verification failed in CI' (Step 1 failure, unaffected by event scoping)"
 else
   _fail "push-event-failing-verify: expected 'verification failed in CI' -- output: $out7v"
 fi
-if echo "$out7v" | grep -qF "push event:"; then
+if [[ "$out7v" == *"push event:"* ]]; then
   _pass "push-event-failing-verify: still emits the push-event Step-2 no-op line even though the overall run fails on Step 1 (the two are independent)"
 else
   _fail "push-event-failing-verify: expected the push-event no-op line -- output: $out7v"
