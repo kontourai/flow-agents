@@ -177,7 +177,23 @@ and one or more substantive commands that were actually run. Repeat `--command`
 when criteria require different checks. Every command needs a matching
 top-level command reference, and every passing criterion must cite at least one
 of those exact commands. A passing observation must also report a positive executed-test or
-assertion count; a successful zero-test run is rejected. Do not use placeholders such as `true`
+assertion count; a successful zero-test run is rejected. Predictable payload, current-review,
+result-protocol and publication-command incompatibilities are checked before execution and
+revalidated afterward. Bounded diagnostics retain the final stdout result independently of
+late stderr; output hashes cover all bytes. A watchdog termination is non-confirming even if
+the terminated child exits zero. A supported framework must terminate its package-script
+chain; trailing summary printers and post-script lifecycle hooks cannot supply its proof.
+Node supports its built-in default, spec and TAP reporters. Project-local regular preloads
+remain inside the reviewed source boundary; arbitrary outside preloads or reporters do not.
+Repository test code and the host runner remain the local trust boundary; these counts are
+execution evidence, not cryptographic proof of assertion quality.
+
+For a committed manifest command that directly delegates to a local Node coordinator,
+Flow Agents also supports committed v3 verification receipts. Admission uses the producer's
+current public `explain <lane>` request and its exact canonical receipt path and commit sidecar.
+Both freshly executed and reused summaries must match the current source, request, environment,
+toolchain, provenance, artifact digests, cleanup and positive counts. Missing, stale, failed or
+incompatible receipts remain non-confirming. Do not use placeholders such as `true`
 or a version command as behavior proof:
 
 ```bash
@@ -374,7 +390,11 @@ verdict and at least one substantive `--lane-json`. Passing critiques additional
 require local reviewed `--artifact-ref` values and every lane to pass; reviewed
 files and the workspace snapshot are
 hashed into the stored review target so later implementation changes invalidate
-stale clean critiques.
+stale clean critiques. The writer captures the workflow-owned execution report as immutable
+historical context and always includes its controls. Verification notes may grow only in its
+single final `## Verification Evidence` appendix without another source review. Source files,
+unowned reports, the execution prefix, accepted plan, criterion identity and live scope claims
+remain review subjects. Ambiguous markers and malformed role metadata fail closed.
 
 Current local runtime actor IDs provide coordination-level separation, not a
 cryptographic identity guarantee. A policy that requires externally attested

@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { pinnedFlowAgentsCommand } from "./lib/pinned-cli-command.js";
-import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapshot, type GateActionEnvelope, type GateActionProgressSnapshot } from "./builder-gate-action-envelope.js";
+import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapshot, installedBuilderImplementationAllowed, type GateActionEnvelope, type GateActionProgressSnapshot } from "./builder-gate-action-envelope.js";
 import {
   evaluateGate,
   expectationsForGate,
@@ -18,6 +18,7 @@ import {
 } from "@kontourai/flow";
 import { buildUnsignedLifecycleAuthorization, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { captureReviewWorkspaceSnapshot, isGitWorktreeSnapshot } from "./lib/review-workspace-snapshot.js";
+import { assertReviewArtifactRole, ReviewControlDriftError } from "./lib/review-context.js";
 export { captureReviewWorkspaceSnapshot } from "./lib/review-workspace-snapshot.js";
 import { invokeExternalLifecycleAuthority, lifecycleAuthorityCompletionBindsExactState, verifyLifecycleAuthorityCompletion, type ExternalLifecycleMutationResult } from "./external-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, readLocalRecord, resolveCurrentAssignmentActor, withSubjectLockAsync, type ActorStruct } from "./cli/assignment-provider.js";
@@ -2296,6 +2297,11 @@ function reviewedWorkspaceFiles(snapshot: AnyRecord): Array<{ file: string; sha2
 }
 
 async function assertReviewedArtifactDigest(artifact: AnyRecord, projectRoot: string): Promise<void> {
+  try { assertReviewArtifactRole(projectRoot, artifact); }
+  catch (error) {
+    if (error instanceof ReviewControlDriftError) throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.sha256", error.message);
+    throw error;
+  }
   const canonicalArtifact = safeReviewedArtifactPath(projectRoot, artifact.file);
   if (createHash("sha256").update(fs.readFileSync(canonicalArtifact)).digest("hex") !== artifact.sha256) {
     throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.sha256", `does not match ${artifact.file}`);
@@ -2452,7 +2458,7 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
     ? ` Route-back history: attempt ${routeBack.attempt ?? "n/a"}${routeBack.max_attempts ? `/${routeBack.max_attempts}` : ""} returned to \`${routeBack.route_back_to ?? "an earlier step"}\`${routeBack.route_reason ? ` for \`${routeBack.route_reason}\`` : ""}.`
     : "";
   const nextAction = complete
-    ? { status: "done", summary: "Canonical Flow run is complete." }
+    ? { status: "done", summary: "The selected Flow process is complete. Reconcile any remaining publication or consumer obligations from the user goal before reporting full delivery." }
     : canceled
       ? { status: "done", summary: "Canonical Flow run was canceled by an authorized external request. Artifacts are retained until separately archived." }
       : paused
@@ -2478,14 +2484,22 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
         ...execution,
       };
   const phase = phaseForStep(definition.phase_map, run.state.current_step) ?? sidecar.phase;
-  const verificationStatus = verificationStatusFromFlowGateOutcomes(run.state.gate_outcomes);
+  const verificationGateIds = Object.entries(definition.gates ?? {}).filter(([, gate]) =>
+    (expectationsForGate(gate, run.config) as FlowExpectation[]).some(expectation => expectation.id === "tests-evidence" && expectation.required))
+    .map(([id]) => id);
+  let verificationStatus = verificationStatusFromFlowGateOutcomes(run.state.gate_outcomes, verificationGateIds);
+  const codeProducing = complete && installedBuilderImplementationAllowed(run.definitionId, undefined, context.projectRoot);
+  if (codeProducing && verificationStatus === "PASS") {
+    try { assertTerminalDeliveryWorkspaceEvidenceWithAuthorityVerifier(context.sessionDir, context.projectRoot, context.slug, verifyProvisionalDeliveryLifecycleCompletion); }
+    catch { verificationStatus = "NOT_VERIFIED"; }
+  }
   return { gateActionEnvelope: envelope, progressSnapshot, projection: {
     ...sidecar,
     run_correlation: run.correlation.status === "present"
       ? run.correlation.envelope
       : { status: "incomplete", reason: run.correlation.reason },
     workflow_outcome: deriveWorkflowOutcome(run.state.status, verificationStatus),
-    status: complete ? "delivered" : canceled ? "canceled" : failed ? "failed" : (paused || needsDecision) ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
+    status: complete ? (codeProducing ? (verificationStatus === "PASS" ? "verified" : "not_verified") : "delivered") : canceled ? "canceled" : failed ? "failed" : (paused || needsDecision) ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
     phase: complete || canceled || failed ? "done" : phase,
     updated_at: run.state.updated_at,
     flow_run: {

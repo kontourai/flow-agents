@@ -119,12 +119,25 @@ credential and the runtime cannot provide one, record reviewer identity as
 `NOT_VERIFIED`; do not describe the review as independently authenticated.
 
 Every critique needs at least one substantive `--lane-json`. A passing critique
-also needs existing local `--artifact-ref` values for the delivery report and
-reviewed changed files. The writer hashes those files and captures the current
-workspace snapshot in `review_target`. Git repositories bind the review to
-`HEAD`, the tracked diff, and untracked file bytes; non-Git repositories bind it
-to the explicitly reviewed files. A later implementation change makes the
-critique stale rather than silently clean.
+also needs existing local `--artifact-ref` values for the execution report and
+reviewed changed files. The public writer captures the owned execution report
+as immutable historical `review_context` automatically. It separately anchors
+the execution controls, complete plan, accepted criterion identity, and live
+plan/scope claims. Source and control references remain `review_subject`;
+legacy untyped references keep their strict subject semantics.
+
+Optional later observations belong under one final `## Verification Evidence`
+appendix in the execution report. That informational appendix can grow without
+another review of unchanged implementation. It cannot redefine scope, DoD, or
+criteria, contain new control headings, or duplicate the appendix marker.
+Markers inside fenced examples are ordinary content. Ambiguous reports retain
+strict subject hashing. The writer owns capture; no manual freeze or extra
+artifact operation is required.
+
+Git repositories still bind review to exact `HEAD`, tracked diff, and untracked
+file bytes. Non-Git reviews need explicit implementation subjects. Changes to
+source, execution controls, plan, criteria, scope claims, or captured historical
+context invalidate the review. A report-only verification appendix does not.
 
 For standalone use, return the same report to the caller without creating a
 workflow record.

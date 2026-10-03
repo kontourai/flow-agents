@@ -29,6 +29,7 @@ import { isCanonicalRunFlowId } from "../builder-flow-run-adapter.js";
 import { resolveKitFlowBinding, resolveKitGateProducer, kitFlowIdParts, kitFlowSourceRoots } from "../lib/kit-flow-binding.js";
 import { flowAdmissionRefusal } from "../lib/flow-admission.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
+import { assertReviewArtifactRole, captureExecutionReviewContext } from "../lib/review-context.js";
 import { lifecycleAuthorityResultDigest, verifyLifecycleAuthorityCompletion } from "../external-lifecycle-authority.js";
 import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
 import { validateRunCorrelationPresence } from "../run-correlation.js";
@@ -3927,6 +3928,61 @@ function committedPackageJson(projectRoot: string): Record<string, unknown> | nu
   }
 }
 
+/** Declaration presence is static: it never executes a repository manifest emitter. */
+export function hasDeclaredVerificationChecks(projectRoot: string): boolean {
+  const pkg = committedPackageJson(projectRoot);
+  if (!pkg) return false;
+  const scripts = pkg.scripts && typeof pkg.scripts === "object" && !Array.isArray(pkg.scripts) ? pkg.scripts as AnyObj : undefined;
+  return Object.hasOwn(pkg, "trust-reconcile-manifest") || Boolean(scripts && Object.hasOwn(scripts, "trust-reconcile-manifest"));
+}
+
+export type DeclaredVerificationCheck = { id: string; command: string; result_protocol?: string; unavailable_reason?: string };
+
+/** Resolve the repository's committed declaration using CI's existing normalization. */
+export function declaredVerificationChecks(projectRoot: string, options: { executeEmitter?: boolean } = {}): DeclaredVerificationCheck[] | null {
+  const pkg = committedPackageJson(projectRoot);
+  const scripts = pkg?.scripts as AnyObj | undefined;
+  let raw: unknown = pkg?.["trust-reconcile-manifest"] ?? scripts?.["trust-reconcile-manifest"];
+  if (raw === undefined) return null;
+  if (typeof raw === "string") {
+    if (options.executeEmitter === false) throw new Error("Verification checks use a committed dynamic manifest; authenticated evidence admission resolves it before execution. Status does not execute repository emitters.");
+    try {
+      raw = JSON.parse(execFileSync("bash", ["-lc", raw], { cwd: projectRoot, encoding: "utf8", timeout: 30000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] }));
+    } catch { throw new Error("committed verification manifest could not emit a valid declaration; no verification command was started"); }
+  }
+  if (!Array.isArray(raw) || raw.length === 0 || raw.some((entry) =>
+    typeof entry === "string" ? entry.trim().length === 0
+      : !entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.command !== "string" || entry.command.trim().length === 0)) {
+    throw new Error("committed verification manifest must declare valid checks");
+  }
+  const helper = createRequire(import.meta.url)(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/ci/trust-reconcile.js")) as {
+    resolveManifest(args: { manifest: string }, root: string, commands: string[]): { entries: DeclaredVerificationCheck[] };
+  };
+  const checks = helper.resolveManifest({ manifest: JSON.stringify(raw) }, projectRoot, []).entries;
+  if (checks.length !== raw.length || checks.some((check) => !check.id || !check.command)
+    || new Set(checks.map((check) => check.id)).size !== checks.length
+    || new Set(checks.map((check) => check.command)).size !== checks.length) {
+    throw new Error("committed verification checks require unique IDs and unambiguous commands");
+  }
+  return checks.map((check) => {
+    const proof = testExecutionProof(check.command, projectRoot, new Set(), false, pkg);
+    const resultProtocol = proof?.kind === "coordinated-command-receipt" ? proof.protocol
+      : proof?.kind === "local-process-exit" && ["node --test", "go test", "cargo test"].includes(proof.runner) ? proof.runner : undefined;
+    return { ...check, ...(resultProtocol ? { result_protocol: resultProtocol }
+      : { unavailable_reason: "This check has no supported verifiable result protocol for tests-evidence; its result remains diagnostic." }) };
+  });
+}
+
+export function assertEvidenceCommandsReconcilable(commands: readonly string[], projectRoot: string): void {
+  if (commands.length === 0) return;
+  const checks = declaredVerificationChecks(projectRoot);
+  if (!checks) throw new Error("CI-published command evidence requires a committed verification manifest; no verification command was started");
+  const declared = new Set(checks.map((check) => check.command));
+  if (commands.some((command) => !declared.has(command.trim().replace(/\s+/g, " ")))) {
+    throw new Error(`command evidence cannot be published through CI: select a declared check ID (${checks.map((check) => check.id).join(", ")}); local measurements belong in artifact or summary evidence. No verification command was started`);
+  }
+}
+
 function staticTestUnits(file: string, executable: string): number {
   try {
     const content = fs.readFileSync(file, "utf8").slice(0, 256 * 1024);
@@ -3958,17 +4014,17 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
     && committedPackage !== null
     && committedManifestDeclaresExactCommand(command, committedPackage);
   const normalized = command.trim().replace(/\s+/g, " ");
-  if (!normalized || /[`$()]/.test(normalized)) return null;
+  if (!normalized || /[`$()<>\n\r]/.test(command) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(normalized)) return null;
   if (/[;&|]/.test(normalized)) {
     if (!packageScriptBody || normalized.includes("||") || /[;|]/.test(normalized)) return null;
     const segments = normalized.split(/\s*&&\s*/).filter(Boolean);
-    return segments.length > 1 ? segments.map((segment) => testExecutionProof(segment, projectRoot, new Set(seenScripts), false, committedScriptPackage)).find(Boolean) ?? null : null;
+    if (segments.some((segment) => /^(?:[A-Za-z_][A-Za-z0-9_]*=|(?:export|unset|source|\.)\s)/.test(segment))) return null;
+    return segments.length > 1 ? testExecutionProof(segments.at(-1)!, projectRoot, new Set(seenScripts), false, committedScriptPackage) : null;
   }
   if (/^(?:true|:|\/usr\/bin\/true)$/i.test(normalized)) return null;
   if (/^(?:echo|printf)(?:\s|$)/i.test(normalized)) return null;
   if (/(?:^|\s)(?:--version|-v|--help|-h)(?:\s|$)/.test(normalized)) return null;
   const tokens = normalized.split(" ").filter(Boolean);
-  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0] ?? "")) tokens.shift();
   const executable = tokens[0] ?? "";
   const executableName = path.basename(executable);
   if (["npm", "pnpm", "yarn", "bun"].includes(executableName)) {
@@ -3978,6 +4034,17 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
       const units = target ? staticTestUnits(path.resolve(projectRoot, target), "bun") : 0;
       return units > 0 ? { kind: "local-process-exit", runner: "bun test", static_test_units: units } : null;
     }
+    const script = tokens[1] === "run" || tokens[1] === "run-script" ? tokens[2] : tokens[1];
+    if (!script || tokens.length !== (tokens[1] === "run" || tokens[1] === "run-script" ? 3 : 2)) return null;
+    try {
+      const actualPackage = loadJson(path.join(projectRoot, "package.json"));
+      const packages = [actualPackage, committedScriptPackage ?? committedPackage];
+      if (packages.some((pkg) => {
+        const scripts = pkg?.scripts;
+        const postScript = scripts && typeof scripts === "object" && !Array.isArray(scripts) ? (scripts as AnyObj)[`post${script}`] : undefined;
+        return postScript !== undefined && (typeof postScript !== "string" || postScript.trim().length > 0);
+      })) return null;
+    } catch { return null; }
     // A coordinator is admitted only when its exact public command is declared
     // in the reconcile manifest and its observed receipt proves a complete,
     // stable, committed test result. The resolver names no product or filename.
@@ -3990,7 +4057,6 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
         receipt_commit_sha256: "pending-observation",
       };
     }
-    const script = tokens[1] === "run" || tokens[1] === "run-script" ? tokens[2] : tokens[1];
     // A host's exact, committed reconcile-manifest entry authorizes an
     // unconventional *script name*, not its body. The body must still resolve
     // to a substantive local test workflow below; `echo ok` and `true` remain
@@ -4057,6 +4123,24 @@ export function testExecutionProof(command: string, projectRoot: string, seenScr
     return units > 0 ? { kind: "local-process-exit", runner: npxPlaywright ? "npx playwright test" : "playwright test", static_test_units: units } : null;
   }
   if (executableName === "node" && tokens.includes("--test")) {
+    if (executable !== "node" || tokens.some((token) => /^(?:--test-reporter-destination|--loader|--experimental-loader|--eval|--print)(?:=|$)/.test(token)
+      || ["-e", "-p"].includes(token))) return null;
+    const reporters: string[] = [];
+    for (let index = 1; index < tokens.length; index++) {
+      if (tokens[index] === "--test-reporter") reporters.push(tokens[++index] ?? "");
+      else if (tokens[index]!.startsWith("--test-reporter=")) reporters.push(tokens[index]!.slice("--test-reporter=".length));
+      else if (["--import", "--require", "-r"].includes(tokens[index]!) || /^(?:--import|--require)=/.test(tokens[index]!)) {
+        const token = tokens[index]!;
+        const preload = token.includes("=") ? token.slice(token.indexOf("=") + 1) : tokens[++index];
+        if (!preload || path.isAbsolute(preload) || !/^\.\.?\//.test(preload)) return null;
+        try {
+          const resolved = path.resolve(projectRoot, preload);
+          const stat = fs.lstatSync(resolved);
+          if (stat.isSymbolicLink() || !stat.isFile() || !pathIsWithinRoot(fs.realpathSync(resolved), fs.realpathSync(projectRoot))) return null;
+        } catch { return null; }
+      }
+    }
+    if (reporters.length > 1 || reporters.some((reporter) => !["spec", "tap"].includes(reporter))) return null;
     const testFlag = tokens.indexOf("--test");
     const targets = tokens.slice(testFlag + 1)
       .filter((token) => !token.startsWith("-") && resolvesExplicitTestTarget(projectRoot, token))
@@ -4082,13 +4166,13 @@ export function isMeaningfulTestCommand(command: string, projectRoot: string, se
 
 export function observedExecutedTestCount(output: string, runner?: string): number {
   if (runner === "node --test") {
-    // Node prints its summary after every test's stdout.  Take only the last
-    // pass line that is followed by the rest of that canonical terminal block;
-    // source code cannot place a lookalike after the runner has finished.
-    const summaries = [...output.matchAll(/^(?:#|ℹ)\s*pass\s+(\d+)\s*$/gim)];
-    const terminal = summaries.at(-1);
-    if (!terminal || !/(?:^|\n)(?:#|ℹ)\s*fail\s+\d+\s*$[\s\S]*(?:^|\n)(?:#|ℹ)\s*skipped\s+\d+\s*$[\s\S]*(?:^|\n)(?:#|ℹ)\s*duration_ms\s+[\d.]+\s*$/im.test(output.slice((terminal.index ?? 0) + terminal[0].length))) return 0;
-    return Number(terminal[1]);
+    const text = output.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n/g, "\n");
+    const terminal = text.match(/(?:^|\n)(#|ℹ)[ \t]+tests[ \t]+(\d+)[ \t]*\n\1[ \t]+suites[ \t]+\d+[ \t]*\n\1[ \t]+pass[ \t]+(\d+)[ \t]*\n\1[ \t]+fail[ \t]+(\d+)[ \t]*\n\1[ \t]+cancelled[ \t]+(\d+)[ \t]*\n\1[ \t]+skipped[ \t]+(\d+)[ \t]*\n\1[ \t]+todo[ \t]+(\d+)[ \t]*\n\1[ \t]+duration_ms[ \t]+[\d.]+[ \t]*\s*$/u);
+    if (!terminal) return 0;
+    const [tests, passed, failed, cancelled, skipped, todo] = terminal.slice(2).map(Number);
+    if (![tests, passed, failed, cancelled, skipped, todo].every(Number.isSafeInteger)
+      || failed !== 0 || cancelled !== 0 || passed + skipped > tests) return 0;
+    return passed > 0 ? passed : 0;
   }
   if (runner === "go test") {
     // Go's package `ok` line says only that a package succeeded.  The runner's
@@ -4199,14 +4283,23 @@ function observedCommandReference(commands: readonly string[], command: string, 
 async function normalizeObservedCommands(commands: string[], projectRoot: string, requireTestIntent: boolean, expectedStatus: string): Promise<ObservedCommand[]> {
   if (commands.length === 0) die("record-gate-claim requires at least one --command for observed command evidence");
   if (new Set(commands).size !== commands.length) die("record-gate-claim --command values must be unique");
+  const proofs = new Map<string, TestExecutionProof>();
   for (const command of commands) {
     const { isRunnableCommandText } = loadRunnableCommandHelper();
     if (!isRunnableCommandText(command)) die(`record-gate-claim ${observedCommandReference(commands, command)} is not a runnable shell command — prose belongs in --summary, which is never executed.`);
-    if (requireTestIntent && !isMeaningfulTestCommand(command, projectRoot)) die("record-gate-claim tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
+    if (requireTestIntent) {
+      const proof = testExecutionProof(command, projectRoot);
+      if (!proof) die("record-gate-claim tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
+      if (proof.kind === "local-process-exit" && !["node --test", "go test", "cargo test"].includes(proof.runner)) {
+        die(`record-gate-claim ${observedCommandReference(commands, command)} has no supported verifiable result protocol for ${proof.runner}; select a registered Node or coordinated-receipt check. No verification command was started`);
+      }
+      proofs.set(command, proof);
+    }
   }
   // The canonical writer executes every command and records its own observation.
   const observeCommand = async (command: string) => {
     const result = await runObservedCommand(command, projectRoot);
+    if (result.timed_out) die(`record-gate-claim ${observedCommandReference(commands, command)} exceeded its execution deadline; a watchdog-terminated process cannot confirm passing evidence`);
     const coordinated = requireTestIntent ? resolveCoordinatedCommandBinding(command, projectRoot) : null;
     if (coordinated) {
       const receipt = observeCoordinatedCommandReceipt(coordinated, projectRoot, result);
@@ -4229,7 +4322,7 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
         execution_proof,
       };
     }
-    const proof = requireTestIntent ? testExecutionProof(command, projectRoot) : null;
+    const proof = proofs.get(command);
     return {
       command,
       exit_code: result.exit_code,
@@ -4240,7 +4333,7 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
         worktree_clean: result.observation.worktree_clean,
         verification_workspace_snapshot: result.observation.verification_workspace_snapshot,
       } : {}),
-      ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.output), execution_proof: proof } : {}),
+      ...(proof ? { test_count: inferExecutedTestCount(command, projectRoot, result.stdout_tail ?? result.output), execution_proof: proof } : {}),
     };
   };
   // Sequential, never concurrent: evidence commands are test runs against one working tree, so
@@ -4501,7 +4594,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
  * parsed (today: the current-clean-critique requirement, #1359 step 8), so a caller whose payload
  * is also malformed learns both in the same refusal instead of after four shape round-trips.
  */
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string, preconditionProblems: readonly string[], verifiedBy: string): AnyObj[] {
+function preparePassingCriteria(existing: AnyObj[], raw: string[], commands: readonly string[], projectRoot: string, preconditionProblems: readonly string[]): AnyObj[] {
   const problems: string[] = [...preconditionProblems];
   if (raw.length === 0) {
     problems.push("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
@@ -4523,17 +4616,56 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   // rule are produced inside criterionShapeViolations so --explain's table is their only source.
   incoming.forEach((criterion, index) => problems.push(...criterionShapeViolations(criterion, labels[index]!)));
   dieOnViolations(problems);
-  const observedCommandNames = new Set(observedCommands.map((observation) => observation.command));
+  const observedCommandNames = new Set(commands);
   const normalized = incoming.map((criterion, index) => normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot));
   dieOnViolations(normalized.flatMap((refs, index) => observedCommandRefViolations(refs, observedCommandNames, `criterion ${ids[index]}`)));
-  return normalized.map((refs, index) => {
+  return normalized.map((refs, index) => ({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs }));
+}
+
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string, preconditionProblems: readonly string[], verifiedBy: string): AnyObj[] {
+  const prepared = preparePassingCriteria(existing, raw, observedCommands.map((observation) => observation.command), projectRoot, preconditionProblems);
+  return prepared.map((criterion) => {
+    const refs = criterion.evidence_refs as AnyObj[];
     const referencedCommands = new Set(refs.filter((ref) => ref.kind === "command").map(commandFromEvidenceRef));
     const criterionObservedCommands = observedCommands.filter((observation) => referencedCommands.has(observation.command));
     // #1363: this is the only path that moves a criterion to `pass`, so the actor running
     // record-gate-claim right now IS the criterion's verifying identity. Stamp it alongside
     // verified_at (buildTrustBundle persists it as metadata.criterion.verified_by).
-    return markCanonicallyObservedCriterion({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _verified_by: verifiedBy, _observed_commands: criterionObservedCommands });
+    return markCanonicallyObservedCriterion({ ...criterion, identity_version: 2, verified_at: verifiedAt, _verified_by: verifiedBy, _observed_commands: criterionObservedCommands });
   });
+}
+
+export type GateClaimEvidencePreflight = {
+  expectation: string;
+  status: string;
+  commands: string[];
+  evidenceRefs: string[];
+  criteria: string[];
+  requirePublicationCompatibility?: boolean;
+};
+
+/** Known payload/authority prerequisites are checked without running a verification command. */
+export function preflightGateClaimEvidence(dir: string, input: GateClaimEvidencePreflight): void {
+  const projectRoot = narrativeGuardRoot(dir);
+  const refs = input.evidenceRefs.map((raw) => validateEvidenceRef(parseJson(raw, "--evidence-ref-json"), "--evidence-ref-json", projectRoot));
+  if (input.expectation !== "tests-evidence" || input.status !== "pass") {
+    if (input.requirePublicationCompatibility && input.status === "pass") assertEvidenceCommandsReconcilable(input.commands, projectRoot);
+    return;
+  }
+  if (input.commands.length === 0) die("record-gate-claim passing tests-evidence requires at least one --command");
+  if (new Set(input.commands).size !== input.commands.length) die("record-gate-claim --command values must be unique");
+  requireObservedCommandRefs(refs, new Set(input.commands), "a passing tests-evidence claim", true);
+  const state = readBundleState(dir);
+  preparePassingCriteria(state.criteria, input.criteria, input.commands, projectRoot, passingTestsCritiquePreconditionProblems(dir, state.critiques));
+  for (const command of input.commands) {
+    rejectNarrativeReference(projectRoot, command, "record-gate-claim command");
+    const proof = testExecutionProof(command, projectRoot);
+    if (!proof) die("record-gate-claim tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
+    if (proof.kind === "local-process-exit" && !["node --test", "go test", "cargo test"].includes(proof.runner)) {
+      die(`tests-evidence has no supported result protocol for ${proof.runner}; choose a registered Node or coordinated-receipt check. No verification command was started`);
+    }
+  }
+  if (input.requirePublicationCompatibility) assertEvidenceCommandsReconcilable(input.commands, projectRoot);
 }
 
 // The id grammar `record-critique` enforces is the SAME constant `--explain` prints for
@@ -4609,6 +4741,7 @@ function reviewTargetArtifactsMatch(dir: string, reviewTarget: unknown): boolean
       const file = (artifact as AnyObj).file;
       const sha256 = (artifact as AnyObj).sha256;
       if (!hasNonEmptyString(file) || !/^[a-f0-9]{64}$/i.test(String(sha256)) || files.has(file)) return false;
+      assertReviewArtifactRole(projectRoot, artifact as AnyObj, dir);
       files.add(file);
       const relative = validateLocalEvidenceFile(projectRoot, file, "critique review_target artifact");
       const digest = createHash("sha256").update(fs.readFileSync(path.join(projectRoot, relative))).digest("hex");
@@ -6221,6 +6354,13 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
   const projectRoot = narrativeGuardRoot(dir);
   const canonicalRoot = gateCommands.length > 0 ? canonicalProjectRootForSession(dir) : null;
   for (const command of gateCommands) rejectNarrativeReference(projectRoot, command, "record-gate-claim command");
+  preflightGateClaimEvidence(dir, {
+    expectation: targetExpectation.id,
+    status: statusVal,
+    commands: gateCommands,
+    evidenceRefs: opts(p, "evidence-ref-json"),
+    criteria: opts(p, "criterion-json"),
+  });
   const observedCommands = gateCommands.length > 0
     ? await normalizeObservedCommands(gateCommands, canonicalRoot!, mustRunTests, statusVal)
     : [];
@@ -6701,7 +6841,7 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // defence in depth, so a payload that somehow reaches it malformed still refuses rather than
   // being built.
   const lanes = normalizeCritiqueLanes(laneRaw, projectRoot);
-  const reviewArtifacts = reviewTargetArtifacts(dir, opts(p, "artifact-ref"), "record-critique review_target");
+  let reviewArtifacts = reviewTargetArtifacts(dir, opts(p, "artifact-ref"), "record-critique review_target");
   if (verdict === "pass" && (lanes.some((lane) => lane.status !== "pass") || reviewArtifacts.length === 0)) {
     die("a passing critique requires every lane to pass and at least one local reviewed --artifact-ref");
   }
@@ -6709,6 +6849,18 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const projectedRun = sidecarState.flow_run && typeof sidecarState.flow_run === "object" && !Array.isArray(sidecarState.flow_run)
     ? sidecarState.flow_run as AnyObj
     : null;
+  if (projectedRun) {
+    const ownedReportFile = path.join(dir, `${slug}--deliver.md`);
+    const ownedReport = path.relative(projectRoot, ownedReportFile).replaceAll(path.sep, "/");
+    if (fs.existsSync(ownedReportFile) && !reviewArtifacts.some(artifact => artifact.file === ownedReport)) {
+      reviewArtifacts.push(...reviewTargetArtifacts(dir, [ownedReportFile], "record-critique owned execution controls"));
+    }
+    const beforeContext = captureReviewWorkspaceSnapshot(projectRoot, reviewArtifacts.map(artifact => ({ file: String(artifact.file), sha256: String(artifact.sha256) })));
+    if (verdict === "pass" && beforeContext.kind !== "git-worktree" && reviewArtifacts.every(artifact => artifact.file === ownedReport)) {
+      die("a passing non-Git critique requires an explicit implementation review subject; execution context alone is insufficient");
+    }
+    reviewArtifacts = captureExecutionReviewContext(projectRoot, dir, reviewArtifacts.map(artifact => ({ file: String(artifact.file), sha256: String(artifact.sha256) })));
+  }
   const exactFlowContext = projectedRun
     && typeof projectedRun.definition_id === "string"
     && typeof projectedRun.current_step === "string"

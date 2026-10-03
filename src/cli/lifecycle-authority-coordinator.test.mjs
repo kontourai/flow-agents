@@ -818,6 +818,100 @@ async function invokeHermeticCoordinator(fixture) {
   }
 }
 
+test("provisional coordinator publishes at a custom declared freshness gate and rejects signed gate drift", async () => {
+  const root = makeFixtureDir("provisional-custom-gate-");
+  const runId = "custom-gate";
+  const projectRoot = path.join(root, "project");
+  const installRoot = path.join(root, "installed");
+  const configRoot = path.join(root, "operator-config");
+  const stateRoot = path.join(root, "operator-state");
+  const subject = "kontourai/flow-agents#1424";
+  const sessionDir = path.join(projectRoot, ".kontourai", "flow-agents", runId);
+  try {
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.mkdirSync(configRoot);
+    fs.mkdirSync(stateRoot);
+    copyPinnedFlowClosure(installRoot);
+    const operator = generateKeyPairSync("ed25519");
+    const completion = generateKeyPairSync("ed25519");
+    fs.writeFileSync(path.join(configRoot, "keys.json"), JSON.stringify({ schema_version: "1.0", keys: [
+      { id: "fixture-operator", algorithm: "ed25519", public_key_pem: operator.publicKey.export({ type: "spki", format: "pem" }) },
+    ] }), { mode: 0o600 });
+    fs.writeFileSync(path.join(configRoot, "completion-signing-key.pem"), completion.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+    fs.writeFileSync(path.join(configRoot, "completion-verification-key.pem"), completion.publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
+    fs.copyFileSync(RUNTIME, path.join(installRoot, "runtime-v1.mjs"));
+    fs.writeFileSync(path.join(installRoot, "coordinator.mjs"), fs.readFileSync(COORDINATOR, "utf8")
+      .replace(/export const CONFIG_ROOT = .*?;/, `export const CONFIG_ROOT = ${JSON.stringify(configRoot)};`)
+      .replace(/export const STATE_ROOT = .*?;/, `export const STATE_ROOT = ${JSON.stringify(stateRoot)};`));
+    const coordinator = await import(`${pathToFileURL(path.join(installRoot, "coordinator.mjs")).href}?custom=${Date.now()}`);
+    const definition = {
+      id: "example.provisional", version: "1.0", steps: [{ id: "ci-submit", next: "done" }, { id: "done", next: null }],
+      gates: { "ci-submit-gate": { step: "ci-submit", requires_current_verification: true, expects: [
+        { id: "ci-readiness", kind: "trust.bundle", required: true, description: "Required CI reconciles the provisional claims.", bundle_claim: { claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request", accepted_statuses: ["verified"] } },
+      ] } },
+    };
+    const definitionFile = path.join(root, "custom.flow.json");
+    fs.writeFileSync(definitionFile, JSON.stringify(definition));
+    await startRun(definitionFile, { cwd: projectRoot, runId, params: { subject } });
+    const run = await loadRun(runId, projectRoot);
+    fs.writeFileSync(path.join(projectRoot, ".gitignore"), ".kontourai/\ndelivery/\n");
+    execFileSync("git", ["init", "-q"], { cwd: projectRoot });
+    execFileSync("git", ["add", ".gitignore"], { cwd: projectRoot });
+    execFileSync("git", ["-c", "user.email=fixture@example.invalid", "-c", "user.name=Fixture", "commit", "-qm", "fixture"], { cwd: projectRoot });
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: projectRoot, encoding: "utf8" }).trim();
+    const write = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    write(path.join(sessionDir, "state.json"), { work_item_refs: [subject] });
+    const assignment = { status: "claimed", actor_key: "codex:custom-gate:host", claimed_at: new Date().toISOString() };
+    fs.mkdirSync(path.join(projectRoot, ".kontourai", "flow-agents", "assignment"));
+    write(path.join(projectRoot, ".kontourai", "flow-agents", "assignment", `${runId}.json`), assignment);
+    const providerFile = path.join(sessionDir, "publish-change.result.json");
+    write(providerFile, { change_ref: { head_sha: head, provider_record_id: "fixture-pr" } });
+    const destination = path.join(projectRoot, "delivery", runId);
+    fs.mkdirSync(destination, { recursive: true });
+    write(path.join(destination, "trust.bundle"), { claims: [], evidence: [] });
+    write(path.join(destination, "trust.checkpoint.json"), { status: "provisional", phase: "ci-readiness", slug: runId, commit_sha: head });
+    write(path.join(destination, "trust.checkpoint.attestation.json"), { status: "unsigned", path: "trust.checkpoint.intoto.json" });
+    write(path.join(destination, "trust.checkpoint.intoto.json"), { predicate: "fixture" });
+    const companions = fs.readdirSync(destination).sort().map((name) => ({ path: name, sha256: rawSha256(fs.readFileSync(path.join(destination, name))) }));
+    const unsigned = provisionalAuthorization({
+      project_root: fs.realpathSync(projectRoot), run_id: runId, subject, work_item: subject,
+      assignment_actor_key: assignment.actor_key, assignment_generation: assignment.claimed_at,
+      published_head_sha: head, checkpoint_commit_sha: head, checkpoint_slug: runId,
+      provider_record_id: "fixture-pr", provider_observation_sha256: rawSha256(fs.readFileSync(providerFile)),
+      flow_definition_id: definition.id, flow_definition_version: definition.version, flow_definition_digest: definitionDigest(run.definition),
+      flow_run_head: flowRunHead(run.state), flow_gate_id: "ci-submit-gate", flow_gate_visit: run.state.updated_at,
+      workspace_snapshot: provisionalWorkspaceSnapshot(projectRoot, runId), companions,
+      checkpoint_sha256: companions.find(({ path: name }) => name === "trust.checkpoint.json").sha256,
+      bundle_sha256: companions.find(({ path: name }) => name === "trust.bundle").sha256,
+      attestation_sha256: companions.find(({ path: name }) => name === "trust.checkpoint.attestation.json").sha256,
+    });
+    delete unsigned.signature;
+    const authorizationFile = path.join(root, "authorization.json");
+    const fixture = { coordinator, envelope: null };
+    const authorize = (changes) => {
+      const fields = { ...unsigned, ...changes };
+      write(authorizationFile, { ...fields, signature: { algorithm: "ed25519", key_id: "fixture-operator", value: sign(null, Buffer.from(JSON.stringify(fields)), operator.privateKey).toString("base64") } });
+      const request = { action: "publish-provisional-delivery", project_root: unsigned.project_root, session_dir: fs.realpathSync(sessionDir), authorization_file: authorizationFile };
+      fixture.envelope = { schema_version: "1.0", action: request.action, request_sha256: coordinator.sha256(request), request };
+    };
+    for (const [field, value] of [["flow_gate_id", "merge-ready-ci-gate"], ["flow_gate_visit", "2026-01-01T00:00:00.000Z"], ["flow_run_head", "f".repeat(64)]]) {
+      authorize({ [field]: value, nonce: `wrong-${field}` });
+      await assert.rejects(invokeHermeticCoordinator(fixture), new RegExp(`${field} does not match`));
+      assert.equal(fs.existsSync(path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json")), false, "invalid signed gate binding publishes no authority event");
+    }
+    authorize({ nonce: "custom-gate-publication" });
+    const applied = await invokeHermeticCoordinator(fixture);
+    assert.equal(applied.result.operation_status, "applied");
+    assert.equal(applied.result.completion.action, "publish-provisional-delivery");
+    const ledger = JSON.parse(fs.readFileSync(path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json"), "utf8"));
+    assert.equal(ledger.events.length, 1);
+    assert.equal(ledger.events[0].signed_authorization.flow_gate_id, "ci-submit-gate");
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(sessionDir, "provisional-delivery.authority-completion.json"), "utf8")), applied.result.completion);
+    assert.equal((await invokeHermeticCoordinator(fixture)).result.operation_status, "replayed");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(sessionDir, "lifecycle-authority.provisional-delivery-events.json"), "utf8")).events.length, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("hermetic privileged coordinator recovers a stale completion without rewriting evidence and replays exactly", async () => {
   const fixture = await createHermeticRecoveryFixture();
   try {

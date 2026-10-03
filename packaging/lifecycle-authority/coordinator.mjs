@@ -2202,21 +2202,13 @@ async function prepareProvisionalDeliveryMutation(paths, authorization) {
   return { flow, destination, expected, ledger: loadProvisionalDeliveryLedger(paths) };
 }
 async function appendOrRecoverProvisionalDeliveryEvent(paths, authorization, prepared, resumePrepared) {
-  const { flow, destination, expected, ledger } = prepared;
+  const { ledger } = prepared;
   const predecessor_hash = ledger.value.events.at(-1)?.event_hash ?? "0".repeat(64);
   const authorizationSha256 = sha256(canonicalJson(authorization));
   const unsigned = { schema_version: PROTOCOL_VERSION, kind: "kontourai.lifecycle-authority.provisional-delivery-event", run_id: paths.runId, subject: authorization.subject, authorization_sha256: authorizationSha256, predecessor_hash, signed_authorization: authorization };
   const event = { ...unsigned, event_hash: sha256(unsigned) };
   return withCanonicalFlowRunMutationLock(paths, async () => {
-    const currentLedger = loadProvisionalDeliveryLedger(paths);
-    const currentState = protectedJson(canonicalFlowPaths(paths).state, "canonical Flow state", MAX_CANONICAL_FLOW_MANIFEST_BYTES);
-    if (flow.flowRunHead(currentState) !== authorization.flow_run_head || currentState.status !== "active" || currentState.current_step !== "merge-ready-ci") {
-      throw new Error("canonical Flow state changed before provisional delivery authority append");
-    }
-    if (canonicalJson(provisionalWorkspaceSnapshot(paths.projectRoot, paths.runId)) !== canonicalJson(authorization.workspace_snapshot)) {
-      throw new Error("provisional delivery source changed before authority append");
-    }
-    validateProvisionalDeliveryTransport(destination, expected);
+    const { ledger: currentLedger } = await prepareProvisionalDeliveryMutation(paths, authorization);
     if (resumePrepared) {
       const recovered = recoverPreparedProvisionalDeliveryEvent(currentLedger.value.events, authorization);
       if (recovered !== null) return recovered;

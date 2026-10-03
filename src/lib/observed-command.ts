@@ -18,8 +18,12 @@ export type ObservedWorkspaceState =
 export type ObservedProcessResult = {
   command: string;
   exit_code: number | null;
+  process_exit_code?: number | null;
+  timed_out?: boolean;
   output_sha256: string;
   output: string;
+  /** Bounded stdout ending, kept independently of interleaved diagnostic stderr. */
+  stdout_tail?: string;
   observation: ObservedWorkspaceState;
 };
 
@@ -31,11 +35,14 @@ function configuredTimeout(variable: string, fallback: number): number {
 export async function runObservedCommand(command: string, projectRoot: string): Promise<ObservedProcessResult> {
   const timeoutMs = configuredTimeout("FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS", 600000);
   const killGraceMs = configuredTimeout("FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS", 5000);
-  const result = await new Promise<{ code: number | null; outputSha256: string; output: string }>((resolve, reject) => {
+  const result = await new Promise<{ code: number | null; timedOut: boolean; outputSha256: string; output: string; stdoutTail: string }>((resolve, reject) => {
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
     const child = spawn("bash", ["-lc", command], {
       cwd: projectRoot,
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
+      env,
     });
     const stdoutHash = createHash("sha256");
     const stderrHash = createHash("sha256");
@@ -46,10 +53,17 @@ export async function runObservedCommand(command: string, projectRoot: string): 
     let cleanupComplete = false;
     let streamsClosed = false;
     let closedCode: number | null = null;
-    let output = "";
+    let timedOut = false;
+    let outputHead = Buffer.alloc(0);
+    let outputTail = Buffer.alloc(0);
+    let stdoutTail = Buffer.alloc(0);
+    let outputBytes = 0;
+    const headLimit = 16 * 1024;
+    const tailLimit = 48 * 1024;
     const captureOutput = (chunk: Buffer): void => {
-      if (output.length >= 64 * 1024) return;
-      output += chunk.toString("utf8").slice(0, 64 * 1024 - output.length);
+      outputBytes += chunk.length;
+      if (outputHead.length < headLimit) outputHead = Buffer.concat([outputHead, chunk.subarray(0, headLimit - outputHead.length)]);
+      outputTail = Buffer.concat([outputTail, chunk]).subarray(-tailLimit);
     };
     const terminateProcessGroup = (signal: NodeJS.Signals): boolean => {
       try {
@@ -126,7 +140,10 @@ export async function runObservedCommand(command: string, projectRoot: string): 
       const outputHash = createHash("sha256")
         .update("stdout\0").update(stdoutHash.digest())
         .update("stderr\0").update(stderrHash.digest());
-      resolve({ code: closedCode, outputSha256: outputHash.digest("hex"), output });
+      const output = outputBytes <= headLimit + tailLimit
+        ? Buffer.concat([outputHead, outputTail.subarray(Math.max(0, outputHead.length - (outputBytes - outputTail.length)))]).toString("utf8")
+        : `${outputHead.toString("utf8")}\n[observed output truncated]\n${outputTail.toString("utf8")}`;
+      resolve({ code: closedCode, timedOut, outputSha256: outputHash.digest("hex"), output, stdoutTail: stdoutTail.toString("utf8") });
     };
     // ROUND-3 BLOCKER: this runs from BOTH the timeout and the child's own `exit`, and round 2
     // armed the bounded settle from either — so a command that exited 0 in ~50ms but left an
@@ -136,6 +153,7 @@ export async function runObservedCommand(command: string, projectRoot: string): 
     // was already known here, so it is passed explicitly rather than inferred.
     const beginCleanup = (reason: "timeout" | "exit"): void => {
       if (settled || cleanupStarted) return;
+      if (reason === "timeout") timedOut = true;
       cleanupStarted = true;
       try {
         if (!terminateProcessGroup("SIGTERM")) {
@@ -176,7 +194,11 @@ export async function runObservedCommand(command: string, projectRoot: string): 
       }
     };
     timeout = setTimeout(() => beginCleanup("timeout"), timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => { stdoutHash.update(chunk); captureOutput(chunk); });
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutHash.update(chunk);
+      stdoutTail = Buffer.concat([stdoutTail, chunk]).subarray(-tailLimit);
+      captureOutput(chunk);
+    });
     child.stderr.on("data", (chunk: Buffer) => { stderrHash.update(chunk); captureOutput(chunk); });
     child.once("error", fail);
     child.once("exit", (code) => { closedCode = code; beginCleanup("exit"); });
@@ -187,9 +209,12 @@ export async function runObservedCommand(command: string, projectRoot: string): 
   // observation boundary for both the command result and its Git provenance.
   return {
     command,
-    exit_code: result.code,
+    exit_code: result.timedOut ? null : result.code,
+    process_exit_code: result.code,
+    timed_out: result.timedOut,
     output_sha256: result.outputSha256,
     output: result.output,
+    stdout_tail: result.stdoutTail,
     observation: captureObservedWorkspaceState(projectRoot),
   };
 }

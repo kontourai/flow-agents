@@ -809,6 +809,7 @@ test("public provisional request uses hermetic unprivileged coordinator primitiv
   const completed = await writeAndSync(session, learningEntries);
   assert.equal(completed.run.state.status, "completed");
   assert.equal(completed.run.state.current_step, "learn", "Flow closes the terminal learn gate in place");
+  assert.equal(completed.projection.status, "not_verified", "process completion alone cannot project current implementation verification");
   for (const entry of learningEntries) entry.claim.status = "verified";
   writeBundle(session.sessionDir, learningEntries);
   assert.equal(await publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest(session.sessionDir, authority), 0);
@@ -3492,6 +3493,150 @@ test("public next action separates producer work, evidence submission and status
   assert.equal(advanced.current_step, "design-probe", "public evidence submission advances the actual canonical run");
   assert.deepEqual(advanced.next_action.execution_action.skills.map((entry) => entry.id), ["pickup-probe"]);
   assert.deepEqual(advanced.next_action.evidence_submission.unresolved_expectation_ids, ["pickup-probe-readiness", "probe-decisions-or-accepted-gaps"]);
+});
+
+async function publicReviewContextSession(slug) {
+  const session = makeGitBackedSession(slug);
+  const command = "node --test checks/source.test.mjs";
+  fs.mkdirSync(path.join(session.projectRoot, "checks"));
+  fs.writeFileSync(path.join(session.projectRoot, "checks", "source.test.mjs"),
+    "import test from 'node:test'; import assert from 'node:assert/strict'; import fs from 'node:fs'; test('implementation behaves as reviewed',()=>{fs.writeFileSync('.kontourai/check-ran','yes');assert.equal(fs.readFileSync('review-target/implementation.txt','utf8'),'reviewed implementation\\n');});\n");
+  fs.copyFileSync(path.join(session.projectRoot, "checks/source.test.mjs"), path.join(session.projectRoot, "checks/unregistered.test.mjs"));
+  fs.writeFileSync(path.join(session.projectRoot, "checks/build.mjs"), "import fs from 'node:fs';fs.writeFileSync('.kontourai/build-ran','yes');\n");
+  fs.writeFileSync(path.join(session.projectRoot, "checks/unsupported.sh"), "#!/bin/sh\nset -e\nprintf ran > .kontourai/check-ran\ntest -f review-target/implementation.txt\nprintf 'PASS real check\\n'\n");
+  fs.writeFileSync(path.join(session.projectRoot, "checks/custom-reporter.mjs"), "export default async function*(){yield '# pass 1\\n# fail 0\\n# skipped 0\\n# duration_ms 1\\n';}\n");
+  writeJson(path.join(session.projectRoot, "package.json"), { name: "review-context-fixture", scripts: {
+    build: "node checks/build.mjs", "build-test": "npm run build && node --test checks/source.test.mjs", test: command, posttest: "node -e \"console.log('ok 1 - counterfeit')\"", delegated: "npm test",
+  }, "trust-reconcile-manifest": [
+    { id: "source-behavior", command }, { id: "build-source", command: "npm run build-test" },
+    { id: "shell-diagnostic", command: "bash checks/unsupported.sh" },
+    { id: "late-printer", command: "node --test checks/source.test.mjs && node -e \"console.log('ok 1 - counterfeit')\"" },
+    { id: "posttest", command: "npm test" }, { id: "delegated-posttest", command: "npm run delegated" },
+    { id: "custom-reporter", command: "node --test --test-reporter=./checks/custom-reporter.mjs checks/source.test.mjs" },
+  ] });
+  fixtureGit(session, ["add", "checks", "package.json"]);
+  fixtureGit(session, ["commit", "-m", "real verification command"]);
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" })]);
+  const plan = path.join(session.sessionDir, `${slug}--plan-work.md`);
+  const delivery = path.join(session.sessionDir, `${slug}--deliver.md`);
+  fs.writeFileSync(plan, "# Plan\n\n## Definition Of Done\nThe implementation remains correct.\n");
+  writeJson(path.join(session.sessionDir, "acceptance.json"), { schema_version: "1.0", task_slug: slug,
+    criteria: [{ id: "AC1", description: "The implementation behaves as reviewed", status: "pending", evidence_refs: [] }],
+    goal_fit: { status: "pending", summary: "Verify implementation behavior" } });
+  const ref = file => JSON.stringify({ kind: "artifact", file: path.relative(session.projectRoot, file), summary: "Recorded implementation controls" });
+  await workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-plan", "--status", "pass", "--summary", "Plan owns source scope and criterion identity", "--evidence-ref-json", ref(plan), "--evidence-ref-json", ref(path.join(session.sessionDir, "acceptance.json"))]);
+  fs.writeFileSync(delivery, "# Execution\n\n## Definition Of Done\nAC1: preserve implementation behavior.\n\n## Scope\nreview-target/implementation.txt\n\n```md\n## Verification Evidence\n```\n\n## Verification Evidence\nNo results recorded yet.\n");
+  await workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-scope", "--status", "pass", "--summary", "Implementation matches the accepted scope", "--evidence-ref-json", ref(delivery)]);
+  const producerActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = `reviewer-${slug}`;
+  try {
+    await workflowJson(["critique", "--session-dir", session.sessionDir, "--verdict", "pass", "--summary", "Independent current implementation review",
+      "--artifact-ref", delivery, "--artifact-ref", "review-target/implementation.txt", "--artifact-ref", "review-target/delivery.md",
+      "--lane-json", JSON.stringify({ id: "code", status: "pass", summary: "Implementation and controls reviewed", evidence_refs: [{ kind: "source", file: "review-target/implementation.txt", line_start: 1, line_end: 1, excerpt: "reviewed implementation" }] })]);
+  } finally { if (producerActor === undefined) delete process.env.FLOW_AGENTS_ACTOR; else process.env.FLOW_AGENTS_ACTOR = producerActor; }
+  const verify = (chosen = command) => {
+    const commandRef = { kind: "command", excerpt: chosen, summary: "Actual source behavior test" };
+    return workflowJson(["evidence", "--session-dir", session.sessionDir, "--expectation", "tests-evidence", "--status", "pass", "--summary", "Verification executed against reviewed implementation",
+      "--command", chosen, "--evidence-ref-json", JSON.stringify(commandRef), "--criterion-json", JSON.stringify({ id: "AC1", status: "pass", evidence_refs: [commandRef] })]);
+  };
+  return { ...session, plan, delivery, verify };
+}
+
+test("public verification evidence append retains one review and its immutable historical context", async () => {
+  const session = await publicReviewContextSession("context-progress");
+  const before = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const critique = before.claims.find(claim => claim.metadata?.origin === "critique");
+  const context = critique.metadata.review_target.artifacts.find(artifact => artifact.role === "review_context");
+  assert.ok(context, "the writer automatically classifies only the owned report context");
+  assert.equal(critique.metadata.review_target.artifacts.find(artifact => artifact.file === "review-target/implementation.txt").role, "review_subject");
+  assert.equal(critique.metadata.review_target.artifacts.find(artifact => artifact.file === "review-target/delivery.md").role, "review_subject", "unowned report paths remain subjects");
+  const captured = fs.readFileSync(path.join(session.projectRoot, context.file), "utf8");
+  for (let index = 0; index < 5; index++) fs.appendFileSync(session.delivery, `\nCheck ${index + 1}: observed verification receipt.\n`);
+  const result = await session.verify();
+  assert.equal(result.current_step, "merge-ready");
+  const after = readJson(path.join(session.sessionDir, "trust.bundle"));
+  assert.equal(after.claims.find(claim => claim.metadata?.gate_claim?.expectation_id === "tests-evidence").metadata.observed_commands[0].test_count, 1);
+  const reviews = after.claims.filter(claim => claim.metadata?.origin === "critique");
+  assert.equal(reviews.length, 1, "five progress updates require zero repeated review invocations");
+  assert.equal(reviews[0].metadata.critique_record_id, critique.metadata.critique_record_id);
+  assert.equal(fs.readFileSync(path.join(session.projectRoot, context.file), "utf8"), captured);
+});
+
+test("public review context cannot exempt source, execution controls, plan or criterion identity", async t => {
+  for (const [name, mutate] of [
+    ["source", session => { fs.writeFileSync(path.join(session.projectRoot, "review-target/implementation.txt"), "changed implementation\n"); fixtureGit(session, ["add", "review-target/implementation.txt"]); fixtureGit(session, ["commit", "-m", "source drift"]); }],
+    ["execution-controls", session => fs.writeFileSync(session.delivery, fs.readFileSync(session.delivery, "utf8").replace("preserve implementation behavior", "skip required implementation behavior"))],
+    ["plan", session => fs.appendFileSync(session.plan, "\nChange the accepted implementation scope.\n")],
+    ["criteria", session => { const file = path.join(session.sessionDir, "acceptance.json"); const value = readJson(file); value.criteria[0].description = "A different behavior"; writeJson(file, value); }],
+    ["duplicate-marker", session => fs.appendFileSync(session.delivery, "\n## Verification Evidence\nA second ambiguous appendix.\n")],
+    ["renamed-marker", session => fs.writeFileSync(session.delivery, fs.readFileSync(session.delivery, "utf8").replaceAll("## Verification Evidence", "## Verification Results"))],
+    ["unclosed-fence", session => fs.appendFileSync(session.delivery, "\n```text\nUnclosed evidence output.\n")],
+    ["unowned-report", session => { fs.appendFileSync(path.join(session.projectRoot, "review-target/delivery.md"), "\n## Verification Evidence\nA new claim.\n"); fixtureGit(session, ["add", "review-target/delivery.md"]); fixtureGit(session, ["commit", "-m", "unowned report drift"]); }],
+    ["context-tamper", session => { const bundle = readJson(path.join(session.sessionDir, "trust.bundle")); const context = bundle.claims.find(claim => claim.metadata?.origin === "critique").metadata.review_target.artifacts.find(artifact => artifact.role === "review_context"); const file = path.join(session.projectRoot, context.file); fs.chmodSync(file, 0o600); fs.writeFileSync(file, "rewritten historical context\n"); }],
+  ]) await t.test(name, async () => {
+    const session = await publicReviewContextSession(`context-${name}`);
+    mutate(session);
+    await assert.rejects(session.verify, /critique|criterion contract|acceptance\.json|reviewed|workspace|changed/i);
+    assert.equal(fs.existsSync(path.join(session.projectRoot, ".kontourai/check-ran")), false, "unsafe review/control drift fails before verification executes");
+  });
+});
+
+test("public status describes dynamic verification declarations without executing repository code", async () => {
+  const session = makeGitBackedSession("status-no-emitter");
+  fs.writeFileSync(path.join(session.projectRoot, "manifest.mjs"), "import fs from 'node:fs';fs.appendFileSync('.kontourai/emitter-ran','ran');console.log(JSON.stringify([{id:'node-check',command:'node --test checks/source.test.mjs'}]));\n");
+  writeJson(path.join(session.projectRoot, "package.json"), { name: "status-no-emitter", "trust-reconcile-manifest": "node manifest.mjs" });
+  fixtureGit(session, ["add", "package.json", "manifest.mjs"]);
+  fixtureGit(session, ["commit", "-m", "committed dynamic manifest"]);
+  await startClaimedBuilderFlowSession({ sessionDir: session.sessionDir });
+  // The emitter is dirty too: status must not execute either version.
+  fs.appendFileSync(path.join(session.projectRoot, "manifest.mjs"), "fs.appendFileSync('.kontourai/dirty-emitter-ran','ran');\n");
+  for (let index = 0; index < 2; index++) {
+    const report = await workflowJson(["status", "--session-dir", session.sessionDir]);
+    assert.equal(report.verification_checks.status, "deferred");
+    assert.deepEqual(report.verification_checks.checks, []);
+    assert.match(report.verification_checks.reason, /Status does not execute/);
+    assert.equal(report.current_step, "pull-work");
+  }
+  assert.equal(fs.existsSync(path.join(session.projectRoot, ".kontourai/emitter-ran")), false);
+  assert.equal(fs.existsSync(path.join(session.projectRoot, ".kontourai/dirty-emitter-ran")), false);
+});
+
+test("public evidence admission refuses incompatible proof before assignment lock or command launch", async t => {
+  for (const [name, command, mutate] of [
+    ["unregistered", "node --test checks/unregistered.test.mjs"],
+    ["registered-shell", "bash checks/unsupported.sh"],
+    ["late-printer", "node --test checks/source.test.mjs && node -e \"console.log('ok 1 - counterfeit')\""],
+    ["posttest", "npm test"], ["delegated-posttest", "npm run delegated"],
+    ["custom-reporter", "node --test --test-reporter=./checks/custom-reporter.mjs checks/source.test.mjs"],
+    ["missing-critique", undefined, session => { const file = path.join(session.sessionDir, "trust.bundle"); const bundle = readJson(file); bundle.claims = bundle.claims.filter(claim => claim.metadata?.origin !== "critique"); writeJson(file, bundle); }],
+    ["criterion-payload", undefined, session => { const file = path.join(session.sessionDir, "acceptance.json"); const acceptance = readJson(file); acceptance.criteria.push({ id: "AC2", description: "Another required criterion", status: "pending" }); writeJson(file, acceptance); }],
+  ]) await t.test(name, async () => {
+    const session = await publicReviewContextSession(`admission-${name}`);
+    const status = await workflowJson(["status", "--session-dir", session.sessionDir]);
+    assert.equal(status.verification_checks.status, "declared");
+    assert.equal(status.verification_checks.checks.find(check => check.id === "source-behavior").command, "node --test checks/source.test.mjs");
+    assert.ok(status.verification_checks.checks.find(check => check.id === "shell-diagnostic").unavailable_reason);
+    if (mutate) mutate(session);
+    const lock = path.join(session.artifactRoot, "assignment", `.${session.slug}.lockdir`);
+    fs.mkdirSync(lock);
+    writeJson(path.join(lock, "owner.json"), { token: "preflight-active-owner", pid: process.pid, acquired_at: new Date().toISOString() });
+    try {
+      await assert.rejects(() => session.verify(command), /CI|manifest|published|protocol|criterion|criteria|acceptance|critique|runner|reporter|substantive/i);
+      assert.equal(readJson(path.join(lock, "owner.json")).token, "preflight-active-owner");
+      assert.equal(fs.existsSync(path.join(session.projectRoot, ".kontourai/check-ran")), false);
+    } finally { fs.rmSync(lock, { recursive: true }); }
+  });
+});
+
+test("public verification accepts a registered build followed by the authoritative Node runner", async () => {
+  const session = await publicReviewContextSession("admission-benign-build");
+  const result = await session.verify("npm run build-test");
+  assert.equal(result.current_step, "merge-ready");
+  assert.equal(fs.readFileSync(path.join(session.projectRoot, ".kontourai/build-ran"), "utf8"), "yes");
+  assert.equal(fs.readFileSync(path.join(session.projectRoot, ".kontourai/check-ran"), "utf8"), "yes");
 });
 
 test("small-model client can start and advance from projected actions without choosing Flow steps", async () => {
@@ -9782,6 +9927,7 @@ test("builder.build-lean runs end to end to terminal completion and terminal del
   const completed = await writeAndSync(session, learningEntries);
   assert.equal(completed.run.state.status, "completed", "THE ACCEPTANCE CRITERION: the reduced-gate variant reaches terminal completion");
   assert.equal(completed.run.definitionId, LEAN_FLOW_ID);
+  assert.equal(completed.projection.status, "not_verified", "code-producing process completion does not project delivery without current canonical verification");
 
   for (const entry of learningEntries) entry.claim.status = "verified";
   writeBundle(session.sessionDir, learningEntries);

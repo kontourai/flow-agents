@@ -393,6 +393,32 @@ test("supported node test workflows produce source-derived local proof", () => {
   assert.equal(observedExecutedTestCount("# Subtest: skipped suite\n    ok 1 - deferred # SKIP later\n    1..1\nok 1 - skipped suite\n1..1\n"), 0, "an all-skipped TAP subtest does not make its outer suite marker a pass");
 });
 
+test("Node protocol admission requires a terminal built-in runner while permitting preceding setup", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({ scripts: { build: "node build.mjs", test: "npm run build && node --test --test-reporter=spec test/contract.test.mjs" } }),
+    "build.mjs": "export {};\n",
+    "fixture-state.mjs": "process.env.FIXTURE_STATE = 'owned';\n",
+    "test/contract.test.mjs": 'import test from "node:test"; test("contract", () => {});\n',
+  });
+  assert.equal(testExecutionProof("npm test", root)?.runner, "node --test");
+  for (const command of [
+    "node --test --test-reporter=./counterfeit.mjs test/contract.test.mjs",
+    "node --test --test-reporter ./counterfeit.mjs test/contract.test.mjs",
+    "node --test --test-reporter-destination=stdout test/contract.test.mjs",
+    "node --require ./counterfeit.mjs --test test/contract.test.mjs",
+    "NODE_OPTIONS=--require=./counterfeit.mjs node --test test/contract.test.mjs",
+    "node --test test/contract.test.mjs > forged.log",
+    "./node --test test/contract.test.mjs",
+    "npm test -- --test-reporter=./counterfeit.mjs",
+  ]) assert.equal(testExecutionProof(command, root), null, command);
+  for (const reporter of ["spec", "tap"]) assert.equal(testExecutionProof(`node --test --test-reporter=${reporter} test/contract.test.mjs`, root)?.runner, "node --test");
+  assert.equal(testExecutionProof("node --import ./fixture-state.mjs --test test/contract.test.mjs", root)?.runner, "node --test", "reviewed regular project-local setup remains in the source trust boundary");
+  assert.equal(testExecutionProof("node --import data:text/javascript,forged --test test/contract.test.mjs", root), null);
+  assert.equal(testExecutionProof("node --import ../outside.mjs --test test/contract.test.mjs", root), null);
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "export NODE_OPTIONS=--require=./counterfeit.mjs && node --test test/contract.test.mjs" } }));
+  assert.equal(testExecutionProof("npm test", root), null, "shell setup cannot replace the terminal runner's protocol through exported options");
+});
+
 test("#1048: a name-filtered, skipped-only Node suite with printed pass-shaped stdout is null proof", () => {
   const root = fixture({
     "package.json": JSON.stringify({ scripts: { test: "node --test --test-name-pattern=contract test/contract.test.mjs" } }),

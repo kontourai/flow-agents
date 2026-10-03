@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/review-artifact/1.0.json",
+  "title": "Reviewed artifact subject or captured execution context",
+  "type": "object",
+  "required": ["file", "sha256"],
+  "properties": {
+    "file": { "type": "string", "minLength": 1 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "role": { "enum": ["review_subject", "review_context"] },
+    "source_file": { "type": "string", "minLength": 1 },
+    "control_anchors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "execution_mode", "execution_sha256", "plan_sha256", "acceptance_sha256", "scope_claims_sha256"],
+      "properties": {
+        "version": { "const": 1 },
+        "execution_mode": { "enum": ["verification_appendix", "entire_report"] },
+        "execution_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "plan_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "acceptance_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "scope_claims_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  },
+  "if": { "properties": { "role": { "const": "review_context" } }, "required": ["role"] },
+  "then": { "required": ["source_file", "control_anchors"] }
+}

@@ -126,6 +126,12 @@ Work Item, actual changed scope, criterion verdicts, critique, and Flow status.
 Do not describe delivery as complete while required behavior, evidence, or
 follow-up remains unresolved. Route eligible outcomes into publish/readiness and
 learning through their owning Builder skills.
+Canonical Flow completion reports completion of the selected process. A code
+run with verified behavior remains `verified` until the actual delivery work is
+observed; it does not establish registry publication, installation, or the
+original user goal's downstream outcomes. List any remaining milestones and
+continue authorized work from the real provider state. Do not close the overall
+goal merely because this producer run reports `done`.
 
 After learning completes, follow `learning-review`'s Repository-adapter
 closeout. Keep the worktree while its change is open or needs review fixes.

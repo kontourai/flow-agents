@@ -36,6 +36,11 @@ report is local and must not call `workflow evidence`.
 
 ## Evaluation
 
+Aggregate the existing canonical implementation scope, accepted criteria,
+critique, observed commands, and available provider records. Reuse their exact
+references and revision bindings. This step adds a confidence decision; it does
+not require a second criterion ledger or another run of current checks.
+
 1. Operate report-only. Do not patch source, alter checks, publish a change, or
    rerun with weaker options to manufacture a passing decision.
 2. Confirm acceptance evidence maps to the intended changed scope. Compare the
@@ -47,7 +52,9 @@ report is local and must not call `workflow evidence`.
    unsupported assertion. Preserve command, revision, timestamp, scope, and
    artifact provenance where available. Prose-only completion claims are not
    acceptance proof.
-4. Re-run only when the command is safe, relevant, and reproducible. A stale,
+4. Re-run only to resolve an actual stale result, changed scope, contradiction,
+   or missing required observation, and only when the command is safe and
+   reproducible. A stale,
    unavailable, changed, or non-reproducible check is degraded to
    `NOT_VERIFIED`; a previous pass must not remain current by assertion.
 5. Produce `PASS`, `FAIL`, or `NOT_VERIFIED` for the confidence decision.
@@ -70,7 +77,9 @@ It contains the scope assessed, acceptance evidence, integrity findings,
 evidence provenance, residual risks, `PASS`/`FAIL`/`NOT_VERIFIED` decision, and
 recommended route.
 
-Include a readable `Acceptance Evidence` table when behavior is claimed:
+Reuse the existing readable `Acceptance Evidence` table or canonical criterion
+references when behavior is claimed. Add a table only when it resolves a scope
+or evidence gap; do not copy the ledger merely to satisfy this step:
 
 | AC id | Status | Command/Test Evidence | Source Evidence | Gaps |
 | --- | --- | --- | --- | --- |
