@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.5.1](https://github.com/kontourai/flow-agents/compare/v6.5.0...v6.5.1) (2026-10-03)
+
+
+### Fixes
+
+* **builder:** restore namespace startup and reduce verification friction ([#1425](https://github.com/kontourai/flow-agents/issues/1425)) ([e4f910d](https://github.com/kontourai/flow-agents/commit/e4f910d9d3d5bdcd65f5d4a6281824d069af4b42))
+
 ## [6.5.0](https://github.com/kontourai/flow-agents/compare/v6.4.0...v6.5.0) (2026-09-30)
 
 
