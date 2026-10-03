@@ -4320,7 +4320,21 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   assert.equal(verify(null, tampered, keys.publicKey, Buffer.from(attestation.signature_b64, "base64")), false);
 });
 
-test("killing a drive during its third adapter preserves two verified accepted-turn checkpoints", async () => {
+test("killing a drive during its third adapter preserves two verified accepted-turn checkpoints", async (t) => {
+  const runtimeRoot = makeFixtureDir("interrupted-drive-runtime-");
+  const contextNames = ["FLOW_AGENTS_ACTOR", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDECODE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"];
+  const previousContext = new Map(contextNames.map((name) => [name, process.env[name]]));
+  t.after(() => {
+    for (const [name, value] of previousContext) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  for (const name of contextNames) delete process.env[name];
+  process.env.CODEX_THREAD_ID = path.basename(runtimeRoot);
+  process.env.XDG_CONFIG_HOME = path.join(runtimeRoot, "config");
+  process.env.XDG_CACHE_HOME = path.join(runtimeRoot, "cache");
+  process.env.XDG_STATE_HOME = path.join(runtimeRoot, "state");
   const session = makeSession("continuation-driver-interrupted-checkpoints");
   claimAmbientSessionAssignment(session);
   fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
@@ -4342,7 +4356,7 @@ test("killing a drive during its third adapter preserves two verified accepted-t
     for await (const chunk of process.stdin) input += chunk;
     const request = JSON.parse(input);
     if (request.iteration === 3) {
-      fs.writeFileSync(${JSON.stringify(thirdTurnMarker)}, JSON.stringify({ pid: process.pid }));
+      fs.writeFileSync(${JSON.stringify(thirdTurnMarker)}, JSON.stringify({ pid: process.pid, run_id: request.run_id, iteration: request.iteration }));
       setInterval(() => {}, 1000);
       await new Promise(() => {});
     }
@@ -4364,21 +4378,38 @@ test("killing a drive during its third adapter preserves two verified accepted-t
     "--turn-timeout-ms", "60000",
     "--barrier-wait-ms", "0",
     "--json",
-  ], { cwd: session.projectRoot, stdio: "ignore" });
+  ], { cwd: session.projectRoot, stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+  let driverStderr = "";
+  child.stderr.on("data", (chunk) => { driverStderr = (driverStderr + chunk.toString()).slice(-8192); });
+  const closed = new Promise((resolve) => {
+    child.once("error", (error) => resolve({ error: error.message }));
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
   let adapterPid;
+  let cancelReadiness = false;
   try {
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      if (fs.existsSync(path.join(checkpointDir, "checkpoint-000002.json")) && fs.existsSync(thirdTurnMarker)) {
-        adapterPid = readJson(thirdTurnMarker).pid;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    assert.ok(adapterPid, "the third adapter started after two checkpoints were published");
-    const closed = new Promise((resolve) => child.once("close", resolve));
-    child.kill("SIGKILL");
-    await closed;
+    const ready = await Promise.race([
+      (async () => {
+        const deadline = Date.now() + 10_000;
+        while (!cancelReadiness && Date.now() < deadline) {
+          if (fs.existsSync(thirdTurnMarker)) {
+            const marker = readJson(thirdTurnMarker);
+            adapterPid = marker.pid;
+            if (fs.existsSync(path.join(checkpointDir, "checkpoint-000002.json"))) return { kind: "third-turn-ready", marker };
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        return { kind: "startup-timeout" };
+      })(),
+      closed.then((exit) => ({ kind: "driver-exited", exit })),
+    ]);
+    assert.equal(ready.kind, "third-turn-ready", `driver did not reach its third adapter after two checkpoints: ${JSON.stringify(ready)}\n${driverStderr}`);
+    assert.equal(ready.marker.run_id, session.slug);
+    assert.equal(ready.marker.iteration, 3);
+    assert.ok(Number.isSafeInteger(adapterPid) && adapterPid > 1, "the third adapter handshake identifies its own process");
+    assert.equal(child.kill("SIGKILL"), true);
+    const exit = await closed;
+    assert.equal(exit.signal, "SIGKILL");
 
     const synchronized = await inspectBuilderFlowSession({ sessionDir: session.sessionDir });
     const verified = verifyContinuationEvidenceCheckpoints({
@@ -4393,8 +4424,10 @@ test("killing a drive during its third adapter preserves two verified accepted-t
     assert.deepEqual(verified.checkpoints.map((checkpoint) => checkpoint.accepted_turn.iteration), [1, 2]);
     assert.equal(fs.existsSync(path.join(checkpointDir, "checkpoint-000003.json")), false);
   } finally {
+    cancelReadiness = true;
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    if (Number.isSafeInteger(adapterPid)) {
+    await closed;
+    if (Number.isSafeInteger(adapterPid) && adapterPid > 1) {
       try { process.kill(adapterPid, "SIGKILL"); } catch (error) {
         if (error.code !== "ESRCH") throw error;
       }

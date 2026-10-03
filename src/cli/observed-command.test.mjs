@@ -94,12 +94,12 @@ test("output hashes cover omitted middle bytes while retained diagnostics remain
 
 test("a watchdog expiry cannot confirm a child that handles termination by exiting zero", async () => {
   const root = gitFixture();
-  fs.writeFileSync(path.join(root, "watchdog.mjs"), 'process.on("SIGTERM", () => { console.log("terminal-after-watchdog"); process.exit(0); }); console.log("ready"); setInterval(() => {}, 1000);\n');
   const prior = { timeout: process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS, grace: process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS };
   process.env.FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS = "600";
   process.env.FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS = "1000";
   try {
-    const result = await runObservedCommand("exec node watchdog.mjs", root);
+    const result = await runObservedCommand("trap 'printf \"terminal-after-watchdog\\n\"; exit 0' TERM; printf 'ready\\n'; while :; do :; done", root);
+    assert.match(result.stdout_tail, /ready\n/);
     assert.equal(result.process_exit_code, 0);
     assert.equal(result.timed_out, true);
     assert.equal(result.exit_code, null);
