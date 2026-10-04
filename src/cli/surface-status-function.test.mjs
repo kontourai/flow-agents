@@ -111,7 +111,8 @@ test("#1422: every committed delivery bundle re-derives to the verdict it record
   let compared = 0;
   for (const file of bundles) {
     const bundle = JSON.parse(fs.readFileSync(file, "utf8"));
-    assert.equal(stampedStatusFunctionVersion(bundle), "2", `${file} is not a status-function-2 bundle`);
+    // Every flow-agents writer stamps its version; the re-derivation below must use that stamp.
+    assert.notEqual(stampedStatusFunctionVersion(bundle), null, `${file} carries no statusFunctionVersion stamp`);
     const { statuses } = derive(file);
     for (const claim of bundle.claims) {
       // Superseded critique history is excluded from reconciliation (reconcile-shape.js) and its
@@ -150,6 +151,32 @@ test("#1422: a bundle whose stamp cannot be honoured is underivable in CI, so th
   assert.match(stderr, /statusFunctionVersion "1"/);
   const issues = reconcileStatusIssues(bundle, statuses);
   assert.ok(issues.length > 0 && issues.every((issue) => issue.type === "status-underivable"), JSON.stringify(issues));
+
+  // The real reconciler exits non-zero and says why.
+  const recon = spawnSync(process.execPath, [RECONCILE, "--bundle", forged, "--repo-root", repo], { encoding: "utf8", env: { ...process.env, TRUST_RECONCILE_COMMANDS: "true" } });
+  assert.notEqual(recon.status, 0, `trust-reconcile accepted a bundle it cannot re-derive:\n${recon.stdout}`);
+  assert.match(recon.stderr, /statusFunctionVersion "1", which the installed @kontourai\/surface cannot evaluate/);
+  assert.match(recon.stdout + recon.stderr, /status-underivable|could not be re-derived/);
+});
+
+test("#1422: `workflow-sidecar claim` explains a bundle with its stamped status function and refuses one it cannot honour", () => {
+  const { repo, bundle } = writeReviewedDelivery();
+  const critique = bundle.claims.find((claim) => claim.metadata?.origin === "critique");
+  const claimCli = (dir) => spawnSync(process.execPath, [SIDECAR, "claim", critique.id, dir], { encoding: "utf8" });
+  const good = path.join(repo, "explain-good");
+  fs.mkdirSync(good);
+  fs.writeFileSync(path.join(good, "trust.bundle"), JSON.stringify(bundle));
+  const ok = claimCli(good);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /Status: verified/);
+  assert.match(ok.stdout, /\[pass\] attestation: critique verdict: pass/);
+  const bad = path.join(repo, "explain-unsupported");
+  fs.mkdirSync(bad);
+  fs.writeFileSync(path.join(bad, "trust.bundle"), JSON.stringify({ ...bundle, source: "flow-agents/workflow-sidecar;statusFunctionVersion=1" }));
+  const refused = claimCli(bad);
+  assert.equal(refused.status, 1, `claim explained a bundle it cannot re-derive:\n${refused.stdout}`);
+  assert.match(refused.stderr, /statusFunctionVersion "1"/);
+  assert.equal(refused.stdout, "");
 });
 
 test("#1422: claim rendering shows evidence with no recorded result as 'no result', never as a failure", () => {

@@ -1573,7 +1573,8 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       // claim.status). Consumed by the session-local loop below to catch status-misassertion.
       const derivedStatus = deriveClaimStatuses(bundlePath, resolvedRepoRoot);
       if (derivedStatus) {
-        process.stdout.write(`[trust-reconcile] re-derived ${derivedStatus.size} claim status(es) CI-side from the bundle's own evidence/events/policies (self-reported claim.status is NOT trusted)\n`);
+        const underivable = [...derivedStatus.values()].filter((status) => status === null).length;
+        process.stdout.write(`[trust-reconcile] re-derived ${derivedStatus.size - underivable} claim status(es) CI-side from the bundle's own evidence/events/policies (self-reported claim.status is NOT trusted)${underivable ? `; ${underivable} claim(s) could not be re-derived` : ''}\n`);
       } else {
         process.stderr.write(`[trust-reconcile] WARNING: CI-side status re-derivation is unavailable — every session-local pass-asserting claim will fail closed (cannot verify self-reported status)\n`);
       }

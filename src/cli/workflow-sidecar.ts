@@ -2,7 +2,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -7551,12 +7551,12 @@ function loadTrustReconcileHelper(): {
 function derivePreflightClaimStatuses(bundlePath: string, repoRoot: string): Map<string, string | null> | null {
   const helper = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/ci/derive-claim-status.mjs");
   if (!fs.existsSync(helper)) return null;
-  let stdout: string;
-  try {
-    stdout = execFileSync(process.execPath, [helper, bundlePath], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000 });
-  } catch {
-    return null;
-  }
+  const res = spawnSync(process.execPath, [helper, bundlePath], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000 });
+  if (res.status !== 0) return null;
+  const stdout = res.stdout;
+  // #1422: a successful run can still report every claim underivable (a status function stamp
+  // the installed Surface cannot honour); its stderr names why, so pass it on.
+  if (res.stderr && res.stderr.trim()) process.stderr.write(`[reconcile-preflight] status re-derivation: ${res.stderr.trim()}\n`);
   if (!stdout) return null;
   try {
     const obj = JSON.parse(stdout);
@@ -7702,7 +7702,7 @@ function preflightFixHint(type: string): string {
     case "status-misassertion":
       return "FIX: the claim's asserted status does not match what Surface re-derives from the bundle's own evidence/events/policies — re-record evidence so the bundle's own data supports the asserted status; do not hand-edit status.";
     case "status-underivable":
-      return "FIX: CI-side status re-derivation failed for this claim — ensure @kontourai/surface is installed/resolvable and the claim's evidence/events are well-formed, then re-record.";
+      return "FIX: CI-side status re-derivation failed for this claim — ensure @kontourai/surface is installed/resolvable and the claim's evidence/events are well-formed, then re-record. If every claim is underivable, check the bundle's statusFunctionVersion stamp (its source field) against the status function versions the installed Surface supports; the reason is printed above.";
     case "unwaived-session-local":
       return "FIX: this claim asserts pass but has neither a waiver nor a CI-re-derived 'verified' status — add a waiver (--accepted-gap-reason/--waived-by) or resolve it so Surface derives 'verified'.";
     default:

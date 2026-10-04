@@ -16,8 +16,10 @@
 // (scripts/lib/status-function-version.js owns that decision, including what an unstamped or
 // unsupported stamp means). Surface 5 defaults to status function "3"; re-deriving a bundle the
 // writer derived under "2" with "3" would report a status-misassertion against an honest bundle.
-// When the stamp cannot be honoured every claim is reported underivable (null), so the CI
-// reconciler fails closed on each pass-asserting claim and names the reason on stderr.
+// When the stamp cannot be honoured every claim is reported underivable (null) and the reason is
+// written to stderr. The reconciler then refuses each session-local claim that asserts a pass or
+// a failure (status-underivable); claims it reconciles by re-running their command do not consult
+// the derived status at all.
 //
 // Usage: node derive-claim-status.mjs <bundle-path>
 // Output (stdout): {"claimId": "<TrustStatus>", ...}  — value is null if that claim threw.

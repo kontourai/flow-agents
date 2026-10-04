@@ -149,6 +149,15 @@ written with.
   is unavoidable while installed writers on Surface 2.x keep producing honest `"2"` bundles; a
   floor on the accepted version is a separate, owner-level policy decision.
 
+- **Readers that stay on the installed default, deliberately.** The Stop hook's gate re-derivation
+  (`stop-goal-fit.js`), checkpoint sealing, `render-trust-panel` and gate-review inquiries read the
+  live session bundle, which the current writer rebuilds and restamps on every write; they are not
+  reconciling a past delivery. The hook acts only on `disputed`/`rejected`, which `"3"` reaches in
+  strictly more cases, never fewer.
+
 Critique claims carry the reviewer's verdict as `attestation` evidence, linked from the verdict
 event, and their policy requires it. Under `"3"` a policy that requires nothing cannot verify a
-claim, so this is what lets a passing review derive `verified` from the bundle's own data.
+claim, so this is what lets a passing review derive `verified` from the bundle's own data. One
+status changes already under `"2"`: a critique with no verdict event (`not_verified`) and
+superseded critique history now re-derive `unknown` rather than `proposed`, because their policy
+now requires evidence they do not have. Neither asserts a pass, so neither is reconciled or gated.
