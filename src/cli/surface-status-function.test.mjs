@@ -132,7 +132,13 @@ test("#1422: the status function stamp is parsed as an identity and refused when
   // No stamp: the strictest version the installed Surface offers, never the lenient one.
   assert.deepEqual(statusFunctionVersionForBundle({ source: "someone-else" }, surface), { version: "3", stamped: false });
   assert.deepEqual(statusFunctionVersionForBundle({}, surface), { version: "3", stamped: false });
-  assert.throws(() => statusFunctionVersionForBundle({ source: "x;statusFunctionVersion=1" }, surface), /cannot evaluate/);
+  // Status function "1" is re-derived under "2" exactly when the bundle carries none of the three
+  // inputs on which the two differ, and refused otherwise.
+  assert.deepEqual(statusFunctionVersionForBundle({ source: "x;statusFunctionVersion=1", claims: [{ id: "c" }], events: [{ status: "verified" }] }, surface), { version: "2", stamped: true });
+  assert.throws(() => statusFunctionVersionForBundle({ source: "x;statusFunctionVersion=1", events: [{ status: "revoked" }] }, surface), /revoked.*cannot evaluate "1"/);
+  assert.throws(() => statusFunctionVersionForBundle({ source: "x;statusFunctionVersion=1", events: [{ status: "stale", type: "invalidation" }] }, surface), /invalidation event/);
+  assert.throws(() => statusFunctionVersionForBundle({ source: "x;statusFunctionVersion=1", claims: [{ id: "c", ttlSeconds: 60 }] }, surface), /expiresAt\/ttlSeconds/);
+  assert.throws(() => statusFunctionVersionForBundle({ source: "x;statusFunctionVersion=0" }, surface), /cannot evaluate/);
   assert.throws(() => statusFunctionVersionForBundle({ source: "x;statusFunctionVersion=2;statusFunctionVersion=3" }, surface), /2 times/);
   assert.throws(() => statusFunctionVersionForBundle({ source: "x;statusFunctionVersion=" }, surface), /empty/);
   assert.equal(stampedStatusFunctionVersion({ source: "x;statusFunctionVersion=22" }), "22", "a stamp is matched whole, not by prefix");
@@ -144,18 +150,18 @@ test("#1422: the status function stamp is parsed as an identity and refused when
 test("#1422: a bundle whose stamp cannot be honoured is underivable in CI, so the reconciler fails closed", () => {
   const { repo, bundle } = writeReviewedDelivery();
   const forged = path.join(repo, "unsupported-stamp.bundle");
-  fs.writeFileSync(forged, JSON.stringify({ ...bundle, source: "flow-agents/workflow-sidecar;statusFunctionVersion=1" }));
+  fs.writeFileSync(forged, JSON.stringify({ ...bundle, source: "flow-agents/workflow-sidecar;statusFunctionVersion=9" }));
   const { statuses, stderr } = derive(forged);
   assert.ok(statuses.size > 0);
   assert.ok([...statuses.values()].every((status) => status === null), "every claim must be underivable");
-  assert.match(stderr, /statusFunctionVersion "1"/);
+  assert.match(stderr, /statusFunctionVersion "9"/);
   const issues = reconcileStatusIssues(bundle, statuses);
   assert.ok(issues.length > 0 && issues.every((issue) => issue.type === "status-underivable"), JSON.stringify(issues));
 
   // The real reconciler exits non-zero and says why.
   const recon = spawnSync(process.execPath, [RECONCILE, "--bundle", forged, "--repo-root", repo], { encoding: "utf8", env: { ...process.env, TRUST_RECONCILE_COMMANDS: "true" } });
   assert.notEqual(recon.status, 0, `trust-reconcile accepted a bundle it cannot re-derive:\n${recon.stdout}`);
-  assert.match(recon.stderr, /statusFunctionVersion "1", which the installed @kontourai\/surface cannot evaluate/);
+  assert.match(recon.stderr, /statusFunctionVersion "9", which the installed @kontourai\/surface cannot evaluate/);
   assert.match(recon.stdout + recon.stderr, /status-underivable|could not be re-derived/);
 });
 
@@ -172,11 +178,33 @@ test("#1422: `workflow-sidecar claim` explains a bundle with its stamped status 
   assert.match(ok.stdout, /\[pass\] attestation: critique verdict: pass/);
   const bad = path.join(repo, "explain-unsupported");
   fs.mkdirSync(bad);
-  fs.writeFileSync(path.join(bad, "trust.bundle"), JSON.stringify({ ...bundle, source: "flow-agents/workflow-sidecar;statusFunctionVersion=1" }));
+  fs.writeFileSync(path.join(bad, "trust.bundle"), JSON.stringify({ ...bundle, source: "flow-agents/workflow-sidecar;statusFunctionVersion=9" }));
   const refused = claimCli(bad);
   assert.equal(refused.status, 1, `claim explained a bundle it cannot re-derive:\n${refused.stdout}`);
-  assert.match(refused.stderr, /statusFunctionVersion "1"/);
+  assert.match(refused.stderr, /statusFunctionVersion "9"/);
   assert.equal(refused.stdout, "");
+});
+
+// This one bites only on Surface >= 5. On 2.x `buildTrustReport` implements only "2" and ignores
+// the version option, so nothing observable distinguishes passing the stamp from not passing it.
+// It deliberately has no skip: once the pin moves it runs as-is, and `claim` must still explain a
+// committed delivery as it was derived. Its critiques were verified under a policy that requires
+// nothing, which status function "3" derives `proposed`.
+test("#1422: `workflow-sidecar claim` explains a committed status-function-2 delivery as it was derived", () => {
+  const dir = path.join(ROOT, "delivery/kontourai-flow-agents-1000");
+  const bundle = JSON.parse(fs.readFileSync(path.join(dir, "trust.bundle"), "utf8"));
+  assert.equal(stampedStatusFunctionVersion(bundle), "2");
+  const policies = new Map(bundle.policies.map((policy) => [policy.id, policy]));
+  const emptyPolicyVerified = bundle.claims.filter((claim) => claim.status === "verified"
+    && !claim.metadata?.superseded_by
+    && (policies.get(claim.verificationPolicyId)?.requiredEvidence ?? []).length === 0
+    && (policies.get(claim.verificationPolicyId)?.requiredMethods ?? []).length === 0);
+  assert.equal(emptyPolicyVerified.length, 8, "the fixture's empty-requirement verified critiques");
+  for (const claim of emptyPolicyVerified) {
+    const res = spawnSync(process.execPath, [SIDECAR, "claim", claim.id, dir, "--json"], { encoding: "utf8" });
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(JSON.parse(res.stdout).status, "verified", `claim ${claim.id} is explained as '${JSON.parse(res.stdout).status}', not as it was derived`);
+  }
 });
 
 test("#1422: claim rendering shows evidence with no recorded result as 'no result', never as a failure", () => {

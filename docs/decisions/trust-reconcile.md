@@ -142,9 +142,17 @@ written with.
 
 - **No stamp** derives under the installed Surface's current version. No flow-agents writer has
   emitted an unstamped bundle, and leaving the stamp out must never select the more lenient rules.
-- **A stamp the installed Surface cannot evaluate** (for example `"1"`), or a malformed one (empty,
-  repeated), is refused: every claim is reported underivable, so CI fails closed with the reason on
-  stderr. A status derived with an algorithm the producer did not use is not that bundle's status.
+- **A stamp the installed Surface cannot evaluate**, or a malformed one (empty, repeated), is
+  refused: every claim is reported underivable and the reason goes to stderr. CI then refuses each
+  session-local claim that asserts a pass or a failure; command-reconciled claims do not consult the
+  derived status. A status derived with an algorithm the producer did not use is not that bundle's
+  status.
+- **`"1"` is the one exact exception.** Surface < 1.2.0 implemented status function `"1"`, and the
+  first writers stamped it for about a day; test fixtures still carry it. `"1"` and `"2"` differ in
+  three inputs only: a `revoked` event status, an `invalidation` event, and a claim-intrinsic
+  `expiresAt`/`ttlSeconds` window (compared on the Surface 1.1.0 and 1.2.0 sources). A `"1"` bundle
+  with none of them is re-derived under `"2"`, which is what every reader did before this change; one
+  with any of them is refused.
 - **Accepted residual.** The stamp is producer-written, so any bundle can claim `"2"`. Honouring it
   is unavoidable while installed writers on Surface 2.x keep producing honest `"2"` bundles; a
   floor on the accepted version is a separate, owner-level policy decision.
