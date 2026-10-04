@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.5.2](https://github.com/kontourai/flow-agents/compare/v6.5.1...v6.5.2) (2026-10-03)
+
+
+### Fixes
+
+* **economics:** preserve unknown Builder feedback costs ([#1428](https://github.com/kontourai/flow-agents/issues/1428)) ([ce491ad](https://github.com/kontourai/flow-agents/commit/ce491ad810b8de0dc0336d2a7b67e05edcec1b56))
+
 ## [6.5.1](https://github.com/kontourai/flow-agents/compare/v6.5.0...v6.5.1) (2026-10-03)
 
 
