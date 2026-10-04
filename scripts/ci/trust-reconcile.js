@@ -332,6 +332,9 @@ function deriveClaimStatuses(bundlePath, repoRoot) {
 `);
     return null;
   }
+  // #1422: a successful run can still report every claim underivable (a status function stamp
+  // the installed Surface cannot honour); its stderr names why, so surface it.
+  if (res.stderr && res.stderr.trim()) process.stderr.write(`[trust-reconcile] status re-derivation: ${res.stderr.trim()}\n`);
   try {
     const obj = JSON.parse(res.stdout);
     const m = new Map();

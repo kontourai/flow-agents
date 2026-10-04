@@ -129,3 +129,26 @@ version 1 record. Version 1 records are rejected and require re-recording under 
 The `workflow-evidence` schema v2 projects the same per-command fields for
 consumers. It is not a runtime reconciliation authority. Version 1 is rejected; runtime decisions
 continue to derive from `trust.bundle`.
+
+## Implementation note (#1422, status function versions)
+
+Surface 5 moved the default status function from `"2"` to `"3"` (omission fails closed) and keeps
+`"2"` selectable for re-deriving records made under it. The writer stamps the version it derived
+with into every bundle's `source` (`flow-agents/workflow-sidecar;statusFunctionVersion=<v>`), and
+re-derivation of a stored bundle — `derive-claim-status.mjs` for CI and `reconcile-preflight`, and
+`workflow-sidecar claim` — uses that stamp, through the shared
+`scripts/lib/status-function-version.js`, so a committed delivery reconciles to the verdict it was
+written with.
+
+- **No stamp** derives under the installed Surface's current version. No flow-agents writer has
+  emitted an unstamped bundle, and leaving the stamp out must never select the more lenient rules.
+- **A stamp the installed Surface cannot evaluate** (for example `"1"`), or a malformed one (empty,
+  repeated), is refused: every claim is reported underivable, so CI fails closed with the reason on
+  stderr. A status derived with an algorithm the producer did not use is not that bundle's status.
+- **Accepted residual.** The stamp is producer-written, so any bundle can claim `"2"`. Honouring it
+  is unavoidable while installed writers on Surface 2.x keep producing honest `"2"` bundles; a
+  floor on the accepted version is a separate, owner-level policy decision.
+
+Critique claims carry the reviewer's verdict as `attestation` evidence, linked from the verdict
+event, and their policy requires it. Under `"3"` a policy that requires nothing cannot verify a
+claim, so this is what lets a passing review derive `verified` from the bundle's own data.
