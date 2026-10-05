@@ -9528,6 +9528,8 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
     if (typeof surface.deriveTrustStatus !== "function") die("@kontourai/surface deriveTrustStatus unavailable — requires surface >= 1.2");
     const subjectFilter = opt(p, "subject");
     const now = opt(p, "now") ? new Date(opt(p, "now")) : new Date();
+    // An unparseable --now must never decide freshness: a NaN comparison reads every hold as fresh.
+    if (!Number.isFinite(now.getTime())) die(`liveness status --now must be an ISO timestamp, got ${JSON.stringify(opt(p, "now"))}`);
     // Group events by subjectId::actor — one liveness claim per holder of a subject.
     const groups = new Map<string, { subjectId: string; actor: string; ttlSeconds: number; created: string; updated: string; events: AnyObj[]; evidence: AnyObj[] }>();
     // The signal an event records, as evidence linked from that event (#1422).
@@ -9860,7 +9862,7 @@ const COMMAND_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> = [
   ["promote", "Record a durable-residue promotion claim (or none) for a session."],
   ["advance-state", "Advance a session's status/phase; auto-seals and publishes on delivery."],
   ["record-critique", "Record a review critique verdict into the trust bundle."],
-  ["resolve-critique", "Resolve a pending critique (public workflow interface only)."],
+  ["resolve-critique", "Refused here: critique resolution is owned by the external lifecycle authority (use the public workflow resolve-critique)."],
   ["import-critique", "Import an externally-authored critique into the trust bundle."],
   ["record-release", "Record a release-readiness decision; auto-seals and publishes."],
   ["record-learning", "Record a post-delivery learning/follow-up entry."],

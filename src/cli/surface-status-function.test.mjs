@@ -236,6 +236,9 @@ test("#1422: claim rendering shows evidence with no recorded result as 'no resul
 
 // ── Slice 2: liveness holds and bundle-root resolution events ─────────────────
 
+// The held -> `verified` assertion bites only on Surface >= 5: under status function "2" a policy
+// that requires nothing still verifies, so reverting the liveness evidence or its requirement is
+// invisible on 2.x. No skip, so it gates once the pin moves; lapse, release and --now hold everywhere.
 test("#1422: a liveness hold is verified by the holder's signal evidence, and lapses and releases still free it", () => {
   const root = makeFixtureDir("surface-1422-liveness-");
   const live = (...args) => sidecar(["liveness", ...args, "--artifact-root", root]);
@@ -247,6 +250,10 @@ test("#1422: a liveness hold is verified by the holder's signal evidence, and la
   const rows = JSON.parse(live("status", "--now", "2026-06-25T12:00:00Z", "--json").stdout);
   const bySubject = Object.fromEntries(rows.map((row) => [row.subjectId, row.status]));
   assert.deepEqual(bySubject, { "held-subj": "verified", "lapsed-subj": "stale", "released-subj": "stale" });
+  // An unparseable --now is refused rather than read as "every hold is fresh".
+  const bogus = spawnSync(process.execPath, [SIDECAR, "liveness", "status", "--now", "bogus", "--json", "--artifact-root", root], { encoding: "utf8" });
+  assert.notEqual(bogus.status, 0, `liveness status accepted --now bogus:\n${bogus.stdout}`);
+  assert.match(bogus.stderr, /--now must be an ISO timestamp/);
 });
 
 /** A real session whose trust.bundle carries the legacy root key, as the pre-externalization writer left it. */
