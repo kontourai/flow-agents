@@ -21,7 +21,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { explainClaim, buildTrustReport } from "@kontourai/surface";
+import { explainClaim, buildTrustReport, validateTrustBundle } from "@kontourai/surface";
 import { renderClaimExplanation, claimEvidenceResult } from "../../build/src/cli/workflow-sidecar.js";
 import { validateCritiqueResolutionGraph } from "../../build/src/cli/critique-resolution.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
@@ -232,4 +232,70 @@ test("#1422: claim rendering shows evidence with no recorded result as 'no resul
   const noFailure = renderClaimExplanation(critique.id, { ...explanation, evidence: [{ ...item, passing: null }] });
   assert.doesNotMatch(noFailure, /Failing evidence/);
   assert.doesNotMatch(noFailure, /FAIL/);
+});
+
+// ── Slice 2: liveness holds and bundle-root resolution events ─────────────────
+
+// Reverting the policy requirement is caught only on Surface >= 5: under status function "2" a
+// policy that requires nothing still verifies. Dropping the signal evidence is caught on every
+// version, because the requirement then goes unmet. No skip, so all of it gates once the pin moves.
+test("#1422: a liveness hold is verified by the holder's signal evidence, and lapses and releases still free it", () => {
+  const root = makeFixtureDir("surface-1422-liveness-");
+  const live = (...args) => sidecar(["liveness", ...args, "--artifact-root", root]);
+  live("claim", "held-subj", "--actor", "agent-A", "--at", "2026-06-25T11:50:00Z", "--ttl", "1800");
+  live("heartbeat", "held-subj", "--actor", "agent-A", "--at", "2026-06-25T11:58:00Z");
+  live("claim", "lapsed-subj", "--actor", "agent-B", "--at", "2026-06-25T11:00:00Z", "--ttl", "1800");
+  live("claim", "released-subj", "--actor", "agent-C", "--at", "2026-06-25T11:50:00Z", "--ttl", "1800");
+  live("release", "released-subj", "--actor", "agent-C", "--at", "2026-06-25T11:55:00Z");
+  const rows = JSON.parse(live("status", "--now", "2026-06-25T12:00:00Z", "--json").stdout);
+  const bySubject = Object.fromEntries(rows.map((row) => [row.subjectId, row.status]));
+  assert.deepEqual(bySubject, { "held-subj": "verified", "lapsed-subj": "stale", "released-subj": "stale" });
+  // A stale claim refreshed by a heartbeat is held on the heartbeat's own signal; the same stale
+  // claim with no fresh heartbeat has lapsed.
+  live("claim", "refreshed-subj", "--actor", "agent-D", "--at", "2026-06-20T11:00:00Z", "--ttl", "1800");
+  live("heartbeat", "refreshed-subj", "--actor", "agent-D", "--at", "2026-06-25T11:58:00Z");
+  live("claim", "unrefreshed-subj", "--actor", "agent-E", "--at", "2026-06-20T11:00:00Z", "--ttl", "1800");
+  const later = Object.fromEntries(JSON.parse(live("status", "--now", "2026-06-25T12:00:00Z", "--json").stdout).map((row) => [row.subjectId, row.status]));
+  assert.equal(later["refreshed-subj"], "verified", "a heartbeat carrying its signal keeps the hold");
+  assert.equal(later["unrefreshed-subj"], "stale", "a claim with no fresh heartbeat has lapsed");
+  // An unparseable --now is refused rather than read as "every hold is fresh".
+  const bogus = spawnSync(process.execPath, [SIDECAR, "liveness", "status", "--now", "bogus", "--json", "--artifact-root", root], { encoding: "utf8" });
+  assert.notEqual(bogus.status, 0, `liveness status accepted --now bogus:\n${bogus.stdout}`);
+  assert.match(bogus.stderr, /--now must be an ISO timestamp/);
+});
+
+/** A real session whose trust.bundle carries the legacy root key, as the pre-externalization writer left it. */
+function legacyEmbeddedSession() {
+  const { repo, bundlePath, bundle } = writeReviewedDelivery();
+  const legacyEvents = [{ schema_version: "1.0", sequence: 1, event_id: "critique-resolution:legacy", operation: "resolve-critique" }];
+  fs.writeFileSync(bundlePath, `${JSON.stringify({ ...bundle, critique_resolution_events: legacyEvents }, null, 2)}\n`);
+  return { repo, bundlePath, dir: path.dirname(bundlePath), before: bundle };
+}
+
+test("#1422: a fresh bundle never carries critique_resolution_events at its root", () => {
+  const { bundle } = writeReviewedDelivery();
+  assert.deepEqual(Object.keys(bundle).sort(), ["claims", "events", "evidence", "policies", "schemaVersion", "source"]);
+  validateTrustBundle(bundle);
+});
+
+test("#1422: rebuilding a legacy bundle drops the root resolution events, says so, and keeps every claim", () => {
+  const { bundlePath, dir, before } = legacyEmbeddedSession();
+  const res = sidecar(["record-evidence", dir, "--verdict", "pass", "--check-json", JSON.stringify({ id: "diff-2", kind: "diff", status: "pass", summary: "second diff" }), "--timestamp", "2026-07-01T00:03:00Z"]);
+  assert.match(res.stderr, /dropping the legacy bundle-embedded critique_resolution_events/);
+  const after = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
+  assert.equal(Object.hasOwn(after, "critique_resolution_events"), false, "the rebuilt bundle still carries the legacy root key");
+  validateTrustBundle(after); // Surface >= 4 refuses an unknown top-level key; this is the write that would fail
+  for (const claim of before.claims) {
+    const rebuilt = after.claims.find((candidate) => candidate.id === claim.id);
+    assert.ok(rebuilt, `claim ${claim.id} lost in the rebuild`);
+    assert.equal(rebuilt.status, claim.status);
+  }
+  assert.ok(after.claims.some((claim) => claim.subjectId?.endsWith("/diff-2")), "the new evidence was recorded");
+});
+
+test("#1422: the sidecar refuses resolve-critique; resolution is the lifecycle authority's mutation", () => {
+  const { dir } = legacyEmbeddedSession();
+  const res = spawnSync(process.execPath, [SIDECAR, "resolve-critique", dir], { encoding: "utf8" });
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /owned by the external lifecycle authority helper/);
 });

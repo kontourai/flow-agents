@@ -472,9 +472,15 @@
     ]
   },
   {
-    "scope": "author:briananderson1222 branch-prefix:feat/surface-5",
+    "scope": "author:briananderson1222 ref:feat/surface-5",
     "reason": "First slice of #1422: critique verdicts carry attestation evidence, re-derivation follows each bundle's stamped status-function version, and 'no result' evidence is rendered as such. Agent-delivered without a trust bundle. Verification in lieu of a bundle: independent report-only review plus a delta review, fault injections, re-derivation of every committed bundle unchanged, and a differential check of status-function 1 against 2.",
     "approved_by": "briananderson1222 (repository owner; scoped to this branch only, not a standing exemption)",
     "declared_at": "2026-10-05T00:00:00Z"
+  },
+  {
+    "scope": "author:briananderson1222 ref:feat/surface-5-liveness",
+    "reason": "Second slice of #1422 (Surface 5 status function 3 preparation, pin unchanged at 2.17.0): liveness holds carry the holder's claim/heartbeat signal as attestation evidence that their policy requires, and Trust Bundles no longer carry critique_resolution_events at the root (the unreachable sidecar resolve-critique writer is removed; a legacy bundle is rebuilt without the key). Agent-delivered without a trust bundle. Verification in lieu of a bundle: tests through the real sidecar writer on Surface 2.17.0 and on a local Surface 5.0.0 swap (lockfile untouched), fault injections with recorded failure text, re-derivation of every committed delivery bundle unchanged, and the trust-verify reconcilers pinned by consumers (Surface 2.13.0) exiting 0 on a bundle from this branch.",
+    "approved_by": "briananderson1222 (repository owner; scoped to this branch only, not a standing exemption)",
+    "declared_at": "2026-10-05T16:55:49Z"
   }
 ]

@@ -7545,7 +7545,7 @@ externalAuthorityE2E("an authenticated final reviewer resolves an earlier repair
   fs.writeFileSync(path.join(session.sessionDir, "trust.bundle"), beforeRejectedResolution);
   await assert.rejects(
     workflowSidecarMain(["resolve-critique", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId, "--resolver", finalReviewer.actorKey]),
-    /authenticated public workflow interface/,
+    /owned by the external lifecycle authority helper/,
   );
   await assert.rejects(
     workflowMain(["resolve-critique", "--session-dir", session.sessionDir, "--prior-record-id", priorRecordId, "--resolving-record-id", resolvingRecordId]),

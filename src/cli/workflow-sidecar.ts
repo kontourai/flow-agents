@@ -18,7 +18,7 @@ import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { updateStateJson, writeStateJson } from "../lib/state-file-lock.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { observeCoordinatedCommandReceipt, resolveCoordinatedCommandBinding, type CoordinatedCommandReceiptProof } from "../lib/coordinated-command-receipt.js";
-import { assertTrustedGitAncestor, execTrustedGitSync, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
+import { execTrustedGitSync, isExactLowercaseCommitSha, readTrustedGitBlobSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 import { assertMutationWritableWithRetry, startBuilderFlowSession, syncBuilderFlowSession, withBuilderFlowProjectionCurrent } from "../builder-flow-runtime.js";
 // #1315 review FIX-4 / #1316: the canonical-run capability is DECLARED by the run adapter that
 // owns it, and is now DERIVED from what each declaring kit binds rather than enumerated. Both
@@ -50,7 +50,7 @@ import {
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
 // import — same idiom already used above for ../lib/flow-resolver.js).
 import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
-import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, critiqueResolutionResultCoreDigest, normalizeCritiqueChainRecords, validateCritiqueResolutionGraph } from "./critique-resolution.js";
+import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, normalizeRouteReasonForBudget, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
@@ -796,6 +796,9 @@ const CAPTURE_HOOK_COLLECTOR = "flow-agents/evidence-capture";
  */
 const DEFAULT_CRITIQUE_REVIEWER = "tool-code-reviewer";
 
+/** #1422: the root key the pre-externalization writer used for critique resolution events. Never written now. */
+const LEGACY_BUNDLE_RESOLUTION_EVENTS_KEY = "critique_resolution_events";
+
 /**
  * #1422: how a critique verdict is recorded as evidence. Surface's attestation shape for a review
  * or sign-off (docs/reference/schema-versioning.md, "Producers of claims verified by a policy that
@@ -1029,7 +1032,7 @@ export function composeGateVerdict(
  * @param critiques  Critique objects reconstructed from trust.bundle claims
  * @param commandLog Optional parsed command-log.jsonl entries (capture-authoritative fold)
  */
-export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[], flowAgentsDir?: string, actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents: AnyObj[] = [], capturedWorkflowSubjectRef?: string | null): Promise<AnyObj | null> {
+export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[], flowAgentsDir?: string, actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, capturedWorkflowSubjectRef?: string | null): Promise<AnyObj | null> {
   const surface = await tryLoadSurface();
   if (!surface) return null;
   const { deriveClaimStatus, generateClaimId, statusFunctionVersion } = surface;
@@ -1854,7 +1857,6 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     evidence: evidenceItems,
     policies: [...policies.values()],
     events,
-    ...(resolutionEvents.length ? { critique_resolution_events: resolutionEvents } : {}),
   };
 }
 
@@ -1871,7 +1873,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
  * @param criteria   Acceptance criteria objects (same as buildTrustBundle)
  * @param critiques  Critique objects (same as buildTrustBundle)
  */
-export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, resolutionEvents?: AnyObj[], capturedWorkflowSubjectRef?: string | null, writerTarget?: TrustBundleWriterTarget): Promise<{ written: boolean; errors: string[] }> {
+export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string, exactFlowContext?: { flowId: string; stepId: string }, capturedWorkflowSubjectRef?: string | null, writerTarget?: TrustBundleWriterTarget): Promise<{ written: boolean; errors: string[] }> {
   try {
     // Fold the deterministic capture log (PostToolUse evidence-capture) into the
     // bundle so capture is authoritative over claimed status. Best-effort read.
@@ -1904,14 +1906,19 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
         }
       } catch { /* current.json absent or unreadable — no scoping */ }
     }
-    let effectiveResolutionEvents = resolutionEvents;
-    if (effectiveResolutionEvents === undefined) {
-      try {
-        const prior = loadJson(path.join(dir, "trust.bundle"));
-        effectiveResolutionEvents = Array.isArray(prior.critique_resolution_events) ? prior.critique_resolution_events : [];
-      } catch { effectiveResolutionEvents = []; }
-    }
-    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir, _effectiveActorKey, exactFlowContext, effectiveResolutionEvents, capturedWorkflowSubjectRef);
+    // #1422: critique resolution events live only in the protected external lifecycle-authority
+    // ledger (lifecycle-authority.resolution-events.json). A Trust Bundle never carries them: Surface
+    // >= 4 refuses a bundle with an unknown top-level key, and no gate has read bundle-embedded
+    // events since they were externalized (externalCritiqueAuthorityForGate treats them as
+    // forgeries). A bundle written by the short-lived pre-externalization writer may still carry
+    // `critique_resolution_events` at its root; the rebuild leaves it out and says so.
+    try {
+      const prior = loadJson(path.join(dir, "trust.bundle"));
+      if (Object.hasOwn(prior, LEGACY_BUNDLE_RESOLUTION_EVENTS_KEY)) {
+        process.stderr.write(`[trust-bundle] dropping the legacy bundle-embedded ${LEGACY_BUNDLE_RESOLUTION_EVENTS_KEY} from ${path.join(dir, "trust.bundle")}: no gate consumes them; critique resolution authority is the external lifecycle-authority ledger\n`);
+      }
+    } catch { /* no prior bundle */ }
+    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir, _effectiveActorKey, exactFlowContext, capturedWorkflowSubjectRef);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
     const result = await validateTrustBundle(bundle);
     if (result.available && !result.valid) {
@@ -4900,16 +4907,6 @@ export function externalCritiqueAuthorityForGate(dir: string, bundle: AnyObj): {
   } catch { return { events, completionVerified: false }; }
 }
 
-function critiqueSnapshotDigest(critique: AnyObj): string | null {
-  const target = critique.review_target;
-  const snapshot = target && typeof target === "object" && !Array.isArray(target)
-    ? (target as AnyObj).workspace_snapshot
-    : null;
-  return snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
-    && typeof (snapshot as AnyObj).digest === "string" && /^[a-f0-9]{64}$/i.test((snapshot as AnyObj).digest)
-    ? (snapshot as AnyObj).digest
-    : null;
-}
 // #270 HIGH fix (iteration 3): the `gate-claim-` check-id prefix is RESERVED for
 // record-gate-claim's own internally-constructed ids (`id: \`gate-claim-${checkId}\`` — see
 // recordGateClaim below). Every OTHER writer of check ids (record-evidence --check-json,
@@ -6600,7 +6597,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>, publicWorkflowAu
     for (const criterion of criteria) validateReviewableGateEvidence(dir, slug, criterion.evidence_refs, producer, `criterion ${criterion.id}`);
   }
   const _mergedChecks = mergeChecksById(_existingState.checks, [checkNormalized]);
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext, undefined, capturedWorkflowSubjectRef, writerTarget));
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, criteria, _existingState.critiques, gateClaimActorKey, exactFlowContext, capturedWorkflowSubjectRef, writerTarget));
   return 0;
 }
 
@@ -7008,152 +7005,6 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   return 0;
 }
 
-function requiredResolutionRecordId(p: ReturnType<typeof parseArgs>, flag: string): string {
-  const value = opt(p, flag);
-  if (!/^[A-Za-z0-9._:-]{1,256}$/.test(value)) die(`resolve-critique requires a safe --${flag}`);
-  return value;
-}
-
-function critiqueByRecordId(critiques: AnyObj[], recordId: string, label: string): AnyObj {
-  const matches = critiques.filter((critique) => critique.critique_record_id === recordId);
-  if (matches.length !== 1) die(`resolve-critique ${label} critique record ${recordId} is missing or ambiguous`);
-  return matches[0]!;
-}
-
-async function resolveCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
-  const slug = taskSlugFor(dir, opt(p, "task-slug"));
-  const priorRecordId = requiredResolutionRecordId(p, "prior-record-id");
-  const resolvingRecordId = requiredResolutionRecordId(p, "resolving-record-id");
-  const resolver = opt(p, "resolver");
-  const authorizationDigest = requiredResolutionRecordId(p, "authorization-digest");
-  const authorizationKeyId = requiredResolutionRecordId(p, "authorization-key-id");
-  const authorizationNonce = requiredResolutionRecordId(p, "authorization-nonce");
-  const preimageDigest = requiredResolutionRecordId(p, "preimage-digest");
-  const bundleFile = path.join(dir, "trust.bundle");
-  const bundleDescriptor = fs.openSync(bundleFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  let lockedPreimage: Buffer;
-  try { lockedPreimage = fs.readFileSync(bundleDescriptor); } finally { fs.closeSync(bundleDescriptor); }
-  if (createHash("sha256").update(lockedPreimage).digest("hex") !== preimageDigest) {
-    die("resolve-critique preimage changed before the locked mutation");
-  }
-  let signedAuthorization: AnyObj;
-  try { signedAuthorization = JSON.parse(Buffer.from(opt(p, "authorization-base64"), "base64").toString("utf8")); }
-  catch { die("resolve-critique requires the verified signed authorization payload"); }
-  if (!hasNonEmptyString(resolver)) die("resolve-critique requires an authenticated resolver");
-  if (priorRecordId === resolvingRecordId) die("resolve-critique rejects circular prior and resolving critique references");
-  const sidecarState = loadJson(path.join(dir, "state.json"));
-  const workItemRefs = Array.isArray(sidecarState.work_item_refs) ? sidecarState.work_item_refs : [];
-  if (workItemRefs.length !== 1 || !hasNonEmptyString(workItemRefs[0])) die("resolve-critique requires one bound workflow subject");
-  const workflowSubjectRef = String(workItemRefs[0]);
-  const projectedRun = sidecarState.flow_run && typeof sidecarState.flow_run === "object" && !Array.isArray(sidecarState.flow_run)
-    ? sidecarState.flow_run as AnyObj
-    : null;
-  const exactFlowContext = projectedRun
-    && typeof projectedRun.definition_id === "string"
-    && typeof projectedRun.current_step === "string"
-    ? { flowId: projectedRun.definition_id, stepId: projectedRun.current_step }
-    : undefined;
-  const existing = readBundleState(dir);
-  existing.critiques = normalizeCritiqueChainRecords(existing.critiques).records;
-  const rawBundle = loadJson(path.join(dir, "trust.bundle"));
-  const resolutionEvents = Array.isArray(rawBundle.critique_resolution_events) ? rawBundle.critique_resolution_events : [];
-  const prior = critiqueByRecordId(existing.critiques, priorRecordId, "prior");
-  const resolving = critiqueByRecordId(existing.critiques, resolvingRecordId, "resolving");
-  if (prior.superseded_by) {
-    const priorResolution = prior.critique_resolution;
-    if (prior.superseded_by === resolvingRecordId
-      && priorResolution && typeof priorResolution === "object"
-      && priorResolution.resolver === resolver
-      && priorResolution.resolving_record_id === resolvingRecordId) return 0;
-    die("resolve-critique prior critique is already superseded by a different resolution");
-  }
-  if (prior.verdict === "pass") die("resolve-critique prior critique must be a live failing or not-verified critique");
-  if (resolving.verdict !== "pass" || resolving.claim_status !== "verified" || !critiqueIsCleanAndCurrent(dir, resolving) || !critiqueWorkspaceSnapshotIsCurrent(dir, resolving)) {
-    die("resolve-critique resolving critique must be a verified, current passing critique");
-  }
-  if (resolving.reviewer !== resolver) die("resolve-critique resolver must match the authenticated resolving critique reviewer");
-  if (prior.reviewer === resolver) die("resolve-critique cross-reviewer resolution requires a distinct reviewer");
-  if (prior.workflow_subject_ref !== workflowSubjectRef || resolving.workflow_subject_ref !== workflowSubjectRef) {
-    die("resolve-critique critiques must be bound to this session's workflow subject");
-  }
-  const priorSnapshot = critiqueSnapshotDigest(prior);
-  const resolvingSnapshot = critiqueSnapshotDigest(resolving);
-  if (!priorSnapshot || !resolvingSnapshot || priorSnapshot === resolvingSnapshot) {
-    die("resolve-critique resolving critique must reference a newer immutable workspace snapshot");
-  }
-  if (!Number.isSafeInteger(prior.critique_sequence) || !Number.isSafeInteger(resolving.critique_sequence)
-    || resolving.critique_sequence <= prior.critique_sequence) {
-    die("resolve-critique resolving critique must be newer in the writer-issued critique sequence");
-  }
-  const chainByHash = new Map(existing.critiques.map((critique) => [critique.critique_record_hash, critique]));
-  let chainCursor: AnyObj | undefined = resolving;
-  let descendsFromPrior = false;
-  const visitedHashes = new Set<string>();
-  while (chainCursor && !visitedHashes.has(chainCursor.critique_record_hash)) {
-    visitedHashes.add(chainCursor.critique_record_hash);
-    if (chainCursor.critique_predecessor_hash === prior.critique_record_hash) { descendsFromPrior = true; break; }
-    chainCursor = chainByHash.get(chainCursor.critique_predecessor_hash);
-  }
-  if (!descendsFromPrior) die("resolve-critique resolving critique must be a hash-chain descendant of the prior critique");
-  const priorWorkspace = prior.review_target?.workspace_snapshot;
-  const resolvingWorkspace = resolving.review_target?.workspace_snapshot;
-  if (priorWorkspace?.kind === "git-worktree" && resolvingWorkspace?.kind === "git-worktree") {
-    try {
-      assertTrustedGitAncestor(canonicalProjectRootForSession(dir), String(priorWorkspace.head_sha), String(resolvingWorkspace.head_sha));
-    } catch { die("resolve-critique resolving Git snapshot must descend from the prior reviewed commit"); }
-  }
-  const requiredLaneIds = (Array.isArray(prior.lanes) ? prior.lanes : []).filter((lane: AnyObj) => lane.status !== "pass").map((lane: AnyObj) => lane.id).sort();
-  const resolvingLaneStatus = new Map((Array.isArray(resolving.lanes) ? resolving.lanes : []).map((lane: AnyObj) => [lane.id, lane.status]));
-  if (requiredLaneIds.length === 0 || requiredLaneIds.some((laneId: string) => resolvingLaneStatus.get(laneId) !== "pass")) {
-    die("resolve-critique requires the resolving critique to cover every failed or not-verified review lane");
-  }
-  const requiredFindingIds = (Array.isArray(prior.findings) ? prior.findings : []).filter((finding: AnyObj) => finding.status === "open").map((finding: AnyObj) => finding.id).sort();
-  const resolvingFindingStatus = new Map((Array.isArray(resolving.findings) ? resolving.findings : []).map((finding: AnyObj) => [finding.id, finding.status]));
-  if (requiredFindingIds.some((findingId: string) => !["fixed", "accepted", "deferred", "false_positive"].includes(resolvingFindingStatus.get(findingId)))) {
-    die("resolve-critique requires the resolving critique to cover every open finding");
-  }
-  const resolvedAt = now();
-  const resolution = {
-    schema_version: "1.0",
-    kind: "cross-reviewer",
-    prior_record_id: priorRecordId,
-    resolving_record_id: resolvingRecordId,
-    resolver,
-    resolved_lane_ids: requiredLaneIds,
-    resolved_finding_ids: requiredFindingIds,
-    resolved_at: resolvedAt,
-    authorization_sha256: authorizationDigest,
-    resolution_event_id: `critique-resolution:${authorizationDigest}`,
-  };
-  const critiques = existing.critiques.map((critique) => critique.critique_record_id === priorRecordId
-    ? { ...critique, superseded_by: resolvingRecordId, critique_resolution: resolution }
-    : critique);
-  const candidateBundle = await buildTrustBundle(slug, resolvedAt, existing.checks, existing.criteria, critiques, undefined, path.dirname(dir), undefined, exactFlowContext);
-  if (!candidateBundle) die("resolve-critique could not build the candidate trust bundle");
-  const eventWithoutHash = {
-    schema_version: "1.0", sequence: resolutionEvents.length + 1,
-    predecessor_hash: resolutionEvents.length ? resolutionEvents.at(-1)?.event_hash : CRITIQUE_CHAIN_GENESIS,
-    event_id: resolution.resolution_event_id, operation: "resolve-critique", run_id: slug, subject: workflowSubjectRef,
-    preimage_bundle_sha256: preimageDigest, prior_record_id: priorRecordId, prior_record_hash: prior.critique_record_hash,
-    resolving_record_id: resolvingRecordId, resolving_record_hash: resolving.critique_record_hash,
-    resolver, authorization_sha256: authorizationDigest, authorization_key_id: authorizationKeyId,
-    authorization_nonce: authorizationNonce, edge: resolution, resulting_core_sha256: critiqueResolutionResultCoreDigest(prior, resolving, resolution),
-    signed_authorization: signedAuthorization,
-  };
-  const resolutionEvent = { ...eventWithoutHash, event_hash: createHash("sha256").update(JSON.stringify(eventWithoutHash)).digest("hex") };
-  const nextResolutionEvents = [...resolutionEvents, resolutionEvent];
-  const graph = validateCritiqueResolutionGraph(Array.isArray(candidateBundle.claims) ? candidateBundle.claims : [], workflowSubjectRef, nextResolutionEvents, canonicalProjectRootForSession(dir));
-  // Multiple independent reviewers may have live failures after a route-back. Each signed
-  // authorization binds one exact edge/preimage, so resolution is intentionally sequential.
-  // Permit only the intermediate "other live critiques remain" condition here; every other
-  // graph defect still fails, and Builder/runtime/artifact consumers remain blocked until the
-  // final signed edge makes the complete graph valid.
-  const blockingGraphErrors = graph.errors.filter((error) => error !== "critique graph has unresolved live critique records");
-  if (blockingGraphErrors.length) die(`resolve-critique rejected invalid critique graph: ${blockingGraphErrors.join("; ")}`);
-  assertBundleWritten(await writeTrustBundle(dir, slug, resolvedAt, existing.checks, existing.criteria, critiques, undefined, exactFlowContext, nextResolutionEvents));
-  return 0;
-}
 function frontmatter(text: string, key: string): string {
   if (!text.startsWith("---")) return "";
   const end = text.indexOf("\n---", 3);
@@ -9355,10 +9206,17 @@ function trustMcp(p: ReturnType<typeof parseArgs>): number {
 // shared stream all agents read. Status is RECOMPUTED via Surface's deriveTrustStatus
 // (no forked logic). Advisory, not a lock. The liveness policy is a general archetype
 // (not use-case-specific) and is a candidate to graduate upstream into Surface.
+// #1422: a hold is verified by the holder's own claim/heartbeat signal, so every claim and
+// heartbeat event carries that signal as evidence and the policy requires it. Under Surface status
+// function "3" a policy that requires nothing cannot verify a claim, so an evidence-free hold would
+// read `proposed` instead of held. The signal is the holder attesting it is alive and holding --
+// self-reported, never independently checked -- hence `attestation` collected by the holder, with
+// method `monitoring`.
+const LIVENESS_SIGNAL_EVIDENCE = { evidenceType: "attestation", method: "monitoring" } as const;
 const LIVENESS_POLICY = {
   id: "policy:liveness.hold",
   claimType: "liveness.hold",
-  requiredEvidence: [] as string[],
+  requiredEvidence: [LIVENESS_SIGNAL_EVIDENCE.evidenceType] as string[],
   acceptanceCriteria: ["A heartbeat within ttlSeconds holds the claim; a lapse or release frees it."],
   reviewAuthority: "system",
   validityRule: { kind: "duration", durationDays: 1 },
@@ -9670,23 +9528,47 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
     if (typeof surface.deriveTrustStatus !== "function") die("@kontourai/surface deriveTrustStatus unavailable — requires surface >= 1.2");
     const subjectFilter = opt(p, "subject");
     const now = opt(p, "now") ? new Date(opt(p, "now")) : new Date();
+    // An unparseable --now must never decide freshness: a NaN comparison reads every hold as fresh.
+    if (!Number.isFinite(now.getTime())) die(`liveness status --now must be an ISO timestamp, got ${JSON.stringify(opt(p, "now"))}`);
     // Group events by subjectId::actor — one liveness claim per holder of a subject.
-    const groups = new Map<string, { subjectId: string; actor: string; ttlSeconds: number; created: string; updated: string; events: AnyObj[] }>();
+    const groups = new Map<string, { subjectId: string; actor: string; ttlSeconds: number; created: string; updated: string; events: AnyObj[]; evidence: AnyObj[] }>();
+    // The signal an event records, as evidence linked from that event (#1422).
+    const livenessSignal = (eventId: string, key: string, e: AnyObj, actor: string): AnyObj => ({
+      id: `ev:${eventId}`, claimId: key, evidenceType: LIVENESS_SIGNAL_EVIDENCE.evidenceType, method: LIVENESS_SIGNAL_EVIDENCE.method,
+      sourceRef: `liveness:${String(e.type)}`, excerptOrSummary: `${String(e.type)} by ${actor}`, observedAt: String(e.at), collectedBy: actor,
+    });
     for (const e of readLivenessEvents(root)) {
       if (!e.subjectId || !e.actor) continue;
       const key = `${e.subjectId}::${e.actor}`;
       let g = groups.get(key);
-      if (!g) { g = { subjectId: String(e.subjectId), actor: String(e.actor), ttlSeconds: 1800, created: String(e.at), updated: String(e.at), events: [] }; groups.set(key, g); }
+      if (!g) { g = { subjectId: String(e.subjectId), actor: String(e.actor), ttlSeconds: 1800, created: String(e.at), updated: String(e.at), events: [], evidence: [] }; groups.set(key, g); }
       g.updated = String(e.at);
-      if (e.type === "claim") { g.ttlSeconds = Number(e.ttlSeconds) || g.ttlSeconds; g.events.push({ id: `c:${key}:${e.at}`, claimId: key, status: "verified", actor: g.actor, method: "observation", evidenceIds: [], createdAt: e.at, verifiedAt: e.at }); }
-      else if (e.type === "heartbeat") { g.events.push({ id: `h:${key}:${e.at}`, claimId: key, status: "verified", actor: g.actor, method: "observation", evidenceIds: [], createdAt: e.at, verifiedAt: e.at }); }
+      if (e.type === "claim" || e.type === "heartbeat") {
+        if (e.type === "claim") g.ttlSeconds = Number(e.ttlSeconds) || g.ttlSeconds;
+        const eventId = `${e.type === "claim" ? "c" : "h"}:${key}:${e.at}`;
+        const signal = livenessSignal(eventId, key, e, g.actor);
+        g.evidence.push(signal);
+        g.events.push({ id: eventId, claimId: key, status: "verified", actor: g.actor, method: "observation", evidenceIds: [signal.id], createdAt: e.at, verifiedAt: e.at });
+      }
       else if (e.type === "release") { g.events.push({ id: `r:${key}:${e.at}`, claimId: key, status: "revoked", type: "invalidation", actor: g.actor, method: "observation", evidenceIds: [], createdAt: e.at, verifiedAt: e.at }); }
     }
     const rows: AnyObj[] = [];
     for (const g of groups.values()) {
       if (subjectFilter && g.subjectId !== subjectFilter) continue;
       const claim: AnyObj = { id: `${g.subjectId}::${g.actor}`, subjectType: "work-item", subjectId: g.subjectId, facet: "flow.liveness", claimType: "liveness.hold", fieldOrBehavior: "held-by", value: g.actor, createdAt: g.created, updatedAt: g.updated, ttlSeconds: g.ttlSeconds, verificationPolicyId: LIVENESS_POLICY.id };
-      const status = surface.deriveTrustStatus!({ claim, evidence: [], policy: LIVENESS_POLICY, events: g.events, now });
+      // #1422: the hold is verified by the signal that keeps it fresh. Surface decides from the
+      // latest event of any status (a release derives stale; a claim or heartbeat is timed against
+      // the claim's ttlSeconds) but checks the policy requirement against whatever evidence it is
+      // given, so passing every signal would let an old claim's evidence verify a hold refreshed by
+      // an event that carries no signal. Only the latest claim/heartbeat's own signal is supplied.
+      // This sort matches Surface's status function "2" (most recent createdAt first, stable on
+      // ties). Under "3" an unparseable createdAt sorts as oldest, while here it compares as NaN,
+      // so the two can pick different events. That cannot change the status: the requirement check
+      // only asks whether a qualifying attestation is present, and every claim/heartbeat carries
+      // one; freshness always comes from Surface's own choice of latest event.
+      const governing = [...g.events].sort((a, b) => Date.parse(String(b.createdAt)) - Date.parse(String(a.createdAt))).find((evt) => evt.status === "verified");
+      const governingEvidence = governing ? g.evidence.filter((item) => (governing.evidenceIds as string[]).includes(String(item.id))) : [];
+      const status = surface.deriveTrustStatus!({ claim, evidence: governingEvidence, policy: LIVENESS_POLICY, events: g.events, now });
       rows.push({ subjectId: g.subjectId, actor: g.actor, status, label: livenessLabel(status) });
     }
     if (p.flags.has("json")) { console.log(JSON.stringify(rows, null, 2)); return 0; }
@@ -9992,7 +9874,7 @@ const COMMAND_DESCRIPTIONS: ReadonlyArray<readonly [string, string]> = [
   ["promote", "Record a durable-residue promotion claim (or none) for a session."],
   ["advance-state", "Advance a session's status/phase; auto-seals and publishes on delivery."],
   ["record-critique", "Record a review critique verdict into the trust bundle."],
-  ["resolve-critique", "Resolve a pending critique (public workflow interface only)."],
+  ["resolve-critique", "Refused here: critique resolution is owned by the external lifecycle authority (use the public workflow resolve-critique)."],
   ["import-critique", "Import an externally-authored critique into the trust bundle."],
   ["record-release", "Record a release-readiness decision; auto-seals and publishes."],
   ["record-learning", "Record a post-delivery learning/follow-up entry."],
@@ -10149,10 +10031,10 @@ export async function main(argv: string[] = process.argv.slice(2), authority?: s
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
-      case "resolve-critique": {
-        if (authority !== PUBLIC_WORKFLOW_AUTHORITY) die("resolve-critique is available only through the authenticated public workflow interface");
-        return resolveCritique(p);
-      }
+      // Critique resolution is a lifecycle-authority mutation (packaging/lifecycle-authority): it
+      // writes the protected external resolution-event ledger and signs a completion over it. The
+      // sidecar never mutates resolution state; mainFromPublicWorkflow refuses the verb as well.
+      case "resolve-critique": die("critique resolution mutation is owned by the external lifecycle authority helper");
       case "import-critique": return importCritique(p);
       case "record-release": return recordRelease(p);
       case "record-learning": return recordLearning(p);
