@@ -3449,8 +3449,19 @@ if [[ -z "$HACHURE_CONF" || ! -d "$HACHURE_CONF" ]]; then
 else
   if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-conf-vectors.err"
 import { readFileSync, readdirSync } from 'node:fs';
-import { deriveClaimStatus, statusFunctionVersion } from '@kontourai/surface';
+import { deriveClaimStatus, supportedStatusFunctionVersions } from '@kontourai/surface';
 const confDir = '${HACHURE_CONF}';
+// #1422: the vectors are conformance for ONE status function version, declared by the manifest
+// that ships beside them ("All vectors must pass for the statusFunctionVersion declared in
+// appliesTo.statusFunctionVersion"). The hachure release reachable here declares "2", while
+// Surface 5 defaults to "3", so the vectors run under the declared version -- which Surface must
+// still implement -- not under the default.
+const manifest = JSON.parse(readFileSync(confDir + '/manifest.json', 'utf8'));
+const statusFunctionVersion = manifest.appliesTo && manifest.appliesTo.statusFunctionVersion;
+if (typeof statusFunctionVersion !== 'string' || !(supportedStatusFunctionVersions || []).includes(statusFunctionVersion)) {
+  process.stderr.write('conformance manifest declares statusFunctionVersion ' + JSON.stringify(statusFunctionVersion) + ', which this Surface does not implement\n');
+  process.exit(1);
+}
 const vectors = readdirSync(confDir).filter(f => f.startsWith('sf-') && f.endsWith('.json'));
 let passed = 0; let failed = 0;
 for (const vec of vectors) {
@@ -3464,7 +3475,7 @@ for (const vec of vectors) {
     const events = (input.events || []).filter((e) => e.claimId === claimId);
     const policies = (input.policies || []);
     const authorityTrace = (input.authorityTrace || []);
-    const result = deriveClaimStatus({ claim, evidence, events, policies, now, authorityTrace });
+    const result = deriveClaimStatus({ claim, evidence, events, policies, now, authorityTrace, statusFunctionVersion });
     if (result.status !== expectedStatus) {
       process.stderr.write('vector ' + vec + ' claim ' + claimId + ': got ' + result.status + ', expected ' + expectedStatus + '\n');
       failed++;

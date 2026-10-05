@@ -114,7 +114,10 @@ test("explainClaim (Surface): legacy evidence label/summary fallback tolerance s
   assert.equal(out.evidence[0].label, "excerpt-wins-for-summary");   // label falls back to excerptOrSummary
   assert.equal(out.evidence[0].summary, "excerpt-wins-for-summary"); // summary prefers excerptOrSummary
   assert.equal(out.evidence[0].execution, null);
-  assert.equal(out.evidence[0].passing, true);                       // no execution, not disputed → passing
+  // #1422: Surface 5 reports an item's own `passing` when it has no execution record -- true, false,
+  // or null when it records no result -- where it used to report true for any undisputed item
+  // (docs/reference/schema-versioning.md, v7 to v8 migration). This attestation sets none.
+  assert.equal(out.evidence[0].passing, null);
 });
 
 // ── deriveGateCalibration (pure mapping) ─────────────────────────────────────
