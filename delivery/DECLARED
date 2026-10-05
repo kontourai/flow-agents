@@ -472,7 +472,7 @@
     ]
   },
   {
-    "scope": "author:briananderson1222 branch-prefix:feat/surface-5",
+    "scope": "author:briananderson1222 ref:feat/surface-5",
     "reason": "First slice of #1422: critique verdicts carry attestation evidence, re-derivation follows each bundle's stamped status-function version, and 'no result' evidence is rendered as such. Agent-delivered without a trust bundle. Verification in lieu of a bundle: independent report-only review plus a delta review, fault injections, re-derivation of every committed bundle unchanged, and a differential check of status-function 1 against 2.",
     "approved_by": "briananderson1222 (repository owner; scoped to this branch only, not a standing exemption)",
     "declared_at": "2026-10-05T00:00:00Z"
