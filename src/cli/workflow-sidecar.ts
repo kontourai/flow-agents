@@ -2,7 +2,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -713,7 +713,10 @@ type SurfaceModule = {
     inquiry: SurfaceInquiry,
     options?: { now?: Date },
   ) => SurfaceInquiryRecord;
-  buildTrustReport: (bundle: Record<string, unknown>, options?: { now?: Date }) => Record<string, unknown>;
+  /** `statusFunctionVersion` is honoured by Surface >= 5 and ignored by earlier releases, which implement only "2". */
+  buildTrustReport: (bundle: Record<string, unknown>, options?: { now?: Date; statusFunctionVersion?: string }) => Record<string, unknown>;
+  /** Surface >= 5: every status function version the package can evaluate. Absent before 5. */
+  supportedStatusFunctionVersions?: readonly string[];
   buildDerivationDrilldown: (report: Record<string, unknown>, claimId: string) => Record<string, unknown>;
   /** #171: consumer-ready claim explanation (Surface >=2.10); composes the drilldown internally, fail-soft. */
   explainClaim: (report: Record<string, unknown>, claimId: string) => import("@kontourai/surface").ClaimExplanation;
@@ -792,6 +795,13 @@ const CAPTURE_HOOK_COLLECTOR = "flow-agents/evidence-capture";
  * and silently make the sentinel unrecognisable to the fold.
  */
 const DEFAULT_CRITIQUE_REVIEWER = "tool-code-reviewer";
+
+/**
+ * #1422: how a critique verdict is recorded as evidence. Surface's attestation shape for a review
+ * or sign-off (docs/reference/schema-versioning.md, "Producers of claims verified by a policy that
+ * requires nothing"): `attestation` evidence collected by the reviewer, with method `attestation`.
+ */
+const CRITIQUE_VERDICT_EVIDENCE = { evidenceType: "attestation", method: "attestation" } as const;
 
 /**
  * #1363: the verifying identity a claim actually carries, or null when none was derived.
@@ -1777,7 +1787,11 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ? c.critique_record_id
       : claimId;
     const legacyClaimType = "workflow.critique.review";
-    const policy = ensurePolicy(legacyClaimType, "medium", []);
+    // #1422: a critique claim is verified by the reviewer's verdict, so the verdict is recorded as
+    // attestation evidence and the policy requires it. A policy that requires nothing verified
+    // under status function "2" but derives `proposed` under "3" (Surface 5): there is nothing to
+    // verify against. Requiring the attestation is what makes the verified state derivable.
+    const policy = ensurePolicy(legacyClaimType, "medium", [CRITIQUE_VERDICT_EVIDENCE.evidenceType]);
     // A superseded write emits NO verification event (its status is "superseded" directly).
     const evStatus = supersededBy ? null : critiqueToEventStatus(String(c.verdict ?? ""), c.findings ?? []);
     // #1363: the reviewer IS the verifying identity of a critique claim, and the bundle already
@@ -1795,8 +1809,28 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // record time from the flag's presence, which is the only moment the difference exists.
     const critiqueActor = critMeta.reviewer_source === "explicit" ? recordedActorOrNull(critMeta.reviewer) : null;
     const claimEvents: AnyObj[] = [];
+    // #1422: the reviewer's verdict as evidence, linked from the event it supports. Emitted only
+    // when the verdict produces an event; a superseded write is history and carries neither.
+    // `passing` records the verdict's own result: true for a pass with no open finding, false for
+    // a fail (or a pass that still has open findings, which the event already disputes), and absent
+    // for a comment, which records no result. Attestation is not a check type, so Surface does not
+    // read `passing` to qualify it; a `false` is a blocking failure, consistent with the event.
+    const critiqueEvidence: AnyObj[] = [];
     if (evStatus) {
-      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: critiqueActor ?? SIDECAR_TOOL_ACTOR, method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
+      const verdictPassing = evStatus === "verified" ? true : evStatus === "disputed" ? false : null;
+      critiqueEvidence.push({
+        id: `ev:${claimId}:verdict`,
+        claimId,
+        evidenceType: CRITIQUE_VERDICT_EVIDENCE.evidenceType,
+        method: CRITIQUE_VERDICT_EVIDENCE.method,
+        sourceRef: `${slug}/trust.bundle#critique/${String(critMeta.critique_record_id)}`,
+        excerptOrSummary: `critique verdict: ${String(c.verdict ?? "")}`,
+        observedAt: critiqueReviewedAt,
+        collectedBy: critiqueActor ?? SIDECAR_TOOL_ACTOR,
+        ...(verdictPassing === null ? {} : { passing: verdictPassing }),
+      });
+      evidenceItems.push(...critiqueEvidence);
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: critiqueActor ?? SIDECAR_TOOL_ACTOR, method: "validation", evidenceIds: critiqueEvidence.map((item) => item.id), createdAt: ts, verifiedAt: ts };
       events.push(evt);
       claimEvents.push(evt);
     }
@@ -1808,7 +1842,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // History: status is "superseded" directly (no verification event); excluded from evaluation.
       claims.push({ ...claimObj, status: "superseded" });
     } else {
-      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
+      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: critiqueEvidence as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
     }
   }
@@ -7517,12 +7551,12 @@ function loadTrustReconcileHelper(): {
 function derivePreflightClaimStatuses(bundlePath: string, repoRoot: string): Map<string, string | null> | null {
   const helper = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/ci/derive-claim-status.mjs");
   if (!fs.existsSync(helper)) return null;
-  let stdout: string;
-  try {
-    stdout = execFileSync(process.execPath, [helper, bundlePath], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000 });
-  } catch {
-    return null;
-  }
+  const res = spawnSync(process.execPath, [helper, bundlePath], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000 });
+  if (res.status !== 0) return null;
+  const stdout = res.stdout;
+  // #1422: a successful run can still report every claim underivable (a status function stamp
+  // the installed Surface cannot honour); its stderr names why, so pass it on.
+  if (res.stderr && res.stderr.trim()) process.stderr.write(`[reconcile-preflight] status re-derivation: ${res.stderr.trim()}\n`);
   if (!stdout) return null;
   try {
     const obj = JSON.parse(stdout);
@@ -7668,7 +7702,7 @@ function preflightFixHint(type: string): string {
     case "status-misassertion":
       return "FIX: the claim's asserted status does not match what Surface re-derives from the bundle's own evidence/events/policies — re-record evidence so the bundle's own data supports the asserted status; do not hand-edit status.";
     case "status-underivable":
-      return "FIX: CI-side status re-derivation failed for this claim — ensure @kontourai/surface is installed/resolvable and the claim's evidence/events are well-formed, then re-record.";
+      return "FIX: CI-side status re-derivation failed for this claim — ensure @kontourai/surface is installed/resolvable and the claim's evidence/events are well-formed, then re-record. If every claim is underivable, check the bundle's statusFunctionVersion stamp (its source field) against the status function versions the installed Surface supports; the reason is printed above.";
     case "unwaived-session-local":
       return "FIX: this claim asserts pass but has neither a waiver nor a CI-re-derived 'verified' status — add a waiver (--accepted-gap-reason/--waived-by) or resolve it so Surface derives 'verified'.";
     default:
@@ -9350,6 +9384,13 @@ function loadLivenessWriteHelper(): {
     appendLivenessEvent: (root: string, evt: AnyObj) => void;
   };
 }
+/** #1422: the shared stamped-status-function-version decision (scripts/lib/status-function-version.js). */
+function loadStatusFunctionVersionHelper(): {
+  statusFunctionVersionForBundle: (bundle: unknown, surface: { statusFunctionVersion?: string; supportedStatusFunctionVersions?: readonly string[] }) => { version: string; stamped: boolean };
+} {
+  const _req = createRequire(import.meta.url);
+  return _req(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/lib/status-function-version.js"));
+}
 function livenessStreamFile(root: string): string { return loadLivenessWriteHelper().livenessStreamFile(root); }
 function appendLivenessEvent(root: string, evt: AnyObj): void { loadLivenessWriteHelper().appendLivenessEvent(root, evt); }
 function readLivenessEvents(root: string): AnyObj[] {
@@ -9753,77 +9794,32 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
 // from Surface so the library facade keeps compiling for downstream importers.
 export type { ClaimEvidenceItem, ClaimExplanation } from "@kontourai/surface";
 
-/**
- * claim <id> <dir>
- *
- * Look up a specific claim in the session's trust.bundle and print:
- *   - Derived status and raw value
- *   - Failing evidence items (with execution block: runner, exitCode, isError)
- *   - Governing VerificationPolicy (how-to-verify)
- *   - Derivation drilldown / transparency gaps (why it is in that state)
- *
- * --json  Emit the structured ClaimExplanation object instead of text.
- *
- * Usage: workflow-sidecar claim <claimId> <artifactDir>
- */
-async function claimLookup(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const claimId = p.positional[0] || die("claim id is required (first positional argument)");
-  const rawDir = p.positional[1] || die("artifact directory is required (second positional argument)");
-  const dir = path.resolve(rawDir);
+/** #1422: an evidence item's own recorded result, as `explainClaim` reports it (`boolean | null` from Surface 5). */
+export function claimEvidenceResult(ev: { passing?: boolean | null }): "pass" | "fail" | "no-result" {
+  if (ev.passing === true) return "pass";
+  if (ev.passing === false) return "fail";
+  return "no-result";
+}
+const CLAIM_EVIDENCE_RESULT_LABEL = { pass: "pass", fail: "FAIL", "no-result": "no result" } as const;
 
-  const bundlePath = path.join(dir, "trust.bundle");
-  if (!fs.existsSync(bundlePath)) {
-    process.stderr.write(`[claim] no trust.bundle at ${bundlePath} — run record-evidence first
-`);
-    return 1;
-  }
-
-  const bundle: BundleFile = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
-  const bundleClaims = Array.isArray(bundle.claims) ? bundle.claims : [];
-
-  const bundleClaim = bundleClaims.find((c) => c.id === claimId);
-  if (!bundleClaim) {
-    const available = bundleClaims.map((c) => c.id).join("\n  ");
-    process.stderr.write(`[claim] unknown claim id: ${claimId}
-Available claim ids:
-  ${available || "(none — bundle has no claims)"}
-`);
-    return 1;
-  }
-
-  // Load Surface via tryLoadSurface() (ESM, cached, fail-open pattern)
-  const surface = await tryLoadSurface();
-  if (!surface || typeof surface.buildTrustReport !== "function" || typeof surface.explainClaim !== "function") {
-    process.stderr.write(`[claim] @kontourai/surface unavailable or missing buildTrustReport/explainClaim (needs >=2.10)
-`);
-    return 0; // fail-open, consistent with gate-review pattern
-  }
-
-  // Build TrustReport, then the structured explanation — Surface's explainClaim
-  // (#171 lift) composes the derivation drilldown internally, fail-soft, exactly
-  // as the retired local helper + caller-side enrichment did.
-  const report = surface.buildTrustReport(bundle as unknown as Record<string, unknown>);
-  const explanation = surface.explainClaim(report, claimId) as import("@kontourai/surface").ClaimExplanation;
-
-  if (p.flags.has("json")) {
-    console.log(JSON.stringify(explanation, null, 2));
-    return 0;
-  }
-
-  // ── Human-readable output ───────────────────────────────────────────────────
+/** Human-readable `workflow-sidecar claim` output for one explained claim. */
+export function renderClaimExplanation(claimId: string, explanation: import("@kontourai/surface").ClaimExplanation): string {
   const lines: string[] = [];
   lines.push(`Claim:  ${claimId}`);
   lines.push(`Status: ${explanation.status}   Value: ${explanation.value}`);
   lines.push(`Type:   ${explanation.claimType}`);
   lines.push("");
 
-  // Evidence section — failing items are the concrete "why disputed"
-  const failingEvidence = explanation.evidence.filter((ev) => !ev.passing);
+  // Evidence section — failing items are the concrete "why disputed". #1422: an item's own
+  // result is three-way. Surface 5 reports `passing: null` for evidence that records no result
+  // (a source excerpt, an attestation without a verdict); that is neither a pass nor a failure,
+  // so it is shown as "no result" and never listed as a reason the claim is disputed.
+  const failingEvidence = explanation.evidence.filter((ev) => claimEvidenceResult(ev) === "fail");
   const allEvidence = explanation.evidence;
   if (allEvidence.length > 0) {
     lines.push("Evidence:");
     for (const ev of allEvidence) {
-      const passMark = ev.passing ? "pass" : "FAIL";
+      const passMark = CLAIM_EVIDENCE_RESULT_LABEL[claimEvidenceResult(ev)];
       const execStr = ev.execution
         ? ` [runner: ${ev.execution.runner}, exitCode: ${ev.execution.exitCode ?? "?"}, isError: ${ev.execution.isError}]`
         : "";
@@ -9894,7 +9890,76 @@ Available claim ids:
     }
   }
 
-  console.log(lines.join("\n"));
+  return lines.join("\n");
+}
+
+/**
+ * claim <id> <dir>
+ *
+ * Look up a specific claim in the session's trust.bundle and print:
+ *   - Derived status and raw value
+ *   - Failing evidence items (with execution block: runner, exitCode, isError)
+ *   - Governing VerificationPolicy (how-to-verify)
+ *   - Derivation drilldown / transparency gaps (why it is in that state)
+ *
+ * --json  Emit the structured ClaimExplanation object instead of text.
+ *
+ * Usage: workflow-sidecar claim <claimId> <artifactDir>
+ */
+async function claimLookup(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const claimId = p.positional[0] || die("claim id is required (first positional argument)");
+  const rawDir = p.positional[1] || die("artifact directory is required (second positional argument)");
+  const dir = path.resolve(rawDir);
+
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) {
+    process.stderr.write(`[claim] no trust.bundle at ${bundlePath} — run record-evidence first
+`);
+    return 1;
+  }
+
+  const bundle: BundleFile = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
+  const bundleClaims = Array.isArray(bundle.claims) ? bundle.claims : [];
+
+  const bundleClaim = bundleClaims.find((c) => c.id === claimId);
+  if (!bundleClaim) {
+    const available = bundleClaims.map((c) => c.id).join("\n  ");
+    process.stderr.write(`[claim] unknown claim id: ${claimId}
+Available claim ids:
+  ${available || "(none — bundle has no claims)"}
+`);
+    return 1;
+  }
+
+  // Load Surface via tryLoadSurface() (ESM, cached, fail-open pattern)
+  const surface = await tryLoadSurface();
+  if (!surface || typeof surface.buildTrustReport !== "function" || typeof surface.explainClaim !== "function") {
+    process.stderr.write(`[claim] @kontourai/surface unavailable or missing buildTrustReport/explainClaim (needs >=2.10)
+`);
+    return 0; // fail-open, consistent with gate-review pattern
+  }
+
+  // Build TrustReport, then the structured explanation — Surface's explainClaim
+  // (#171 lift) composes the derivation drilldown internally, fail-soft, exactly
+  // as the retired local helper + caller-side enrichment did.
+  // #1422: explain the claim as its bundle was derived — with the status function version the
+  // writer stamped — not with whatever version the installed Surface defaults to.
+  let statusFunctionVersion: string;
+  try {
+    statusFunctionVersion = loadStatusFunctionVersionHelper().statusFunctionVersionForBundle(bundle, surface).version;
+  } catch (err) {
+    process.stderr.write(`[claim] ${err instanceof Error ? err.message : String(err)}\n`);
+    return 1;
+  }
+  const report = surface.buildTrustReport(bundle as unknown as Record<string, unknown>, { statusFunctionVersion });
+  const explanation = surface.explainClaim(report, claimId) as import("@kontourai/surface").ClaimExplanation;
+
+  if (p.flags.has("json")) {
+    console.log(JSON.stringify(explanation, null, 2));
+    return 0;
+  }
+
+  console.log(renderClaimExplanation(claimId, explanation));
   return 0;
 }
 // ─────────────────────────────────────────────────────────────────────────────
