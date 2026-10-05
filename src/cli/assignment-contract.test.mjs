@@ -303,6 +303,17 @@ test("codec: forward compatibility, unknown fields survive and incompatible vers
   assert.equal(parseAssignmentClaimRecord("{nope").code, "invalid_json");
 });
 
+test("codec: a GitHub claim comment with the wrong role or schema_version fails loud, never reads as 'no claim'", () => {
+  const rendered = github.renderGithubClaim("s", githubInput(), AGENT, "2026-10-05T11:00:00Z");
+  const issueWith = (body) => ({ number: 1, comments: [{ id: 1, body }] });
+  const marker = github.GITHUB_CLAIM_COMMENT_MARKER_DEFAULT;
+  const wrongRole = rendered.claim_comment_body.replace('"role": "AssignmentClaimRecord"', '"role": "Other"');
+  const wrongVersion = rendered.claim_comment_body.replace('"schema_version": "1.0"', '"schema_version": "2.0"');
+  assert.throws(() => github.githubAssignmentStatus(issueWith(wrongRole), "agent:claimed", marker), /unexpected role Other/);
+  assert.throws(() => github.githubAssignmentStatus(issueWith(wrongVersion), "agent:claimed", marker), /unsupported schema_version 2\.0/);
+  assert.throws(() => github.githubAssignmentStatus(issueWith(`${marker}\nno fence`), "agent:claimed", marker), /no fenced JSON block/);
+});
+
 test("findAssignmentClaimRecordProblems names a host record's missing required fields", () => {
   assert.deepEqual(findAssignmentClaimRecordProblems(claimRecord(AGENT)), []);
   const broken = { schema_version: "1.0", role: "AssignmentClaimRecord", actor: { runtime: "x" }, ttl_seconds: 0, status: "weird" };
