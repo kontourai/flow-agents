@@ -64,15 +64,19 @@ export async function runReviewedGroundingReference(options = {}) {
   const reviewItem = imported.reviewItems[0];
   if (!reviewItem) throw new Error("Extraction import did not create a review item.");
   const policy = groundingPolicy();
-  const beforeReview = evaluateReviewedGroundingPolicy({ policy, evidence: [] });
+  // Surface >= 4 binds the claim value the action would publish to the reviewed candidate value
+  // (`value-mismatch`) and refuses a decision made without claims (`claims-not-supplied`). The value
+  // published here is the reviewed proposal itself, read from the import record Surface evaluates.
+  const claims = [{ id: "claim.public-record-17.status", value: imported.record.spec.envelope.result.proposals[0].candidateValue }];
+  const beforeReview = evaluateReviewedGroundingPolicy({ policy, evidence: [], claims });
   const reviewDecision = buildReviewDecision({ item: reviewItem, decision: "accept-proposed", note: "Exact source span confirms the value.",
     actorId: "reviewer:reference", reviewedAt: "2026-07-20T00:03:00.000Z" });
   const projected = projectReviewedExtractionEvidence({ evidenceId: "evidence.public-record-17.status", claimId: "claim.public-record-17.status",
     proposalIndex: 0, importRecord: imported.record, reviewItem, reviewDecision, collectedBy: "reference-workflow:collector", structuralTrust: "validated" });
   const currentSource = { evidenceId: projected.evidence.id, status: "current", expectedSnapshotRef: "snapshot:record-17:v2",
     observedSnapshotRef: "snapshot:record-17:v2", observedAt: "2026-07-20T00:03:00.000Z", extractedValueChanged: true };
-  const afterReview = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], sourceStates: [currentSource] });
-  const drifted = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], sourceStates: [{ ...currentSource,
+  const afterReview = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], sourceStates: [currentSource], claims });
+  const drifted = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], claims, sourceStates: [{ ...currentSource,
     status: "drifted", observedSnapshotRef: "snapshot:record-17:v3", extractedValueChanged: false }] });
   const tamperedResolution = await resolvePreparedArtifact(extraction.preparedArtifact, { get: () => "Record 17\nStatus: Altered\n" });
   const tamperedEnvelope = JSON.parse(envelope);
