@@ -9556,12 +9556,16 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
     for (const g of groups.values()) {
       if (subjectFilter && g.subjectId !== subjectFilter) continue;
       const claim: AnyObj = { id: `${g.subjectId}::${g.actor}`, subjectType: "work-item", subjectId: g.subjectId, facet: "flow.liveness", claimType: "liveness.hold", fieldOrBehavior: "held-by", value: g.actor, createdAt: g.created, updatedAt: g.updated, ttlSeconds: g.ttlSeconds, verificationPolicyId: LIVENESS_POLICY.id };
-      // #1422: the hold is verified by the signal that keeps it fresh. Surface times freshness from
-      // the latest verified event (claim or heartbeat, against the claim's ttlSeconds) but checks the
-      // policy requirement against whatever evidence it is given, so passing every signal would let
-      // an old claim's evidence verify a hold refreshed by an event that carries no signal. Only the
-      // governing event's own signal is supplied. The ordering mirrors Surface's (most recent
-      // createdAt first, stable on ties).
+      // #1422: the hold is verified by the signal that keeps it fresh. Surface decides from the
+      // latest event of any status (a release derives stale; a claim or heartbeat is timed against
+      // the claim's ttlSeconds) but checks the policy requirement against whatever evidence it is
+      // given, so passing every signal would let an old claim's evidence verify a hold refreshed by
+      // an event that carries no signal. Only the latest claim/heartbeat's own signal is supplied.
+      // This sort matches Surface's status function "2" (most recent createdAt first, stable on
+      // ties). Under "3" an unparseable createdAt sorts as oldest, while here it compares as NaN,
+      // so the two can pick different events. That cannot change the status: the requirement check
+      // only asks whether a qualifying attestation is present, and every claim/heartbeat carries
+      // one; freshness always comes from Surface's own choice of latest event.
       const governing = [...g.events].sort((a, b) => Date.parse(String(b.createdAt)) - Date.parse(String(a.createdAt))).find((evt) => evt.status === "verified");
       const governingEvidence = governing ? g.evidence.filter((item) => (governing.evidenceIds as string[]).includes(String(item.id))) : [];
       const status = surface.deriveTrustStatus!({ claim, evidence: governingEvidence, policy: LIVENESS_POLICY, events: g.events, now });
