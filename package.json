@@ -29,6 +29,18 @@
       "types": "./build/src/index.d.ts",
       "import": "./build/src/index.js"
     },
+    "./assignment-contract": {
+      "types": "./build/src/assignment-contract.d.ts",
+      "import": "./build/src/assignment-contract.js"
+    },
+    "./assignment-github": {
+      "types": "./build/src/assignment-github.d.ts",
+      "import": "./build/src/assignment-github.js"
+    },
+    "./assignment-local-file": {
+      "types": "./build/src/assignment-local-file.d.ts",
+      "import": "./build/src/assignment-local-file.js"
+    },
     "./console-contract": {
       "types": "./build/src/console-contract.d.ts",
       "import": "./build/src/console-contract.js"
