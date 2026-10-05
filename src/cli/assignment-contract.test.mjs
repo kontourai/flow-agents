@@ -331,3 +331,34 @@ test("subject and work identity are opaque to the core; the GitHub provider owns
   assert.equal(computeEffectiveState(statusOf(taskRecord), [], undefined, NOW).effective_state, "reclaimable");
   assert.throws(() => github.renderGithubClaim("s", githubInput({ work_item_ref: "task://9f3" }), AGENT, "2026-10-05T11:00:00Z"), /work_item_ref must exactly match kontourai\/flow-agents#4242/);
 });
+
+// ─── The CLI's takeover-preflight takes its action from the contract's decideTakeover ────────────
+
+test("takeover-preflight (the CLI) earns each action from the contract's takeover decision, for every join state", async () => {
+  const { runTakeoverPreflight } = await import("../../build/src/cli/workflow-sidecar.js");
+  const root = makeFixtureDir("assignment-takeover-");
+  try {
+    const provider = createLocalFileAssignmentProvider(root);
+    const meta = { ttlSeconds: 1800, branch: "agent/incumbent/x", artifactDir: ".kontourai/flow-agents/x" };
+    // takeover-preflight sanitizes --actor (":" is stripped), so keys here are bare tokens.
+    const incumbent = "incumbent-key";
+    provider.claim("stale-agent", AGENT, { ...meta, actorKey: incumbent });
+    provider.claim("fresh-agent", AGENT, { ...meta, actorKey: incumbent });
+    provider.claim("held-by-human", HUMAN, { ...meta, actorKey: "human-key" });
+    fs.mkdirSync(path.join(root, "liveness"), { recursive: true });
+    fs.writeFileSync(path.join(root, "liveness", "events.jsonl"), `${JSON.stringify({ type: "claim", subjectId: "fresh-agent", actor: incumbent, at: new Date().toISOString(), ttlSeconds: 1800 })}\n`);
+    const successor = "successor-key";
+    const run = (slug, actorKey = successor) => runTakeoverPreflight(path.join(root, slug), { actorKey, graceSeconds: 7 });
+
+    const stale = run("stale-agent");
+    assert.deepEqual([stale.ok, stale.action, stale.effective_state, stale.grace_seconds, stale.resume_branch], [true, "grace-then-supersede", "reclaimable", 7, "agent/incumbent/x"]);
+    const live = run("fresh-agent");
+    assert.deepEqual([live.ok, live.action, live.effective_state], [false, "back-off", "held"]);
+    const mine = run("fresh-agent", incumbent);
+    assert.deepEqual([mine.ok, mine.action, mine.effective_state], [true, "proceed", "held"]);
+    const human = run("held-by-human");
+    assert.deepEqual([human.ok, human.action, human.effective_state], [false, "ask-first", "human-held"]);
+    const free = run("never-claimed");
+    assert.deepEqual([free.ok, free.action, free.effective_state], [true, "claim", "free"]);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
