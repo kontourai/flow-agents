@@ -27,7 +27,12 @@ assert(deterministic.failures.tamperedPreparedContent.state === "unresolved" && 
 // reference workflow on evidence, not on assertion: all nine published surface schemas
 // are byte-identical across 2.13.0..2.17.0, and the only export-surface change is
 // additive, so the envelope/digest contract this file exercises is unchanged.
-assert(Object.values(deterministic.revisions).join(",") === "0.19.1,2.0.0,0.3.2,2.17.0", "public revisions are not pinned");
+// surface: 2.17.0 -> 5.0.0 with kontourai/flow-agents#1422. One break reaches this workflow:
+// Surface 4.0 binds the published claim value to the reviewed candidate and refuses a grounding
+// decision made without claims, so run.mjs now supplies the claim it would publish.
+assert(Object.values(deterministic.revisions).join(",") === "0.19.1,2.0.0,0.3.2,5.0.0", "public revisions are not pinned");
+assert(!deterministic.action.afterReview.gaps.some((gap) => gap.kind === "claims-not-supplied" || gap.kind === "value-mismatch"), "the reviewed claim value is not bound to the decision");
+assert(deterministic.failures.valueMismatch.outcome === "refused" && deterministic.failures.valueMismatch.gaps.some((gap) => gap.kind === "value-mismatch"), "a claim publishing a value other than the reviewed one was not refused with value-mismatch");
 assert(live.liveTelemetry.provider === "reference-provider-adapter" && live.liveTelemetry.model === "reference-provider-model" && live.liveTelemetry.taskDigest === deterministic.extraction.taskDigest && live.liveTelemetry.usageTokens === 42 && live.liveTelemetry.latencyMs >= 0 && live.liveTelemetry.fixtureRevision === "reviewed-grounding-fixture/v1", "optional live execution telemetry is incomplete or unbound");
 NODE
 node --input-type=module -e "import('$RUNNER').then((module) => { if (typeof module.runReviewedGroundingReference !== 'function') process.exit(1); })"

@@ -20,6 +20,12 @@ import { buildTrustBundle, validateTrustBundle } from "../../build/src/cli/workf
 
 const TS = "2026-07-02T00:00:00Z";
 
+// #1422: a pending criterion has no event and no evidence, and its policy requires nothing. Surface
+// status function "3" derives such a claim `unknown` where "2" derived `proposed`
+// (docs/reference/schema-versioning.md, v7 to v8 migration, "No event and no evidence, under a
+// policy that requires nothing"). Either way it is not verified, which is what these tests guard.
+const PENDING_CRITERION_STATUS = "unknown";
+
 // A command-backed browser check (-> test_output) and a no-command browser check
 // (-> crawl_observation): SAME legacy claimType (workflow.check.browser), DIFFERENT
 // requiredEvidence. This is the exact collision the verifier reproduced.
@@ -121,7 +127,7 @@ test("buildTrustBundle: malformed acceptance statuses remain pending and keep in
     assert.equal(claim.claimType, "workflow.acceptance.criterion");
     assert.equal(claim.subjectType, "flow-step");
     assert.equal(claim.value, "pending");
-    assert.equal(claim.status, "proposed");
+    assert.equal(claim.status, PENDING_CRITERION_STATUS);
     assert.equal(claim.metadata.criterion.status, "pending");
     assert.equal(bundle.events.filter((event) => event.claimId === claim.id).length, 0);
     assert.deepEqual(await validateTrustBundle(bundle), { valid: true, errors: [], available: true });
@@ -140,7 +146,7 @@ test("buildTrustBundle: evidence-free acceptance pass cannot manufacture verifie
   const claim = bundle.claims.find((candidate) => candidate.metadata?.origin === "acceptance");
   assert.ok(claim, "expected an acceptance criterion claim");
   assert.equal(claim.value, "pending");
-  assert.equal(claim.status, "proposed");
+  assert.equal(claim.status, PENDING_CRITERION_STATUS);
   assert.equal(bundle.events.filter((event) => event.claimId === claim.id).length, 0);
 });
 
@@ -170,7 +176,7 @@ test("buildTrustBundle: pass metadata without observed execution remains pending
   const claim = bundle.claims.find((candidate) => candidate.metadata?.origin === "acceptance");
   assert.ok(claim, "expected an acceptance criterion claim");
   assert.equal(claim.value, "pending");
-  assert.equal(claim.status, "proposed");
+  assert.equal(claim.status, PENDING_CRITERION_STATUS);
   assert.equal(bundle.evidence.filter((evidence) => evidence.claimId === claim.id).length, 0);
   assert.equal(bundle.events.filter((event) => event.claimId === claim.id).length, 0);
 });
@@ -212,7 +218,7 @@ test("buildTrustBundle: direct observed-command metadata cannot manufacture veri
     assert.equal(claim.claimType, "workflow.acceptance.criterion");
     assert.equal(claim.subjectType, "flow-step");
     assert.equal(claim.value, "pending");
-    assert.equal(claim.status, "proposed");
+    assert.equal(claim.status, PENDING_CRITERION_STATUS);
     const evidence = bundle.evidence.filter((candidate) => candidate.claimId === claim.id);
     assert.equal(evidence.length, 0);
     const event = bundle.events.find((candidate) => candidate.claimId === claim.id);

@@ -6,7 +6,7 @@ import { createExtractionTaskSpec, createInMemoryPreparedArtifactStore, extract,
 import { buildSemanticReviewWork, createObserveExtractDiff } from "@kontourai/lookout";
 import { importExtractionEnvelope } from "@kontourai/survey";
 import { buildReviewDecision } from "@kontourai/survey/review-workbench";
-import { evaluateReviewedGroundingPolicy, projectReviewedExtractionEvidence } from "@kontourai/surface";
+import { evaluateReviewedGroundingPolicy, projectReviewedExtractionEvidence, restoreReviewedExtractionEvidence } from "@kontourai/surface";
 
 const source = { id: "public-record-17", url: "https://example.test/records/17", kind: "api-record", cadenceHint: "manual", renderPolicy: "never",
   targetSchema: [{ path: "status", type: "string", required: true, inferenceType: "explicit" }] };
@@ -64,15 +64,24 @@ export async function runReviewedGroundingReference(options = {}) {
   const reviewItem = imported.reviewItems[0];
   if (!reviewItem) throw new Error("Extraction import did not create a review item.");
   const policy = groundingPolicy();
-  const beforeReview = evaluateReviewedGroundingPolicy({ policy, evidence: [] });
   const reviewDecision = buildReviewDecision({ item: reviewItem, decision: "accept-proposed", note: "Exact source span confirms the value.",
     actorId: "reviewer:reference", reviewedAt: "2026-07-20T00:03:00.000Z" });
   const projected = projectReviewedExtractionEvidence({ evidenceId: "evidence.public-record-17.status", claimId: "claim.public-record-17.status",
     proposalIndex: 0, importRecord: imported.record, reviewItem, reviewDecision, collectedBy: "reference-workflow:collector", structuralTrust: "validated" });
+  // Surface >= 4 binds the value the action would publish to the reviewed candidate value
+  // (`value-mismatch`) and refuses a decision made without claims (`claims-not-supplied`). The value
+  // published here is the one the reviewed evidence itself carries, recovered from that evidence.
+  const reviewed = restoreReviewedExtractionEvidence(projected.evidence);
+  const claimId = "claim.public-record-17.status";
+  const claims = [{ id: claimId, value: reviewed.importRecord.spec.envelope.result.proposals[reviewed.proposalIndex].candidateValue }];
+  const beforeReview = evaluateReviewedGroundingPolicy({ policy, evidence: [], claims });
   const currentSource = { evidenceId: projected.evidence.id, status: "current", expectedSnapshotRef: "snapshot:record-17:v2",
     observedSnapshotRef: "snapshot:record-17:v2", observedAt: "2026-07-20T00:03:00.000Z", extractedValueChanged: true };
-  const afterReview = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], sourceStates: [currentSource] });
-  const drifted = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], sourceStates: [{ ...currentSource,
+  const afterReview = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], sourceStates: [currentSource], claims });
+  // A claim publishing a value other than the reviewed one (the superseded v1 value) is refused.
+  const valueMismatch = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], sourceStates: [currentSource],
+    claims: [{ id: claimId, value: "Ready" }] });
+  const drifted = evaluateReviewedGroundingPolicy({ policy, evidence: [projected.evidence], claims, sourceStates: [{ ...currentSource,
     status: "drifted", observedSnapshotRef: "snapshot:record-17:v3", extractedValueChanged: false }] });
   const tamperedResolution = await resolvePreparedArtifact(extraction.preparedArtifact, { get: () => "Record 17\nStatus: Altered\n" });
   const tamperedEnvelope = JSON.parse(envelope);
@@ -88,7 +97,7 @@ export async function runReviewedGroundingReference(options = {}) {
     review: { semanticItemCount: semanticReview.value.items.length,
       semanticKinds: semanticReview.value.items.map((item) => item.metadata.producer["lookout.kontourai.io/semantic-transition"].semanticKind),
       importName: imported.record.metadata.name, reviewItemName: reviewItem.metadata.name, reviewDecisionName: reviewDecision.metadata.name },
-    action: { beforeReview, afterReview, drifted }, failures: { missingEvidence: beforeReview.gaps, tamperedPreparedContent: tamperedImport.record.status },
+    action: { beforeReview, afterReview, drifted }, failures: { missingEvidence: beforeReview.gaps, valueMismatch: { outcome: valueMismatch.outcome, gaps: valueMismatch.gaps }, tamperedPreparedContent: tamperedImport.record.status },
     ...(options.liveProviderModule ? { liveTelemetry: await observeLiveProvider(options.liveProviderModule) } : {}) };
 }
 

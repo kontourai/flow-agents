@@ -3449,8 +3449,19 @@ if [[ -z "$HACHURE_CONF" || ! -d "$HACHURE_CONF" ]]; then
 else
   if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-conf-vectors.err"
 import { readFileSync, readdirSync } from 'node:fs';
-import { deriveClaimStatus, statusFunctionVersion } from '@kontourai/surface';
+import { deriveClaimStatus, supportedStatusFunctionVersions } from '@kontourai/surface';
 const confDir = '${HACHURE_CONF}';
+// #1422: the vectors are conformance for ONE status function version, declared by the manifest
+// that ships beside them ("All vectors must pass for the statusFunctionVersion declared in
+// appliesTo.statusFunctionVersion"). The hachure release reachable here declares "2", while
+// Surface 5 defaults to "3", so the vectors run under the declared version -- which Surface must
+// still implement -- not under the default.
+const manifest = JSON.parse(readFileSync(confDir + '/manifest.json', 'utf8'));
+const statusFunctionVersion = manifest.appliesTo && manifest.appliesTo.statusFunctionVersion;
+if (typeof statusFunctionVersion !== 'string' || !(supportedStatusFunctionVersions || []).includes(statusFunctionVersion)) {
+  process.stderr.write('conformance manifest declares statusFunctionVersion ' + JSON.stringify(statusFunctionVersion) + ', which this Surface does not implement\n');
+  process.exit(1);
+}
 const vectors = readdirSync(confDir).filter(f => f.startsWith('sf-') && f.endsWith('.json'));
 let passed = 0; let failed = 0;
 for (const vec of vectors) {
@@ -3464,7 +3475,7 @@ for (const vec of vectors) {
     const events = (input.events || []).filter((e) => e.claimId === claimId);
     const policies = (input.policies || []);
     const authorityTrace = (input.authorityTrace || []);
-    const result = deriveClaimStatus({ claim, evidence, events, policies, now, authorityTrace });
+    const result = deriveClaimStatus({ claim, evidence, events, policies, now, authorityTrace, statusFunctionVersion });
     if (result.status !== expectedStatus) {
       process.stderr.write('vector ' + vec + ' claim ' + claimId + ': got ' + result.status + ', expected ' + expectedStatus + '\n');
       failed++;
@@ -3481,6 +3492,59 @@ NODEOF
   else
     _fail "hachure conformance vectors failed: $(cat "$TMPDIR_EVAL/tb-conf-vectors.err")"
   fi
+fi
+
+# Status function "3" conformance (#1422). The writer derives under Surface's default, "3", but
+# the hachure reachable above (0.15, via @kontourai/flow) only carries "2" vectors. hachure 0.16.0's
+# vectors declare "3"; they are vendored as the unmodified npm tarball because
+# check:hachure-boundary forbids declaring hachure at all (see the fixture README). The tarball is
+# refused unless its sha512 is the registry integrity pinned here. Some "3" rules (the derivation
+# ceiling) are whole-bundle, so vectors run through deriveTrustSnapshot, not per-claim derivation.
+HACHURE_V3_TGZ="$ROOT/evals/fixtures/hachure-conformance/hachure-0.16.0.tgz"
+HACHURE_V3_INTEGRITY="sha512-ehgfts5BDLX5xTk6zs2lvr3PVUf2wFeCVnFIuFYJNx6RlKQJuWuhWlIn+glJbmdLdfYCjDTcAbjagR/OkfpLuQ=="
+HACHURE_V3_DIR="$TMPDIR_EVAL/hachure-0.16.0"
+HACHURE_V3_ACTUAL="$(node -e 'process.stdout.write("sha512-" + require("crypto").createHash("sha512").update(require("fs").readFileSync(process.argv[1])).digest("base64"))' "$HACHURE_V3_TGZ" 2>/dev/null || true)"
+if [[ "$HACHURE_V3_ACTUAL" != "$HACHURE_V3_INTEGRITY" ]]; then
+  _fail "vendored hachure 0.16.0 tarball does not match its pinned integrity (got ${HACHURE_V3_ACTUAL:-unreadable})"
+elif ! { mkdir -p "$HACHURE_V3_DIR" && tar -xzf "$HACHURE_V3_TGZ" -C "$HACHURE_V3_DIR" package/conformance; }; then
+  _fail "could not extract conformance vectors from the vendored hachure 0.16.0 tarball"
+elif node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-conf-v3.err"
+import { readFileSync, readdirSync } from 'node:fs';
+import { deriveTrustSnapshot, supportedStatusFunctionVersions } from '@kontourai/surface';
+const confDir = '${HACHURE_V3_DIR}/package/conformance';
+const manifest = JSON.parse(readFileSync(confDir + '/manifest.json', 'utf8'));
+const statusFunctionVersion = manifest.appliesTo && manifest.appliesTo.statusFunctionVersion;
+if (statusFunctionVersion !== '3' || !(supportedStatusFunctionVersions || []).includes('3')) {
+  process.stderr.write('expected status function "3" vectors that this Surface implements; manifest declares ' + JSON.stringify(statusFunctionVersion) + '\n');
+  process.exit(1);
+}
+const l2 = manifest.levels.find((level) => level.level === 'L2');
+const files = readdirSync(confDir).filter((f) => f.startsWith('sf-') && f.endsWith('.json'));
+if (files.length !== l2.satisfiedBy.vectorCount || files.length !== 17) {
+  process.stderr.write('expected the manifest\'s 17 status-derivation vectors, found ' + files.length + '\n');
+  process.exit(1);
+}
+let passed = 0; let failed = 0; let v3Only = 0;
+for (const file of files) {
+  const vector = JSON.parse(readFileSync(confDir + '/' + file, 'utf8'));
+  // A vector listing statusFunctionVersions applies only to those versions (manifest howToRun).
+  if (Array.isArray(vector.statusFunctionVersions) && !vector.statusFunctionVersions.includes(statusFunctionVersion)) continue;
+  if (Array.isArray(vector.statusFunctionVersions)) v3Only++;
+  const snapshot = deriveTrustSnapshot(vector.input, { now: new Date(vector.now), statusFunctionVersion });
+  const derived = new Map(snapshot.claims.map((claim) => [claim.id, claim.status]));
+  for (const [claimId, expected] of Object.entries(vector.expect.statusByClaimId ?? {})) {
+    if (derived.get(claimId) === expected) { passed++; continue; }
+    process.stderr.write('vector ' + file + ' claim ' + claimId + ': got ' + derived.get(claimId) + ', expected ' + expected + '\n');
+    failed++;
+  }
+}
+process.stderr.write('status function 3 conformance: ' + passed + ' passed, ' + failed + ' failed, ' + v3Only + ' v3-only vectors\n');
+if (failed > 0 || passed === 0 || v3Only === 0) process.exit(1);
+NODEOF
+then
+  _pass "hachure 0.16.0 status function 3 conformance vectors pass Surface deriveTrustSnapshot"
+else
+  _fail "hachure 0.16.0 status function 3 conformance failed: $(cat "$TMPDIR_EVAL/tb-conf-v3.err")"
 fi
 
 # ─── Deterministic session slug from work-item ref (#161) ───────────────────

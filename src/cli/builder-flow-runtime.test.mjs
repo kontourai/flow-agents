@@ -3472,12 +3472,27 @@ function writeBundle(sessionDir, entries) {
     const gateClaim = entry.claim?.metadata?.gate_claim;
     if (gateClaim && canonicalHead && typeof gateClaim.flow_run_head !== "string") gateClaim.flow_run_head = canonicalHead;
   }
+  // #1422: shaped like the real writer's output, each claim names a policy that requires the
+  // evidence type it carries. Under Surface status function "3" a claim with no resolvable policy
+  // (the old `policies: []`) cannot derive `verified`, so the reconcile preflight would refuse every
+  // passing fixture claim. docs/reference/schema-versioning.md ("To keep a claim verified under 3").
+  const policies = new Map();
+  const claims = entries.map((entry) => {
+    const claimType = String(entry.claim?.claimType ?? "");
+    const evidenceType = String(entry.evidence?.evidenceType ?? "");
+    if (!claimType || !evidenceType) return entry.claim;
+    const id = `policy:${claimType}:${evidenceType}`;
+    if (!policies.has(id)) {
+      policies.set(id, { id, claimType, requiredEvidence: [evidenceType], acceptanceCriteria: [`A verified verification event must support a ${claimType} claim.`], reviewAuthority: "system", validityRule: { kind: "manual" }, stalenessTriggers: [], conflictRules: [], impactLevel: "high" });
+    }
+    return { ...entry.claim, verificationPolicyId: id };
+  });
   writeJson(path.join(sessionDir, "trust.bundle"), {
     schemaVersion: 5,
     source: "flow-agents-builder-runtime-test",
-    claims: entries.map((entry) => entry.claim),
+    claims,
     evidence: entries.flatMap((entry) => [entry.evidence, ...(entry.extraEvidence ?? [])]),
-    policies: [],
+    policies: [...policies.values()],
     events: entries.map((entry) => entry.event),
   });
 }

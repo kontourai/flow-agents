@@ -482,5 +482,11 @@
     "reason": "Second slice of #1422 (Surface 5 status function 3 preparation, pin unchanged at 2.17.0): liveness holds carry the holder's claim/heartbeat signal as attestation evidence that their policy requires, and Trust Bundles no longer carry critique_resolution_events at the root (the unreachable sidecar resolve-critique writer is removed; a legacy bundle is rebuilt without the key). Agent-delivered without a trust bundle. Verification in lieu of a bundle: tests through the real sidecar writer on Surface 2.17.0 and on a local Surface 5.0.0 swap (lockfile untouched), fault injections with recorded failure text, re-derivation of every committed delivery bundle unchanged, and the trust-verify reconcilers pinned by consumers (Surface 2.13.0) exiting 0 on a bundle from this branch.",
     "approved_by": "briananderson1222 (repository owner; scoped to this branch only, not a standing exemption)",
     "declared_at": "2026-10-05T16:55:49Z"
+  },
+  {
+    "scope": "author:briananderson1222 ref:feat/surface-5-pin",
+    "reason": "Final slice of #1422: pins @kontourai/surface at 5.0.0 (status function 3; 5.1.0 is still inside the pnpm minimumReleaseAge floor) and moves the fixtures that pinned status-function-2 results to the Surface 5 behaviour its upgrade notes specify, plus the reviewed-grounding reference workflow's Surface 4 claim binding. Agent-delivered without a trust bundle. Verification in lieu of a bundle: the full unit corpus and CI baseline on the real pin (failures reproduced on origin/main), a fresh reviewed delivery deriving verified through the real writer, every committed delivery bundle here and 54 consumer bundles re-deriving to their recorded status, fault injections proving the stamped-version and liveness tests now gate, and the trust-verify reconcilers consumers pin (Surface 2.13.0) exiting 0 on a bundle from this branch.",
+    "approved_by": "briananderson1222 (repository owner; scoped to this branch only, not a standing exemption)",
+    "declared_at": "2026-10-05T22:57:08Z"
   }
 ]
