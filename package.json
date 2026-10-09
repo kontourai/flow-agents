@@ -59,9 +59,9 @@
       "types": "./build/src/workspace-kits.d.ts",
       "import": "./build/src/workspace-kits.js"
     },
-    "./docker-worker": "./runtime/docker-worker.mjs",
-    "./provider-broker": "./runtime/provider-broker.mjs",
-    "./storage-admission": "./runtime/storage-admission.mjs",
+    "./docker-worker": "./integrations/codex-host/docker-worker.mjs",
+    "./provider-broker": "./integrations/codex-host/provider-broker.mjs",
+    "./storage-admission": "./integrations/codex-host/storage-admission.mjs",
     "./kit-execution": {
       "types": "./build/src/kit-execution.d.ts",
       "import": "./build/src/kit-execution.js"
@@ -146,7 +146,7 @@
     "!**/.veritas/",
     "!**/node_modules/",
     "!build/src/cli/workflow.test-support.js",
-    "runtime/"
+    "integrations/codex-host/"
   ],
   "scripts": {
     "knowledge:yaml:generate": "node scripts/build-knowledge-yaml.mjs",
