@@ -112,14 +112,21 @@ test('comparison refuses absent/unbound runs and detects missing outputs without
 
 test('present optional outputs participate in validity while absent ones remain optional', () => {
   const root = fixture();
-  const local = { upstream: snapshot.upstream, profiles: { demo: { stages: ['design'] } }, stages: [{ slug: 'design', source_digest: 'd', produces: [], optional_produces: ['frontend'], consumes: [] }] };
+  const local = { upstream: snapshot.upstream, profiles: { demo: { stages: ['design', 'build'] } }, stages: [
+    { slug: 'design', source_digest: 'd', produces: [], optional_produces: ['frontend'], consumes: [] },
+    { slug: 'build', source_digest: 'b', produces: [], consumes: [{ artifact: 'frontend', required: false }] },
+  ] };
   try {
     assert.equal(observeStage({ snapshot: local, profile: 'demo', stage: 'design', root, artifacts: [] }).structural_status, 'pass');
     writeFileSync(join(root, 'frontend.md'), 'original component');
     const receipt = observeStage({ snapshot: local, profile: 'demo', stage: 'design', root, artifacts: [{ id: 'frontend', stage: 'design', path: 'frontend.md' }] });
     assert.equal(receipt.outputs.length, 1);
+    const dependent = observeStage({ snapshot: local, profile: 'demo', stage: 'build', root, artifacts: [{ id: 'frontend', stage: 'design', path: 'frontend.md' }] });
+    assert.equal(dependent.inputs.length, 1);
     writeFileSync(join(root, 'frontend.md'), 'changed component');
     assert.equal(inspectBasis(receipt, root).status, 'stale');
+    assert.equal(projectInvalidation([receipt, dependent], root).build.status, 'stale');
+    assert.throws(() => projectInvalidation([receipt, receipt], root), /one current receipt/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

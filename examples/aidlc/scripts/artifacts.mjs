@@ -45,7 +45,7 @@ export function observeStage({ snapshot, profile, stage: stageId, root, artifact
   for (const id of new Set([...(stage.produces ?? []), ...optional])) observe(instance(artifacts, stageId, id), !optional.has(id), outputs, `${stageId}/${id}`);
   for (const input of stage.consumes ?? []) {
     if (input.conditional_on && input.conditional_on !== projectType) continue;
-    const producers = snapshot.stages.filter((entry) => selected.includes(entry.slug) && selected.indexOf(entry.slug) < selected.indexOf(stageId) && entry.produces?.includes(input.artifact));
+    const producers = snapshot.stages.filter((entry) => selected.includes(entry.slug) && selected.indexOf(entry.slug) < selected.indexOf(stageId) && [...(entry.produces ?? []), ...(entry.optional_produces ?? [])].includes(input.artifact));
     const producer = producers.at(-1);
     // A skipped upstream stage supplies no invented document. Consumers must
     // take their scope from the selected profile, as the upstream method does.
@@ -69,6 +69,7 @@ export function inspectBasis(receipt, root) {
 }
 
 export function projectInvalidation(receipts, root) {
+  if (new Set(receipts.map((receipt) => receipt.stage)).size !== receipts.length) throw new Error('Invalidation projection requires one current receipt per stage');
   const states = new Map(receipts.map((receipt) => [receipt.stage, { ...inspectBasis(receipt, root), direct: true }]));
   let changed;
   do {
