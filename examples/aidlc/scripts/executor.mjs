@@ -17,6 +17,7 @@ const inside=(root,file)=>{const rel=path.relative(root,file);return rel!=='..'&
 export function createDockerExecutor({request,controllerRoot,workerRunner,signal}){
   const workspace=fs.realpathSync(request.workspace),config=request.engine_sandbox;
   if(!config||typeof workerRunner!=='function')throw new Error('Pinned worker sandbox port required');
+  for(const excluded of config.forbidden_mount_roots??[]){const root=fs.realpathSync(excluded.path);for(const source of [workspace,fs.realpathSync(request.source_root)])if(inside(source,root)||inside(root,source))throw new Error('Private host source may not be copied into model workers');}
   if(!Number.isSafeInteger(request.execution?.max_turns)||request.execution.max_turns<1||request.execution.max_turns>10000||!Number.isFinite(request.execution.timeout_s)||request.execution.timeout_s<=0||request.execution.timeout_s>86400)throw new Error('Finite execution turn and time budgets required');
   const workerRoot=path.resolve(config.worker_root??path.join(controllerRoot,'workers'));
   fs.mkdirSync(workerRoot,{recursive:true,mode:0o700});fs.mkdirSync(config.artifact_root,{recursive:true,mode:0o700});

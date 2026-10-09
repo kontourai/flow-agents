@@ -58,6 +58,7 @@ export async function executeRequestFile({requestFile,controllerRoot,authFile,wo
   if(request.schema!=='kontour.kit.execution_request'||request.version!=='1.0'||request.kit_id!=='aidlc')throw new Error('Unsupported kit execution request');
   request.workspace=fs.realpathSync(request.workspace);
   request.source_root=fs.realpathSync(request.source_root??KIT_ROOT);
+  if(authFile){const credential=fs.realpathSync(authFile);for(const root of [request.workspace,request.source_root]){const relative=path.relative(root,credential);if(!relative||relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative))throw new Error('Host credentials must stay outside model workspace and kit source');}}
   controllerRoot=privateController(request.workspace,controllerRoot);
   const config=request.engine_sandbox;
   if(!config?.image)throw new Error('Explicit immutable worker image required');
