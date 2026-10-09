@@ -220,7 +220,7 @@ export async function runAidlc({request,executor,commandRunner,authority,control
       }
       if(stage.phase==='operation'){
         const purpose=['environment-provisioning','deployment-execution'].includes(stageId)?'deployment':'operation';
-        const input={purpose,stage:stageId,request_digest:binding.request_digest};const grant=await authority?.authorize?.(input);
+        const input={purpose,stage:stageId,source_digest:snapshotWorkspace(workspace).source_digest,basis:currentRefs(workspace,allArtifacts),operation_config_digest:digest(request.parameters?.operations?.stages?.[stageId]??null),request_digest:binding.request_digest};const grant=await authority?.authorize?.(input);
         if(!grant?.authorized||authority.verify?.(grant.receipt,input)!==true){failure={stage:stageId,reason:'authority_required',detail:grant};await refuse(stageId,failure);break;}
         if(!operationProvider?.execute||!operationProvider?.verify){failure={stage:stageId,reason:'operation_provider_required'};await refuse(stageId,failure);break;}
         const operationInput={stage:structuredClone(stage),workspace,source_digest:snapshotWorkspace(workspace).source_digest,authority:grant,request_digest:binding.request_digest};
