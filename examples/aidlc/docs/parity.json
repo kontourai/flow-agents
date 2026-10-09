@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "baseline_commit": "2a555f7a4387cd1b8254029cccb9fd1e99974574",
+  "method": {"stage_contracts": "implemented", "profile_membership": "implemented", "personas": "reference-data", "source_procedures": "reference-data"},
+  "execution": {"flow_gates": "public-contract-tested", "canonical_kit_binding": "public-install-and-start-tested", "artifact_fingerprints": "implemented", "transitive_invalidation_projection": "implemented", "automatic_invalidation_to_flow": "not_implemented", "conditional_stage_resolution": "project-type-only", "complete_sensor_suite": "not_implemented", "human_approval_authentication": "host_required", "distinct_reviewer_authentication": "not_implemented", "native_topology_dispatch": "not_implemented", "unit_dag_expansion": "not_implemented", "swarm_source_merges": "not_implemented", "deployment_adapters": "host_required"},
+  "comparison": {"profile_structure": "implemented", "frozen_output_rubric": "implemented", "paired_model_runs": "not_run", "independent_semantic_grading": "evals_required", "effectiveness": "not_verified"},
+  "deliberate_differences": ["Missing or unavailable checks never count as passing required evidence.", "Reviewer roles retain required evidence even when upstream profiles lower guard policy.", "All stage completions require explicit Flow evidence; artifact presence alone does not advance a run."]
+}

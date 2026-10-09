@@ -25,7 +25,7 @@ import { isWithinRuntimeArtifactRoot } from "./declared-artifact-roots.js";
 // resolver admitting bytes the run binding rejects (or vice versa) is exactly the disagreement
 // those rules exist to prevent, and it is the mechanism behind the start-validates-consumer /
 // run-binds-package split this merge closes.
-import { canonicalKitFlowSourceRoots, canonicalKitsRoot, kitManifestFlowDeclarations } from "./kit-flow-binding.js";
+import { canonicalKitFlowSourceRoots, canonicalKitsRoot, kitManifestFlowDeclarations, declaredInstalledKitFlowBindings, hasRegisteredInstalledKit, resolveKitFlowBinding } from "./kit-flow-binding.js";
 
 // ─── Security: Layer 1 traversal defense ─────────────────────────────────────
 //
@@ -117,6 +117,13 @@ export function resolveFlowFilePath(
 
   const override = allowOverride ? process.env["FLOW_AGENTS_FLOW_DEFS_DIR"] : undefined;
 
+  if (!override && hasRegisteredInstalledKit(repoRoot, kitId)) {
+    // An undeclared file in kits/<id>/ cannot replace an installed declaration. Resolve the
+    // exact binding the run pins: package first, then declared tracked kit, then hashed install.
+    // If the installation has drifted, refuse rather than falling through to an unbound decoy.
+    return resolveKitFlowBinding(flowId, canonicalKitFlowSourceRoots(repoRoot))?.definitionPath ?? null;
+  }
+
   let expectedRoot: string;
   let flowFilePath: string;
   let canonicalLookup = false;
@@ -168,6 +175,8 @@ export function resolveFlowFilePath(
     if (canonicalLookup) {
       const packaged = packagedFlowFile(kitId, flowName, repoRoot);
       if (packaged) return packaged;
+      const installed = declaredInstalledKitFlowBindings(repoRoot).find((binding) => binding.flowId === flowId);
+      if (installed) return installed.definitionPath;
     }
     return resolvedPath;
   }
@@ -334,6 +343,8 @@ export function declaredKitFlows(repoRoot: string): DeclaredKitFlow[] {
   for (const sourceRoot of canonicalKitFlowSourceRoots(repoRoot)) {
     const kitsRoot = canonicalKitsRoot(sourceRoot);
     if (!kitsRoot) continue;
+    const installed = declaredInstalledKitFlowBindings(sourceRoot);
+    const installedIds = new Set(installed.map((binding) => binding.flowId));
     for (const kitEntry of listDirents(kitsRoot)) {
       if (!kitEntry.isDirectory() || !SLUG_RE.test(kitEntry.name)) continue;
       const declared = kitManifestFlowDeclarations(kitsRoot, kitEntry.name);
@@ -344,9 +355,10 @@ export function declaredKitFlows(repoRoot: string): DeclaredKitFlow[] {
       for (const flowEntry of listDirents(path.join(kitsRoot, kitEntry.name, "flows"))) {
         if (!flowEntry.isFile() || !flowEntry.name.endsWith(".flow.json")) continue;
         const id = `${kitEntry.name}.${flowEntry.name.slice(0, -".flow.json".length)}`;
-        if (slugFlowIdParts(id)) push(id, sourceRoot, "flows-directory");
+        if (slugFlowIdParts(id) && !installedIds.has(id)) push(id, sourceRoot, "flows-directory");
       }
     }
+    for (const binding of installed) push(binding.flowId, sourceRoot, "manifest");
   }
   return declarations;
 }

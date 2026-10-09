@@ -34,7 +34,9 @@ export function skillRoleFlowIds(role: { flow_id?: string; flow_ids?: string[] }
 }
 
 
-const MAX_FLOW_STEP_ACTIONS = 128;
+// Full lifecycle kits can expose many profiles using the same stage producers.
+// AI-DLC's 11 pinned profiles need 193 flow/step bindings; retain a finite cap.
+const MAX_FLOW_STEP_ACTIONS = 512;
 const MAX_FLOW_STEP_ACTION_LIST_ITEMS = 32;
 const MAX_FLOW_STEP_ACTION_SKILLS = 16;
 const MAX_FLOW_OBSERVABLE_ARTIFACTS = 128;
