@@ -488,5 +488,15 @@
     "reason": "Final slice of #1422: pins @kontourai/surface at 5.0.0 (status function 3; 5.1.0 is still inside the pnpm minimumReleaseAge floor) and moves the fixtures that pinned status-function-2 results to the Surface 5 behaviour its upgrade notes specify, plus the reviewed-grounding reference workflow's Surface 4 claim binding. Agent-delivered without a trust bundle. Verification in lieu of a bundle: the full unit corpus and CI baseline on the real pin (failures reproduced on origin/main), a fresh reviewed delivery deriving verified through the real writer, every committed delivery bundle here and 54 consumer bundles re-deriving to their recorded status, fault injections proving the stamped-version and liveness tests now gate, and the trust-verify reconcilers consumers pin (Surface 2.13.0) exiting 0 on a bundle from this branch.",
     "approved_by": "briananderson1222 (repository owner; scoped to this branch only, not a standing exemption)",
     "declared_at": "2026-10-05T22:57:08Z"
+  },
+  {
+    "scope": "author:briananderson1222 ref:feat/aidlc-reference-kit-20261008",
+    "reason": "Owner-authorized retained-work recovery for AI-DLC reference PR #1440. This IS agent-delivered work, produced without a pre-change bound Builder run; native delivery history cannot be reconstructed retrospectively. Waive only Step 2 bundle-required reconciliation for this PR's retained source and its delivery-declaration follow-up. Keep Step 1 fresh canonical verification and all ordinary CI checks mandatory. Hosted Trust Reconcile on source 54a2d214dba8ec8c7dfadafcd6a32e041ab572cc ran npm run trust-reconcile-verify successfully, then failed solely because no attesting delivery bundle or in-scope approved declaration exists. This exception makes no claim of Builder completion, authentic signed delivery, full AWS runtime parity, or measured model effectiveness.",
+    "gaps": [
+      "No pre-change bound Builder planning, execution, review or publication history for this retained implementation.",
+      "No native signed delivery bundle attesting this PR; independent command/test evidence is retained but does not substitute for that history."
+    ],
+    "approved_by": "briananderson1222 (explicit owner approval in this T3 thread, 2026-10-09: \"Approve all exceptions as I really don't understand the value\")",
+    "declared_at": "2026-10-09T01:18:40.904Z"
   }
 ]
