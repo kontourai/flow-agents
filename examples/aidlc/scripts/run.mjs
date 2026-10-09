@@ -5,13 +5,13 @@ import { createDockerExecutor } from './executor.mjs';
 import { createControllerAuthority } from './authority.mjs';
 import { createCommandRunner } from './commands.mjs';
 import { runAidlc } from './runtime.mjs';
-import { digest, requestBindingDigest } from './compile.mjs';
+import { KIT_ROOT, requestBindingDigest } from './compile.mjs';
 
 export {runAidlc};
 
-export async function executeNamedTreatment({request,controllerRoot,workerRunner}){
-  if(request.schema!=='kontour.evals.named_treatment_request'||request.version!=='1.0')throw new Error('Unsupported named treatment request');
-  if(request.treatment_kind!=='kontour-aidlc')throw new Error('This adapter executes Kontour only; AWS must use its pinned native engine adapter');
+export async function executeKit({request,controllerRoot,workerRunner}){
+  if(request.schema!=='kontour.kit.execution_request'||request.version!=='1.0')throw new Error('Unsupported kit execution request');
+  if(request.kit_id!=='aidlc')throw new Error('This entry executes the aidlc kit');
   const executor=createDockerExecutor({request,controllerRoot,workerRunner});
   const authority=createControllerAuthority({policy:request.parameters?.authority_policy,requestDigest:requestBindingDigest(request),controllerRoot});
   executor.decide=async input=>{const proposal={...input,purpose:'review-disposition',request_digest:requestBindingDigest(request)};const grant=await authority.authorize(proposal);const verified=grant.authorized&&authority.verify(grant.receipt,proposal);return {authorized:verified,decision:verified?'accept':'defer',reference:grant.reference,receipt:grant.receipt};};
@@ -23,20 +23,49 @@ export async function executeNamedTreatment({request,controllerRoot,workerRunner
   const workers=executor.observed;
   const first=workers[0];const completeUsage=workers.length>0&&!executor.hasUnobservedStarts&&workers.every(worker=>worker.usage.complete);
   const completion=result.status==='completed'?'completed':result.status==='waiting'?'waiting':result.status==='budget_exhausted'?'budget_exhausted':'failed';
-  return {schema:'kontour.evals.named_treatment_capture',version:'1.0',run_id:request.run_id,attempt_id:request.attempt_id,arm_id:request.arm_id,case_id:request.case_id,
-    seed_digest:request.seed_digest,source_digest:request.source_digest,
-    identity:{observed:!!first,source:'trusted-runner-capture',model:first?.observed.argv_model??null,provider:first?.observed.provider??null,harness:first?.observed.harness??null,harness_version:first?.observed.harness_version??null,runtime:request.execution.runtime,evidence:workers.map(worker=>worker.observed.container_id).join(',')},
-    turns_started:executor.turnsStarted,completion,
-    engagement:{authenticated_by:'trusted_runner',source:'runtime_observation',evidence:JSON.stringify({flow_definition:result.definition_digest,stage_observations:result.records.map(record=>({stage:record.stage,record_digest:record.digest})),worker_contexts:workers.map(worker=>worker.observed.context_digest)}),source_digest:request.source_digest,engaged:workers.length>0&&result.records.length>3},
+  return {schema:'kontour.kit.execution_result',version:'1.0',kit_id:'aidlc',run_id:request.run_id,
+    status:completion,result,
+    identity:{observed:!!first,source:'trusted-runtime-capture',model:first?.observed.argv_model??null,provider:first?.observed.provider??null,harness:first?.observed.harness??null,harness_version:first?.observed.harness_version??null,runtime:request.execution.runtime,evidence:workers.map(worker=>worker.observed.container_id).join(',')},
+    turns_started:executor.turnsStarted,
+    observations:{definition_digest:result.definition_digest,stages:result.records.map(record=>({stage:record.stage,record_digest:record.digest})),worker_contexts:workers.map(worker=>worker.observed.context_digest)},
     usage:{complete:completeUsage,source:completeUsage?'codex-turn-completed':'unavailable',input_tokens:completeUsage?workers.reduce((sum,w)=>sum+w.usage.input_tokens,0):null,output_tokens:completeUsage?workers.reduce((sum,w)=>sum+w.usage.output_tokens,0):null},
     workflow:{definition_digest:result.definition_digest,canonical_status:result.canonical_state?.status,failure:result.failure,authority_kind:'operator-policy',semantic_quality:'not_verified'}};
+
+}
+
+export async function executeRequestFile({requestFile,controllerRoot,authFile,workerRunner,brokerFactory}){
+  const request=JSON.parse(fs.readFileSync(requestFile,'utf8'));
+  if(request.schema!=='kontour.kit.execution_request'||request.version!=='1.0'||request.kit_id!=='aidlc')throw new Error('Unsupported kit execution request');
+  request.workspace=fs.realpathSync(request.workspace);
+  request.source_root=fs.realpathSync(request.source_root??KIT_ROOT);
+  controllerRoot=path.resolve(controllerRoot);
+  fs.mkdirSync(controllerRoot,{recursive:true,mode:0o700});
+  const config=request.engine_sandbox;
+  if(!config?.image)throw new Error('Explicit immutable worker image required');
+  if(!workerRunner)({runCodexDockerWorker:workerRunner}=await import('@kontourai/flow-agents/docker-worker'));
+  let broker;
+  try{
+    if(!config.providerProxy){
+      if(!authFile)throw new Error('Host auth file required; credentials are never mounted into workers');
+      if(!brokerFactory)({startProviderProxy:brokerFactory}=await import('@kontourai/flow-agents/provider-broker'));
+      broker=await brokerFactory({authFile,model:request.execution.model,reasoningEffort:request.execution.reasoning_effort,maxRequests:request.execution.max_provider_requests});
+      config.providerProxy={baseUrl:broker.baseUrl,capability:broker.capability,model:broker.model};
+    }
+    config.artifact_root=path.resolve(config.artifact_root??path.join(controllerRoot,'worker-receipts'));
+    config.worker_root=path.resolve(config.worker_root??path.join(controllerRoot,'workers'));
+    return await executeKit({request,controllerRoot,workerRunner});
+  }finally{
+    if(broker){
+      try{fs.writeFileSync(path.join(controllerRoot,'provider-observations.json'),JSON.stringify(broker.evidence,null,2)+'\n',{flag:'wx',mode:0o600});}
+      finally{await broker.close();}
+    }
+  }
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const args=process.argv.slice(2);const get=name=>{const at=args.indexOf(name);return at<0?null:args[at+1];};
-  const file=get('--request'),controllerRoot=get('--controller-root');if(!file||!controllerRoot)throw new Error('Usage: run.mjs --request <named-request.json> --controller-root <private-root>');
-  const request=JSON.parse(fs.readFileSync(file,'utf8'));const helper=request.engine_sandbox?.worker_helper;if(!helper||!path.isAbsolute(helper))throw new Error('Trusted worker helper required');
-  const {runCodexDockerWorker}=await import(pathToFileURL(helper).href);
-  const capture=await executeNamedTreatment({request,controllerRoot:path.resolve(controllerRoot),workerRunner:runCodexDockerWorker});
-  console.log(JSON.stringify(capture));
+  const requestFile=get('--request'),controllerRoot=get('--controller-root');
+  if(!requestFile||!controllerRoot)throw new Error('Usage: aidlc run --request <kit-execution-request.json> --controller-root <private-root> [--auth-file <host-auth.json>]');
+  const result=await executeRequestFile({requestFile,controllerRoot,authFile:get('--auth-file')});
+  console.log(JSON.stringify(result));
 }
