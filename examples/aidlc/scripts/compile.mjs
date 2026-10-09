@@ -8,6 +8,7 @@ export const digest = (value) => createHash('sha256').update(typeof value === 's
 // Resume binds experiment inputs, not rotating worker access capabilities.
 export function requestBindingDigest(request) {
   const bound=structuredClone(request);
+  if(bound.engine_sandbox)delete bound.engine_sandbox.owner_id;
   if(bound.engine_sandbox?.providerProxy){
     delete bound.engine_sandbox.providerProxy.token;
     delete bound.engine_sandbox.providerProxy.capability;

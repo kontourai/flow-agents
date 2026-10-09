@@ -71,7 +71,7 @@ export function createDockerExecutor({request,controllerRoot,workerRunner,signal
       prompt.allowed_source_changes=dispatch.phase!=='review'&&!contribution&&!dispatch.context.planning_only&&(dispatch.context.stage?.workspace_requires===true||typeof dispatch.context.source_write_authority==='string');
       const contextFile=path.join(controllerRoot,'contexts',`${identity.instance_id}.json`);put(contextFile,prompt);
       let worker;
-      try{worker=await workerRunner({image:config.image,workspace:fork,sourceRoot:request.source_root,contextFile,providerProxy:config.providerProxy,model:request.execution.model,reasoningEffort:request.execution.reasoning_effort,
+      try{worker=await workerRunner({image:config.image,ownerId:config.owner_id,forbiddenMountRoots:config.forbidden_mount_roots,workspace:fork,sourceRoot:request.source_root,contextFile,providerProxy:config.providerProxy,model:request.execution.model,reasoningEffort:request.execution.reasoning_effort,
         timeoutMs:Math.max(1,request.execution.timeout_s*1000-(Date.now()-start)),network:config.network??'bridge',readOnlyWorkspace:dispatch.phase==='review',artifactRoot:config.artifact_root,storageBudget:config.storage_budget,signal:dispatch.signal??signal,invocationId:identity.instance_id,runId:request.run_id});}
       catch(error){attempt.status='port-failed';attempt.error=error.message;persistHistory();throw error;}
       if(Buffer.byteLength(JSON.stringify(worker))>16*1024*1024)throw new Error('Worker capture exceeds durable receipt budget');

@@ -43,7 +43,7 @@ export function prepareCheckWorkspace({workspace,controllerRoot,basis=[]}){
 }
 
 /** Public Flow capture + isolated source command; no model or grader authority. */
-export function createCommandRunner({workspace,controllerRoot,runId,image,currentStage}){
+export function createCommandRunner({workspace,controllerRoot,runId,image,currentStage,ownerId}){
   return async function commandRunner({id,command,cwd=workspace,timeoutMs=120000,maxOutputBytes=1024*1024,basis=[]}){
     const actual=fs.realpathSync(cwd);const relative=path.relative(fs.realpathSync(workspace),actual);if(relative==='..'||relative.startsWith(`..${path.sep}`)||path.isAbsolute(relative))throw new Error('Check cwd escapes source workspace');
     if(!/^sha256:[a-f0-9]{64}$/.test(image))throw new Error('Immutable check image required');
@@ -51,7 +51,8 @@ export function createCommandRunner({workspace,controllerRoot,runId,image,curren
     const name=`aidlc-check-${randomUUID()}`;let container,check;
     try{
       check=prepareCheckWorkspace({workspace,controllerRoot,basis});
-      container=invoke(['docker','create','--name',name,'--label',`kontour.worker.run=${runId}`,'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','256','--memory','2g','--cpus','2','--tmpfs','/tmp:rw,nosuid,size=1g','--mount',`type=bind,source=${check.workspace},target=/workspace`,'--workdir',path.posix.join('/workspace',relative.split(path.sep).join('/')),image,...argv]);
+      const ownership=ownerId?['--label',`kontour.worker.owner=${ownerId}`]:[];
+      container=invoke(['docker','create','--name',name,'--label',`kontour.worker.run=${runId}`,...ownership,'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','256','--memory','2g','--cpus','2','--tmpfs','/tmp:rw,nosuid,size=1g','--mount',`type=bind,source=${check.workspace},target=/workspace`,'--workdir',path.posix.join('/workspace',relative.split(path.sep).join('/')),image,...argv]);
       const inspected=JSON.parse(invoke(['docker','inspect',container]))[0];if(inspected.Image!==image||inspected.Mounts.length!==1||inspected.Mounts[0].Destination!=='/workspace'||fs.realpathSync(inspected.Mounts[0].Source)!==check.workspace)throw new Error('Check container boundary mismatch');
       const run=await loadRun(runId,controllerRoot);
       const captured=spawnSync(process.execPath,[flowCli(),'capture',runId,'--gate',`${currentStage?.()??run.state.current_step}-gate`,'--kind','command','--cwd',controllerRoot,'--timeout',String(timeoutMs),'--','docker','start','--attach',container],{encoding:'utf8',timeout:timeoutMs+15000,maxBuffer:1024*1024});if(captured.error)throw captured.error;
