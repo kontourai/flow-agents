@@ -122,11 +122,11 @@ export async function runAidlc({request,executor,commandRunner,authority,control
     const retained=records.find(record=>record.stage===stageId&&!record.invalidated&&record.sensors?.status==='pass');
     if(retained){await evaluateRun(request.run_id,{cwd:controllerRoot});continue;}
     const original=snapshot.stages.find(s=>s.slug===stageId);const stage=structuredClone(original);
-    if(defaults.collaborators===false){stage.support_agents=[];if(['pipeline','mob'].includes(stage.mode))stage.mode='inline';}
+    if(defaults.collaborators===false||defaults.collaborators==='off'){stage.support_agents=[];if(['pipeline','mob'].includes(stage.mode))stage.mode='inline';}
     if(stage.for_each&&!units){delete stage.for_each;}
     const allArtifacts=records.filter(record=>!record.invalidated).flatMap(record=>record.artifacts??[]);let artifacts=artifactPaths(stage);
     if(stage.for_each)artifacts=units.flatMap(unit=>artifactPaths(stage,unit.id));
-    fs.writeFileSync(path.join(workspace,'.aidlc/state.md'),`# AI-DLC State\n\n## Project\n- **Project**: ${request.prompt.replace(/\n/g,' ')}\n- **Project Description Source**: project-description.json\n- **Scope**: ${profile}\n- **Current Stage**: ${stageId}\n`);
+    fs.writeFileSync(path.join(workspace,'.aidlc/state.md'),`# AI-DLC State\n\n## Project\n- **Project**: ${request.prompt.replace(/\n/g,' ')}\n- **Project Description Source**: project-description.json\n- **Scope**: ${defaults.scope??profile}\n- **Profile**: ${profile}\n- **Depth**: ${defaults.depth??'unspecified'}\n- **Current Stage**: ${stageId}\n`);
     const context={shared:{task:request.prompt,profile,defaults,workspace:'/workspace',stage,artifact_targets:artifacts,upstream_artifacts:allArtifacts,permissions:request.parameters?.permissions??{},plan_approval:'unapproved',prior_check_failures:records.find(record=>record.stage===stageId)?.sensors?.checks??[]},units:{}};
     if(stage.for_each)for(const unit of units)context.units[unit.id]={artifact_targets:artifacts.filter(a=>a.unit===unit.id),upstream_artifacts:allArtifacts.filter(a=>!a.unit||a.unit===unit.id)};
     if((request.parameters?.source_write_stages??[]).includes(stageId)){
@@ -209,7 +209,7 @@ export async function runAidlc({request,executor,commandRunner,authority,control
         tests.push({command,unit:instruction.unit,passed:result?.exitCode===0&&!!result.receipt,receipt:result?.receipt??null});}
       if(!tests.length||tests.some(test=>!test.passed))sensors={...sensors,status:tests.length?'fail':'not_verified',checks:[...sensors.checks,{id:'planned-unit-tests',status:tests.length?'fail':'not_verified',findings:tests.length?['Actual planned unit commands failed.']:['No executable unit test command in approved instructions.']}]};
     }
-    if(dispatched.units.some(unit=>(unit.receipts??[]).some(receipt=>receipt.changed_source?.length)))observation.source_digest=snapshotWorkspace(workspace).source_digest;
+    if(stage.workspace_requires===true||context.shared.source_write_authority||dispatched.units.some(unit=>(unit.receipts??[]).some(receipt=>receipt.changed_source?.length)))observation.source_digest=snapshotWorkspace(workspace).source_digest;
     const passing=observation.structural_status==='pass'&&sensors.status==='pass';
     const record={stage:stageId,profile,artifacts:resolved,artifact_observation:observation,sensors,tests,dispatch:dispatched,evidence:{},invalidated:false};record.digest=digest(record);
     const prior=records.find(r=>r.stage===stageId);

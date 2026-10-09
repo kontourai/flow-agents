@@ -11,6 +11,9 @@ export function createControllerAuthority({policy,requestDigest,controllerRoot})
   const keyFile=path.join(authorityRoot,'host-private-key.pem');let privateKey,publicKey;
   if(fs.existsSync(keyFile)){privateKey=createPrivateKey(fs.readFileSync(keyFile));publicKey=createPublicKey(privateKey);}
   else{({privateKey,publicKey}=generateKeyPairSync('ed25519'));fs.writeFileSync(keyFile,privateKey.export({type:'pkcs8',format:'pem'}),{flag:'wx',mode:0o600});}
+  const publicFile=path.join(authorityRoot,'host-public-key.pem');const publicPem=publicKey.export({type:'spki',format:'pem'});
+  if(fs.existsSync(publicFile)){if(fs.readFileSync(publicFile,'utf8')!==publicPem)throw new Error('Host authority public key drifted');}
+  else fs.writeFileSync(publicFile,publicPem,{flag:'wx',mode:0o444});
   const fingerprint=createHash('sha256').update(publicKey.export({type:'spki',format:'der'})).digest('hex');
   const issued=new Map();
   for(const name of fs.readdirSync(authorityRoot).filter(name=>name.endsWith('.json'))){const receipt=JSON.parse(fs.readFileSync(path.join(authorityRoot,name),'utf8'));if(receipt.payload?.issuer===fingerprint&&receipt.payload.request_digest===requestDigest&&verify(null,Buffer.from(JSON.stringify(receipt.payload)),publicKey,Buffer.from(receipt.signature,'base64')))issued.set(receipt.payload.id,receipt);}
@@ -47,6 +50,7 @@ export function buildExecutionPrompt({dispatch,workspace,sourceDigest}){
       context.planning_only?'Planning only. Write plan and test instructions; implementation source changes are forbidden.':context.plan_approval==='approved'?'The exact plan/test-instruction bytes were approved by registered host policy. Do not edit them; execute them.':'Follow the selected procedure; never forge host decisions.',
       'Return one JSON object as final response: {status:"completed"|"failed",artifacts:[{path}],verdict:"ready"|"not_ready" (review only),findings:[{id,severity:"critical"|"high"|"medium"|"low"|"info",status:"open"|"fixed",reason}],summary}. Do not supply execution identity, receipt, approval or gate status; those are observed by the trusted host.',
       'Reference prior findings by their unchanged ids. A review covers the frozen source and artifact basis. Do not weaken tests or declared quality targets to obtain a pass.',
+      'Native generated metadata is adapted to this controller. If traceability.json is a required output, supply a candidate mapping {stage, unit (only for a real unit), upstream_ids:[actual IDs], coverage:[{id,status:"OK"|"GAP"|"ORPHAN"|"Deferred"|"N/A",target}], reverse:[{id,status,target}]}. Read actual upstream IDs and existing implementation targets; never invent IDs or claim the mapping proves semantic correctness. The host sensor validates this candidate instead of running native engine commands.',
       'For every Markdown artifact use the pinned required sections and source/requirement ids. Preserve real questions and assumptions. Questions awaiting operator policy are not answers supplied by the model.',
       `Task: ${context.task??''}`,`Actual required output paths: ${JSON.stringify(targets)}`,
       `Selected profile defaults: ${JSON.stringify(context.defaults??{})}`,`Pinned procedure: ${dispatch.procedure??stage.procedure??''}`,`Role knowledge: ${persona}`
