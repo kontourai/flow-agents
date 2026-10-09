@@ -14,7 +14,7 @@ export async function executeNamedTreatment({request,controllerRoot,workerRunner
   if(request.treatment_kind!=='kontour-aidlc')throw new Error('This adapter executes Kontour only; AWS must use its pinned native engine adapter');
   const executor=createDockerExecutor({request,controllerRoot,workerRunner});
   const authority=createControllerAuthority({policy:request.parameters?.authority_policy,requestDigest:requestBindingDigest(request),controllerRoot});
-  executor.decide=async input=>{const proposal={...input,purpose:'review-disposition',request_digest:requestBindingDigest(request)};const grant=await authority.authorize(proposal);return {authorized:grant.authorized&&authority.verify(grant.receipt,proposal),decision:grant.authorized?'accept':'defer',reference:grant.reference,receipt:grant.receipt};};
+  executor.decide=async input=>{const proposal={...input,purpose:'review-disposition',request_digest:requestBindingDigest(request)};const grant=await authority.authorize(proposal);const verified=grant.authorized&&authority.verify(grant.receipt,proposal);return {authorized:verified,decision:verified?'accept':'defer',reference:grant.reference,receipt:grant.receipt};};
   const commandRunner=createCommandRunner({workspace:request.workspace,controllerRoot,runId:request.run_id,image:request.engine_sandbox.image});
   let result;
   try{result=await runAidlc({request,executor,commandRunner,authority,controllerRoot});}

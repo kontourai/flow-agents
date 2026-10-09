@@ -148,7 +148,7 @@ export async function dispatchStage({ stage, units, executor, context = {}, poli
       const slot = new Promise(resolve => { releaseSlot = resolve; });
       globalSlots.add(slot);
       try {
-        const frozen = { schema_version: '1.0', stage: stage.slug, stage_source_digest: stage.source_digest, stage_source_path: stage.source_path ?? null, procedure: stage.procedure ?? null, declared_outputs: stage.produces ?? [], review_class: stage.review_class ?? null, unit: record.id, ...request };
+        const frozen = { schema_version: '1.0', stage: stage.slug, stage_source_digest: stage.source_digest, stage_source_path: stage.source_path ?? null, procedure: stage.procedure ?? null, declared_outputs: stage.produces ?? [], review_class: stage.review_class ?? null, unit: record.id, mutable_resources: structuredClone(manifest.find(entry => entry.id === record.id)?.mutable_resources ?? []), ...request };
         if (Buffer.byteLength(JSON.stringify(frozen)) > 262144) fail('context_budget', 'Execution request exceeds bounded context budget');
         frozen.request_digest = hash(frozen);
         if (executor.admit) frozen.expected_identity = await executor.admit(structuredClone(frozen));

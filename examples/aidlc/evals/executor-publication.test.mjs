@@ -25,7 +25,7 @@ function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 
     if (portThrows) throw new Error('Synthetic unreceipted worker failure');
     fork = input.workspace;
     fs.writeFileSync(path.join(fork, 'app.js'), 'worker edit');
-    fs.unlinkSync(path.join(fork, 'keep.js'));
+    if (fs.existsSync(path.join(fork, 'keep.js'))) fs.unlinkSync(path.join(fork, 'keep.js'));
     fs.writeFileSync(path.join(fork, 'added.js'), 'worker addition');
     fs.mkdirSync(path.dirname(path.join(fork, artifact)), { recursive: true });
     fs.writeFileSync(path.join(fork, artifact), 'worker artifact');
@@ -117,4 +117,40 @@ test('contributors and dialogue participants cannot publish source edits in a so
   }
 });
 
-test('every worker receives the registered aggregate case storage budget',async t=>{const storageBudget={scope_roots:['/synthetic-owned-case'],max_total_bytes:128*1024*1024,max_file_bytes:16*1024*1024,max_entries:10000,min_free_bytes:4*1024*1024*1024};const f=fixture(t,{responseStatus:'completed',storageBudget});await f.execute();assert.deepEqual(f.observedStorageBudget(),storageBudget);});
+// The registered named-treatment request shape, not an invented one.
+const registeredBudget = (over = {}) => ({ max_bytes: 128 * 1024 * 1024, max_entries: 10000, max_file_bytes: 16 * 1024 * 1024, min_free_bytes: 4 * 1024 * 1024 * 1024, roots: ['/synthetic-owned-case'], ...over });
+
+test('workers receive the registered aggregate storage budget and the host ledger enforces it',async t=>{
+  const storageBudget=registeredBudget();delete storageBudget.roots;const f=fixture(t,{responseStatus:'completed',storageBudget});
+  await f.execute();assert.deepEqual(f.observedStorageBudget(),storageBudget);
+  assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'worker edit');
+});
+test('a shared byte budget exhausts across workers and stays exhausted after restart',async t=>{
+  const budget=registeredBudget({max_bytes:45});delete budget.roots;const f=fixture(t,{responseStatus:'completed',storageBudget:budget});
+  await f.execute();
+  assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'worker edit');
+  const second=f.freshExecutor();
+  const dispatch={request_digest:digest({second:true}),stage:'code-generation',role:'aidlc-developer-agent',phase:'inline',unit:'stage',context:{stage:{workspace_requires:true},artifact_targets:[{path:f.artifact}]},basis:await second.snapshotBasis({})};
+  dispatch.expected_identity=await second.admit(dispatch);
+  await assert.rejects(second.execute(dispatch),error=>error.code==='storage_budget'&&/byte budget exhausted/.test(error.message));
+  assert.equal(f.calls(),2);
+});
+test('an oversized single publication is refused before any canonical byte changes',async t=>{
+  const f=fixture(t,{responseStatus:'completed',storageBudget:registeredBudget({max_file_bytes:5})});
+  await assert.rejects(f.execute(),error=>error.code==='storage_budget'&&/per-file storage budget/.test(error.message));
+  assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'canonical implementation');
+  assert.equal(fs.readFileSync(path.join(f.workspace,f.artifact),'utf8'),'canonical artifact');
+});
+test('publication outside the declared storage roots is refused',async t=>{
+  const f=fixture(t,{responseStatus:'completed',storageBudget:registeredBudget({roots:['/definitely-not-the-case-root']})});
+  await assert.rejects(f.execute(),error=>error.code==='storage_budget'&&/outside declared storage roots/.test(error.message));
+  assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'canonical implementation');
+  assert.equal(fs.existsSync(path.join(f.workspace,'added.js')),false);
+});
+test('declared unit resources confine source publication to their scopes',async t=>{
+  const f=fixture(t,{responseStatus:'completed'});
+  const dispatch={request_digest:digest({scoped:true}),stage:'code-generation',role:'aidlc-developer-agent',phase:'inline',unit:'api',mutable_resources:['services/api'],context:{stage:{workspace_requires:true},artifact_targets:[{path:f.artifact}]},basis:await f.executor.snapshotBasis({})};
+  dispatch.expected_identity=await f.executor.admit(dispatch);
+  await assert.rejects(f.executor.execute(dispatch),error=>error.code==='unit_scope'&&/outside declared unit resources/.test(error.message));
+  assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'canonical implementation');
+});

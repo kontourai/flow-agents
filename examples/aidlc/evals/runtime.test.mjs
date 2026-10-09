@@ -8,6 +8,37 @@ const fixture=()=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'aidlc-runtim
 
 test('host policy authenticates exact decision basis; labels/altered bytes never approve',async()=>{const f=fixture();try{const authority=createControllerAuthority({policy:{reference:'synthetic-operator-policy',purposes:['code-plan','review-disposition']},requestDigest:'a'.repeat(64),controllerRoot:f.controllerRoot});const input={purpose:'code-plan',stage:'code-generation',request_digest:'a'.repeat(64),basis:[{digest:'b'.repeat(64)}]};const result=await authority.authorize(input);assert.equal(result.authorized,true);assert.equal(authority.verify(result.receipt,input),true);assert.equal(authority.verify(result.receipt,{...input,basis:[]}),false);assert.equal((await authority.authorize({...input,purpose:'deployment'})).authorized,false);assert.equal((await authority.authorize({...input,purpose:'review-disposition',findings:[{severity:'critical',status:'open'}]})).authorized,false);}finally{fs.rmSync(f.root,{recursive:true,force:true});}});
 
+test('judgment dissent never self-resolves; explicit operator acceptance is receipted and auditable',async()=>{const f=fixture();try{
+  const dissent=[{kind:'judgment',reason:'do not ship this integration'}];
+  const policy={reference:'synthetic-operator-policy',purposes:['review-disposition']};
+  const refusing=createControllerAuthority({policy,requestDigest:'a'.repeat(64),controllerRoot:f.controllerRoot});
+  const refused=await refusing.authorize({purpose:'review-disposition',stage:'outcomes',request_digest:'a'.repeat(64),dissent});
+  assert.equal(refused.authorized,false);assert.equal(refused.reason,'judgment_dissent_requires_operator_disposition');
+  assert.equal((await refusing.authorize({purpose:'review-disposition',stage:'outcomes',request_digest:'a'.repeat(64),decision:{units:[{id:'api',dissent}]}})).authorized,false);
+  const accepting=createControllerAuthority({policy:{...policy,review_disposition:{accept_judgment_dissent:true}},requestDigest:'a'.repeat(64),controllerRoot:f.controllerRoot});
+  const input={purpose:'review-disposition',stage:'outcomes',request_digest:'a'.repeat(64),dissent};
+  const grant=await accepting.authorize(input);assert.equal(grant.authorized,true);assert.equal(grant.receipt.payload.judgment_dissent_accepted,true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.controllerRoot,'authority',`${grant.receipt.payload.id}.input.json`),'utf8')).dissent[0].reason,dissent[0].reason);
+  assert.equal((await refusing.authorize({purpose:'review-disposition',stage:'outcomes',request_digest:'a'.repeat(64),dissent:[{kind:'knowledge',reason:'needs dialogue'}]})).authorized,true);
+  }finally{fs.rmSync(f.root,{recursive:true,force:true});}});
+
+test('a masked planned test command fails the build-and-test gate without aborting the adapter',async()=>{const f=fixture();try{
+  const snap=readSnapshot();const keep=new Set(['workspace-scaffold','workspace-detection','state-init','requirements-analysis','code-generation','build-and-test']);const request={run_id:'runtime-masked-command-fixture',workspace:f.workspace,prompt:'Fix fixture defect.',parameters:{profile:'bugfix',project_type:'brownfield',repair_checks:false,stage_decisions:snap.profiles.bugfix.stages.filter(s=>!keep.has(s)).map(stage=>({stage,execute:false,reason:'Synthetic boundary fixture'}))}};
+  fs.writeFileSync(path.join(f.workspace,'records.mjs'),'export const answer=1;\n');
+  const content=target=>{
+    if(target.id==='unit-test-instructions')return '# Unit Test Instructions\n\n## Commands\n```bash\nnode --test records.test.mjs && echo ok\n```\n\n## Basis\nApproved plan.\n';
+    if(target.id==='requirements')return '# Requirements\n\n## Functional\n- FR1: fixture requirement\n\n## Basis\nTask prompt.\n';
+    if(target.id==='traceability')return JSON.stringify({stage:'code-generation',upstream_ids:['FR1'],coverage:[{id:'FR1',status:'OK',target:'records.mjs'}]})+'\n';
+    if(target.stage==='build-and-test')return '# Build\n\n## Instructions\nImplements code-generation-plan and unit-test-instructions per code-summary.\n\n## Basis\nTask.\n';
+    return '# Observed fixture\n\n## Change\nFixture.\n\n## Basis\nTask.\n';};
+  const authority=createControllerAuthority({policy:{reference:'synthetic-test-only',purposes:['stage-selection','code-plan','review-disposition']},requestDigest:digest(request),controllerRoot:f.controllerRoot});const identities=new Map();
+  const executor={async admit(req){const id=randomUUID(),identity={actor:{runtime:'node-fixture',session_id:id,host:'isolated-test-host'},instance_id:id};identities.set(req.request_digest,identity);return identity;},async snapshotBasis({artifacts=[]}){return {source_digest:snapshotWorkspace(f.workspace).source_digest,artifacts:artifacts.map(a=>({path:a.path,digest:digest(fs.readFileSync(path.join(f.workspace,a.path)))}))};},async execute(req){if(req.phase==='review')return {status:'completed',identity:identities.get(req.request_digest),identity_basis:'executor-observed',receipt:{id:'review-'+randomUUID(),digest:digest('review'),request_digest:req.request_digest},input_basis:req.basis,basis:req.basis,artifacts:[],verdict:'ready',findings:[]};for(const target of req.context.artifact_targets){fs.mkdirSync(path.dirname(path.join(f.workspace,target.path)),{recursive:true});fs.writeFileSync(path.join(f.workspace,target.path),content(target));}return {status:'completed',identity:identities.get(req.request_digest),identity_basis:'executor-observed',receipt:{id:'masked-'+randomUUID(),digest:digest('masked'),request_digest:req.request_digest},input_basis:req.basis,artifacts:req.context.artifact_targets.map(a=>({path:a.path,digest:digest(fs.readFileSync(path.join(f.workspace,a.path)))}))};}};
+  const result=await runAidlc({request,executor,authority,controllerRoot:f.controllerRoot});
+  assert.equal(result.status,'failed');assert.equal(result.failure.reason,'required_checks_failed');assert.equal(result.failure.stage,'build-and-test');
+  const record=result.records.find(r=>r.stage==='build-and-test');assert.ok(record);assert.equal(record.sensors.status,'fail');
+  assert.match(record.sensors.checks.find(check=>check.id==='planned-unit-tests').findings[0],/cannot be safely executed/);
+  }finally{fs.rmSync(f.root,{recursive:true,force:true});}});
+
 test('actual canonical Flow invalidates artifact consumers after completion, with unchanged branch preserved',async()=>{
  const f=fixture();try{const snapshot={upstream:{commit:'fixture'},profiles:{fixture:{stages:['a','b','unrelated']}},stages:[{slug:'a',source_digest:'a'.repeat(64),produces:['requirement'],consumes:[]},{slug:'b',source_digest:'b'.repeat(64),produces:['plan'],consumes:[{artifact:'requirement',required:true}]},{slug:'unrelated',source_digest:'c'.repeat(64),produces:['note'],consumes:[]}]};
  const artifacts=snapshot.stages.map((s,i)=>({id:s.produces[0],stage:s.slug,path:`${s.slug}.md`}));for(const a of artifacts)fs.writeFileSync(path.join(f.workspace,a.path),'Observed fixture artifact\n');
@@ -70,7 +101,7 @@ test('partial planning output cannot approve or execute implementation',async()=
  const authority=createControllerAuthority({policy:{reference:'fixture',purposes:['stage-selection','code-plan']},requestDigest:digest(request),controllerRoot:f.controllerRoot});const identities=new Map();let implementationCalls=0;
  const executor={async admit(req){const id=randomUUID();const identity={actor:{runtime:'fixture',session_id:id,host:'test'},instance_id:id};identities.set(req.request_digest,identity);return identity;},async snapshotBasis({artifacts=[]}){return {source_digest:snapshotWorkspace(f.workspace).source_digest,artifacts:artifacts.map(a=>({path:a.path,digest:digest(fs.readFileSync(path.join(f.workspace,a.path)))}))};},async execute(req){if(!req.context.planning_only)implementationCalls++;const target=req.context.artifact_targets[0];fs.mkdirSync(path.dirname(path.join(f.workspace,target.path)),{recursive:true});fs.writeFileSync(path.join(f.workspace,target.path),'# Plan\n\n## Change\nFixture.\n\n## Basis\nTask.\n');return {status:'completed',identity:identities.get(req.request_digest),identity_basis:'executor-observed',receipt:{id:'partial-plan-fixture',digest:digest('partial-plan'),request_digest:req.request_digest},input_basis:req.basis,artifacts:[{path:target.path,digest:digest(fs.readFileSync(path.join(f.workspace,target.path)))}]};}};
  const result=await runAidlc({request,executor,authority,controllerRoot:f.controllerRoot});assert.equal(result.failure.reason,'approval_basis_incomplete');assert.equal(implementationCalls,0);assert.equal(result.status,'failed');
- const receipts=fs.readdirSync(path.join(f.controllerRoot,'authority')).filter(name=>name.endsWith('.json')).map(name=>JSON.parse(fs.readFileSync(path.join(f.controllerRoot,'authority',name),'utf8')));assert.equal(receipts.some(r=>r.payload.purpose==='code-plan'),false);
+  const receipts=fs.readdirSync(path.join(f.controllerRoot,'authority')).filter(name=>name.endsWith('.json')&&!name.endsWith('.input.json')).map(name=>JSON.parse(fs.readFileSync(path.join(f.controllerRoot,'authority',name),'utf8')));assert.equal(receipts.some(r=>r.payload.purpose==='code-plan'),false);
  }finally{fs.rmSync(f.root,{recursive:true,force:true});}
 });
 

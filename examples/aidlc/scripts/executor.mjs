@@ -11,6 +11,7 @@ const put=(file,value)=>{fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o
 const replace=(file,value)=>{const temp=`${file}.${randomUUID()}.tmp`;put(temp,value);fs.renameSync(temp,file);};
 const normalizedResult=text=>{const raw=text?.trim().replace(/^```(?:json)?\s*\n/,'').replace(/\n```$/,'');const value=JSON.parse(raw);if(!value||!['completed','failed'].includes(value.status)||!Array.isArray(value.artifacts))throw new Error('Worker final response violates execution schema');for(const forbidden of ['receipt','identity','authorized','gate_status'])if(Object.hasOwn(value,forbidden))throw new Error(`Model cannot supply ${forbidden}`);return value;};
 const safeRel=(file)=>typeof file==='string'&&file.length>0&&!path.isAbsolute(file)&&!file.split(/[\\/]/).some(p=>p==='..');
+const inside=(root,file)=>{const rel=path.relative(root,file);return rel!=='..'&&!rel.startsWith(`..${path.sep}`)&&!path.isAbsolute(rel);};
 
 /** Host-owned executor. Model messages never become identity or evidence receipts. */
 export function createDockerExecutor({request,controllerRoot,workerRunner,signal}){
@@ -25,6 +26,15 @@ export function createDockerExecutor({request,controllerRoot,workerRunner,signal
     const saved=json(historyFile);if(saved.digest!==digest(saved.history)||saved.history?.binding!==binding||!Array.isArray(saved.history.starts)||saved.history.starts.length>10000||!Number.isFinite(saved.history.started_at))throw new Error('Durable executor history drifted');history=saved.history;
   }else{history={binding,started_at:Date.now(),starts:[]};replace(historyFile,{history,digest:digest(history)});}
   const persistHistory=()=>replace(historyFile,{history,digest:digest(history)});
+  if(!history.storage)history.storage={bytes:0,entries:0};
+  // The shared storage budget is enforced by this host ledger, not by worker
+  // self-reporting: shape follows the registered named-treatment request.
+  const storage=config.storage_budget;
+  if(storage!==undefined){
+    if(!storage||typeof storage!=='object'||Array.isArray(storage))throw new Error('Storage budget must be an object');
+    for(const key of ['max_bytes','max_entries','max_file_bytes','min_free_bytes'])if(!Number.isSafeInteger(storage[key])||storage[key]<0)throw new Error(`Storage budget ${key} must be a nonnegative integer`);
+    if(storage.roots!==undefined&&(!Array.isArray(storage.roots)||!storage.roots.length||storage.roots.some(root=>typeof root!=='string'||!path.isAbsolute(root))))throw new Error('Storage budget roots must be nonempty absolute paths');
+  }
   const admitted=new Map();const observed=history.starts.filter(start=>start.worker).map(start=>start.worker);let turns=history.starts.length;const start=history.started_at;let merge=Promise.resolve();
   const budget=()=>{if(signal?.aborted)throw Object.assign(new Error('Execution cancelled'),{code:'cancelled'});if(turns>=request.execution.max_turns||Date.now()-start>=request.execution.timeout_s*1000)throw Object.assign(new Error('Run execution budget exhausted'),{code:'execution_budget'});};
   const executor={
@@ -77,6 +87,11 @@ export function createDockerExecutor({request,controllerRoot,workerRunner,signal
       const after=snapshotWorkspace(fork);const prior=new Map(before.files.map(file=>[file.path,file]));const next=new Map(after.files.map(file=>[file.path,file]));
       const changed=[...new Set([...prior.keys(),...next.keys()])].filter(file=>prior.get(file)?.digest!==next.get(file)?.digest);
       if(changed.length&&!prompt.allowed_source_changes)throw new Error('Worker changed source outside stage authority');
+      // Units that declare explicit resource scopes are confined to them;
+      // 'source/workspace'/'*' retain scheduler-serialized workspace custody.
+      const resources=dispatch.mutable_resources;
+      if(changed.length&&Array.isArray(resources)&&resources.length&&!resources.includes('source/workspace')&&!resources.includes('*'))
+        for(const file of changed)if(!resources.some(scope=>file===scope||file.startsWith(`${scope}/`)))throw Object.assign(new Error(`Source change outside declared unit resources: ${file}`),{code:'unit_scope'});
       if(dispatch.phase==='review'){
         if(changed.length)throw new Error('Read-only reviewer changed source');
         const basis=await executor.snapshotBasis({artifacts:dispatch.reviewed_artifacts??[]});
@@ -87,6 +102,20 @@ export function createDockerExecutor({request,controllerRoot,workerRunner,signal
       for(const approved of dispatch.context.approved_plan_basis??[]){const present=returned.find(ref=>ref.path===approved.path);if(present&&present.digest!==approved.digest)throw new Error('Worker changed approved plan/test instructions');}
       if(response.artifacts.some(ref=>!safeRel(ref.path)||!ownTargets.some(target=>target.path===ref.path)))throw new Error('Worker returned artifacts outside assigned scope');
       const apply=async()=>{
+        // Host-side shared storage ledger, enforced before any canonical byte
+        // is written. Fail-closed: a later merge conflict still counts the
+        // attempted writes against the budget.
+        if(storage){
+          for(const file of changed)if(next.has(file)&&next.get(file).bytes>storage.max_file_bytes)throw Object.assign(new Error(`Published file exceeds per-file storage budget: ${file}`),{code:'storage_budget'});
+          let writeBytes=changed.reduce((sum,file)=>sum+(next.has(file)?next.get(file).bytes:0),0);let writeEntries=changed.length;
+          for(const ref of returned){const size=fs.statSync(path.join(fork,ref.path)).size;if(size>storage.max_file_bytes)throw Object.assign(new Error(`Published artifact exceeds per-file storage budget: ${ref.path}`),{code:'storage_budget'});writeBytes+=size;writeEntries++;}
+          if(history.storage.bytes+writeBytes>storage.max_bytes)throw Object.assign(new Error('Shared storage byte budget exhausted'),{code:'storage_budget'});
+          if(history.storage.entries+writeEntries>storage.max_entries)throw Object.assign(new Error('Shared storage entry budget exhausted'),{code:'storage_budget'});
+          const free=fs.statfsSync(workspace);
+          if(BigInt(free.bavail)*BigInt(free.bsize)<BigInt(storage.min_free_bytes))throw Object.assign(new Error('Workspace free-space floor breached'),{code:'storage_budget'});
+          if(storage.roots)for(const file of [...changed,...returned.map(ref=>ref.path)])if(!storage.roots.some(root=>inside(root,path.join(workspace,file))))throw Object.assign(new Error(`Published path outside declared storage roots: ${file}`),{code:'storage_budget'});
+          history.storage.bytes+=writeBytes;history.storage.entries+=writeEntries;persistHistory();
+        }
         for(const file of changed){let actual;try{actual=readArtifact(workspace,file).digest;}catch(error){if(error.code!=='ENOENT')throw error;}
           if(actual!==prior.get(file)?.digest)throw new Error(`Concurrent source merge conflict: ${file}`);}
         for(const file of changed){const target=path.join(workspace,file);if(!next.has(file)){fs.unlinkSync(target);continue;}fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(fork,file),target);}

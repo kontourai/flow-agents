@@ -178,7 +178,7 @@ export async function runAidlc({request,executor,commandRunner,authority,control
             if(verification.status!=='completed')dispatched={...dispatched,status:'blocked',reason:verification.failure?.reason??'final_source_review_failed'};
           }else if(!historicalJoin.complete)dispatched={...dispatched,status:'blocked',reason:'canonical_unit_join_incomplete'};
         }
-      }catch(error){failure={stage:stageId,reason:error.code==='execution_budget'?'budget_exhausted':'execution_failed',detail:{message:error.message}};await refuse(stageId,failure);break;}finally{await unitFlow?.close();}
+      }catch(error){failure={stage:stageId,reason:error.code==='execution_budget'||error.code==='storage_budget'?'budget_exhausted':'execution_failed',detail:{message:error.message,code:error.code??null}};await refuse(stageId,failure);break;}finally{await unitFlow?.close();}
       executions.push(...dispatched.units.flatMap(u=>u.receipts??[]),...(dispatched.final_verification?.dispatch?.units??[]).flatMap(u=>u.receipts??[]));
       if(dispatched.status==='awaiting_decision'){
         const input={purpose:'review-disposition',stage:stageId,decision:dispatched,request_digest:binding.request_digest};const grant=await authority?.authorize?.(input);
@@ -203,11 +203,15 @@ export async function runAidlc({request,executor,commandRunner,authority,control
     else sensors=await runStageSensors({stage:original,workspace,artifacts:resolved,context:sensorContext,commandRunner});
     const tests=[];
     if(stageId==='build-and-test'){
-      const instructions=allArtifacts.filter(a=>a.id==='unit-test-instructions');
-      for(const instruction of instructions)for(const command of plannedTestCommands(readArtifact(workspace,instruction.path).text)){
+      // A masked/unexecutable planned command fails this gate with the real
+      // reason; it never aborts the adapter and never silently passes.
+      let planned=null;
+      try{planned=allArtifacts.filter(a=>a.id==='unit-test-instructions').map(instruction=>({instruction,commands:plannedTestCommands(readArtifact(workspace,instruction.path).text)}));}
+      catch(error){planned=[];sensors={...sensors,status:'fail',checks:[...sensors.checks,{id:'planned-unit-tests',status:'fail',findings:[`Approved unit test instructions cannot be safely executed: ${error.message}`]}]};}
+      for(const {instruction,commands} of planned)for(const command of commands){
         const result=await commandRunner?.({id:'planned-unit-test',command,cwd:workspace,timeoutMs:request.parameters?.check_timeout_ms??120000,maxOutputBytes:1024*1024,basis:[{path:instruction.path,sha256:readArtifact(workspace,instruction.path).digest}]});
         tests.push({command,unit:instruction.unit,passed:result?.exitCode===0&&!!result.receipt,receipt:result?.receipt??null});}
-      if(!tests.length||tests.some(test=>!test.passed))sensors={...sensors,status:tests.length?'fail':'not_verified',checks:[...sensors.checks,{id:'planned-unit-tests',status:tests.length?'fail':'not_verified',findings:tests.length?['Actual planned unit commands failed.']:['No executable unit test command in approved instructions.']}]};
+      if(sensors.status!=='fail'&&(!tests.length||tests.some(test=>!test.passed)))sensors={...sensors,status:tests.length?'fail':'not_verified',checks:[...sensors.checks,{id:'planned-unit-tests',status:tests.length?'fail':'not_verified',findings:tests.length?['Actual planned unit commands failed.']:['No executable unit test command in approved instructions.']}]};
     }
     if(stage.workspace_requires===true||context.shared.source_write_authority||dispatched.units.some(unit=>(unit.receipts??[]).some(receipt=>receipt.changed_source?.length)))observation.source_digest=snapshotWorkspace(workspace).source_digest;
     const passing=observation.structural_status==='pass'&&sensors.status==='pass';

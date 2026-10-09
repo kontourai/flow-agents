@@ -16,7 +16,7 @@ export function createControllerAuthority({policy,requestDigest,controllerRoot})
   else fs.writeFileSync(publicFile,publicPem,{flag:'wx',mode:0o444});
   const fingerprint=createHash('sha256').update(publicKey.export({type:'spki',format:'der'})).digest('hex');
   const issued=new Map();
-  for(const name of fs.readdirSync(authorityRoot).filter(name=>name.endsWith('.json'))){const receipt=JSON.parse(fs.readFileSync(path.join(authorityRoot,name),'utf8'));if(receipt.payload?.issuer===fingerprint&&receipt.payload.request_digest===requestDigest&&verify(null,Buffer.from(JSON.stringify(receipt.payload)),publicKey,Buffer.from(receipt.signature,'base64')))issued.set(receipt.payload.id,receipt);}
+  for(const name of fs.readdirSync(authorityRoot).filter(name=>name.endsWith('.json')&&!name.endsWith('.input.json'))){const receipt=JSON.parse(fs.readFileSync(path.join(authorityRoot,name),'utf8'));if(receipt.payload?.issuer===fingerprint&&receipt.payload.request_digest===requestDigest&&verify(null,Buffer.from(JSON.stringify(receipt.payload)),publicKey,Buffer.from(receipt.signature,'base64')))issued.set(receipt.payload.id,receipt);}
   return {kind:'trusted-host-policy',fingerprint,
     async authorize(input){
       if(input.request_digest!==requestDigest||!policy.purposes.includes(input.purpose)||input.purpose==='deployment'&&policy.deployment!==true)return {authorized:false,reason:'outside_registered_policy'};
@@ -28,10 +28,19 @@ export function createControllerAuthority({policy,requestDigest,controllerRoot})
         const allowed=policy.accepted_finding_severities??['low','info'];
         const findings=input.findings??input.decision?.units?.flatMap(unit=>unit.findings??[])??[];
         if(findings.some(finding=>finding.status==='open'&&!allowed.includes(finding.severity)))return {authorized:false,reason:'unaccepted_review_finding'};
+        // Judgment dissent is an unresolved objection to shipping. It never
+        // resolves itself: only an explicit operator policy may accept it.
+        const dissent=input.dissent??input.decision?.units?.flatMap(unit=>unit.dissent??[])??[];
+        const judgments=dissent.filter(objection=>objection?.kind==='judgment');
+        if(judgments.length&&policy.review_disposition?.accept_judgment_dissent!==true)return {authorized:false,reason:'judgment_dissent_requires_operator_disposition',dissent:judgments};
       }
-      const payload={version:'1.0',id:randomUUID(),kind:'controller-policy',issuer:fingerprint,reference:policy.reference,request_digest:requestDigest,purpose:input.purpose,stage:input.stage,input_digest:digest(input),issued_at:new Date().toISOString()};
+      const payload={version:'1.0',id:randomUUID(),kind:'controller-policy',issuer:fingerprint,reference:policy.reference,request_digest:requestDigest,purpose:input.purpose,stage:input.stage,input_digest:digest(input),issued_at:new Date().toISOString(),...(input.purpose==='review-disposition'&&policy.review_disposition?.accept_judgment_dissent===true?{judgment_dissent_accepted:true}:{})};
       const bytes=Buffer.from(JSON.stringify(payload));const signature=sign(null,bytes,privateKey).toString('base64');
-      const receipt={payload,signature};issued.set(payload.id,receipt);fs.writeFileSync(path.join(controllerRoot,'authority',`${payload.id}.json`),JSON.stringify(receipt)+'\n',{flag:'wx',mode:0o600});
+      const receipt={payload,signature};issued.set(payload.id,receipt);
+      // The approved input is durably stored beside its receipt: a signed
+      // input_digest alone cannot reconstruct what the host actually decided.
+      fs.writeFileSync(path.join(controllerRoot,'authority',`${payload.id}.input.json`),JSON.stringify(input,null,2)+'\n',{flag:'wx',mode:0o600});
+      fs.writeFileSync(path.join(controllerRoot,'authority',`${payload.id}.json`),JSON.stringify(receipt)+'\n',{flag:'wx',mode:0o600});
       return {authorized:true,reference:`controller-policy:${payload.id}`,decision_kind:'operator-policy',receipt};
     },
     verify(receipt,input){return !!receipt&&issued.has(receipt.payload?.id)&&receipt.payload.request_digest===requestDigest&&receipt.payload.input_digest===digest(input)&&verify(null,Buffer.from(JSON.stringify(receipt.payload)),publicKey,Buffer.from(receipt.signature,'base64'));},
