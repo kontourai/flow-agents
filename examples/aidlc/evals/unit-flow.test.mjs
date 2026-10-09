@@ -146,3 +146,13 @@ test('trusted advisory decision precedes actual canonical unit settlement; denie
     assert.equal(outcome.units[0].reviews.length,1);assert.equal((await adapter.load()).state.multi_cursor.active_claims.length,0);
   }
 });
+
+test('claim revoked between periodic heartbeats refuses publication and completion even if worker ignores cancellation',async t=>{
+ const {adapter,controllerRoot}=await fixture(t,undefined,{leaseSeconds:3,renewalIntervalMs:2000});
+ const lease=await adapter.claim({unit:'a'});let started,finish,published=false;
+ const startedSignal=new Promise(resolve=>{started=resolve;}),finishSignal=new Promise(resolve=>{finish=resolve;});
+ const bound=adapter.bindExecutor({snapshotBasis:async()=>basis,execute:async request=>{started();await finishSignal;await request.beforePublication();published=true;return {};}});
+ const pending=bound.execute({unit:'a',signal:new AbortController().signal});await startedSignal;
+ await releaseStepClaim(adapter.runId,{cwd:controllerRoot,claim_id:lease.claim_id,liveness_id:lease.liveness_id,actor:lease.actor,reason:'host-revoked'});finish();
+ await assert.rejects(pending,/aborted.*claim authority revoked/);assert.equal(published,false);assert.equal(adapter.signalFor('a').aborted,true);await adapter.close();
+});

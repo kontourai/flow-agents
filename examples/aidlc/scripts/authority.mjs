@@ -20,8 +20,8 @@ export function createControllerAuthority({policy,requestDigest,controllerRoot})
   return {kind:'trusted-host-policy',fingerprint,
     async authorize(input){
       if(input.request_digest!==requestDigest||!policy.purposes.includes(input.purpose)||input.purpose==='deployment'&&policy.deployment!==true)return {authorized:false,reason:'outside_registered_policy'};
-      if(input.purpose==='input-confirmation'){
-        const confirmation=policy.input_confirmations?.[input.stage];
+      if(['input-confirmation','summary-confirmation'].includes(input.purpose)){
+        const confirmation=(input.purpose==='summary-confirmation'?policy.summary_confirmations:policy.input_confirmations)?.[input.stage];
         if(!confirmation?.reference||confirmation.source!=='operator-supplied'||!Array.isArray(confirmation.basis)||digest(confirmation.basis)!==digest(input.basis))return {authorized:false,reason:'exact_operator_input_confirmation_required'};
       }
       // Judgment dissent is an unresolved objection to shipping. It never
@@ -57,11 +57,13 @@ export function buildExecutionPrompt({dispatch,workspace,sourceDigest}){
     instructions:[
       'Execute the substantive pinned AI-DLC procedure for this stage. The host owns canonical state, approvals, gate advancement and source publication; upstream aidlc engine commands and harness paths are reference data and must not be executed.',
       `Phase ${dispatch.phase}; role ${dispatch.role}. ${dispatch.phase==='review'?'Read-only independent review: write no files.':'Write only this stage output scope and authorized application source.'}`,
-      context.planning_only?'Planning only. Write plan and test instructions; implementation source changes are forbidden.':context.plan_approval==='approved'?'The exact plan/test-instruction bytes were approved by registered host policy. Do not edit them; execute them.':'Follow the selected procedure; never forge host decisions.',
+      context.summary_only?'Summary checkpoint only: read upstream inputs and write the questions with proposed assumptions for operator confirmation; do not produce substantive stage artifacts or edit source.':context.planning_only?'Planning only. Write plan and test instructions; implementation source changes are forbidden.':context.plan_approval==='approved'?'The exact plan/test-instruction bytes were approved by registered host policy. Do not edit them; execute them.':'Follow the selected procedure; never forge host decisions.',
       'Return one JSON object as final response: {status:"completed"|"failed",artifacts:[{path}],verdict:"ready"|"not_ready" (review only),findings:[{id,severity:"critical"|"high"|"medium"|"low"|"info",status:"open"|"fixed",reason}],summary}. Do not supply execution identity, receipt, approval or gate status; those are observed by the trusted host.',
       'Reference prior findings by their unchanged ids. A review covers the frozen source and artifact basis. Do not weaken tests or declared quality targets to obtain a pass.',
       'Native generated metadata is adapted to this controller. If traceability.json is a required output, supply a candidate mapping {stage, unit (only for a real unit), upstream_ids:[actual IDs], coverage:[{id,status:"OK"|"GAP"|"ORPHAN"|"Deferred"|"N/A",target}], reverse:[{id,status,target}]}. Read actual upstream IDs and existing implementation targets; never invent IDs or claim the mapping proves semantic correctness. The host sensor validates this candidate instead of running native engine commands.',
+      context.approved_summary_basis?'Summary question bytes have current-basis operator confirmation; consume them and preserve those exact bytes.':'Do not claim unconfirmed summary assumptions are approved.',
       'For every Markdown artifact use the pinned required sections and source/requirement ids. Preserve real questions and assumptions. Questions awaiting operator policy are not answers supplied by the model.',
+      context.learning_diary?`${context.learning_protocol} Diary: ${context.learning_diary}`:'Learning ritual is off or this is a revision.',
       `Task: ${context.task??''}`,`Actual required output paths: ${JSON.stringify(targets)}`,
       `Selected profile defaults: ${JSON.stringify(context.defaults??{})}`,`Pinned procedure: ${dispatch.procedure??stage.procedure??''}`,`Role knowledge: ${persona}`
     ]};

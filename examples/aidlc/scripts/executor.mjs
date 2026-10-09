@@ -62,15 +62,16 @@ export function createDockerExecutor({request,controllerRoot,workerRunner,signal
       for(const file of before.files){const dest=path.join(fork,file.path);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(workspace,file.path),dest);}
       const contribution=['contribute','dialogue'].includes(dispatch.phase);
       const targets=contribution?[{id:`contribution-${dispatch.role}`,stage:dispatch.stage,unit:dispatch.unit,path:`.aidlc/contributions/${dispatch.stage}/${dispatch.unit}/${dispatch.role}.md`}]:dispatch.context.artifact_targets??[];
-      const priorArtifacts=[...(dispatch.context.upstream_artifacts??[]),...(dispatch.context.approved_plan_basis??[]),...(dispatch.reviewed_artifacts??[]),...(dispatch.revised_artifacts??[]),...(dispatch.upstream??[]).flatMap(value=>value.artifacts??[]),...(dispatch.draft?.artifacts??[]),...(dispatch.contributions??dispatch.positions??[]).flatMap(value=>value.artifacts??[])];
+      const priorArtifacts=[...(dispatch.context.upstream_artifacts??[]),...(dispatch.context.approved_plan_basis??[]),...(dispatch.context.approved_summary_basis??[]),...(dispatch.reviewed_artifacts??[]),...(dispatch.revised_artifacts??[]),...(dispatch.upstream??[]).flatMap(value=>value.artifacts??[]),...(dispatch.draft?.artifacts??[]),...(dispatch.contributions??dispatch.positions??[]).flatMap(value=>value.artifacts??[])];
       for(const ref of priorArtifacts){if(!safeRel(ref.path))throw new Error('Invalid artifact input path');try{readArtifact(workspace,ref.path);const dest=path.join(fork,ref.path);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(path.join(workspace,ref.path),dest);}catch(error){if(error.code!=='ENOENT')throw error;}}
+      for(const diary of dispatch.context.learning_diaries??[]){const source=path.join(workspace,diary.path);if(fs.existsSync(source)){fs.mkdirSync(path.dirname(path.join(fork,diary.path)),{recursive:true});fs.copyFileSync(source,path.join(fork,diary.path));}}
       for(const local of ['.aidlc/state.md','.aidlc/project-description.json']){const source=path.join(workspace,local);if(fs.existsSync(source)){fs.mkdirSync(path.dirname(path.join(fork,local)),{recursive:true});fs.copyFileSync(source,path.join(fork,local));}}
       const prompt=buildExecutionPrompt({dispatch,workspace,sourceDigest:before.source_digest});
       prompt.instructions.push(`This invocation's exact output targets: ${JSON.stringify(targets)}. ${contribution?'Create only your own contribution file; other contributors are intentionally absent.':''}`);
       prompt.allowed_source_changes=dispatch.phase!=='review'&&!contribution&&!dispatch.context.planning_only&&(dispatch.context.stage?.workspace_requires===true||typeof dispatch.context.source_write_authority==='string');
       const contextFile=path.join(controllerRoot,'contexts',`${identity.instance_id}.json`);put(contextFile,prompt);
       let worker;
-      try{worker=await workerRunner({image:config.image,workspace:fork,sourceRoot:request.source_root,contextFile,providerProxy:config.providerProxy,model:request.execution.model,
+      try{worker=await workerRunner({image:config.image,workspace:fork,sourceRoot:request.source_root,contextFile,providerProxy:config.providerProxy,model:request.execution.model,reasoningEffort:request.execution.reasoning_effort,
         timeoutMs:Math.max(1,request.execution.timeout_s*1000-(Date.now()-start)),network:config.network??'bridge',readOnlyWorkspace:dispatch.phase==='review',artifactRoot:config.artifact_root,storageBudget:config.storage_budget,signal:dispatch.signal??signal,invocationId:identity.instance_id,runId:request.run_id});}
       catch(error){attempt.status='port-failed';attempt.error=error.message;persistHistory();throw error;}
       if(Buffer.byteLength(JSON.stringify(worker))>16*1024*1024)throw new Error('Worker capture exceeds durable receipt budget');
@@ -100,9 +101,10 @@ export function createDockerExecutor({request,controllerRoot,workerRunner,signal
       }
       const ownTargets=targets.filter(ref=>!dispatch.unit||dispatch.unit==='stage'||ref.unit===dispatch.unit);
       const returned=observeOutputs(fork,ownTargets);
-      for(const approved of dispatch.context.approved_plan_basis??[]){const present=returned.find(ref=>ref.path===approved.path);if(present&&present.digest!==approved.digest)throw new Error('Worker changed approved plan/test instructions');}
+      for(const approved of [...(dispatch.context.approved_plan_basis??[]),...(dispatch.context.approved_summary_basis??[])]){const present=returned.find(ref=>ref.path===approved.path);if(present&&present.digest!==approved.digest)throw new Error('Worker changed approved plan/test instructions');}
       if(response.artifacts.some(ref=>!safeRel(ref.path)||!ownTargets.some(target=>target.path===ref.path)))throw new Error('Worker returned artifacts outside assigned scope');
       const apply=async()=>{
+        await dispatch.beforePublication?.();
         // Host-side shared storage ledger, enforced before any canonical byte
         // is written. Fail-closed: a later merge conflict still counts the
         // attempted writes against the budget.

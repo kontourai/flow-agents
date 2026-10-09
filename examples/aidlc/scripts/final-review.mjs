@@ -13,7 +13,7 @@ const fail = (code, message) => { throw Object.assign(new Error(message), { code
  * read-only reviews in a fresh canonical child Flow bound to final source.
  * No original completion or review receipt is relabelled as current evidence.
  */
-export async function verifyFinalUnits({ stage, units, dispatched, context = {}, executor, controllerRoot, parentRunId, signal, policy = {} }) {
+export async function verifyFinalUnits({ stage, units, dispatched, context = {}, executor, controllerRoot, parentRunId, signal, policy = {}, parentAdmissionStage }) {
   const historical = structuredClone(dispatched);
   let flow, freshDispatch = null, join = null;
   try {
@@ -84,7 +84,7 @@ export async function verifyFinalUnits({ stage, units, dispatched, context = {},
     };
     // Keep load/save ports paired even for a port without durable replay.
     if (!executor.loadReceipt) { delete reviewingExecutor.loadReceipt; delete reviewingExecutor.saveReceipt; }
-    flow = await createUnitFlow({ controllerRoot, parentRunId, stage: verificationStage, units: manifest, snapshotBasis: observeCurrent });
+    flow = await createUnitFlow({ controllerRoot, parentRunId, stage: verificationStage, units: manifest, snapshotBasis: observeCurrent,parentAdmissionStage });
     freshDispatch = await dispatchStage({ stage: verificationStage, units: manifest, executor: flow.bindExecutor(reviewingExecutor), context: finalContext, policy: { ...policy, requiresClaim: true }, signal });
     join = await flow.join();
     return { status: freshDispatch.status === 'completed' && join.complete ? 'completed' : freshDispatch.status === 'cancelled' ? 'cancelled' : 'blocked', dispatch: freshDispatch, join, historical };
