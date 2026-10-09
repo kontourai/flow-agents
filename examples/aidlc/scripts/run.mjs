@@ -32,7 +32,7 @@ export async function executeKit({request,controllerRoot,workerRunner,signal,ope
   controllerRoot=privateController(request.workspace,controllerRoot);
   const executor=createDockerExecutor({request,controllerRoot,workerRunner,signal});
   const authority=createControllerAuthority({policy:request.parameters?.authority_policy,requestDigest:requestBindingDigest(request),controllerRoot});
-  executor.decide=async input=>{const proposal={...input,purpose:'review-disposition',request_digest:requestBindingDigest(request)};const grant=await authority.authorize(proposal);const verified=grant.authorized&&authority.verify(grant.receipt,proposal);return {authorized:verified,decision:verified?'accept':'defer',reference:grant.reference,receipt:grant.receipt};};
+  executor.decide=async input=>{const proposal={...input,purpose:'review-disposition',request_digest:requestBindingDigest(request)};const grant=await authority.authorize(proposal);const verified=grant.authorized&&authority.verify(grant.receipt,proposal);return {authorized:verified,decision:verified?'accept':'defer',reference:grant.reference,receipt:grant.receipt,pending:grant.pending};};
   const commandRunner=createCommandRunner({workspace:request.workspace,controllerRoot,runId:request.run_id,image:request.engine_sandbox.image,ownerId:request.engine_sandbox.owner_id});
   operationProvider??=request.parameters?.operations?createCommandOperationProvider({config:request.parameters.operations,commandRunner:createOperationCommandRunner({workspace:request.workspace,controllerRoot}),controllerRoot}):undefined;
   knowledge??=createLearningCapture({controllerRoot});
