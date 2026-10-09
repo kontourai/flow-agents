@@ -37,3 +37,19 @@ test('descriptor excludes traversal and missing execution exports',()=>{
  for(const module of ['../entry.mjs','/tmp/entry.mjs','sub/../entry.mjs','sub\\entry.mjs','__pycache__/entry.mjs','.git/entry.mjs'])assert.throws(()=>parseKitExecution({execution:{...descriptor,module}}));
  assert.throws(()=>parseKitExecution({execution:{...descriptor,export:'bad-name'}}));
 });
+test('a successful kit response cannot hide live invocation-owned workers',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'entry-custody-')),source=path.join(root,'kit'),dest=path.join(root,'dest'),bin=path.join(root,'bin');for(const dir of [source,dest,bin])fs.mkdirSync(dir);
+ const prior=process.env.PATH;
+ try{
+  fs.writeFileSync(path.join(source,'kit.json'),JSON.stringify({schema_version:'1.0',id:'custody',name:'Custody',flows:[{id:'custody.check',path:'check.flow.json'}],execution:descriptor}));
+  fs.writeFileSync(path.join(source,'check.flow.json'),JSON.stringify({id:'custody.check',version:'1',steps:[{id:'check',next:null}],gates:{}}));
+  fs.writeFileSync(path.join(source,'entry.mjs'),'export async function execute(){return {status:"completed"};}');
+  const install=spawnSync(process.execPath,[CLI,'kit','install',source,'--dest',dest],{encoding:'utf8'});assert.equal(install.status,0,install.stderr);
+  const countFile=path.join(root,'count'),log=path.join(root,'calls');
+  fs.writeFileSync(path.join(bin,'docker'),`#!${process.execPath}\nconst fs=require('node:fs'),args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(log)},JSON.stringify(args)+'\\n');if(args[0]==='ps'&&!fs.existsSync(${JSON.stringify(countFile)})){fs.writeFileSync(${JSON.stringify(countFile)},'1');console.log('${'a'.repeat(64)}');}\n`,{mode:0o755});
+  process.env.PATH=bin+path.delimiter+prior;
+  const requestFile=path.join(root,'request.json');fs.writeFileSync(requestFile,JSON.stringify({schema:'kontour.kit.execution_request',version:'1.0',kit_id:'custody',engine_sandbox:{image:'mock-image'},execution:{timeout_s:5}}));
+  await assert.rejects(executeInstalledKit({kitId:'custody',dest,requestFile,controllerRoot:root}),/left owned workers running/);
+  const calls=fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);assert.ok(calls[0].includes('--filter'));assert.match(calls[0].at(-1),/^label=kontour.worker.owner=/);assert.equal(calls[1][0],'rm');assert.equal(calls[2][0],'ps');
+ }finally{process.env.PATH=prior;fs.rmSync(root,{recursive:true,force:true});}
+});

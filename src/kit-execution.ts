@@ -42,7 +42,7 @@ export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot
  if(!Number.isFinite(seconds)||seconds<=0||seconds>86400)throw new Error('Finite host execution deadline required');
  const args={requestFile:path.resolve(requestFile),controllerRoot:path.resolve(controllerRoot),authFile:authFile?path.resolve(authFile):undefined,executionOwner};
  const cleanup=async()=>{
-   if(!request.engine_sandbox?.image)return;
+   if(!request.engine_sandbox?.image)return 0;
    const command=promisify(execFile),filter=`label=kontour.worker.owner=${executionOwner}`;
    const list=await command('docker',['ps','-aq','--filter',filter],{timeout:10000});
    const ids=list.stdout.trim().split(/\s+/).filter(Boolean);
@@ -50,6 +50,7 @@ export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot
    if(ids.length)await command('docker',['rm','-f',...ids],{timeout:10000});
    const remaining=await command('docker',['ps','-aq','--filter',filter],{timeout:10000});
    if(remaining.stdout.trim())throw new Error('Owned worker termination unverified');
+   return ids.length;
  };
  return new Promise((resolve,reject)=>{
    const child=fork(fileURLToPath(new URL('./kit-execution-child.js',import.meta.url)),[modulePath,descriptor.export,JSON.stringify(args)],{stdio:['ignore','ignore','pipe','ipc'],execArgv:[]});
@@ -59,6 +60,6 @@ export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot
    child.stderr?.on('data',chunk=>{stderr=(stderr+chunk).slice(-65536);});
    child.on('message',message=>{outcome=message as typeof outcome;});
    child.on('error',error=>{clearTimeout(timer);clearTimeout(forced);cleanup().then(()=>reject(error),reject);});
-   child.on('exit',code=>{clearTimeout(timer);clearTimeout(forced);cleanup().then(()=>{if(timedOut)reject(new Error('Kit execution deadline exceeded; owned workers terminated'));else if(code===0&&outcome?.kind==='result')resolve(outcome.result);else reject(new Error(outcome?.message??`Kit execution process failed (${code}): ${stderr}`));},error=>reject(new Error(`Owned worker cleanup refused: ${(error as Error).message}`)));});
+   child.on('exit',code=>{clearTimeout(timer);clearTimeout(forced);cleanup().then(removed=>{if(removed>0&&code===0&&outcome?.kind==='result')reject(new Error('Kit left owned workers running; terminated them and refused completion'));else if(timedOut)reject(new Error('Kit execution deadline exceeded; owned workers terminated'));else if(code===0&&outcome?.kind==='result')resolve(outcome.result);else reject(new Error(outcome?.message??`Kit execution process failed (${code}): ${stderr}`));},error=>reject(new Error(`Owned worker cleanup refused: ${(error as Error).message}`)));});
  });
 }
