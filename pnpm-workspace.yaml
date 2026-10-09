@@ -43,6 +43,10 @@ minimumReleaseAgeExclude:
   # Exact Flow budget repair from merged PR #262 and release PR #263; registry
   # gitHead, tarball integrity and tag-bound publish provenance verified before adoption.
   - '@kontourai/flow@5.1.3'
+  # Exact AI-DLC invalidation repair from merged Flow #269 and release #266.
+  # Registry gitHead/tag 756ebfd, tarball integrity and source-bound publish provenance
+  # verified before adoption; this excludes only the verified internal version.
+  - '@kontourai/flow@5.1.4'
 
 # mise supplies node and pnpm on developer machines; CI installs the exact
 # version pinned in package.json. Do not reject a same-major pnpm from mise.

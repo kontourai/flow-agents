@@ -498,5 +498,15 @@
     ],
     "approved_by": "briananderson1222 (explicit owner approval in this T3 thread, 2026-10-09: \"Approve all exceptions as I really don't understand the value\")",
     "declared_at": "2026-10-09T01:18:40.904Z"
+  },
+  {
+    "scope": "author:briananderson1222 ref:feat/aidlc-execution-20261009",
+    "reason": "Owner-authorized Step-2-only exception for AI-DLC execution PR #1441, under the current task instruction: \"Approve all exceptions as I really don't understand the value\". This retained implementation is agent-created and has no pre-change bound Builder history or native signed delivery bundle; neither is reconstructed or claimed. Waive only bundle-required Step 2 for this exact author and branch. Fresh canonical Step 1 and every ordinary CI check remain mandatory, including the real installed-package lifecycle regressions that exposed Flow 5.1.3 and require its released repair from Flow #269. This exception cannot turn the current static-test failure into a pass, does not waive repository standards, and does not claim method fidelity, live provider completion or comparative superiority.",
+    "gaps": [
+      "No pre-change bound Builder planning, execution, review or publication history.",
+      "No native signed delivery bundle attesting this retained implementation."
+    ],
+    "approved_by": "briananderson1222 (explicit owner instruction in this T3 thread: \"Approve all exceptions as I really don't understand the value\"; task-related Step-2 exception only)",
+    "declared_at": "2026-10-09T14:02:28.346964Z"
   }
 ]
