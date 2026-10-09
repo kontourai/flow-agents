@@ -70,22 +70,28 @@ export async function executeRequestFile({requestFile,controllerRoot,authFile,wo
   fs.mkdirSync(config.worker_root,{recursive:true,mode:0o700});
   config.forbidden_mount_roots=[...(config.forbidden_mount_roots??[]),{kind:'controller',path:controllerRoot},...(authFile?[{kind:'credentials',path:fs.realpathSync(authFile)}]:[])];
   if(!workerRunner)({runCodexDockerWorker:workerRunner}=await import('@kontourai/flow-agents/docker-worker'));
+  config.artifact_root=path.resolve(config.artifact_root??path.join(controllerRoot,'worker-receipts'));
+  const lockFile=path.join(controllerRoot,'execution.lock');
+  fs.writeFileSync(lockFile,executionOwner,{flag:'wx',mode:0o600});
   let broker;
   try{
     if(!config.providerProxy){
       if(!authFile)throw new Error('Host auth file required; credentials are never mounted into workers');
       if(!brokerFactory)({startProviderProxy:brokerFactory}=await import('@kontourai/flow-agents/provider-broker'));
-      broker=await brokerFactory({authFile,model:request.execution.model,reasoningEffort:request.execution.reasoning_effort,maxRequests:request.execution.max_provider_requests});
+      config.providerProxy={model:request.execution.model};
+      const requestDigest='sha256:'+requestBindingDigest(request),admissionFile=path.join(controllerRoot,'provider-admission.json');
+      const initializeLedger=!fs.existsSync(admissionFile);
+      if(initializeLedger)fs.writeFileSync(admissionFile,JSON.stringify({request_digest:requestDigest})+'\n',{flag:'wx',mode:0o600});
+      else if(JSON.parse(fs.readFileSync(admissionFile,'utf8')).request_digest!==requestDigest)throw new Error('Provider admission binding changed');
+      broker=await brokerFactory({authFile,model:request.execution.model,reasoningEffort:request.execution.reasoning_effort,maxRequests:request.execution.max_provider_requests,ledgerFile:path.join(controllerRoot,'provider-budget.json'),requestBindingDigest:requestDigest,initializeLedger});
       config.providerProxy={baseUrl:broker.baseUrl,capability:broker.capability,model:broker.model};
     }
-    config.artifact_root=path.resolve(config.artifact_root??path.join(controllerRoot,'worker-receipts'));
-    config.worker_root=path.resolve(config.worker_root??path.join(controllerRoot,'workers'));
     return await executeKit({request,controllerRoot,workerRunner,signal});
   }finally{
-    if(broker){
-      try{fs.writeFileSync(path.join(controllerRoot,'provider-observations.json'),JSON.stringify(broker.evidence,null,2)+'\n',{flag:'wx',mode:0o600});}
+    try{if(broker){
+      try{fs.writeFileSync(path.join(controllerRoot,`provider-observations-${executionOwner}.json`),JSON.stringify(broker.evidence,null,2)+'\n',{flag:'wx',mode:0o600});}
       finally{await broker.close();}
-    }
+    }}finally{if(fs.readFileSync(lockFile,'utf8')!==executionOwner)throw new Error('Execution lock custody changed');fs.unlinkSync(lockFile);}
   }
 }
 

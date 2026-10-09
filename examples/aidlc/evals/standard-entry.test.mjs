@@ -18,6 +18,6 @@ test('standard kit entry rejects experiment requests and executes without benchm
   const result=await executeRequestFile({requestFile:file,controllerRoot,authFile:path.join(root,'host-auth.json'),brokerFactory:async()=>({baseUrl:'http://fixture.invalid',capability:'fixture',model:'fixture',evidence:[],close:async()=>{closed++;}}),workerRunner:async()=>{started++;throw new Error('synthetic provider refusal');}});
   assert.equal(result.schema,'kontour.kit.execution_result');assert.equal(result.kit_id,'aidlc');assert.equal(result.status,'failed');assert.equal(result.turns_started,1);assert.equal(result.identity.observed,false);assert.equal(started,1);assert.equal(closed,1);
   assert.ok(!Object.hasOwn(result,'arm_id'));assert.ok(!Object.hasOwn(result,'case_id'));assert.equal(fs.readFileSync(file,'utf8').includes('worker_helper'),false);
-  assert.equal(fs.existsSync(path.join(controllerRoot,'runtime-result.json')),true);assert.equal(fs.existsSync(path.join(controllerRoot,'provider-observations.json')),true);
+  assert.equal(fs.existsSync(path.join(controllerRoot,'runtime-result.json')),true);assert.equal(fs.readdirSync(controllerRoot).some(file=>file.startsWith('provider-observations-')),true);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
