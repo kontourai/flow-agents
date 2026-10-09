@@ -54,8 +54,12 @@ export async function refreshArtifactValidity({controllerRoot,runId,workspace,re
   for(const record of observations){if(projection[record.stage].status!=='stale'||record.invalidated)continue;
     const entry=await attachObservation({controllerRoot,runId,stage:record.stage,status:'fail',record:{prior:record.digest,validity:projection[record.stage]},invalid:true,supersede:record.evidence.completion.evidence_id});
     record.invalidated=true;record.invalidation=entry;invalidated.push(record.stage);}
-  if(invalidated.length)await evaluateRun(runId,{cwd:controllerRoot,gate:`${invalidated[0]}-gate`});
-  return {projection,invalidated};
+  const deferred=[];
+  for(const stage of invalidated){
+    try{await evaluateRun(runId,{cwd:controllerRoot,gate:`${stage}-gate`});break;}
+    catch(error){if(error.code!=='flow.evaluate.gate.reentry_pending')throw error;deferred.push(stage);}
+  }
+  return {projection,invalidated,deferred};
 }
 
 function boundDefinition(snapshot,profile,runId,projectType,omitted){

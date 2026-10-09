@@ -8,7 +8,7 @@ import { digest } from '../scripts/compile.mjs';
 
 // This is a local host-port boundary test, not a Docker/provider receipt.
 // The port creates real competing fork bytes; the executor decides publication.
-function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 5, portThrows = false } = {}) {
+function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 5, portThrows = false, storageBudget } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aidlc-publication-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const workspace = path.join(root, 'source'), controllerRoot = path.join(root, 'controller');
@@ -18,10 +18,10 @@ function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 
   const artifact = '.aidlc/artifacts/code-generation/code-summary.md';
   fs.mkdirSync(path.dirname(path.join(workspace, artifact)), { recursive: true });
   fs.writeFileSync(path.join(workspace, artifact), 'canonical artifact');
-  const request = { workspace, source_root: workspace, run_id: 'publication-fixture', execution: { max_turns: maxTurns, timeout_s: 60, model: 'local-fixture' }, engine_sandbox: { image: `sha256:${'a'.repeat(64)}`, artifact_root: path.join(root, 'artifacts') } };
-  let fork, calls = 0, dispatch;
+  const request = { workspace, source_root: workspace, run_id: 'publication-fixture', execution: { max_turns: maxTurns, timeout_s: 60, model: 'local-fixture' }, engine_sandbox: { image: `sha256:${'a'.repeat(64)}`, artifact_root: path.join(root, 'artifacts'), storage_budget: storageBudget } };
+  let fork, calls = 0, dispatch, observedStorageBudget;
   const workerRunner = async (input) => {
-    calls++;
+    calls++;observedStorageBudget=input.storageBudget;
     if (portThrows) throw new Error('Synthetic unreceipted worker failure');
     fork = input.workspace;
     fs.writeFileSync(path.join(fork, 'app.js'), 'worker edit');
@@ -38,7 +38,7 @@ function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 
     dispatch.expected_identity = await executor.admit(dispatch);
     return executor.execute(dispatch);
   };
-  return { workspace, controllerRoot, artifact, execute, executor, freshExecutor, fork: () => fork, calls: () => calls, dispatch: () => dispatch };
+  return { workspace, controllerRoot, artifact, execute, executor, freshExecutor, fork: () => fork, calls: () => calls, dispatch: () => dispatch, observedStorageBudget:()=>observedStorageBudget };
 }
 
 test('a final failed result publishes no modifications, deletions, additions or artifacts', async (t) => {
@@ -116,3 +116,5 @@ test('contributors and dialogue participants cannot publish source edits in a so
     assert.equal(fs.readFileSync(path.join(f.workspace, f.artifact), 'utf8'), 'canonical artifact');
   }
 });
+
+test('every worker receives the registered aggregate case storage budget',async t=>{const storageBudget={scope_roots:['/synthetic-owned-case'],max_total_bytes:128*1024*1024,max_file_bytes:16*1024*1024,max_entries:10000,min_free_bytes:4*1024*1024*1024};const f=fixture(t,{responseStatus:'completed',storageBudget});await f.execute();assert.deepEqual(f.observedStorageBudget(),storageBudget);});
