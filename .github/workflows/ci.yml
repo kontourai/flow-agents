@@ -127,6 +127,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check codex-pr-review-action
 
+      - name: Installed kit execution unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check installed-kit-execution-unit-tests
+
+      - name: Host adapter unit tests
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check host-adapter-unit-tests
+
       - name: Public API unit tests
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check public-api-unit-tests
