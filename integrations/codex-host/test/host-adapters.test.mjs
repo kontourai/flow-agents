@@ -3,9 +3,15 @@ import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,symlink,rm} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {parseCodexEvents} from '../docker-worker.mjs';
+import {parseCodexEvents,dockerHostGatewayArgs} from '../docker-worker.mjs';
 import {startProviderProxy} from '../provider-broker.mjs';
 import {DEFAULT_STORAGE,inspectStorage,admitStorage} from '../storage-admission.mjs';
+
+test('Docker host gateway mapping is Linux-only and defaults to the host platform',()=>{
+ assert.deepEqual(dockerHostGatewayArgs('linux'),['--add-host','host.docker.internal:host-gateway']);
+ for(const platform of ['darwin','win32'])assert.deepEqual(dockerHostGatewayArgs(platform),[]);
+ assert.deepEqual(dockerHostGatewayArgs(),dockerHostGatewayArgs(process.platform));
+});
 
 test('worker usage requires one observed complete turn with finite integral tokens',()=>{
  const events=[{type:'thread.started',thread_id:'actual'},{type:'turn.started'},{type:'turn.completed',usage:{input_tokens:2,output_tokens:3}},{type:'item.completed',item:{type:'agent_message',text:'result'}}];
@@ -48,11 +54,35 @@ test('mock Docker observations bind explicit mount boundaries and owner labels',
   const contextFile=path.join(root,'context.json');await writeFile(contextFile,'{}');
   const image='sha256:'+'a'.repeat(64),container='b'.repeat(64),owner='11111111-2222-3333-4444-555555555555';
   const mounts=[{Destination:'/workspace',Source:workspace,RW:true},{Destination:'/treatment',Source:sourceRoot,RW:false},{Destination:'/context/request.json',Source:contextFile,RW:false}];
-  const fake=path.join(root,'docker');await writeFile(fake,`#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(path.join(root,'calls'))},JSON.stringify(args)+'\\n');if(args[0]==='create')console.log('${container}');else if(args[0]==='inspect')console.log(JSON.stringify([{Image:'${image}',Mounts:${JSON.stringify(mounts)},HostConfig:{Privileged:false,ReadonlyRootfs:true,NetworkMode:'bridge'}}]));else if(args[0]==='start')console.log(${JSON.stringify([{type:'thread.started',thread_id:'mock-thread'},{type:'turn.started'},{type:'turn.completed',usage:{input_tokens:1,output_tokens:1}}].map(x=>JSON.stringify(x)).join('\n'))});else if(args[0]==='run')console.log(args.includes('--version')?'codex-cli mocked':'${'c'.repeat(64)} mocked');\n`);await chmod(fake,0o755);process.env.PATH=root+path.delimiter+original;
+  const extraHostsFile=path.join(root,'extra-hosts.json');
+  const nativeExtraHosts=process.platform==='linux'?['host.docker.internal:host-gateway']:null;
+  await writeFile(extraHostsFile,JSON.stringify(nativeExtraHosts));
+  const fake=path.join(root,'docker');await writeFile(fake,`#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(path.join(root,'calls'))},JSON.stringify(args)+'\\n');if(args[0]==='create')console.log('${container}');else if(args[0]==='inspect')console.log(JSON.stringify([{Image:'${image}',Mounts:${JSON.stringify(mounts)},HostConfig:{Privileged:false,ReadonlyRootfs:true,NetworkMode:'bridge',ExtraHosts:JSON.parse(fs.readFileSync(${JSON.stringify(extraHostsFile)},'utf8'))}}]));else if(args[0]==='start')console.log(${JSON.stringify([{type:'thread.started',thread_id:'mock-thread'},{type:'turn.started'},{type:'turn.completed',usage:{input_tokens:1,output_tokens:1}}].map(x=>JSON.stringify(x)).join('\n'))});else if(args[0]==='run')console.log(args.includes('--version')?'codex-cli mocked':'${'c'.repeat(64)} mocked');\n`);await chmod(fake,0o755);process.env.PATH=root+path.delimiter+original;
   const options={image,workspace,sourceRoot,contextFile,artifactRoot,model:'mock',timeoutMs:1000,runId:'mock-run',ownerId:owner,providerProxy:{baseUrl:'http://host.docker.internal:9999',capability:'d'.repeat(64),model:'mock'},storageBudget:{...DEFAULT_STORAGE,roots:[workspace,artifactRoot],min_free_bytes:0}};
-  const unknown=await runCodexDockerWorker({...options,invocationId:'unknown'});assert.equal(unknown.observed.controller_mounted,null);assert.equal(unknown.observed.hidden_oracles_mounted,null);
+  const unknown=await runCodexDockerWorker({...options,invocationId:'unknown'});assert.equal(unknown.observed.controller_mounted,null);assert.equal(unknown.observed.hidden_oracles_mounted,null);assert.deepEqual(unknown.observed.extra_hosts,nativeExtraHosts);
   const checked=await runCodexDockerWorker({...options,invocationId:'checked',forbiddenMountRoots:[{kind:'controller',path:controller},{kind:'hidden-oracle',path:oracle}]});assert.equal(checked.observed.controller_mounted,false);assert.equal(checked.observed.execution_owner,owner);
   await assert.rejects(runCodexDockerWorker({...options,invocationId:'overlap',forbiddenMountRoots:[{kind:'hidden-oracle',path:sourceRoot}]}),/forbidden root/);
-  assert.match(await readFile(path.join(root,'calls'),'utf8'),/kontour.worker.owner=11111111/);
+  await writeFile(extraHostsFile,JSON.stringify(['host.docker.internal:host-gateway']));
+  const linux=await runCodexDockerWorker({...options,invocationId:'linux',platform:'linux'});
+  assert.deepEqual(linux.observed.extra_hosts,['host.docker.internal:host-gateway']);
+  for(const [invocationId,extraHosts]of [['missing-gateway',null],['wrong-gateway',['other.internal:host-gateway']]]){
+   await writeFile(extraHostsFile,JSON.stringify(extraHosts));
+   await assert.rejects(runCodexDockerWorker({...options,invocationId,platform:'linux'}),/host gateway mapping missing/);
+  }
+  await writeFile(extraHostsFile,'null');
+  const mac=await runCodexDockerWorker({...options,invocationId:'mac',platform:'darwin'});
+  assert.equal(mac.observed.extra_hosts,null);
+  const calls=(await readFile(path.join(root,'calls'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+  const creates=calls.filter(args=>args[0]==='create');
+  for(const name of ['linux','missing-gateway','wrong-gateway']){
+   const args=creates.find(args=>args.includes('kontour-worker-'+name));
+   assert.equal(args[args.indexOf('--add-host')+1],'host.docker.internal:host-gateway');
+  }
+  assert.equal(creates.find(args=>args.includes('kontour-worker-mac')).includes('--add-host'),false);
+  assert.equal(creates[0].includes('--add-host'),process.platform==='linux');
+  // Rejected inspection must remove the container without starting a model turn.
+  assert.equal(calls.filter(args=>args[0]==='start').length,4);
+  assert.equal(calls.filter(args=>args[0]==='rm').length,7);
+  assert.ok(creates.every(args=>args.includes('kontour.worker.owner='+owner)));
  }finally{process.env.PATH=original;await rm(root,{recursive:true,force:true});}
 });
