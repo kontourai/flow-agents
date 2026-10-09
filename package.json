@@ -1,7 +1,7 @@
 {
   "name": "@kontourai/flow-agents",
   "version": "6.5.2",
-  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
+  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows \u2014 a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi \u2014 with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
     "ai-agents",
@@ -58,6 +58,13 @@
     "./workspace-kits": {
       "types": "./build/src/workspace-kits.d.ts",
       "import": "./build/src/workspace-kits.js"
+    },
+    "./docker-worker": "./runtime/docker-worker.mjs",
+    "./provider-broker": "./runtime/provider-broker.mjs",
+    "./storage-admission": "./runtime/storage-admission.mjs",
+    "./kit-execution": {
+      "types": "./build/src/kit-execution.d.ts",
+      "import": "./build/src/kit-execution.js"
     }
   },
   "repository": {
@@ -138,7 +145,8 @@
     "!**/.telemetry/",
     "!**/.veritas/",
     "!**/node_modules/",
-    "!build/src/cli/workflow.test-support.js"
+    "!build/src/cli/workflow.test-support.js",
+    "runtime/"
   ],
   "scripts": {
     "knowledge:yaml:generate": "node scripts/build-knowledge-yaml.mjs",
