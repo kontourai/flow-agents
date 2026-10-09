@@ -116,6 +116,7 @@ export async function runAidlc({request,executor,commandRunner,authority,control
   const executions=[];let failure=null,units=null;
   const refuse=async(stage,detail)=>{
     const prior=records.find(r=>r.stage===stage);const record={stage,profile,failure:detail,artifacts:[],sensors:{status:'fail',checks:[]},evidence:{},invalidated:false};record.digest=digest(record);
+    if(['authority_required','awaiting_decision','mob_judgment','advisory_review'].includes(detail.reason)){record.waiting=true;records=records.filter(r=>r.stage!==stage);records.push(record);write(recordsFile,records);return;}
     record.evidence.completion=await attachObservation({controllerRoot,runId:request.run_id,stage,status:'fail',record,supersede:prior?.invalidation?.evidence_id??prior?.evidence?.completion?.evidence_id});
     if(snapshot.stages.find(s=>s.slug===stage)?.reviewer)record.evidence.review=await attachObservation({controllerRoot,runId:request.run_id,stage,kind:'review',status:'fail',record});
     records=records.filter(r=>r.stage!==stage);records.push(record);write(recordsFile,records);await evaluateRun(request.run_id,{cwd:controllerRoot});
@@ -254,6 +255,7 @@ export async function runAidlc({request,executor,commandRunner,authority,control
       if(dispatched.status==='awaiting_decision'){
         const input={purpose:'review-disposition',stage:stageId,decision:dispatched,request_digest:binding.request_digest};const grant=await authority?.authorize?.(input);
         if(grant?.authorized&&authority.verify?.(grant.receipt,input)===true&&!unitFlow)dispatched.status='completed';
+        else dispatched.pending=dispatched.units.flatMap(unit=>unit.decisions??[]).findLast(decision=>decision.response?.pending)?.response.pending??grant?.pending??null;
       }
       if(dispatched.status!=='completed'){failure={stage:stageId,reason:dispatched.reason==='execution_budget'||dispatched.reason==='storage_budget'?'budget_exhausted':dispatched.reason??dispatched.status,detail:dispatched};await refuse(stageId,failure);break;}
       if(context.shared.approved_summary_basis?.some(ref=>readArtifact(workspace,ref.path).digest!==ref.digest)){failure={stage:stageId,reason:'approved_summary_changed'};await refuse(stageId,failure);break;}
@@ -292,7 +294,7 @@ export async function runAidlc({request,executor,commandRunner,authority,control
     if(settings.learnings==='on'&&knowledge?.capture&&context.shared.learning_diaries){record.learning_captures=[];for(const diaryRef of context.shared.learning_diaries){const diary=readArtifact(workspace,diaryRef.path);const captured=await knowledge.capture({stage:stageId,unit:diaryRef.unit,run_id:request.run_id,path:diaryRef.path,digest:diary.digest,text:diary.text,decision_basis:dispatched});if(!captured?.reference)throw new Error('Knowledge capture returned no durable reference');record.learning_captures.push(captured);}}
     record.digest=digest(record);
     const prior=records.find(r=>r.stage===stageId);
-    record.evidence.completion=await attachObservation({controllerRoot,runId:request.run_id,stage:stageId,status:passing?'pass':'fail',record,supersede:prior?.invalidation?.evidence_id??prior?.evidence.completion.evidence_id});
+    record.evidence.completion=await attachObservation({controllerRoot,runId:request.run_id,stage:stageId,status:passing?'pass':'fail',record,supersede:prior?.invalidation?.evidence_id??prior?.evidence?.completion?.evidence_id});
     if(stage.reviewer)record.evidence.review=await attachObservation({controllerRoot,runId:request.run_id,stage:stageId,kind:'review',status:passing?'pass':'fail',record:{reviews:dispatched.final_verification?.dispatch?.units?.flatMap(u=>u.receipts??[])??dispatched.units.flatMap(u=>u.reviews??[]),final_source_acceptance:dispatched.final_verification?.join??null},supersede:prior?.evidence.review?.evidence_id});
     records=records.filter(r=>r.stage!==stageId);records.push(record);write(recordsFile,records);
     const outcome=await evaluateRun(request.run_id,{cwd:controllerRoot});
