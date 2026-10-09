@@ -110,3 +110,20 @@ test('default operation runner executes actual workspace and bounds child lifeti
  await assert.rejects(runner({...base,cwd:root,command:[process.execPath,'-e','process.exit(0)']}),/outside host admission/);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+import {recordControllerDecision} from '../scripts/authority.mjs';
+test('normal operator decision resumes a paused summary gate without changing registered request; tamper and source changes refuse',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aidlc-decision-')),workspace=path.join(root,'source'),controllerRoot=path.join(root,'controller');fs.mkdirSync(workspace);fs.mkdirSync(controllerRoot);
+ try{
+ const snapshot=readSnapshot(),keep=new Set(['workspace-scaffold','workspace-detection','state-init','market-research']);
+ const request={run_id:'human-summary',workspace,prompt:'Synthetic ordinary summary checkpoint',parameters:{profile:'feature',project_type:'greenfield',ceremony:{sensors:'off',review_cap:'none',summary_confirmation:'on',learnings:'off',skeleton:'off',collaborators:'off'},stage_decisions:snapshot.profiles.feature.stages.filter(stage=>!keep.has(stage)).map(stage=>({stage,execute:false,reason:'Synthetic checkpoint boundary'})),repair_checks:false}};
+ const policy={reference:'operator-policy',purposes:['stage-selection']},createAuthority=()=>createControllerAuthority({policy,requestDigest:requestBindingDigest(request),controllerRoot}),ids=new Map();let substantive=0;
+ const executor={async admit(req){const id=randomUUID(),identity={actor:{runtime:'test-host',host:'localhost',session_id:id},instance_id:id};ids.set(req.request_digest,identity);return identity;},async snapshotBasis({artifacts=[]}){return {source_digest:snapshotWorkspace(workspace).source_digest,artifacts:artifacts.map(ref=>({path:ref.path,digest:digest(fs.readFileSync(path.join(workspace,ref.path)))}))};},async execute(req){if(!req.context.summary_only)substantive++;for(const target of req.context.artifact_targets){const file=path.join(workspace,target.path);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,target.id.endsWith('-questions')?'# Summary questions\n\n## Assumptions\nOperator must confirm scope.\n':'# Market\n\n## Findings\nActual fixture.\n');}return {status:'completed',identity:ids.get(req.request_digest),identity_basis:'executor-observed',receipt:{id:randomUUID(),digest:digest(req.request_digest),request_digest:req.request_digest},input_basis:req.basis,artifacts:req.context.artifact_targets.map(target=>({path:target.path,digest:digest(fs.readFileSync(path.join(workspace,target.path)))}))};}};
+ const held=await runAidlc({request,executor,authority:createAuthority(),controllerRoot});assert.equal(held.status,'waiting');assert.equal(substantive,0);
+ const pendingFile=held.failure.detail.pending.file,pending=JSON.parse(fs.readFileSync(pendingFile,'utf8')),original=fs.readFileSync(pendingFile,'utf8');
+ fs.writeFileSync(pendingFile,JSON.stringify({...pending,payload:{...pending.payload,input:{...pending.payload.input,source_digest:'f'.repeat(64)}}}));assert.throws(()=>recordControllerDecision({controllerRoot,pendingFile,reference:'operator-approval'}),/signature or exact binding invalid/);fs.writeFileSync(pendingFile,original);
+ const approval=recordControllerDecision({controllerRoot,pendingFile,reference:'operator explicitly confirmed retained questions'});assert.equal(approval.decision_kind,'host-observed-operator-interaction');
+ const authority=createAuthority(),input=pending.payload.input;assert.equal((await authority.authorize(input)).authorized,true);assert.equal((await authority.authorize({...input,source_digest:'f'.repeat(64)})).authorized,false);assert.equal((await authority.authorize({...input,request_digest:'d'.repeat(64)})).authorized,false);
+ const completed=await runAidlc({request,executor,authority,controllerRoot});assert.equal(completed.status,'completed',JSON.stringify(completed.failure));assert.equal(substantive,1);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});

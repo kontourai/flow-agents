@@ -102,11 +102,13 @@ export async function createUnitFlow({controllerRoot,parentRunId,stage,units,act
       const canonical=await loadRun(runId,controllerRoot);if(!canonical.state.gate_outcomes.some(gate=>gate.gate_id===`${lease.step_id}-gate`&&gate.status==='pass'))throw new Error('Canonical completed-unit gate was invalidated');
       active.delete(lease.claim_id);return {run_id:runId,unit:lease.step_id,settled:true,passed:true,reused:true,evidence:state.completed.evidence};
     }
-    await stop(state);
     if(state.failure||state.executionStop.signal.aborted)throw state.failure??new Error('Unit execution was cancelled');
+    await renewStepClaim(runId,{...leaseOptions(lease),lease_seconds:leaseSeconds});
     const passing=record?.id===lease.step_id&&record.status==='completed'&&record.receipts?.length>0&&record.receipts.every(receipt=>receipt.status==='completed'&&receipt.identity_basis==='executor-observed')&&await current(record,lease.step_id);
     const prior=readRecords()[lease.step_id];const observation=await attach(lease.step_id,record,Boolean(passing),{supersede:prior?.evidence?.id});
+    await renewStepClaim(runId,{...leaseOptions(lease),lease_seconds:leaseSeconds});
     const evaluated=await evaluateClaimedStep(runId,leaseOptions(lease));
+    await stop(state);
     const passed=evaluated.settled&&evaluated.outcomes.length>0&&evaluated.outcomes.every(outcome=>outcome.status==='pass');
     const records=readRecords();records[lease.step_id]={record:structuredClone(record),evidence:observation,settled:evaluated.settled,passed};write(recordsFile,records);
     if(evaluated.settled)active.delete(lease.claim_id);
