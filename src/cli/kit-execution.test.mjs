@@ -24,6 +24,10 @@ test('installed execution invokes declared generic entry and refuses drift or cr
   fs.writeFileSync(path.join(source,'helper.mjs'),'export const version=3;');
   const updateAgain=spawnSync(process.execPath,[CLI,'kit','install',source,'--dest',dest,'--update'],{encoding:'utf8'});assert.equal(updateAgain.status,0,updateAgain.stderr);
   assert.equal((await executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root})).version,3);
+  fs.writeFileSync(path.join(source,'entry.mjs'),'export async function execute(){await new Promise(()=>{});}');
+  const hangingUpdate=spawnSync(process.execPath,[CLI,'kit','install',source,'--dest',dest,'--update'],{encoding:'utf8'});assert.equal(hangingUpdate.status,0,hangingUpdate.stderr);
+  fs.writeFileSync(requestFile,JSON.stringify({schema:'kontour.kit.execution_request',version:'1.0',kit_id:'portable',execution:{timeout_s:0.1}}));
+  await assert.rejects(executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root}),/deadline exceeded/);
   fs.writeFileSync(requestFile,JSON.stringify({schema:'kontour.kit.execution_request',version:'1.0',kit_id:'other'}));await assert.rejects(executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root}),/Request must bind/);
   const unhashed=path.join(dest,'kits/local/repositories/portable/__pycache__');fs.mkdirSync(unhashed);fs.writeFileSync(path.join(unhashed,'helper.mjs'),'export const version=99');await assert.rejects(executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root}),/unhashed entries/);fs.rmSync(unhashed,{recursive:true});
   fs.appendFileSync(path.join(dest,'kits/local/repositories/portable/entry.mjs'),'\n// drift');await assert.rejects(executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root}),/integrity refused/);

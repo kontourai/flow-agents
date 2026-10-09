@@ -37,3 +37,22 @@ test('provider broker authenticates capability, bounds model and forwards canoni
   assert.equal(response.status,200);assert.equal(forwarded.model,'model-a');assert.equal(broker.evidence[0].transport_mode,'mocked-test-only');assert.equal(JSON.stringify(broker.evidence).includes('host-test-secret'),false);
  }finally{await broker?.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('mock Docker observations bind explicit mount boundaries and owner labels',async()=>{
+ const {chmod,mkdir,readFile,realpath}=await import('node:fs/promises');
+ const {runCodexDockerWorker}=await import('../docker-worker.mjs');
+ const root=await realpath(await mkdtemp(path.join(os.tmpdir(),'mock-host-worker-')));const original=process.env.PATH;
+ try{
+  const workspace=path.join(root,'workspace'),sourceRoot=path.join(root,'kit'),artifactRoot=path.join(root,'receipts'),controller=path.join(root,'controller'),oracle=path.join(root,'oracle');
+  for(const dir of [workspace,sourceRoot,artifactRoot,controller,oracle])await mkdir(dir);
+  const contextFile=path.join(root,'context.json');await writeFile(contextFile,'{}');
+  const image='sha256:'+'a'.repeat(64),container='b'.repeat(64),owner='11111111-2222-3333-4444-555555555555';
+  const mounts=[{Destination:'/workspace',Source:workspace,RW:true},{Destination:'/treatment',Source:sourceRoot,RW:false},{Destination:'/context/request.json',Source:contextFile,RW:false}];
+  const fake=path.join(root,'docker');await writeFile(fake,`#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(path.join(root,'calls'))},JSON.stringify(args)+'\\n');if(args[0]==='create')console.log('${container}');else if(args[0]==='inspect')console.log(JSON.stringify([{Image:'${image}',Mounts:${JSON.stringify(mounts)},HostConfig:{Privileged:false,ReadonlyRootfs:true,NetworkMode:'bridge'}}]));else if(args[0]==='start')console.log(${JSON.stringify([{type:'thread.started',thread_id:'mock-thread'},{type:'turn.started'},{type:'turn.completed',usage:{input_tokens:1,output_tokens:1}}].map(x=>JSON.stringify(x)).join('\n'))});else if(args[0]==='run')console.log(args.includes('--version')?'codex-cli mocked':'${'c'.repeat(64)} mocked');\n`);await chmod(fake,0o755);process.env.PATH=root+path.delimiter+original;
+  const options={image,workspace,sourceRoot,contextFile,artifactRoot,model:'mock',timeoutMs:1000,runId:'mock-run',ownerId:owner,providerProxy:{baseUrl:'http://host.docker.internal:9999',capability:'d'.repeat(64),model:'mock'},storageBudget:{...DEFAULT_STORAGE,roots:[workspace,artifactRoot],min_free_bytes:0}};
+  const unknown=await runCodexDockerWorker({...options,invocationId:'unknown'});assert.equal(unknown.observed.controller_mounted,null);assert.equal(unknown.observed.hidden_oracles_mounted,null);
+  const checked=await runCodexDockerWorker({...options,invocationId:'checked',forbiddenMountRoots:[{kind:'controller',path:controller},{kind:'hidden-oracle',path:oracle}]});assert.equal(checked.observed.controller_mounted,false);assert.equal(checked.observed.execution_owner,owner);
+  await assert.rejects(runCodexDockerWorker({...options,invocationId:'overlap',forbiddenMountRoots:[{kind:'hidden-oracle',path:sourceRoot}]}),/forbidden root/);
+  assert.match(await readFile(path.join(root,'calls'),'utf8'),/kontour.worker.owner=11111111/);
+ }finally{process.env.PATH=original;await rm(root,{recursive:true,force:true});}
+});
