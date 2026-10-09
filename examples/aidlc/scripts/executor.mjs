@@ -80,6 +80,7 @@ export function createDockerExecutor({request,controllerRoot,workerRunner,signal
       observed.push(worker);
       const observation={worker:identity.instance_id,container_id:worker.observed.container_id,provider_thread_id:worker.provider_thread_id,context_digest:worker.observed.context_digest,stdin_digest:worker.observed.stdin_digest,source_fork_digest:worker.observed.source_fork_digest,input_basis:dispatch.basis,terminal:worker.terminal,usage:worker.usage};
       const receipt={id:identity.instance_id,digest:digest(observation),request_digest:dispatch.request_digest};
+      if(worker.storage_violation)throw Object.assign(new Error(`Worker storage budget refused: ${worker.storage_violation.reason}`),{code:'storage_budget',observation:worker.storage_violation});
       if(worker.terminal.status!==0||worker.terminal.timeout||worker.terminal.overflow||!worker.provider_thread_id||!worker.container_removed)return {status:'failed',identity,identity_basis:'executor-observed',receipt,input_basis:dispatch.basis,artifacts:[],observation};
       const response=normalizedResult(worker.final);
       // A successful provider process is not successful work. Preserve the

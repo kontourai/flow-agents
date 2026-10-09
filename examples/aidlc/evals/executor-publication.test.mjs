@@ -9,7 +9,7 @@ import { digest } from '../scripts/compile.mjs';
 
 // This is a local host-port boundary test, not a Docker/provider receipt.
 // The port creates real competing fork bytes; the executor decides publication.
-function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 5, portThrows = false, storageBudget,reasoningEffort } = {}) {
+function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 5, portThrows = false, storageBudget,reasoningEffort,storageViolation } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aidlc-publication-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const workspace = path.join(root, 'source'), controllerRoot = path.join(root, 'controller');
@@ -30,7 +30,7 @@ function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 
     fs.writeFileSync(path.join(fork, 'added.js'), 'worker addition');
     fs.mkdirSync(path.dirname(path.join(fork, artifact)), { recursive: true });
     fs.writeFileSync(path.join(fork, artifact), 'worker artifact');
-    return { observed: { container_id: 'local-port-fixture', context_digest: 'fixture', stdin_digest: 'fixture', source_fork_digest: 'fixture' }, provider_thread_id: 'local-port-fixture', terminal: { status: terminalStatus, timeout: false, overflow: false }, container_removed: true, usage: { complete: false }, final: JSON.stringify({ status: responseStatus, artifacts: [{ path: artifact }] }) };
+    return {storage_violation:storageViolation, observed: { container_id: 'local-port-fixture', context_digest: 'fixture', stdin_digest: 'fixture', source_fork_digest: 'fixture' }, provider_thread_id: 'local-port-fixture', terminal: { status: terminalStatus, timeout: false, overflow: false }, container_removed: true, usage: { complete: false }, final: JSON.stringify({ status: responseStatus, artifacts: [{ path: artifact }] }) };
   };
   const freshExecutor = () => createDockerExecutor({ request, controllerRoot, workerRunner });
   const executor = freshExecutor();
@@ -170,3 +170,10 @@ test('logical storage roots are canonicalized before comparison',async t=>{
 });
 
 test('low and high effort reach the worker unchanged for broker admission',async t=>{for(const reasoningEffort of ['low','high']){const f=fixture(t,{reasoningEffort});await f.execute();assert.equal(f.observedReasoning(),reasoningEffort);}});
+
+test('worker quota termination retains observation and refuses publication as budget exhaustion',async t=>{
+ const f=fixture(t,{responseStatus:'completed',storageViolation:{allowed:false,reason:'filesystem_free_floor'}});
+ await assert.rejects(f.execute(),error=>error.code==='storage_budget'&&error.observation.reason==='filesystem_free_floor');
+ assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'canonical implementation');
+ assert.equal(f.executor.observed.length,1);assert.equal(f.executor.turnsStarted,1);
+});
