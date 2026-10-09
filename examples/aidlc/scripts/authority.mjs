@@ -24,17 +24,18 @@ export function createControllerAuthority({policy,requestDigest,controllerRoot})
         const confirmation=policy.input_confirmations?.[input.stage];
         if(!confirmation?.reference||confirmation.source!=='operator-supplied'||!Array.isArray(confirmation.basis)||digest(confirmation.basis)!==digest(input.basis))return {authorized:false,reason:'exact_operator_input_confirmation_required'};
       }
+      // Judgment dissent is an unresolved objection to shipping. It never
+      // resolves itself: only an explicit operator policy may accept it.
+      // Both decision channels merge so neither can mask the other.
+      const dissent=[...(input.dissent??[]),...(input.decision?.units?.flatMap(unit=>unit.dissent??[])??[])];
+      const judgments=dissent.filter(objection=>objection?.kind==='judgment');
       if(input.purpose==='review-disposition'){
         const allowed=policy.accepted_finding_severities??['low','info'];
         const findings=input.findings??input.decision?.units?.flatMap(unit=>unit.findings??[])??[];
         if(findings.some(finding=>finding.status==='open'&&!allowed.includes(finding.severity)))return {authorized:false,reason:'unaccepted_review_finding'};
-        // Judgment dissent is an unresolved objection to shipping. It never
-        // resolves itself: only an explicit operator policy may accept it.
-        const dissent=input.dissent??input.decision?.units?.flatMap(unit=>unit.dissent??[])??[];
-        const judgments=dissent.filter(objection=>objection?.kind==='judgment');
         if(judgments.length&&policy.review_disposition?.accept_judgment_dissent!==true)return {authorized:false,reason:'judgment_dissent_requires_operator_disposition',dissent:judgments};
       }
-      const payload={version:'1.0',id:randomUUID(),kind:'controller-policy',issuer:fingerprint,reference:policy.reference,request_digest:requestDigest,purpose:input.purpose,stage:input.stage,input_digest:digest(input),issued_at:new Date().toISOString(),...(input.purpose==='review-disposition'&&policy.review_disposition?.accept_judgment_dissent===true?{judgment_dissent_accepted:true}:{})};
+      const payload={version:'1.0',id:randomUUID(),kind:'controller-policy',issuer:fingerprint,reference:policy.reference,request_digest:requestDigest,purpose:input.purpose,stage:input.stage,input_digest:digest(input),issued_at:new Date().toISOString(),...(input.purpose==='review-disposition'&&judgments.length&&policy.review_disposition?.accept_judgment_dissent===true?{judgment_dissent_accepted:true}:{})};
       const bytes=Buffer.from(JSON.stringify(payload));const signature=sign(null,bytes,privateKey).toString('base64');
       const receipt={payload,signature};issued.set(payload.id,receipt);
       // The approved input is durably stored beside its receipt: a signed

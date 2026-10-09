@@ -87,10 +87,11 @@ export function createDockerExecutor({request,controllerRoot,workerRunner,signal
       const after=snapshotWorkspace(fork);const prior=new Map(before.files.map(file=>[file.path,file]));const next=new Map(after.files.map(file=>[file.path,file]));
       const changed=[...new Set([...prior.keys(),...next.keys()])].filter(file=>prior.get(file)?.digest!==next.get(file)?.digest);
       if(changed.length&&!prompt.allowed_source_changes)throw new Error('Worker changed source outside stage authority');
-      // Units that declare explicit resource scopes are confined to them;
-      // 'source/workspace'/'*' retain scheduler-serialized workspace custody.
+      // Real units that declare explicit resource scopes are confined to them;
+      // 'source/workspace'/'*' retain scheduler-serialized workspace custody,
+      // and the 'stage' pseudo-unit is governed by stage-level write authority.
       const resources=dispatch.mutable_resources;
-      if(changed.length&&Array.isArray(resources)&&resources.length&&!resources.includes('source/workspace')&&!resources.includes('*'))
+      if(dispatch.unit&&dispatch.unit!=='stage'&&changed.length&&Array.isArray(resources)&&resources.length&&!resources.includes('source/workspace')&&!resources.includes('*'))
         for(const file of changed)if(!resources.some(scope=>file===scope||file.startsWith(`${scope}/`)))throw Object.assign(new Error(`Source change outside declared unit resources: ${file}`),{code:'unit_scope'});
       if(dispatch.phase==='review'){
         if(changed.length)throw new Error('Read-only reviewer changed source');
@@ -113,7 +114,7 @@ export function createDockerExecutor({request,controllerRoot,workerRunner,signal
           if(history.storage.entries+writeEntries>storage.max_entries)throw Object.assign(new Error('Shared storage entry budget exhausted'),{code:'storage_budget'});
           const free=fs.statfsSync(workspace);
           if(BigInt(free.bavail)*BigInt(free.bsize)<BigInt(storage.min_free_bytes))throw Object.assign(new Error('Workspace free-space floor breached'),{code:'storage_budget'});
-          if(storage.roots)for(const file of [...changed,...returned.map(ref=>ref.path)])if(!storage.roots.some(root=>inside(root,path.join(workspace,file))))throw Object.assign(new Error(`Published path outside declared storage roots: ${file}`),{code:'storage_budget'});
+          if(storage.roots)for(const file of [...changed,...returned.map(ref=>ref.path)])if(!storage.roots.some(root=>{try{return inside(fs.realpathSync(root),path.join(workspace,file));}catch{return false;}}))throw Object.assign(new Error(`Published path outside declared storage roots: ${file}`),{code:'storage_budget'});
           history.storage.bytes+=writeBytes;history.storage.entries+=writeEntries;persistHistory();
         }
         for(const file of changed){let actual;try{actual=readArtifact(workspace,file).digest;}catch(error){if(error.code!=='ENOENT')throw error;}

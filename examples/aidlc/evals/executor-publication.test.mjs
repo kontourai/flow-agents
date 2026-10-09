@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createDockerExecutor } from '../scripts/executor.mjs';
+import { dispatchStage } from '../scripts/dispatch.mjs';
 import { digest } from '../scripts/compile.mjs';
 
 // This is a local host-port boundary test, not a Docker/provider receipt.
@@ -18,7 +19,7 @@ function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 
   const artifact = '.aidlc/artifacts/code-generation/code-summary.md';
   fs.mkdirSync(path.dirname(path.join(workspace, artifact)), { recursive: true });
   fs.writeFileSync(path.join(workspace, artifact), 'canonical artifact');
-  const request = { workspace, source_root: workspace, run_id: 'publication-fixture', execution: { max_turns: maxTurns, timeout_s: 60, model: 'local-fixture' }, engine_sandbox: { image: `sha256:${'a'.repeat(64)}`, artifact_root: path.join(root, 'artifacts'), storage_budget: storageBudget } };
+  const request = { workspace, source_root: workspace, run_id: 'publication-fixture', execution: { max_turns: maxTurns, timeout_s: 60, model: 'local-fixture' }, engine_sandbox: { image: `sha256:${'a'.repeat(64)}`, artifact_root: path.join(root, 'artifacts'), storage_budget: storageBudget === 'workspace-logical' ? registeredBudget({ roots: [workspace] }) : storageBudget } };
   let fork, calls = 0, dispatch, observedStorageBudget;
   const workerRunner = async (input) => {
     calls++;observedStorageBudget=input.storageBudget;
@@ -153,4 +154,17 @@ test('declared unit resources confine source publication to their scopes',async 
   dispatch.expected_identity=await f.executor.admit(dispatch);
   await assert.rejects(f.executor.execute(dispatch),error=>error.code==='unit_scope'&&/outside declared unit resources/.test(error.message));
   assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'canonical implementation');
+});
+test('the stage pseudo-unit keeps stage-level source authority and publishes',async t=>{
+  const f=fixture(t,{responseStatus:'completed'});
+  const stage={slug:'code-generation',lead_agent:'aidlc-developer-agent',mode:'subagent',source_digest:'a'.repeat(64),produces:['code-summary'],workspace_requires:true,reviewer:undefined};
+  const context={shared:{stage,artifact_targets:[{id:'code-summary',stage:'code-generation',unit:null,path:f.artifact}]},units:{}};
+  const outcome=await dispatchStage({stage,executor:f.executor,context,policy:{}});
+  assert.equal(outcome.status,'completed',JSON.stringify(outcome.units.map(u=>u.error)));
+  assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'worker edit');
+});
+test('logical storage roots are canonicalized before comparison',async t=>{
+  const f=fixture(t,{responseStatus:'completed',storageBudget:'workspace-logical'});
+  await f.execute();
+  assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'worker edit');
 });

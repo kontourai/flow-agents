@@ -184,7 +184,7 @@ export async function runAidlc({request,executor,commandRunner,authority,control
         const input={purpose:'review-disposition',stage:stageId,decision:dispatched,request_digest:binding.request_digest};const grant=await authority?.authorize?.(input);
         if(grant?.authorized&&authority.verify?.(grant.receipt,input)===true&&!unitFlow)dispatched.status='completed';
       }
-      if(dispatched.status!=='completed'){failure={stage:stageId,reason:dispatched.reason==='execution_budget'?'budget_exhausted':dispatched.reason??dispatched.status,detail:dispatched};await refuse(stageId,failure);break;}
+      if(dispatched.status!=='completed'){failure={stage:stageId,reason:dispatched.reason==='execution_budget'||dispatched.reason==='storage_budget'?'budget_exhausted':dispatched.reason??dispatched.status,detail:dispatched};await refuse(stageId,failure);break;}
       if(context.shared.approved_plan_basis?.some(ref=>readArtifact(workspace,ref.path).digest!==ref.digest)){failure={stage:stageId,reason:'approved_plan_changed'};await refuse(stageId,failure);break;}
     }
     const resolved=currentRefs(workspace,artifacts);
@@ -229,5 +229,5 @@ export async function runAidlc({request,executor,commandRunner,authority,control
   }
   const run=await loadRun(request.run_id,controllerRoot);
   return {schema_version:'1.0',run_id:request.run_id,profile,definition_digest:binding.definition_digest,upstream_commit:snapshot.upstream.commit,
-    status:signal?.aborted?'cancelled':run.state.status==='completed'?'completed':failure?.reason==='authority_required'?'waiting':failure?.reason==='budget_exhausted'||visits>stageLimit?'budget_exhausted':'failed',failure,records,executions,canonical_state:run.state,semantic_quality:'not_verified'};
+    status:signal?.aborted?'cancelled':run.state.status==='completed'?'completed':failure?.reason==='authority_required'||failure?.reason==='awaiting_decision'||failure?.reason==='mob_judgment'||failure?.reason==='advisory_review'?'waiting':failure?.reason==='budget_exhausted'||visits>stageLimit?'budget_exhausted':'failed',failure,records,executions,canonical_state:run.state,semantic_quality:'not_verified'};
 }
