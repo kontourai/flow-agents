@@ -1,6 +1,7 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { digest } from './compile.mjs';
+import { snapshotWorkspace } from './workspace.mjs';
 
 const MAX_BYTES = 1024 * 1024;
 const MAX_ARTIFACTS = 512;
@@ -50,7 +51,10 @@ export function observeStage({ snapshot, profile, stage: stageId, root, artifact
     // A skipped upstream stage supplies no invented document. Consumers must
     // take their scope from the selected profile, as the upstream method does.
     if (!producer) continue;
-    observe(instance(artifacts, producer.slug, input.artifact), input.required, inputs, `${producer.slug}/${input.artifact}`);
+    const matches=artifacts.filter(entry=>entry.stage===producer.slug&&entry.id===input.artifact);
+    if(matches.length>1&&new Set(matches.map(entry=>entry.unit??null)).size!==matches.length)throw new Error(`Ambiguous artifact identity ${producer.slug}/${input.artifact}`);
+    if(matches.length)for(const entry of matches)observe(entry,input.required,inputs,`${producer.slug}/${input.artifact}/${entry.unit??'stage'}`);
+    else observe(undefined,input.required,inputs,`${producer.slug}/${input.artifact}`);
   }
   return { schema_version: '1.0', evidence_class: 'artifact-structure-observation',
     upstream_commit: snapshot.upstream.commit, profile, project_type: projectType, stage: stageId,
@@ -61,6 +65,7 @@ export function observeStage({ snapshot, profile, stage: stageId, root, artifact
 
 export function inspectBasis(receipt, root) {
   const changes = [];
+  if(receipt.source_digest){try{if(snapshotWorkspace(root).source_digest!==receipt.source_digest)changes.push(`${receipt.stage}/source`);}catch{changes.push(`${receipt.stage}/source`);}}
   for (const entry of [...receipt.inputs, ...receipt.outputs]) {
     try { if (readArtifact(root, entry.path).digest !== entry.digest) changes.push(`${entry.stage}/${entry.id}`); }
     catch { changes.push(`${entry.stage}/${entry.id}`); }
