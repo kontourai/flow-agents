@@ -10,7 +10,7 @@ Maintain a run-owned artifact index with `{id,stage,path}` entries. Artifact ids
 
 These functions provide structural observations only. `semantic_status` and unexecuted sensors remain `not_verified`. Do not turn structural success into the compiled completion claim, which also demands applicable checks. An adapter must run those checks, preserve their actual verdicts, publish revision- and subject-bound evidence through Surface, attach it through Flow/Flow Agents, then let Flow evaluate the gate.
 
-The lifecycle conductor reobserves artifact bytes before each gate visit and submits direct/transitive invalidations through Surface and Flow. Completed off-cursor reappraisal exposed a defect in published Flow 5.1.3; the integration regression requires the repaired public package before release qualification. Independent branches retain their current evidence.
+The lifecycle conductor reobserves artifact bytes before each gate visit and submits direct/transitive invalidations through Surface and Flow. Completed off-cursor reappraisal exposed a defect in published Flow 5.1.3; the installed-package integration regressions now consume the released Flow 5.1.4 repair. Independent branches retain their current evidence.
 
 ## Review, human decisions and operations
 

@@ -12,7 +12,7 @@
   "canonical_kit_binding": "public-install-and-start-tested",
   "artifact_fingerprints": "implemented",
   "transitive_invalidation_projection": "implemented",
-  "automatic_invalidation_to_flow": "implemented-published-flow-repair-required",
+  "automatic_invalidation_to_flow": "public-lifecycle-tested-on-flow-5.1.4",
   "conditional_stage_resolution": "project-type-and-authorized-explicit-selection",
   "complete_sensor_suite": "component-tested",
   "human_approval_authentication": "exact-operator-policy-receipts-human-channel-required",
