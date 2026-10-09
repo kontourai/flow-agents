@@ -127,3 +127,12 @@ test('normal operator decision resumes a paused summary gate without changing re
  const completed=await runAidlc({request,executor,authority,controllerRoot});assert.equal(completed.status,'completed',JSON.stringify(completed.failure));assert.equal(substantive,1);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('recorded advisory disposition survives durable replay bookkeeping but never changed receipt facts',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aidlc-replay-decision-'));
+ try{const policy={reference:'default',purposes:[]},create=()=>createControllerAuthority({policy,requestDigest:'a'.repeat(64),controllerRoot:root}),input={purpose:'review-disposition',stage:'reviewed',request_digest:'a'.repeat(64),decision:{units:[{id:'u',receipts:[{receipt:{id:'observed',digest:'b'.repeat(64)},replayed:false,persisted:true}],findings:[],dissent:[]}]}};
+ const pending=(await create().authorize(input)).pending;recordControllerDecision({controllerRoot:root,pendingFile:pending.file,reference:'operator accepted current observed review'});
+ const replay=structuredClone(input);replay.decision.units[0].receipts[0].replayed=true;replay.decision.units[0].receipts[0].persisted=false;const authority=create(),grant=await authority.authorize(replay);assert.equal(grant.authorized,true);assert.equal(authority.verify(grant.receipt,replay),true);
+ replay.decision.units[0].receipts[0].receipt.digest='c'.repeat(64);assert.equal((await authority.authorize(replay)).authorized,false);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
