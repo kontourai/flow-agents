@@ -261,7 +261,7 @@ export async function runAidlc({request,executor,commandRunner,authority,control
     }
     const resolved=currentRefs(workspace,artifacts);
     if(stageId==='intent-capture'){
-      const input={purpose:'input-confirmation',stage:stageId,basis:resolved,request_digest:binding.request_digest};const grant=await authority?.authorize?.(input);
+      const input={purpose:'input-confirmation',stage:stageId,basis:resolved,source_digest:snapshotWorkspace(workspace).source_digest,request_digest:binding.request_digest};const grant=await authority?.authorize?.(input);
       if(!grant?.authorized||authority.verify?.(grant.receipt,input)!==true){failure={stage:stageId,reason:'authority_required',detail:grant};await refuse(stageId,failure);break;}
     }
     let observation;

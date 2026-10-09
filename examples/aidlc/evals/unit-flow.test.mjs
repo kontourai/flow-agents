@@ -156,3 +156,10 @@ test('claim revoked between periodic heartbeats refuses publication and completi
  await releaseStepClaim(adapter.runId,{cwd:controllerRoot,claim_id:lease.claim_id,liveness_id:lease.liveness_id,actor:lease.actor,reason:'host-revoked'});finish();
  await assert.rejects(pending,/aborted.*claim authority revoked/);assert.equal(published,false);assert.equal(adapter.signalFor('a').aborted,true);await adapter.close();
 });
+
+test('lease renewals continue through slow source observation until canonical settlement',async t=>{
+ const {adapter}=await fixture(t,undefined,{leaseSeconds:3,renewalIntervalMs:100,snapshotBasis:async()=>{await delay(3500);return basis;}});
+ const lease=await adapter.claim({unit:'a'}),settled=await adapter.release(lease,record('a'));
+ assert.equal(settled.passed,true);assert.equal((await adapter.load()).state.multi_cursor.active_claims.length,0);
+ assert.ok((await adapter.load()).state.multi_cursor.claim_history.filter(event=>event.action==='renewed').length>1);
+});

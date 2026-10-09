@@ -17,7 +17,7 @@ export function createControllerAuthority({policy,requestDigest,controllerRoot})
   const fingerprint=createHash('sha256').update(publicKey.export({type:'spki',format:'der'})).digest('hex');
   const issued=new Map();
   for(const name of fs.readdirSync(authorityRoot).filter(name=>name.endsWith('.json')&&!name.endsWith('.input.json'))){const receipt=JSON.parse(fs.readFileSync(path.join(authorityRoot,name),'utf8'));if(receipt.payload?.issuer===fingerprint&&receipt.payload.request_digest===requestDigest&&verify(null,Buffer.from(JSON.stringify(receipt.payload)),publicKey,Buffer.from(receipt.signature,'base64')))issued.set(receipt.payload.id,receipt);}
-  return {kind:'trusted-host-policy',fingerprint,
+  const port={kind:'trusted-host-policy',fingerprint,
     async authorize(input){
       if(input.request_digest!==requestDigest||!policy.purposes.includes(input.purpose)||input.purpose==='deployment'&&policy.deployment!==true)return {authorized:false,reason:'outside_registered_policy'};
       if(['input-confirmation','summary-confirmation'].includes(input.purpose)){
@@ -45,7 +45,42 @@ export function createControllerAuthority({policy,requestDigest,controllerRoot})
       return {authorized:true,reference:`controller-policy:${payload.id}`,decision_kind:'operator-policy',receipt};
     },
     verify(receipt,input){return !!receipt&&issued.has(receipt.payload?.id)&&receipt.payload.request_digest===requestDigest&&receipt.payload.input_digest===digest(input)&&verify(null,Buffer.from(JSON.stringify(receipt.payload)),publicKey,Buffer.from(receipt.signature,'base64'));},
-    authorizeFinding:async()=>({authorized:false,reason:'finding_requires_specific_owner_disposition'})};
+authorizeFinding:async()=>({authorized:false,reason:'finding_requires_specific_owner_disposition'})};
+  const policyAuthorize=port.authorize;
+  port.authorize=async input=>{
+    if(input.request_digest!==requestDigest)return {authorized:false,reason:'request_binding_mismatch'};
+    const accepted=[...issued.values()].find(receipt=>receipt.payload.kind==='controller-decision'&&receipt.payload.input_digest===digest(input)&&receipt.payload.request_digest===requestDigest);
+    if(accepted)return {authorized:true,reference:`controller-decision:${accepted.payload.id}`,decision_kind:'host-observed-operator-interaction',receipt:accepted};
+    const response=await policyAuthorize(input);if(response.authorized)return response;
+    if(!DECISION_PURPOSES.includes(input.purpose))return response;
+    const pendingRoot=path.join(authorityRoot,'pending');fs.mkdirSync(pendingRoot,{recursive:true,mode:0o700});
+    const id=digest(input),pendingFile=path.join(pendingRoot,`${id}.json`);
+    const payload={version:'1.0',id,kind:'decision-pending',issuer:fingerprint,request_digest:requestDigest,input_digest:id,input:structuredClone(input)};
+    const pending={payload,signature:sign(null,Buffer.from(JSON.stringify(payload)),privateKey).toString('base64')};
+    if(!fs.existsSync(pendingFile))fs.writeFileSync(pendingFile,JSON.stringify(pending)+'\n',{flag:'wx',mode:0o600});
+    return {...response,pending:{input_digest:id,file:pendingFile,purpose:input.purpose,stage:input.stage}};
+  };
+  return port;
+}
+
+const DECISION_PURPOSES=['stage-selection','source-change','summary-confirmation','input-confirmation','code-plan','skeleton-checkpoint','review-disposition','deployment','operation'];
+/** Trusted CLI interaction. This observes an operator action, not a human signature. */
+export function recordControllerDecision({controllerRoot,pendingFile,reference,decision='approve',disposition}) {
+  if(typeof reference!=='string'||!reference.trim()||reference.length>2048||decision!=='approve')throw new Error('Explicit approval and reference required');
+  const root=fs.realpathSync(controllerRoot),authorityRoot=path.join(root,'authority'),file=fs.realpathSync(pendingFile),pendingRoot=fs.realpathSync(path.join(authorityRoot,'pending'));
+  if(path.dirname(file)!==pendingRoot)throw new Error('Decision input must be a retained private pending request');
+  const privateKey=createPrivateKey(fs.readFileSync(path.join(authorityRoot,'host-private-key.pem'))),publicKey=createPublicKey(privateKey);
+  const fingerprint=createHash('sha256').update(publicKey.export({type:'spki',format:'der'})).digest('hex'),pending=JSON.parse(fs.readFileSync(file,'utf8')),input=pending.payload?.input;
+  if(pending.payload?.kind!=='decision-pending'||pending.payload.issuer!==fingerprint||!input||pending.payload.input_digest!==digest(input)||pending.payload.id!==digest(input)||path.basename(file)!==`${digest(input)}.json`||pending.payload.request_digest!==input.request_digest||!DECISION_PURPOSES.includes(input.purpose)||!verify(null,Buffer.from(JSON.stringify(pending.payload)),publicKey,Buffer.from(pending.signature??'','base64')))throw new Error('Pending decision signature or exact binding invalid');
+  const bindingFile=path.join(root,'binding.json');if(fs.existsSync(bindingFile)&&JSON.parse(fs.readFileSync(bindingFile,'utf8')).request_digest!==input.request_digest)throw new Error('Pending decision request is stale');
+  const dissent=[...(input.dissent??[]),...(input.decision?.units?.flatMap(unit=>unit.dissent??[])??[])];
+  const findings=input.findings??input.decision?.units?.flatMap(unit=>unit.findings??[])??[];
+  if(dissent.some(objection=>objection.kind==='judgment')&&disposition?.accept_judgment_dissent!==true)throw new Error('Judgment dissent requires explicit operator disposition');
+  if(findings.some(finding=>finding.status==='open'&&!disposition?.accepted_finding_ids?.includes(finding.id)))throw new Error('Open findings require explicit operator disposition by id');
+  const payload={version:'1.0',id:randomUUID(),kind:'controller-decision',issuer:fingerprint,reference,decision_kind:'host-observed-operator-interaction',request_digest:input.request_digest,purpose:input.purpose,stage:input.stage,input_digest:digest(input),disposition:disposition??null,issued_at:new Date().toISOString()};
+  const receipt={payload,signature:sign(null,Buffer.from(JSON.stringify(payload)),privateKey).toString('base64')};
+  fs.writeFileSync(path.join(authorityRoot,`${payload.id}.input.json`),JSON.stringify(input,null,2)+'\n',{flag:'wx',mode:0o600});fs.writeFileSync(path.join(authorityRoot,`${payload.id}.json`),JSON.stringify(receipt)+'\n',{flag:'wx',mode:0o600});
+  return {reference:`controller-decision:${payload.id}`,decision_kind:'host-observed-operator-interaction',receipt};
 }
 
 export function buildExecutionPrompt({dispatch,workspace,sourceDigest}){
