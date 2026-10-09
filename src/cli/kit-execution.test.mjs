@@ -17,11 +17,19 @@ test('installed execution invokes declared generic entry and refuses drift or cr
   fs.writeFileSync(requestFile,JSON.stringify({schema:'kontour.kit.execution_request',version:'1.0',kit_id:'portable'}));
   assert.equal((await executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:path.join(root,'private')})).status,'completed');
   const cli=spawnSync(process.execPath,[CLI,'kit','run','portable','--dest',dest,'--request',requestFile,'--controller-root',path.join(root,'private')],{encoding:'utf8'});assert.equal(cli.status,0,cli.stderr);
+  fs.writeFileSync(path.join(source,'helper.mjs'),'export const version=2;');
+  fs.writeFileSync(path.join(source,'entry.mjs'),'import {version} from "./helper.mjs";export async function execute(){return {status:"completed",version};}');
+  const update=spawnSync(process.execPath,[CLI,'kit','install',source,'--dest',dest,'--update'],{encoding:'utf8'});assert.equal(update.status,0,update.stderr);
+  assert.equal((await executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root})).version,2);
+  fs.writeFileSync(path.join(source,'helper.mjs'),'export const version=3;');
+  const updateAgain=spawnSync(process.execPath,[CLI,'kit','install',source,'--dest',dest,'--update'],{encoding:'utf8'});assert.equal(updateAgain.status,0,updateAgain.stderr);
+  assert.equal((await executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root})).version,3);
   fs.writeFileSync(requestFile,JSON.stringify({schema:'kontour.kit.execution_request',version:'1.0',kit_id:'other'}));await assert.rejects(executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root}),/Request must bind/);
+  const unhashed=path.join(dest,'kits/local/repositories/portable/__pycache__');fs.mkdirSync(unhashed);fs.writeFileSync(path.join(unhashed,'helper.mjs'),'export const version=99');await assert.rejects(executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root}),/unhashed entries/);fs.rmSync(unhashed,{recursive:true});
   fs.appendFileSync(path.join(dest,'kits/local/repositories/portable/entry.mjs'),'\n// drift');await assert.rejects(executeInstalledKit({kitId:'portable',dest,requestFile,controllerRoot:root}),/integrity refused/);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 test('descriptor excludes traversal and missing execution exports',()=>{
- for(const module of ['../entry.mjs','/tmp/entry.mjs','sub/../entry.mjs','sub\\entry.mjs'])assert.throws(()=>parseKitExecution({execution:{...descriptor,module}}));
+ for(const module of ['../entry.mjs','/tmp/entry.mjs','sub/../entry.mjs','sub\\entry.mjs','__pycache__/entry.mjs','.git/entry.mjs'])assert.throws(()=>parseKitExecution({execution:{...descriptor,module}}));
  assert.throws(()=>parseKitExecution({execution:{...descriptor,export:'bad-name'}}));
 });
