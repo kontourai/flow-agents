@@ -9,9 +9,24 @@ import { KIT_ROOT, requestBindingDigest } from './compile.mjs';
 
 export {runAidlc};
 
+function privateController(workspace,controllerRoot){
+  workspace=fs.realpathSync(workspace);controllerRoot=path.resolve(controllerRoot);
+  // Resolve every existing parent before admission, so aliases cannot place
+  // host authority or credentials inside a model-visible workspace.
+  const missing=[];let ancestor=controllerRoot;
+  while(!fs.existsSync(ancestor)){missing.unshift(path.basename(ancestor));const next=path.dirname(ancestor);if(next===ancestor)throw new Error('Controller ancestor unavailable');ancestor=next;}
+  const resolved=path.join(fs.realpathSync(ancestor),...missing);
+  const overlaps=(a,b)=>a===b||a.startsWith(b+path.sep)||b.startsWith(a+path.sep);
+  if(overlaps(workspace,resolved))throw new Error('Controller state must be separate from model workspace');
+  fs.mkdirSync(resolved,{recursive:true,mode:0o700});
+  const stat=fs.lstatSync(resolved);if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error('Controller must be a private regular directory');
+  fs.chmodSync(resolved,0o700);return resolved;
+}
+
 export async function executeKit({request,controllerRoot,workerRunner}){
   if(request.schema!=='kontour.kit.execution_request'||request.version!=='1.0')throw new Error('Unsupported kit execution request');
   if(request.kit_id!=='aidlc')throw new Error('This entry executes the aidlc kit');
+  controllerRoot=privateController(request.workspace,controllerRoot);
   const executor=createDockerExecutor({request,controllerRoot,workerRunner});
   const authority=createControllerAuthority({policy:request.parameters?.authority_policy,requestDigest:requestBindingDigest(request),controllerRoot});
   executor.decide=async input=>{const proposal={...input,purpose:'review-disposition',request_digest:requestBindingDigest(request)};const grant=await authority.authorize(proposal);const verified=grant.authorized&&authority.verify(grant.receipt,proposal);return {authorized:verified,decision:verified?'accept':'defer',reference:grant.reference,receipt:grant.receipt};};
@@ -38,8 +53,7 @@ export async function executeRequestFile({requestFile,controllerRoot,authFile,wo
   if(request.schema!=='kontour.kit.execution_request'||request.version!=='1.0'||request.kit_id!=='aidlc')throw new Error('Unsupported kit execution request');
   request.workspace=fs.realpathSync(request.workspace);
   request.source_root=fs.realpathSync(request.source_root??KIT_ROOT);
-  controllerRoot=path.resolve(controllerRoot);
-  fs.mkdirSync(controllerRoot,{recursive:true,mode:0o700});
+  controllerRoot=privateController(request.workspace,controllerRoot);
   const config=request.engine_sandbox;
   if(!config?.image)throw new Error('Explicit immutable worker image required');
   if(!workerRunner)({runCodexDockerWorker:workerRunner}=await import('@kontourai/flow-agents/docker-worker'));
