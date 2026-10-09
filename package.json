@@ -107,7 +107,6 @@
     "flow-agents-kit": "build/src/cli.js"
   },
   "files": [
-    "examples/aidlc/",
     ".github/",
     ".githooks/",
     "AGENTS.md",
@@ -154,8 +153,6 @@
     "build": "npm run knowledge:yaml:check && tsc -p tsconfig.json && node build/src/cli.js capability-matrix --json-only && node build/src/tools/generate-install-identity.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:unit": "npm run build --silent && node build/src/cli.js build-bundles && node scripts/build-test-support.mjs && node --import ./src/cli/unit-test-state.mjs --test src/cli/*.test.mjs",
-    "test:aidlc": "npm run build --silent && node --test src/cli/aidlc-reference-kit.test.mjs src/cli/installed-kit-run-binding.test.mjs",
-    "eval:aidlc": "node examples/aidlc/scripts/compile.mjs --check && node examples/aidlc/scripts/compare.mjs method && node examples/aidlc/evals/public-flow-conformance.mjs",
     "validate:source": "npm run build --silent && node build/src/cli.js validate-source",
     "validate:artifacts": "npm run build --silent && node build/src/cli/validate-workflow-artifacts.js",
     "context-map": "npm run build --silent && node build/src/cli.js context-map",
