@@ -53,3 +53,17 @@ test('a successful kit response cannot hide live invocation-owned workers',async
   const calls=fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);assert.ok(calls[0].includes('--filter'));assert.match(calls[0].at(-1),/^label=kontour.worker.owner=/);assert.equal(calls[1][0],'rm');assert.equal(calls[2][0],'ps');
  }finally{process.env.PATH=prior;fs.rmSync(root,{recursive:true,force:true});}
 });
+test('public kit CLI maps ordinary failed and waiting results to the observed process exit',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'entry-exits-')),source=path.join(root,'kit'),dest=path.join(root,'dest');fs.mkdirSync(source);fs.mkdirSync(dest);
+ try{
+  fs.writeFileSync(path.join(source,'kit.json'),JSON.stringify({schema_version:'1.0',id:'outcomes',name:'Outcomes',flows:[{id:'outcomes.check',path:'check.flow.json'}],execution:descriptor}));
+  fs.writeFileSync(path.join(source,'check.flow.json'),JSON.stringify({id:'outcomes.check',version:'1',steps:[{id:'check',next:null}],gates:{}}));
+  const requestFile=path.join(root,'request.json');fs.writeFileSync(requestFile,JSON.stringify({schema:'kontour.kit.execution_request',version:'1.0',kit_id:'outcomes',execution:{timeout_s:5}}));
+  for(const [status,expected]of [['failed',1],['cancelled',1],['budget_exhausted',1],['unknown',1],['waiting',0],['completed',0]]){
+   fs.writeFileSync(path.join(source,'entry.mjs'),`export async function execute(){return ${JSON.stringify({schema:'kontour.kit.execution_result',version:'1.0',kit_id:'outcomes',status})};}`);
+   const install=spawnSync(process.execPath,[CLI,'kit','install',source,'--dest',dest,'--update'],{encoding:'utf8'});assert.equal(install.status,0,install.stderr);
+   const run=spawnSync(process.execPath,[CLI,'kit','run','outcomes','--dest',dest,'--request',requestFile,'--controller-root',path.join(root,'private')],{encoding:'utf8'});
+   assert.equal(run.status,expected,`${status}: ${run.stderr}`);assert.equal(JSON.parse(run.stdout).status,status);
+  }
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
