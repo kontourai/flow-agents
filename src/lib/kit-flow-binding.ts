@@ -55,6 +55,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isWithinRuntimeArtifactRoot } from "./declared-artifact-roots.js";
+import { observeInstalledKitIntegrity } from "../flow-kit/content-hash.js";
 
 /** The identifier shape `resolveFlowFilePath` actually enforces on both parts of a flow id. */
 const SLUG_RE = /^[a-zA-Z0-9_-]+$/;
@@ -80,14 +81,15 @@ export interface KitFlowBinding {
   flowName: string;
   /** Absolute, canonical root containing the `kits/` tree this binding was resolved in. */
   sourceRoot: string;
-  /** Absolute, canonical `<sourceRoot>/kits`. */
+  /** Directory whose immediate children are kit roots: kits/ or kits/local/repositories/. */
   kitsRoot: string;
   /** Absolute path of the declaring kit's manifest. */
   manifestPath: string;
   /** The declaring kit's parsed manifest — the producer-binding surface for this flow. */
   manifest: Record<string, unknown>;
   /**
-   * `kits/<kit>/<declared path>`, POSIX-relative to `sourceRoot`. This is what the run adapter's
+   * The declared definition's POSIX path relative to `sourceRoot`, retaining its install namespace.
+   * This is what the run adapter's
    * `flowRelativePath` constant used to hardcode for one kit.
    */
   flowRelativePath: string;
@@ -220,9 +222,12 @@ export function resolveKitFlowBinding(flowId: string, sourceRoots: readonly stri
     if (!kitsRoot) continue;
     const declarations = kitManifestFlowDeclarations(kitsRoot, parts.kitId);
     const declaration = declarations?.find((candidate) => candidate.flowId === flowId);
-    if (!declaration) continue;
-    const binding = bindingInKitsRoot(declaration, root, kitsRoot);
-    if (binding) return binding;
+    if (declaration) {
+      const binding = bindingInKitsRoot(declaration, root, kitsRoot);
+      if (binding) return binding;
+    }
+    const installed = declaredInstalledKitFlowBindings(root).find((binding) => binding.flowId === flowId);
+    if (installed) return installed;
   }
   return null;
 }
@@ -254,9 +259,61 @@ function bindingInKitsRoot(
     kitsRoot,
     manifestPath,
     manifest,
-    flowRelativePath: [KITS_DIR, declaration.kitId, ...declaration.relativePath.split(path.sep)].join("/"),
+    flowRelativePath: path.relative(sourceRoot, definitionPath).split(path.sep).join("/"),
     definitionPath,
   };
+}
+
+/**
+ * Installed local kits retain the installer's namespace; they are not mirrored into kits/<id>.
+ * A registry pointer is not authority by itself: use the installer's own integrity observer,
+ * which checks identity, canonical installed_path, non-symlink containment, and the content hash.
+ * Changed installed bytes require an explicit kit update before canonical execution.
+ */
+function readInstalledKitEntries(sourceRoot: string): Record<string, unknown>[] {
+  const root = canonicalPathOrNull(sourceRoot);
+  if (!root || isWithinRuntimeArtifactRoot(root)) return [];
+  let registryPath = root;
+  try {
+    for (const component of ["kits", "local", "installed-kits.json"]) {
+      registryPath = path.join(registryPath, component);
+      const stat = fs.lstatSync(registryPath);
+      if (stat.isSymbolicLink()) return [];
+      if (component === "installed-kits.json" ? !stat.isFile() : !stat.isDirectory()) return [];
+    }
+  } catch { return []; }
+  const registry = readJsonObject(registryPath);
+  if (!registry || registry["schema_version"] !== "1.0" || !Array.isArray(registry["kits"])) return [];
+  const entries = registry["kits"] as unknown[];
+  const ids = new Set<string>();
+  // Ambiguous or malformed identity is refused wholesale rather than choosing an arbitrary copy.
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry["id"] !== "string" || !/^[a-z][a-z0-9-]*$/.test(entry["id"]) || ids.has(entry["id"])) return [];
+    ids.add(entry["id"]);
+  }
+  return entries as Record<string, unknown>[];
+}
+
+/** Registration reserves a local kit namespace even when its copied bytes have drifted. */
+export function hasRegisteredInstalledKit(sourceRoot: string, kitId: string): boolean {
+  return readInstalledKitEntries(sourceRoot).some((entry) => entry["id"] === kitId);
+}
+
+export function declaredInstalledKitFlowBindings(sourceRoot: string): KitFlowBinding[] {
+  const root = canonicalPathOrNull(sourceRoot);
+  if (!root) return [];
+  const entries = readInstalledKitEntries(root);
+  const kitsRoot = path.join(root, "kits", "local", "repositories");
+  const bindings: KitFlowBinding[] = [];
+  for (const entry of entries as Record<string, unknown>[]) {
+    if (observeInstalledKitIntegrity(entry, root).state !== "installed") continue;
+    const kitId = entry["id"] as string;
+    for (const declaration of kitManifestFlowDeclarations(kitsRoot, kitId) ?? []) {
+      const binding = bindingInKitsRoot(declaration, root, kitsRoot);
+      if (binding) bindings.push(binding);
+    }
+  }
+  return bindings;
 }
 
 /**
@@ -433,6 +490,11 @@ export function declaredKitFlowBindings(sourceRoots: readonly string[]): KitFlow
         seen.add(declaration.flowId);
         bindings.push(binding);
       }
+    }
+    for (const binding of declaredInstalledKitFlowBindings(root)) {
+      if (seen.has(binding.flowId)) continue;
+      seen.add(binding.flowId);
+      bindings.push(binding);
     }
   }
   return bindings;

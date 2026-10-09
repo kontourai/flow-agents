@@ -1,0 +1,6849 @@
+{
+  "schema_version": "1.0",
+  "id": "aidlc",
+  "name": "AI-DLC Reference Kit",
+  "description": "Pinned AWS AI-DLC methodology expressed as Kontour flows, with differential conformance and explicit capability gaps.",
+  "flows": [
+    {
+      "id": "aidlc.bugfix",
+      "path": "flows/bugfix.flow.json",
+      "description": "AI-DLC bugfix profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.classic",
+      "path": "flows/classic.flow.json",
+      "description": "AI-DLC classic profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.enterprise",
+      "path": "flows/enterprise.flow.json",
+      "description": "AI-DLC enterprise profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.express",
+      "path": "flows/express.flow.json",
+      "description": "AI-DLC express profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.feature",
+      "path": "flows/feature.flow.json",
+      "description": "AI-DLC feature profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.infra",
+      "path": "flows/infra.flow.json",
+      "description": "AI-DLC infra profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.mvp",
+      "path": "flows/mvp.flow.json",
+      "description": "AI-DLC mvp profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.poc",
+      "path": "flows/poc.flow.json",
+      "description": "AI-DLC poc profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.refactor",
+      "path": "flows/refactor.flow.json",
+      "description": "AI-DLC refactor profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.security-patch",
+      "path": "flows/security-patch.flow.json",
+      "description": "AI-DLC security-patch profile; pinned upstream stage selection."
+    },
+    {
+      "id": "aidlc.workshop",
+      "path": "flows/workshop.flow.json",
+      "description": "AI-DLC workshop profile; pinned upstream stage selection."
+    }
+  ],
+  "skills": [
+    {
+      "id": "aidlc.aidlc-workspace-scaffold",
+      "path": "skills/aidlc-workspace-scaffold/SKILL.md",
+      "description": "Workspace Scaffold"
+    },
+    {
+      "id": "aidlc.aidlc-workspace-detection",
+      "path": "skills/aidlc-workspace-detection/SKILL.md",
+      "description": "Workspace Detection"
+    },
+    {
+      "id": "aidlc.aidlc-state-init",
+      "path": "skills/aidlc-state-init/SKILL.md",
+      "description": "State Initialization"
+    },
+    {
+      "id": "aidlc.aidlc-intent-capture",
+      "path": "skills/aidlc-intent-capture/SKILL.md",
+      "description": "Intent Capture & Framing"
+    },
+    {
+      "id": "aidlc.aidlc-market-research",
+      "path": "skills/aidlc-market-research/SKILL.md",
+      "description": "Market Research"
+    },
+    {
+      "id": "aidlc.aidlc-feasibility",
+      "path": "skills/aidlc-feasibility/SKILL.md",
+      "description": "Feasibility & Constraints"
+    },
+    {
+      "id": "aidlc.aidlc-scope-definition",
+      "path": "skills/aidlc-scope-definition/SKILL.md",
+      "description": "Scope Definition"
+    },
+    {
+      "id": "aidlc.aidlc-team-formation",
+      "path": "skills/aidlc-team-formation/SKILL.md",
+      "description": "Team Formation"
+    },
+    {
+      "id": "aidlc.aidlc-rough-mockups",
+      "path": "skills/aidlc-rough-mockups/SKILL.md",
+      "description": "Rough Mockups"
+    },
+    {
+      "id": "aidlc.aidlc-approval-handoff",
+      "path": "skills/aidlc-approval-handoff/SKILL.md",
+      "description": "Approval & Handoff"
+    },
+    {
+      "id": "aidlc.aidlc-reverse-engineering",
+      "path": "skills/aidlc-reverse-engineering/SKILL.md",
+      "description": "Reverse Engineering"
+    },
+    {
+      "id": "aidlc.aidlc-practices-discovery",
+      "path": "skills/aidlc-practices-discovery/SKILL.md",
+      "description": "Practices Discovery"
+    },
+    {
+      "id": "aidlc.aidlc-requirements-analysis",
+      "path": "skills/aidlc-requirements-analysis/SKILL.md",
+      "description": "Requirements Analysis"
+    },
+    {
+      "id": "aidlc.aidlc-user-stories",
+      "path": "skills/aidlc-user-stories/SKILL.md",
+      "description": "User Stories"
+    },
+    {
+      "id": "aidlc.aidlc-refined-mockups",
+      "path": "skills/aidlc-refined-mockups/SKILL.md",
+      "description": "Refined Mockups"
+    },
+    {
+      "id": "aidlc.aidlc-domain-design",
+      "path": "skills/aidlc-domain-design/SKILL.md",
+      "description": "Domain Design"
+    },
+    {
+      "id": "aidlc.aidlc-units-generation",
+      "path": "skills/aidlc-units-generation/SKILL.md",
+      "description": "Units Generation"
+    },
+    {
+      "id": "aidlc.aidlc-contract-design",
+      "path": "skills/aidlc-contract-design/SKILL.md",
+      "description": "Contract Design"
+    },
+    {
+      "id": "aidlc.aidlc-delivery-planning",
+      "path": "skills/aidlc-delivery-planning/SKILL.md",
+      "description": "Delivery Planning"
+    },
+    {
+      "id": "aidlc.aidlc-functional-design",
+      "path": "skills/aidlc-functional-design/SKILL.md",
+      "description": "Functional Design"
+    },
+    {
+      "id": "aidlc.aidlc-nfr-requirements",
+      "path": "skills/aidlc-nfr-requirements/SKILL.md",
+      "description": "NFR Requirements"
+    },
+    {
+      "id": "aidlc.aidlc-nfr-design",
+      "path": "skills/aidlc-nfr-design/SKILL.md",
+      "description": "NFR Design"
+    },
+    {
+      "id": "aidlc.aidlc-infrastructure-design",
+      "path": "skills/aidlc-infrastructure-design/SKILL.md",
+      "description": "Infrastructure Design"
+    },
+    {
+      "id": "aidlc.aidlc-code-generation",
+      "path": "skills/aidlc-code-generation/SKILL.md",
+      "description": "Code Generation"
+    },
+    {
+      "id": "aidlc.aidlc-build-and-test",
+      "path": "skills/aidlc-build-and-test/SKILL.md",
+      "description": "Build and Test"
+    },
+    {
+      "id": "aidlc.aidlc-ci-pipeline",
+      "path": "skills/aidlc-ci-pipeline/SKILL.md",
+      "description": "CI Pipeline"
+    },
+    {
+      "id": "aidlc.aidlc-deployment-pipeline",
+      "path": "skills/aidlc-deployment-pipeline/SKILL.md",
+      "description": "Deployment Pipeline"
+    },
+    {
+      "id": "aidlc.aidlc-environment-provisioning",
+      "path": "skills/aidlc-environment-provisioning/SKILL.md",
+      "description": "Environment Provisioning"
+    },
+    {
+      "id": "aidlc.aidlc-deployment-execution",
+      "path": "skills/aidlc-deployment-execution/SKILL.md",
+      "description": "Deployment Execution"
+    },
+    {
+      "id": "aidlc.aidlc-observability-setup",
+      "path": "skills/aidlc-observability-setup/SKILL.md",
+      "description": "Observability Setup"
+    },
+    {
+      "id": "aidlc.aidlc-incident-response",
+      "path": "skills/aidlc-incident-response/SKILL.md",
+      "description": "Incident Response"
+    },
+    {
+      "id": "aidlc.aidlc-performance-validation",
+      "path": "skills/aidlc-performance-validation/SKILL.md",
+      "description": "Performance Validation"
+    },
+    {
+      "id": "aidlc.aidlc-feedback-optimization",
+      "path": "skills/aidlc-feedback-optimization/SKILL.md",
+      "description": "Feedback & Optimization"
+    }
+  ],
+  "docs": [
+    {
+      "path": "docs/README.md"
+    },
+    {
+      "path": "docs/execution.md"
+    },
+    {
+      "path": "docs/methodology.md"
+    },
+    {
+      "path": "docs/parity.json"
+    }
+  ],
+  "assets": [
+    {
+      "path": "upstream/snapshot.json"
+    },
+    {
+      "path": "upstream/LICENSE-MIT-0"
+    },
+    {
+      "path": "scripts/compile.mjs"
+    },
+    {
+      "path": "scripts/artifacts.mjs"
+    },
+    {
+      "path": "scripts/compare.mjs"
+    },
+    {
+      "path": "scripts/capture-run.mjs"
+    },
+    {
+      "path": "evals/corpus.json"
+    }
+  ],
+  "evals": [
+    {
+      "path": "evals/public-flow-conformance.mjs"
+    }
+  ],
+  "flow_step_actions": [
+    {
+      "flow_id": "aidlc.bugfix",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.bugfix",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.bugfix",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.bugfix",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.bugfix",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.bugfix",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.bugfix",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.bugfix",
+      "step_id": "deployment-pipeline",
+      "skills": [
+        "aidlc-deployment-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-pipeline.json"
+      ],
+      "expectation_ids": [
+        "deployment-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-pipeline.json",
+          "expectation_ids": [
+            "deployment-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.bugfix",
+      "step_id": "deployment-execution",
+      "skills": [
+        "aidlc-deployment-execution"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-execution.json"
+      ],
+      "expectation_ids": [
+        "deployment-execution-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-execution-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-execution.json",
+          "expectation_ids": [
+            "deployment-execution-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "practices-discovery",
+      "skills": [
+        "aidlc-practices-discovery"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--practices-discovery.json"
+      ],
+      "expectation_ids": [
+        "practices-discovery-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "practices-discovery-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--practices-discovery.json",
+          "expectation_ids": [
+            "practices-discovery-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "user-stories",
+      "skills": [
+        "aidlc-user-stories"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--user-stories.json"
+      ],
+      "expectation_ids": [
+        "user-stories-completion",
+        "user-stories-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "user-stories-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "user-stories-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--user-stories.json",
+          "expectation_ids": [
+            "user-stories-completion",
+            "user-stories-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "refined-mockups",
+      "skills": [
+        "aidlc-refined-mockups"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--refined-mockups.json"
+      ],
+      "expectation_ids": [
+        "refined-mockups-completion",
+        "refined-mockups-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "refined-mockups-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "refined-mockups-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--refined-mockups.json",
+          "expectation_ids": [
+            "refined-mockups-completion",
+            "refined-mockups-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "domain-design",
+      "skills": [
+        "aidlc-domain-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--domain-design.json"
+      ],
+      "expectation_ids": [
+        "domain-design-completion",
+        "domain-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "domain-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "domain-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--domain-design.json",
+          "expectation_ids": [
+            "domain-design-completion",
+            "domain-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "units-generation",
+      "skills": [
+        "aidlc-units-generation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--units-generation.json"
+      ],
+      "expectation_ids": [
+        "units-generation-completion",
+        "units-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "units-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "units-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--units-generation.json",
+          "expectation_ids": [
+            "units-generation-completion",
+            "units-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "contract-design",
+      "skills": [
+        "aidlc-contract-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--contract-design.json"
+      ],
+      "expectation_ids": [
+        "contract-design-completion",
+        "contract-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "contract-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "contract-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--contract-design.json",
+          "expectation_ids": [
+            "contract-design-completion",
+            "contract-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "delivery-planning",
+      "skills": [
+        "aidlc-delivery-planning"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--delivery-planning.json"
+      ],
+      "expectation_ids": [
+        "delivery-planning-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "delivery-planning-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--delivery-planning.json",
+          "expectation_ids": [
+            "delivery-planning-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "functional-design",
+      "skills": [
+        "aidlc-functional-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--functional-design.json"
+      ],
+      "expectation_ids": [
+        "functional-design-completion",
+        "functional-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "functional-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "functional-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--functional-design.json",
+          "expectation_ids": [
+            "functional-design-completion",
+            "functional-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "nfr-requirements",
+      "skills": [
+        "aidlc-nfr-requirements"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-requirements.json"
+      ],
+      "expectation_ids": [
+        "nfr-requirements-completion",
+        "nfr-requirements-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-requirements-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-requirements-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-requirements.json",
+          "expectation_ids": [
+            "nfr-requirements-completion",
+            "nfr-requirements-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "nfr-design",
+      "skills": [
+        "aidlc-nfr-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-design.json"
+      ],
+      "expectation_ids": [
+        "nfr-design-completion",
+        "nfr-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-design.json",
+          "expectation_ids": [
+            "nfr-design-completion",
+            "nfr-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "infrastructure-design",
+      "skills": [
+        "aidlc-infrastructure-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--infrastructure-design.json"
+      ],
+      "expectation_ids": [
+        "infrastructure-design-completion",
+        "infrastructure-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "infrastructure-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "infrastructure-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--infrastructure-design.json",
+          "expectation_ids": [
+            "infrastructure-design-completion",
+            "infrastructure-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.classic",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "intent-capture",
+      "skills": [
+        "aidlc-intent-capture"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--intent-capture.json"
+      ],
+      "expectation_ids": [
+        "intent-capture-completion",
+        "intent-capture-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "intent-capture-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "intent-capture-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--intent-capture.json",
+          "expectation_ids": [
+            "intent-capture-completion",
+            "intent-capture-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "market-research",
+      "skills": [
+        "aidlc-market-research"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--market-research.json"
+      ],
+      "expectation_ids": [
+        "market-research-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "market-research-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--market-research.json",
+          "expectation_ids": [
+            "market-research-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "feasibility",
+      "skills": [
+        "aidlc-feasibility"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--feasibility.json"
+      ],
+      "expectation_ids": [
+        "feasibility-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "feasibility-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--feasibility.json",
+          "expectation_ids": [
+            "feasibility-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "scope-definition",
+      "skills": [
+        "aidlc-scope-definition"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--scope-definition.json"
+      ],
+      "expectation_ids": [
+        "scope-definition-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "scope-definition-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--scope-definition.json",
+          "expectation_ids": [
+            "scope-definition-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "team-formation",
+      "skills": [
+        "aidlc-team-formation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--team-formation.json"
+      ],
+      "expectation_ids": [
+        "team-formation-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "team-formation-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--team-formation.json",
+          "expectation_ids": [
+            "team-formation-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "rough-mockups",
+      "skills": [
+        "aidlc-rough-mockups"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--rough-mockups.json"
+      ],
+      "expectation_ids": [
+        "rough-mockups-completion",
+        "rough-mockups-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "rough-mockups-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "rough-mockups-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--rough-mockups.json",
+          "expectation_ids": [
+            "rough-mockups-completion",
+            "rough-mockups-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "approval-handoff",
+      "skills": [
+        "aidlc-approval-handoff"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--approval-handoff.json"
+      ],
+      "expectation_ids": [
+        "approval-handoff-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "approval-handoff-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--approval-handoff.json",
+          "expectation_ids": [
+            "approval-handoff-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "practices-discovery",
+      "skills": [
+        "aidlc-practices-discovery"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--practices-discovery.json"
+      ],
+      "expectation_ids": [
+        "practices-discovery-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "practices-discovery-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--practices-discovery.json",
+          "expectation_ids": [
+            "practices-discovery-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "user-stories",
+      "skills": [
+        "aidlc-user-stories"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--user-stories.json"
+      ],
+      "expectation_ids": [
+        "user-stories-completion",
+        "user-stories-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "user-stories-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "user-stories-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--user-stories.json",
+          "expectation_ids": [
+            "user-stories-completion",
+            "user-stories-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "refined-mockups",
+      "skills": [
+        "aidlc-refined-mockups"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--refined-mockups.json"
+      ],
+      "expectation_ids": [
+        "refined-mockups-completion",
+        "refined-mockups-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "refined-mockups-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "refined-mockups-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--refined-mockups.json",
+          "expectation_ids": [
+            "refined-mockups-completion",
+            "refined-mockups-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "domain-design",
+      "skills": [
+        "aidlc-domain-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--domain-design.json"
+      ],
+      "expectation_ids": [
+        "domain-design-completion",
+        "domain-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "domain-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "domain-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--domain-design.json",
+          "expectation_ids": [
+            "domain-design-completion",
+            "domain-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "units-generation",
+      "skills": [
+        "aidlc-units-generation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--units-generation.json"
+      ],
+      "expectation_ids": [
+        "units-generation-completion",
+        "units-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "units-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "units-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--units-generation.json",
+          "expectation_ids": [
+            "units-generation-completion",
+            "units-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "contract-design",
+      "skills": [
+        "aidlc-contract-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--contract-design.json"
+      ],
+      "expectation_ids": [
+        "contract-design-completion",
+        "contract-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "contract-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "contract-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--contract-design.json",
+          "expectation_ids": [
+            "contract-design-completion",
+            "contract-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "delivery-planning",
+      "skills": [
+        "aidlc-delivery-planning"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--delivery-planning.json"
+      ],
+      "expectation_ids": [
+        "delivery-planning-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "delivery-planning-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--delivery-planning.json",
+          "expectation_ids": [
+            "delivery-planning-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "functional-design",
+      "skills": [
+        "aidlc-functional-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--functional-design.json"
+      ],
+      "expectation_ids": [
+        "functional-design-completion",
+        "functional-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "functional-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "functional-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--functional-design.json",
+          "expectation_ids": [
+            "functional-design-completion",
+            "functional-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "nfr-requirements",
+      "skills": [
+        "aidlc-nfr-requirements"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-requirements.json"
+      ],
+      "expectation_ids": [
+        "nfr-requirements-completion",
+        "nfr-requirements-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-requirements-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-requirements-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-requirements.json",
+          "expectation_ids": [
+            "nfr-requirements-completion",
+            "nfr-requirements-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "nfr-design",
+      "skills": [
+        "aidlc-nfr-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-design.json"
+      ],
+      "expectation_ids": [
+        "nfr-design-completion",
+        "nfr-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-design.json",
+          "expectation_ids": [
+            "nfr-design-completion",
+            "nfr-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "infrastructure-design",
+      "skills": [
+        "aidlc-infrastructure-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--infrastructure-design.json"
+      ],
+      "expectation_ids": [
+        "infrastructure-design-completion",
+        "infrastructure-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "infrastructure-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "infrastructure-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--infrastructure-design.json",
+          "expectation_ids": [
+            "infrastructure-design-completion",
+            "infrastructure-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "ci-pipeline",
+      "skills": [
+        "aidlc-ci-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--ci-pipeline.json"
+      ],
+      "expectation_ids": [
+        "ci-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "ci-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--ci-pipeline.json",
+          "expectation_ids": [
+            "ci-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "deployment-pipeline",
+      "skills": [
+        "aidlc-deployment-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-pipeline.json"
+      ],
+      "expectation_ids": [
+        "deployment-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-pipeline.json",
+          "expectation_ids": [
+            "deployment-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "environment-provisioning",
+      "skills": [
+        "aidlc-environment-provisioning"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--environment-provisioning.json"
+      ],
+      "expectation_ids": [
+        "environment-provisioning-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "environment-provisioning-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--environment-provisioning.json",
+          "expectation_ids": [
+            "environment-provisioning-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "deployment-execution",
+      "skills": [
+        "aidlc-deployment-execution"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-execution.json"
+      ],
+      "expectation_ids": [
+        "deployment-execution-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-execution-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-execution.json",
+          "expectation_ids": [
+            "deployment-execution-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "observability-setup",
+      "skills": [
+        "aidlc-observability-setup"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--observability-setup.json"
+      ],
+      "expectation_ids": [
+        "observability-setup-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "observability-setup-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--observability-setup.json",
+          "expectation_ids": [
+            "observability-setup-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "incident-response",
+      "skills": [
+        "aidlc-incident-response"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--incident-response.json"
+      ],
+      "expectation_ids": [
+        "incident-response-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "incident-response-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--incident-response.json",
+          "expectation_ids": [
+            "incident-response-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "performance-validation",
+      "skills": [
+        "aidlc-performance-validation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--performance-validation.json"
+      ],
+      "expectation_ids": [
+        "performance-validation-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "performance-validation-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--performance-validation.json",
+          "expectation_ids": [
+            "performance-validation-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.enterprise",
+      "step_id": "feedback-optimization",
+      "skills": [
+        "aidlc-feedback-optimization"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--feedback-optimization.json"
+      ],
+      "expectation_ids": [
+        "feedback-optimization-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "feedback-optimization-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--feedback-optimization.json",
+          "expectation_ids": [
+            "feedback-optimization-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "deployment-pipeline",
+      "skills": [
+        "aidlc-deployment-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-pipeline.json"
+      ],
+      "expectation_ids": [
+        "deployment-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-pipeline.json",
+          "expectation_ids": [
+            "deployment-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "deployment-execution",
+      "skills": [
+        "aidlc-deployment-execution"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-execution.json"
+      ],
+      "expectation_ids": [
+        "deployment-execution-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-execution-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-execution.json",
+          "expectation_ids": [
+            "deployment-execution-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.express",
+      "step_id": "observability-setup",
+      "skills": [
+        "aidlc-observability-setup"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--observability-setup.json"
+      ],
+      "expectation_ids": [
+        "observability-setup-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "observability-setup-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--observability-setup.json",
+          "expectation_ids": [
+            "observability-setup-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "intent-capture",
+      "skills": [
+        "aidlc-intent-capture"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--intent-capture.json"
+      ],
+      "expectation_ids": [
+        "intent-capture-completion",
+        "intent-capture-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "intent-capture-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "intent-capture-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--intent-capture.json",
+          "expectation_ids": [
+            "intent-capture-completion",
+            "intent-capture-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "market-research",
+      "skills": [
+        "aidlc-market-research"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--market-research.json"
+      ],
+      "expectation_ids": [
+        "market-research-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "market-research-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--market-research.json",
+          "expectation_ids": [
+            "market-research-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "feasibility",
+      "skills": [
+        "aidlc-feasibility"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--feasibility.json"
+      ],
+      "expectation_ids": [
+        "feasibility-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "feasibility-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--feasibility.json",
+          "expectation_ids": [
+            "feasibility-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "scope-definition",
+      "skills": [
+        "aidlc-scope-definition"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--scope-definition.json"
+      ],
+      "expectation_ids": [
+        "scope-definition-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "scope-definition-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--scope-definition.json",
+          "expectation_ids": [
+            "scope-definition-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "team-formation",
+      "skills": [
+        "aidlc-team-formation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--team-formation.json"
+      ],
+      "expectation_ids": [
+        "team-formation-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "team-formation-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--team-formation.json",
+          "expectation_ids": [
+            "team-formation-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "rough-mockups",
+      "skills": [
+        "aidlc-rough-mockups"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--rough-mockups.json"
+      ],
+      "expectation_ids": [
+        "rough-mockups-completion",
+        "rough-mockups-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "rough-mockups-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "rough-mockups-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--rough-mockups.json",
+          "expectation_ids": [
+            "rough-mockups-completion",
+            "rough-mockups-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "approval-handoff",
+      "skills": [
+        "aidlc-approval-handoff"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--approval-handoff.json"
+      ],
+      "expectation_ids": [
+        "approval-handoff-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "approval-handoff-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--approval-handoff.json",
+          "expectation_ids": [
+            "approval-handoff-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "practices-discovery",
+      "skills": [
+        "aidlc-practices-discovery"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--practices-discovery.json"
+      ],
+      "expectation_ids": [
+        "practices-discovery-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "practices-discovery-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--practices-discovery.json",
+          "expectation_ids": [
+            "practices-discovery-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "user-stories",
+      "skills": [
+        "aidlc-user-stories"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--user-stories.json"
+      ],
+      "expectation_ids": [
+        "user-stories-completion",
+        "user-stories-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "user-stories-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "user-stories-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--user-stories.json",
+          "expectation_ids": [
+            "user-stories-completion",
+            "user-stories-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "refined-mockups",
+      "skills": [
+        "aidlc-refined-mockups"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--refined-mockups.json"
+      ],
+      "expectation_ids": [
+        "refined-mockups-completion",
+        "refined-mockups-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "refined-mockups-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "refined-mockups-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--refined-mockups.json",
+          "expectation_ids": [
+            "refined-mockups-completion",
+            "refined-mockups-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "domain-design",
+      "skills": [
+        "aidlc-domain-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--domain-design.json"
+      ],
+      "expectation_ids": [
+        "domain-design-completion",
+        "domain-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "domain-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "domain-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--domain-design.json",
+          "expectation_ids": [
+            "domain-design-completion",
+            "domain-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "units-generation",
+      "skills": [
+        "aidlc-units-generation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--units-generation.json"
+      ],
+      "expectation_ids": [
+        "units-generation-completion",
+        "units-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "units-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "units-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--units-generation.json",
+          "expectation_ids": [
+            "units-generation-completion",
+            "units-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "contract-design",
+      "skills": [
+        "aidlc-contract-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--contract-design.json"
+      ],
+      "expectation_ids": [
+        "contract-design-completion",
+        "contract-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "contract-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "contract-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--contract-design.json",
+          "expectation_ids": [
+            "contract-design-completion",
+            "contract-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "delivery-planning",
+      "skills": [
+        "aidlc-delivery-planning"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--delivery-planning.json"
+      ],
+      "expectation_ids": [
+        "delivery-planning-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "delivery-planning-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--delivery-planning.json",
+          "expectation_ids": [
+            "delivery-planning-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "functional-design",
+      "skills": [
+        "aidlc-functional-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--functional-design.json"
+      ],
+      "expectation_ids": [
+        "functional-design-completion",
+        "functional-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "functional-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "functional-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--functional-design.json",
+          "expectation_ids": [
+            "functional-design-completion",
+            "functional-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "nfr-requirements",
+      "skills": [
+        "aidlc-nfr-requirements"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-requirements.json"
+      ],
+      "expectation_ids": [
+        "nfr-requirements-completion",
+        "nfr-requirements-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-requirements-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-requirements-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-requirements.json",
+          "expectation_ids": [
+            "nfr-requirements-completion",
+            "nfr-requirements-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "nfr-design",
+      "skills": [
+        "aidlc-nfr-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-design.json"
+      ],
+      "expectation_ids": [
+        "nfr-design-completion",
+        "nfr-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-design.json",
+          "expectation_ids": [
+            "nfr-design-completion",
+            "nfr-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "infrastructure-design",
+      "skills": [
+        "aidlc-infrastructure-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--infrastructure-design.json"
+      ],
+      "expectation_ids": [
+        "infrastructure-design-completion",
+        "infrastructure-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "infrastructure-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "infrastructure-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--infrastructure-design.json",
+          "expectation_ids": [
+            "infrastructure-design-completion",
+            "infrastructure-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "ci-pipeline",
+      "skills": [
+        "aidlc-ci-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--ci-pipeline.json"
+      ],
+      "expectation_ids": [
+        "ci-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "ci-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--ci-pipeline.json",
+          "expectation_ids": [
+            "ci-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "deployment-pipeline",
+      "skills": [
+        "aidlc-deployment-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-pipeline.json"
+      ],
+      "expectation_ids": [
+        "deployment-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-pipeline.json",
+          "expectation_ids": [
+            "deployment-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "environment-provisioning",
+      "skills": [
+        "aidlc-environment-provisioning"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--environment-provisioning.json"
+      ],
+      "expectation_ids": [
+        "environment-provisioning-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "environment-provisioning-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--environment-provisioning.json",
+          "expectation_ids": [
+            "environment-provisioning-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "deployment-execution",
+      "skills": [
+        "aidlc-deployment-execution"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-execution.json"
+      ],
+      "expectation_ids": [
+        "deployment-execution-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-execution-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-execution.json",
+          "expectation_ids": [
+            "deployment-execution-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "observability-setup",
+      "skills": [
+        "aidlc-observability-setup"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--observability-setup.json"
+      ],
+      "expectation_ids": [
+        "observability-setup-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "observability-setup-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--observability-setup.json",
+          "expectation_ids": [
+            "observability-setup-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "incident-response",
+      "skills": [
+        "aidlc-incident-response"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--incident-response.json"
+      ],
+      "expectation_ids": [
+        "incident-response-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "incident-response-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--incident-response.json",
+          "expectation_ids": [
+            "incident-response-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "performance-validation",
+      "skills": [
+        "aidlc-performance-validation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--performance-validation.json"
+      ],
+      "expectation_ids": [
+        "performance-validation-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "performance-validation-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--performance-validation.json",
+          "expectation_ids": [
+            "performance-validation-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.feature",
+      "step_id": "feedback-optimization",
+      "skills": [
+        "aidlc-feedback-optimization"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--feedback-optimization.json"
+      ],
+      "expectation_ids": [
+        "feedback-optimization-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "feedback-optimization-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--feedback-optimization.json",
+          "expectation_ids": [
+            "feedback-optimization-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "practices-discovery",
+      "skills": [
+        "aidlc-practices-discovery"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--practices-discovery.json"
+      ],
+      "expectation_ids": [
+        "practices-discovery-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "practices-discovery-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--practices-discovery.json",
+          "expectation_ids": [
+            "practices-discovery-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "nfr-requirements",
+      "skills": [
+        "aidlc-nfr-requirements"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-requirements.json"
+      ],
+      "expectation_ids": [
+        "nfr-requirements-completion",
+        "nfr-requirements-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-requirements-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-requirements-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-requirements.json",
+          "expectation_ids": [
+            "nfr-requirements-completion",
+            "nfr-requirements-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "nfr-design",
+      "skills": [
+        "aidlc-nfr-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-design.json"
+      ],
+      "expectation_ids": [
+        "nfr-design-completion",
+        "nfr-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-design.json",
+          "expectation_ids": [
+            "nfr-design-completion",
+            "nfr-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "infrastructure-design",
+      "skills": [
+        "aidlc-infrastructure-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--infrastructure-design.json"
+      ],
+      "expectation_ids": [
+        "infrastructure-design-completion",
+        "infrastructure-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "infrastructure-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "infrastructure-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--infrastructure-design.json",
+          "expectation_ids": [
+            "infrastructure-design-completion",
+            "infrastructure-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "ci-pipeline",
+      "skills": [
+        "aidlc-ci-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--ci-pipeline.json"
+      ],
+      "expectation_ids": [
+        "ci-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "ci-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--ci-pipeline.json",
+          "expectation_ids": [
+            "ci-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "deployment-pipeline",
+      "skills": [
+        "aidlc-deployment-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-pipeline.json"
+      ],
+      "expectation_ids": [
+        "deployment-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-pipeline.json",
+          "expectation_ids": [
+            "deployment-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "environment-provisioning",
+      "skills": [
+        "aidlc-environment-provisioning"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--environment-provisioning.json"
+      ],
+      "expectation_ids": [
+        "environment-provisioning-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "environment-provisioning-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--environment-provisioning.json",
+          "expectation_ids": [
+            "environment-provisioning-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "deployment-execution",
+      "skills": [
+        "aidlc-deployment-execution"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-execution.json"
+      ],
+      "expectation_ids": [
+        "deployment-execution-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-execution-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-execution.json",
+          "expectation_ids": [
+            "deployment-execution-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.infra",
+      "step_id": "observability-setup",
+      "skills": [
+        "aidlc-observability-setup"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--observability-setup.json"
+      ],
+      "expectation_ids": [
+        "observability-setup-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "observability-setup-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--observability-setup.json",
+          "expectation_ids": [
+            "observability-setup-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "intent-capture",
+      "skills": [
+        "aidlc-intent-capture"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--intent-capture.json"
+      ],
+      "expectation_ids": [
+        "intent-capture-completion",
+        "intent-capture-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "intent-capture-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "intent-capture-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--intent-capture.json",
+          "expectation_ids": [
+            "intent-capture-completion",
+            "intent-capture-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "feasibility",
+      "skills": [
+        "aidlc-feasibility"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--feasibility.json"
+      ],
+      "expectation_ids": [
+        "feasibility-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "feasibility-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--feasibility.json",
+          "expectation_ids": [
+            "feasibility-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "scope-definition",
+      "skills": [
+        "aidlc-scope-definition"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--scope-definition.json"
+      ],
+      "expectation_ids": [
+        "scope-definition-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "scope-definition-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--scope-definition.json",
+          "expectation_ids": [
+            "scope-definition-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "rough-mockups",
+      "skills": [
+        "aidlc-rough-mockups"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--rough-mockups.json"
+      ],
+      "expectation_ids": [
+        "rough-mockups-completion",
+        "rough-mockups-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "rough-mockups-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "rough-mockups-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--rough-mockups.json",
+          "expectation_ids": [
+            "rough-mockups-completion",
+            "rough-mockups-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "practices-discovery",
+      "skills": [
+        "aidlc-practices-discovery"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--practices-discovery.json"
+      ],
+      "expectation_ids": [
+        "practices-discovery-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "practices-discovery-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--practices-discovery.json",
+          "expectation_ids": [
+            "practices-discovery-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "user-stories",
+      "skills": [
+        "aidlc-user-stories"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--user-stories.json"
+      ],
+      "expectation_ids": [
+        "user-stories-completion",
+        "user-stories-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "user-stories-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "user-stories-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--user-stories.json",
+          "expectation_ids": [
+            "user-stories-completion",
+            "user-stories-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "refined-mockups",
+      "skills": [
+        "aidlc-refined-mockups"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--refined-mockups.json"
+      ],
+      "expectation_ids": [
+        "refined-mockups-completion",
+        "refined-mockups-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "refined-mockups-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "refined-mockups-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--refined-mockups.json",
+          "expectation_ids": [
+            "refined-mockups-completion",
+            "refined-mockups-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "domain-design",
+      "skills": [
+        "aidlc-domain-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--domain-design.json"
+      ],
+      "expectation_ids": [
+        "domain-design-completion",
+        "domain-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "domain-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "domain-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--domain-design.json",
+          "expectation_ids": [
+            "domain-design-completion",
+            "domain-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "units-generation",
+      "skills": [
+        "aidlc-units-generation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--units-generation.json"
+      ],
+      "expectation_ids": [
+        "units-generation-completion",
+        "units-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "units-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "units-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--units-generation.json",
+          "expectation_ids": [
+            "units-generation-completion",
+            "units-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "contract-design",
+      "skills": [
+        "aidlc-contract-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--contract-design.json"
+      ],
+      "expectation_ids": [
+        "contract-design-completion",
+        "contract-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "contract-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "contract-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--contract-design.json",
+          "expectation_ids": [
+            "contract-design-completion",
+            "contract-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "delivery-planning",
+      "skills": [
+        "aidlc-delivery-planning"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--delivery-planning.json"
+      ],
+      "expectation_ids": [
+        "delivery-planning-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "delivery-planning-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--delivery-planning.json",
+          "expectation_ids": [
+            "delivery-planning-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "functional-design",
+      "skills": [
+        "aidlc-functional-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--functional-design.json"
+      ],
+      "expectation_ids": [
+        "functional-design-completion",
+        "functional-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "functional-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "functional-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--functional-design.json",
+          "expectation_ids": [
+            "functional-design-completion",
+            "functional-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "nfr-requirements",
+      "skills": [
+        "aidlc-nfr-requirements"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-requirements.json"
+      ],
+      "expectation_ids": [
+        "nfr-requirements-completion",
+        "nfr-requirements-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-requirements-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-requirements-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-requirements.json",
+          "expectation_ids": [
+            "nfr-requirements-completion",
+            "nfr-requirements-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "nfr-design",
+      "skills": [
+        "aidlc-nfr-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-design.json"
+      ],
+      "expectation_ids": [
+        "nfr-design-completion",
+        "nfr-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-design.json",
+          "expectation_ids": [
+            "nfr-design-completion",
+            "nfr-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "infrastructure-design",
+      "skills": [
+        "aidlc-infrastructure-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--infrastructure-design.json"
+      ],
+      "expectation_ids": [
+        "infrastructure-design-completion",
+        "infrastructure-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "infrastructure-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "infrastructure-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--infrastructure-design.json",
+          "expectation_ids": [
+            "infrastructure-design-completion",
+            "infrastructure-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.mvp",
+      "step_id": "ci-pipeline",
+      "skills": [
+        "aidlc-ci-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--ci-pipeline.json"
+      ],
+      "expectation_ids": [
+        "ci-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "ci-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--ci-pipeline.json",
+          "expectation_ids": [
+            "ci-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.poc",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.poc",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.poc",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.poc",
+      "step_id": "intent-capture",
+      "skills": [
+        "aidlc-intent-capture"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--intent-capture.json"
+      ],
+      "expectation_ids": [
+        "intent-capture-completion",
+        "intent-capture-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "intent-capture-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "intent-capture-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--intent-capture.json",
+          "expectation_ids": [
+            "intent-capture-completion",
+            "intent-capture-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.poc",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.poc",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.poc",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.poc",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "functional-design",
+      "skills": [
+        "aidlc-functional-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--functional-design.json"
+      ],
+      "expectation_ids": [
+        "functional-design-completion",
+        "functional-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "functional-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "functional-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--functional-design.json",
+          "expectation_ids": [
+            "functional-design-completion",
+            "functional-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "deployment-pipeline",
+      "skills": [
+        "aidlc-deployment-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-pipeline.json"
+      ],
+      "expectation_ids": [
+        "deployment-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-pipeline.json",
+          "expectation_ids": [
+            "deployment-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.refactor",
+      "step_id": "deployment-execution",
+      "skills": [
+        "aidlc-deployment-execution"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-execution.json"
+      ],
+      "expectation_ids": [
+        "deployment-execution-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-execution-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-execution.json",
+          "expectation_ids": [
+            "deployment-execution-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "nfr-requirements",
+      "skills": [
+        "aidlc-nfr-requirements"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-requirements.json"
+      ],
+      "expectation_ids": [
+        "nfr-requirements-completion",
+        "nfr-requirements-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-requirements-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-requirements-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-requirements.json",
+          "expectation_ids": [
+            "nfr-requirements-completion",
+            "nfr-requirements-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "deployment-pipeline",
+      "skills": [
+        "aidlc-deployment-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-pipeline.json"
+      ],
+      "expectation_ids": [
+        "deployment-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-pipeline.json",
+          "expectation_ids": [
+            "deployment-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.security-patch",
+      "step_id": "deployment-execution",
+      "skills": [
+        "aidlc-deployment-execution"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-execution.json"
+      ],
+      "expectation_ids": [
+        "deployment-execution-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-execution-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-execution.json",
+          "expectation_ids": [
+            "deployment-execution-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "workspace-scaffold",
+      "skills": [
+        "aidlc-workspace-scaffold"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-scaffold-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-scaffold.json",
+          "expectation_ids": [
+            "workspace-scaffold-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "workspace-detection",
+      "skills": [
+        "aidlc-workspace-detection"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "workspace-detection-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--workspace-detection.json",
+          "expectation_ids": [
+            "workspace-detection-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "state-init",
+      "skills": [
+        "aidlc-state-init"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--state-init.json"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "state-init-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--state-init.json",
+          "expectation_ids": [
+            "state-init-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "reverse-engineering",
+      "skills": [
+        "aidlc-reverse-engineering"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "reverse-engineering-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--reverse-engineering.json",
+          "expectation_ids": [
+            "reverse-engineering-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "practices-discovery",
+      "skills": [
+        "aidlc-practices-discovery"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--practices-discovery.json"
+      ],
+      "expectation_ids": [
+        "practices-discovery-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "practices-discovery-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--practices-discovery.json",
+          "expectation_ids": [
+            "practices-discovery-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "requirements-analysis",
+      "skills": [
+        "aidlc-requirements-analysis"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "requirements-analysis-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "requirements-analysis-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--requirements-analysis.json",
+          "expectation_ids": [
+            "requirements-analysis-completion",
+            "requirements-analysis-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "user-stories",
+      "skills": [
+        "aidlc-user-stories"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--user-stories.json"
+      ],
+      "expectation_ids": [
+        "user-stories-completion",
+        "user-stories-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "user-stories-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "user-stories-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--user-stories.json",
+          "expectation_ids": [
+            "user-stories-completion",
+            "user-stories-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "refined-mockups",
+      "skills": [
+        "aidlc-refined-mockups"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--refined-mockups.json"
+      ],
+      "expectation_ids": [
+        "refined-mockups-completion",
+        "refined-mockups-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "refined-mockups-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "refined-mockups-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--refined-mockups.json",
+          "expectation_ids": [
+            "refined-mockups-completion",
+            "refined-mockups-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "domain-design",
+      "skills": [
+        "aidlc-domain-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--domain-design.json"
+      ],
+      "expectation_ids": [
+        "domain-design-completion",
+        "domain-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "domain-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "domain-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--domain-design.json",
+          "expectation_ids": [
+            "domain-design-completion",
+            "domain-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "units-generation",
+      "skills": [
+        "aidlc-units-generation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--units-generation.json"
+      ],
+      "expectation_ids": [
+        "units-generation-completion",
+        "units-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "units-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "units-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--units-generation.json",
+          "expectation_ids": [
+            "units-generation-completion",
+            "units-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "contract-design",
+      "skills": [
+        "aidlc-contract-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--contract-design.json"
+      ],
+      "expectation_ids": [
+        "contract-design-completion",
+        "contract-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "contract-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "contract-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--contract-design.json",
+          "expectation_ids": [
+            "contract-design-completion",
+            "contract-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "delivery-planning",
+      "skills": [
+        "aidlc-delivery-planning"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--delivery-planning.json"
+      ],
+      "expectation_ids": [
+        "delivery-planning-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "delivery-planning-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--delivery-planning.json",
+          "expectation_ids": [
+            "delivery-planning-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "functional-design",
+      "skills": [
+        "aidlc-functional-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--functional-design.json"
+      ],
+      "expectation_ids": [
+        "functional-design-completion",
+        "functional-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "functional-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "functional-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--functional-design.json",
+          "expectation_ids": [
+            "functional-design-completion",
+            "functional-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "nfr-requirements",
+      "skills": [
+        "aidlc-nfr-requirements"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-requirements.json"
+      ],
+      "expectation_ids": [
+        "nfr-requirements-completion",
+        "nfr-requirements-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-requirements-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-requirements-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-requirements.json",
+          "expectation_ids": [
+            "nfr-requirements-completion",
+            "nfr-requirements-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "nfr-design",
+      "skills": [
+        "aidlc-nfr-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--nfr-design.json"
+      ],
+      "expectation_ids": [
+        "nfr-design-completion",
+        "nfr-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "nfr-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "nfr-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--nfr-design.json",
+          "expectation_ids": [
+            "nfr-design-completion",
+            "nfr-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "infrastructure-design",
+      "skills": [
+        "aidlc-infrastructure-design"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--infrastructure-design.json"
+      ],
+      "expectation_ids": [
+        "infrastructure-design-completion",
+        "infrastructure-design-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "infrastructure-design-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "infrastructure-design-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--infrastructure-design.json",
+          "expectation_ids": [
+            "infrastructure-design-completion",
+            "infrastructure-design-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "code-generation",
+      "skills": [
+        "aidlc-code-generation"
+      ],
+      "implementation_allowed": true,
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "code-generation-completion",
+          "interface": "workflow.evidence"
+        },
+        {
+          "expectation_id": "code-generation-review",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--code-generation.json",
+          "expectation_ids": [
+            "code-generation-completion",
+            "code-generation-review"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "build-and-test",
+      "skills": [
+        "aidlc-build-and-test"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "build-and-test-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--build-and-test.json",
+          "expectation_ids": [
+            "build-and-test-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "ci-pipeline",
+      "skills": [
+        "aidlc-ci-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--ci-pipeline.json"
+      ],
+      "expectation_ids": [
+        "ci-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "ci-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--ci-pipeline.json",
+          "expectation_ids": [
+            "ci-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "deployment-pipeline",
+      "skills": [
+        "aidlc-deployment-pipeline"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-pipeline.json"
+      ],
+      "expectation_ids": [
+        "deployment-pipeline-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-pipeline-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-pipeline.json",
+          "expectation_ids": [
+            "deployment-pipeline-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "environment-provisioning",
+      "skills": [
+        "aidlc-environment-provisioning"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--environment-provisioning.json"
+      ],
+      "expectation_ids": [
+        "environment-provisioning-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "environment-provisioning-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--environment-provisioning.json",
+          "expectation_ids": [
+            "environment-provisioning-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "deployment-execution",
+      "skills": [
+        "aidlc-deployment-execution"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--deployment-execution.json"
+      ],
+      "expectation_ids": [
+        "deployment-execution-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "deployment-execution-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--deployment-execution.json",
+          "expectation_ids": [
+            "deployment-execution-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "observability-setup",
+      "skills": [
+        "aidlc-observability-setup"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--observability-setup.json"
+      ],
+      "expectation_ids": [
+        "observability-setup-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "observability-setup-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--observability-setup.json",
+          "expectation_ids": [
+            "observability-setup-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "incident-response",
+      "skills": [
+        "aidlc-incident-response"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--incident-response.json"
+      ],
+      "expectation_ids": [
+        "incident-response-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "incident-response-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--incident-response.json",
+          "expectation_ids": [
+            "incident-response-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "performance-validation",
+      "skills": [
+        "aidlc-performance-validation"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--performance-validation.json"
+      ],
+      "expectation_ids": [
+        "performance-validation-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "performance-validation-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--performance-validation.json",
+          "expectation_ids": [
+            "performance-validation-completion"
+          ]
+        }
+      ]
+    },
+    {
+      "flow_id": "aidlc.workshop",
+      "step_id": "feedback-optimization",
+      "skills": [
+        "aidlc-feedback-optimization"
+      ],
+      "implementation_allowed": false,
+      "artifacts": [
+        "<slug>--feedback-optimization.json"
+      ],
+      "expectation_ids": [
+        "feedback-optimization-completion"
+      ],
+      "expectation_bindings": [
+        {
+          "expectation_id": "feedback-optimization-completion",
+          "interface": "workflow.evidence"
+        }
+      ],
+      "artifact_bindings": [
+        {
+          "artifact": "<slug>--feedback-optimization.json",
+          "expectation_ids": [
+            "feedback-optimization-completion"
+          ]
+        }
+      ]
+    }
+  ],
+  "skill_roles": [
+    {
+      "skill_id": "aidlc.aidlc-workspace-scaffold",
+      "role": "step",
+      "flow_id": "aidlc.bugfix",
+      "flow_ids": [
+        "aidlc.classic",
+        "aidlc.enterprise",
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.mvp",
+        "aidlc.poc",
+        "aidlc.refactor",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "workspace-scaffold"
+      ],
+      "expectation_ids": [
+        "workspace-scaffold-completion"
+      ],
+      "artifacts": [
+        "<slug>--workspace-scaffold.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-workspace-detection",
+      "role": "step",
+      "flow_id": "aidlc.bugfix",
+      "flow_ids": [
+        "aidlc.classic",
+        "aidlc.enterprise",
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.mvp",
+        "aidlc.poc",
+        "aidlc.refactor",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "workspace-detection"
+      ],
+      "expectation_ids": [
+        "workspace-detection-completion"
+      ],
+      "artifacts": [
+        "<slug>--workspace-detection.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-state-init",
+      "role": "step",
+      "flow_id": "aidlc.bugfix",
+      "flow_ids": [
+        "aidlc.classic",
+        "aidlc.enterprise",
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.mvp",
+        "aidlc.poc",
+        "aidlc.refactor",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "state-init"
+      ],
+      "expectation_ids": [
+        "state-init-completion"
+      ],
+      "artifacts": [
+        "<slug>--state-init.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-intent-capture",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.poc"
+      ],
+      "step_ids": [
+        "intent-capture"
+      ],
+      "expectation_ids": [
+        "intent-capture-completion",
+        "intent-capture-review"
+      ],
+      "artifacts": [
+        "<slug>--intent-capture.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-market-research",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature"
+      ],
+      "step_ids": [
+        "market-research"
+      ],
+      "expectation_ids": [
+        "market-research-completion"
+      ],
+      "artifacts": [
+        "<slug>--market-research.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-feasibility",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature",
+        "aidlc.mvp"
+      ],
+      "step_ids": [
+        "feasibility"
+      ],
+      "expectation_ids": [
+        "feasibility-completion"
+      ],
+      "artifacts": [
+        "<slug>--feasibility.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-scope-definition",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature",
+        "aidlc.mvp"
+      ],
+      "step_ids": [
+        "scope-definition"
+      ],
+      "expectation_ids": [
+        "scope-definition-completion"
+      ],
+      "artifacts": [
+        "<slug>--scope-definition.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-team-formation",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature"
+      ],
+      "step_ids": [
+        "team-formation"
+      ],
+      "expectation_ids": [
+        "team-formation-completion"
+      ],
+      "artifacts": [
+        "<slug>--team-formation.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-rough-mockups",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature",
+        "aidlc.mvp"
+      ],
+      "step_ids": [
+        "rough-mockups"
+      ],
+      "expectation_ids": [
+        "rough-mockups-completion",
+        "rough-mockups-review"
+      ],
+      "artifacts": [
+        "<slug>--rough-mockups.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-approval-handoff",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature"
+      ],
+      "step_ids": [
+        "approval-handoff"
+      ],
+      "expectation_ids": [
+        "approval-handoff-completion"
+      ],
+      "artifacts": [
+        "<slug>--approval-handoff.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-reverse-engineering",
+      "role": "step",
+      "flow_id": "aidlc.bugfix",
+      "flow_ids": [
+        "aidlc.classic",
+        "aidlc.enterprise",
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.poc",
+        "aidlc.refactor",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "reverse-engineering"
+      ],
+      "expectation_ids": [
+        "reverse-engineering-completion"
+      ],
+      "artifacts": [
+        "<slug>--reverse-engineering.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-practices-discovery",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "practices-discovery"
+      ],
+      "expectation_ids": [
+        "practices-discovery-completion"
+      ],
+      "artifacts": [
+        "<slug>--practices-discovery.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-requirements-analysis",
+      "role": "step",
+      "flow_id": "aidlc.bugfix",
+      "flow_ids": [
+        "aidlc.classic",
+        "aidlc.enterprise",
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.mvp",
+        "aidlc.poc",
+        "aidlc.refactor",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "requirements-analysis"
+      ],
+      "expectation_ids": [
+        "requirements-analysis-completion",
+        "requirements-analysis-review"
+      ],
+      "artifacts": [
+        "<slug>--requirements-analysis.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-user-stories",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "user-stories"
+      ],
+      "expectation_ids": [
+        "user-stories-completion",
+        "user-stories-review"
+      ],
+      "artifacts": [
+        "<slug>--user-stories.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-refined-mockups",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "refined-mockups"
+      ],
+      "expectation_ids": [
+        "refined-mockups-completion",
+        "refined-mockups-review"
+      ],
+      "artifacts": [
+        "<slug>--refined-mockups.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-domain-design",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "domain-design"
+      ],
+      "expectation_ids": [
+        "domain-design-completion",
+        "domain-design-review"
+      ],
+      "artifacts": [
+        "<slug>--domain-design.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-units-generation",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "units-generation"
+      ],
+      "expectation_ids": [
+        "units-generation-completion",
+        "units-generation-review"
+      ],
+      "artifacts": [
+        "<slug>--units-generation.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-contract-design",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "contract-design"
+      ],
+      "expectation_ids": [
+        "contract-design-completion",
+        "contract-design-review"
+      ],
+      "artifacts": [
+        "<slug>--contract-design.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-delivery-planning",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "delivery-planning"
+      ],
+      "expectation_ids": [
+        "delivery-planning-completion"
+      ],
+      "artifacts": [
+        "<slug>--delivery-planning.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-functional-design",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.refactor",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "functional-design"
+      ],
+      "expectation_ids": [
+        "functional-design-completion",
+        "functional-design-review"
+      ],
+      "artifacts": [
+        "<slug>--functional-design.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-nfr-requirements",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.mvp",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "nfr-requirements"
+      ],
+      "expectation_ids": [
+        "nfr-requirements-completion",
+        "nfr-requirements-review"
+      ],
+      "artifacts": [
+        "<slug>--nfr-requirements.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-nfr-design",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "nfr-design"
+      ],
+      "expectation_ids": [
+        "nfr-design-completion",
+        "nfr-design-review"
+      ],
+      "artifacts": [
+        "<slug>--nfr-design.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-infrastructure-design",
+      "role": "step",
+      "flow_id": "aidlc.classic",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "infrastructure-design"
+      ],
+      "expectation_ids": [
+        "infrastructure-design-completion",
+        "infrastructure-design-review"
+      ],
+      "artifacts": [
+        "<slug>--infrastructure-design.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-code-generation",
+      "role": "step",
+      "flow_id": "aidlc.bugfix",
+      "flow_ids": [
+        "aidlc.classic",
+        "aidlc.enterprise",
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.poc",
+        "aidlc.refactor",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "code-generation"
+      ],
+      "expectation_ids": [
+        "code-generation-completion",
+        "code-generation-review"
+      ],
+      "artifacts": [
+        "<slug>--code-generation.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-build-and-test",
+      "role": "step",
+      "flow_id": "aidlc.bugfix",
+      "flow_ids": [
+        "aidlc.classic",
+        "aidlc.enterprise",
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.mvp",
+        "aidlc.poc",
+        "aidlc.refactor",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "build-and-test"
+      ],
+      "expectation_ids": [
+        "build-and-test-completion"
+      ],
+      "artifacts": [
+        "<slug>--build-and-test.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-ci-pipeline",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.mvp",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "ci-pipeline"
+      ],
+      "expectation_ids": [
+        "ci-pipeline-completion"
+      ],
+      "artifacts": [
+        "<slug>--ci-pipeline.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-deployment-pipeline",
+      "role": "step",
+      "flow_id": "aidlc.bugfix",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.refactor",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "deployment-pipeline"
+      ],
+      "expectation_ids": [
+        "deployment-pipeline-completion"
+      ],
+      "artifacts": [
+        "<slug>--deployment-pipeline.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-environment-provisioning",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "environment-provisioning"
+      ],
+      "expectation_ids": [
+        "environment-provisioning-completion"
+      ],
+      "artifacts": [
+        "<slug>--environment-provisioning.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-deployment-execution",
+      "role": "step",
+      "flow_id": "aidlc.bugfix",
+      "flow_ids": [
+        "aidlc.enterprise",
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.refactor",
+        "aidlc.security-patch",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "deployment-execution"
+      ],
+      "expectation_ids": [
+        "deployment-execution-completion"
+      ],
+      "artifacts": [
+        "<slug>--deployment-execution.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-observability-setup",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.express",
+        "aidlc.feature",
+        "aidlc.infra",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "observability-setup"
+      ],
+      "expectation_ids": [
+        "observability-setup-completion"
+      ],
+      "artifacts": [
+        "<slug>--observability-setup.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-incident-response",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "incident-response"
+      ],
+      "expectation_ids": [
+        "incident-response-completion"
+      ],
+      "artifacts": [
+        "<slug>--incident-response.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-performance-validation",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "performance-validation"
+      ],
+      "expectation_ids": [
+        "performance-validation-completion"
+      ],
+      "artifacts": [
+        "<slug>--performance-validation.json"
+      ]
+    },
+    {
+      "skill_id": "aidlc.aidlc-feedback-optimization",
+      "role": "step",
+      "flow_id": "aidlc.enterprise",
+      "flow_ids": [
+        "aidlc.feature",
+        "aidlc.workshop"
+      ],
+      "step_ids": [
+        "feedback-optimization"
+      ],
+      "expectation_ids": [
+        "feedback-optimization-completion"
+      ],
+      "artifacts": [
+        "<slug>--feedback-optimization.json"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,383 @@
+{
+  "id": "aidlc.security-patch",
+  "version": "1.0",
+  "steps": [
+    {
+      "id": "workspace-scaffold",
+      "next": "workspace-detection",
+      "needs": []
+    },
+    {
+      "id": "workspace-detection",
+      "next": "state-init",
+      "needs": [
+        "workspace-scaffold"
+      ]
+    },
+    {
+      "id": "state-init",
+      "next": "reverse-engineering",
+      "needs": [
+        "workspace-detection"
+      ]
+    },
+    {
+      "id": "reverse-engineering",
+      "next": "requirements-analysis",
+      "needs": [
+        "state-init"
+      ]
+    },
+    {
+      "id": "requirements-analysis",
+      "next": "nfr-requirements",
+      "needs": [
+        "reverse-engineering"
+      ]
+    },
+    {
+      "id": "nfr-requirements",
+      "next": "code-generation",
+      "needs": []
+    },
+    {
+      "id": "code-generation",
+      "next": "build-and-test",
+      "needs": [
+        "nfr-requirements"
+      ]
+    },
+    {
+      "id": "build-and-test",
+      "next": "deployment-pipeline",
+      "needs": [
+        "code-generation"
+      ]
+    },
+    {
+      "id": "deployment-pipeline",
+      "next": "deployment-execution",
+      "needs": []
+    },
+    {
+      "id": "deployment-execution",
+      "next": null,
+      "needs": [
+        "deployment-pipeline"
+      ]
+    }
+  ],
+  "gates": {
+    "workspace-scaffold-gate": {
+      "step": "workspace-scaffold",
+      "expects": [
+        {
+          "id": "workspace-scaffold-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Workspace Scaffold: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.workspace-scaffold-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "workspace-scaffold",
+        "default": "workspace-scaffold"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    },
+    "workspace-detection-gate": {
+      "step": "workspace-detection",
+      "expects": [
+        {
+          "id": "workspace-detection-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Workspace Detection: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.workspace-detection-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "workspace-detection",
+        "default": "workspace-detection"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    },
+    "state-init-gate": {
+      "step": "state-init",
+      "expects": [
+        {
+          "id": "state-init-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "State Initialization: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.state-init-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "state-init",
+        "default": "state-init"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    },
+    "reverse-engineering-gate": {
+      "step": "reverse-engineering",
+      "expects": [
+        {
+          "id": "reverse-engineering-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Reverse Engineering: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.reverse-engineering-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "reverse-engineering",
+        "default": "reverse-engineering"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    },
+    "requirements-analysis-gate": {
+      "step": "requirements-analysis",
+      "expects": [
+        {
+          "id": "requirements-analysis-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Requirements Analysis: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.requirements-analysis-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        },
+        {
+          "id": "requirements-analysis-review",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Requirements Analysis: recorded review of the current artifact and source basis.",
+          "bundle_claim": {
+            "claimType": "aidlc.requirements-analysis-review",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "requirements-analysis",
+        "default": "requirements-analysis"
+      },
+      "route_back_policy": {
+        "max_attempts": 2,
+        "on_exceeded": "block"
+      }
+    },
+    "nfr-requirements-gate": {
+      "step": "nfr-requirements",
+      "expects": [
+        {
+          "id": "nfr-requirements-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "NFR Requirements: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.nfr-requirements-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        },
+        {
+          "id": "nfr-requirements-review",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "NFR Requirements: recorded review of the current artifact and source basis.",
+          "bundle_claim": {
+            "claimType": "aidlc.nfr-requirements-review",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "nfr-requirements",
+        "default": "nfr-requirements"
+      },
+      "route_back_policy": {
+        "max_attempts": 2,
+        "on_exceeded": "block"
+      }
+    },
+    "code-generation-gate": {
+      "step": "code-generation",
+      "expects": [
+        {
+          "id": "code-generation-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Code Generation: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.code-generation-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        },
+        {
+          "id": "code-generation-review",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Code Generation: recorded review of the current artifact and source basis.",
+          "bundle_claim": {
+            "claimType": "aidlc.code-generation-review",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "code-generation",
+        "default": "code-generation"
+      },
+      "route_back_policy": {
+        "max_attempts": 2,
+        "on_exceeded": "block"
+      }
+    },
+    "build-and-test-gate": {
+      "step": "build-and-test",
+      "expects": [
+        {
+          "id": "build-and-test-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Build and Test: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.build-and-test-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "build-and-test",
+        "default": "build-and-test"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    },
+    "deployment-pipeline-gate": {
+      "step": "deployment-pipeline",
+      "expects": [
+        {
+          "id": "deployment-pipeline-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Deployment Pipeline: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.deployment-pipeline-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "deployment-pipeline",
+        "default": "deployment-pipeline"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    },
+    "deployment-execution-gate": {
+      "step": "deployment-execution",
+      "expects": [
+        {
+          "id": "deployment-execution-completion",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Deployment Execution: current required artifacts and applicable checks were observed.",
+          "bundle_claim": {
+            "claimType": "aidlc.deployment-execution-completion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "deployment-execution",
+        "default": "deployment-execution"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    }
+  },
+  "phase_map": {
+    "workspace-scaffold": "workspace-scaffold",
+    "workspace-detection": "workspace-detection",
+    "state-init": "state-init",
+    "reverse-engineering": "reverse-engineering",
+    "requirements-analysis": "requirements-analysis",
+    "nfr-requirements": "nfr-requirements",
+    "code-generation": "code-generation",
+    "build-and-test": "build-and-test",
+    "deployment-pipeline": "deployment-pipeline",
+    "deployment-execution": "deployment-execution"
+  }
+}
