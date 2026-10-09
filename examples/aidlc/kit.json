@@ -1,6 +1,11 @@
 {
   "schema_version": "1.0",
   "id": "aidlc",
+  "execution": {
+    "module": "scripts/run.mjs",
+    "export": "executeRequestFile",
+    "contract": "kontour.kit.execution_request@1.0"
+  },
   "name": "AI-DLC Reference Kit",
   "description": "Pinned AWS AI-DLC methodology expressed as Kontour flows, with differential conformance and explicit capability gaps.",
   "flows": [

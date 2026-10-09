@@ -76,7 +76,8 @@ export function generatedFiles(snapshot) {
   const profiles = Object.keys(snapshot.profiles).sort();
   const all = profiles.map((profile) => compileProfile(snapshot, profile));
   const actions = all.flatMap((entry) => entry.actions);
-  const manifest = { schema_version: '1.0', id: 'aidlc', name: 'AI-DLC Reference Kit',
+  const manifest = { schema_version: '1.0', id: 'aidlc',
+    execution:{module:'scripts/run.mjs',export:'executeRequestFile',contract:'kontour.kit.execution_request@1.0'}, name: 'AI-DLC Reference Kit',
     description: 'Pinned AWS AI-DLC methodology expressed as Kontour flows, with differential conformance and explicit capability gaps.',
     flows: all.map((entry) => ({ id: entry.flow.id, path: `flows/${entry.flow.id.slice(6)}.flow.json`, description: `AI-DLC ${entry.identity.profile} profile; pinned upstream stage selection.` })),
     skills: snapshot.stages.map((stage) => ({ id: `aidlc.aidlc-${stage.slug}`, path: `skills/aidlc-${stage.slug}/SKILL.md`, description: stage.name })),

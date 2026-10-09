@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {fork} from 'node:child_process';
+import {fork,execFile} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
+import {promisify} from 'node:util';
 import {observeInstalledKitIntegrity} from './flow-kit/content-hash.js';
 
 export type KitExecutionDescriptor = {contract: 'kontour.kit.execution_request@1.0'; module: string; export: string};
@@ -36,15 +38,27 @@ export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot
  const request=JSON.parse(fs.readFileSync(requestFile,'utf8'));
  if(request.schema!=='kontour.kit.execution_request'||request.version!=='1.0'||request.kit_id!==kitId)throw new Error('Request must bind the declared kit execution contract and kit id');
  if(request.source_root!==undefined&&(typeof request.source_root!=='string'||fs.realpathSync(request.source_root)!==fs.realpathSync(kitRoot)))throw new Error('Request source_root must bind the installed kit');
- const args={requestFile:path.resolve(requestFile),controllerRoot:path.resolve(controllerRoot),authFile:authFile?path.resolve(authFile):undefined};
+ const executionOwner=randomUUID(),seconds=request.execution?.timeout_s??300;
+ if(!Number.isFinite(seconds)||seconds<=0||seconds>86400)throw new Error('Finite host execution deadline required');
+ const args={requestFile:path.resolve(requestFile),controllerRoot:path.resolve(controllerRoot),authFile:authFile?path.resolve(authFile):undefined,executionOwner};
+ const cleanup=async()=>{
+   if(!request.engine_sandbox?.image)return;
+   const command=promisify(execFile),filter=`label=kontour.worker.owner=${executionOwner}`;
+   const list=await command('docker',['ps','-aq','--filter',filter],{timeout:10000});
+   const ids=list.stdout.trim().split(/\s+/).filter(Boolean);
+   if(ids.some(id=>!/^[a-f0-9]{12,64}$/.test(id)))throw new Error('Invalid observed worker custody ids');
+   if(ids.length)await command('docker',['rm','-f',...ids],{timeout:10000});
+   const remaining=await command('docker',['ps','-aq','--filter',filter],{timeout:10000});
+   if(remaining.stdout.trim())throw new Error('Owned worker termination unverified');
+ };
  return new Promise((resolve,reject)=>{
-   const child=fork(fileURLToPath(new URL('./kit-execution-child.js',import.meta.url)),[modulePath,descriptor.export,JSON.stringify(args)],{stdio:['ignore','ignore','pipe','ipc'],detached:true});
-   const seconds=request.execution?.timeout_s??300;if(!Number.isFinite(seconds)||seconds<=0||seconds>86400){child.kill();reject(new Error('Finite host execution deadline required'));return;}
-   const timer=setTimeout(()=>{try{process.kill(-child.pid!,'SIGKILL');}catch{}reject(new Error('Kit execution deadline exceeded'));},(seconds+30)*1000);
+   const child=fork(fileURLToPath(new URL('./kit-execution-child.js',import.meta.url)),[modulePath,descriptor.export,JSON.stringify(args)],{stdio:['ignore','ignore','pipe','ipc'],execArgv:[]});
+   let forced:ReturnType<typeof setTimeout>|undefined,timedOut=false;
+   const timer=setTimeout(()=>{timedOut=true;child.send({kind:'cancel'});forced=setTimeout(()=>child.kill('SIGKILL'),5000);},seconds*1000);
    let outcome:{kind:string;result?:unknown;message?:string}|null=null,stderr='';
    child.stderr?.on('data',chunk=>{stderr=(stderr+chunk).slice(-65536);});
    child.on('message',message=>{outcome=message as typeof outcome;});
-   child.on('error',error=>{clearTimeout(timer);reject(error);});
-   child.on('exit',code=>{clearTimeout(timer);if(code===0&&outcome?.kind==='result')resolve(outcome.result);else reject(new Error(outcome?.message??`Kit execution process failed (${code}): ${stderr}`));});
+   child.on('error',error=>{clearTimeout(timer);clearTimeout(forced);cleanup().then(()=>reject(error),reject);});
+   child.on('exit',code=>{clearTimeout(timer);clearTimeout(forced);cleanup().then(()=>{if(timedOut)reject(new Error('Kit execution deadline exceeded; owned workers terminated'));else if(code===0&&outcome?.kind==='result')resolve(outcome.result);else reject(new Error(outcome?.message??`Kit execution process failed (${code}): ${stderr}`));},error=>reject(new Error(`Owned worker cleanup refused: ${(error as Error).message}`)));});
  });
 }
