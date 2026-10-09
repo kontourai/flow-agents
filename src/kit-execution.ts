@@ -54,12 +54,39 @@ export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot
  };
  return new Promise((resolve,reject)=>{
    const child=fork(fileURLToPath(new URL('./kit-execution-child.js',import.meta.url)),[modulePath,descriptor.export,JSON.stringify(args)],{stdio:['ignore','ignore','pipe','ipc'],execArgv:[]});
-   let forced:ReturnType<typeof setTimeout>|undefined,timedOut=false;
-   const timer=setTimeout(()=>{timedOut=true;child.send({kind:'cancel'});forced=setTimeout(()=>child.kill('SIGKILL'),5000);},seconds*1000);
+   let forced:ReturnType<typeof setTimeout>|undefined,timedOut=false,settled=false;
+   let processError:Error|undefined;
+   // IPC is a cooperative cancellation transport, not process custody. A kit
+   // can close that transport while retaining referenced handles in its host.
+   const terminate=()=>{
+     forced??=setTimeout(()=>child.kill('SIGKILL'),5000);
+     if(child.connected){
+       try{child.send({kind:'cancel'},error=>{if(error)processError??=error;});}
+       catch(error){processError??=error as Error;}
+     }
+   };
+   const timer=setTimeout(()=>{timedOut=true;terminate();},seconds*1000);
    let outcome:{kind:string;result?:unknown;message?:string}|null=null,stderr='';
    child.stderr?.on('data',chunk=>{stderr=(stderr+chunk).slice(-65536);});
    child.on('message',message=>{outcome=message as typeof outcome;});
-   child.on('error',error=>{clearTimeout(timer);clearTimeout(forced);cleanup().then(()=>reject(error),reject);});
-   child.on('exit',code=>{clearTimeout(timer);clearTimeout(forced);cleanup().then(removed=>{if(removed>0&&code===0&&outcome?.kind==='result')reject(new Error('Kit left owned workers running; terminated them and refused completion'));else if(timedOut)reject(new Error('Kit execution deadline exceeded; owned workers terminated'));else if(code===0&&outcome?.kind==='result')resolve(outcome.result);else reject(new Error(outcome?.message??`Kit execution process failed (${code}): ${stderr}`));},error=>reject(new Error(`Owned worker cleanup refused: ${(error as Error).message}`)));});
+   const finish=(code:number|null)=>{
+     if(settled)return;
+     settled=true;clearTimeout(timer);clearTimeout(forced);
+     cleanup().then(removed=>{
+       if(timedOut)reject(new Error('Kit execution deadline exceeded; owned workers terminated'));
+       else if(processError)reject(processError);
+       else if(removed>0&&code===0&&outcome?.kind==='result')reject(new Error('Kit left owned workers running; terminated them and refused completion'));
+       else if(code===0&&outcome?.kind==='result')resolve(outcome.result);
+       else reject(new Error(outcome?.message??`Kit execution process failed (${code}): ${stderr}`));
+     },error=>reject(new Error(`Owned worker cleanup refused: ${(error as Error).message}`)));
+   };
+   child.on('error',error=>{
+     processError??=error;
+     // Failed spawn has no executing process and emits close rather than exit.
+     // Every error on a spawned process retains custody until its observed exit.
+     if(child.pid!==undefined&&!settled)terminate();
+   });
+   child.on('exit',finish);
+   child.on('close',code=>{if(child.pid===undefined)finish(code);});
  });
 }
