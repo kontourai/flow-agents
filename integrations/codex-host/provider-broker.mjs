@@ -1,11 +1,12 @@
 // Trusted host-only credential broker. Workers receive a short-lived, model-bound capability.
 // No OAuth refresh, no secret logging, no arbitrary upstream URL, no credential mount in a worker.
 import http from 'node:http';
+import {openProviderBudget} from './provider-budget.mjs';
 import {readFile} from 'node:fs/promises';
 import {randomBytes,timingSafeEqual,createHash} from 'node:crypto';
 const same=(left,right)=>{const a=Buffer.from(left??''),b=Buffer.from(right);return a.length===b.length&&timingSafeEqual(a,b);};
 const serialize=value=>JSON.stringify(value);
-export async function startProviderProxy({authFile,model,reasoningEffort=null,upstreamOrigin,fetchImpl=fetch,bindHost='0.0.0.0',port=0,maxRequests=128}) {
+export async function startProviderProxy({authFile,model,reasoningEffort=null,upstreamOrigin,fetchImpl=fetch,bindHost='0.0.0.0',port=0,maxRequests=128,ledgerFile=null,requestBindingDigest=null,initializeLedger=false}) {
  if(typeof model!=='string'||!model)throw new Error('model required');
  if(!Number.isSafeInteger(maxRequests)||maxRequests<1||maxRequests>10000)throw new Error('finite provider request budget required');
  const auth=JSON.parse(await readFile(authFile,'utf8'));
@@ -15,6 +16,7 @@ export async function startProviderProxy({authFile,model,reasoningEffort=null,up
  const origin=upstreamOrigin??(apiKey?'https://api.openai.com/v1':'https://chatgpt.com/backend-api/codex');
  // Tests may inject fetch, but production never forwards to a caller-controlled host.
  if(!['https://api.openai.com/v1','https://chatgpt.com/backend-api/codex'].includes(origin))throw new Error('upstream origin not allowed');
+ const budget=ledgerFile?openProviderBudget({ledgerFile,requestBindingDigest,model,reasoningEffort,upstreamOrigin:origin,maxRequests,initializeLedger}):null;
  const capability=randomBytes(32).toString('hex');let active=true,received=0,forwarded=0,refused=0;
  const evidence=[];const controllers=new Set();const transportMode=fetchImpl===fetch?'live':'mocked-test-only';
  const server=http.createServer(async(req,res)=>{
@@ -25,7 +27,7 @@ export async function startProviderProxy({authFile,model,reasoningEffort=null,up
   let bytes=Buffer.alloc(0);const controller=new AbortController();controllers.add(controller);
   try {
    for await(const chunk of req){bytes=Buffer.concat([bytes,chunk]);if(bytes.length>16*1024*1024)throw new Error('request too large');}
-   const body=JSON.parse(bytes);if(body.model!==model){refused++;reject(403);return;}if(reasoningEffort&&body.reasoning?.effort!==reasoningEffort){refused++;reject(403);return;}if(forwarded>=maxRequests){refused++;reject(429);return;}forwarded++;
+   const body=JSON.parse(bytes);if(body.model!==model){refused++;reject(403);return;}if(reasoningEffort&&body.reasoning?.effort!==reasoningEffort){refused++;reject(403);return;}if(budget?!budget.reserve():forwarded>=maxRequests){refused++;reject(429);return;}forwarded++;
    // Forward the canonical re-serialization, not the original bytes: duplicate
    // JSON keys must not let authorization read one value while the upstream
    // receives another. The observation still digests the exact worker bytes.
@@ -48,7 +50,7 @@ export async function startProviderProxy({authFile,model,reasoningEffort=null,up
   }catch{if(!res.headersSent)reject(502);else res.end();}
   finally{controllers.delete(controller);}
  });
- await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,bindHost,resolve);});
+ try{await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,bindHost,resolve);});}catch(error){budget?.close();throw error;}
  const actualPort=server.address().port;
- return {baseUrl:`http://host.docker.internal:${actualPort}`,capability,model,evidence,transport_mode:transportMode,get counters(){return {received,forwarded,refused,max_requests:maxRequests};},async close(){active=false;for(const c of controllers)c.abort();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}};
+ return {baseUrl:`http://host.docker.internal:${actualPort}`,capability,model,evidence,transport_mode:transportMode,get counters(){return {received,forwarded,refused,max_requests:maxRequests,total_forwarded:budget?.reservedRequests??forwarded};},async close(){active=false;for(const c of controllers)c.abort();server.closeAllConnections();try{await new Promise(resolve=>server.close(resolve));}finally{budget?.close();}}};
 }
