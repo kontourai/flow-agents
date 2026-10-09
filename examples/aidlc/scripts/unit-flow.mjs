@@ -28,12 +28,13 @@ export function unitObservationBundle({runId,parentRunId,stage,unitId,record,pas
  * `join().complete` is required before the host may appraise the parent stage.
  * Parent sensor/semantic/human evidence remains a separate obligation.
  */
-export async function createUnitFlow({controllerRoot,parentRunId,stage,units,actor,leaseSeconds=300,renewalIntervalMs=Math.max(250,Math.floor(leaseSeconds*500)),snapshotBasis}) {
+export async function createUnitFlow({controllerRoot,parentRunId,stage,units,actor,leaseSeconds=300,renewalIntervalMs=Math.max(250,Math.floor(leaseSeconds*500)),snapshotBasis,parentAdmissionStage}) {
   if(!safe(parentRunId)||!safe(stage?.slug)||!/^[a-f0-9]{64}$/.test(stage?.source_digest)||!Number.isInteger(leaseSeconds)||leaseSeconds<1||leaseSeconds>3600||!Number.isInteger(renewalIntervalMs)||renewalIntervalMs<10||renewalIntervalMs>=leaseSeconds*1000)throw new Error('Invalid bounded unit Flow configuration');
   controllerRoot=path.resolve(controllerRoot);const manifest=validateUnits(units),parent=await loadRun(parentRunId,controllerRoot);
-  if(!parent.definition.steps.some(step=>step.id===stage.slug))throw new Error('Parent run does not own this stage');
-  const parentAdmission=parent.state.transitions.filter(entry=>entry.to_step===stage.slug||entry.from_step===stage.slug).at(-1)??{initial_stage:stage.slug};
-  const binding={parentRunId,parentAdmission,stage:stage.slug,stage_source_digest:stage.source_digest,stage_contract_digest:digest(stage),units:manifest};
+  const admissionStage=parentAdmissionStage??stage.slug;
+  if(!safe(admissionStage)||!parent.definition.steps.some(step=>step.id===admissionStage))throw new Error('Parent run does not own this stage');
+  const parentAdmission=parent.state.transitions.filter(entry=>entry.to_step===admissionStage||entry.from_step===admissionStage).at(-1)??{initial_stage:admissionStage};
+  const binding={parentRunId,parentAdmission,parent_admission_stage:admissionStage,stage:stage.slug,stage_source_digest:stage.source_digest,stage_contract_digest:digest(stage),units:manifest};
   const runId=`${parentRunId.slice(0,45)}-units-${digest(binding).slice(0,24)}`;
   const definition=validateDefinition({id:'aidlc.unit-dispatch',version:'1.0',execution:{mode:'multi-cursor',claim_contract_version:'1'},
     steps:manifest.map(unit=>({id:unit.id,next:null,needs:unit.depends_on??[],mutable_resources:unit.mutable_resources??['aidlc.shared-workspace']})),
@@ -43,7 +44,7 @@ export async function createUnitFlow({controllerRoot,parentRunId,stage,units,act
     if(!isDeepStrictEqual(JSON.parse(fs.readFileSync(definitionFile,'utf8')),definition))throw new Error('Unit definition binding changed on resume');
     const existing=await loadRun(runId,controllerRoot);if(!isDeepStrictEqual(definitionIdentity(existing.definition),definitionIdentity(definition)))throw new Error('Canonical unit Flow definition changed');
   } else {
-    if(parent.state.current_step!==stage.slug||['completed','cancelled'].includes(parent.state.status))throw new Error('Parent stage is not currently admitted');
+    if(parent.state.current_step!==admissionStage||['completed','cancelled'].includes(parent.state.status))throw new Error('Parent stage is not currently admitted');
     write(definitionFile,definition);await startRun(definitionFile,{cwd:controllerRoot,runId,params:{subject:runId,parent_run_id:parentRunId,parent_stage:stage.slug}});
   }
   await recoverExpiredStepClaims(runId,{cwd:controllerRoot});
@@ -77,7 +78,7 @@ export async function createUnitFlow({controllerRoot,parentRunId,stage,units,act
   async function claim({unit,signal}) {
     const unitId=typeof unit==='string'?unit:unit?.id;if(!manifest.some(entry=>entry.id===unitId))throw new Error('Unknown authoritative unit');
     if(signal?.aborted)throw new Error('Unit dispatch cancelled before canonical admission');
-    const parentNow=await loadRun(parentRunId,controllerRoot);if(parentNow.state.current_step!==stage.slug||['completed','cancelled'].includes(parentNow.state.status))throw new Error('Parent stage admission changed');
+    const parentNow=await loadRun(parentRunId,controllerRoot);if(parentNow.state.current_step!==admissionStage||['completed','cancelled'].includes(parentNow.state.status))throw new Error('Parent stage admission changed');
     const existing=await loadRun(runId,controllerRoot),completed=readRecords()[unitId];
     if(existing.state.gate_outcomes.some(gate=>gate.gate_id===`${unitId}-gate`&&gate.status==='pass')) {
       if(!completed?.passed||!await current(completed.record,unitId))throw new Error('Previously passed canonical unit has stale basis; a new parent admission is required');
@@ -129,7 +130,7 @@ export async function createUnitFlow({controllerRoot,parentRunId,stage,units,act
   }
   function bindExecutor(executor) {
     basisObserver=executor.snapshotBasis;
-    return {...executor,claim,release,async execute(request){const state=[...active.values()].find(entry=>entry.lease.step_id===request.unit);if(!state)throw new Error('No canonical claim admits this unit execution');owned(state.lease);if(state.reuse)throw new Error('Canonical completed-unit reuse permits durable receipt replay only, never live execution');return executor.execute({...request,signal:AbortSignal.any([request.signal,state.executionStop.signal])});}};
+    return {...executor,claim,release,async execute(request){const state=[...active.values()].find(entry=>entry.lease.step_id===request.unit);if(!state)throw new Error('No canonical claim admits this unit execution');owned(state.lease);if(state.reuse)throw new Error('Canonical completed-unit reuse permits durable receipt replay only, never live execution');const assertAuthority=async()=>{try{owned(state.lease);await renewStepClaim(runId,{...leaseOptions(state.lease),lease_seconds:leaseSeconds});if(state.executionStop.signal.aborted)throw state.executionStop.signal.reason;}catch(error){state.failure=error;state.executionStop.abort(error);throw Object.assign(new Error('Execution aborted: canonical unit claim authority revoked',{cause:error}),{name:'AbortError'});}};await assertAuthority();const result=await executor.execute({...request,signal:AbortSignal.any([request.signal,state.executionStop.signal]),beforePublication:assertAuthority});await assertAuthority();return result;}};
   }
   async function close() {
     for(const state of [...active.values()]) {await stop(state);const run=await loadRun(runId,controllerRoot);if(!state.reuse&&run.state.multi_cursor.active_claims.some(claim=>claim.claim_id===state.lease.claim_id))await releaseStepClaim(runId,{...leaseOptions(state.lease),reason:'controller-close'});active.delete(state.lease.claim_id);}

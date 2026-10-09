@@ -20,11 +20,11 @@
   "native_topology_dispatch": "component-and-subprocess-tested",
   "unit_dag_expansion": "public-flow-subprocess-tested",
   "swarm_source_merges": "isolated-fork-component-tested",
-  "deployment_adapters": "host_required",
+  "deployment_adapters": "authenticated-provider-neutral-host-ports-required",
   "shared_worker_budgets": "host-ledger-enforced",
   "judgment_dissent_disposition": "operator-policy-required-with-audit-input",
   "unit_source_custody": "manifest-scoped-publication-jail",
-  "native_ceremony_settings": "partial-collaborators-plan-approval-others-recorded"
+  "native_ceremony_settings": "validated-review-sensor-summary-plan-collaborator-learning-and-skeleton-composition"
  },
  "comparison": {
   "profile_structure": "implemented",
@@ -35,7 +35,7 @@
  },
  "deliberate_differences": [
   "Missing or unavailable checks never count as passing required evidence.",
-  "Reviewer roles retain required evidence even when upstream profiles lower guard policy.",
+  "Current source and artifact custody stays fail-closed even when upstream guard policy relaxed/off would keep unreadable or stale review verdicts.",
   "All stage completions require explicit Flow evidence; artifact presence alone does not advance a run."
  ]
 }

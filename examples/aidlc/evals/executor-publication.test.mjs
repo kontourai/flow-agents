@@ -9,7 +9,7 @@ import { digest } from '../scripts/compile.mjs';
 
 // This is a local host-port boundary test, not a Docker/provider receipt.
 // The port creates real competing fork bytes; the executor decides publication.
-function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 5, portThrows = false, storageBudget } = {}) {
+function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 5, portThrows = false, storageBudget,reasoningEffort } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aidlc-publication-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const workspace = path.join(root, 'source'), controllerRoot = path.join(root, 'controller');
@@ -19,10 +19,10 @@ function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 
   const artifact = '.aidlc/artifacts/code-generation/code-summary.md';
   fs.mkdirSync(path.dirname(path.join(workspace, artifact)), { recursive: true });
   fs.writeFileSync(path.join(workspace, artifact), 'canonical artifact');
-  const request = { workspace, source_root: workspace, run_id: 'publication-fixture', execution: { max_turns: maxTurns, timeout_s: 60, model: 'local-fixture' }, engine_sandbox: { image: `sha256:${'a'.repeat(64)}`, artifact_root: path.join(root, 'artifacts'), storage_budget: storageBudget === 'workspace-logical' ? registeredBudget({ roots: [workspace] }) : storageBudget } };
-  let fork, calls = 0, dispatch, observedStorageBudget;
+  const request = { workspace, source_root: workspace, run_id: 'publication-fixture', execution: { max_turns: maxTurns, timeout_s: 60, model: 'local-fixture',reasoning_effort:reasoningEffort }, engine_sandbox: { image: `sha256:${'a'.repeat(64)}`, artifact_root: path.join(root, 'artifacts'), storage_budget: storageBudget === 'workspace-logical' ? registeredBudget({ roots: [workspace] }) : storageBudget } };
+  let fork, calls = 0, dispatch, observedStorageBudget,observedReasoning;
   const workerRunner = async (input) => {
-    calls++;observedStorageBudget=input.storageBudget;
+    calls++;observedStorageBudget=input.storageBudget;observedReasoning=input.reasoningEffort;
     if (portThrows) throw new Error('Synthetic unreceipted worker failure');
     fork = input.workspace;
     fs.writeFileSync(path.join(fork, 'app.js'), 'worker edit');
@@ -39,7 +39,7 @@ function fixture(t, { responseStatus = 'failed', terminalStatus = 0, maxTurns = 
     dispatch.expected_identity = await executor.admit(dispatch);
     return executor.execute(dispatch);
   };
-  return { workspace, controllerRoot, artifact, execute, executor, freshExecutor, fork: () => fork, calls: () => calls, dispatch: () => dispatch, observedStorageBudget:()=>observedStorageBudget };
+  return { workspace, controllerRoot, artifact, execute, executor, freshExecutor, fork: () => fork, calls: () => calls, dispatch: () => dispatch, observedStorageBudget:()=>observedStorageBudget,observedReasoning:()=>observedReasoning };
 }
 
 test('a final failed result publishes no modifications, deletions, additions or artifacts', async (t) => {
@@ -168,3 +168,5 @@ test('logical storage roots are canonicalized before comparison',async t=>{
   await f.execute();
   assert.equal(fs.readFileSync(path.join(f.workspace,'app.js'),'utf8'),'worker edit');
 });
+
+test('low and high effort reach the worker unchanged for broker admission',async t=>{for(const reasoningEffort of ['low','high']){const f=fixture(t,{reasoningEffort});await f.execute();assert.equal(f.observedReasoning(),reasoningEffort);}});
