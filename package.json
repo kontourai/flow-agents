@@ -1,7 +1,7 @@
 {
   "name": "@kontourai/flow-agents",
   "version": "6.5.2",
-  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
+  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows \u2014 a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi \u2014 with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
     "ai-agents",
@@ -58,6 +58,13 @@
     "./workspace-kits": {
       "types": "./build/src/workspace-kits.d.ts",
       "import": "./build/src/workspace-kits.js"
+    },
+    "./docker-worker": "./integrations/codex-host/docker-worker.mjs",
+    "./provider-broker": "./integrations/codex-host/provider-broker.mjs",
+    "./storage-admission": "./integrations/codex-host/storage-admission.mjs",
+    "./kit-execution": {
+      "types": "./build/src/kit-execution.d.ts",
+      "import": "./build/src/kit-execution.js"
     }
   },
   "repository": {
@@ -100,7 +107,6 @@
     "flow-agents-kit": "build/src/cli.js"
   },
   "files": [
-    "examples/aidlc/",
     ".github/",
     ".githooks/",
     "AGENTS.md",
@@ -138,7 +144,8 @@
     "!**/.telemetry/",
     "!**/.veritas/",
     "!**/node_modules/",
-    "!build/src/cli/workflow.test-support.js"
+    "!build/src/cli/workflow.test-support.js",
+    "integrations/codex-host/"
   ],
   "scripts": {
     "knowledge:yaml:generate": "node scripts/build-knowledge-yaml.mjs",
@@ -146,8 +153,6 @@
     "build": "npm run knowledge:yaml:check && tsc -p tsconfig.json && node build/src/cli.js capability-matrix --json-only && node build/src/tools/generate-install-identity.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:unit": "npm run build --silent && node build/src/cli.js build-bundles && node scripts/build-test-support.mjs && node --import ./src/cli/unit-test-state.mjs --test src/cli/*.test.mjs",
-    "test:aidlc": "npm run build --silent && node --test src/cli/aidlc-reference-kit.test.mjs src/cli/installed-kit-run-binding.test.mjs",
-    "eval:aidlc": "node examples/aidlc/scripts/compile.mjs --check && node examples/aidlc/scripts/compare.mjs method && node examples/aidlc/evals/public-flow-conformance.mjs",
     "validate:source": "npm run build --silent && node build/src/cli.js validate-source",
     "validate:artifacts": "npm run build --silent && node build/src/cli/validate-workflow-artifacts.js",
     "context-map": "npm run build --silent && node build/src/cli.js context-map",

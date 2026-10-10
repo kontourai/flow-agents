@@ -1049,13 +1049,29 @@ NODE
 )"
 
 package_flow() {
-  (cd "$PACKAGE_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" workflow "$@")
+  local status
+  if (cd "$PACKAGE_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" workflow "$@"); then
+    return 0
+  else
+    status=$?
+    printf 'Packed workflow command failed (exit %s): %s\n' "$status" "$*" >&2
+    return "$status"
+  fi
 }
 
 package_review() {
-  (cd "$PACKAGE_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=packed-package-reviewer node "$PACKAGE_CLI" workflow "$@")
+  local status
+  if (cd "$PACKAGE_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=packed-package-reviewer node "$PACKAGE_CLI" workflow "$@"); then
+    return 0
+  else
+    status=$?
+    printf 'Packed reviewer command failed (exit %s): %s\n' "$status" "$*" >&2
+    return "$status"
+  fi
 }
 
+PACKAGE_DIAGNOSTIC_LOG="$TMPDIR_EVAL/packed-consumer-diagnostics.log"
+packed_consumer_check() {
 if (cd "$ROOT_DIR" && npm pack --silent --pack-destination "$TMPDIR_EVAL" >"$PACKAGE_PACK_LOG") \
   && PACKAGE_TARBALL="$(find "$TMPDIR_EVAL" -maxdepth 1 -type f -name 'kontourai-flow-agents-*.tgz' -print -quit)" \
   && [[ -n "$PACKAGE_TARBALL" ]] \
@@ -1075,15 +1091,24 @@ const visit = (directory) => fs.readdirSync(directory, { withFileTypes: true }).
 visit(root);
 const publicApi = await import(pathToFileURL(path.join(root, 'index.js')).href);
 for (const name of ['loadCritiqueResolutionAuthorization']) {
-  if (name in publicApi) process.exit(1);
+  if (name in publicApi) { console.error(`Packed public API unexpectedly exports ${name}`); process.exit(1); }
 }
 for (const file of files.sort()) {
   // Executable-only entrypoints intentionally run or exit when imported. Their
-  // installed bytes are covered by the scan above and their public behavior is
-  // exercised below; import every library module that exposes an API surface.
-  if (file === path.join(root, 'cli.js') || file === path.join(root, 'cli', 'validate-workflow-artifacts.js') || file === path.join(root, 'cli', 'lifecycle-authority-verifier.js')) continue;
-  const exported = await import(pathToFileURL(file).href);
-  if (Object.keys(exported).some((name) => /test.*authority|authority.*test|inject.*authority/i.test(name))) process.exit(1);
+  // installed bytes are covered by the scan above; the dedicated CLI/runtime
+  // evals exercise these processes. Import every library API module here.
+  if (file === path.join(root, 'kit-execution-child.js') || file === path.join(root, 'cli.js') || file === path.join(root, 'cli', 'validate-workflow-artifacts.js') || file === path.join(root, 'cli', 'lifecycle-authority-verifier.js')) continue;
+  const exitBefore = process.exitCode;
+  let exported;
+  try {
+    exported = await import(pathToFileURL(file).href);
+    if (process.exitCode !== exitBefore) throw new Error(`import changed process exit status to ${process.exitCode}`);
+  } catch (error) {
+    console.error(`Packed library module import failed: ${path.relative(root, file)}`);
+    throw error;
+  }
+  const forbidden = Object.keys(exported).filter((name) => /test.*authority|authority.*test|inject.*authority/i.test(name));
+  if (forbidden.length) { console.error(`Packed library ${path.relative(root, file)} exports test authority APIs: ${forbidden.join(', ')}`); process.exit(1); }
 }
 NODE
   mkdir -p "$PACKAGE_SESSION" "$PACKAGE_LIFECYCLE_SESSION" \
@@ -1307,8 +1332,16 @@ if (flow.status === 'canceled') process.exit(1);
 if (!fs.existsSync(path.join(project, '.kontourai', 'flow-agents', slug))) process.exit(1);
 NODE
 then
+  return 0
+else
+  return 1
+fi
+}
+if packed_consumer_check >"$PACKAGE_DIAGNOSTIC_LOG" 2>&1; then
+  cat "$PACKAGE_DIAGNOSTIC_LOG"
   _pass "packed npm consumer follows the public Builder workflow contract and lifecycle commands"
 else
+  tail -n 160 "$PACKAGE_DIAGNOSTIC_LOG" >&2
   _fail "packed npm consumer did not complete the public Builder workflow contract and lifecycle commands"
 fi
 

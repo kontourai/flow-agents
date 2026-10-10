@@ -1,0 +1,92 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {fork,execFile} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
+import {promisify} from 'node:util';
+import {observeInstalledKitIntegrity} from './flow-kit/content-hash.js';
+
+export type KitExecutionDescriptor = {contract: 'kontour.kit.execution_request@1.0'; module: string; export: string};
+export function parseKitExecution(manifest: Record<string, unknown>): KitExecutionDescriptor | null {
+ if(manifest.execution===undefined)return null;
+ const value=manifest.execution as Record<string, unknown>;
+ if(!value||typeof value!=='object'||Array.isArray(value)||value.contract!=='kontour.kit.execution_request@1.0'||typeof value.module!=='string'||!value.module.endsWith('.mjs')||path.isAbsolute(value.module)||value.module.includes('\\')||value.module.split('/').some(part=>!part||part==='.'||part==='..'||['.git','__pycache__','.pytest_cache'].includes(part))||typeof value.export!=='string'||!/^[$A-Z_a-z][$\w]*$/.test(value.export))throw new Error('execution must declare a relative .mjs module, exported function and kontour.kit.execution_request@1.0 contract');
+ return value as KitExecutionDescriptor;
+}
+
+/** Resolve only an explicitly installed, integrity-bound kit host entry. */
+export function verifyInstalledKit({kitId,dest}: {kitId:string;dest:string}):{kitRoot:string;modulePath:string;descriptor:KitExecutionDescriptor;hash:string}{
+ if(!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(kitId))throw new Error('Invalid kit id');
+ const registry=JSON.parse(fs.readFileSync(path.join(dest,'kits/local/installed-kits.json'),'utf8'));
+ const entries=(registry.kits as Record<string, unknown>[]).filter(entry=>entry.id===kitId);
+ if(entries.length!==1)throw new Error('Exactly one installed kit required');
+ const integrity=observeInstalledKitIntegrity(entries[0]!,dest);
+ if(integrity.state!=='installed')throw new Error(`Installed kit integrity refused: ${integrity.state}`);
+ const kitRoot=path.join(path.resolve(dest),'kits/local/repositories',kitId);
+ const inspectTree=(directory:string):void=>{for(const entry of fs.readdirSync(directory,{withFileTypes:true})){if(['.git','__pycache__','.pytest_cache'].includes(entry.name))throw new Error('Installed execution tree contains unhashed entries');if(entry.isDirectory())inspectTree(path.join(directory,entry.name));}};
+ inspectTree(kitRoot);
+ const manifest=JSON.parse(fs.readFileSync(path.join(kitRoot,'kit.json'),'utf8'));
+ const descriptor=parseKitExecution(manifest);if(!descriptor)throw new Error('Kit has no declared execution entry');
+ let modulePath=kitRoot;
+ for(const component of descriptor.module.split('/')){modulePath=path.join(modulePath,component);if(fs.lstatSync(modulePath).isSymbolicLink())throw new Error('Execution module may not traverse symlinks');}
+ if(!fs.statSync(modulePath).isFile())throw new Error('Execution module must be a regular file');
+ return {kitRoot,modulePath,descriptor,hash:integrity.observed_hash!};
+}
+
+export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot,authFile}: {kitId:string;dest:string;requestFile:string;controllerRoot:string;authFile?:string}):Promise<unknown>{
+ const {kitRoot,modulePath,descriptor}=verifyInstalledKit({kitId,dest});
+ const request=JSON.parse(fs.readFileSync(requestFile,'utf8'));
+ if(request.schema!=='kontour.kit.execution_request'||request.version!=='1.0'||request.kit_id!==kitId)throw new Error('Request must bind the declared kit execution contract and kit id');
+ if(request.source_root!==undefined&&(typeof request.source_root!=='string'||fs.realpathSync(request.source_root)!==fs.realpathSync(kitRoot)))throw new Error('Request source_root must bind the installed kit');
+ const executionOwner=randomUUID(),seconds=request.execution?.timeout_s??300;
+ if(!Number.isFinite(seconds)||seconds<=0||seconds>86400)throw new Error('Finite host execution deadline required');
+ const args={requestFile:path.resolve(requestFile),controllerRoot:path.resolve(controllerRoot),authFile:authFile?path.resolve(authFile):undefined,executionOwner};
+ const cleanup=async()=>{
+   if(!request.engine_sandbox?.image)return 0;
+   const command=promisify(execFile),filter=`label=kontour.worker.owner=${executionOwner}`;
+   const list=await command('docker',['ps','-aq','--filter',filter],{timeout:10000});
+   const ids=list.stdout.trim().split(/\s+/).filter(Boolean);
+   if(ids.some(id=>!/^[a-f0-9]{12,64}$/.test(id)))throw new Error('Invalid observed worker custody ids');
+   if(ids.length)await command('docker',['rm','-f',...ids],{timeout:10000});
+   const remaining=await command('docker',['ps','-aq','--filter',filter],{timeout:10000});
+   if(remaining.stdout.trim())throw new Error('Owned worker termination unverified');
+   return ids.length;
+ };
+ return new Promise((resolve,reject)=>{
+   const child=fork(fileURLToPath(new URL('./kit-execution-child.js',import.meta.url)),[modulePath,descriptor.export,JSON.stringify(args)],{stdio:['ignore','ignore','pipe','ipc'],execArgv:[]});
+   let forced:ReturnType<typeof setTimeout>|undefined,timedOut=false,settled=false;
+   let processError:Error|undefined;
+   // IPC is a cooperative cancellation transport, not process custody. A kit
+   // can close that transport while retaining referenced handles in its host.
+   const terminate=()=>{
+     forced??=setTimeout(()=>child.kill('SIGKILL'),5000);
+     if(child.connected){
+       try{child.send({kind:'cancel'},error=>{if(error)processError??=error;});}
+       catch(error){processError??=error as Error;}
+     }
+   };
+   const timer=setTimeout(()=>{timedOut=true;terminate();},seconds*1000);
+   let outcome:{kind:string;result?:unknown;message?:string}|null=null,stderr='';
+   child.stderr?.on('data',chunk=>{stderr=(stderr+chunk).slice(-65536);});
+   child.on('message',message=>{outcome=message as typeof outcome;});
+   const finish=(code:number|null)=>{
+     if(settled)return;
+     settled=true;clearTimeout(timer);clearTimeout(forced);
+     cleanup().then(removed=>{
+       if(timedOut)reject(new Error('Kit execution deadline exceeded; owned workers terminated'));
+       else if(processError)reject(processError);
+       else if(removed>0&&code===0&&outcome?.kind==='result')reject(new Error('Kit left owned workers running; terminated them and refused completion'));
+       else if(code===0&&outcome?.kind==='result')resolve(outcome.result);
+       else reject(new Error(outcome?.message??`Kit execution process failed (${code}): ${stderr}`));
+     },error=>reject(new Error(`Owned worker cleanup refused: ${(error as Error).message}`)));
+   };
+   child.on('error',error=>{
+     processError??=error;
+     // Failed spawn has no executing process and emits close rather than exit.
+     // Every error on a spawned process retains custody until its observed exit.
+     if(child.pid!==undefined&&!settled)terminate();
+   });
+   child.on('exit',finish);
+   child.on('close',code=>{if(child.pid===undefined)finish(code);});
+ });
+}

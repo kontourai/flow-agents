@@ -1,3 +1,4 @@
+import {executeInstalledKit} from '../kit-execution.js';
 import { workspaceKitMain } from "./workspace-kit.js";
 import * as child_process from "node:child_process";
 import * as fs from "node:fs";
@@ -61,6 +62,7 @@ export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): 
 }
 
 const KIT_USAGE: Record<string, string> = {
+  run: "usage: flow-agents kit run <kit-id> --request <json> --controller-root <private-root> [--auth-file <host-auth.json>] [--dest <workspace>]",
   install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
   activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]\n"
     + "   or: flow-agents kit activate <kit-id> [<kit-id> ...] (--global | --dest <path>) [--dry-run]  (built-in kit activation)",
@@ -1545,6 +1547,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "status" && hasHelp(rest)) {
     printCommandUsage("status");
     return 0;
+  }
+  if(command==='run'){
+    if(hasHelp(rest)){printCommandUsage('run');return 0;}
+    const args=parseArgs(rest),kitId=args.positionals[0],requestFile=flagString(args.flags,'request'),controllerRoot=flagString(args.flags,'controller-root');
+    if(!kitId||!requestFile||!controllerRoot){printCommandUsage('run');return 2;}
+    const result=await executeInstalledKit({kitId,dest:resolveDest(args.flags),requestFile,controllerRoot,authFile:flagString(args.flags,'auth-file')});
+    console.log(JSON.stringify(result));
+    const status=(result as {status?:string})?.status;return status==='completed'||status==='waiting'?0:1;
   }
   if (command === "install") return await install(rest);
   // Legacy sub-subcommands forwarded for backward compatibility within the kit subcommand.

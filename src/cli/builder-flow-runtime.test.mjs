@@ -6855,9 +6855,19 @@ test("record-agent-event rejects a pointer rebound while waiting for another run
   const holderRelease = new Promise((resolve) => { releaseHolder = resolve; });
   let holderEntered;
   const entered = new Promise((resolve) => { holderEntered = resolve; });
+  let observeRecordSettlement;
+  const recordSettled = new Promise((resolve) => { observeRecordSettlement = resolve; });
+  let holderSettled = false;
   const holder = withRunMutationLock(first.slug, first.projectRoot, async () => {
     holderEntered();
     await holderRelease;
+  }).then(async () => {
+    // Make the formerly timing-dependent window deterministic: the writer
+    // settles before this holder's post-release cleanup finishes, followed by
+    // a full event-loop turn in which an unobserved rejection would escape.
+    await recordSettled;
+    await new Promise((resolve) => setImmediate(resolve));
+    holderSettled = true;
   });
   await entered;
   const record = workflowSidecarMain([
@@ -6868,6 +6878,18 @@ test("record-agent-event rejects a pointer rebound while waiting for another run
     "--status", "active",
     "--summary", "must remain bound to the lock-selected run",
   ]);
+  // Observe rejection at creation, before queue polling or holder cleanup.
+  // Resolve an outcome instead of leaving a second assertion promise capable
+  // of rejecting before the test reaches its final await.
+  let rejectedBeforeHolderSettled = false;
+  const recordOutcome = record.then(
+    () => { observeRecordSettlement(); return { status: "fulfilled" }; },
+    (error) => {
+      rejectedBeforeHolderSettled = !holderSettled;
+      observeRecordSettlement();
+      return { status: "rejected", error };
+    },
+  );
   const lockRoot = path.join(runDir(first.slug, first.projectRoot), ".mutation.lock");
   let queued = false;
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -6880,11 +6902,17 @@ test("record-agent-event rejects a pointer rebound while waiting for another run
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-  assert.equal(queued, true, "event writer must be waiting on the first run lock before the rebind");
-  currentPointer.writePerActorCurrent(first.artifactRoot, ambient.actorKey, secondPointer);
-  releaseHolder();
+  try {
+    assert.equal(queued, true, "event writer must be waiting on the first run lock before the rebind");
+    currentPointer.writePerActorCurrent(first.artifactRoot, ambient.actorKey, secondPointer);
+  } finally {
+    releaseHolder();
+  }
   await holder;
-  await assert.rejects(record, /authenticated binding changed while waiting for the canonical Flow lock/);
+  const outcome = await recordOutcome;
+  assert.equal(outcome.status, "rejected");
+  assert.match(outcome.error.message, /authenticated binding changed while waiting for the canonical Flow lock/);
+  assert.equal(rejectedBeforeHolderSettled, true, "binding rejection must be observed while holder cleanup is still pending");
   assert.equal(
     fs.existsSync(path.join(second.sessionDir, "agents", "rebound-worker", "events.jsonl")),
     false,

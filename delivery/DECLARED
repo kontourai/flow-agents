@@ -508,5 +508,15 @@
     ],
     "approved_by": "briananderson1222 (explicit owner instruction in this T3 thread: \"Approve all exceptions as I really don't understand the value\"; task-related Step-2 exception only)",
     "declared_at": "2026-10-09T14:02:28.346964Z"
+  },
+  {
+    "scope": "author:briananderson1222 ref:feat/aidlc-external-kit-20261009",
+    "reason": "Owner-authorized Step-2-only administrative delivery exception for the continuing AI-DLC program and PR #1442. Earlier implementation had no pre-change bound Builder history; current follow-up Work Item #1444 retains that gap and real chronological review, failed attempts and repairs. Actual current Node verification commands passed with kernel receipts, but canonical first verification admission after signed cross-review resolution remains unqualified: the public signed reseal cannot insert an absent target, and the installed host lacks the required kernel atomic expected-preimage replacement capability. No signed canonical delivery, complete Builder outcome, live method effectiveness or released consumer closure is claimed. Waive only bundle-required Step 2 for this exact author and branch. Step 1 fresh canonical verification, all ordinary required CI, repository standards and runtime/worker security checks remain mandatory; neither the helper nor its missing capability is bypassed. The generic first-admission design is preserved as a separate follow-up rather than merged as an unvalidated platform capability.",
+    "gaps": [
+      "Earlier AI-DLC implementation was not performed under a pre-change bound Builder run; that historical gap is retained in Work Item #1444.",
+      "Current normal Builder tests-evidence submission and signed delivery are NOT verified: public first-target insertion is unsupported and the host has no required kernel atomic expected-preimage capability. Real passing command receipts and independent reviews do not constitute canonical delivery."
+    ],
+    "approved_by": "briananderson1222; explicit continuing AI-DLC task approval: \"Approve all exceptions as I really don't understand the value\". Durable source: T3 thread ea18a31e-9878-420c-b99d-63d0327a6647 activity position 293, user message turn-item:message:async-answer%3Aruntime-request%3Aprovider%3Acodex%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Acodex%253Anative-turn%253A01a11e2d-03c7-7742-b4c1-39c4a68f23e5%3Anative-request%3Aasync%253Acall_9667f8d8be184008949d674b517763d9%3A63f1f203-661b-4b79-8482-e5ef03e06776. This administrative exception does not authorize a runtime or protected-standards weakening.",
+    "declared_at": "2026-10-09T23:58:17.245901+00:00"
   }
 ]

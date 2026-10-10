@@ -1,3 +1,4 @@
+import {parseKitExecution} from '../kit-execution.js';
 import fs from "node:fs";
 import * as path from "node:path";
 import { readJson } from "../lib/fs.js";
@@ -23,7 +24,7 @@ const AGENT_EXTENSION_CLASSES = new Set(["skills", "docs", "adapters", "evals", 
 // agent_spawn_triggers declares perimeter trigger surfaces that spawn agent runs plus
 // their guard config (context/contracts/trigger-guards.md), and first_party is legacy
 // catalog/marketplace metadata. It does not grant runtime capability or steering privilege.
-const KNOWN_METADATA_FIELDS = new Set(["dependencies", "workflow_triggers", "hook_influence_expectations", "flow_step_actions", "skill_roles", "first_party", "agent_spawn_triggers", "observability_contribution"]);
+const KNOWN_METADATA_FIELDS = new Set(["dependencies", "workflow_triggers", "hook_influence_expectations", "flow_step_actions", "skill_roles", "first_party", "agent_spawn_triggers", "observability_contribution", "execution"]);
 
 export interface KitDependencyEntry {
   kit_id: string;
@@ -840,6 +841,7 @@ function validateExtensionAssets(kitDir: string, manifestPath: string, manifest:
 function validateAgentMetadata(kitDir: string, manifestPath: string, manifest: Record<string, unknown>): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
+  try{const execution=parseKitExecution(manifest);if(execution&&!fs.existsSync(path.join(kitDir,execution.module)))errors.push(`${manifestPath}: execution module is missing`);}catch(error){errors.push(`${manifestPath}: ${(error as Error).message}`);}
   const depResult = parseKitDependencies(manifest, manifestPath);
   for (const err of depResult.errors) errors.push(err);
   const workflowTriggerResult = parseKitWorkflowTriggers(manifest, manifestPath);
