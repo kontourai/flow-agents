@@ -32,7 +32,6 @@ import type {
   WorkItemMutationRequest,
   WorkItemMutationResult,
 } from "../lib/work-item-mutations.js";
-import type { ActorStruct, AssignmentClaimRecord, AssignmentStatus } from "./assignment-provider.js";
 // Type-only imports of the CLI's OWN exported runtime const arrays (#777 review finding 5):
 // `WorkItemReadinessClassification`/`ReferenceAdapterFreshnessDiagnostic` below derive their
 // union directly from these arrays via `typeof ...[number]`, so a change to what `classify()`/
@@ -339,131 +338,17 @@ export interface BoardProvider {
 }
 
 // ─── AssignmentProvider ──────────────────────────────────────────────────────
-// assignment-provider-contract.md "AssignmentProvider Operations", formalizing ADR 0021 §2.
-
-export interface AssignmentClaimMeta {
-  ttlSeconds: number;
-  branch: string;
-  artifactDir: string;
-  reason?: string;
-  actorKey?: string;
-  workItemRef?: string;
-}
-
-export interface AssignmentReleaseMeta {
-  reason?: string;
-  actorKey?: string;
-  /** When `true`, a missing claim or an ownership mismatch is a tolerated no-op (`null` return)
-   * instead of a thrown error — the Stop-hook idempotent-release lifecycle's behavior
-   * (`performLocalRelease`'s doc comment); the interactive/default behavior is `false`. */
-  tolerateNoActiveClaim?: boolean;
-}
-
-export interface AssignmentSupersedeMeta {
-  ttlSeconds?: number;
-  branch?: string;
-  artifactDir?: string;
-  reason?: string;
-  actorKey?: string;
-  workItemRef?: string;
-}
-
-export interface AssignmentProvider {
-  /**
-   * Record durable ownership of `subjectId` for `actor`. Returns `void` — ADR 0021 §2's abstract
-   * signature documents exactly this ("caller re-reads via `status` to confirm" —
-   * assignment-provider-contract.md "AssignmentProvider Operations" table). This is the
-   * provider-NEUTRAL surface: the shipped local-file implementation (`performLocalClaim`,
-   * `src/cli/assignment-provider.ts`) actually returns the written `AssignmentClaimRecord`
-   * directly, but a GitHub-backed `AssignmentProvider` cannot do the equivalent (the GitHub write
-   * path is render-don't-execute — see assignment-provider-contract.md's "Implementation Note" —
-   * so there is no synchronously-written record to hand back). Forcing every adapter to return a
-   * record would leak the local-file adapter's shape into the neutral contract (#777 review
-   * finding 1). A caller that wants the written record from an adapter that can supply one should
-   * use that adapter's capability extension instead — see `LocalAssignmentProviderExt` below for
-   * the local-file case.
-   *
-   * Same actor re-claiming before TTL expiry is idempotent; a different actor claiming an
-   * already-`claimed` subject throws (AC7 — never silently overwritten; use `supersede`).
-   */
-  claim(subjectId: string, actor: ActorStruct, meta: AssignmentClaimMeta): void | Promise<void>;
-
-  /**
-   * Clear durable ownership and leave a handoff note. Returns `void` — same ADR 0021 §2 rationale
-   * as `claim` above; re-read via `status()` to confirm the release took effect. `releasedBy:
-   * null` performs an unconditional release (no ownership check); every other caller should pass
-   * the releasing actor so ownership is verified before the record is cleared (AC6 — never
-   * force-release a claim held by a different actor). `meta.tolerateNoActiveClaim` makes a missing
-   * claim or an ownership mismatch a tolerated no-op instead of a thrown error.
-   */
-  release(subjectId: string, releasedBy: ActorStruct | null, meta?: AssignmentReleaseMeta): void | Promise<void>;
-
-  /** Reassign ownership from a lapsed actor (`from`) to a successor (`to`), with an audit-trail
-   * note. Returns `void` — same ADR 0021 §2 rationale as `claim` above. Throws when `from` does
-   * not match the current holder — never force-reassigns a claim held by someone else. */
-  supersede(subjectId: string, from: ActorStruct, to: ActorStruct, meta?: AssignmentSupersedeMeta): void | Promise<void>;
-
-  /**
-   * Read current assignment-layer state WITHOUT joining liveness — assignment-layer truth only
-   * (assignment-provider-contract.md "AssignmentProvider Operations" / "The assignment ⋈
-   * liveness join"). A caller that needs to know whether work is actually available must
-   * additionally join this against `freshHolders` (`scripts/hooks/lib/liveness-read.js`) via
-   * `computeEffectiveState` (`src/cli/assignment-provider.ts`) — this method alone never answers
-   * that question; it deliberately mirrors the contract's own "never trust one layer alone"
-   * framing rather than baking a join this interface does not own into its return shape.
-   */
-  status(subjectId: string): AssignmentStatus | Promise<AssignmentStatus>;
-
-  /**
-   * Enumerate subject ids currently claimed, optionally filtered to one actor's CANONICAL actor
-   * key: `record.actor_key` when present, falling back to `serializeActor(record.actor)` only for
-   * pre-`actor_key` records — the exact comparison `canonicalHolderActorKey()`
-   * (`src/cli/assignment-provider.ts`) centralizes and `computeEffectiveState` already uses for
-   * self-recognition (#777 review finding 3). A filter that instead re-serializes the actor struct
-   * unconditionally, ignoring a present `actor_key`, gives the WRONG answer for an
-   * explicit-override actor (assignment-provider-contract.md's `actor_key` field doc: a bare
-   * canonical token vs. a re-derived `explicit-override:<value>:<host>` triple diverge for that
-   * one actor shape) — adapters must delegate to `canonicalHolderActorKey()` (or an equivalent
-   * provider-native rule that produces the same canonical key) rather than inventing their own
-   * comparison.
-   */
-  list(actorKey?: string): string[] | Promise<string[]>;
-}
-
-/**
- * Local-file-adapter-specific capability extension (#777 review finding 1): the record-returning
- * counterparts to `AssignmentProvider`'s void-returning `claim`/`release`/`supersede`, for hosts
- * that specifically want the local-file adapter's synchronously-written `AssignmentClaimRecord`
- * instead of a second `status()` round trip. This interface is intentionally NOT part of
- * `AssignmentProvider` itself — it is a capability only an adapter with direct, synchronous
- * storage access (the local-file adapter) can honestly provide; a GitHub-backed adapter cannot
- * implement it without fabricating a record the render-don't-execute split does not actually
- * produce. A host must explicitly opt in by checking for/depending on this extension (e.g. `if
- * ("claimReturning" in provider) ...`) rather than this leaking into the general contract every
- * `AssignmentProvider` consumer is typed against. `createLocalFileAssignmentProvider`
- * (`local-file-provider-adapters.ts`) returns an object satisfying `AssignmentProvider &
- * LocalAssignmentProviderExt`.
- */
-export interface LocalAssignmentProviderExt {
-  /** Record-returning counterpart to `AssignmentProvider.claim` — see that method's doc comment
-   * and `performLocalClaim`'s return value. */
-  claimReturning(subjectId: string, actor: ActorStruct, meta: AssignmentClaimMeta): AssignmentClaimRecord | Promise<AssignmentClaimRecord>;
-  /** Record-returning counterpart to `AssignmentProvider.release` — see that method's doc comment
-   * and `performLocalRelease`'s return value (`null` for a tolerated no-op). */
-  releaseReturning(
-    subjectId: string,
-    releasedBy: ActorStruct | null,
-    meta?: AssignmentReleaseMeta,
-  ): AssignmentClaimRecord | null | Promise<AssignmentClaimRecord | null>;
-  /** Record-returning counterpart to `AssignmentProvider.supersede` — see that method's doc
-   * comment and `performLocalSupersede`'s return value. */
-  supersedeReturning(
-    subjectId: string,
-    from: ActorStruct,
-    to: ActorStruct,
-    meta?: AssignmentSupersedeMeta,
-  ): AssignmentClaimRecord | Promise<AssignmentClaimRecord>;
-}
+// The AssignmentProvider contract is the engine's kit-neutral coordination primitive and lives in
+// `src/lib/assignment-model.ts` (published as `@kontourai/flow-agents/assignment-contract`); it is
+// re-exported here so existing imports keep working. `LocalAssignmentProviderExt` is the local-file
+// store's capability extension (`src/lib/assignment-local-store.ts`).
+export type {
+  AssignmentClaimMeta,
+  AssignmentProvider,
+  AssignmentReleaseMeta,
+  AssignmentSupersedeMeta,
+} from "../lib/assignment-model.js";
+export type { LocalAssignmentProviderExt } from "../lib/assignment-local-store.js";
 
 // ─── WorkItemMutationProvider ────────────────────────────────────────────────
 // work-item-contract.md "Mutations" (issue #776).

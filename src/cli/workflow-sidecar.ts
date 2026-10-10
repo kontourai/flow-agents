@@ -53,6 +53,7 @@ import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLo
 import { CRITIQUE_CHAIN_GENESIS, critiqueRecordHash, validateCritiqueResolutionGraph } from "./critique-resolution.js";
 import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
+import { decideTakeover } from "../lib/assignment-model.js";
 import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, normalizeRouteReasonForBudget, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
 
 type AnyObj = Record<string, any>;
@@ -8158,6 +8159,9 @@ export function runTakeoverPreflight(
   const events = readLivenessEvents(artifactRoot);
   const freshList = loadLivenessReadHelper().freshHolders(events, slug, actorKey, nowMs);
   const effective = computeEffectiveState(assignment, freshList, actorKey, nowMs);
+  // The eligibility rule (which action a join result earns) is the shared contract's; this function
+  // only adds the Builder-side resume rendering (branch, next_steps) around it.
+  const decision = decideTakeover(effective);
   const reason = sanitize(effective.reason);
   const holderActor = effective.holder?.actor ? sanitize(effective.holder.actor) : undefined;
   const holderLastAt = effective.holder?.last_at ? sanitize(effective.holder.last_at) : undefined;
@@ -8168,8 +8172,8 @@ export function runTakeoverPreflight(
       // derive a new one (AC1: takeover continues the incumbent's branch, no parallel branch).
       const resumeBranch = assignment.record?.branch ? sanitizeWide(assignment.record.branch) : undefined;
       return {
-        ok: true,
-        action: "grace-then-supersede",
+        ok: decision.ok,
+        action: decision.action,
         effective_state: "reclaimable",
         reason,
         holder: { actor: holderActor, last_at: holderLastAt },
@@ -8188,8 +8192,8 @@ export function runTakeoverPreflight(
     case "held": {
       const selfIsHolder = effective.reason === "self_is_holder";
       return {
-        ok: selfIsHolder,
-        action: selfIsHolder ? "proceed" : "back-off",
+        ok: decision.ok,
+        action: decision.action,
         effective_state: "held",
         reason,
         holder: { actor: holderActor, last_at: holderLastAt },
@@ -8200,8 +8204,8 @@ export function runTakeoverPreflight(
     }
     case "human-held": {
       return {
-        ok: false,
-        action: "ask-first",
+        ok: decision.ok,
+        action: decision.action,
         effective_state: "human-held",
         reason,
         holder: { actor: holderActor, last_at: holderLastAt },
@@ -8211,8 +8215,8 @@ export function runTakeoverPreflight(
     case "free":
     default: {
       return {
-        ok: true,
-        action: "claim",
+        ok: decision.ok,
+        action: decision.action,
         effective_state: "free",
         reason,
         next_steps: ["No durable claim to supersede — this is a normal claim, not a takeover. Run `ensure-session` to claim it."],
