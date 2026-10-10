@@ -12,6 +12,7 @@ import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKi
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
+import { activateNativeHarness, NATIVE_HARNESS_SURFACES, type NativeHarnessSurface } from "../native-harness-activation.js";
 import { defaultCodexHome, claudeCodeGlobalDest } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
 import {
@@ -65,7 +66,7 @@ export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): 
 const KIT_USAGE: Record<string, string> = {
   run: "usage: flow-agents kit run <kit-id> --request <json> --controller-root <private-root> [--auth-file <host-auth.json>] [--dest <workspace>]",
   install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
-  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]\n"
+  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local|claude-code|codex|kiro-cli|kiro-ide|cursor|opencode|copilot-cli|vscode>] [--dest <path>] [--source-root <path>]\n"
     + "   or: flow-agents kit activate <kit-id> [<kit-id> ...] (--global | --dest <path>) [--dry-run]  (built-in kit activation)",
   deactivate: "usage: flow-agents kit deactivate <kit-id> [<kit-id> ...] (--global | --dest <path>) [--dry-run] [--force]\n"
     + "   or: flow-agents kit deactivate --all (--global | --dest <path>) [--dry-run] [--force]  (built-in kit deactivation)\n"
@@ -581,7 +582,7 @@ function status(argv: string[]): number {
 }
 
 // Available adapters for the activate subcommand (Issue #32: added strands-local).
-const AVAILABLE_ADAPTERS = ["codex-local", "strands-local"];
+const AVAILABLE_ADAPTERS = ["codex-local", "strands-local", ...NATIVE_HARNESS_SURFACES];
 
 function activate(argv: string[]): number {
   const args = parseArgs(argv);
@@ -595,7 +596,9 @@ function activate(argv: string[]): number {
   // Default to codex-local for backward compatibility; strands-local is opt-in via --adapter.
   const result = adapter === "strands-local"
     ? activateStrandsLocal(sourceRoot, dest)
-    : activateCodexLocal(sourceRoot, dest);
+    : adapter && NATIVE_HARNESS_SURFACES.includes(adapter as NativeHarnessSurface)
+      ? activateNativeHarness(sourceRoot, dest, { surface: adapter as NativeHarnessSurface })
+      : activateCodexLocal(sourceRoot, dest);
   console.log(JSON.stringify(result, null, 2));
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
 }

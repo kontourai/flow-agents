@@ -3,13 +3,14 @@ import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import { parseArgs, flagString } from "../lib/args.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
+import { activateNativeHarness, NATIVE_HARNESS_SURFACES, type NativeHarnessSurface } from "../native-harness-activation.js";
 
-const AVAILABLE_ADAPTERS = ["codex-local", "strands-local"];
+const AVAILABLE_ADAPTERS = ["codex-local", "strands-local", ...NATIVE_HARNESS_SURFACES];
 
 export function main(argv = process.argv.slice(2)): number {
   const [command, ...rest] = argv;
   if (command !== "activate") {
-    console.error("usage: runtime-adapter activate [--dest DIR] [--source-root DIR] [--adapter codex-local|strands-local]");
+    console.error("usage: runtime-adapter activate [--dest DIR] [--source-root DIR] [--adapter <native-surface|codex-local|strands-local>]");
     return 2;
   }
   const args = parseArgs(rest);
@@ -23,7 +24,9 @@ export function main(argv = process.argv.slice(2)): number {
   // Default to codex-local for backward compatibility; strands-local is opt-in via --adapter.
   const result = adapter === "strands-local"
     ? activateStrandsLocal(sourceRoot, dest)
-    : activateCodexLocal(sourceRoot, dest);
+    : adapter && NATIVE_HARNESS_SURFACES.includes(adapter as NativeHarnessSurface)
+      ? activateNativeHarness(sourceRoot, dest, { surface: adapter as NativeHarnessSurface })
+      : activateCodexLocal(sourceRoot, dest);
   console.log(JSON.stringify(result, null, 2));
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
 }

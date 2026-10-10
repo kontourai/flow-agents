@@ -62,6 +62,10 @@
     "./docker-worker": "./integrations/codex-host/docker-worker.mjs",
     "./provider-broker": "./integrations/codex-host/provider-broker.mjs",
     "./storage-admission": "./integrations/codex-host/storage-admission.mjs",
+    "./kit-activation": {
+      "types": "./build/src/native-harness-activation.d.ts",
+      "import": "./build/src/native-harness-activation.js"
+    },
     "./kit-execution": {
       "types": "./build/src/kit-execution.d.ts",
       "import": "./build/src/kit-execution.js"
