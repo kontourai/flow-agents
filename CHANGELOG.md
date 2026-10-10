@@ -1,5 +1,12 @@
 # Changelog
 
+## [7.0.1](https://github.com/kontourai/flow-agents/compare/v7.0.0...v7.0.1) (2026-10-10)
+
+
+### Fixes
+
+* align shared Flow readers with pending-forward amendments ([#1446](https://github.com/kontourai/flow-agents/issues/1446)) ([0574ce7](https://github.com/kontourai/flow-agents/commit/0574ce717206448cc9f8c56d00a35c3d670c3d87))
+
 ## [7.0.0](https://github.com/kontourai/flow-agents/compare/v6.5.2...v7.0.0) (2026-10-10)
 
 
