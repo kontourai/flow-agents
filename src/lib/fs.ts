@@ -43,6 +43,19 @@ export function assertPathsDisjoint(first: string, second: string): void {
   }
 }
 
+function createDirectoryComponent(directory: string): void {
+  try {
+    fs.mkdirSync(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  // A concurrent creator may win after the existence check. Accept only the
+  // real directory now present, never a symlink or regular-file collision.
+  const stat = fs.lstatSync(directory);
+  if (stat.isSymbolicLink()) throw new Error(`refusing to write through symlink: ${directory}`);
+  if (!stat.isDirectory()) throw new Error(`destination component is not a directory: ${directory}`);
+}
+
 /**
  * Create a directory below root without following any symlink that already
  * exists at or below the root. Ambient aliases above root (for example macOS
@@ -65,7 +78,7 @@ export function ensureSafeDirectory(root: string, directory: string): string {
         if (stat.isSymbolicLink()) throw new Error(`refusing to write through symlink: ${current}`);
         if (!stat.isDirectory()) throw new Error(`destination component is not a directory: ${current}`);
       } else {
-        fs.mkdirSync(current);
+        createDirectoryComponent(current);
       }
     }
   }
@@ -83,7 +96,7 @@ export function ensureSafeDirectory(root: string, directory: string): string {
       if (stat.isSymbolicLink()) throw new Error(`refusing to write through symlink: ${current}`);
       if (!stat.isDirectory()) throw new Error(`destination component is not a directory: ${current}`);
     } else {
-      fs.mkdirSync(current);
+      createDirectoryComponent(current);
     }
   }
   return prospective;

@@ -6,10 +6,12 @@ import {readFile} from 'node:fs/promises';
 import {randomBytes,timingSafeEqual,createHash} from 'node:crypto';
 const same=(left,right)=>{const a=Buffer.from(left??''),b=Buffer.from(right);return a.length===b.length&&timingSafeEqual(a,b);};
 const serialize=value=>JSON.stringify(value);
-export async function startProviderProxy({authFile,model,reasoningEffort=null,upstreamOrigin,fetchImpl=fetch,bindHost='0.0.0.0',port=0,maxRequests=128,ledgerFile=null,requestBindingDigest=null,initializeLedger=false}) {
+export async function startProviderProxy({authFile,apiKey:hostApiKey,model,reasoningEffort=null,upstreamOrigin,fetchImpl=fetch,bindHost='0.0.0.0',port=0,maxRequests=128,ledgerFile=null,requestBindingDigest=null,initializeLedger=false}) {
  if(typeof model!=='string'||!model)throw new Error('model required');
  if(!Number.isSafeInteger(maxRequests)||maxRequests<1||maxRequests>10000)throw new Error('finite provider request budget required');
- const auth=JSON.parse(await readFile(authFile,'utf8'));
+ if((authFile!==undefined)===(hostApiKey!==undefined))throw new Error('Exactly one host credential source required');
+ if(hostApiKey!==undefined&&(typeof hostApiKey!=='string'||!hostApiKey))throw new Error('Host API credential unavailable');
+ const auth=hostApiKey!==undefined?{OPENAI_API_KEY:hostApiKey}:JSON.parse(await readFile(authFile,'utf8'));
  const apiKey=typeof auth.OPENAI_API_KEY==='string'?auth.OPENAI_API_KEY:null;
  const access=apiKey??auth.tokens?.access_token;
  if(typeof access!=='string'||!access)throw new Error('provider credential unavailable');

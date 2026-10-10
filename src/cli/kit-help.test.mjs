@@ -29,6 +29,9 @@ function runKit(args) {
 }
 
 const COMMANDS = [
+  ["setup", "flow-agents kit setup"],
+  ["doctor", "flow-agents kit doctor"],
+  ["prepare-worker", "flow-agents kit prepare-worker"],
   ["install", "usage: flow-agents kit install"],
   ["activate", "usage: flow-agents kit activate"],
   ["deactivate", "usage: flow-agents kit deactivate <kit-id> [<kit-id> ...]"],
@@ -69,7 +72,7 @@ test("kit top-level help prints overall usage and is side-effect-free", () => {
   for (const help of ["--help", "-h"]) {
     const result = runKit([help]);
     assert.equal(result.status, 0, `${help}: ${result.stdout}\n${result.stderr}`);
-    assert.match(result.stdout, /Usage: flow-agents kit <install\|activate\|deactivate\|validate\|provision\|inspect\|list\|status\|workspace> \[args\]/);
+    assert.match(result.stdout, /Usage: flow-agents kit <install\|activate\|deactivate\|validate\|provision\|inspect\|list\|status\|setup\|doctor\|prepare-worker\|workspace> \[args\]/);
     assert.equal(result.stderr, "");
   }
 });

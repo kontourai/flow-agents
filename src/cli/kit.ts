@@ -1,3 +1,4 @@
+import {kitSetupMain} from './kit-setup.js';
 import {executeInstalledKit} from '../kit-execution.js';
 import { workspaceKitMain } from "./workspace-kit.js";
 import * as child_process from "node:child_process";
@@ -11,6 +12,7 @@ import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKi
 import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { observeInstalledKitIntegrity, observeKitContentHash } from "../flow-kit/content-hash.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
+import { activateNativeHarness, NATIVE_HARNESS_SURFACES, type NativeHarnessSurface } from "../native-harness-activation.js";
 import { defaultCodexHome, claudeCodeGlobalDest } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
 import {
@@ -64,7 +66,7 @@ export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): 
 const KIT_USAGE: Record<string, string> = {
   run: "usage: flow-agents kit run <kit-id> --request <json> --controller-root <private-root> [--auth-file <host-auth.json>] [--dest <workspace>]",
   install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
-  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local>] [--dest <path>] [--source-root <path>]\n"
+  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local|claude-code|codex|kiro-cli|kiro-ide|cursor|opencode|copilot-cli|vscode>] [--dest <installed-root>] [--target <project>] [--kits <id,id>] [--source-root <path>]\n"
     + "   or: flow-agents kit activate <kit-id> [<kit-id> ...] (--global | --dest <path>) [--dry-run]  (built-in kit activation)",
   deactivate: "usage: flow-agents kit deactivate <kit-id> [<kit-id> ...] (--global | --dest <path>) [--dry-run] [--force]\n"
     + "   or: flow-agents kit deactivate --all (--global | --dest <path>) [--dry-run] [--force]  (built-in kit deactivation)\n"
@@ -81,7 +83,7 @@ function hasHelp(argv: string[]): boolean {
 }
 
 function printKitUsage(): void {
-  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|workspace> [args]
+  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|setup|doctor|prepare-worker|workspace> [args]
 
 Commands:
   install    Install a Flow Kit from a local path or Git URL.
@@ -93,6 +95,9 @@ Commands:
   inspect    Report a kit's conformance and consumer targets.
   list       List locally installed Flow Kits.
   status     Report local Flow Kit installation status.
+  setup      Configure an installed kit execution request.
+  prepare-worker Build a generic pinned Codex Docker worker.
+  doctor     Check engine, auth backend, and Docker availability.
   workspace  Resolve or inspect an inert portable workspace selection.
 
 Install notes:
@@ -577,21 +582,36 @@ function status(argv: string[]): number {
 }
 
 // Available adapters for the activate subcommand (Issue #32: added strands-local).
-const AVAILABLE_ADAPTERS = ["codex-local", "strands-local"];
+const AVAILABLE_ADAPTERS = ["codex-local", "strands-local", ...NATIVE_HARNESS_SURFACES];
 
 function activate(argv: string[]): number {
   const args = parseArgs(argv);
   const dest = resolveDest(args.flags);
-  const sourceRoot = path.resolve(flagString(args.flags, "source-root", path.resolve(path.dirname(process.argv[1]), "..")) ?? ".");
+  const sourceRoot = path.resolve(flagString(args.flags, "source-root", fileURLToPath(new URL("../../../", import.meta.url))) ?? ".");
   const adapter = flagString(args.flags, "adapter");
   if (adapter && !AVAILABLE_ADAPTERS.includes(adapter)) {
     console.log(JSON.stringify({ selected_adapter: null, available_adapters: AVAILABLE_ADAPTERS, supported_asset_classes: [], generated_runtime_files: [], skipped_assets: [], warnings: [], errors: [`unknown runtime adapter '${adapter}'; available adapters: ${AVAILABLE_ADAPTERS.join(", ")}`] }, null, 2));
     return 2;
   }
+  const target = flagString(args.flags, "target");
+  const kitSelection = flagString(args.flags, "kits");
+  const kitIdFilter = kitSelection?.split(",").map((id) => id.trim());
+  const native = adapter !== undefined && NATIVE_HARNESS_SURFACES.includes(adapter as NativeHarnessSurface);
+  const inputError = args.flags.target !== undefined && (!target || Array.isArray(args.flags.target))
+    ? "--target requires exactly one project path"
+    : target && !native ? "--target requires an explicit native harness adapter"
+    : args.flags.kits !== undefined && (!kitSelection || Array.isArray(args.flags.kits) || kitIdFilter?.some((id) => !/^[a-z][a-z0-9-]*$/.test(id)))
+      ? "--kits requires one comma-separated list of kebab-case kit ids" : null;
+  if (inputError) {
+    console.log(JSON.stringify({ selected_adapter: adapter ?? "codex-local", generated_runtime_files: [], warnings: [], errors: [inputError] }, null, 2));
+    return 2;
+  }
   // Default to codex-local for backward compatibility; strands-local is opt-in via --adapter.
   const result = adapter === "strands-local"
-    ? activateStrandsLocal(sourceRoot, dest)
-    : activateCodexLocal(sourceRoot, dest);
+    ? activateStrandsLocal(sourceRoot, dest, { kitIdFilter })
+    : adapter && NATIVE_HARNESS_SURFACES.includes(adapter as NativeHarnessSurface)
+      ? activateNativeHarness(sourceRoot, dest, { surface: adapter as NativeHarnessSurface, targetRoot: target, kitIdFilter })
+      : activateCodexLocal(sourceRoot, dest, { kitIdFilter });
   console.log(JSON.stringify(result, null, 2));
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
 }
@@ -1511,6 +1531,7 @@ async function inspect(argv: string[]): Promise<number> {
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const [command, ...rest] = argv;
+  if(command==='setup'||command==='doctor'||command==='prepare-worker')return kitSetupMain(command,rest);
   if (command === "workspace") return workspaceKitMain(rest);
   if (command === "--help" || command === "-h") {
     printKitUsage();
@@ -1578,7 +1599,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "validate") return await validate(rest);
   if (command === "provision") return await provision(rest);
   if (command === "inspect") return await inspect(rest);
-  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|workspace> ...");
+  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|setup|doctor|prepare-worker|workspace> ...");
   return 2;
 }
 

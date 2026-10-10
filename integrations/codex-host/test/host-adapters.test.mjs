@@ -51,6 +51,18 @@ test('provider broker authenticates capability, bounds model and forwards canoni
  }finally{await broker?.close();await rm(root,{recursive:true,force:true});}
 });
 
+test('host-resolved API credentials need no cache file and never appear in broker observations',async()=>{
+ const secret='host-memory-test-secret';let broker;let authorization;
+ try{
+  broker=await startProviderProxy({apiKey:secret,model:'model-a',bindHost:'127.0.0.1',fetchImpl:async(url,request)=>{assert.equal(url,'https://api.openai.com/v1/responses');authorization=request.headers.authorization;return new Response(`data: {"note":"${secret}"}\n\n`);}});
+  const response=await fetch(broker.baseUrl.replace('host.docker.internal','127.0.0.1')+'/responses',{method:'POST',headers:{authorization:`Bearer ${broker.capability}`},body:JSON.stringify({model:'model-a'})});
+  assert.equal(authorization,`Bearer ${secret}`);assert.equal((await response.text()).includes(secret),false);assert.equal(JSON.stringify(broker.evidence).includes(secret),false);
+ }finally{await broker?.close();}
+ await assert.rejects(startProviderProxy({model:'model-a'}),/Exactly one/);
+ await assert.rejects(startProviderProxy({authFile:'unused',apiKey:secret,model:'model-a'}),/Exactly one/);
+ await assert.rejects(startProviderProxy({apiKey:'',model:'model-a'}),/credential unavailable/);
+});
+
 test('mock Docker observations bind explicit mount boundaries and owner labels',async()=>{
  const {chmod,mkdir,readFile,realpath}=await import('node:fs/promises');
  const {runCodexDockerWorker}=await import('../docker-worker.mjs');

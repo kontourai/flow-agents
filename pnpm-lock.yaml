@@ -11,9 +11,12 @@ importers:
       '@kontourai/conduit':
         specifier: 0.7.1
         version: 0.7.1
+      '@kontourai/datum':
+        specifier: 0.8.0
+        version: 0.8.0(playwright@1.61.0)
       '@kontourai/dispatch':
         specifier: 0.3.0
-        version: 0.3.0(@ai-sdk/provider@3.0.10)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))
+        version: 0.3.0(@ai-sdk/provider@3.0.10)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/bearing@0.2.0(playwright@1.61.0))(@kontourai/datum@0.8.0(playwright@1.61.0))
       '@kontourai/flow':
         specifier: 5.2.0
         version: 5.2.0
@@ -1008,12 +1011,22 @@ packages:
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
+  '@kontourai/bearing@0.2.0':
+    resolution: {integrity: sha512-nPSpYIQn4S0VGRanHyno7g2D7Mcz7rT7/+KXGWvYo4zPWQPU2Ceaxv0eMgAT6/D/pZHZ2157mSl6dAYD17VA0Q==}
+    engines: {node: '>=22'}
+    hasBin: true
+
   '@kontourai/conduit@0.7.1':
     resolution: {integrity: sha512-EiAd0KYVnysVy6I1lvW6vHoGTocLmG81HotMDsqJTIcqhMBImFAyojMs1qPqXrBnH/HpjrLI+yBlUSOzKtJwjw==}
     engines: {node: '>=22'}
 
   '@kontourai/datum@0.3.0':
     resolution: {integrity: sha512-wBMOZ72grkSwjXzt2soTykG2AUxitc29IsUb193KPcIChlVIvli/gQ0E1VDzMZGVi+AUQjFSl/zupIi66s4O0A==}
+    engines: {node: '>=22'}
+    hasBin: true
+
+  '@kontourai/datum@0.8.0':
+    resolution: {integrity: sha512-aP12EVopTRNEuYYPCLeNAXFpTcKUpMO46lQoGRDOQ6M/8p27745bZlpSCKAW6IFetu5aHhNmm2Tn/hWlOIe34Q==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -1910,6 +1923,11 @@ packages:
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
     engines: {node: '>= 0.6'}
+
+  acorn@8.19.0:
+    resolution: {integrity: sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw==}
+    engines: {node: '>=0.4.0'}
+    hasBin: true
 
   adm-zip@0.5.17:
     resolution: {integrity: sha512-+Ut8d9LLqwEvHHJl1+PIHqoyDxFgVN847JTVM3Izi3xHDWPE4UtzzXysMZQs64DMcrJfBeS/uoEP4AD3HQHnQQ==}
@@ -3013,6 +3031,9 @@ packages:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
     hasBin: true
+
+  jsonc-parser@3.3.1:
+    resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
 
   jsonwebtoken@9.0.3:
     resolution: {integrity: sha512-MT/xP0CrubFRNLNKvxJ2BYfy53Zkm++5bX9dtuPbqAeQpTVe0MQTFhao8+Cp//EmJp244xt6Drw/GVEGCUj40g==}
@@ -5245,15 +5266,34 @@ snapshots:
 
   '@keyv/serialize@1.1.1': {}
 
+  '@kontourai/bearing@0.2.0(playwright@1.61.0)':
+    dependencies:
+      '@kontourai/forage': 0.4.1(playwright@1.61.0)
+      acorn: 8.19.0
+      csv-parse: 7.0.1
+      jsonc-parser: 3.3.1
+      parse5: 8.0.1
+      yaml: 2.9.0
+    transitivePeerDependencies:
+      - playwright
+
   '@kontourai/conduit@0.7.1': {}
 
   '@kontourai/datum@0.3.0': {}
 
-  '@kontourai/dispatch@0.3.0(@ai-sdk/provider@3.0.10)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))':
+  '@kontourai/datum@0.8.0(playwright@1.61.0)':
+    dependencies:
+      '@kontourai/bearing': 0.2.0(playwright@1.61.0)
+    transitivePeerDependencies:
+      - playwright
+
+  '@kontourai/dispatch@0.3.0(@ai-sdk/provider@3.0.10)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/bearing@0.2.0(playwright@1.61.0))(@kontourai/datum@0.8.0(playwright@1.61.0))':
     dependencies:
       '@kontourai/relay': 0.2.0(@ai-sdk/provider@3.0.10)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))
     optionalDependencies:
       '@ai-sdk/provider': 3.0.10
+      '@kontourai/bearing': 0.2.0(playwright@1.61.0)
+      '@kontourai/datum': 0.8.0(playwright@1.61.0)
     transitivePeerDependencies:
       - '@anthropic-ai/sdk'
 
@@ -6108,6 +6148,8 @@ snapshots:
     dependencies:
       mime-types: 3.0.2
       negotiator: 1.0.0
+
+  acorn@8.19.0: {}
 
   adm-zip@0.5.17:
     optional: true
@@ -7288,6 +7330,8 @@ snapshots:
     optional: true
 
   json5@2.2.3: {}
+
+  jsonc-parser@3.3.1: {}
 
   jsonwebtoken@9.0.3:
     dependencies:

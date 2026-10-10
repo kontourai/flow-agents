@@ -44,6 +44,7 @@ function fixture() {
 function cli(f, command, extra = []) {
   const run = spawnSync(process.execPath, [CLI, "kit", "workspace", command, "--scope", f.scope, "--cache", f.cache, ...extra], { cwd: f.scope, encoding: "utf8", timeout: 20000 });
   assert.equal(run.signal, null, run.stderr); assert.equal(run.error, undefined);
+  assert.ok(run.stdout.trim(), `workspace ${command} returned no JSON: status=${run.status}; stderr=${run.stderr}`);
   return { exit: run.status, ...JSON.parse(run.stdout) };
 }
 function resolve(f, extra = []) { return cli(f, "resolve", ["--bindings", f.bindingFile, ...extra]); }

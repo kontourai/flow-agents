@@ -38,6 +38,16 @@ TARBALL_LIST="$TMPDIR_EVAL/tarball.list"
 tar -tzf "$TARBALL" > "$TARBALL_LIST"
 grep -Fxq 'package/dist/codex/.codex/hooks.json' "$TARBALL_LIST"
 grep -Fxq 'package/dist/codex/build/src/cli.js' "$TARBALL_LIST"
+# Publisher-owned files must all be link-free before npm adds its own production
+# dependencies. Keep this guard separate from npm-generated nested .bin links.
+SHIPPED_ROOT="$TMPDIR_EVAL/shipped"
+mkdir -p "$SHIPPED_ROOT"
+tar -xzf "$TARBALL" -C "$SHIPPED_ROOT"
+node --input-type=module - "$ROOT_DIR" "$SHIPPED_ROOT/package" <<'NODE'
+import { pathToFileURL } from 'node:url';
+const { assertShippedPackageLinks } = await import(pathToFileURL(`${process.argv[2]}/evals/integration/packed-package-links.mjs`));
+assertShippedPackageLinks(process.argv[3]);
+NODE
 
 printf '{"name":"flow-agents-packed-consumer","private":true,"version":"1.0.0"}\n' > "$CONSUMER/package.json"
 (cd "$CONSUMER" && npm install --omit=dev --ignore-scripts --no-audit --no-fund --cache "$NPM_CACHE" "$TARBALL" >/dev/null)
@@ -52,10 +62,7 @@ case "$PACKAGE_REAL/" in
   "$CONSUMER_REAL/"*) ;;
   *) echo "packed package resolved outside isolated consumer: $PACKAGE_REAL" >&2; exit 1 ;;
 esac
-if find "$PACKAGE_ROOT" -type l -print -quit | grep -q .; then
-  echo "packed package contains a symlink/workspace link" >&2
-  exit 1
-fi
+node "$ROOT_DIR/evals/integration/packed-package-links.mjs" "$SHIPPED_ROOT/package" "$PACKAGE_ROOT" "$CONSUMER"
 [[ -f "$PACKAGE_ROOT/dist/codex/.codex/hooks.json" ]]
 [[ -f "$PACKAGE_ROOT/dist/codex/.agents/skills/deliver/SKILL.md" ]]
 FLOW_AGENTS_BIN="$CONSUMER/node_modules/.bin/flow-agents"

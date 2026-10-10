@@ -1,7 +1,7 @@
 {
   "name": "@kontourai/flow-agents",
   "version": "7.0.2",
-  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
+  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows \u2014 a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi \u2014 with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
     "ai-agents",
@@ -62,10 +62,23 @@
     "./docker-worker": "./integrations/codex-host/docker-worker.mjs",
     "./provider-broker": "./integrations/codex-host/provider-broker.mjs",
     "./storage-admission": "./integrations/codex-host/storage-admission.mjs",
+    "./kit-activation": {
+      "types": "./build/src/native-harness-activation.d.ts",
+      "import": "./build/src/native-harness-activation.js"
+    },
     "./kit-execution": {
       "types": "./build/src/kit-execution.d.ts",
       "import": "./build/src/kit-execution.js"
-    }
+    },
+    "./kit-setup": {
+      "types": "./build/src/kit-setup.d.ts",
+      "import": "./build/src/kit-setup.js"
+    },
+    "./engine-host": {
+      "types": "./build/src/engine-host.d.ts",
+      "import": "./build/src/engine-host.js"
+    },
+    "./workspace-revision": "./integrations/codex-host/workspace-revision.mjs"
   },
   "repository": {
     "type": "git",
@@ -219,6 +232,7 @@
   },
   "dependencies": {
     "@kontourai/conduit": "0.7.1",
+    "@kontourai/datum": "0.8.0",
     "@kontourai/dispatch": "0.3.0",
     "@kontourai/flow": "5.2.0",
     "@kontourai/relay": "0.6.0",

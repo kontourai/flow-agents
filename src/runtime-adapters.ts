@@ -173,7 +173,7 @@ function expandKitIdFilter(requested: Set<string> | undefined, dependencies: Kit
   return selected;
 }
 
-export function readKitInventory(sourceRoot: string, dest: string, options: { kitIdFilter?: string[]; snapshotLocalKits?: boolean; testHooks?: RuntimeAdapterTestHooks } = {}): KitInventory {
+export function readKitInventory(sourceRoot: string, dest: string, options: { kitIdFilter?: string[]; snapshotLocalKits?: boolean; strictInstalledIntegrity?: boolean; testHooks?: RuntimeAdapterTestHooks } = {}): KitInventory {
   const warnings: string[] = [];
   const errors: string[] = [];
   const assets: KitAsset[] = [];
@@ -183,6 +183,16 @@ export function readKitInventory(sourceRoot: string, dest: string, options: { ki
   const loadedKits: LoadedKit[] = [];
   const snapshots: string[] = [];
   const presentKitIds = new Set<string>();
+  const installedKitIds = new Set<string>();
+  // Integrity belongs to the selected kit/dependency closure. Registry identity
+  // ambiguity remains global because it prevents reliable selection.
+  const installedIntegrityIssues: { kit_id: string; message: string }[] = [];
+  const reportInstalledIntegrityIssue = (kit_id: string, message: string): void => {
+    if (options.strictInstalledIntegrity) installedIntegrityIssues.push({ kit_id, message });
+    else warnings.push(message);
+  };
+  const skipEntryMessage = options.strictInstalledIntegrity ? "native activation refuses this entry" : "activation is warning-only and skips this entry";
+  const skipKitMessage = options.strictInstalledIntegrity ? "native activation refuses this kit" : "activation is warning-only and skips this kit";
   const kitIdFilter = options.kitIdFilter ? new Set(options.kitIdFilter) : undefined;
   const catalogPath = path.join(sourceRoot, "kits", "catalog.json");
   if (!fs.existsSync(catalogPath)) warnings.push(`${catalogPath}: built-in Kit Catalog not found; skipping built-in kits (this is normal when running outside a flow-agents checkout)`);
@@ -210,22 +220,32 @@ export function readKitInventory(sourceRoot: string, dest: string, options: { ki
   if (fs.existsSync(registryPath)) {
     const registry = readJson(registryPath) as Record<string, unknown>;
     const kits = registry.kits;
+    if (options.strictInstalledIntegrity && !Array.isArray(kits)) errors.push(`${registryPath}: installed kits must be a list`);
     if (Array.isArray(kits)) {
       kits.forEach((entry, index) => {
         if (typeof entry !== "object" || entry === null) {
-          warnings.push(`local kit registry entry ${index} is invalid: entry must be an object; activation is warning-only and skips this entry`);
+          (options.strictInstalledIntegrity ? errors : warnings).push(`local kit registry entry ${index} is invalid: entry must be an object; ${skipEntryMessage}`);
           return;
         }
         const record = entry as Record<string, unknown>;
         const id = record.id;
         if (typeof id !== "string") {
-          warnings.push(`local kit registry entry ${index} is invalid: id must be a string; activation is warning-only and skips this entry`);
+          (options.strictInstalledIntegrity ? errors : warnings).push(`local kit registry entry ${index} is invalid: id must be a string; ${skipEntryMessage}`);
           return;
         }
+        if (options.strictInstalledIntegrity && !KIT_ID_RE.test(id)) {
+          errors.push(`local kit registry entry ${index} is invalid: ambiguous kit id '${id}'`);
+          return;
+        }
+        if (installedKitIds.has(id)) {
+          (options.strictInstalledIntegrity ? errors : warnings).push(`duplicate installed kit identity '${id}'`);
+          return;
+        }
+        installedKitIds.add(id);
         const kitRoot = path.join(dest, "kits", "local", "repositories", id);
         const integrity = observeInstalledKitIntegrity(record, dest);
         if (integrity.state === "missing" || integrity.state === "invalid") {
-          warnings.push(`local kit '${id}' integrity is ${integrity.state} (recorded_hash: ${integrity.recorded_hash ?? "none"}; observed_hash: ${integrity.observed_hash ?? "none"}): ${integrity.diagnostic}; activation is warning-only and skips this kit`);
+          reportInstalledIntegrityIssue(id, `local kit '${id}' integrity is ${integrity.state} (recorded_hash: ${integrity.recorded_hash ?? "none"}; observed_hash: ${integrity.observed_hash ?? "none"}): ${integrity.diagnostic}; ${skipKitMessage}`);
         } else {
           let activationRoot = kitRoot;
           let observedIntegrity = integrity;
@@ -252,9 +272,13 @@ export function readKitInventory(sourceRoot: string, dest: string, options: { ki
               snapshots.push(snapshotParent);
             } catch (error) {
               fs.rmSync(snapshotParent, { recursive: true, force: true });
-              warnings.push(`local kit '${id}' integrity is invalid (recorded_hash: ${integrity.recorded_hash ?? "none"}; observed_hash: none): cannot create a stable activation snapshot: ${(error as Error).message}; activation is warning-only and skips this kit`);
+              reportInstalledIntegrityIssue(id, `local kit '${id}' integrity is invalid (recorded_hash: ${integrity.recorded_hash ?? "none"}; observed_hash: none): cannot create a stable activation snapshot: ${(error as Error).message}; ${skipKitMessage}`);
               return;
             }
+          }
+          if (observedIntegrity.state === "drifted" && options.strictInstalledIntegrity) {
+            reportInstalledIntegrityIssue(id, `local kit '${id}' content drift: installed bytes do not match the registry hash; reinstall before native activation`);
+            return;
           }
           if (observedIntegrity.state === "drifted") {
             warnings.push(`local kit '${id}' integrity is drifted (recorded_hash: ${observedIntegrity.recorded_hash}; observed_hash: ${observedIntegrity.observed_hash}): ${observedIntegrity.diagnostic}; activation is warning-only and continues with the observed installed bytes`);
@@ -274,6 +298,11 @@ export function readKitInventory(sourceRoot: string, dest: string, options: { ki
     }
   }
   const allDependencies = loadedKits.flatMap((kit) => kit.dependencies);
+  const integrityScope = expandKitIdFilter(kitIdFilter, allDependencies, new Set([...presentKitIds, ...installedKitIds]));
+  for (const issue of installedIntegrityIssues) {
+    if (!integrityScope || integrityScope.has(issue.kit_id)) errors.push(issue.message);
+    else warnings.push(`${issue.message}; outside selected kit/dependency scope and skipped`);
+  }
   const selectedKitIds = expandKitIdFilter(kitIdFilter, allDependencies, presentKitIds);
   for (const loaded of loadedKits) {
     if (selectedKitIds && !selectedKitIds.has(loaded.kit_id)) continue;
