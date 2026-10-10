@@ -108,7 +108,7 @@ export interface CritiqueResolutionHistoryRepairAuthorization {
   signature: { algorithm: "ed25519"; key_id: string; value: string };
 }
 
-export interface VerificationEvidenceResealAuthorization {
+interface VerificationEvidenceResealAuthorizationBase {
   schema_version: "1.0";
   operation: "reseal-verification-evidence";
   project_root: string;
@@ -137,20 +137,21 @@ export interface VerificationEvidenceResealAuthorization {
   flow_manifest_sha256: string;
   critique_projection_sha256: string;
   target_expectation_id: string;
-  predecessor_claim_id: string;
-  predecessor_claim_status: string;
-  predecessor_claim_sha256: string;
-  predecessor_claim_index: number;
   current_claim_id: string;
   current_claim_status: string;
   current_claim_sha256: string;
   current_claim_index: number;
-  claim_delta: "replace";
   nonce: string;
   expires_at: string;
   requested_at: string;
   signature: { algorithm: "ed25519"; key_id: string; value: string };
 }
+
+/** An insertion authorizes an exact absent predecessor, never a wildcard replacement. */
+export type VerificationEvidenceResealAuthorization = VerificationEvidenceResealAuthorizationBase & (
+  | { claim_delta: "replace"; predecessor_claim_id: string; predecessor_claim_status: string; predecessor_claim_sha256: string; predecessor_claim_index: number; related_criterion_deltas?: never }
+  | { claim_delta: "insert"; predecessor_claim_id: null; predecessor_claim_status: null; predecessor_claim_sha256: null; predecessor_claim_index: null; writer_actor_key: string; related_criterion_deltas: { criterion_id: string; claim_index: number; preimage_claim_sha256: string; candidate_claim_sha256: string }[] }
+);
 
 /** Signed only by the external lifecycle authority registry. The package may
  * construct this request but deliberately never verifies its signature. */
@@ -306,21 +307,27 @@ const VERIFICATION_RESEAL_AUTHORIZATION_FIELDS = [
   "nonce", "expires_at", "requested_at", "signature",
 ] as const;
 
-export function verificationEvidenceResealAuthorizationPayload(value: Omit<VerificationEvidenceResealAuthorization, "signature">): string {
+type WithoutSignature<T> = T extends unknown ? Omit<T,"signature"> : never;
+export type UnsignedVerificationEvidenceResealAuthorization = WithoutSignature<VerificationEvidenceResealAuthorization>;
+type VerificationResealRequestFields<T = UnsignedVerificationEvidenceResealAuthorization> = T extends unknown ? Omit<T,"schema_version"|"operation"> : never;
+
+export function verificationEvidenceResealAuthorizationPayload(value: UnsignedVerificationEvidenceResealAuthorization): string {
   return JSON.stringify(value);
 }
 
 export function buildUnsignedVerificationEvidenceResealAuthorization(
-  fields: Omit<VerificationEvidenceResealAuthorization, "schema_version" | "operation" | "signature">,
-): { unsigned: Omit<VerificationEvidenceResealAuthorization, "signature">; signingPayload: string } {
-  const unsigned = { schema_version: "1.0", operation: "reseal-verification-evidence", ...fields } as const;
+  fields: VerificationResealRequestFields,
+): { unsigned: UnsignedVerificationEvidenceResealAuthorization; signingPayload: string } {
+  const value = {schema_version:"1.0",operation:"reseal-verification-evidence",...fields};
+  const names = fields.claim_delta === "insert" ? [...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(0,-4),"writer_actor_key","related_criterion_deltas",...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(-4,-1)] : VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(0,-1);
+  const unsigned = Object.fromEntries(names.map(name=>[name,(value as JsonRecord)[name]])) as UnsignedVerificationEvidenceResealAuthorization;
   return { unsigned, signingPayload: verificationEvidenceResealAuthorizationPayload(unsigned) };
 }
 
 export function validateVerificationEvidenceResealAuthorization(value: JsonRecord, expected: {
   projectRoot: string; runId: string; subject: string; now?: string; allowExpired?: boolean; bindings?: Record<string, unknown>;
 }): VerificationEvidenceResealAuthorization {
-  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS].sort())) {
+  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...(value.claim_delta === "insert" ? [...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(0, -4), "writer_actor_key", "related_criterion_deltas", ...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(-4)] : VERIFICATION_RESEAL_AUTHORIZATION_FIELDS)].sort())) {
     throw new Error("verification evidence reseal authorization contains unexpected or missing fields");
   }
   if (value.schema_version !== "1.0" || value.operation !== "reseal-verification-evidence") throw new Error("verification evidence reseal authorization identity is invalid");
@@ -332,16 +339,23 @@ export function validateVerificationEvidenceResealAuthorization(value: JsonRecor
   if (!declaredStepBindsInterface(String(value.flow_definition_id), String(value.flow_step_id), "workflow.critique", expected.projectRoot)) {
     throw new Error(`verification evidence reseal authorization must bind a canonical review gate; ${String(value.flow_definition_id)}/${String(value.flow_step_id)} declares no workflow.critique binding`);
   }
-  if (value.claim_delta !== "replace") throw new Error("verification evidence reseal authorization claim delta is invalid");
+  if (!["replace", "insert"].includes(String(value.claim_delta))) throw new Error("verification evidence reseal authorization claim delta is invalid");
+  const inserting = value.claim_delta === "insert";
+  if (inserting) boundedText(value.writer_actor_key,"authorization.writer_actor_key",4096);
+  if (inserting && (!Array.isArray(value.related_criterion_deltas) || value.related_criterion_deltas.length > 512)) throw new Error("initial verification criterion delta is invalid");
+  if (inserting && ["predecessor_claim_id", "predecessor_claim_status", "predecessor_claim_sha256", "predecessor_claim_index"].some(field => value[field] !== null)) throw new Error("initial verification evidence requires an explicitly absent predecessor");
   for (const field of VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.filter((field) => field.endsWith("_sha256") || field.endsWith("_tail_hash") || field === "flow_run_head")) {
+    if (inserting && field === "predecessor_claim_sha256") continue;
     if (!/^[a-f0-9]{64}$/.test(String(value[field]))) throw new Error(`verification evidence reseal authorization ${field} must be a SHA-256 digest`);
   }
   if (!/^[a-f0-9]{32}$/.test(String(value.candidate_transaction_id))) throw new Error("verification evidence reseal candidate transaction identity is invalid");
   if (!Number.isSafeInteger(value.preimage_ledger_length) || Number(value.preimage_ledger_length) < 0) throw new Error("verification evidence reseal ledger length is invalid");
   for (const field of ["predecessor_claim_index", "current_claim_index"]) {
+    if (inserting && field === "predecessor_claim_index") continue;
     if (!Number.isSafeInteger(value[field]) || Number(value[field]) < 0) throw new Error(`verification evidence reseal authorization ${field} is invalid`);
   }
   for (const field of ["flow_gate_id", "target_expectation_id", "predecessor_claim_id", "predecessor_claim_status", "current_claim_id", "current_claim_status"]) {
+    if (inserting && field.startsWith("predecessor_claim_")) continue;
     boundedText(value[field], `authorization.${field}`, 4096);
   }
   for (const [field, binding] of Object.entries(expected.bindings ?? {})) if (value[field] !== binding) throw new Error(`verification evidence reseal authorization ${field} does not match the current preimage`);
@@ -350,8 +364,8 @@ export function validateVerificationEvidenceResealAuthorization(value: JsonRecor
   const now = Date.parse(expected.now ?? new Date().toISOString());
   if (expiresAt < requestedAt || (now > expiresAt && !expected.allowExpired) || requestedAt > now + 5 * 60_000) throw new Error("verification evidence reseal authorization time window is invalid");
   const signature = validateSignature(value.signature);
-  const authorization = { ...Object.fromEntries(VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(0, -1).map((field) => [field, value[field]])), signature } as unknown as VerificationEvidenceResealAuthorization;
-  verifySignedAuthorization(authorization, expected.projectRoot, verificationEvidenceResealAuthorizationPayload);
+  const authorization = { ...Object.fromEntries((inserting ? [...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(0, -4), "writer_actor_key", "related_criterion_deltas", ...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(-4, -1)] : VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(0, -1)).map((field) => [field, value[field]])), signature } as unknown as VerificationEvidenceResealAuthorization;
+  verifySignedAuthorization<VerificationEvidenceResealAuthorization>(authorization, expected.projectRoot, verificationEvidenceResealAuthorizationPayload);
   return authorization;
 }
 
@@ -607,7 +621,7 @@ export function authorizationDigest(authorization: SignedBuilderAuthorization): 
   return createHash("sha256").update(JSON.stringify(authorization)).digest("hex");
 }
 
-function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, projectRoot: string, payload: (value: Omit<T, "signature">) => string): void {
+function verifySignedAuthorization<T extends SignedBuilderAuthorization>(authorization: T, projectRoot: string, payload: (value: WithoutSignature<T>) => string): void {
   void authorization; void projectRoot; void payload;
   throw new Error("lifecycle authorization is NOT_VERIFIED by package-side validation; the external authority must own the complete transition");
 }

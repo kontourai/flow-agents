@@ -5879,6 +5879,39 @@ test("unsigned lifecycle authorization preserves non-null human identity", () =>
   assert.equal(unsigned.assignment_actor.human, "operator");
 });
 
+test("first verification public request executes canonical checks and binds absent target plus anchored criteria", async () => {
+  const session=makeCanonicalPathSession("first-verification-public-request");
+  const command="node --test actual.test.mjs";
+  fs.writeFileSync(path.join(session.projectRoot,"actual.test.mjs"),'import test from "node:test";import assert from "node:assert/strict";test("actual process assertion",()=>assert.equal(2+2,4));\n');
+  writeJson(path.join(session.projectRoot,"package.json"),{name:"first-verification-fixture",private:true,type:"module",scripts:{test:command},"trust-reconcile-manifest":[{id:"actual",command}]});
+  ensureFixtureGitWorktree(session.projectRoot);
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({sessionDir:session.sessionDir});
+  const specifications=Array.from({length:4},(_,i)=>({id:`real-criterion-${i}`,description:`Actual verification acceptance ${i}`}));
+  writeJson(path.join(session.sessionDir,"acceptance.json"),{criteria:specifications.map(c=>({...c,status:"pending",evidence_refs:[]}))});
+  await writeAndSync(session,[bundleClaim({expectation:"selected-work",claimType:"builder.pull-work.selected",subjectType:"work-item"})]);
+  await writeAndSync(session,[bundleClaim({expectation:"pickup-probe-readiness",claimType:"builder.design-probe.pickup-readiness",subjectType:"work-item"}),bundleClaim({expectation:"probe-decisions-or-accepted-gaps",claimType:"builder.design-probe.decisions",subjectType:"decision"})]);
+  const plan=bundleClaim({expectation:"implementation-plan",claimType:"builder.plan.implementation",subjectType:"artifact"});
+  plan.claim.metadata.acceptance_contract={version:1,algorithm:"sha256",digest:createHash("sha256").update(JSON.stringify(specifications)).digest("hex"),criteria:specifications};
+  await writeAndSync(session,[plan]);
+  await writeAndSync(session,[bundleClaim({expectation:"implementation-scope",claimType:"builder.execute.scope",subjectType:"change"})]);
+  const review=verifiedTestsPrerequisites(session)[0];
+  const criteria=specifications.map(c=>{const entry=bundleClaim({expectation:"acceptance-criteria",claimType:"workflow.acceptance.criterion",subjectType:"flow-step",status:"not_verified"});entry.claim.id=`pending-${c.id}`;entry.claim.subjectId=`${session.slug}/${c.id}`;entry.claim.metadata={origin:"acceptance",workflow_subject_ref:SUBJECT,criterion:{...c,status:"pending",evidence_refs:[]}};entry.evidence.claimId=entry.claim.id;entry.event.claimId=entry.claim.id;return entry;});
+  writeBundle(session.sessionDir,[plan,...criteria,review]);
+  await workflowSidecarMain(["record-critique",session.sessionDir,"--id","first-verification-current-review","--reviewer","independent-reviewer","--verdict","pass","--summary","Current source independently reviewed before first verification.","--artifact-ref",path.join(session.projectRoot,"review-target","delivery.md"),"--lane-json",JSON.stringify({id:"code",status:"pass",summary:"Current fixture source and acceptance scope reviewed.",evidence_refs:[{kind:"artifact",file:"review-target/delivery.md",summary:"Current reviewed artifact."}]})]);
+  installSignedCurrentCompletion(session);
+  const before=fs.readFileSync(path.join(session.sessionDir,"trust.bundle"));
+  const priorClaims=JSON.parse(before).claims;
+  const result=await captureWorkflowPublicResult(["reseal-verification-evidence-request","--session-dir",session.sessionDir,"--expectation","tests-evidence","--status","pass","--summary","Actual process checks substantiate the anchored fixture criteria.","--command",command,"--evidence-ref-json",JSON.stringify({kind:"command",excerpt:command,summary:"Actual canonical Node test observation."}),...specifications.flatMap(c=>["--criterion-json",JSON.stringify({id:c.id,status:"pass",evidence_refs:[{kind:"command",excerpt:command,summary:"Actual canonical verification."}]})])]);
+  assert.equal(result.error,null,result.error?.stack);assert.equal(result.output.length,1);
+  const request=JSON.parse(result.output[0]);assert.equal(request.authorization.claim_delta,"insert");assert.equal(request.authorization.predecessor_claim_index,null);assert.equal(request.authorization.related_criterion_deltas.length,4);
+  const candidate=JSON.parse(fs.readFileSync(path.join(session.sessionDir,`.workflow-evidence-transaction-${request.authorization.candidate_transaction_id}`,"trust.bundle.candidate")));
+  assert.equal(candidate.claims.length,priorClaims.length+1);assert.deepEqual(candidate.claims[0],priorClaims[0]);assert.deepEqual(candidate.claims.at(-2),priorClaims.at(-1));
+  assert.equal(candidate.claims.at(-1).metadata.observed_commands[0].test_count,1);
+  assert.equal(candidate.claims.at(-1).metadata.observed_commands[0].source,"canonical-writer-execution");
+  assert.equal(fs.readFileSync(path.join(session.sessionDir,"trust.bundle")).equals(before),true,"unsigned staging remains non-authoritative");
+});
+
 test("verification evidence reseal authorization binds every atomic preimage", () => {
   const fields = {
     project_root: "/tmp/reseal-project", run_id: "run-1", subject: SUBJECT,

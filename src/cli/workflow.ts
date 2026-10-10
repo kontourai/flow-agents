@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { definitionDigest, expectationsForGate, flowRunHead, loadRun, openGates, validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
@@ -24,7 +24,7 @@ import { publicJsonFlagShapes, WORKFLOW_CRITIQUE_PARAMETERS, WORKFLOW_EVIDENCE_P
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, declaredVerificationChecks, hasDeclaredVerificationChecks, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, preflightGateClaimEvidence, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
-import { kitFlowSourceRoots, resolveKitFlowBinding } from "../lib/kit-flow-binding.js";
+import { kitFlowSourceRoots, resolveKitFlowBinding, resolveKitGateProducer } from "../lib/kit-flow-binding.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
@@ -2136,9 +2136,20 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
     const flowRoot = path.join(projectRoot, ".kontourai", "flow", "runs", slug);
     const manifestBytes = readProtectedRegularFileBytes(path.join(flowRoot, "evidence", "manifest.json"), "verification evidence reseal Flow manifest", 16 * 1024 * 1024);
     if (!manifestBytes) throw new Error("verification evidence reseal canonical Flow manifest is missing");
-    const staged = await stageWorkflowEvidenceCandidate(sessionDir, [
+    const lifecycleRuntime = await import(pathToFileURL(path.join(PACKAGE_ROOT,"packaging/lifecycle-authority/runtime-v1.mjs")).href);
+    const staged = await withStagedWorkflowEvidenceCandidate(sessionDir, [
       "record-gate-claim", sessionDir, ...forwarded, "--actor", caller.actorKey, "--flow-run-head", caller.expectedRunHead,
-    ]);
+    ], async candidate => {
+      if (candidate.writerError) throw candidate.writerError;
+      const generated = JSON.parse(candidate.bytes.toString("utf8"));
+      const composed = lifecycleRuntime.composeVerificationEvidenceCandidate(bundle, generated, expectation);
+      const bytes = Buffer.from(JSON.stringify(composed,null,2)+"\n");
+      // Write only the owned candidate descriptor. Canonical trust stays untouched until signed publication.
+      writeDescriptorFully(candidate.descriptor,bytes,workflowEvidenceTransactionTestHooks?.candidateWrite);
+      fs.ftruncateSync(candidate.descriptor,bytes.length);fs.fsyncSync(candidate.descriptor);
+      if (!readDescriptorBytes(candidate.descriptor).equals(bytes)) throw new Error("verification candidate changed during composition");
+      return {...candidate,bytes,digest:createHash("sha256").update(bytes).digest("hex")};
+    });
     if (staged.bytes.length === 0) throw new Error("verification evidence reseal writer produced no candidate bytes");
     if (!fs.readFileSync(bundleFile).equals(bundleBytes)
         || !fs.readFileSync(path.join(flowRoot, "evidence", "manifest.json")).equals(manifestBytes)
@@ -2155,19 +2166,29 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
     };
     const predecessorMatches = currentClaims.map((claim, index) => ({ claim, index })).filter(({ claim }) => claimExpectation(claim) === expectation);
     const currentMatches = candidateClaims.map((claim, index) => ({ claim, index })).filter(({ claim }) => claimExpectation(claim) === expectation);
-    if (predecessorMatches.length !== 1 || currentMatches.length !== 1
-        || currentClaims.length !== candidateClaims.length
-        || predecessorMatches[0]!.index !== currentMatches[0]!.index) {
+    const inserting = predecessorMatches.length === 0;
+    if (currentMatches.length !== 1
+        || (inserting ? candidateClaims.length !== currentClaims.length + 1 || currentMatches[0]!.index !== currentClaims.length
+          : predecessorMatches.length !== 1 || currentClaims.length !== candidateClaims.length || predecessorMatches[0]!.index !== currentMatches[0]!.index)) {
       throw new Error(`verification evidence reseal requires exactly one in-place target expectation claim replacement (predecessor=${predecessorMatches.length}, current=${currentMatches.length}, claims=${currentClaims.length}->${candidateClaims.length})`);
     }
-    const predecessorClaim = predecessorMatches[0]!;
+    const predecessorClaim = predecessorMatches[0];
+    if (inserting && (repaired.run.definitionId !== "builder.build" || repaired.run.state.current_step !== "verify" || targetRequirement.required !== true || targetBundleClaim.subjectType !== "flow-step" || requestedStatus !== "pass")) throw new Error("initial verification evidence must target one required canonical verification expectation with passing producer evidence");
+    if (inserting) {
+      const binding=resolveKitFlowBinding(repaired.run.definitionId,kitFlowSourceRoots(PACKAGE_ROOT,projectRoot));
+      const producer=binding && resolveKitGateProducer(binding.manifest,binding.kitId,repaired.run.definitionId,repaired.run.state.current_step,expectation);
+      if (!producer || producer.kind!=="producer" || (currentMatches[0]!.claim.metadata as JsonRecord)?.expected_producer!==producer.skillId) throw new Error("initial verification evidence has no matching registered canonical producer");
+    }
     const currentClaim = currentMatches[0]!;
+    const relatedCriterionDeltas = inserting ? currentClaims.flatMap((claim,index) => claim.metadata && (claim.metadata as JsonRecord).origin === "acceptance" && JSON.stringify(claim) !== JSON.stringify(candidateClaims[index])
+      ? [{criterion_id:String(((claim.metadata as JsonRecord).criterion as JsonRecord).id),claim_index:index,preimage_claim_sha256:createHash("sha256").update(JSON.stringify(claim)).digest("hex"),candidate_claim_sha256:createHash("sha256").update(JSON.stringify(candidateClaims[index])).digest("hex")}] : []) : [];
+    const relatedIndices = new Set(relatedCriterionDeltas.map(delta=>delta.claim_index));
     currentClaims.forEach((claim, index) => {
-      if (index !== predecessorClaim.index && JSON.stringify(claim) !== JSON.stringify(candidateClaims[index])) {
+      if ((inserting ? !relatedIndices.has(index) : index !== predecessorClaim!.index) && JSON.stringify(claim) !== JSON.stringify(candidateClaims[index])) {
         throw new Error("verification evidence reseal writer changed the ordered claim set outside the target expectation");
       }
     });
-    for (const [label, claim] of [["predecessor", predecessorClaim.claim], ["current", currentClaim.claim]] as const) {
+    for (const [label, claim] of [...(predecessorClaim ? [["predecessor", predecessorClaim.claim] as const] : []), ["current", currentClaim.claim] as const]) {
       if (typeof claim.id !== "string" || !claim.id || typeof claim.status !== "string" || !claim.status) {
         throw new Error(`verification evidence reseal ${label} claim identity or status is invalid`);
       }
@@ -2184,7 +2205,14 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
     const subject = Array.isArray(state.work_item_refs) && state.work_item_refs.length === 1 ? String(state.work_item_refs[0]) : "";
     if (!subject || subject !== repaired.run.state.subject) throw new Error("verification evidence reseal requires one matching canonical subject");
     const now = new Date();
-    return buildUnsignedVerificationEvidenceResealAuthorization({
+    const delta = predecessorClaim ? {
+      claim_delta:"replace" as const,predecessor_claim_id:String(predecessorClaim.claim.id),predecessor_claim_status:String(predecessorClaim.claim.status),
+      predecessor_claim_sha256:createHash("sha256").update(JSON.stringify(predecessorClaim.claim)).digest("hex"),predecessor_claim_index:predecessorClaim.index,
+    } : {
+      claim_delta:"insert" as const,predecessor_claim_id:null,predecessor_claim_status:null,predecessor_claim_sha256:null,predecessor_claim_index:null,
+      writer_actor_key:String((currentClaim.claim.metadata as JsonRecord).recorded_by),related_criterion_deltas:relatedCriterionDeltas,
+    };
+    const unsigned = buildUnsignedVerificationEvidenceResealAuthorization({
       project_root: projectRoot,
       run_id: slug,
       subject,
@@ -2207,19 +2235,19 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
       flow_manifest_sha256: createHash("sha256").update(manifestBytes).digest("hex"),
       critique_projection_sha256: String(critiqueHistoryProjectionSummary(Array.isArray(bundle.claims) ? bundle.claims as JsonRecord[] : []).digest),
       target_expectation_id: expectation,
-      predecessor_claim_id: String(predecessorClaim.claim.id),
-      predecessor_claim_status: String(predecessorClaim.claim.status),
-      predecessor_claim_sha256: createHash("sha256").update(JSON.stringify(predecessorClaim.claim)).digest("hex"),
-      predecessor_claim_index: predecessorClaim.index,
       current_claim_id: String(currentClaim.claim.id),
       current_claim_status: String(currentClaim.claim.status),
       current_claim_sha256: createHash("sha256").update(JSON.stringify(currentClaim.claim)).digest("hex"),
       current_claim_index: currentClaim.index,
-      claim_delta: "replace",
+      ...delta,
       nonce: `verification-reseal-${slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`,
       requested_at: now.toISOString(),
       expires_at: new Date(now.getTime() + hours * 3_600_000).toISOString(),
     });
+    if (inserting) lifecycleRuntime.resealVerificationEvidenceTransition({current_bundle:bundle,candidate_bundle:candidateBundle,resolution_events:events,authorization:unsigned.unsigned,current_bundle_bytes:bundleBytes,candidate_bundle_bytes:staged.bytes,ledger_bytes:ledgerBytes,
+      flow:{definition_id:repaired.run.definitionId,step_id:repaired.run.state.current_step,gate_id:currentGate.id,requirements:currentRequirements},
+      verification_observation:{assignment_actor_key:caller.assignmentActorKey,workspace_snapshot:captureReviewWorkspaceSnapshot(projectRoot,[]),command_log:fs.readFileSync(path.join(sessionDir,"command-log.jsonl"),"utf8").split("\n").filter(line=>line.trim()).map(line=>JSON.parse(line))}});
+    return unsigned;
   });
   console.log(JSON.stringify({ authorization: request.unsigned, signing_payload: request.signingPayload }, null, 2));
   return 0;

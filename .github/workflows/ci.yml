@@ -131,6 +131,12 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check installed-kit-execution-unit-tests
 
+      - name: Verification evidence authority unit tests
+        run: bash evals/ci/run-baseline.sh --check verification-evidence-authority-unit-tests
+
+      - name: Verification evidence public request unit tests
+        run: bash evals/ci/run-baseline.sh --check verification-evidence-public-request-unit-tests
+
       - name: Host adapter unit tests
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check host-adapter-unit-tests
