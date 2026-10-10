@@ -73,7 +73,7 @@ if (!/EXACT_CURRENT_RECOVERY_PUBLICATION_PROTOCOL/.test(source)
 NODE
 sudo -u node env HOME=/home/node node --test --test-name-pattern='exact-current recovery|hermetic privileged coordinator recovers a stale completion|same recovery request path' \
   src/cli/lifecycle-authority-coordinator.test.mjs
-# The privileged coordinator is pinned to the audited Flow 5.1.4 reducer closure, and that pin is
+# The privileged coordinator is pinned to the audited Flow 5.2.0 reducer closure, and that pin is
 # a digest over the whole staged tree -- so the tree has to be REPRODUCIBLE or the digest is a
 # clock, not a control.
 #
@@ -606,7 +606,7 @@ const [flowRoot, project, runId] = process.argv.slice(2);
 const flow = await import(pathToFileURL(path.join(flowRoot, 'dist', 'index.js')).href);
 await flow.pauseRun(runId, {
   cwd: project,
-  reason: 'installed Flow 5.1.4 mutation after reseal',
+  reason: 'installed Flow 5.2.0 mutation after reseal',
   authority: {
     kind: 'operator_request',
     actor: 'installed-flow-5.1.4-container',

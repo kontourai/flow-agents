@@ -220,7 +220,7 @@
   "dependencies": {
     "@kontourai/conduit": "0.7.1",
     "@kontourai/dispatch": "0.3.0",
-    "@kontourai/flow": "5.1.4",
+    "@kontourai/flow": "5.2.0",
     "@kontourai/relay": "0.6.0",
     "@kontourai/surface": "5.0.0",
     "@kontourai/survey": "2.0.0",

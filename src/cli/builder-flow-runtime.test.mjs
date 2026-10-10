@@ -4459,7 +4459,11 @@ test("killing a drive during its third adapter preserves two verified accepted-t
     for await (const chunk of process.stdin) input += chunk;
     const request = JSON.parse(input);
     if (request.iteration === 3) {
-      fs.writeFileSync(${JSON.stringify(thirdTurnMarker)}, JSON.stringify({ pid: process.pid, run_id: request.run_id, iteration: request.iteration }));
+      // Publish the handshake atomically: the parent observes existence while
+      // this process writes, so opening the final path first exposes empty JSON.
+      const pendingMarker = ${JSON.stringify(`${thirdTurnMarker}.pending`)};
+      fs.writeFileSync(pendingMarker, JSON.stringify({ pid: process.pid, run_id: request.run_id, iteration: request.iteration }));
+      fs.renameSync(pendingMarker, ${JSON.stringify(thirdTurnMarker)});
       setInterval(() => {}, 1000);
       await new Promise(() => {});
     }
