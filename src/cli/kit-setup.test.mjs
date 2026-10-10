@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {parseHostSetup,doctorKitSetup,resolveKitAuth,resolveKitModel,createKitRequest,writeKitRequest} from '../../build/src/kit-setup.js';
+import {parseHostSetup,doctorKitSetup,resolveKitAuth,resolveKitConnection,resolveKitNativeEnvironment,resolveKitModel,createKitRequest,writeKitRequest} from '../../build/src/kit-setup.js';
 const native={engine:'codex',provider:'codex',model:'example-model',auth:{mode:'native'},isolation:'trusted-host',host_access_granted:true};
 test('native auth checks engine status without reading assumed auth file or emitting native output',()=>{
  const calls=[];const checks=doctorKitSetup(native,{probe:(b,a)=>{calls.push([b,a]);return true;}});
@@ -22,6 +22,9 @@ test('Datum reference availability never materializes a secret; host resolution 
 });
 test('Datum provider model selection preserves original secret reference without materialization',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'setup-datum-'));try{fs.mkdirSync(path.join(root,'.datum'));fs.writeFileSync(path.join(root,'.datum/config.json'),JSON.stringify({providers:{setup_fixture:{kind:'openai-compatible',models:['example-model'],auth:{env:'SETUP_TEST_KEY'}}}}));assert.deepEqual(resolveKitModel('example-model@setup_fixture',root),{model:'example-model',provider:'setup_fixture',auth:{mode:'secret-ref',ref:{env:'SETUP_TEST_KEY'}}});assert.throws(()=>resolveKitModel('example-model@missing_setup_fixture',root));}finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+test('configured host connection preserves endpoint/auth authority and native environment uses Datum Claude adapter',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'setup-connection-'));try{fs.mkdirSync(path.join(root,'.datum'));const file=path.join(root,'.datum/config.json'),config={providers:{test_anthropic:{kind:'anthropic-compatible',baseUrl:'https://provider.example.test',models:['example-model'],auth:{env:'TEST_ANTHROPIC_KEY'}}}};fs.writeFileSync(file,JSON.stringify(config));const host={...native,engine:'claude',provider:'test_anthropic',auth:{mode:'secret-ref',ref:{env:'TEST_ANTHROPIC_KEY'}}};const env={TEST_ANTHROPIC_KEY:'private-value'};const connection=resolveKitConnection(host,{cwd:root,env});assert.equal(connection.kind,'anthropic-compatible');assert.equal(connection.baseUrl,'https://provider.example.test');assert.ok(!JSON.stringify(connection).includes('private-value'));assert.deepEqual(resolveKitNativeEnvironment(host,{cwd:root,env}),{ANTHROPIC_MODEL:'example-model',ANTHROPIC_BASE_URL:'https://provider.example.test',ANTHROPIC_API_KEY:'private-value'});assert.throws(()=>resolveKitNativeEnvironment({...host,engine:'kiro'},{cwd:root,env}),/unavailable/);config.providers.test_anthropic.auth={env:'CHANGED_TEST_KEY'};fs.writeFileSync(file,JSON.stringify(config));assert.throws(()=>resolveKitConnection(host,{cwd:root,env}),/changed/);}finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 test('unsupported auth and Docker/native combinations fail closed',()=>{
  for(const value of [{...native,engine:'unknown'},{...native,isolation:'docker'},{...native,engine:'claude',auth:{mode:'codex-file',file:'/tmp/auth'}},{...native,auth:{mode:'secret-ref',ref:{env:'TEST_KEY',password:'secret'}}},{...native,auth:{mode:'native',token:'secret'}}])assert.throws(()=>parseHostSetup(value));

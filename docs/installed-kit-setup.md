@@ -43,7 +43,8 @@ Datum reference: `{ "env": "PROVIDER_KEY" }`, `{ "keychain": { "service":
 Never place the value itself in JSON or command arguments. `--auth native`
 explicitly retains engine-owned login even when a Datum model is selected.
 Reference backend availability does not prove that a secret exists or that the
-provider accepts it. Only explicit trusted-host execution materializes it, using
+provider accepts it. Configured provider kind, endpoint and auth-reference authority are refreshed before execution; changed references require setup again. The supported native API-key adapter is Claude Code with an anthropic-compatible Datum provider, using Datum’s native settings generator and `ANTHROPIC_API_KEY` subprocess environment. Other native API-key adapters are refused; use their engine-owned login.
+Only explicit trusted-host execution materializes it, using
 Datum's existing `materializeAuthRef`; setup and doctor do not read keychain or
 1Password values.
 

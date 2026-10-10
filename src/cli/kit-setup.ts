@@ -30,7 +30,7 @@ export async function kitSetupMain(command:string,argv:string[]):Promise<number>
   else if(get('auth')==='native'||!resolved&&!get('auth'))auth={mode:'native'};
   else if(get('auth'))throw new Error('Only native is supported by --auth; use --auth-ref for Datum references');
   else auth=resolved!.auth;
-  const host=parseHostSetup({engine:required('engine'),model:model??resolved?.model,provider:resolved?.provider??(auth.mode==='codex-file'?'openai':required('engine')),auth,isolation:get('isolation')??'trusted-host',host_access_granted:flagBool(args.flags,'allow-host-execution')});
+  const host=parseHostSetup({engine:required('engine'),model:model??resolved?.model,provider:resolved?.provider??(auth.mode!=='native'?'openai':required('engine')),auth,isolation:get('isolation')??'trusted-host',host_access_granted:flagBool(args.flags,'allow-host-execution')});
   const request=createKitRequest({kitId:args.positionals[0]??'',dest:path.resolve(get('dest')??defaultCodexHome()),workspace,controllerRoot:required('controller-root'),host,prompt:required('prompt'),runId:get('run-id'),image:get('image'),parameters:get('parameters-file')?json(required('parameters-file')):get('parameters')?json(required('parameters')):undefined,template:get('request-template')?json(required('request-template')):undefined,maxTurns:get('max-turns')?Number(get('max-turns')):undefined,maxProviderRequests:get('max-provider-requests')?Number(get('max-provider-requests')):undefined,timeoutS:get('timeout-s')?Number(get('timeout-s')):undefined});
   const checks=doctorKitSetup(host,{image:(request.engine_sandbox as {image?:string}).image}),dry=flagBool(args.flags,'dry-run');
   if(!dry)writeKitRequest(required('output'),request);

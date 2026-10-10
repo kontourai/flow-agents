@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {parseAuthRef, materializeAuthRef, describeAuth, defaultSecretRunner, resolveRef, loadConfig, type AuthRef, type SecretRunner} from '@kontourai/datum';
+import {parseAuthRef, materializeAuthRef, describeAuth, defaultSecretRunner, resolveRef, loadConfig, generateClaudeCodeEnv, type AuthRef, type SecretRunner} from '@kontourai/datum';
 import {verifyInstalledKit} from './kit-execution.js';
 
 export const setupEngines = ['codex','claude','kiro','cursor','opencode','copilot'] as const;
@@ -36,6 +36,30 @@ export function resolveKitAuth(auth:KitAuth,options:{env?:NodeJS.ProcessEnv;secr
 export function resolveKitModel(ref:string,cwd:string):{model:string;provider:string;auth:KitAuth} {
  const resolved=resolveRef(ref,{cwd});
  return {model:resolved.model,provider:resolved.provider,auth:{mode:'secret-ref',ref:parseAuthRef(loadConfig({cwd}).config.providers?.[resolved.provider]?.auth)}};
+}
+export type KitConnection = {provider:string;model:string;kind:string|null;baseUrl:string|null;auth:KitAuth};
+/** Refresh the configured provider authority before host invocation. Never reads a secret. */
+export function resolveKitConnection(host:HostSetup,options:{cwd:string;env?:NodeJS.ProcessEnv}):KitConnection {
+ host=parseHostSetup(host);
+ if(host.auth.mode==='native')return {provider:host.provider,model:host.model,kind:null,baseUrl:null,auth:host.auth};
+ if(host.auth.mode==='codex-file')return {provider:'openai',model:host.model,kind:'openai-compatible',baseUrl:null,auth:host.auth};
+ const config=loadConfig(options).config;
+ if(host.provider==='openai'&&host.engine==='codex'&&host.isolation==='docker'&&!config.providers?.openai)return {provider:'openai',model:host.model,kind:'openai-compatible',baseUrl:'https://api.openai.com/v1',auth:host.auth};
+ const resolved=resolveRef(`${host.model}@${host.provider}`,options),provider=config.providers?.[resolved.provider];
+ if(!provider)throw new Error('Configure the provider in Datum before API-key execution');
+ const auth=parseAuthRef(provider.auth);if(JSON.stringify(auth)!==JSON.stringify(host.auth.ref))throw new Error('Datum provider auth reference changed; rerun kit setup');
+ return {provider:resolved.provider,model:resolved.model,kind:resolved.kind,baseUrl:resolved.baseUrl??null,auth:{mode:'secret-ref',ref:auth}};
+}
+/** Supported native API-key adapter, grounded in Datum's Claude Code generator.
+ * Returned secret values belong only in the trusted subprocess environment. */
+export function resolveKitNativeEnvironment(host:HostSetup,options:{cwd:string;env?:NodeJS.ProcessEnv;secretRunner?:SecretRunner}):NodeJS.ProcessEnv {
+ host=parseHostSetup(host);if(host.auth.mode==='native')return {};
+ if(host.engine!=='claude'||host.auth.mode!=='secret-ref')throw new Error('Native API-key adapter unavailable for this engine; use engine-native login or the supported Codex host broker');
+ const connection=resolveKitConnection(host,options);
+ if(connection.kind!=='anthropic-compatible')throw new Error('Claude Code requires an anthropic-compatible Datum provider');
+ const resolved=resolveRef(`${host.model}@${host.provider}`,options),generated=generateClaudeCodeEnv(`${host.model}@${host.provider}`,resolved);
+ const secret=materializeAuthRef(host.auth.ref,options);
+ return {...generated.env,ANTHROPIC_API_KEY:secret};
 }
 function noSecrets(value:unknown):void {if(typeof value==='string'&&/^(?:(?:sk|pk|rk|ghp|gho|xox)[-_]|AKIA[0-9A-Z]{16}$|eyJ[A-Za-z0-9_-]+\.)/.test(value))throw new Error('Secret literal refused');if(Array.isArray(value)){value.forEach(noSecrets);return;}if(!value||typeof value!=='object')return;for(const [key,item] of Object.entries(value)){if(/^(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|client[_-]?secret|credentials|tokens|token|bearer|capability|authorization|OPENAI_API_KEY)$/i.test(key))throw new Error('Secret-bearing request field refused');noSecrets(item);}}
 export function createKitRequest(options:{kitId:string;dest:string;workspace:string;controllerRoot:string;host:HostSetup;prompt:string;runId?:string;parameters?:unknown;template?:unknown;image?:string;maxTurns?:number;maxProviderRequests?:number;timeoutS?:number}):Record<string,unknown> {
