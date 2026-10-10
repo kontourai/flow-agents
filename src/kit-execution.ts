@@ -52,10 +52,11 @@ export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot
    if(remaining.stdout.trim())throw new Error('Owned worker termination unverified');
    return ids.length;
  };
+ const deliveryId=randomUUID();
  return new Promise((resolve,reject)=>{
-   const child=fork(fileURLToPath(new URL('./kit-execution-child.js',import.meta.url)),[modulePath,descriptor.export,JSON.stringify(args)],{stdio:['ignore','ignore','pipe','ipc'],execArgv:[]});
+   const child=fork(fileURLToPath(new URL('./kit-execution-child.js',import.meta.url)),[modulePath,descriptor.export,JSON.stringify(args),deliveryId],{stdio:['ignore','ignore','pipe','ipc'],execArgv:[]});
    let forced:ReturnType<typeof setTimeout>|undefined,timedOut=false,settled=false;
-   let processError:Error|undefined;
+   let processError:Error|undefined,acknowledgedDelivery=false,observedExit=false,observedExitCode:number|null=null;
    // IPC is a cooperative cancellation transport, not process custody. A kit
    // can close that transport while retaining referenced handles in its host.
    const terminate=()=>{
@@ -65,12 +66,23 @@ export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot
        catch(error){processError??=error as Error;}
      }
    };
-   const timer=setTimeout(()=>{timedOut=true;terminate();},seconds*1000);
+   const timer=setTimeout(()=>{timedOut=true;if(observedExit)finish(observedExitCode);else terminate();},seconds*1000);
    let outcome:{kind:string;result?:unknown;message?:string}|null=null,stderr='';
    child.stderr?.on('data',chunk=>{stderr=(stderr+chunk).slice(-65536);});
-   child.on('message',message=>{outcome=message as typeof outcome;});
+   child.on('message',message=>{
+     const value=message as Record<string,unknown>|null;
+     const valid=value&&typeof value==='object'&&!Array.isArray(value)&&value.deliveryId===deliveryId
+       && (value.kind==='result'&&Object.keys(value).every(key=>['kind','deliveryId','result'].includes(key))
+         ||value.kind==='error'&&typeof value.message==='string'&&Object.keys(value).every(key=>['kind','deliveryId','message'].includes(key)));
+     if(!valid||outcome){processError??=new Error('Kit result IPC terminal envelope is invalid or duplicated');terminate();return;}
+     outcome=value as {kind:string;result?:unknown;message?:string};
+     if(!child.connected){processError??=new Error('Kit result IPC disconnected before acknowledgement');terminate();return;}
+     try{child.send({kind:'outcome-ack',deliveryId},error=>{if(error){processError??=error;if(!observedExit)terminate();}else acknowledgedDelivery=true;if(observedExit)finish(observedExitCode);});}
+     catch(error){processError??=error as Error;terminate();}
+   });
    const finish=(code:number|null)=>{
      if(settled)return;
+     if(outcome&&!acknowledgedDelivery&&!processError&&!timedOut)return;
      settled=true;clearTimeout(timer);clearTimeout(forced);
      cleanup().then(removed=>{
        if(timedOut)reject(new Error('Kit execution deadline exceeded; owned workers terminated'));
@@ -86,7 +98,9 @@ export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot
      // Every error on a spawned process retains custody until its observed exit.
      if(child.pid!==undefined&&!settled)terminate();
    });
-   child.on('exit',finish);
+   // The ACK handshake guarantees outcome delivery before ordinary exit.
+   // Do not wait on inherited descendant stderr handles after observed exit.
+   child.on('exit',code=>{observedExit=true;observedExitCode=code;finish(code);});
    child.on('close',code=>{if(child.pid===undefined)finish(code);});
  });
 }
