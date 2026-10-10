@@ -1,5 +1,21 @@
 # Changelog
 
+## [7.0.0](https://github.com/kontourai/flow-agents/compare/v6.5.2...v7.0.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* new trust bundles are stamped statusFunctionVersion "3" and derived under it. A pending acceptance criterion derives `unknown` instead of `proposed`, a claim under a policy that requires no evidence derives `proposed`, and the re-exported ClaimEvidenceItem.passing is `boolean | null`. Committed bundles keep their verdict: each re-derives under the version it stamped.
+
+### Features
+
+* **aidlc:** native lifecycle execution with isolated workers and current evidence ([#1441](https://github.com/kontourai/flow-agents/issues/1441)) ([e9ef108](https://github.com/kontourai/flow-agents/commit/e9ef108123b38cbe02789ae6740296c25ef89c53))
+* **kit:** add AI-DLC reference and workflow comparison ground ([#1440](https://github.com/kontourai/flow-agents/issues/1440)) ([f7a47a0](https://github.com/kontourai/flow-agents/commit/f7a47a0d4cd2c89755107eed639f93fcda964149))
+* move @kontourai/surface to 5.0.0 (status function 3) ([#1438](https://github.com/kontourai/flow-agents/issues/1438)) ([f8202c6](https://github.com/kontourai/flow-agents/commit/f8202c678a8a5a7e8fe97f81a372674e6157b98b)), closes [#1422](https://github.com/kontourai/flow-agents/issues/1422)
+* **runtime:** reusable installed-kit execution and isolated host adapters ([#1442](https://github.com/kontourai/flow-agents/issues/1442)) ([9365779](https://github.com/kontourai/flow-agents/commit/9365779efc36214ec5bfa87d56ddfa167be821ac))
+* **trust:** make trust bundles honest under Surface status function 3 ([#1432](https://github.com/kontourai/flow-agents/issues/1432)) ([77249ed](https://github.com/kontourai/flow-agents/commit/77249ed468cd65b4cd48f6e3e419186866709dd5)), closes [#1422](https://github.com/kontourai/flow-agents/issues/1422)
+* **trust:** verify liveness holds by their signal and keep resolution events out of the bundle ([#1434](https://github.com/kontourai/flow-agents/issues/1434)) ([e8d76ce](https://github.com/kontourai/flow-agents/commit/e8d76ce7479993b52e12a582d35a338c62664957)), closes [#1422](https://github.com/kontourai/flow-agents/issues/1422)
+
 ## [6.5.2](https://github.com/kontourai/flow-agents/compare/v6.5.1...v6.5.2) (2026-10-03)
 
 
