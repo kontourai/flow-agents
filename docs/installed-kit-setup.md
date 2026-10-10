@@ -6,6 +6,13 @@ owns methodology and its parameters. Datum owns provider/model resolution and
 secret references. Station's connection and credential registry is optional;
 setup works without Station.
 
+Standalone universal homes also support the installed `scripts/kit.js` setup
+and doctor commands without an npm installation. Their bundle includes the exact
+pinned public Datum implementation and its dependencies. Original licenses and
+package versions are recorded beside `build/src/vendor/datum.mjs` in
+`datum.licenses/` and `datum.bundle.json`; secret values remain host-resolved at
+execution time.
+
 ```sh
 flow-agents kit setup <kit-id> --dest <installation-root> \
   --workspace <project-directory> --controller-root <private-directory> \

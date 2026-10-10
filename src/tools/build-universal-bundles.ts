@@ -696,6 +696,7 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
   writeBundledFlowValidator(targetRoot);
   writeBundledConduit(targetRoot);
+  writeBundledDatum(targetRoot);
   // #620: ship the build-only capability-declarations JSON inside each bundle so an
   // installed economics-record emitter (and hooks) can read it at build/generated/
   // relative to the bundle root. It is generated unconditionally by `npm run build`
@@ -763,6 +764,82 @@ function writeBundledConduit(targetRoot: string): void {
       source = source.replaceAll(importText, `from "${relativeVendor.startsWith(".") ? relativeVendor : `./${relativeVendor}`}"`);
     }
     writeText(file, source);
+  }
+}
+
+/** Installed setup/doctor must use the same pinned public Datum without npm. */
+function writeBundledDatum(targetRoot: string): void {
+  const packageName = "@kontourai/datum";
+  const declared = loadJson<{ dependencies?: Record<string, string> }>(path.join(root, "package.json")).dependencies?.[packageName];
+  const datumRoot = installedPackageRoot(packageName, `${root}/`);
+  const datumPackage = loadJson<{ name: string; version: string }>(path.join(datumRoot, "package.json"));
+  if (!declared || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(declared)
+    || datumPackage.name !== packageName || datumPackage.version !== declared) {
+    throw new Error("Standalone Datum must match the exact published dependency version");
+  }
+  const result = buildSync({
+    absWorkingDir: root,
+    entryPoints: [createRequire(`${root}/`).resolve(packageName)],
+    bundle: true, platform: "node", format: "esm", target: "node22",
+    minifyWhitespace: true, legalComments: "eof", write: false, metafile: true,
+    // Prefer packages' published ESM builds: UMD factories pass require as an
+    // opaque callback, leaving relative imports unbundleable after relocation.
+    mainFields: ["module", "main"],
+    // Public transitives include CJS modules requiring Node builtins. Supply
+    // Node's resolver in the emitted ESM rather than leaving a dynamic require.
+    banner: { js: 'import { createRequire as datumCreateRequire } from "node:module"; const require = datumCreateRequire(import.meta.url);' },
+  });
+  const output = result.outputFiles?.[0];
+  if (!output || !result.metafile) throw new Error("Datum host integration bundle produced no output");
+  const vendorFile = path.join(targetRoot, "build/src/vendor/datum.mjs");
+  writeText(vendorFile, output.text);
+
+  // Retain original package license/notice files for every dependency whose
+  // code landed in the bundle, including pnpm-isolated public transitives.
+  const packaged = new Map<string, { name: string; version: string; license: unknown; notices: string[] }>();
+  for (const built of Object.values(result.metafile.outputs)) {
+    for (const [input, contribution] of Object.entries(built.inputs)) {
+      if (!contribution.bytesInOutput) continue;
+      let directory = path.dirname(path.resolve(root, input));
+      type PackageMetadata = { name?: string; version?: string; license?: unknown };
+      let metadata: PackageMetadata | null = null;
+      while (directory !== path.parse(directory).root) {
+        const file = path.join(directory, "package.json");
+        if (fs.existsSync(file)) {
+          const candidate = loadJson<PackageMetadata>(file);
+          if (candidate?.name && candidate.version) { metadata = candidate; break; }
+        }
+        directory = path.dirname(directory);
+      }
+      if (!metadata?.name || !metadata.version) throw new Error(`Bundled Datum input lacks package provenance: ${input}`);
+      const identity = `${metadata.name}@${metadata.version}`;
+      if (packaged.has(identity)) continue;
+      const notices = fs.readdirSync(directory).filter((file) => /^(?:licen[sc]e|copying|notice)(?:[._-].*)?$/i.test(file) && fs.statSync(path.join(directory, file)).isFile()).sort();
+      if (!notices.length) throw new Error(`Bundled Datum dependency lacks a license/notice: ${identity}`);
+      const copied: string[] = [];
+      for (const notice of notices) {
+        const relative = `datum.licenses/${encodeURIComponent(identity)}/${notice}`;
+        writeText(path.join(path.dirname(vendorFile), relative), readText(path.join(directory, notice)));
+        copied.push(relative);
+      }
+      packaged.set(identity, { name: metadata.name, version: metadata.version, license: metadata.license ?? null, notices: copied });
+    }
+  }
+  writeText(path.join(path.dirname(vendorFile), "datum.bundle.json"), `${JSON.stringify({
+    schema_version: "1.0", entry_package: packageName, entry_version: datumPackage.version,
+    bundle_digest: `sha256:${crypto.createHash("sha256").update(output.text).digest("hex")}`,
+    packages: [...packaged.values()].sort((first, second) => `${first.name}@${first.version}`.localeCompare(`${second.name}@${second.version}`)),
+  }, null, 2)}\n`);
+
+  for (const file of walkFiles(path.join(targetRoot, "build/src"))) {
+    if (!/\.(?:js|mjs)$/.test(file) || file === vendorFile) continue;
+    const source = readText(file);
+    const relativeVendor = path.relative(path.dirname(file), vendorFile).replaceAll(path.sep, "/");
+    const specifier = relativeVendor.startsWith(".") ? relativeVendor : `./${relativeVendor}`;
+    const rewritten = source
+      .replace(/\bfrom\s*(["'])@kontourai\/datum\1/g, `from ${JSON.stringify(specifier)}`)
+      .replace(/\bimport\(\s*(["'])@kontourai\/datum\1\s*\)/g, `import(${JSON.stringify(specifier)})`);
+    if (rewritten !== source) writeText(file, rewritten);
   }
 }
 

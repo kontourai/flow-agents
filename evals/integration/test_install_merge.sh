@@ -42,10 +42,11 @@ echo ""
 
 # Ensure bundles are built
 echo "--- Build ---"
-if (cd "$ROOT_DIR" && npm run build:bundles >/dev/null 2>&1); then
+if (cd "$ROOT_DIR" && npm run build:bundles >"$TMPDIR_EVAL/bundle-build.log" 2>&1); then
   _pass "bundle build completed"
 else
   _fail "bundle build failed"
+  tail -20 "$TMPDIR_EVAL/bundle-build.log" 2>/dev/null || true
   echo "Results: 0/$((pass + fail + 1)) passed, $((fail + 1)) failed"
   exit 1
 fi
@@ -1396,7 +1397,9 @@ fs.writeFileSync(path.join(kit, 'kit.json'), JSON.stringify({
   schema_version: '1.0', id: 'fixture', name: 'Fixture',
   flows: [{ id: 'fixture.review', path: 'flows/review.flow.json' }],
   provisions: [{ id: 'fixture.governance', path: 'payload/hook.json', target: '.codex/hooks.json', host: 'codex', kind: 'hook', merge: 'hooks-json' }],
+  execution: { module: 'entry.mjs', export: 'execute', contract: 'kontour.kit.execution_request@1.0' },
 }));
+fs.writeFileSync(path.join(kit, 'entry.mjs'), 'export async function execute() { return { status: "waiting" }; }\n');
 fs.writeFileSync(path.join(target, '.codex/hooks.json'), JSON.stringify({ hooks: {
   PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'user-hook' }] }],
 } }));
@@ -1419,6 +1422,81 @@ then
 else
   _fail "CH4: installed Kit provision failed or lost hook/receipt fidelity"
   tail -12 "$CH4_PROVISION_LOG" 2>/dev/null || true
+fi
+
+# These commands must run from the installed home, outside the checkout's npm
+# graph. Mock only the native engine status checks; never call a provider.
+CH4_SETUP_BIN="$TMPDIR_EVAL/ch4-setup-bin"
+CH4_SETUP_WORKSPACE="$TMPDIR_EVAL/ch4-setup-workspace"
+CH4_SETUP_CONTROLLER="$TMPDIR_EVAL/ch4-setup-controller"
+CH4_SETUP_REQUEST="$TMPDIR_EVAL/ch4-setup-request.json"
+CH4_SETUP_LOG="$TMPDIR_EVAL/ch4-setup.log"
+CH4_SETUP_ENGINE_LOG="$TMPDIR_EVAL/ch4-setup-engine.jsonl"
+mkdir -p "$CH4_SETUP_BIN" "$CH4_SETUP_WORKSPACE" "$CH4_SETUP_CONTROLLER"
+chmod 700 "$CH4_SETUP_CONTROLLER"
+cat > "$CH4_SETUP_BIN/codex" <<'NODE'
+#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FLOW_AGENTS_TEST_ENGINE_LOG, JSON.stringify(args) + '\n');
+if (JSON.stringify(args) === '["--version"]') console.log('codex fixture-preflight-only');
+else if (JSON.stringify(args) !== '["login","status"]') process.exit(99);
+NODE
+chmod 700 "$CH4_SETUP_BIN/codex"
+if [[ ! -d "$CH4_DEST/node_modules" && ! -d "$CH4_DEST/build/node_modules" ]] \
+  && node "$CH4_DEST/scripts/kit.js" install "$CH4_KIT" --dest "$CH4_DEST" >"$CH4_SETUP_LOG" 2>&1 \
+  && PATH="$CH4_SETUP_BIN:$PATH" FLOW_AGENTS_TEST_ENGINE_LOG="$CH4_SETUP_ENGINE_LOG" \
+    node "$CH4_DEST/scripts/kit.js" setup fixture --dest "$CH4_DEST" \
+      --workspace "$CH4_SETUP_WORKSPACE" --controller-root "$CH4_SETUP_CONTROLLER" \
+      --engine codex --model fixture-model --auth native --allow-host-execution \
+      --prompt 'Inspect this standalone installed kit' --output "$CH4_SETUP_REQUEST" >>"$CH4_SETUP_LOG" 2>&1 \
+  && PATH="$CH4_SETUP_BIN:$PATH" FLOW_AGENTS_TEST_ENGINE_LOG="$CH4_SETUP_ENGINE_LOG" \
+    node "$CH4_DEST/scripts/kit.js" doctor --request "$CH4_SETUP_REQUEST" >>"$CH4_SETUP_LOG" 2>&1 \
+  && node --input-type=module - "$CH4_DEST" "$CH4_SETUP_WORKSPACE" "$CH4_SETUP_REQUEST" "$CH4_SETUP_ENGINE_LOG" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+const [installed, workspace, requestFile, engineLog] = process.argv.slice(2);
+const request = JSON.parse(fs.readFileSync(requestFile, 'utf8'));
+assert.equal(request.kit_id, 'fixture');
+assert.equal(request.source_root, path.join(installed, 'kits/local/repositories/fixture'));
+assert.equal(request.host_setup.auth.mode, 'native');
+assert.equal(request.execution.provider_request_budget_enforcement, 'not-enforced');
+assert.deepEqual(fs.readFileSync(engineLog, 'utf8').trim().split('\n').map(JSON.parse), [
+  ['--version'], ['login', 'status'], ['--version'], ['login', 'status'],
+]);
+const setup = await import(pathToFileURL(path.join(installed, 'build/src/kit-setup.js')));
+fs.mkdirSync(path.join(workspace, '.datum'));
+fs.writeFileSync(path.join(workspace, '.datum/config.json'), JSON.stringify({ providers: {
+  bundle_fixture: { kind: 'anthropic-compatible', baseUrl: 'https://provider.example.test',
+    models: ['fixture-model'], auth: { env: 'FLOW_AGENTS_TEST_DATUM_KEY' } },
+} }));
+const selected = setup.resolveKitModel('fixture-model@bundle_fixture', workspace);
+assert.deepEqual(selected, { model: 'fixture-model', provider: 'bundle_fixture',
+  auth: { mode: 'secret-ref', ref: { env: 'FLOW_AGENTS_TEST_DATUM_KEY' } } });
+const environment = setup.resolveKitNativeEnvironment({ engine: 'claude', ...selected,
+  isolation: 'trusted-host', host_access_granted: true },
+  { cwd: workspace, env: { FLOW_AGENTS_TEST_DATUM_KEY: 'fixture-only-no-provider-value' } });
+assert.equal(environment.ANTHROPIC_BASE_URL, 'https://provider.example.test');
+assert.equal(environment.ANTHROPIC_API_KEY, 'fixture-only-no-provider-value');
+const vendor = path.join(installed, 'build/src/vendor');
+const provenance = JSON.parse(fs.readFileSync(path.join(vendor, 'datum.bundle.json'), 'utf8'));
+assert.equal(provenance.entry_package, '@kontourai/datum');
+assert.equal(provenance.bundle_digest, 'sha256:' + crypto.createHash('sha256').update(fs.readFileSync(path.join(vendor, 'datum.mjs'))).digest('hex'));
+assert.ok(provenance.packages.some((item) => item.name === '@kontourai/datum' && item.version === provenance.entry_version));
+assert.ok(provenance.packages.some((item) => item.name === '@kontourai/bearing'));
+for (const dependency of provenance.packages) {
+  assert.ok(dependency.notices.length > 0);
+  for (const notice of dependency.notices) assert.ok(fs.readFileSync(path.join(vendor, notice)).length > 0);
+}
+NODE
+then
+  _pass "CH4: installed setup/doctor and Datum reference helpers work without npm or provider calls"
+else
+  _fail "CH4: installed setup/doctor or vendored Datum reference/license contract failed"
+  tail -12 "$CH4_SETUP_LOG" 2>/dev/null || true
 fi
 
 CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$CH4_SKILLS" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH4_DEST" >/dev/null 2>&1
