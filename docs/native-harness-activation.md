@@ -72,7 +72,11 @@ const receipt = activateNativeHarness(packageRoot, projectRoot, {
 
 `kitIdFilter` expands declared dependencies using the existing inventory. Without
 a filter, activation uses all available built-in and installed kits. The SDK's
-filter also bounds stale cleanup; unrelated kits keep their ownership records.
+filter bounds strict installed content integrity and stale cleanup to the selected
+kit and its transitive dependencies. Unrelated integrity failures remain warnings
+and their files stay untouched. Ambiguous or duplicate registry identities always
+refuse activation, because a kit cannot be selected reliably from that registry.
+Unrelated kits keep their ownership records.
 The packed-package tests exercise all eight surface IDs, ordinary installed-kit
 CLI use from skill companions, legacy adapter compatibility, shared custody,
 installed drift, conflicts, and unsafe destinations. They supply dependencies

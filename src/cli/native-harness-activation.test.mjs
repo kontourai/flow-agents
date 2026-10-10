@@ -198,3 +198,66 @@ test("Kiro CLI and IDE activate distinct native agent identities in one project"
   const skill = ownership.files.find((entry) => entry.path === ".kiro/skills/example-review/SKILL.md");
   assert.deepEqual(new Set(skill.surfaces), new Set(["kiro-cli", "kiro-ide"]));
 });
+
+function installAdditionalKit(root, dest, id, dependencies = []) {
+  const source = path.join(root, id);
+  fs.cpSync(path.resolve("evals/fixtures/flow-kit-repository/valid-local-kit"), source, { recursive: true });
+  const file = path.join(source, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(file));
+  manifest.id = id;
+  if (dependencies.length) manifest.dependencies = dependencies.map((kit_id) => ({ kit_id }));
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  const installed = command(["kit", "install", source, "--dest", dest]);
+  assert.equal(installed.status, 0, installed.stderr);
+  return path.join(dest, "kits/local/repositories", id);
+}
+
+test("selected native activation skips unrelated installed drift without modifying its files", () => {
+  const { root, dest } = fixture("selected-unrelated-drift");
+  const unrelated = installAdditionalKit(root, dest, "unrelated-kit");
+  const readme = path.join(unrelated, "docs/README.md");
+  fs.appendFileSync(readme, "Unrelated owner edit\n");
+  const before = fs.readFileSync(readme);
+  const result = activateNativeHarness(packageRoot, dest, { surface: "codex", kitIdFilter: ["example-kit"] });
+  assert.deepEqual(result.errors, []);
+  assert.match(result.warnings.join("\n"), /unrelated-kit.*outside selected kit\/dependency scope/);
+  assert.ok(result.generated_runtime_files.some((file) => file.path === ".agents/skills/example-review/SKILL.md"));
+  assert.ok(result.generated_runtime_files.every((file) => file.kit_id === "example-kit"));
+  assert.deepEqual(fs.readFileSync(readme), before);
+  // Whole-inventory activation still strictly refuses that same drift.
+  assert.match(activateNativeHarness(packageRoot, dest, { surface: "codex" }).errors.join("\n"), /unrelated-kit.*content drift/);
+});
+
+test("selected native activation requires integrity throughout its transitive dependency closure", () => {
+  const { root, source, dest } = fixture("selected-dependency-drift");
+  const leaf = installAdditionalKit(root, dest, "leaf-kit");
+  installAdditionalKit(root, dest, "dependency-kit", ["leaf-kit"]);
+  const file = path.join(source, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(file));
+  manifest.dependencies = [{ kit_id: "dependency-kit" }];
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  assert.equal(command(["kit", "install", source, "--dest", dest, "--update"]).status, 0);
+  const healthy = activateNativeHarness(packageRoot, dest, { surface: "codex", kitIdFilter: ["example-kit"] });
+  assert.deepEqual(healthy.errors, []);
+  assert.deepEqual(new Set(healthy.generated_runtime_files.map((file) => file.kit_id)), new Set(["example-kit", "dependency-kit", "leaf-kit"]));
+  const ownership = fs.readFileSync(path.join(dest, ".flow-agents/native-harness-activation.json"));
+  fs.appendFileSync(path.join(leaf, "docs/README.md"), "Selected dependency drift\n");
+  const refused = activateNativeHarness(packageRoot, dest, { surface: "codex", kitIdFilter: ["example-kit"] });
+  assert.match(refused.errors.join("\n"), /leaf-kit.*content drift/);
+  assert.deepEqual(refused.generated_runtime_files, []);
+  assert.deepEqual(fs.readFileSync(path.join(dest, ".flow-agents/native-harness-activation.json")), ownership);
+});
+
+test("unrelated duplicate and malformed registry identities remain global native activation refusals", () => {
+  const { root, dest } = fixture("selected-ambiguous-registry");
+  installAdditionalKit(root, dest, "unrelated-kit");
+  const file = path.join(dest, "kits/local/installed-kits.json");
+  const registry = JSON.parse(fs.readFileSync(file));
+  const unrelated = registry.kits.find((entry) => entry.id === "unrelated-kit");
+  registry.kits.push(unrelated); fs.writeFileSync(file, JSON.stringify(registry));
+  assert.match(activateNativeHarness(packageRoot, dest, { surface: "codex", kitIdFilter: ["example-kit"] }).errors.join("\n"), /duplicate installed kit identity 'unrelated-kit'/);
+  registry.kits.pop(); registry.kits.push({ ...unrelated, id: "../unrelated-kit" });
+  fs.writeFileSync(file, JSON.stringify(registry));
+  assert.match(activateNativeHarness(packageRoot, dest, { surface: "codex", kitIdFilter: ["example-kit"] }).errors.join("\n"), /ambiguous kit id/);
+  assert.equal(fs.existsSync(path.join(dest, ".agents")), false);
+});
