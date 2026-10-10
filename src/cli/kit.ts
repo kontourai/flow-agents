@@ -66,7 +66,7 @@ export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): 
 const KIT_USAGE: Record<string, string> = {
   run: "usage: flow-agents kit run <kit-id> --request <json> --controller-root <private-root> [--auth-file <host-auth.json>] [--dest <workspace>]",
   install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
-  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local|claude-code|codex|kiro-cli|kiro-ide|cursor|opencode|copilot-cli|vscode>] [--dest <path>] [--source-root <path>]\n"
+  activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local|claude-code|codex|kiro-cli|kiro-ide|cursor|opencode|copilot-cli|vscode>] [--dest <installed-root>] [--target <project>] [--kits <id,id>] [--source-root <path>]\n"
     + "   or: flow-agents kit activate <kit-id> [<kit-id> ...] (--global | --dest <path>) [--dry-run]  (built-in kit activation)",
   deactivate: "usage: flow-agents kit deactivate <kit-id> [<kit-id> ...] (--global | --dest <path>) [--dry-run] [--force]\n"
     + "   or: flow-agents kit deactivate --all (--global | --dest <path>) [--dry-run] [--force]  (built-in kit deactivation)\n"
@@ -587,18 +587,31 @@ const AVAILABLE_ADAPTERS = ["codex-local", "strands-local", ...NATIVE_HARNESS_SU
 function activate(argv: string[]): number {
   const args = parseArgs(argv);
   const dest = resolveDest(args.flags);
-  const sourceRoot = path.resolve(flagString(args.flags, "source-root", path.resolve(path.dirname(process.argv[1]), "..")) ?? ".");
+  const sourceRoot = path.resolve(flagString(args.flags, "source-root", fileURLToPath(new URL("../../../", import.meta.url))) ?? ".");
   const adapter = flagString(args.flags, "adapter");
   if (adapter && !AVAILABLE_ADAPTERS.includes(adapter)) {
     console.log(JSON.stringify({ selected_adapter: null, available_adapters: AVAILABLE_ADAPTERS, supported_asset_classes: [], generated_runtime_files: [], skipped_assets: [], warnings: [], errors: [`unknown runtime adapter '${adapter}'; available adapters: ${AVAILABLE_ADAPTERS.join(", ")}`] }, null, 2));
     return 2;
   }
+  const target = flagString(args.flags, "target");
+  const kitSelection = flagString(args.flags, "kits");
+  const kitIdFilter = kitSelection?.split(",").map((id) => id.trim());
+  const native = adapter !== undefined && NATIVE_HARNESS_SURFACES.includes(adapter as NativeHarnessSurface);
+  const inputError = args.flags.target !== undefined && (!target || Array.isArray(args.flags.target))
+    ? "--target requires exactly one project path"
+    : target && !native ? "--target requires an explicit native harness adapter"
+    : args.flags.kits !== undefined && (!kitSelection || Array.isArray(args.flags.kits) || kitIdFilter?.some((id) => !/^[a-z][a-z0-9-]*$/.test(id)))
+      ? "--kits requires one comma-separated list of kebab-case kit ids" : null;
+  if (inputError) {
+    console.log(JSON.stringify({ selected_adapter: adapter ?? "codex-local", generated_runtime_files: [], warnings: [], errors: [inputError] }, null, 2));
+    return 2;
+  }
   // Default to codex-local for backward compatibility; strands-local is opt-in via --adapter.
   const result = adapter === "strands-local"
-    ? activateStrandsLocal(sourceRoot, dest)
+    ? activateStrandsLocal(sourceRoot, dest, { kitIdFilter })
     : adapter && NATIVE_HARNESS_SURFACES.includes(adapter as NativeHarnessSurface)
-      ? activateNativeHarness(sourceRoot, dest, { surface: adapter as NativeHarnessSurface })
-      : activateCodexLocal(sourceRoot, dest);
+      ? activateNativeHarness(sourceRoot, dest, { surface: adapter as NativeHarnessSurface, targetRoot: target, kitIdFilter })
+      : activateCodexLocal(sourceRoot, dest, { kitIdFilter });
   console.log(JSON.stringify(result, null, 2));
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
 }

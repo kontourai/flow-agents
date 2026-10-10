@@ -2,7 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { createHash } from "node:crypto";
-import { atomicWriteFile, atomicWriteJson, ensureSafeDirectory } from "./lib/fs.js";
+import { fileURLToPath } from "node:url";
+import { atomicWriteFile, atomicWriteJson, ensureSafeDirectory, assertPathsDisjoint, canonicalProspectivePath } from "./lib/fs.js";
 import { withStateFileLock } from "./lib/state-file-lock.js";
 import { readKitInventory, type KitAsset, type KitInventory, type RuntimeAdapterTestHooks } from "./runtime-adapters.js";
 
@@ -15,9 +16,9 @@ const SKILLS: Record<NativeHarnessSurface, string> = {
   "copilot-cli": ".github/skills", vscode: ".github/skills",
 };
 const MANIFEST = ".flow-agents/native-harness-activation.json";
-type Owned = { kit_id: string; path: string; sha256: string; surfaces: NativeHarnessSurface[] };
-type Manifest = { schema_version: "1.0"; files: Owned[] };
-type Planned = { path: string; bytes: Buffer; kit_id: string; asset_class: string };
+type Owned = { installed_root?: string; runtime_argv?: string[]; source_path?: string; kit_id: string; path: string; sha256: string; surfaces: NativeHarnessSurface[] };
+type Manifest = { schema_version: "1.0"; installed_root?: string; runtime_argv?: string[]; files: Owned[] };
+type Planned = { source_path: string; path: string; bytes: Buffer; kit_id: string; asset_class: string };
 const digest = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
 const segment = (value: string): string => {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(value)) throw new Error(`invalid native asset name '${value}'`);
@@ -53,20 +54,40 @@ function ownedPathForSurface(rel: string, surface: NativeHarnessSurface): boolea
     || (surface === "cursor" && /^\.cursor\/rules\/flow-agents-[a-zA-Z0-9_-]+\.mdc$/.test(rel));
 }
 
+function validLauncher(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 2 && value.every((item) => typeof item === "string" && path.isAbsolute(item) && !item.includes("\0"));
+}
+
 function readManifest(root: string): Manifest {
   const file = safeTarget(root, MANIFEST);
   if (!exists(file)) return { schema_version: "1.0", files: [] };
   const value = JSON.parse(fs.readFileSync(file, "utf8")) as Manifest;
-  if (value.schema_version !== "1.0" || !Array.isArray(value.files)) throw new Error("invalid native projection ownership manifest");
+  if (value.schema_version !== "1.0" || !Array.isArray(value.files)
+    || value.installed_root !== undefined && (typeof value.installed_root !== "string" || !path.isAbsolute(value.installed_root))
+    || value.runtime_argv !== undefined && !validLauncher(value.runtime_argv)) throw new Error("invalid native projection ownership manifest");
   const seen = new Set<string>();
   for (const entry of value.files) {
-    if (!entry || typeof entry.kit_id !== "string" || !/^[a-z][a-z0-9-]*$/.test(entry.kit_id) || typeof entry.path !== "string" || !/^[a-f0-9]{64}$/.test(entry.sha256) || !Array.isArray(entry.surfaces)
+    if (!entry || entry.installed_root !== undefined && (typeof entry.installed_root !== "string" || !path.isAbsolute(entry.installed_root))
+      || entry.runtime_argv !== undefined && !validLauncher(entry.runtime_argv) || (entry.source_path !== undefined && (typeof entry.source_path !== "string" || !path.isAbsolute(entry.source_path) || entry.source_path.includes("\0"))) || typeof entry.kit_id !== "string" || !/^[a-z][a-z0-9-]*$/.test(entry.kit_id) || typeof entry.path !== "string" || !/^[a-f0-9]{64}$/.test(entry.sha256) || !Array.isArray(entry.surfaces)
       || entry.surfaces.length === 0 || entry.surfaces.some((surface) => !NATIVE_HARNESS_SURFACES.includes(surface) || !ownedPathForSurface(entry.path, surface))
       || seen.has(entry.path)) throw new Error("invalid native projection ownership entry");
     safeTarget(root, entry.path);
     seen.add(entry.path);
   }
   return value;
+}
+
+function runtimeHeader(asset: KitAsset, installedRoot: string, runtimeArgv: string[]): string {
+  const metadata = { installed_root: installedRoot, runtime_argv: runtimeArgv,
+    installed_kit_root: path.resolve(path.dirname(asset.source_path), path.relative(path.dirname(asset.relative_path), ".")), source_path: asset.source_path };
+  return `<!-- Flow Agents installed runtime -->\nUse runtime_argv to invoke the public Flow Agents CLI. For kit commands, append ["kit", "<operation>", "--dest", installed_root, ...]. Repository-relative instructions refer to installed_kit_root; skill companions in this projection remain local. This is discovery guidance, not hook enforcement.\n\n\`\`\`json\n${JSON.stringify(metadata, null, 2).replaceAll("`", "\\u0060")}\n\`\`\`\n\n`;
+}
+
+function withRuntimeHeader(bytes: Buffer, header: string): Buffer {
+  const text = bytes.toString("utf8");
+  const frontmatter = /^(---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$))/.exec(text);
+  const offset = frontmatter?.[0].length ?? 0;
+  return Buffer.from(`${text.slice(0, offset)}${header}${text.slice(offset)}`);
 }
 
 function sourcePath(asset: KitAsset): string {
@@ -93,24 +114,28 @@ function skillFiles(source: string): { rel: string; bytes: Buffer }[] {
 /** Activate installed content using the canonical kit inventory; legacy adapters stay intact.
  * The receipt attests only asset placement, never GUI discovery, auth, hooks, or execution.
  */
-export function activateNativeHarness(sourceRoot: string, destination: string, options: {
-  surface: NativeHarnessSurface; kitIdFilter?: string[]; testHooks?: RuntimeAdapterTestHooks;
+export function activateNativeHarness(sourceRoot: string, installationRoot: string, options: {
+  surface: NativeHarnessSurface; targetRoot?: string; kitIdFilter?: string[]; testHooks?: RuntimeAdapterTestHooks;
 }): Record<string, unknown> {
   const surface = options.surface;
-  const root = path.resolve(destination);
+  const installedRoot = path.resolve(installationRoot);
+  const root = path.resolve(options.targetRoot ?? installedRoot);
+  const separateRoots = canonicalProspectivePath(root) !== canonicalProspectivePath(installedRoot);
+  const runtimeCli = fileURLToPath(new URL("./cli.js", import.meta.url));
+  const runtimeArgv = [process.execPath, runtimeCli];
   const errors: string[] = [];
-  const generated: { path: string; kit_id: string; asset_class: string; sha256: string }[] = [];
+  const generated: { source_path: string; path: string; kit_id: string; asset_class: string; sha256: string }[] = [];
   const removed: string[] = [];
   const inventory: KitInventory = (() => {
     try {
-      safeTarget(root, "kits/local/installed-kits.json");
-      return readKitInventory(sourceRoot, root, { ...options, snapshotLocalKits: true, strictInstalledIntegrity: true });
+      safeTarget(installedRoot, "kits/local/installed-kits.json");
+      return readKitInventory(sourceRoot, installedRoot, { ...options, snapshotLocalKits: true, strictInstalledIntegrity: true });
     }
     catch (error) { return { assets: [], dependencies: [], workflow_triggers: [], hook_influence_expectations: [], warnings: [], errors: [(error as Error).message], dispose() {} }; }
   })();
   const affectedSurfaces = new Set<NativeHarnessSurface>();
   errors.push(...inventory.errors);
-  const receipt = (): Record<string, unknown> => ({ selected_adapter: surface, projection_scope: "project", evidence_scope: "native-configuration-placement",
+  const receipt = (): Record<string, unknown> => ({ installed_root: installedRoot, target_root: root, runtime_cli: runtimeCli, runtime_argv: runtimeArgv, selected_adapter: surface, projection_scope: "project", evidence_scope: "native-configuration-placement",
     runtime_execution: "NOT_VERIFIED", hook_enforcement: "NOT_INSTALLED", authentication: "NOT_VERIFIED",
     supported_asset_classes: ["skills", "flows", "docs"], generated_runtime_files: generated, removed_owned_files: removed,
     skipped_assets: inventory.assets.filter((asset) => !["skills", "flows", "docs"].includes(asset.asset_class)).map((asset) => ({ kit_id: asset.kit_id, path: asset.relative_path, asset_class: asset.asset_class })),
@@ -119,16 +144,17 @@ export function activateNativeHarness(sourceRoot: string, destination: string, o
     if (!NATIVE_HARNESS_SURFACES.includes(surface)) throw new Error(`unknown native harness surface '${surface}'`);
     if (root === path.parse(root).root || root === path.resolve(os.homedir())) throw new Error("native activation requires a project destination, not a user home or filesystem root");
     if (errors.length) return receipt();
+    if (separateRoots) assertPathsDisjoint(installedRoot, root);
     safeTarget(root, MANIFEST);
     ensureSafeDirectory(root, path.dirname(path.join(root, MANIFEST)));
     return withStateFileLock(path.join(root, MANIFEST), () => {
       const manifest = readManifest(root);
       const previous = new Map(manifest.files.map((entry) => [entry.path, entry]));
       const plans = new Map<string, Planned>();
-      const add = (rel: string, bytes: Buffer, asset: KitAsset): void => {
+      const add = (rel: string, bytes: Buffer, asset: KitAsset, originalSource = asset.source_path): void => {
         if (plans.has(rel)) throw new Error(`native projection collision at '${rel}'`);
         safeTarget(root, rel);
-        plans.set(rel, { path: rel, bytes, kit_id: asset.kit_id, asset_class: asset.asset_class });
+        plans.set(rel, { source_path: originalSource, path: rel, bytes, kit_id: asset.kit_id, asset_class: asset.asset_class });
       };
       const kits = new Map<string, KitAsset[]>();
       for (const asset of inventory.assets) {
@@ -136,7 +162,10 @@ export function activateNativeHarness(sourceRoot: string, destination: string, o
         kitAssets.push(asset); kits.set(asset.kit_id, kitAssets);
         if (asset.asset_class === "skills") {
           const name = segment(path.basename(path.dirname(sourcePath(asset))));
-          for (const file of skillFiles(sourcePath(asset))) add(`${SKILLS[surface]}/${name}/${file.rel}`, file.bytes, asset);
+          for (const file of skillFiles(sourcePath(asset))) {
+            const bytes = separateRoots && file.rel === "SKILL.md" ? withRuntimeHeader(file.bytes, runtimeHeader(asset, installedRoot, runtimeArgv)) : file.bytes;
+            add(`${SKILLS[surface]}/${name}/${file.rel}`, bytes, asset, path.join(path.dirname(asset.source_path), ...file.rel.split("/")));
+          }
         } else if (asset.asset_class === "flows" || asset.asset_class === "docs") {
           add(`.kontourai/flow-agents/projections/${surface}/${segment(asset.kit_id)}/${asset.relative_path}`, fs.readFileSync(sourcePath(asset)), asset);
         }
@@ -144,7 +173,7 @@ export function activateNativeHarness(sourceRoot: string, destination: string, o
       for (const [kitId, assets] of kits) {
         const skills = assets.filter((asset) => asset.asset_class === "skills");
         if (!skills.length) continue;
-        const guidance = `Follow the installed ${kitId} skills when relevant. Read the skill before acting. Skills invoke their documented ordinary CLI tools; these projections install no enforcement hooks.\n${skills.map((asset) => `- ${SKILLS[surface]}/${path.basename(path.dirname(sourcePath(asset)))}/SKILL.md`).join("\n")}\n`;
+        const guidance = `${separateRoots ? runtimeHeader(skills[0], installedRoot, runtimeArgv) : ""}Follow the installed ${kitId} skills when relevant. Read the skill before acting. Skills invoke their documented ordinary CLI tools; these projections install no enforcement hooks.\n${skills.map((asset) => `- ${SKILLS[surface]}/${path.basename(path.dirname(sourcePath(asset)))}/SKILL.md`).join("\n")}\n`;
         const agentName = `flow-agents-${segment(kitId)}${surface === "kiro-cli" ? "-cli" : surface === "kiro-ide" ? "-ide" : ""}`;
         if (surface === "kiro-cli") {
           const agent = { name: agentName, description: `Installed ${kitId} kit guidance`, prompt: guidance,
@@ -179,10 +208,10 @@ export function activateNativeHarness(sourceRoot: string, destination: string, o
         const sha256 = digest(plan.bytes);
         if (old && old.sha256 !== sha256) for (const owner of old.surfaces) affectedSurfaces.add(owner);
         affectedSurfaces.add(surface);
-        next.set(plan.path, { kit_id: plan.kit_id, path: plan.path, sha256, surfaces: [...new Set([...(old?.surfaces ?? []), surface])] });
+        next.set(plan.path, { installed_root: installedRoot, runtime_argv: runtimeArgv, source_path: plan.source_path, kit_id: plan.kit_id, path: plan.path, sha256, surfaces: [...new Set([...(old?.surfaces ?? []), surface])] });
         // Persist custody after each write so interrupted runs retain ownership of landed files.
-        atomicWriteJson(root, path.join(root, MANIFEST), { schema_version: "1.0", files: [...next.values()] });
-        generated.push({ path: plan.path, kit_id: plan.kit_id, asset_class: plan.asset_class, sha256 });
+        atomicWriteJson(root, path.join(root, MANIFEST), { schema_version: "1.0", installed_root: installedRoot, runtime_argv: runtimeArgv, files: [...next.values()] });
+        generated.push({ source_path: plan.source_path, path: plan.path, kit_id: plan.kit_id, asset_class: plan.asset_class, sha256 });
       }
       for (const entry of stale) {
         const others = entry.surfaces.filter((candidate) => candidate !== surface);
@@ -195,7 +224,7 @@ export function activateNativeHarness(sourceRoot: string, destination: string, o
           }
           next.delete(entry.path);
         }
-        atomicWriteJson(root, path.join(root, MANIFEST), { schema_version: "1.0", files: [...next.values()] });
+        atomicWriteJson(root, path.join(root, MANIFEST), { schema_version: "1.0", installed_root: installedRoot, runtime_argv: runtimeArgv, files: [...next.values()] });
       }
       return receipt();
     });

@@ -1,14 +1,24 @@
 # Installed kit activation in native harnesses
 
-Install a kit into a project, then select its native discovery surface:
+Install a kit in its tooling bootstrap, then project its native discovery assets
+into the application:
 
 ```sh
-flow-agents kit install /path/to/kit --dest /path/to/project
-flow-agents kit activate --adapter claude-code --dest /path/to/project
+flow-agents kit install /path/to/kit --dest /path/to/bootstrap
+flow-agents kit activate --adapter claude-code --dest /path/to/bootstrap \
+  --target /path/to/project --kits your-kit
 ```
 
 `runtime-adapter activate` accepts the same adapters. An omitted adapter retains
 the legacy `codex-local` behavior; `strands-local` also remains available.
+Omitting `--target` retains same-root activation. Separate roots must be
+canonically disjoint, so an application does not contain its bootstrap's tooling
+dependencies or receive writes into an installed repository. `--target` requires
+an explicit native adapter; legacy projection adapters retain their own layouts.
+`--kits` accepts one comma-separated list and expands declared dependencies.
+The CLI finds built-in kits relative to its own published dispatcher, including
+when launched through npm's compiled entry point. `--source-root` remains an
+explicit catalog override.
 
 | Adapter | Project-local skill discovery | Additional guidance |
 | --- | --- | --- |
@@ -39,8 +49,13 @@ does not replace that user configuration. These projections reuse Flow Agents'
 kit inventory, compiled public assets, and file primitives; they do not copy AWS's
 workflow engine or Station's persistent executor.
 
-Skills retain their names and content and include their regular-file companion
-trees. Duplicate native skill names refuse activation rather than overwrite each
+Skills retain their names and procedures and include their regular-file companion
+trees. Separate-root projection adds a generic runtime/source header after skill
+frontmatter and to generated native agent/rule guidance. It records `installed_root`,
+`installed_kit_root`, `source_path`, and `runtime_argv`, derived from Node and the
+published SDK's adjacent compiled CLI. Agents can invoke that CLI with `--dest`
+bound to the bootstrap without relying on their application session's PATH.
+Same-root skill content remains unchanged. Duplicate native skill names refuse activation rather than overwrite each
 other. Flows and docs retain their kit-relative paths below
 `.kontourai/flow-agents/projections/<adapter>/<kit>/`. The authoritative installed
 kit remains at `kits/local/repositories/<kit>/`; repository-relative references
@@ -49,6 +64,11 @@ use ordinary CLI operations and installed-kit bindings in portable entry skills.
 Activation adds no hook, shell permission grant, model selection, or auth token.
 
 The project ownership manifest is `.flow-agents/native-harness-activation.json`.
+Inventory, dependency closure, and strict installed integrity are read from the
+bootstrap. Native files, the ownership manifest, and its lock are written in the
+target project; activation does not copy npm dependencies or mutate the bootstrap
+registry. Receipts and ownership entries preserve the original installed source
+paths and launcher rather than temporary snapshot paths.
 Activation serializes changes through the existing state-file lock and refuses
 symlinks, malformed ownership, modified owned files, unowned destination files,
 and installed-kit hash drift. Refresh removes only stale byte-identical owned
@@ -64,8 +84,9 @@ The published SDK exposes:
 import { activateNativeHarness, NATIVE_HARNESS_SURFACES } from
   "@kontourai/flow-agents/kit-activation";
 
-const receipt = activateNativeHarness(packageRoot, projectRoot, {
+const receipt = activateNativeHarness(packageRoot, bootstrapRoot, {
   surface: "codex",
+  targetRoot: projectRoot,
   kitIdFilter: ["your-kit"],
 });
 ```
@@ -76,7 +97,8 @@ filter bounds strict installed content integrity and stale cleanup to the select
 kit and its transitive dependencies. Unrelated integrity failures remain warnings
 and their files stay untouched. Ambiguous or duplicate registry identities always
 refuse activation, because a kit cannot be selected reliably from that registry.
-Unrelated kits keep their ownership records.
+Unrelated kits keep their ownership records. `targetRoot` defaults to the second
+argument, preserving existing SDK callers.
 The packed-package tests exercise all eight surface IDs, ordinary installed-kit
 CLI use from skill companions, legacy adapter compatibility, shared custody,
 installed drift, conflicts, and unsafe destinations. They supply dependencies
