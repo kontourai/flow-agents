@@ -699,6 +699,21 @@ function copyPinnedFlowClosure(installRoot) {
   fs.copyFileSync("packaging/lifecycle-authority/flow-reducer-v1.json", path.join(installRoot, "flow-reducer-v1.json"));
 }
 
+test("installed coordinator admits the exact published Flow package and refuses a stale pin", async () => {
+  const installRoot = makeFixtureDir("coordinator-published-flow-pin-");
+  copyPinnedFlowClosure(installRoot);
+  fs.copyFileSync(RUNTIME, path.join(installRoot, "runtime-v1.mjs"));
+  fs.writeFileSync(path.join(installRoot, "coordinator.mjs"), `${fs.readFileSync(COORDINATOR, "utf8")}\nexport { loadPinnedFlowReducer };\n`);
+  const coordinator = await import(pathToFileURL(path.join(installRoot, "coordinator.mjs")).href);
+  const admitted = await coordinator.loadPinnedFlowReducer();
+  assert.equal(admitted.pin.package_version, "5.2.0");
+  assert.equal(admitted.pin.release_commit, "f7d6a7f0cd57b02053dc7689567ea51375119754");
+  const pinFile = path.join(installRoot, "flow-reducer-v1.json");
+  const pin = JSON.parse(fs.readFileSync(pinFile, "utf8"));
+  fs.writeFileSync(pinFile, JSON.stringify({ ...pin, package_version: "5.1.4" }));
+  await assert.rejects(coordinator.loadPinnedFlowReducer(), /Flow reducer pin is invalid/);
+});
+
 async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {
   const root = makeFixtureDir("lifecycle-exact-current-e2e-");
   let projectRoot = path.join(root, "project");

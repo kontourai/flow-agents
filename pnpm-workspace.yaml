@@ -47,6 +47,9 @@ minimumReleaseAgeExclude:
   # Registry gitHead/tag 756ebfd, tarball integrity and source-bound publish provenance
   # verified before adoption; this excludes only the verified internal version.
   - '@kontourai/flow@5.1.4'
+  # Exact pending-forward amendment release from merged Flow #270 and release #271.
+  # Registry gitHead/tag f7d6a7f, integrity, signatures and tag-bound provenance verified.
+  - '@kontourai/flow@5.2.0'
 
 # mise supplies node and pnpm on developer machines; CI installs the exact
 # version pinned in package.json. Do not reject a same-major pnpm from mise.
