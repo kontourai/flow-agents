@@ -208,14 +208,14 @@
     "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs"
   },
   "devDependencies": {
-    "@kontourai/lookout": "0.3.2",
-    "@kontourai/traverse": "0.19.1",
-    "@types/node": "^26.1.1",
+    "@kontourai/lookout": "0.8.8",
+    "@kontourai/traverse": "5.0.2",
+    "@types/node": "^26.6.4",
     "ajv": "8.20.0",
-    "gcp-metadata": "7.0.1",
-    "promptfoo": "^0.121.18",
+    "gcp-metadata": "9.0.4",
+    "promptfoo": "^0.124.0",
     "typescript": "^7.0.2",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "dependencies": {
     "@kontourai/conduit": "0.7.1",
