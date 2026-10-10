@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { coordinatorRuntimeSha256, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, critiqueResolutionHistoryBridgeDigest, resolveCritiqueTransition, selectUniqueHistoricalLedgerPrefix } from "../../packaging/lifecycle-authority/runtime-v1.mjs";
-import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, provisionalWorkspaceSnapshot, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, resolveCanonicalFlowRunIdentity, resolveProvisionalTrustedGitExecutable, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
+import { EXACT_CURRENT_RECOVERY_ARTIFACT_IDS, VERIFICATION_RESEAL_ARTIFACT_IDS, VERIFICATION_RESEAL_ATOMIC_REPLACE_PROTOCOL, assertVerificationResealFlowCapabilities, canonicalJson, classifyExactCurrentRecoveryArtifacts, classifyVerificationResealArtifacts, cleanupVerificationResealTransaction, exactCurrentRecoveryArtifactFiles, inProjectTransaction, provisionalWorkspaceSnapshot, verificationWorkspaceSnapshot, recoverMatchingTransaction, rejectActiveLegacyResealJournal, replaceVerificationResealArtifactCAS, resolveCanonicalFlowRunIdentity, resolveProvisionalTrustedGitExecutable, sha256, snapshotTree, validateEnvelope, validateExactCurrentRecoveryPlan, validateProvisionalDeliveryAuthorizationBinding, validateVerificationResealPlan, verificationResealArtifactFiles, withCanonicalFlowRunMutationLock } from "../../packaging/lifecycle-authority/coordinator.mjs";
 import { captureReviewWorkspaceSnapshot } from "../../build/src/lib/review-workspace-snapshot.js";
 import * as pinnedFlow from "../../node_modules/@kontourai/flow/dist/index.js";
 import { amendRunDefinition, definitionDigest, definitionIdentity, flowRunHead, loadRun, pauseRun, startRun } from "../../node_modules/@kontourai/flow/dist/index.js";
@@ -268,6 +268,20 @@ test("provisional authorization validator rejects forged and wrong-session bindi
   assert.throws(() => validateProvisionalDeliveryAuthorizationBinding({ ...authorization, checkpoint_commit_sha: "a".repeat(63) }, {
     project_root: "/project", run_id: "session-a", checkpoint_slug: "session-a",
   }), /checkpoint_commit_sha is invalid/);
+});
+
+test("first verification coordinator snapshot matches the ordinary writer without delivery exclusions", () => {
+  const root=makeFixtureDir("initial-verification-snapshot-");
+  try{
+    fs.writeFileSync(path.join(root,"tracked.txt"),"source\n");
+    execFileSync("git",["init","-q"],{cwd:root});execFileSync("git",["add","tracked.txt"],{cwd:root});
+    execFileSync("git",["-c","user.email=fixture@example.invalid","-c","user.name=Fixture","commit","-qm","fixture"],{cwd:root});
+    assert.deepEqual(verificationWorkspaceSnapshot(root),captureReviewWorkspaceSnapshot(root,[]));
+    fs.mkdirSync(path.join(root,"delivery","run"),{recursive:true});fs.writeFileSync(path.join(root,"delivery","run","untracked.txt"),"included\n");
+    assert.equal(verificationWorkspaceSnapshot(root).worktree_clean,false);
+    assert.deepEqual(verificationWorkspaceSnapshot(root),captureReviewWorkspaceSnapshot(root,[]));
+    assert.notEqual(verificationWorkspaceSnapshot(root).digest,provisionalWorkspaceSnapshot(root,"run").digest);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
 test("provisional coordinator snapshot includes cleanliness and rejects hidden index entries", () => {

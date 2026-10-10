@@ -295,19 +295,26 @@ function hashProvisionalUntrackedFile(hash, file, absolute, totalBytes) {
   } finally { fs.closeSync(descriptor); }
 }
 export function provisionalWorkspaceSnapshot(projectRoot, runId, hooks = {}) {
+  return trustedWorkspaceSnapshot(projectRoot, `delivery/${runId}`, hooks);
+}
+/** Ordinary verification includes the full source tree; no delivery exclusion is granted. */
+export function verificationWorkspaceSnapshot(projectRoot, hooks = {}) {
+  return trustedWorkspaceSnapshot(projectRoot, null, hooks);
+}
+function trustedWorkspaceSnapshot(projectRoot, excluded, hooks) {
   const canonicalRoot = fs.realpathSync(projectRoot);
-  const excluded = `delivery/${runId}`;
+  const pathspec = excluded === null ? [] : [".", `:(exclude)${excluded}/**`];
   const root = provisionalTrustedGit(canonicalRoot, ["rev-parse", "--show-toplevel"], 64 * 1024, "worktree root").toString("utf8").trim();
   if (fs.realpathSync(root) !== canonicalRoot) throw new Error("provisional delivery project root is not the Git worktree root");
   const head = provisionalHead(canonicalRoot);
   assertProvisionalOrdinaryTrackedIndex(canonicalRoot);
-  const tracked = provisionalTrustedGit(canonicalRoot, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ".", `:(exclude)${excluded}/**`], MAX_TRACKED_DIFF_BYTES, "tracked diff");
+  const tracked = provisionalTrustedGit(canonicalRoot, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ...pathspec], MAX_TRACKED_DIFF_BYTES, "tracked diff");
   const untrackedBytes = provisionalTrustedGit(canonicalRoot, ["ls-files", "--others", "--exclude-standard", "-z"], MAX_UNTRACKED_LIST_BYTES, "untracked-file list");
   const untracked = untrackedBytes.toString("utf8").split("\0").filter(Boolean)
-    .filter((file) => file !== excluded && !file.startsWith(`${excluded}/`)).sort();
+    .filter((file) => excluded === null || file !== excluded && !file.startsWith(`${excluded}/`)).sort();
   const hash = crypto.createHash("sha256");
   hash.update("flow-agents:git-worktree:v1\0").update(head).update("\0");
-  hash.update("exclude\0").update(excluded).update("\0");
+  if (excluded !== null) hash.update("exclude\0").update(excluded).update("\0");
   hash.update(tracked).update("\0");
   let untrackedTotalBytes = 0;
   for (const file of untracked) {
@@ -316,7 +323,7 @@ export function provisionalWorkspaceSnapshot(projectRoot, runId, hooks = {}) {
     untrackedTotalBytes = hashProvisionalUntrackedFile(hash, file, absolute, untrackedTotalBytes);
   }
   hooks.afterInitialInputsRead?.();
-  const settledTracked = provisionalTrustedGit(canonicalRoot, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ".", `:(exclude)${excluded}/**`], MAX_TRACKED_DIFF_BYTES, "settled tracked diff");
+  const settledTracked = provisionalTrustedGit(canonicalRoot, ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD", "--", ...pathspec], MAX_TRACKED_DIFF_BYTES, "settled tracked diff");
   const settledUntrackedBytes = provisionalTrustedGit(canonicalRoot, ["ls-files", "--others", "--exclude-standard", "-z"], MAX_UNTRACKED_LIST_BYTES, "settled untracked-file list");
   if (!settledTracked.equals(tracked) || !settledUntrackedBytes.equals(untrackedBytes)) throw new Error("provisional delivery workspace inputs changed while collecting the snapshot");
   assertProvisionalOrdinaryTrackedIndex(canonicalRoot);
@@ -443,7 +450,7 @@ function assertPrivilegedAuthorizationShape(authorization) {
   const fields = authorization.operation === "repair-critique-resolution-history"
     ? HISTORY_REPAIR_AUTHORIZATION_FIELDS
     : authorization.operation === "reseal-verification-evidence"
-      ? VERIFICATION_RESEAL_AUTHORIZATION_FIELDS
+      ? (authorization.claim_delta === "insert" ? [...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(0, -4), "writer_actor_key", "related_criterion_deltas", ...VERIFICATION_RESEAL_AUTHORIZATION_FIELDS.slice(-4)] : VERIFICATION_RESEAL_AUTHORIZATION_FIELDS)
       : authorization.operation === "publish-provisional-delivery"
         ? PROVISIONAL_DELIVERY_AUTHORIZATION_FIELDS
       : authorization.operation === "recover-exact-current-completion"
@@ -1816,6 +1823,14 @@ async function assertVerificationResealCurrentPreimages({ paths, authorization, 
   return { ...flowPreimage, gate_policy: gatePolicy };
 }
 
+function initialVerificationObservation(paths, authorization) {
+  if (authorization.claim_delta !== "insert") return undefined;
+  const bytes = protectedRegularFile(path.join(paths.sessionDir, "command-log.jsonl"), "initial verification command receipts", 16 * 1024 * 1024);
+  const commandLog = bytes.toString("utf8").split("\n").filter(line => line.trim()).map(line => JSON.parse(line));
+  if (commandLog.some(entry => !record(entry))) throw new Error("initial verification command receipt log is invalid");
+  return { workspace_snapshot: verificationWorkspaceSnapshot(paths.projectRoot), command_log: commandLog,
+    assignment_actor_key: protectedJson(assignmentFile(paths),"canonical assignment",256*1024).actor_key };
+}
 async function assertVerificationResealFinalPublicationBoundary(paths, plan) {
   const authorization = plan.authorization;
   assertVerificationResealAssignment(paths, authorization);
@@ -1834,6 +1849,13 @@ async function assertVerificationResealFinalPublicationBoundary(paths, plan) {
   const { flow } = await loadPinnedFlowReducer();
   if (flow.flowRunHead(state) !== authorization.flow_run_head || sha256(manifestBytes) !== authorization.flow_manifest_sha256) {
     throw new Error("verification evidence reseal Flow preimage changed at final publication");
+  }
+  if (authorization.claim_delta === "insert") {
+    const definition = protectedJson(files.definition, "canonical Flow definition", 4 * 1024 * 1024);
+    resealVerificationEvidenceTransition({ current_bundle: JSON.parse(bundleBytes), candidate_bundle: JSON.parse(candidateBytes), resolution_events: ledger.events,
+      authorization, current_bundle_bytes: bundleBytes, candidate_bundle_bytes: candidateBytes, ledger_bytes: ledger.bytes,
+      flow: { definition_id: definition.id, step_id: state.current_step, ...currentGatePolicy(definition, state) },
+      verification_observation: initialVerificationObservation(paths, authorization) });
   }
   assertVerificationResealStages(paths, plan);
 }
@@ -1880,6 +1902,7 @@ async function prepareVerificationResealTransaction(envelope, paths, authorizati
       current_bundle: before, candidate_bundle: candidate, resolution_events: ledger.events, authorization,
       current_bundle_bytes: beforeBytes, candidate_bundle_bytes: candidateBytes, ledger_bytes: ledger.bytes,
       flow: { definition_id: definition.id, step_id: state.current_step, ...lockedPreimage.gate_policy },
+      verification_observation: initialVerificationObservation(paths, authorization),
     });
     const resultCoreSha256 = lifecycleAuthorityResultDigest(reduced.bundle, reduced.resolution_events);
     const synchronized = await prepareCanonicalFlowSynchronization(paths, reduced.bundle, envelope, {

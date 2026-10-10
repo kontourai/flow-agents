@@ -336,7 +336,19 @@ does not attach or publish that candidate. Its unsigned authorization binds the 
 candidate bytes and transaction id, unchanged ledger digest/length/tail, exact current completion
 raw/core identity, canonical Flow step/gate, head and manifest, critique projection, run subject, nonce, and
 expiry. It also binds the exact target verify expectation and the predecessor/current claim
-id, status, raw-JSON digest, ordered index, and `replace` delta. The signed action invokes only the
+id, status, raw-JSON digest, ordered index, and `replace` delta. When the required verification
+expectation has no predecessor, the same signed transaction can instead authorize `insert` with
+all predecessor fields explicitly `null`. It appends exactly one writer-produced passing claim;
+first admission binds the raw assignment actor and the canonical writer's recorded actor label
+separately (the writer may project an explicit actor into its existing filename-safe representation).
+The protected assignment generation remains authoritative. It also enumerates the exact pre/post digests and indices of any acceptance-criterion
+renewals performed by that producer. Those renewals must retain the plan's anchored criterion IDs
+and descriptions, match the same active actor and writer transaction, and use the target's actual
+successful command receipts. Unrelated claims, historical review nodes, evidence, events and
+policies remain unchanged. The source must still match both independent review and recorded command
+snapshots during request preparation and immediately before atomic publication; missing execution
+protocols or substituted receipts fail closed. This extends evidence admission after authenticated
+review resolution; it does not reconstruct implementation history or authorize advancement. The signed action invokes only the
 fixed lifecycle helper. The coordinator derives the protected current verify-gate requirements,
 requires the target exactly once, and rejects predecessor or replacement `gate_claim` metadata
 that does not match the current expectation's step, claim type, and subject type. It acquires
@@ -346,8 +358,9 @@ JSON report, and Markdown report. The root-signed plan contains no artifact path
 request, authorization key and nonce, pinned reducer identity, result core, and exact pre/post
 presence, mode, size, and digest for each fixed identity. Old and new images are durably staged
 in fixed siblings and reread before publication. It permits
-replacement of only that one ordered target claim; every other claim, including other verify-gate
-claims, must remain byte-identical and in the same order. It requires a byte-identical critique
+replacement of only that one ordered target claim, or the explicitly signed first-admission
+append and anchored criterion renewals described above. Every unrelated claim, including other
+verify-gate claims and the full critique graph, remains byte-identical and in the same order. It requires a byte-identical critique
 projection, attaches the candidate to the `builder.build` verify gate, commits the exact candidate
 bytes without appending a sixth ledger event, and installs a new root-signed exact-current
 completion. A provider-neutral Flow recovery fence becomes active before the first postimage and
@@ -362,6 +375,13 @@ accepts only an exact
 all-old or all-new generation. Mixed, malformed, or unknown generations are quarantined with the
 fence left active for offline recovery. An active legacy recursive reseal journal is never
 auto-restored.
+The first-admission protocol requires the corresponding reviewed coordinator and `runtime-v1.mjs`
+to be installed together through `scripts/lifecycle-authority-admin.sh upgrade`, using the verified
+npm reducer closure prescribed by that installer. Updating the package alone does not update the
+OS-owned helper. Record the installed coordinator/runtime bytes and reducer pin; exercise the public
+signed request/publication path afterward. A source fixture, local policy test, or substituted
+helper cannot qualify that protected-host operation.
+
 Publication also preflights the fixed, protected
 `verification-reseal-atomic-replace.cjs` host capability. That administrator-supplied capability
 must implement `kontourai.atomic-expected-preimage-replace.v1`: atomically compare the named leaf's

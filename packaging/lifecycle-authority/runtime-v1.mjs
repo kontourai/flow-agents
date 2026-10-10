@@ -149,28 +149,110 @@ function gateExpectation(claim) {
     : null;
 }
 
-function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow) {
+/** Compose a writer-produced verification slice without regenerating historical claim timestamps. */
+export function composeVerificationEvidenceCandidate(currentBundle, generatedBundle, expectation) {
+  const target = generatedBundle.claims.filter(claim => gateExpectation(claim) === expectation);
+  const oldTarget = currentBundle.claims.filter(claim => gateExpectation(claim) === expectation);
+  if (target.length !== 1 || oldTarget.length > 1) throw new Error("verification candidate must contain one exact target");
+  const generatedById = new Map(generatedBundle.claims.map(claim => [claim.id, claim]));
+  if (generatedById.size !== generatedBundle.claims.length) throw new Error("verification candidate contains duplicate claim identities");
+  const criteria = generatedBundle.claims.filter(claim => claim.metadata?.origin === "acceptance");
+  const used = new Set(target);
+  const claims = currentBundle.claims.map(prior => {
+    if (gateExpectation(prior) === expectation) return target[0];
+    if (expectation === "tests-evidence" && prior.metadata?.origin === "acceptance") {
+      const matches = criteria.filter(claim => claim.metadata?.criterion?.id === prior.metadata.criterion?.id);
+      if (matches.length !== 1) throw new Error("verification candidate lost a canonical criterion");
+      used.add(matches[0]);return matches[0];
+    }
+    const regenerated = generatedById.get(prior.id);
+    const withoutFoldTime = claim => { const result = {...claim};delete result.createdAt;delete result.updatedAt;return result; };
+    if (!regenerated || canonical(withoutFoldTime(prior)) !== canonical(withoutFoldTime(regenerated))) throw new Error("verification candidate changed an unrelated historical claim");
+    used.add(regenerated);return structuredClone(prior);
+  });
+  if (oldTarget.length === 0) claims.push(target[0]);
+  if (used.size !== generatedBundle.claims.length) throw new Error("verification candidate introduced an unrelated claim");
+  const result={...structuredClone(currentBundle),claims};
+  const changedPriorIds=new Set(currentBundle.claims.filter((claim,index)=>JSON.stringify(claim)!==JSON.stringify(claims[index])).map(claim=>claim.id));
+  const changedNextIds=new Set(claims.filter((claim,index)=>index>=currentBundle.claims.length||JSON.stringify(claim)!==JSON.stringify(currentBundle.claims[index])).map(claim=>claim.id));
+  for(const field of ["evidence","events"]){
+    if (Array.isArray(currentBundle[field]) || Array.isArray(generatedBundle[field])) result[field]=[
+      ...(currentBundle[field]??[]).filter(item=>!changedPriorIds.has(item.claimId)),
+      ...(generatedBundle[field]??[]).filter(item=>changedNextIds.has(item.claimId)),
+    ];
+  }
+  const changedPolicies=new Set(claims.filter(claim=>changedNextIds.has(claim.id)).map(claim=>claim.verificationPolicyId));
+  if(Array.isArray(currentBundle.policies)||Array.isArray(generatedBundle.policies)) result.policies=[
+    ...(currentBundle.policies??[]).filter(policy=>!changedPolicies.has(policy.id)),
+    ...(generatedBundle.policies??[]).filter(policy=>changedPolicies.has(policy.id)),
+  ];
+  return result;
+}
+
+function canonicalCriterionContract(bundle) {
+  const contracts = bundle.claims.filter(claim => record(claim.metadata?.acceptance_contract)).map(claim => claim.metadata.acceptance_contract);
+  if (contracts.length !== 1 || contracts[0].version !== 1 || contracts[0].algorithm !== "sha256" || !Array.isArray(contracts[0].criteria) || contracts[0].criteria.length === 0) throw new Error("initial verification evidence requires an anchored canonical criterion contract");
+  const contract = contracts[0];
+  if (crypto.createHash("sha256").update(JSON.stringify(contract.criteria)).digest("hex") !== contract.digest) throw new Error("initial verification criterion contract digest is invalid");
+  if (new Set(contract.criteria.map(criterion => criterion.id)).size !== contract.criteria.length) throw new Error("initial verification criterion contract has duplicate identities");
+  return contract;
+}
+
+function assertRelatedCriterionDelta(currentBundle,candidateBundle,authorization,target) {
+  const deltas = authorization.related_criterion_deltas;
+  if (!Array.isArray(deltas) || deltas.length > 512) throw new Error("initial verification related criterion delta is invalid");
+  const contract = canonicalCriterionContract(currentBundle);
+  const changed = new Set();
+  for(const delta of deltas) {
+    if (!record(delta) || canonical(Object.keys(delta).sort()) !== canonical(["criterion_id","claim_index","preimage_claim_sha256","candidate_claim_sha256"].sort())
+      || !Number.isSafeInteger(delta.claim_index) || delta.claim_index < 0 || changed.has(delta.claim_index)) throw new Error("initial verification related criterion delta is invalid");
+    const prior=currentBundle.claims[delta.claim_index], next=candidateBundle.claims[delta.claim_index];
+    const specification=contract.criteria.filter(criterion=>criterion.id===delta.criterion_id);
+    const digest=claim=>crypto.createHash("sha256").update(JSON.stringify(claim)).digest("hex");
+    if (authorization.target_expectation_id!=="tests-evidence" || specification.length!==1 || prior?.metadata?.origin!=="acceptance" || next?.metadata?.origin!=="acceptance"
+      || prior.metadata.criterion?.id!==delta.criterion_id || next.metadata.criterion?.id!==delta.criterion_id
+      || next.metadata.criterion.description!==specification[0].description || next.fieldOrBehavior!==specification[0].description
+      || prior.subjectId!==next.subjectId || next.facet!==prior.facet || next.impactLevel!==prior.impactLevel || next.claimType!=="workflow.acceptance.criterion" || next.subjectType!=="flow-step"
+      || digest(prior)!==delta.preimage_claim_sha256 || digest(next)!==delta.candidate_claim_sha256
+      || canonical(Object.keys(next.metadata).sort())!==canonical(["origin","criterion","workflow_subject_ref"].sort())
+      || next.value!=="pass" || next.status!=="verified" || next.metadata.workflow_subject_ref!==authorization.subject
+      || next.metadata.criterion.verified_by!==authorization.writer_actor_key || next.metadata.criterion.identity_version!==2
+      || !Number.isFinite(Date.parse(next.metadata.criterion.verified_at))) throw new Error("initial verification related claim is not an exact authorized canonical criterion renewal");
+    const commands=next.metadata.criterion.observed_commands;
+    if (!Array.isArray(commands)||!commands.length||commands.some(command=>!target.metadata.observed_commands.some(observed=>canonical(observed)===canonical(command)))) throw new Error("initial verification criterion requires the target's actual command receipts");
+    const refs=next.metadata.criterion.evidence_refs;
+    if (!Array.isArray(refs)||commands.some(command=>!refs.some(ref=>ref.kind==="command"&&ref.excerpt===command.command))) throw new Error("initial verification criterion omits its exact command references");
+    changed.add(delta.claim_index);
+  }
+  const allCurrent=currentBundle.claims.filter(claim=>claim.metadata?.origin==="acceptance");
+  const allNext=candidateBundle.claims.filter(claim=>claim.metadata?.origin==="acceptance");
+  if (allCurrent.length!==contract.criteria.length || allNext.length!==contract.criteria.length || contract.criteria.some(criterion=>allNext.filter(claim=>claim.metadata.criterion?.id===criterion.id&&claim.metadata.criterion?.description===criterion.description).length!==1)) throw new Error("initial verification criterion set does not match the anchored contract");
+  return changed;
+}
+
+function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow, observation) {
   if (!record(currentBundle) || !record(candidateBundle) || !Array.isArray(currentBundle.claims) || !Array.isArray(candidateBundle.claims)) {
     throw new Error("verification evidence reseal requires Trust Bundles with claims");
   }
-  if (authorization.claim_delta !== "replace"
-      || !Number.isSafeInteger(authorization.predecessor_claim_index)
-      || !Number.isSafeInteger(authorization.current_claim_index)
-      || authorization.predecessor_claim_index !== authorization.current_claim_index
-      || authorization.predecessor_claim_index < 0
-      || currentBundle.claims.length !== candidateBundle.claims.length) {
+  const inserting = authorization.claim_delta === "insert";
+  if (!Number.isSafeInteger(authorization.current_claim_index) || authorization.current_claim_index < 0
+      || (inserting ? ["predecessor_claim_id", "predecessor_claim_status", "predecessor_claim_sha256", "predecessor_claim_index"].some(field => authorization[field] !== null)
+        || candidateBundle.claims.length !== currentBundle.claims.length + 1 || authorization.current_claim_index !== currentBundle.claims.length
+        : authorization.claim_delta !== "replace" || !Number.isSafeInteger(authorization.predecessor_claim_index)
+          || authorization.predecessor_claim_index !== authorization.current_claim_index || authorization.predecessor_claim_index < 0
+          || currentBundle.claims.length !== candidateBundle.claims.length)) {
     throw new Error("verification evidence reseal authorization claim delta is invalid");
   }
-  const index = authorization.predecessor_claim_index;
-  const predecessor = currentBundle.claims[index];
+  const index = authorization.current_claim_index;
+  const predecessor = inserting ? null : currentBundle.claims[index];
   const current = candidateBundle.claims[index];
   const requirements = Array.isArray(flow.requirements) ? flow.requirements : [];
   const targetRequirements = requirements.filter((requirement) => record(requirement) && requirement.id === authorization.target_expectation_id);
-  if (!predecessor || !current
+  if ((!inserting && !predecessor) || !current
       || targetRequirements.length !== 1
-      || gateExpectation(predecessor) !== authorization.target_expectation_id
+      || (!inserting && gateExpectation(predecessor) !== authorization.target_expectation_id)
       || gateExpectation(current) !== authorization.target_expectation_id
-      || currentBundle.claims.filter((claim) => gateExpectation(claim) === authorization.target_expectation_id).length !== 1
+      || currentBundle.claims.filter((claim) => gateExpectation(claim) === authorization.target_expectation_id).length !== (inserting ? 0 : 1)
       || candidateBundle.claims.filter((claim) => gateExpectation(claim) === authorization.target_expectation_id).length !== 1) {
     throw new Error("verification evidence reseal does not target exactly one authorized verify expectation");
   }
@@ -179,7 +261,7 @@ function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, 
   if (!record(bundleClaim) || typeof bundleClaim.claimType !== "string" || typeof bundleClaim.subjectType !== "string") {
     throw new Error("verification evidence reseal target has no canonical current gate-claim requirement");
   }
-  for (const [label, claim] of [["predecessor", predecessor], ["replacement", current]]) {
+  for (const [label, claim] of [...(predecessor ? [["predecessor", predecessor]] : []), [inserting ? "initial" : "replacement", current]]) {
     const gateClaim = claim?.metadata?.gate_claim;
     if (!record(gateClaim)
         || gateClaim.expectation_id !== targetRequirement.id
@@ -190,19 +272,94 @@ function assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, 
     }
   }
   const claimDigest = (claim) => crypto.createHash("sha256").update(JSON.stringify(claim)).digest("hex");
-  if (predecessor.id !== authorization.predecessor_claim_id
+  if ((!inserting && (predecessor.id !== authorization.predecessor_claim_id
       || predecessor.status !== authorization.predecessor_claim_status
-      || claimDigest(predecessor) !== authorization.predecessor_claim_sha256
+      || claimDigest(predecessor) !== authorization.predecessor_claim_sha256))
       || current.id !== authorization.current_claim_id
       || current.status !== authorization.current_claim_status
       || claimDigest(current) !== authorization.current_claim_sha256) {
     throw new Error("verification evidence reseal claim identity, status, or digest does not match the authorized delta");
   }
+  let related = new Set();
+  if (inserting) {
+    assertInitialVerificationObservation(current, targetRequirement, authorization, observation, currentBundle);
+    related = assertRelatedCriterionDelta(currentBundle,candidateBundle,authorization,current);
+    const oldIds=new Set([...related].map(index=>currentBundle.claims[index].id));
+    const newIds=new Set([current.id,...[...related].map(index=>candidateBundle.claims[index].id)]);
+    if(new Set(candidateBundle.claims.map(claim=>claim.id)).size!==candidateBundle.claims.length) throw new Error("initial verification candidate duplicates a claim identity");
+    for(const field of ["evidence","events"]){
+      if(canonical((currentBundle[field]??[]).filter(item=>!oldIds.has(item.claimId)))!==canonical((candidateBundle[field]??[]).filter(item=>!newIds.has(item.claimId)))) throw new Error("initial verification changed unrelated evidence or events");
+    }
+    const policies=new Set(candidateBundle.claims.filter(claim=>newIds.has(claim.id)).map(claim=>claim.verificationPolicyId));
+    for(const claim of candidateBundle.claims.filter(item=>!newIds.has(item.id))){
+      if(!policies.has(claim.verificationPolicyId)) continue;
+      const before=(currentBundle.policies??[]).filter(policy=>policy.id===claim.verificationPolicyId);
+      const after=(candidateBundle.policies??[]).filter(policy=>policy.id===claim.verificationPolicyId);
+      if(canonical(before)!==canonical(after)) throw new Error("initial verification changed a policy shared with an unrelated historical claim");
+    }
+    if(canonical((currentBundle.policies??[]).filter(item=>!policies.has(item.id)))!==canonical((candidateBundle.policies??[]).filter(item=>!policies.has(item.id)))) throw new Error("initial verification changed unrelated policies");
+    const envelope=bundle=>Object.fromEntries(Object.entries(bundle).filter(([key])=>!["claims","evidence","events","policies"].includes(key)));
+    if(canonical(envelope(currentBundle))!==canonical(envelope(candidateBundle))) throw new Error("initial verification changed the unrelated bundle envelope");
+  }
   currentBundle.claims.forEach((claim, claimIndex) => {
-    if (claimIndex !== index && JSON.stringify(claim) !== JSON.stringify(candidateBundle.claims[claimIndex])) {
+    if ((inserting ? !related.has(claimIndex) : claimIndex !== index) && JSON.stringify(claim) !== JSON.stringify(candidateBundle.claims[claimIndex])) {
       throw new Error("verification evidence reseal changed the complete ordered claim set outside the authorized expectation");
     }
   });
+}
+
+/** First admission consumes only canonical writer observations against this exact source. */
+function assertInitialVerificationObservation(claim, requirement, authorization, observation, currentBundle) {
+  const metadata = claim.metadata;
+  const gate = metadata.gate_claim;
+  const snapshot = metadata.verification_workspace_snapshot;
+  if (requirement.required !== true || requirement.bundle_claim?.subjectType !== "flow-step"
+      || claim.claimType !== requirement.bundle_claim.claimType || claim.subjectType !== requirement.bundle_claim.subjectType
+      || claim.value !== "pass" || claim.status !== "verified" || metadata.origin !== "check"
+      || typeof metadata.expected_producer !== "string" || !metadata.expected_producer
+      || !Array.isArray(metadata.self_produced_trust_slices) || !metadata.self_produced_trust_slices.includes(requirement.id)
+      || metadata.recorded_by !== authorization.writer_actor_key || !authorization.writer_actor_key || metadata.workflow_subject_ref !== authorization.subject
+      || gate.flow_run_head !== authorization.flow_run_head || gate.flow_id !== authorization.flow_definition_id
+      || gate.identity_version !== 2 || !record(observation) || observation.assignment_actor_key !== authorization.assignment_actor_key
+      || !record(snapshot) || snapshot.kind !== "git-worktree" || snapshot.version !== 1 || snapshot.algorithm !== "sha256"
+      || snapshot.worktree_clean !== true || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(String(snapshot.head_sha))
+      || canonical(snapshot) !== canonical(observation.workspace_snapshot)) {
+    throw new Error("initial verification evidence requires one required canonical producer observation bound to the active actor and current clean source");
+  }
+  const reviews=currentBundle.claims.filter(item=>item.metadata?.origin==="critique"&&!item.metadata.superseded_by);
+  const latest=reviews.at(-1);
+  if (reviews.some(item=>item.value!=="pass" || item.status!=="verified" || (item.metadata.findings??[]).some(finding=>finding.status==="open"))
+    || !latest || latest.value!=="pass" || latest.status!=="verified"
+    || typeof latest.metadata.reviewer!=="string" || (latest.metadata.reviewer===authorization.assignment_actor_key || latest.metadata.reviewer===authorization.writer_actor_key)
+    || (latest.metadata.findings??[]).some(finding=>finding.status==="open")
+    || !Array.isArray(latest.metadata.lanes)||!latest.metadata.lanes.length||latest.metadata.lanes.some(lane=>lane.status!=="pass")
+    || canonical(latest.metadata.review_target?.workspace_snapshot)!==canonical(snapshot)) throw new Error("initial verification evidence requires an independent clean current-source review");
+  const commands = metadata.observed_commands;
+  const log = observation.command_log;
+  if (!Array.isArray(commands) || commands.length === 0 || !Array.isArray(log)) throw new Error("initial verification evidence requires retained canonical command receipts");
+  if(log.some(entry=>entry.source==="workflow-evidence-transaction"&&entry.transaction?.id===authorization.candidate_transaction_id&&entry.transaction.outcome==="aborted")) throw new Error("initial verification evidence cannot revive an aborted writer transaction");
+  const seen = new Set();
+  for (const command of commands) {
+    const proof = command.execution_proof;
+    const supported = proof?.kind === "local-process-exit" && proof.runner === "node --test" && Number.isSafeInteger(proof.static_test_units) && proof.static_test_units > 0
+      || proof?.kind === "coordinated-command-receipt" && proof.protocol === "flow-agents.coordinated-command-receipt/v1";
+    if (typeof command.command !== "string" || !command.command || seen.has(command.command)
+        || command.source !== "canonical-writer-execution" || command.exit_code !== 0
+        || !Number.isSafeInteger(command.test_count) || command.test_count <= 0 || !supported
+        || !/^[a-f0-9]{64}$/.test(String(command.output_sha256)) || command.worktree_clean !== true
+        || command.observed_at_commit !== snapshot.head_sha || canonical(command.verification_workspace_snapshot) !== canonical(snapshot)) {
+      throw new Error("initial verification evidence command has no supported fresh successful execution protocol");
+    }
+    seen.add(command.command);
+    if (log.filter(entry => entry.source === "canonical-writer-execution" && entry.command === command.command && entry.exitCode === 0
+      && entry.observedResult === "pass" && entry.worktree_clean === true && entry.observed_at_commit === command.observed_at_commit
+      && entry.writer?.transaction_id === authorization.candidate_transaction_id
+      && entry.writer?.output_sha256 === command.output_sha256 && entry.writer?.test_count === command.test_count
+      && canonical(entry.writer?.execution_proof) === canonical(proof)
+      && canonical(entry.writer?.verification_workspace_snapshot) === canonical(snapshot)).length !== 1) {
+      throw new Error("initial verification evidence command receipt does not match its canonical writer transaction");
+    }
+  }
 }
 
 /**
@@ -221,6 +378,7 @@ export function resealVerificationEvidenceTransition(input) {
     candidate_bundle_bytes: candidateBundleBytes,
     ledger_bytes: ledgerBytes,
     flow,
+    verification_observation: verificationObservation,
   } = input ?? {};
   if (!record(authorization) || authorization.operation !== "reseal-verification-evidence") throw new Error("verification evidence reseal authorization identity is invalid");
   if (!Buffer.isBuffer(currentBundleBytes) || !Buffer.isBuffer(candidateBundleBytes) || !Buffer.isBuffer(ledgerBytes)) throw new Error("verification evidence reseal requires exact byte preimages");
@@ -235,7 +393,7 @@ export function resealVerificationEvidenceTransition(input) {
   if (canonical(currentCritique.projection) !== canonical(candidateCritique.projection)) {
     throw new Error("verification evidence reseal candidate changed the byte-identical critique projection");
   }
-  assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow);
+  assertAuthorizedVerificationClaimDelta(currentBundle, candidateBundle, authorization, flow, verificationObservation);
   if (crypto.createHash("sha256").update(currentBundleBytes).digest("hex") !== authorization.preimage_bundle_sha256) throw new Error("verification evidence reseal current bundle preimage changed");
   if (crypto.createHash("sha256").update(candidateBundleBytes).digest("hex") !== authorization.candidate_bundle_sha256) throw new Error("verification evidence reseal candidate bundle preimage changed");
   if (crypto.createHash("sha256").update(ledgerBytes).digest("hex") !== authorization.preimage_ledger_sha256) throw new Error("verification evidence reseal resolution ledger preimage changed");
