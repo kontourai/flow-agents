@@ -65,6 +65,10 @@
     "./kit-execution": {
       "types": "./build/src/kit-execution.d.ts",
       "import": "./build/src/kit-execution.js"
+    },
+    "./kit-setup": {
+      "types": "./build/src/kit-setup.d.ts",
+      "import": "./build/src/kit-setup.js"
     }
   },
   "repository": {
@@ -219,6 +223,7 @@
   },
   "dependencies": {
     "@kontourai/conduit": "0.7.1",
+    "@kontourai/datum": "0.8.0",
     "@kontourai/dispatch": "0.3.0",
     "@kontourai/flow": "5.2.0",
     "@kontourai/relay": "0.6.0",
