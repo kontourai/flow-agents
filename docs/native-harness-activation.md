@@ -14,8 +14,8 @@ the legacy `codex-local` behavior; `strands-local` also remains available.
 | --- | --- | --- |
 | `claude-code` | `.claude/skills/<skill>/SKILL.md` | None |
 | `codex` | `.agents/skills/<skill>/SKILL.md` | None |
-| `kiro-cli` | `.kiro/skills/<skill>/SKILL.md` | `.kiro/agents/flow-agents-<kit>.json`, with `skill://` resources |
-| `kiro-ide` | `.kiro/skills/<skill>/SKILL.md` | `.kiro/agents/flow-agents-<kit>.md` |
+| `kiro-cli` | `.kiro/skills/<skill>/SKILL.md` | `.kiro/agents/flow-agents-<kit>-cli.json`, with `skill://` resources |
+| `kiro-ide` | `.kiro/skills/<skill>/SKILL.md` | `.kiro/agents/flow-agents-<kit>-ide.md` |
 | `cursor` | `.cursor/skills/<skill>/SKILL.md` | `.cursor/rules/flow-agents-<kit>.mdc`, agent-selected |
 | `opencode` | `.opencode/skills/<skill>/SKILL.md` | None |
 | `copilot-cli` | `.github/skills/<skill>/SKILL.md` | None |
@@ -26,6 +26,9 @@ These are configuration projections. The receipt reports
 `authentication: NOT_VERIFIED`, and `hook_enforcement: NOT_INSTALLED`. IDE discovery,
 agent selection, model access, and workflow execution require separate observations
 in that native application. A CLI observation does not qualify an IDE.
+
+Kiro CLI and IDE agents have distinct names so both native formats can coexist in
+one project while sharing owned skills.
 
 The paths and Kiro formats were checked against the published AWS AI-DLC 2.11.0
 release source at `6a378b53c0a4fe0641ed7d8de8dfff94264d5b6a`, specifically

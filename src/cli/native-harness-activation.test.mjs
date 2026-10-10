@@ -11,10 +11,10 @@ import { pathToFileURL } from "node:url";
 let temp, packageRoot, cli, activateNativeHarness;
 before(async () => {
   temp = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-native-package-"));
-  const packed = JSON.parse(execFileSync("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", temp], { encoding: "utf8" }));
+  const archiveName = execFileSync("npm", ["pack", "--ignore-scripts", "--silent", "--pack-destination", temp], { encoding: "utf8" }).trim();
   const moduleRoot = path.join(temp, "node_modules", "@kontourai");
   fs.mkdirSync(moduleRoot, { recursive: true });
-  execFileSync("tar", ["-xzf", path.join(temp, packed[0].filename), "-C", moduleRoot]);
+  execFileSync("tar", ["-xzf", path.join(temp, archiveName), "-C", moduleRoot]);
   packageRoot = path.join(moduleRoot, "flow-agents");
   fs.renameSync(path.join(moduleRoot, "package"), packageRoot);
   fs.symlinkSync(path.resolve("node_modules"), path.join(packageRoot, "node_modules"), "dir");
@@ -68,12 +68,12 @@ for (const [surface, skills] of Object.entries(layouts)) test(`packed package ac
   const flow = path.join(dest, `.kontourai/flow-agents/projections/${surface}/example-kit/flows/review.flow.json`);
   assert.deepEqual(fs.readFileSync(flow), fs.readFileSync(path.join(installed, "flows/review.flow.json")));
   if (surface === "kiro-cli") {
-    const agent = JSON.parse(fs.readFileSync(path.join(dest, ".kiro/agents/flow-agents-example-kit.json")));
+    const agent = JSON.parse(fs.readFileSync(path.join(dest, ".kiro/agents/flow-agents-example-kit-cli.json")));
     assert.deepEqual(agent.resources, ["skill://.kiro/skills/example-review/SKILL.md"]);
     assert.equal(agent.hooks, undefined);
     assert.deepEqual(agent.allowedTools, ["fs_read"]);
   }
-  if (surface === "kiro-ide") assert.match(fs.readFileSync(path.join(dest, ".kiro/agents/flow-agents-example-kit.md"), "utf8"), /^---\nname: flow-agents-example-kit/);
+  if (surface === "kiro-ide") assert.match(fs.readFileSync(path.join(dest, ".kiro/agents/flow-agents-example-kit-ide.md"), "utf8"), /^---\nname: flow-agents-example-kit-ide/);
   if (surface === "cursor") assert.match(fs.readFileSync(path.join(dest, ".cursor/rules/flow-agents-example-kit.mdc"), "utf8"), /alwaysApply: false/);
 });
 
@@ -182,4 +182,19 @@ test("simultaneous native CLI activations retain both shared surface owners", as
   const ownership = JSON.parse(fs.readFileSync(path.join(dest, ".flow-agents/native-harness-activation.json")));
   const skill = ownership.files.find((entry) => entry.path === ".github/skills/example-review/SKILL.md");
   assert.deepEqual(new Set(skill.surfaces), new Set(["copilot-cli", "vscode"]));
+});
+
+
+test("Kiro CLI and IDE activate distinct native agent identities in one project", () => {
+  const { dest } = fixture("kiro-shared-project");
+  for (const surface of ["kiro-cli", "kiro-ide"]) assert.deepEqual(activateNativeHarness(packageRoot, dest, { surface, kitIdFilter: ["example-kit"] }).errors, []);
+  const agents = path.join(dest, ".kiro/agents");
+  assert.deepEqual(fs.readdirSync(agents).sort(), ["flow-agents-example-kit-cli.json", "flow-agents-example-kit-ide.md"]);
+  const cliAgent = JSON.parse(fs.readFileSync(path.join(agents, "flow-agents-example-kit-cli.json")));
+  const ideAgent = fs.readFileSync(path.join(agents, "flow-agents-example-kit-ide.md"), "utf8");
+  assert.equal(cliAgent.name, "flow-agents-example-kit-cli");
+  assert.match(ideAgent, /^---\nname: flow-agents-example-kit-ide\n/);
+  const ownership = JSON.parse(fs.readFileSync(path.join(dest, ".flow-agents/native-harness-activation.json")));
+  const skill = ownership.files.find((entry) => entry.path === ".kiro/skills/example-review/SKILL.md");
+  assert.deepEqual(new Set(skill.surfaces), new Set(["kiro-cli", "kiro-ide"]));
 });

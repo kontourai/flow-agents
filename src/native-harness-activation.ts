@@ -145,7 +145,7 @@ export function activateNativeHarness(sourceRoot: string, destination: string, o
         const skills = assets.filter((asset) => asset.asset_class === "skills");
         if (!skills.length) continue;
         const guidance = `Follow the installed ${kitId} skills when relevant. Read the skill before acting. Skills invoke their documented ordinary CLI tools; these projections install no enforcement hooks.\n${skills.map((asset) => `- ${SKILLS[surface]}/${path.basename(path.dirname(sourcePath(asset)))}/SKILL.md`).join("\n")}\n`;
-        const agentName = `flow-agents-${segment(kitId)}`;
+        const agentName = `flow-agents-${segment(kitId)}${surface === "kiro-cli" ? "-cli" : surface === "kiro-ide" ? "-ide" : ""}`;
         if (surface === "kiro-cli") {
           const agent = { name: agentName, description: `Installed ${kitId} kit guidance`, prompt: guidance,
             tools: ["fs_read", "fs_write", "execute_bash"], allowedTools: ["fs_read"], resources: skills.map((asset) => `skill://${SKILLS[surface]}/${path.basename(path.dirname(sourcePath(asset)))}/SKILL.md`) };
