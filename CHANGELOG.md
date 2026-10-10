@@ -1,5 +1,12 @@
 # Changelog
 
+## [7.0.2](https://github.com/kontourai/flow-agents/compare/v7.0.1...v7.0.2) (2026-10-10)
+
+
+### Fixes
+
+* acknowledge isolated kit outcomes before disconnecting ([#1449](https://github.com/kontourai/flow-agents/issues/1449)) ([9213e4e](https://github.com/kontourai/flow-agents/commit/9213e4e7aa0df73e60a6a5e03d3d4039bef63583))
+
 ## [7.0.1](https://github.com/kontourai/flow-agents/compare/v7.0.0...v7.0.1) (2026-10-10)
 
 
