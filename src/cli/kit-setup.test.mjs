@@ -5,7 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {parseHostSetup,doctorKitSetup,resolveKitAuth,resolveKitConnection,resolveKitNativeEnvironment,resolveKitModel,createKitRequest,writeKitRequest} from '../../build/src/kit-setup.js';
+import {listEngineProfiles} from '../../build/src/engine-host.js';
 const native={engine:'codex',provider:'codex',model:'example-model',auth:{mode:'native'},isolation:'trusted-host',host_access_granted:true};
+test('setup doctor probes the same executable admitted by every native engine profile',()=>{
+ for(const profile of listEngineProfiles()){
+  const calls=[];const checks=doctorKitSetup({...native,engine:profile.id},{probe:(binary,args)=>{calls.push([binary,args]);return binary===profile.executable;}});
+  assert.equal(checks.find(check=>check.id==='engine-installed').status,'PASS');assert.deepEqual(calls[0],[profile.executable,['--version']]);
+ }
+});
 test('native auth checks engine status without reading assumed auth file or emitting native output',()=>{
  const calls=[];const checks=doctorKitSetup(native,{probe:(b,a)=>{calls.push([b,a]);return true;}});
  assert.equal(checks.find(c=>c.id==='native-auth').status,'PASS');assert.deepEqual(calls,[['codex',['--version']],['codex',['login','status']]]);

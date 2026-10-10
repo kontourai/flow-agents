@@ -6,6 +6,7 @@ import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {parseAuthRef, materializeAuthRef, describeAuth, defaultSecretRunner, resolveRef, loadConfig, generateClaudeCodeEnv, type AuthRef, type SecretRunner} from '@kontourai/datum';
 import {verifyInstalledKit} from './kit-execution.js';
+import {listEngineProfiles} from './engine-host.js';
 
 export const setupEngines = ['codex','claude','kiro','cursor','opencode','copilot'] as const;
 export type SetupEngine = typeof setupEngines[number];
@@ -82,7 +83,7 @@ export function createKitRequest(options:{kitId:string;dest:string;workspace:str
 }
 export function doctorKitSetup(host:HostSetup,options:{env?:NodeJS.ProcessEnv;secretRunner?:SecretRunner;probe?:Probe;image?:string}={}):Check[] {
  host=parseHostSetup(host);const run=options.probe??probe,checks:Check[]=[];
- const binary=host.engine==='claude'?'claude':host.engine==='kiro'?'kiro-cli':host.engine==='cursor'?'agent':host.engine;
+ const binary=listEngineProfiles().find(profile=>profile.id===host.engine)!.executable;
  checks.push({id:'engine-installed',status:host.isolation==='docker'?'NOT_VERIFIED':run(binary,['--version'])?'PASS':'FAIL',action:`Install the ${host.engine} CLI on the trusted host`});
  if(host.isolation==='docker'){checks.push({id:'docker-daemon',status:run('docker',['info'])?'PASS':'FAIL',action:'Start Docker on the trusted host'});checks.push({id:'worker-image',status:options.image&&/^sha256:[a-f0-9]{64}$/.test(options.image)&&run('docker',['image','inspect',options.image])?'PASS':'FAIL',action:'Run kit prepare-worker and configure its observed local immutable image ID; engine contents are verified by worker execution'});}
  if(host.auth.mode==='native')checks.push({id:'native-auth',status:host.engine==='codex'?(run('codex',['login','status'])?'PASS':'FAIL'):'NOT_VERIFIED',action:host.engine==='codex'?'Run codex login (or codex login --device-auth on a headless host)':'Use the engine sign-in flow; native auth is engine-owned and is verified by execution'});
