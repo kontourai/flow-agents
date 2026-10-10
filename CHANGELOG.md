@@ -1,5 +1,12 @@
 # Changelog
 
+## [7.1.0](https://github.com/kontourai/flow-agents/compare/v7.0.2...v7.1.0) (2026-10-10)
+
+
+### Features
+
+* configure installed kits across native engines and harnesses ([#1451](https://github.com/kontourai/flow-agents/issues/1451)) ([ce1b2f0](https://github.com/kontourai/flow-agents/commit/ce1b2f042c3d0483529db6d0589ca839e6289500))
+
 ## [7.0.2](https://github.com/kontourai/flow-agents/compare/v7.0.1...v7.0.2) (2026-10-10)
 
 
