@@ -7,7 +7,7 @@ import {defaultCodexHome} from '../lib/local-artifact-root.js';
 import {createKitRequest,doctorKitSetup,parseHostSetup,resolveKitModel,writeKitRequest,type KitAuth} from '../kit-setup.js';
 const usage=`usage: flow-agents kit setup <kit-id> --workspace <dir> --controller-root <private-dir> --engine <codex|claude|kiro|cursor|opencode|copilot> --model <name> --prompt <text> --output <request.json> [--provider <Datum model@provider>] [--auth native | --auth-ref <reference.json> | --auth-file <private-codex-cache>] [--isolation trusted-host|docker] [--image <immutable-digest>] [--parameters-file <json>] [--allow-host-execution] [--request-template <json>] [--dest <install-root>] [--dry-run]\n       flow-agents kit doctor --request <request.json>\n       flow-agents kit prepare-worker --codex-version <exact-version> [--tag <local-name>]`;
 export async function kitSetupMain(command:string,argv:string[]):Promise<number>{
- if(argv.includes('--help')){console.log(usage);return 0;}
+ if(argv.includes('--help')||argv.includes('-h')){console.log(usage);return 0;}
  const args=parseArgs(argv),get=(key:string)=>flagString(args.flags,key),required=(key:string)=>{const v=get(key);if(!v)throw new Error(`--${key} required`);return v;},json=(file:string)=>JSON.parse(fs.readFileSync(file,'utf8'));
  try{
   if(command==='prepare-worker'){
