@@ -295,8 +295,8 @@ output entirely, leaving the caller's `null` + `tokens_unattributed:true` in pla
 **`isSidechain` (subagent turns) — explicit, disclosed design decision (#925 review finding 6).**
 Real transcripts carry an `isSidechain` boolean on every assistant turn (subagent/delegated turns).
 `economics-enrich-tokens.mjs` does **not** filter on it — sidechain turns are **included** in phase
-sums, matching `/Users/brian/dev/github/kontourai/builder-rebuild/baseline/BASELINE.md`'s Phase-0
-burn definition (burn = total token consumption regardless of orchestrator-vs-delegated turn, not an
+sums, matching the Phase-0
+burn definition in an internal baseline document (burn = total token consumption regardless of orchestrator-vs-delegated turn, not an
 orchestrator-only subset). The output's `duplicate_usage_lines_skipped` (responses seen on more than one transcript line and counted once — see #1275), `sidechain_usage_lines_included` count discloses how many of
 the matched lines were sidechain turns, so a consumer can see the inclusion rather than infer it.
 This is a deliberate choice for *this* producer's burn accounting, distinct from — and not a
