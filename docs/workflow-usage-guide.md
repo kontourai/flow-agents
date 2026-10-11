@@ -708,7 +708,7 @@ The wrapper records command logs and Markdown provider evidence summaries under 
 
 ## 8. Publish The Verified Change
 
-Release readiness needs a real published change and provider-check surface when the change risk requires it, not only local verification. The provider-neutral adapter contract is described in [Work Item And Change Adapters](work-item-adapters.html).
+Release readiness needs a real published change and provider-check surface when the change risk requires it, not only local verification. The provider-neutral adapter contract is described in [Work Item And Change Adapters](work-item-adapters.md).
 
 After `evidence-gate` is clean:
 

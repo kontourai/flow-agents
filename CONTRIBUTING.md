@@ -20,16 +20,20 @@ Agents. This file is the footnote for people developing the product itself.
 
 ## Docs Site Preview
 
-The GitHub Pages site is built from `docs/` by the `Publish Docs` workflow
-using Jekyll. To preview locally, install Jekyll 3.9 with the github-pages
-default plugins and build into the ignored `_site/` directory:
+The GitHub Pages site and the agent docs bundle are built by
+[docs-kit](https://github.com/kontourai/docs-kit) from `docs-kit.json`, which
+lists the published documents, their navigation sections, and the MCP topics.
+The `Docs` workflow runs the gate on every pull request and publishes Pages from
+`main`. Every `docs/**/*.md` file must be listed in `documents` or matched by
+`exclude`. To check and preview locally:
 
 ```bash
-gem install --user-install jekyll -v 3.9.5 jekyll-optional-front-matter \
-  jekyll-relative-links jekyll-readme-index jekyll-titles-from-headings \
-  kramdown-parser-gfm
-"$(ruby -e 'print Gem.user_dir')/bin/jekyll" build --source docs --destination _site
+npm run docs:check
+npm run docs:build -- --out dist-pages
 ```
+
+When you change code that a document `covers` in `docs-kit.json`, update that
+document in the same pull request.
 
 Set `FLOW_CLI_ROOT` to a Flow checkout or installed `@kontourai/flow` package
 root to enable full Flow Definition validation in `npm run validate:source`.

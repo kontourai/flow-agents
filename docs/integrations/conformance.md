@@ -12,7 +12,7 @@ Everything in this page is grounded in `packaging/conformance/` and `docs/spec/r
 
 The engine contract is the versioned public interface between Flow Agents policy scripts and adapters. Third-party adapters bind to this contract. Breaking changes will increment the major version and be announced via CHANGELOG.
 
-The contract is defined in <a href="../spec/runtime-hook-surface.html">the spec, section 8</a>. In summary:
+The contract is defined in <a href="../spec/runtime-hook-surface.md">the spec, section 8</a>. In summary:
 
 **Invocation — subprocess form** (standard, used by all current adapters):
 
@@ -53,7 +53,7 @@ node scripts/hooks/run-hook.js --contract-version
 
 ## What each conformance level requires
 
-Conformance levels are defined in <a href="../spec/runtime-hook-surface.html">the spec, section 4</a>.
+Conformance levels are defined in <a href="../spec/runtime-hook-surface.md">the spec, section 4</a>.
 
 ### L0: Telemetry only
 
@@ -240,6 +240,6 @@ If any fixtures fail, list them under `gaps` with a description of the degradati
 - `packaging/conformance/run-conformance.js` — conformance runner
 - `packaging/conformance/fixtures/` — golden fixtures
 - `packaging/conformance/README.md` — conformance kit README
-- <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec §8</a> — engine contract 1.0 in full
-- <a href="harness-install.html">Harness Install</a> — worked install examples for opencode and pi
-- <a href="framework-adapter.html">Framework Adapter</a> — worked example of a language-native adapter
+- <a href="../spec/runtime-hook-surface.md">Runtime Hook Surface spec §8</a> — engine contract 1.0 in full
+- <a href="harness-install.md">Harness Install</a> — worked install examples for opencode and pi
+- <a href="framework-adapter.md">Framework Adapter</a> — worked example of a language-native adapter

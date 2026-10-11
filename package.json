@@ -218,7 +218,9 @@
     "prepack": "npm run build:bundles --silent && npm run validate:source --",
     "kit": "npm run build --silent && node build/src/cli.js kit",
     "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources",
-    "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs"
+    "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs",
+    "docs:check": "npx -y github:kontourai/docs-kit#482fb2e691fe7686f79a9a4da8bc2247384b85c3 docs-kit check",
+    "docs:build": "npx -y github:kontourai/docs-kit#482fb2e691fe7686f79a9a4da8bc2247384b85c3 docs-kit build"
   },
   "devDependencies": {
     "@kontourai/lookout": "0.3.2",

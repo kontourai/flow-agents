@@ -71,3 +71,6 @@ evals/acceptance/*.gif
 delivery/*
 !delivery/README.md
 !delivery/DECLARED
+
+# docs-kit build output
+dist-pages/

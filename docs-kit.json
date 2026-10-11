@@ -1,0 +1,447 @@
+{
+  "schemaVersion": 1,
+  "product": "flow-agents",
+  "title": "Flow Agents",
+  "tagline": "Evidence-gated workflows for coding agents, carried into the agent tools you already use",
+  "repo": "kontourai/flow-agents",
+  "landing": "docs/index.md",
+  "documents": [
+    {
+      "source": "README.md",
+      "section": "Start Here"
+    },
+    {
+      "source": "docs/getting-started.md",
+      "section": "Start Here"
+    },
+    {
+      "source": "docs/installed-kit-setup.md",
+      "section": "Start Here",
+      "covers": [
+        "src/kit-setup.ts"
+      ]
+    },
+    {
+      "source": "docs/migrations.md",
+      "section": "Start Here"
+    },
+    {
+      "source": "docs/agent-system-guidebook.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/architecture-engine-and-kits.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/operating-layers.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/skills-map.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/developer-architecture.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/workflow-artifact-lifecycle.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/verifiable-trust.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/sandbox-policy.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/veritas-integration.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/north-star.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/vision.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/workflow-usage-guide.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/coordination-guide.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/kit-authoring-guide.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/native-harness-activation.md",
+      "section": "Guides",
+      "covers": [
+        "src/native-harness-activation.ts"
+      ]
+    },
+    {
+      "source": "docs/configurable-workflow-routing.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/work-item-adapters.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/knowledge-kit.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/codex-pr-review-adoption.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/trust-anchor-adoption.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/survey-utterance-check.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/agent-usage-feedback-loop.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/integrations/index.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/integrations/harness-install.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/integrations/framework-adapter.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/integrations/conformance.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/integrations/knowledge-kit-live.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/integrations/flow-agents-console.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/public-workflow-cli.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/spec/runtime-hook-surface.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/spec/builder-flow-runtime.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/flow-kit-repository-contract.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/kontour-resource-contract.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/workflow-shared-contracts.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/kit-observability-contribution-contract.md",
+      "section": "Reference",
+      "covers": [
+        "src/kit-observability-contract.ts",
+        "src/kit-observability-conformance.ts"
+      ]
+    },
+    {
+      "source": "docs/docker-worker-adapter.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/system-git-provenance.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/specs/harness-capability-matrix.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/specs/host-integration-conformance.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/specs/economics-record-contract.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/specs/learning-review-proposals-contract.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/specs/routing-efficiency-review.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/standards-register.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/context-map.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/index.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/agent-coordination.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/anti-gaming-trust-security.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/backlog-readiness-source.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/console-record-delivery.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/context-lifecycle.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/core-domain-kit-boundary.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/decision-records.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/embeddable-engine.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/flow-flow-agents-boundary.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/flow-kit.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/flow-skill-kit-tool-boundary.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/graph-knowledge-provider.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/hook-core-kit-boundary.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/kit-dependency-ownership.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/kit-operation-boundary.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/knowledge-promote-sub-flow.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/knowledge-store-provider.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/kontour-resource-contract.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/mcp-posture.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/model-routing.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/portable-host-integration.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/promotion-gate.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/standing-directives.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/survey-evidence-flow-gates.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/three-hard-boundary-model.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/trust-ledger-retention.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/trust-reconcile.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/typescript-source-policy.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/workflow-enforcement.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/workflow-trust-state.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/workspace-kit-selection.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/decisions/writer-observed-execution.md",
+      "section": "Decisions"
+    },
+    {
+      "source": "docs/repository-structure.md",
+      "section": "Contribute"
+    },
+    {
+      "source": "docs/developer-hook-setup.md",
+      "section": "Contribute"
+    },
+    {
+      "source": "docs/workflow-eval-strategy.md",
+      "section": "Contribute"
+    },
+    {
+      "source": "docs/fixture-ownership.md",
+      "section": "Contribute"
+    }
+  ],
+  "topics": [
+    {
+      "id": "install",
+      "title": "Install Flow Agents into a workspace",
+      "source": "README.md#install"
+    },
+    {
+      "id": "quick-start",
+      "title": "First run: shape and build with Builder Kit",
+      "source": "docs/getting-started.md#3-a-two-minute-first-run"
+    },
+    {
+      "id": "engine",
+      "title": "The kit-neutral engine",
+      "source": "docs/architecture-engine-and-kits.md#the-engine"
+    },
+    {
+      "id": "kit-manifest",
+      "title": "Kit root manifest (kit.json)",
+      "source": "docs/flow-kit-repository-contract.md#root-manifest"
+    },
+    {
+      "id": "kit-install",
+      "title": "Install a kit from a local path or git",
+      "source": "docs/flow-kit-repository-contract.md#install-from-a-local-path-or-git"
+    },
+    {
+      "id": "kit-activation",
+      "title": "Activate a kit in a runtime",
+      "source": "docs/flow-kit-repository-contract.md#runtime-activation"
+    },
+    {
+      "id": "workflow-cli",
+      "title": "Run a workflow with the flow-agents CLI",
+      "source": "docs/public-workflow-cli.md#run-a-workflow-from-the-package-binary"
+    },
+    {
+      "id": "provider-config",
+      "title": "Configure backlog, change, and assignment providers",
+      "source": "docs/workflow-usage-guide.md#configure-the-provider-set"
+    },
+    {
+      "id": "stop-goal-fit",
+      "title": "Stop-goal-fit hook policy",
+      "source": "docs/spec/runtime-hook-surface.md#23-stop-goal-fit"
+    },
+    {
+      "id": "evidence-capture",
+      "title": "Evidence capture hook policy",
+      "source": "docs/spec/runtime-hook-surface.md#25-evidence-capture-capture-first-determinism"
+    },
+    {
+      "id": "conformance-levels",
+      "title": "Runtime conformance levels L0, L1, L2",
+      "source": "docs/spec/runtime-hook-surface.md#4-conformance-levels"
+    },
+    {
+      "id": "evidence-gate",
+      "title": "Evidence gate: is completed work trustworthy enough to publish",
+      "source": "docs/workflow-usage-guide.md#6-build-trust-with-evidence-gate"
+    },
+    {
+      "id": "coordination",
+      "title": "Parallel-session coordination model",
+      "source": "docs/coordination-guide.md#the-mental-model-two-independent-streams-joined"
+    },
+    {
+      "id": "kontour-boundaries",
+      "title": "Ownership boundaries with Flow, Veritas, and Surface",
+      "source": "docs/developer-architecture.md#ownership-boundaries"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting kit validation and activation",
+      "source": "docs/kit-authoring-guide.md#troubleshooting"
+    }
+  ],
+  "exclude": [
+    "docs/adr/**",
+    "docs/design/**",
+    "docs/plans/**",
+    "docs/spikes/**",
+    "docs/learnings/**",
+    "docs/fixtures/**",
+    "docs/implementing-trust-reconciliation.md",
+    "docs/suite-config-adoption-audit.md"
+  ]
+}

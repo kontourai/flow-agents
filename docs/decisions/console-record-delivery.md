@@ -93,7 +93,7 @@ Builder Kit concept in the product every other kit also has to live with.
 something happened; it is a fact with a provenance, and Console must never render
 `independently-verified` and `self-asserted` identically — if it does, the signing is decorative
 and Console is only as trustworthy as its weakest accepted producer. The tier is defined once, in
-[trust-reconcile](./trust-reconcile.md#delivery-provenance-is-an-attestation-not-a-claim); Console
+[trust-reconcile](./trust-reconcile.md#delivery-provenance-is-an-attestation-not-a-claim-2026-07-29-1094); Console
 displays it rather than deciding it, and a kit's view interprets it rather than redefining it.
 
 **Local-first is unchanged.** The durable local write happens first and remains

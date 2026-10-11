@@ -21,7 +21,7 @@ title: Kontour Flow Agents
   </section>
   <section>
     <strong>Flow Kits — workflow + output shape</strong>
-    <span>A kit bundles flows and optional skills, docs, adapters, evals, and assets as a validated, installable unit. The catalog lists Builder, Knowledge, Release Evidence, and Veritas Governance; <a href="kit-authoring-guide.html">bring your own kit</a> through the same manifest path.</span>
+    <span>A kit bundles flows and optional skills, docs, adapters, evals, and assets as a validated, installable unit. The catalog lists Builder, Knowledge, Release Evidence, and Veritas Governance; <a href="kit-authoring-guide.md">bring your own kit</a> through the same manifest path.</span>
   </section>
 </div>
 
@@ -51,7 +51,7 @@ Kits supply the workflow. Builder and Knowledge are examples on the engine, not 
 
 ## Process-discipline layer
 
-The four canonical policy classes are defined in the <a href="spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> using a runtime-neutral vocabulary. Adapters translate them to the host's native hook format at three conformance levels: <strong>L0</strong> (telemetry only), <strong>L1</strong> (steering + stop-goal-fit warning), and <strong>L2</strong> (all four policies with blocking capability).
+The four canonical policy classes are defined in the <a href="spec/runtime-hook-surface.md">Runtime Hook Surface spec</a> using a runtime-neutral vocabulary. Adapters translate them to the host's native hook format at three conformance levels: <strong>L0</strong> (telemetry only), <strong>L1</strong> (steering + stop-goal-fit warning), and <strong>L2</strong> (all four policies with blocking capability).
 
 ### Runtime and support matrix
 
@@ -66,11 +66,11 @@ The four canonical policy classes are defined in the <a href="spec/runtime-hook-
 | Official framework adapter | AWS Strands (TypeScript) | `integrations/strands-ts/` native-import preview | shipped telemetry + native config protection; L2-targeted policies run through the conformance shim |
 | Conformance-certified | Community / third-party | Self-certify | Conformance kit in development |
 
-Documented gaps: opencode has no native `prompt.submit`-equivalent event; pi has no stop hook; Codex live hook influence on model context is limited; Strands TS workflow steering, quality-gate, and stop-goal-fit coverage is conformance-shim-only. The <a href="spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> names every gap explicitly using the canonical event taxonomy.
+Documented gaps: opencode has no native `prompt.submit`-equivalent event; pi has no stop hook; Codex live hook influence on model context is limited; Strands TS workflow steering, quality-gate, and stop-goal-fit coverage is conformance-shim-only. The <a href="spec/runtime-hook-surface.md">Runtime Hook Surface spec</a> names every gap explicitly using the canonical event taxonomy.
 
 ## Framework adapters
 
-The same canonical policies wire into agent frameworks as in-process language-native packages. `integrations/strands/` contains `flow-agents-strands`, a Python `HookProvider` that emits the canonical telemetry taxonomy and enforces config protection via `BeforeToolCallEvent` cancellation — 76 unit tests, no Strands SDK required. `integrations/strands-ts/` adds a native-import TypeScript preview with shipped telemetry callbacks and native config-protection blocking; workflow-steering, quality-gate, and stop-goal-fit policy coverage is exercised by the conformance shim only. See <a href="spec/runtime-hook-surface.html">the spec</a> for the full framework adapter mapping and minimum viable adapter pseudocode.
+The same canonical policies wire into agent frameworks as in-process language-native packages. `integrations/strands/` contains `flow-agents-strands`, a Python `HookProvider` that emits the canonical telemetry taxonomy and enforces config protection via `BeforeToolCallEvent` cancellation — 76 unit tests, no Strands SDK required. `integrations/strands-ts/` adds a native-import TypeScript preview with shipped telemetry callbacks and native config-protection blocking; workflow-steering, quality-gate, and stop-goal-fit policy coverage is exercised by the conformance shim only. See <a href="spec/runtime-hook-surface.md">the spec</a> for the full framework adapter mapping and minimum viable adapter pseudocode.
 
 ## Quick Start
 
@@ -101,7 +101,7 @@ Use deliver for the issue you just filed. Pull it, probe the design, plan it,
 implement it, verify it, and stop if any evidence is missing.
 ```
 
-Each step has an evidence gate. The agent cannot proceed past a gate without the expected evidence — it either presents it or blocks and explains what is missing. See the <a href="getting-started.html">Builder Kit Quick Start</a> for a full two-minute walkthrough with worked examples and an explanation of what you observe at each gate.
+Each step has an evidence gate. The agent cannot proceed past a gate without the expected evidence — it either presents it or blocks and explains what is missing. See the <a href="getting-started.md">Builder Kit Quick Start</a> for a full two-minute walkthrough with worked examples and an explanation of what you observe at each gate.
 
 For bugs:
 
@@ -112,95 +112,95 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
 ## Explore the docs
 
 <div class="doc-grid">
-  <a class="doc-card" href="getting-started.html">
+  <a class="doc-card" href="getting-started.md">
     <strong>Builder Kit Quick Start</strong>
     <span>Zero to a running, gated build flow in two minutes: install, shape an idea into a work item, build it through the builder.shape and builder.build flows, and see what the evidence gates do.</span>
   </a>
-  <a class="doc-card" href="architecture-engine-and-kits.html">
+  <a class="doc-card" href="architecture-engine-and-kits.md">
     <strong>Engine and Kits</strong>
     <span>The canonical split: product-neutral engine, opt-in kits, catalog + kit.json plugin model, structured workflow triggers, and marketplace metadata with no runtime privilege.</span>
   </a>
-  <a class="doc-card" href="workflow-usage-guide.html">
+  <a class="doc-card" href="workflow-usage-guide.md">
     <strong>Workflow Usage Guide</strong>
     <span>Every stage from shaping ideas to learning review, with example prompts and expected behavior.</span>
   </a>
-  <a class="doc-card" href="codex-pr-review-adoption.html">
+  <a class="doc-card" href="codex-pr-review-adoption.md">
     <strong>Builder Codex PR Review</strong>
     <span>Adopt advisory exact-head Codex review in publish-learn, publish inline findings, and route blocking evidence back to implementation without giving the reviewer write authority.</span>
   </a>
-  <a class="doc-card" href="agent-system-guidebook.html">
+  <a class="doc-card" href="agent-system-guidebook.md">
     <strong>System Guidebook</strong>
     <span>The plain-language map of how Flow Agents is assembled and how it should feel to use.</span>
   </a>
-  <a class="doc-card" href="coordination-guide.html">
+  <a class="doc-card" href="coordination-guide.md">
     <strong>Parallel-Session Coordination</strong>
     <span>Run many sessions against one repo without collisions: the two-stream model (liveness + assignment), the four guard points, the one hard publish fence, and how delivery defends itself.</span>
   </a>
-  <a class="doc-card" href="skills-map.html">
+  <a class="doc-card" href="skills-map.md">
     <strong>Workflow Map</strong>
     <span>See the core skills, gates, artifacts, and route-back behavior.</span>
   </a>
-  <a class="doc-card" href="kit-authoring-guide.html">
+  <a class="doc-card" href="kit-authoring-guide.md">
     <strong>Kit Authoring Guide</strong>
     <span>Build your own Flow Kit from scratch: directory layout, kit.json, a flow file, validation, local install, and activation.</span>
   </a>
-  <a class="doc-card" href="flow-kit-repository-contract.html">
+  <a class="doc-card" href="flow-kit-repository-contract.md">
     <strong>Flow Kit Repository Contract</strong>
     <span>Full validation rules, registry schema, activation diagnostics, and the install/update/force semantics.</span>
   </a>
-  <a class="doc-card" href="knowledge-kit.html">
+  <a class="doc-card" href="knowledge-kit.md">
     <strong>Knowledge Kit</strong>
     <span>Gated knowledge storage with five pipeline flows, a representation-neutral store contract, default and Obsidian adapters, an extensive automated test suite, and a parameterized contract suite any adapter can run.</span>
   </a>
-  <a class="doc-card" href="spec/runtime-hook-surface.html">
+  <a class="doc-card" href="spec/runtime-hook-surface.md">
     <strong>Runtime Hook Surface</strong>
     <span>Canonical event taxonomy, four policy classes, conformance levels L0/L1/L2, and host mapping tables for adapter authors.</span>
   </a>
-  <a class="doc-card" href="vision.html">
+  <a class="doc-card" href="vision.md">
     <strong>Vision and Direction</strong>
     <span>The kits-as-ecosystem arc (authoring today → domain kits → registry → marketplace), TypeScript framework adapters, and Kontour Console as the unifying telemetry surface.</span>
   </a>
-  <a class="doc-card" href="north-star.html">
+  <a class="doc-card" href="north-star.md">
     <strong>North Star</strong>
     <span>The product promise, design principles, operating layers, and roadmap.</span>
   </a>
-  <a class="doc-card" href="developer-architecture.html">
+  <a class="doc-card" href="developer-architecture.md">
     <strong>Developer Architecture</strong>
     <span>Flow Agents' coordination role, product boundaries, artifact flow, and cross-product vocabulary.</span>
   </a>
-  <a class="doc-card" href="sandbox-policy.html">
+  <a class="doc-card" href="sandbox-policy.md">
     <strong>Safer Execution</strong>
     <span>Choose local, worktree, container, cloud, or privileged execution boundaries deliberately.</span>
   </a>
-  <a class="doc-card" href="veritas-integration.html">
+  <a class="doc-card" href="veritas-integration.md">
     <strong>Governance Evidence</strong>
     <span>Attach optional Veritas readiness reports without making governance tooling mandatory.</span>
   </a>
-  <a class="doc-card" href="workflow-eval-strategy.html">
+  <a class="doc-card" href="workflow-eval-strategy.md">
     <strong>Eval Strategy</strong>
     <span>How static, integration, behavioral, and artifact evals validate the bundle.</span>
   </a>
-  <a class="doc-card" href="workflow-artifact-lifecycle.html">
+  <a class="doc-card" href="workflow-artifact-lifecycle.md">
     <strong>Artifact Lifecycle</strong>
     <span>Check in reviewable change work while promoting completed behavior into durable docs before merge.</span>
   </a>
-  <a class="doc-card" href="work-item-adapters.html">
+  <a class="doc-card" href="work-item-adapters.md">
     <strong>Provider Adapters</strong>
     <span>Map provider-neutral work items, boards, published changes, checks, and evidence to GitHub-first adapters.</span>
   </a>
-  <a class="doc-card" href="repository-structure.html">
+  <a class="doc-card" href="repository-structure.md">
     <strong>Repository Structure</strong>
     <span>The canonical source, generated output, runtime state, package, docs, eval, and cleanup boundaries.</span>
   </a>
-  <a class="doc-card" href="kontour-resource-contract.html">
+  <a class="doc-card" href="kontour-resource-contract.md">
     <strong>Resource Contracts</strong>
     <span>The shared resource shape for durable workflow state and sidecars.</span>
   </a>
-  <a class="doc-card" href="context-map.html">
+  <a class="doc-card" href="context-map.md">
     <strong>Developer Reference</strong>
     <span>The generated repo map: commands, agents, skills, scripts, and contracts.</span>
   </a>
-  <a class="doc-card" href="integrations/index.html">
+  <a class="doc-card" href="integrations/index.md">
     <strong>Integration Examples</strong>
     <span>Worked examples for harness runtimes (Claude Code, opencode, pi), framework adapters (AWS Strands), and third-party self-certification with the conformance kit.</span>
   </a>

@@ -219,8 +219,8 @@ python3 -m unittest discover
 - `integrations/strands/flow_agents_strands/policy.py` — `PolicyGate`, engine subprocess binding
 - `integrations/strands/flow_agents_strands/steering.py` — `SteeringContext`
 - `integrations/strands/README.md` — spike README with quickstart and full limitations list
-- <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec §6.2</a> — framework adapter contract and minimum viable adapter pseudocode
-- <a href="conformance.html">Conformance</a> — how to self-certify using the conformance kit
+- <a href="../spec/runtime-hook-surface.md">Runtime Hook Surface spec §6.2</a> — framework adapter contract and minimum viable adapter pseudocode
+- <a href="conformance.md">Conformance</a> — how to self-certify using the conformance kit
 
 ---
 
