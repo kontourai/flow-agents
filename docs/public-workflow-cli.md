@@ -147,11 +147,9 @@ target checkout's current `HEAD`, replaces stale companions with one newly emitt
 in-toto companion, and verifies that companion binds both the checkpoint digest and current trust
 bundle before copying the set into `delivery/<session>/`.
 
-At terminal publication, the Git delta may contain all four transport files, or exactly the three
-mutable files: `trust.bundle`, `trust.checkpoint.json`, and the signed or in-toto companion selected
-by the attestation descriptor. The three-file form is permitted only when
-`trust.checkpoint.attestation.json` is raw-byte identical in the terminal revision and the
-checkpoint revision. Ordinary ancestry, tree equivalence, inherited bundles, extra source
+At terminal publication, the Git delta must contain exactly the four transport files:
+`trust.bundle`, `trust.checkpoint.json`, `trust.checkpoint.attestation.json`, and the signed or
+in-toto companion selected by the attestation descriptor. Ordinary ancestry, tree equivalence, inherited bundles, extra source
 changes, altered or missing companions, and unrelated session bundles are refused.
 
 Terminal publication is unavailable while `learn` is active, even when a release decision is
