@@ -803,17 +803,9 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check skill-drift-check-integration
 
-      - name: Trust reconcile trailer diagnostic integration
-        continue-on-error: true
-        run: bash evals/ci/run-baseline.sh --check trust-reconcile-trailer-diagnostic-integration
-
       - name: Validate artifacts portability integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check validate-artifacts-portability-integration
-
-      - name: Verify CLI integration
-        continue-on-error: true
-        run: bash evals/ci/run-baseline.sh --check verify-cli-integration
 
       - name: Workspace settings integration
         continue-on-error: true

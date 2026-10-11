@@ -30,7 +30,6 @@ TESTS=(
   "evals/integration/test_trust_reconcile.sh"
   "evals/integration/test_trust_checkpoint.sh"
   "evals/integration/test_checkpoint_signing.sh"
-  "evals/integration/test_mint_attestation.sh"
   "evals/integration/test_publish_delivery.sh"
   "evals/integration/test_phase_map_and_gate_claim.sh"
   "evals/integration/test_trust_reconcile_manifest.sh"

@@ -37,7 +37,6 @@ import { main as validateHookInfluence } from "./cli/validate-hook-influence.js"
 import { main as runtimeAdapter } from "./cli/runtime-adapter.js";
 import { main as skillDriftCheck } from "./cli/skill-drift-check.js";
 import { main as utteranceCheck } from "./cli/utterance-check.js";
-import { main as verify } from "./cli/verify.js";
 
 const availableCommands = new Map<string, (argv: string[]) => number | Promise<number>>([
   ["build-bundles", () => buildBundles()],
@@ -73,7 +72,6 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["usage-feedback", usageFeedback],
   ["validate-package", validatePackage],
   ["validate-hook-influence", validateHookInfluence],
-  ["verify", verify],
   ["workflow", workflow],
   ["validate-source", validateSource],
   ["workflow-artifact-cleanup-audit", workflowArtifactCleanupAudit],

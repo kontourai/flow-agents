@@ -152,9 +152,7 @@ CHECKS=(
   "Terminal before merge integration|bash evals/integration/test_terminal_before_merge.sh"
   "Session resume roundtrip integration|bash evals/integration/test_session_resume_roundtrip.sh"
   "Skill drift check integration|bash evals/integration/test_skill_drift_check.sh"
-  "Trust reconcile trailer diagnostic integration|bash evals/integration/test_trust_reconcile_trailer_diagnostic.sh"
   "Validate artifacts portability integration|bash evals/integration/test_validate_artifacts_portability.sh"
-  "Verify CLI integration|bash evals/integration/test_verify_cli.sh"
   "Workspace settings integration|bash evals/integration/test_workspace_settings.sh"
   "Anti-gaming and trust suite|bash evals/ci/antigaming-suite.sh"
   "Usage feedback import integration|bash evals/integration/test_usage_feedback_import.sh"
@@ -317,9 +315,7 @@ LANE_INTEGRATION_COVERAGE=(
   "Terminal before merge integration"
   "Session resume roundtrip integration"
   "Skill drift check integration"
-  "Trust reconcile trailer diagnostic integration"
   "Validate artifacts portability integration"
-  "Verify CLI integration"
   "Workspace settings integration"
 )
 

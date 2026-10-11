@@ -214,9 +214,9 @@ function checkProtectedPathPattern(filePath) {
     };
   }
 
-  // delivery/trust.bundle is the CI anchor read by trust-reconcile.js and
-  // used as the attestation subject in mint-attestation.js. An agent could
-  // copy a forged bundle here to corrupt the CI trust check.
+  // delivery/<slug>/trust.bundle is the committed terminal delivery evidence that
+  // merge-change byte-compares against the session's own bundle. An agent could
+  // copy a forged bundle here to misrepresent the delivered session.
   // SAFE: publishDelivery writes via fs.copyFileSync (not Write/Edit tool).
   // RESIDUAL: runtime-constructed paths and fs writes are unaffected.
   // #379: the optional (?:[^/]+\/)? segment also covers the per-session path
@@ -224,7 +224,7 @@ function checkProtectedPathPattern(filePath) {
   if (/(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$/.test(norm)) {
     return {
       name: "delivery/trust.bundle",
-      reason: "an agent could write a forged bundle to corrupt the CI trust-reconcile anchor",
+      reason: "an agent could write a forged bundle to misrepresent the delivered session evidence",
     };
   }
 
