@@ -1,5 +1,16 @@
 # Changelog
 
+## [8.0.0](https://github.com/kontourai/flow-agents/compare/v7.2.0...v8.0.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* retire the CI trust anchor (Trust Reconcile / trust-verify action) ([#1459](https://github.com/kontourai/flow-agents/issues/1459))
+
+### Maintenance
+
+* retire the CI trust anchor (Trust Reconcile / trust-verify action) ([#1459](https://github.com/kontourai/flow-agents/issues/1459)) ([ec3a16d](https://github.com/kontourai/flow-agents/commit/ec3a16d2683b89f1316170eb5bc9ae0ac0fa3684))
+
 ## [7.2.0](https://github.com/kontourai/flow-agents/compare/v7.1.0...v7.2.0) (2026-10-11)
 
 
