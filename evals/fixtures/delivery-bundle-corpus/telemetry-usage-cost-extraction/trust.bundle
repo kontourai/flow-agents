@@ -1,0 +1,1024 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "telemetry-usage-cost-extraction-ac1-ac2-usage-cost-unit.flow-agents-workflow.24-24-passed-incl-corrupt-registry-degrades-to-tokens-only-and-model-derivation-cases-ac1-ac2",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/ac1-ac2-usage-cost-unit",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "24/24 passed incl. corrupt-registry-degrades-to-tokens-only and model-derivation cases (AC1, AC2).",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-ac1-ac2-ac4-telemetry-usage-pipeline.flow-agents-workflow.16-16-passed-hermetic-fixture-proves-full-stop-hook-pipeline-yields-real-tokens-cost-concrete-model-pricing-unavailable-degrades-cost-only-no-transcript-kiro-fallback-unchanged-ac1-ac2-ac4",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/ac1-ac2-ac4-telemetry-usage-pipeline",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "16/16 passed: hermetic fixture proves full Stop-hook pipeline yields real tokens/cost/concrete model, pricing-unavailable degrades cost-only, no-transcript kiro fallback unchanged (AC1, AC2, AC4).",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-ac4-ci-manifest-gate.flow-agents-workflow.telemetry-usage-pipeline-integration-check-is-registered-in-lane-runtime-and-kit-evals-ci-run-baseline-sh-and-matches-ci-yml-required-check-set-1-1-76-76",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/ac4-ci-manifest-gate",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Telemetry usage pipeline integration check is registered in LANE_RUNTIME_AND_KIT (evals/ci/run-baseline.sh) and matches ci.yml required --check set 1:1 (76/76).",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-antigaming-suite.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/antigaming-suite",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "25/25 anti-gaming tests passed; no regression from this change.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-ac3-validate-source-mirror.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/ac3-validate-source-mirror",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "validate:source passed; scripts/telemetry vs context/scripts/telemetry usage.sh, telemetry.sh, and new pricing.sh confirmed byte-identical via diff -q (AC3).",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-static-suite.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/static-suite",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Static lane exits 0, no failures. (goal_fit_hook/escape_hatch #297 exemptions live in the integration lane, not static, so not applicable here.)",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-corrupt-registry-real-transcript.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/corrupt-registry-real-transcript",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Verified against a real ~/.claude/projects transcript (not just the synthetic fixture): pointing TELEMETRY_PRICING_FILE at a malformed JSON file yields input_tokens=11221/output_tokens=4/cache_read=20038 unchanged, estimated_cost_usd=null, pricing_version=null; a working registry on the same transcript yields estimated_cost_usd=0.132448. Tokens survive corruption; only cost degrades.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "runtime"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-fault-injection-model-override-revert.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/fault-injection-model-override-revert",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Reverting the transcript-model-override block in telemetry.sh (forcing usage_get_model) made test_telemetry_usage_pipeline.sh FAIL 3/16 (model=unknown instead of claude-opus-4-8); reverted after confirming.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/fault-injection-corrupt-registry-crash",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Reintroducing the pre-fix behavior (no jq -e validation of a non-empty-but-malformed registry) made test_usage_cost.sh FAIL 1/24 (corrupt-registry case: usage_parse_transcript returned empty, discarding tokens); reverted after confirming.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/fault-injection-grep-c-double-emit",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Reintroducing grep -c ... || echo 0 in usage_count_tool_calls made test_telemetry_usage_pipeline.sh FAIL 3/5 scenarios (session.usage silently dropped whenever tool.invoke count is genuinely zero); reverted after confirming.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-fault-injection-manifest-removal.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/fault-injection-manifest-removal",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Removing the Telemetry usage pipeline integration entry from LANE_RUNTIME_AND_KIT made test_trust_reconcile_manifest.sh FAIL (ci.yml invokes a check not in the manifest); reverted after confirming.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-model-override-revert-flow-agents-workflow-reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/telemetry-usage-cost-extraction-fault-injection-model-override-revert.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Reverting the transcript-model-override block in telemetry.sh (forcing usage_get_model) made test_telemetry_usage_pipeline.sh FAIL 3/16 (model=unknown instead of claude-opus-4-8); reverted after confirming.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash-flow-agents-workflow-reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Reintroducing the pre-fix behavior (no jq -e validation of a non-empty-but-malformed registry) made test_usage_cost.sh FAIL 1/24 (corrupt-registry case: usage_parse_transcript returned empty, discarding tokens); reverted after confirming.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit-flow-agents-workflow-reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Reintroducing grep -c ... || echo 0 in usage_count_tool_calls made test_telemetry_usage_pipeline.sh FAIL 3/5 scenarios (session.usage silently dropped whenever tool.invoke count is genuinely zero); reverted after confirming.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-manifest-removal-flow-agents-workflow-removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/telemetry-usage-cost-extraction-fault-injection-manifest-removal.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Removing the Telemetry usage pipeline integration entry from LANE_RUNTIME_AND_KIT made test_trust_reconcile_manifest.sh FAIL (ci.yml invokes a check not in the manifest); reverted after confirming.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-ac3-validate-source-mirror-flow-agents-workflow-validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/telemetry-usage-cost-extraction-ac3-validate-source-mirror.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "validate:source passed; scripts/telemetry vs context/scripts/telemetry usage.sh, telemetry.sh, and new pricing.sh confirmed byte-identical via diff -q (AC3).",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-antigaming-suite-flow-agents-workflow-25-25-anti-gaming-tests-passed-no-regression-from-this-change.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/telemetry-usage-cost-extraction-antigaming-suite.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "25/25 anti-gaming tests passed; no regression from this change.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-static-suite-flow-agents-workflow-static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/telemetry-usage-cost-extraction-static-suite.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Static lane exits 0, no failures. (goal_fit_hook/escape_hatch #297 exemptions live in the integration lane, not static, so not applicable here.)",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-corrupt-registry-real-transcript-flow-agents-workflow-verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/telemetry-usage-cost-extraction-corrupt-registry-real-transcript.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Verified against a real ~/.claude/projects transcript (not just the synthetic fixture): pointing TELEMETRY_PRICING_FILE at a malformed JSON file yields input_tokens=11221/output_tokens=4/cache_read=20038 unchanged, estimated_cost_usd=null, pricing_version=null; a working registry on the same transcript yields estimated_cost_usd=0.132448. Tokens survive corruption; only cost degrades.",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-session-usage-carries-real-input-output-cache-tokens-estimated-cost-usd-concrete-model-when-a-runtime-transcript-exists.flow-agents-workflow.session-usage-carries-real-input-output-cache-tokens-estimated-cost-usd-concrete-model-when-a-runtime-transcript-exists",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/session-usage-carries-real-input-output-cache-tokens-estimated-cost-usd-concrete-model-when-a-runtime-transcript-exists",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "session.usage carries real input/output/cache tokens + estimated_cost_usd + concrete model when a runtime transcript exists",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-model-derived-from-transcript-message-model-runtime-agnostic-not-the-kiro-only-kiro-agents-lookup.flow-agents-workflow.model-derived-from-transcript-message-model-runtime-agnostic-not-the-kiro-only-kiro-agents-lookup",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/model-derived-from-transcript-message-model-runtime-agnostic-not-the-kiro-only-kiro-agents-lookup",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "model derived from transcript .message.model (runtime-agnostic), not the kiro-only ~/.kiro/agents lookup",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-config-sh-mirror-invariant-preserved-no-regression-to-kiro-cli-validate-source-passes.flow-agents-workflow.config-sh-mirror-invariant-preserved-no-regression-to-kiro-cli-validate-source-passes",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/config-sh-mirror-invariant-preserved-no-regression-to-kiro-cli-validate-source-passes",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "config.sh mirror invariant preserved; no regression to kiro-cli; validate:source passes",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-usage-cost-extraction-hermetic-fixture-eval-proves-the-full-stop-hook-pipeline-yields-non-null-usage-and-is-wired-into-the-integration-eval-lane.flow-agents-workflow.hermetic-fixture-eval-proves-the-full-stop-hook-pipeline-yields-non-null-usage-and-is-wired-into-the-integration-eval-lane",
+      "subjectType": "flow-step",
+      "subjectId": "telemetry-usage-cost-extraction/hermetic-fixture-eval-proves-the-full-stop-hook-pipeline-yields-non-null-usage-and-is-wired-into-the-integration-eval-lane",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "hermetic fixture eval proves the full Stop-hook pipeline yields non-null usage and is wired into the integration eval lane",
+      "value": "pass",
+      "createdAt": "2026-07-07T13:11:33Z",
+      "updatedAt": "2026-07-07T13:11:33Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:telemetry-usage-cost-extraction-ac1-ac2-usage-cost-unit.flow-agents-workflow.24-24-passed-incl-corrupt-registry-degrades-to-tokens-only-and-model-derivation-cases-ac1-ac2",
+      "claimId": "telemetry-usage-cost-extraction-ac1-ac2-usage-cost-unit.flow-agents-workflow.24-24-passed-incl-corrupt-registry-degrades-to-tokens-only-and-model-derivation-cases-ac1-ac2",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "telemetry-usage-cost-extraction/command-log.jsonl",
+      "excerptOrSummary": "24/24 passed incl. corrupt-registry-degrades-to-tokens-only and model-derivation cases (AC1, AC2).",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_usage_cost.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-ac1-ac2-ac4-telemetry-usage-pipeline.flow-agents-workflow.16-16-passed-hermetic-fixture-proves-full-stop-hook-pipeline-yields-real-tokens-cost-concrete-model-pricing-unavailable-degrades-cost-only-no-transcript-kiro-fallback-unchanged-ac1-ac2-ac4",
+      "claimId": "telemetry-usage-cost-extraction-ac1-ac2-ac4-telemetry-usage-pipeline.flow-agents-workflow.16-16-passed-hermetic-fixture-proves-full-stop-hook-pipeline-yields-real-tokens-cost-concrete-model-pricing-unavailable-degrades-cost-only-no-transcript-kiro-fallback-unchanged-ac1-ac2-ac4",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "telemetry-usage-cost-extraction/command-log.jsonl",
+      "excerptOrSummary": "16/16 passed: hermetic fixture proves full Stop-hook pipeline yields real tokens/cost/concrete model, pricing-unavailable degrades cost-only, no-transcript kiro fallback unchanged (AC1, AC2, AC4).",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_telemetry_usage_pipeline.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-ac4-ci-manifest-gate.flow-agents-workflow.telemetry-usage-pipeline-integration-check-is-registered-in-lane-runtime-and-kit-evals-ci-run-baseline-sh-and-matches-ci-yml-required-check-set-1-1-76-76",
+      "claimId": "telemetry-usage-cost-extraction-ac4-ci-manifest-gate.flow-agents-workflow.telemetry-usage-pipeline-integration-check-is-registered-in-lane-runtime-and-kit-evals-ci-run-baseline-sh-and-matches-ci-yml-required-check-set-1-1-76-76",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Telemetry usage pipeline integration check is registered in LANE_RUNTIME_AND_KIT (evals/ci/run-baseline.sh) and matches ci.yml required --check set 1:1 (76/76).",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-antigaming-suite.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "claimId": "telemetry-usage-cost-extraction-antigaming-suite.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "25/25 anti-gaming tests passed; no regression from this change.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-ac3-validate-source-mirror.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "claimId": "telemetry-usage-cost-extraction-ac3-validate-source-mirror.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "validate:source passed; scripts/telemetry vs context/scripts/telemetry usage.sh, telemetry.sh, and new pricing.sh confirmed byte-identical via diff -q (AC3).",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-static-suite.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "claimId": "telemetry-usage-cost-extraction-static-suite.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Static lane exits 0, no failures. (goal_fit_hook/escape_hatch #297 exemptions live in the integration lane, not static, so not applicable here.)",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-corrupt-registry-real-transcript.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "claimId": "telemetry-usage-cost-extraction-corrupt-registry-real-transcript.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Verified against a real ~/.claude/projects transcript (not just the synthetic fixture): pointing TELEMETRY_PRICING_FILE at a malformed JSON file yields input_tokens=11221/output_tokens=4/cache_read=20038 unchanged, estimated_cost_usd=null, pricing_version=null; a working registry on the same transcript yields estimated_cost_usd=0.132448. Tokens survive corruption; only cost degrades.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-fault-injection-model-override-revert.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-fault-injection-model-override-revert.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Reverting the transcript-model-override block in telemetry.sh (forcing usage_get_model) made test_telemetry_usage_pipeline.sh FAIL 3/16 (model=unknown instead of claude-opus-4-8); reverted after confirming.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Reintroducing the pre-fix behavior (no jq -e validation of a non-empty-but-malformed registry) made test_usage_cost.sh FAIL 1/24 (corrupt-registry case: usage_parse_transcript returned empty, discarding tokens); reverted after confirming.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Reintroducing grep -c ... || echo 0 in usage_count_tool_calls made test_telemetry_usage_pipeline.sh FAIL 3/5 scenarios (session.usage silently dropped whenever tool.invoke count is genuinely zero); reverted after confirming.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-fault-injection-manifest-removal.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-fault-injection-manifest-removal.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Removing the Telemetry usage pipeline integration entry from LANE_RUNTIME_AND_KIT made test_trust_reconcile_manifest.sh FAIL (ci.yml invokes a check not in the manifest); reverted after confirming.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-model-override-revert-flow-agents-workflow-reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-model-override-revert-flow-agents-workflow-reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Reverting the transcript-model-override block in telemetry.sh (forcing usage_get_model) made test_telemetry_usage_pipeline.sh FAIL 3/16 (model=unknown instead of claude-opus-4-8); reverted after confirming.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash-flow-agents-workflow-reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash-flow-agents-workflow-reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Reintroducing the pre-fix behavior (no jq -e validation of a non-empty-but-malformed registry) made test_usage_cost.sh FAIL 1/24 (corrupt-registry case: usage_parse_transcript returned empty, discarding tokens); reverted after confirming.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit-flow-agents-workflow-reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit-flow-agents-workflow-reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Reintroducing grep -c ... || echo 0 in usage_count_tool_calls made test_telemetry_usage_pipeline.sh FAIL 3/5 scenarios (session.usage silently dropped whenever tool.invoke count is genuinely zero); reverted after confirming.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-manifest-removal-flow-agents-workflow-removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-manifest-removal-flow-agents-workflow-removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Removing the Telemetry usage pipeline integration entry from LANE_RUNTIME_AND_KIT made test_trust_reconcile_manifest.sh FAIL (ci.yml invokes a check not in the manifest); reverted after confirming.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-ac3-validate-source-mirror-flow-agents-workflow-validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-ac3-validate-source-mirror-flow-agents-workflow-validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "validate:source passed; scripts/telemetry vs context/scripts/telemetry usage.sh, telemetry.sh, and new pricing.sh confirmed byte-identical via diff -q (AC3).",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-antigaming-suite-flow-agents-workflow-25-25-anti-gaming-tests-passed-no-regression-from-this-change.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-antigaming-suite-flow-agents-workflow-25-25-anti-gaming-tests-passed-no-regression-from-this-change.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "25/25 anti-gaming tests passed; no regression from this change.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-static-suite-flow-agents-workflow-static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-static-suite-flow-agents-workflow-static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Static lane exits 0, no failures. (goal_fit_hook/escape_hatch #297 exemptions live in the integration lane, not static, so not applicable here.)",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-corrupt-registry-real-transcript-flow-agents-workflow-verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-corrupt-registry-real-transcript-flow-agents-workflow-verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-usage-cost-extraction/evidence.json",
+      "excerptOrSummary": "Verified against a real ~/.claude/projects transcript (not just the synthetic fixture): pointing TELEMETRY_PRICING_FILE at a malformed JSON file yields input_tokens=11221/output_tokens=4/cache_read=20038 unchanged, estimated_cost_usd=null, pricing_version=null; a working registry on the same transcript yields estimated_cost_usd=0.132448. Tokens survive corruption; only cost degrades.",
+      "observedAt": "2026-07-07T13:11:33Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:test_output",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:attestation",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.runtime:attestation",
+      "claimType": "workflow.check.runtime",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.runtime claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:telemetry-usage-cost-extraction-ac1-ac2-usage-cost-unit.flow-agents-workflow.24-24-passed-incl-corrupt-registry-degrades-to-tokens-only-and-model-derivation-cases-ac1-ac2",
+      "claimId": "telemetry-usage-cost-extraction-ac1-ac2-usage-cost-unit.flow-agents-workflow.24-24-passed-incl-corrupt-registry-degrades-to-tokens-only-and-model-derivation-cases-ac1-ac2",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-ac1-ac2-usage-cost-unit.flow-agents-workflow.24-24-passed-incl-corrupt-registry-degrades-to-tokens-only-and-model-derivation-cases-ac1-ac2"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-ac1-ac2-ac4-telemetry-usage-pipeline.flow-agents-workflow.16-16-passed-hermetic-fixture-proves-full-stop-hook-pipeline-yields-real-tokens-cost-concrete-model-pricing-unavailable-degrades-cost-only-no-transcript-kiro-fallback-unchanged-ac1-ac2-ac4",
+      "claimId": "telemetry-usage-cost-extraction-ac1-ac2-ac4-telemetry-usage-pipeline.flow-agents-workflow.16-16-passed-hermetic-fixture-proves-full-stop-hook-pipeline-yields-real-tokens-cost-concrete-model-pricing-unavailable-degrades-cost-only-no-transcript-kiro-fallback-unchanged-ac1-ac2-ac4",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-ac1-ac2-ac4-telemetry-usage-pipeline.flow-agents-workflow.16-16-passed-hermetic-fixture-proves-full-stop-hook-pipeline-yields-real-tokens-cost-concrete-model-pricing-unavailable-degrades-cost-only-no-transcript-kiro-fallback-unchanged-ac1-ac2-ac4"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-ac4-ci-manifest-gate.flow-agents-workflow.telemetry-usage-pipeline-integration-check-is-registered-in-lane-runtime-and-kit-evals-ci-run-baseline-sh-and-matches-ci-yml-required-check-set-1-1-76-76",
+      "claimId": "telemetry-usage-cost-extraction-ac4-ci-manifest-gate.flow-agents-workflow.telemetry-usage-pipeline-integration-check-is-registered-in-lane-runtime-and-kit-evals-ci-run-baseline-sh-and-matches-ci-yml-required-check-set-1-1-76-76",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-ac4-ci-manifest-gate.flow-agents-workflow.telemetry-usage-pipeline-integration-check-is-registered-in-lane-runtime-and-kit-evals-ci-run-baseline-sh-and-matches-ci-yml-required-check-set-1-1-76-76"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-antigaming-suite.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "claimId": "telemetry-usage-cost-extraction-antigaming-suite.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-antigaming-suite.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-ac3-validate-source-mirror.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "claimId": "telemetry-usage-cost-extraction-ac3-validate-source-mirror.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-ac3-validate-source-mirror.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-static-suite.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "claimId": "telemetry-usage-cost-extraction-static-suite.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-static-suite.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-corrupt-registry-real-transcript.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "claimId": "telemetry-usage-cost-extraction-corrupt-registry-real-transcript.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-corrupt-registry-real-transcript.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-fault-injection-model-override-revert.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-fault-injection-model-override-revert.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-fault-injection-model-override-revert.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-fault-injection-manifest-removal.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-fault-injection-manifest-removal.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-fault-injection-manifest-removal.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-model-override-revert-flow-agents-workflow-reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-model-override-revert-flow-agents-workflow-reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-model-override-revert-flow-agents-workflow-reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming.flow-agents-workflow.reverting-the-transcript-model-override-block-in-telemetry-sh-forcing-usage-get-model-made-test-telemetry-usage-pipeline-sh-fail-3-16-model-unknown-instead-of-claude-opus-4-8-reverted-after-confirming"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash-flow-agents-workflow-reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash-flow-agents-workflow-reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-corrupt-registry-crash-flow-agents-workflow-reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming.flow-agents-workflow.reintroducing-the-pre-fix-behavior-no-jq-e-validation-of-a-non-empty-but-malformed-registry-made-test-usage-cost-sh-fail-1-24-corrupt-registry-case-usage-parse-transcript-returned-empty-discarding-tokens-reverted-after-confirming"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit-flow-agents-workflow-reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit-flow-agents-workflow-reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-grep-c-double-emit-flow-agents-workflow-reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming.flow-agents-workflow.reintroducing-grep-c-echo-0-in-usage-count-tool-calls-made-test-telemetry-usage-pipeline-sh-fail-3-5-scenarios-session-usage-silently-dropped-whenever-tool-invoke-count-is-genuinely-zero-reverted-after-confirming"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-manifest-removal-flow-agents-workflow-removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-manifest-removal-flow-agents-workflow-removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-fault-injection-manifest-removal-flow-agents-workflow-removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming.flow-agents-workflow.removing-the-telemetry-usage-pipeline-integration-entry-from-lane-runtime-and-kit-made-test-trust-reconcile-manifest-sh-fail-ci-yml-invokes-a-check-not-in-the-manifest-reverted-after-confirming"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-ac3-validate-source-mirror-flow-agents-workflow-validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-ac3-validate-source-mirror-flow-agents-workflow-validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-ac3-validate-source-mirror-flow-agents-workflow-validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3.flow-agents-workflow.validate-source-passed-scripts-telemetry-vs-context-scripts-telemetry-usage-sh-telemetry-sh-and-new-pricing-sh-confirmed-byte-identical-via-diff-q-ac3"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-antigaming-suite-flow-agents-workflow-25-25-anti-gaming-tests-passed-no-regression-from-this-change.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-antigaming-suite-flow-agents-workflow-25-25-anti-gaming-tests-passed-no-regression-from-this-change.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-antigaming-suite-flow-agents-workflow-25-25-anti-gaming-tests-passed-no-regression-from-this-change.flow-agents-workflow.25-25-anti-gaming-tests-passed-no-regression-from-this-change"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-static-suite-flow-agents-workflow-static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-static-suite-flow-agents-workflow-static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-static-suite-flow-agents-workflow-static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here.flow-agents-workflow.static-lane-exits-0-no-failures-goal-fit-hook-escape-hatch-297-exemptions-live-in-the-integration-lane-not-static-so-not-applicable-here"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-corrupt-registry-real-transcript-flow-agents-workflow-verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "claimId": "telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-corrupt-registry-real-transcript-flow-agents-workflow-verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-usage-cost-extraction-telemetry-usage-cost-extraction-corrupt-registry-real-transcript-flow-agents-workflow-verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades.flow-agents-workflow.verified-against-a-real-claude-projects-transcript-not-just-the-synthetic-fixture-pointing-telemetry-pricing-file-at-a-malformed-json-file-yields-input-tokens-11221-output-tokens-4-cache-read-20038-unchanged-estimated-cost-usd-null-pricing-version-null-a-working-registry-on-the-same-transcript-yields-estimated-cost-usd-0-132448-tokens-survive-corruption-only-cost-degrades"
+      ],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-session-usage-carries-real-input-output-cache-tokens-estimated-cost-usd-concrete-model-when-a-runtime-transcript-exists.flow-agents-workflow.session-usage-carries-real-input-output-cache-tokens-estimated-cost-usd-concrete-model-when-a-runtime-transcript-exists",
+      "claimId": "telemetry-usage-cost-extraction-session-usage-carries-real-input-output-cache-tokens-estimated-cost-usd-concrete-model-when-a-runtime-transcript-exists.flow-agents-workflow.session-usage-carries-real-input-output-cache-tokens-estimated-cost-usd-concrete-model-when-a-runtime-transcript-exists",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-model-derived-from-transcript-message-model-runtime-agnostic-not-the-kiro-only-kiro-agents-lookup.flow-agents-workflow.model-derived-from-transcript-message-model-runtime-agnostic-not-the-kiro-only-kiro-agents-lookup",
+      "claimId": "telemetry-usage-cost-extraction-model-derived-from-transcript-message-model-runtime-agnostic-not-the-kiro-only-kiro-agents-lookup.flow-agents-workflow.model-derived-from-transcript-message-model-runtime-agnostic-not-the-kiro-only-kiro-agents-lookup",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-config-sh-mirror-invariant-preserved-no-regression-to-kiro-cli-validate-source-passes.flow-agents-workflow.config-sh-mirror-invariant-preserved-no-regression-to-kiro-cli-validate-source-passes",
+      "claimId": "telemetry-usage-cost-extraction-config-sh-mirror-invariant-preserved-no-regression-to-kiro-cli-validate-source-passes.flow-agents-workflow.config-sh-mirror-invariant-preserved-no-regression-to-kiro-cli-validate-source-passes",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    },
+    {
+      "id": "evt:telemetry-usage-cost-extraction-hermetic-fixture-eval-proves-the-full-stop-hook-pipeline-yields-non-null-usage-and-is-wired-into-the-integration-eval-lane.flow-agents-workflow.hermetic-fixture-eval-proves-the-full-stop-hook-pipeline-yields-non-null-usage-and-is-wired-into-the-integration-eval-lane",
+      "claimId": "telemetry-usage-cost-extraction-hermetic-fixture-eval-proves-the-full-stop-hook-pipeline-yields-non-null-usage-and-is-wired-into-the-integration-eval-lane.flow-agents-workflow.hermetic-fixture-eval-proves-the-full-stop-hook-pipeline-yields-non-null-usage-and-is-wired-into-the-integration-eval-lane",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T13:11:33Z",
+      "verifiedAt": "2026-07-07T13:11:33Z"
+    }
+  ]
+}

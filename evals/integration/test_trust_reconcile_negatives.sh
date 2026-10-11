@@ -46,9 +46,9 @@ source "$ROOT/evals/lib/node.sh"
 RECONCILE="$ROOT/scripts/ci/trust-reconcile.js"
 FX="$ROOT/evals/fixtures/trust-reconcile-exploits"
 WS3="$ROOT/evals/fixtures/trust-reconcile-ws3/ws3-bundle.json"
-# Real production provisional bundle (session 1125), copied from the retired committed delivery/
-# records so the #1371 cases keep reconciling a genuine provisional shape.
-P1371_SOURCE="$ROOT/evals/fixtures/trust-reconcile-provisional/provisional-1125-bundle.json"
+# Real production provisional bundle (session 1125) from the delivery-bundle corpus, so the #1371
+# cases keep reconciling a genuine provisional shape after delivery/ was retired.
+P1371_SOURCE="$ROOT/evals/fixtures/delivery-bundle-corpus/kontourai-flow-agents-1125/trust.bundle"
 
 errors=0
 _pass() { echo "  PASS: $1"; }

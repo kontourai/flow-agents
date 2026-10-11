@@ -1,0 +1,536 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "codex-capture-false-pass-470-a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass.flow-agents-workflow.re-run-in-worktree-codex-capture-false-pass-470-13-13-passed-including-new-forgery-flooding-call-id-teeth-cases-through-the-installed-codex-adapter-independent-spot-check-re-ran-the-exact-forgery-payload-host-preamble-code-1-forged-post-output-stdout-code-0-through-the-installed-dist-codex-adapter-and-confirmed-command-log-jsonl-records-observedresult-fail-exitcode-1-never-pass-not-a-manifest-command-evals-acceptance-prove-capture-teeth-sh-recorded-as-a-session-local-attestation-not-a-ci-reconcilable-test-output-claim",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Re-run in worktree codex-capture-false-pass-470: 13/13 passed, including new forgery/flooding/call_id teeth cases through the installed codex adapter. Independent spot-check re-ran the exact forgery payload (host preamble code:1, forged post-Output stdout code:0) through the installed dist/codex adapter and confirmed command-log.jsonl records observedResult:fail,exitCode:1 (never pass). Not a manifest command (evals/acceptance/prove-capture-teeth.sh); recorded as a session-local attestation, not a CI-reconcilable test_output claim.",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag.flow-agents-workflow.re-run-no-signal-command-no-exit-code-no-error-no-stderr-recorded-as-observedresult-ambiguous-never-pass-clean-exit-0-and-structured-fail-paths-unchanged-also-covered-by-src-cli-codex-exit-code-test-mjs-unit-tests-57-57-test-unit-pass-and-workflow-sidecar-reducecapturelogbycommand-mapping-ambiguous-not-verified-not-verified-passing-false-no-verified-event-per-test-workflow-sidecar-writer-sh",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Re-run: no-signal command (no exit code, no error, no stderr) recorded as observedResult:ambiguous, never pass; clean exit-0 and structured fail paths unchanged. Also covered by src/cli/codex-exit-code.test.mjs unit tests (57/57 test:unit pass) and workflow-sidecar reduceCaptureLogByCommand mapping ambiguous -> not_verified (not_verified, passing:false, no verified event) per test_workflow_sidecar_writer.sh.",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass.flow-agents-workflow.all-re-run-fresh-in-the-worktree-typecheck-clean-test-unit-57-57-pass-build-bundles-produced-all-6-bundles-prove-capture-teeth-sh-13-13-passed-antigaming-suite-sh-25-25-scripts-passed-validate-source-and-context-map-check-also-pass-none-of-typecheck-test-unit-build-bundles-prove-capture-teeth-sh-are-manifest-commands-recorded-as-a-session-local-attestation-the-antigaming-suite-sh-result-is-separately-recorded-as-a-manifest-matched-command-check-see-check-id-antigaming-suite-manifest-check",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "All re-run fresh in the worktree: typecheck clean; test:unit 57/57 pass; build:bundles produced all 6 bundles; prove-capture-teeth.sh 13/13 passed; antigaming-suite.sh 25/25 scripts passed. validate:source and context-map:check also pass. None of typecheck/test:unit/build:bundles/prove-capture-teeth.sh are manifest commands; recorded as a session-local attestation. The antigaming-suite.sh result is separately recorded as a manifest-matched command check (see check id antigaming-suite-manifest-check).",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-antigaming-suite-manifest-check.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh-25-25-scripts-passed-re-run-fresh-in-the-worktree-at-reconcile-preflight-fix-time",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/antigaming-suite-manifest-check",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "bash evals/ci/antigaming-suite.sh: 25/25 scripts passed (re-run fresh in the worktree at reconcile-preflight fix time).",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass.flow-agents-workflow.a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "A codex-shaped PostToolUse payload whose only failure signal is the host prose banner is never captured as observedResult:pass",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag.flow-agents-workflow.evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "evidence-capture rule-3 default records ambiguous absent positive success evidence (structured exit 0 or explicit success flag)",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass.flow-agents-workflow.prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "prove-capture-teeth and evals/ci/antigaming-suite.sh fully pass",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-security-review-iteration1.flow-agents-workflow.imported-critique-from-security-review-iteration1-md-superseded-security-review-iteration1-2026-07-07t07-25-57z-2026-07-07t06-28-48z",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/security-review-iteration1",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Imported critique from security-review-iteration1.md",
+      "value": "fail",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T06:28:48Z",
+        "superseded_by": "security-review-iteration1@2026-07-07T07:25:57Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "codex-capture-false-pass-470-code-review-iteration1.flow-agents-workflow.imported-critique-from-code-review-iteration1-md-superseded-code-review-iteration1-2026-07-07t07-26-01z-2026-07-07t06-31-15z",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/code-review-iteration1",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Imported critique from code-review-iteration1.md",
+      "value": "fail",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T06:31:15Z",
+        "superseded_by": "code-review-iteration1@2026-07-07T07:26:01Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "codex-capture-false-pass-470-security-review-iteration2.flow-agents-workflow.imported-critique-from-security-review-iteration2-md",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/security-review-iteration2",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Imported critique from security-review-iteration2.md",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T07:14:05Z"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-code-review-iteration2.flow-agents-workflow.imported-critique-from-code-review-iteration2-md",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/code-review-iteration2",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Imported critique from code-review-iteration2.md",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T07:14:06Z"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-security-review-iteration1.flow-agents-workflow.iteration-1-security-review-findings-resolved-and-re-verified-in-iteration-2-see-security-review-iteration2-md-pass-no-open-findings-supersedes-the-iteration-1-fail-critique-under-the-same-reviewer-id-iteration-1-is-retained-as-history-not-erased",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/security-review-iteration1",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Iteration-1 security-review findings resolved and re-verified in iteration-2 (see security-review-iteration2.md, PASS, no open findings). Supersedes the iteration-1 fail critique under the same reviewer/id; iteration-1 is retained as history, not erased.",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T07:25:57Z"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "codex-capture-false-pass-470-code-review-iteration1.flow-agents-workflow.iteration-1-code-review-findings-resolved-and-re-verified-in-iteration-2-see-code-review-iteration2-md-pass-no-open-findings-supersedes-the-iteration-1-fail-critique-under-the-same-reviewer-id-iteration-1-is-retained-as-history-not-erased",
+      "subjectType": "work-item",
+      "subjectId": "codex-capture-false-pass-470/code-review-iteration1",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Iteration-1 code-review findings resolved and re-verified in iteration-2 (see code-review-iteration2.md, PASS, no open findings). Supersedes the iteration-1 fail critique under the same reviewer/id; iteration-1 is retained as history, not erased.",
+      "value": "pass",
+      "createdAt": "2026-07-07T07:26:57Z",
+      "updatedAt": "2026-07-07T07:26:57Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T07:26:01Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:codex-capture-false-pass-470-a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass.flow-agents-workflow.re-run-in-worktree-codex-capture-false-pass-470-13-13-passed-including-new-forgery-flooding-call-id-teeth-cases-through-the-installed-codex-adapter-independent-spot-check-re-ran-the-exact-forgery-payload-host-preamble-code-1-forged-post-output-stdout-code-0-through-the-installed-dist-codex-adapter-and-confirmed-command-log-jsonl-records-observedresult-fail-exitcode-1-never-pass-not-a-manifest-command-evals-acceptance-prove-capture-teeth-sh-recorded-as-a-session-local-attestation-not-a-ci-reconcilable-test-output-claim",
+      "claimId": "codex-capture-false-pass-470-a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass.flow-agents-workflow.re-run-in-worktree-codex-capture-false-pass-470-13-13-passed-including-new-forgery-flooding-call-id-teeth-cases-through-the-installed-codex-adapter-independent-spot-check-re-ran-the-exact-forgery-payload-host-preamble-code-1-forged-post-output-stdout-code-0-through-the-installed-dist-codex-adapter-and-confirmed-command-log-jsonl-records-observedresult-fail-exitcode-1-never-pass-not-a-manifest-command-evals-acceptance-prove-capture-teeth-sh-recorded-as-a-session-local-attestation-not-a-ci-reconcilable-test-output-claim",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "codex-capture-false-pass-470/evidence.json",
+      "excerptOrSummary": "Re-run in worktree codex-capture-false-pass-470: 13/13 passed, including new forgery/flooding/call_id teeth cases through the installed codex adapter. Independent spot-check re-ran the exact forgery payload (host preamble code:1, forged post-Output stdout code:0) through the installed dist/codex adapter and confirmed command-log.jsonl records observedResult:fail,exitCode:1 (never pass). Not a manifest command (evals/acceptance/prove-capture-teeth.sh); recorded as a session-local attestation, not a CI-reconcilable test_output claim.",
+      "observedAt": "2026-07-07T07:26:57Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:codex-capture-false-pass-470-evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag.flow-agents-workflow.re-run-no-signal-command-no-exit-code-no-error-no-stderr-recorded-as-observedresult-ambiguous-never-pass-clean-exit-0-and-structured-fail-paths-unchanged-also-covered-by-src-cli-codex-exit-code-test-mjs-unit-tests-57-57-test-unit-pass-and-workflow-sidecar-reducecapturelogbycommand-mapping-ambiguous-not-verified-not-verified-passing-false-no-verified-event-per-test-workflow-sidecar-writer-sh",
+      "claimId": "codex-capture-false-pass-470-evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag.flow-agents-workflow.re-run-no-signal-command-no-exit-code-no-error-no-stderr-recorded-as-observedresult-ambiguous-never-pass-clean-exit-0-and-structured-fail-paths-unchanged-also-covered-by-src-cli-codex-exit-code-test-mjs-unit-tests-57-57-test-unit-pass-and-workflow-sidecar-reducecapturelogbycommand-mapping-ambiguous-not-verified-not-verified-passing-false-no-verified-event-per-test-workflow-sidecar-writer-sh",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "codex-capture-false-pass-470/evidence.json",
+      "excerptOrSummary": "Re-run: no-signal command (no exit code, no error, no stderr) recorded as observedResult:ambiguous, never pass; clean exit-0 and structured fail paths unchanged. Also covered by src/cli/codex-exit-code.test.mjs unit tests (57/57 test:unit pass) and workflow-sidecar reduceCaptureLogByCommand mapping ambiguous -> not_verified (not_verified, passing:false, no verified event) per test_workflow_sidecar_writer.sh.",
+      "observedAt": "2026-07-07T07:26:57Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_evidence_capture_hook.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:codex-capture-false-pass-470-prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass.flow-agents-workflow.all-re-run-fresh-in-the-worktree-typecheck-clean-test-unit-57-57-pass-build-bundles-produced-all-6-bundles-prove-capture-teeth-sh-13-13-passed-antigaming-suite-sh-25-25-scripts-passed-validate-source-and-context-map-check-also-pass-none-of-typecheck-test-unit-build-bundles-prove-capture-teeth-sh-are-manifest-commands-recorded-as-a-session-local-attestation-the-antigaming-suite-sh-result-is-separately-recorded-as-a-manifest-matched-command-check-see-check-id-antigaming-suite-manifest-check",
+      "claimId": "codex-capture-false-pass-470-prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass.flow-agents-workflow.all-re-run-fresh-in-the-worktree-typecheck-clean-test-unit-57-57-pass-build-bundles-produced-all-6-bundles-prove-capture-teeth-sh-13-13-passed-antigaming-suite-sh-25-25-scripts-passed-validate-source-and-context-map-check-also-pass-none-of-typecheck-test-unit-build-bundles-prove-capture-teeth-sh-are-manifest-commands-recorded-as-a-session-local-attestation-the-antigaming-suite-sh-result-is-separately-recorded-as-a-manifest-matched-command-check-see-check-id-antigaming-suite-manifest-check",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "codex-capture-false-pass-470/evidence.json",
+      "excerptOrSummary": "All re-run fresh in the worktree: typecheck clean; test:unit 57/57 pass; build:bundles produced all 6 bundles; prove-capture-teeth.sh 13/13 passed; antigaming-suite.sh 25/25 scripts passed. validate:source and context-map:check also pass. None of typecheck/test:unit/build:bundles/prove-capture-teeth.sh are manifest commands; recorded as a session-local attestation. The antigaming-suite.sh result is separately recorded as a manifest-matched command check (see check id antigaming-suite-manifest-check).",
+      "observedAt": "2026-07-07T07:26:57Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:codex-capture-false-pass-470-antigaming-suite-manifest-check.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh-25-25-scripts-passed-re-run-fresh-in-the-worktree-at-reconcile-preflight-fix-time",
+      "claimId": "codex-capture-false-pass-470-antigaming-suite-manifest-check.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh-25-25-scripts-passed-re-run-fresh-in-the-worktree-at-reconcile-preflight-fix-time",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "codex-capture-false-pass-470/evidence.json",
+      "excerptOrSummary": "bash evals/ci/antigaming-suite.sh: 25/25 scripts passed (re-run fresh in the worktree at reconcile-preflight fix time).",
+      "observedAt": "2026-07-07T07:26:57Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/ci/antigaming-suite.sh",
+        "isError": false
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:attestation",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:test_output",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:codex-capture-false-pass-470-a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass.flow-agents-workflow.re-run-in-worktree-codex-capture-false-pass-470-13-13-passed-including-new-forgery-flooding-call-id-teeth-cases-through-the-installed-codex-adapter-independent-spot-check-re-ran-the-exact-forgery-payload-host-preamble-code-1-forged-post-output-stdout-code-0-through-the-installed-dist-codex-adapter-and-confirmed-command-log-jsonl-records-observedresult-fail-exitcode-1-never-pass-not-a-manifest-command-evals-acceptance-prove-capture-teeth-sh-recorded-as-a-session-local-attestation-not-a-ci-reconcilable-test-output-claim",
+      "claimId": "codex-capture-false-pass-470-a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass.flow-agents-workflow.re-run-in-worktree-codex-capture-false-pass-470-13-13-passed-including-new-forgery-flooding-call-id-teeth-cases-through-the-installed-codex-adapter-independent-spot-check-re-ran-the-exact-forgery-payload-host-preamble-code-1-forged-post-output-stdout-code-0-through-the-installed-dist-codex-adapter-and-confirmed-command-log-jsonl-records-observedresult-fail-exitcode-1-never-pass-not-a-manifest-command-evals-acceptance-prove-capture-teeth-sh-recorded-as-a-session-local-attestation-not-a-ci-reconcilable-test-output-claim",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:codex-capture-false-pass-470-a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass.flow-agents-workflow.re-run-in-worktree-codex-capture-false-pass-470-13-13-passed-including-new-forgery-flooding-call-id-teeth-cases-through-the-installed-codex-adapter-independent-spot-check-re-ran-the-exact-forgery-payload-host-preamble-code-1-forged-post-output-stdout-code-0-through-the-installed-dist-codex-adapter-and-confirmed-command-log-jsonl-records-observedresult-fail-exitcode-1-never-pass-not-a-manifest-command-evals-acceptance-prove-capture-teeth-sh-recorded-as-a-session-local-attestation-not-a-ci-reconcilable-test-output-claim"
+      ],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag.flow-agents-workflow.re-run-no-signal-command-no-exit-code-no-error-no-stderr-recorded-as-observedresult-ambiguous-never-pass-clean-exit-0-and-structured-fail-paths-unchanged-also-covered-by-src-cli-codex-exit-code-test-mjs-unit-tests-57-57-test-unit-pass-and-workflow-sidecar-reducecapturelogbycommand-mapping-ambiguous-not-verified-not-verified-passing-false-no-verified-event-per-test-workflow-sidecar-writer-sh",
+      "claimId": "codex-capture-false-pass-470-evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag.flow-agents-workflow.re-run-no-signal-command-no-exit-code-no-error-no-stderr-recorded-as-observedresult-ambiguous-never-pass-clean-exit-0-and-structured-fail-paths-unchanged-also-covered-by-src-cli-codex-exit-code-test-mjs-unit-tests-57-57-test-unit-pass-and-workflow-sidecar-reducecapturelogbycommand-mapping-ambiguous-not-verified-not-verified-passing-false-no-verified-event-per-test-workflow-sidecar-writer-sh",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:codex-capture-false-pass-470-evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag.flow-agents-workflow.re-run-no-signal-command-no-exit-code-no-error-no-stderr-recorded-as-observedresult-ambiguous-never-pass-clean-exit-0-and-structured-fail-paths-unchanged-also-covered-by-src-cli-codex-exit-code-test-mjs-unit-tests-57-57-test-unit-pass-and-workflow-sidecar-reducecapturelogbycommand-mapping-ambiguous-not-verified-not-verified-passing-false-no-verified-event-per-test-workflow-sidecar-writer-sh"
+      ],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass.flow-agents-workflow.all-re-run-fresh-in-the-worktree-typecheck-clean-test-unit-57-57-pass-build-bundles-produced-all-6-bundles-prove-capture-teeth-sh-13-13-passed-antigaming-suite-sh-25-25-scripts-passed-validate-source-and-context-map-check-also-pass-none-of-typecheck-test-unit-build-bundles-prove-capture-teeth-sh-are-manifest-commands-recorded-as-a-session-local-attestation-the-antigaming-suite-sh-result-is-separately-recorded-as-a-manifest-matched-command-check-see-check-id-antigaming-suite-manifest-check",
+      "claimId": "codex-capture-false-pass-470-prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass.flow-agents-workflow.all-re-run-fresh-in-the-worktree-typecheck-clean-test-unit-57-57-pass-build-bundles-produced-all-6-bundles-prove-capture-teeth-sh-13-13-passed-antigaming-suite-sh-25-25-scripts-passed-validate-source-and-context-map-check-also-pass-none-of-typecheck-test-unit-build-bundles-prove-capture-teeth-sh-are-manifest-commands-recorded-as-a-session-local-attestation-the-antigaming-suite-sh-result-is-separately-recorded-as-a-manifest-matched-command-check-see-check-id-antigaming-suite-manifest-check",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:codex-capture-false-pass-470-prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass.flow-agents-workflow.all-re-run-fresh-in-the-worktree-typecheck-clean-test-unit-57-57-pass-build-bundles-produced-all-6-bundles-prove-capture-teeth-sh-13-13-passed-antigaming-suite-sh-25-25-scripts-passed-validate-source-and-context-map-check-also-pass-none-of-typecheck-test-unit-build-bundles-prove-capture-teeth-sh-are-manifest-commands-recorded-as-a-session-local-attestation-the-antigaming-suite-sh-result-is-separately-recorded-as-a-manifest-matched-command-check-see-check-id-antigaming-suite-manifest-check"
+      ],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-antigaming-suite-manifest-check.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh-25-25-scripts-passed-re-run-fresh-in-the-worktree-at-reconcile-preflight-fix-time",
+      "claimId": "codex-capture-false-pass-470-antigaming-suite-manifest-check.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh-25-25-scripts-passed-re-run-fresh-in-the-worktree-at-reconcile-preflight-fix-time",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:codex-capture-false-pass-470-antigaming-suite-manifest-check.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh-25-25-scripts-passed-re-run-fresh-in-the-worktree-at-reconcile-preflight-fix-time"
+      ],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass.flow-agents-workflow.a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass",
+      "claimId": "codex-capture-false-pass-470-a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass.flow-agents-workflow.a-codex-shaped-posttooluse-payload-whose-only-failure-signal-is-the-host-prose-banner-is-never-captured-as-observedresult-pass",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag.flow-agents-workflow.evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag",
+      "claimId": "codex-capture-false-pass-470-evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag.flow-agents-workflow.evidence-capture-rule-3-default-records-ambiguous-absent-positive-success-evidence-structured-exit-0-or-explicit-success-flag",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass.flow-agents-workflow.prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass",
+      "claimId": "codex-capture-false-pass-470-prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass.flow-agents-workflow.prove-capture-teeth-and-evals-ci-antigaming-suite-sh-fully-pass",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-security-review-iteration2.flow-agents-workflow.imported-critique-from-security-review-iteration2-md",
+      "claimId": "codex-capture-false-pass-470-security-review-iteration2.flow-agents-workflow.imported-critique-from-security-review-iteration2-md",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-code-review-iteration2.flow-agents-workflow.imported-critique-from-code-review-iteration2-md",
+      "claimId": "codex-capture-false-pass-470-code-review-iteration2.flow-agents-workflow.imported-critique-from-code-review-iteration2-md",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-security-review-iteration1.flow-agents-workflow.iteration-1-security-review-findings-resolved-and-re-verified-in-iteration-2-see-security-review-iteration2-md-pass-no-open-findings-supersedes-the-iteration-1-fail-critique-under-the-same-reviewer-id-iteration-1-is-retained-as-history-not-erased",
+      "claimId": "codex-capture-false-pass-470-security-review-iteration1.flow-agents-workflow.iteration-1-security-review-findings-resolved-and-re-verified-in-iteration-2-see-security-review-iteration2-md-pass-no-open-findings-supersedes-the-iteration-1-fail-critique-under-the-same-reviewer-id-iteration-1-is-retained-as-history-not-erased",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    },
+    {
+      "id": "evt:codex-capture-false-pass-470-code-review-iteration1.flow-agents-workflow.iteration-1-code-review-findings-resolved-and-re-verified-in-iteration-2-see-code-review-iteration2-md-pass-no-open-findings-supersedes-the-iteration-1-fail-critique-under-the-same-reviewer-id-iteration-1-is-retained-as-history-not-erased",
+      "claimId": "codex-capture-false-pass-470-code-review-iteration1.flow-agents-workflow.iteration-1-code-review-findings-resolved-and-re-verified-in-iteration-2-see-code-review-iteration2-md-pass-no-open-findings-supersedes-the-iteration-1-fail-critique-under-the-same-reviewer-id-iteration-1-is-retained-as-history-not-erased",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T07:26:57Z",
+      "verifiedAt": "2026-07-07T07:26:57Z"
+    }
+  ]
+}

@@ -1,0 +1,1169 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-439-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-439-slice-1-detect-refresh-installed-skill-drift-scope-clear-acceptance-criteria-present-liveness-assignment-claims-confirmed-self-is-holder",
+      "subjectType": "work-item",
+      "subjectId": "kontourai-flow-agents-439/gate-claim-selected-work",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Selected kontourai/flow-agents#439 slice 1 (detect+refresh installed-skill drift): scope clear, acceptance criteria present, liveness + assignment claims confirmed self_is_holder.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-439/kontourai-flow-agents-439--pull-work.md",
+            "summary": "Pull-work artifact with selected_item_ids, scope, acceptance criteria, claim evidence."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "selected-work",
+          "claim_type": "builder.pull-work.selected",
+          "subject_type": "work-item",
+          "step_id": "pull-work"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-goal-fit-confirmed-blockers-checked-baseline-drift-researched-origin-main-c19c3e6-no-material-drift-vs-planning-scope-acceptance-criteria-verified-executable",
+      "subjectType": "work-item",
+      "subjectId": "kontourai-flow-agents-439/gate-claim-pickup-probe-readiness",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.design-probe.pickup-readiness",
+      "fieldOrBehavior": "Pickup probe passed: goal fit confirmed, blockers checked, baseline drift researched (origin/main c19c3e6, no material drift vs planning scope), acceptance criteria verified executable.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-439/kontourai-flow-agents-439--pull-work.md",
+            "summary": "Pull-work artifact recording probe status, scope, and planning readiness."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "pickup-probe-readiness",
+          "claim_type": "builder.design-probe.pickup-readiness",
+          "subject_type": "work-item",
+          "step_id": "design-probe"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-3-decisions-3-accepted-gaps-planning-readiness-ready",
+      "subjectType": "decision",
+      "subjectId": "kontourai-flow-agents-439/gate-claim-probe-decisions-or-accepted-gaps",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.design-probe.decisions",
+      "fieldOrBehavior": "Probe decisions recorded: 3 decisions, 3 accepted gaps. Planning readiness: ready.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-439/kontourai-flow-agents-439--pull-work.md",
+            "summary": "Pull-work artifact with decisions, accepted gaps, and planning handoff."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "probe-decisions-or-accepted-gaps",
+          "claim_type": "builder.design-probe.decisions",
+          "subject_type": "decision",
+          "step_id": "design-probe"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-3-waves-ac1-ac5-with-stable-ids-per-task-supports-traceability-files-named-stop-short-risks-and-sandbox-mode-worktree-recorded",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-439/gate-claim-implementation-plan",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.plan.implementation",
+      "fieldOrBehavior": "Implementation plan recorded: 3 waves, AC1-AC5 with stable ids, per-task Supports traceability, files named, stop-short risks and sandbox mode (worktree) recorded.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.plan.implementation:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-439/kontourai-flow-agents-439--plan-work.md",
+            "summary": "Plan artifact with Definition Of Done, wave structure, AC traceability, and baseline revalidation."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "implementation-plan",
+          "claim_type": "builder.plan.implementation",
+          "subject_type": "artifact",
+          "step_id": "plan"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-11-modified-3-new-files-all-within-plan-work-scope-drift-lib-manifest-write-cli-hook-advisory-evals-mirror-inventory-registrations-context-map-no-unrelated-changes-full-suite-evidence-green-28-28-66-66-77-77-static-clean",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-439/gate-claim-implementation-scope",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Implementation scope: 11 modified + 3 new files, all within plan work_scope (drift lib, manifest write, CLI, hook advisory, evals, mirror/inventory registrations, context-map); no unrelated changes; full suite evidence green (28/28, 66/66, 77/77, static clean).",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-439/kontourai-flow-agents-439--deliver.md",
+            "summary": "Deliver artifact with per-wave modified files, evidence, and worker flags."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "implementation-scope",
+          "claim_type": "builder.execute.scope",
+          "subject_type": "change",
+          "step_id": "execute"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-git-c-users-brian-dev-github-kontourai-flow-agents-worktrees-439-skill-drift-st.flow-agents-workflow.session-attestation-worktree-scope-audit-every-changed-path-within-the-plan-work-scope-allowlist-11-modified-3-new-files-deliver-artifact-per-wave-list-prior-command-shaped-check-contained-exit-0-inversion-folded-to-external-per-laundering-rule",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/git--C-Users-brian-dev-github-kontourai-flow-agents-worktrees-439-skill-drift-st",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Session attestation: worktree scope audit — every changed path within the plan work_scope allowlist (11 modified + 3 new files; deliver artifact per-wave list). Prior command-shaped check contained || exit 0 inversion; folded to external per laundering rule.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-the-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/build",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Session attestation: npm run build --silent exited 0 in the worktree (verifier re-run). Non-manifest command folded to external per #381.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-ac1-install-manifest.flow-agents-workflow.session-attestation-evals-integration-test-install-merge-sh-66-66-incl-manifest-write-generatedat-regeneration-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/ac1-install-manifest",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Session attestation: evals/integration/test_install_merge.sh 66/66 incl. manifest write + generatedAt regeneration (verifier re-run). Non-manifest command folded to external per #381.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-ac2-ac4-drift-check.flow-agents-workflow.session-attestation-evals-integration-test-skill-drift-check-sh-43-43-unbaselined-missing-install-exit-1-spot-checked-help-documents-0-1-2-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/ac2-ac4-drift-check",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Session attestation: evals/integration/test_skill_drift_check.sh 43/43; unbaselined/missing_install exit-1 spot-checked; --help documents 0/1/2 (verifier re-run). Non-manifest command folded to external per #381.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-ac3-sessionstart.flow-agents-workflow.session-attestation-sessionstart-advisory-scenarios-green-present-when-drifted-absent-when-clean-corrupt-manifest-no-crash-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/ac3-sessionstart",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Session attestation: SessionStart advisory scenarios green — present when drifted, absent when clean, corrupt manifest no-crash (verifier re-run). Non-manifest command folded to external per #381.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-ac5-regressions.flow-agents-workflow.test-bundle-install-sh-77-77-context-map-check-exit-0-evals-run-sh-static-exit-0",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/ac5-regressions",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "test_bundle_install.sh 77/77; context-map:check exit 0; evals/run.sh static exit 0",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-init-manifest-failure-path.flow-agents-workflow.warn-without-failing-install-path-source-verified-src-cli-init-ts-try-catch-but-no-fault-injection-eval-accepted-gap-non-blocking",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/init-manifest-failure-path",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "warn-without-failing-install path source-verified (src/cli/init.ts try/catch) but no fault-injection eval; accepted gap, non-blocking",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "kontourai-flow-agents-439-gate-claim-tests-evidence.flow-agents-workflow.independent-verifier-re-ran-all-ac-evidence-ac1-ac5-pass-43-43-66-66-77-77-static-context-map-green-exit-code-regression-spot-checked-fixed-one-accepted-non-blocking-gap-init-manifest-failure-fault-injection",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/gate-claim-tests-evidence",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Independent verifier re-ran all AC evidence: AC1-AC5 PASS (43/43, 66/66, 77/77, static+context-map green); exit-code regression spot-checked fixed; one accepted non-blocking gap (init manifest-failure fault injection).",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-439/kontourai-flow-agents-439--review.md",
+            "summary": "Verifier verdict artifact with per-AC command evidence and stop-short risk audit."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "tests-evidence",
+          "claim_type": "builder.verify.tests",
+          "subject_type": "flow-step",
+          "step_id": "verify"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-ac1-install-writes-skill-manifest-flow-agents-init-runtime-claude-code-global-writes-a-per-skill-file-sha256-content-hash-manifest-claude-flow-agents-skills-manifest-json-sibling-of-install-json-alongside-the-existing-install-record-re-running-init-refreshes-drifted-skills-existing-copydirmerge-additive-sync-behavior-unchanged-and-regenerates-the-manifest-settings-preservation-430-is-untouched.flow-agents-workflow.ac1-install-writes-skill-manifest-flow-agents-init-runtime-claude-code-global-writes-a-per-skill-file-sha256-content-hash-manifest-claude-flow-agents-skills-manifest-json-sibling-of-install-json-alongside-the-existing-install-record-re-running-init-refreshes-drifted-skills-existing-copydirmerge-additive-sync-behavior-unchanged-and-regenerates-the-manifest-settings-preservation-430-is-untouched",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/ac1-install-writes-skill-manifest-flow-agents-init-runtime-claude-code-global-writes-a-per-skill-file-sha256-content-hash-manifest-claude-flow-agents-skills-manifest-json-sibling-of-install-json-alongside-the-existing-install-record-re-running-init-refreshes-drifted-skills-existing-copydirmerge-additive-sync-behavior-unchanged-and-regenerates-the-manifest-settings-preservation-430-is-untouched",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC1 `install-writes-skill-manifest`: `flow-agents init --runtime claude-code --global` writes a per-skill-file sha256 content-hash manifest (`~/.claude/.flow-agents/skills-manifest.json`, sibling of `install.json`) alongside the existing install record; re-running init refreshes drifted skills (existing `copyDirMerge` additive-sync behavior unchanged) and regenerates the manifest; settings preservation (#430) is untouched",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-ac2-standalone-drift-check-flow-agents-skill-drift-check-detects-and-reports-drift-between-installed-claude-skills-copies-and-the-current-kit-bundle-source-within-one-command-run-exit-code-distinguishes-drift-found-non-zero-from-clean-0-output-names-the-exact-refresh-command-flow-agents-init-runtime-claude-code-global-each-skill-file-is-classified-as-exactly-one-of-in-sync-kit-updated-user-modified-the-command-never-writes-under-the-installed-skills-directory.flow-agents-workflow.ac2-standalone-drift-check-flow-agents-skill-drift-check-detects-and-reports-drift-between-installed-claude-skills-copies-and-the-current-kit-bundle-source-within-one-command-run-exit-code-distinguishes-drift-found-non-zero-from-clean-0-output-names-the-exact-refresh-command-flow-agents-init-runtime-claude-code-global-each-skill-file-is-classified-as-exactly-one-of-in-sync-kit-updated-user-modified-the-command-never-writes-under-the-installed-skills-directory",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/ac2-standalone-drift-check-flow-agents-skill-drift-check-detects-and-reports-drift-between-installed-claude-skills-copies-and-the-current-kit-bundle-source-within-one-command-run-exit-code-distinguishes-drift-found-non-zero-from-clean-0-output-names-the-exact-refresh-command-flow-agents-init-runtime-claude-code-global-each-skill-file-is-classified-as-exactly-one-of-in-sync-kit-updated-user-modified-the-command-never-writes-under-the-installed-skills-directory",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC2 `standalone-drift-check`: `flow-agents skill-drift-check` detects and reports drift between installed `~/.claude/skills` copies and the current kit/bundle source within one command run; exit code distinguishes drift-found (non-zero) from clean (0); output names the exact refresh command (`flow-agents init --runtime claude-code --global`); each skill file is classified as exactly one of `in_sync` / `kit_updated` / `user_modified`; the command never writes under the installed skills directory",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-ac3-sessionstart-advisory-a-claude-code-sessionstart-advisory-line-surfaces-the-drift-summary-when-running-inside-a-kit-bearing-checkout-repo-has-kits-and-a-built-dist-claude-code-claude-skills-the-advisory-never-blocks-session-start-continue-true-always-a-failure-inside-the-drift-check-is-caught-and-produces-no-advisory-rather-than-breaking-the-hook-chain-mirrors-every-other-steering-helper-s-try-catch-return-convention-already-in-workflow-steering-js.flow-agents-workflow.ac3-sessionstart-advisory-a-claude-code-sessionstart-advisory-line-surfaces-the-drift-summary-when-running-inside-a-kit-bearing-checkout-repo-has-kits-and-a-built-dist-claude-code-claude-skills-the-advisory-never-blocks-session-start-continue-true-always-a-failure-inside-the-drift-check-is-caught-and-produces-no-advisory-rather-than-breaking-the-hook-chain-mirrors-every-other-steering-helper-s-try-catch-return-convention-already-in-workflow-steering-js",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/ac3-sessionstart-advisory-a-claude-code-sessionstart-advisory-line-surfaces-the-drift-summary-when-running-inside-a-kit-bearing-checkout-repo-has-kits-and-a-built-dist-claude-code-claude-skills-the-advisory-never-blocks-session-start-continue-true-always-a-failure-inside-the-drift-check-is-caught-and-produces-no-advisory-rather-than-breaking-the-hook-chain-mirrors-every-other-steering-helper-s-try-catch-return-convention-already-in-workflow-steering-js",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC3 `sessionstart-advisory`: A Claude Code `SessionStart` advisory line surfaces the drift summary when running inside a kit-bearing checkout (repo has `kits/` and a built `dist/claude-code/.claude/skills`); the advisory never blocks session start (`continue: true` always); a failure inside the drift check is caught and produces no advisory rather than breaking the hook chain (mirrors every other `*Steering` helper's try/catch-return-`''` convention already in `workflow-steering.js`)",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-ac4-fixture-drift-classification-a-fixture-based-integration-eval-proves-using-an-isolated-home-equivalent-destination-and-a-synthetic-kit-source-override-no-network-a-kit-source-newer-than-the-last-installed-manifest-baseline-the-changed-file-is-reported-kit-updated-unchanged-files-remain-in-sync-b-a-locally-edited-installed-file-bytes-differ-from-the-manifest-baseline-reported-user-modified-and-is-not-overwritten-by-the-check-or-by-any-messaging-that-implies-auto-refresh-happened.flow-agents-workflow.ac4-fixture-drift-classification-a-fixture-based-integration-eval-proves-using-an-isolated-home-equivalent-destination-and-a-synthetic-kit-source-override-no-network-a-kit-source-newer-than-the-last-installed-manifest-baseline-the-changed-file-is-reported-kit-updated-unchanged-files-remain-in-sync-b-a-locally-edited-installed-file-bytes-differ-from-the-manifest-baseline-reported-user-modified-and-is-not-overwritten-by-the-check-or-by-any-messaging-that-implies-auto-refresh-happened",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/ac4-fixture-drift-classification-a-fixture-based-integration-eval-proves-using-an-isolated-home-equivalent-destination-and-a-synthetic-kit-source-override-no-network-a-kit-source-newer-than-the-last-installed-manifest-baseline-the-changed-file-is-reported-kit-updated-unchanged-files-remain-in-sync-b-a-locally-edited-installed-file-bytes-differ-from-the-manifest-baseline-reported-user-modified-and-is-not-overwritten-by-the-check-or-by-any-messaging-that-implies-auto-refresh-happened",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC4 `fixture-drift-classification`: A fixture-based integration eval proves, using an isolated `HOME`-equivalent destination and a synthetic kit-source override (no network): (a) kit source newer than the last-installed manifest baseline → the changed file is reported `kit_updated`, unchanged files remain `in_sync`; (b) a locally-edited installed file (bytes differ from the manifest baseline) → reported `user_modified` and is **not** overwritten by the check or by any messaging that implies auto-refresh happened",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-ac5-existing-evals-and-context-map-green-existing-installer-bundle-evals-stay-green-after-this-change-docs-context-map-md-passes-its-drift-check-if-the-command-list-changed.flow-agents-workflow.ac5-existing-evals-and-context-map-green-existing-installer-bundle-evals-stay-green-after-this-change-docs-context-map-md-passes-its-drift-check-if-the-command-list-changed",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-439/ac5-existing-evals-and-context-map-green-existing-installer-bundle-evals-stay-green-after-this-change-docs-context-map-md-passes-its-drift-check-if-the-command-list-changed",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC5 `existing-evals-and-context-map-green`: Existing installer/bundle evals stay green after this change; `docs/context-map.md` passes its drift check if the command list changed",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-review-code.flow-agents-workflow.imported-critique-from-review-code-md-superseded-review-code-2026-07-07t00-16-03z-2026-07-07t00-14-58z",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-439/review-code",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.policy-compliance",
+      "fieldOrBehavior": "Imported critique from review-code.md",
+      "value": "fail",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T00:14:58Z",
+        "superseded_by": "review-code@2026-07-07T00:16:03Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "kontourai-flow-agents-439-review-codex.flow-agents-workflow.imported-critique-from-review-codex-md-superseded-review-codex-2026-07-07t00-52-34z-2026-07-07t00-15-33z",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-439/review-codex",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.policy-compliance",
+      "fieldOrBehavior": "Imported critique from review-codex.md",
+      "value": "fail",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T00:15:33Z",
+        "superseded_by": "review-codex@2026-07-07T00:52:34Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "kontourai-flow-agents-439-review-security.flow-agents-workflow.imported-critique-from-review-security-md",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-439/review-security",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.policy-compliance",
+      "fieldOrBehavior": "Imported critique from review-security.md",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T00:15:50Z"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-review-code.flow-agents-workflow.imported-critique-from-review-code-md-superseded-review-code-2026-07-07t00-51-34z-2026-07-07t00-16-03z",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-439/review-code",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.policy-compliance",
+      "fieldOrBehavior": "Imported critique from review-code.md",
+      "value": "fail",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T00:16:03Z",
+        "superseded_by": "review-code@2026-07-07T00:51:34Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "kontourai-flow-agents-439-review-fix-resolution.flow-agents-workflow.all-blocking-findings-from-tool-code-reviewer-codex-independent-resolved-by-fix-wave-agent-fix-wave-review-exit-code-contract-hasdrift-1-high-dirent-walk-symlink-parity-med-manifest-key-containment-med-cli-init-error-containment-med-kit-removed-state-med-eval-coverage-for-unbaselined-missing-install-kit-removed-corrupt-manifest-always-rebuild-low-post-fix-suites-green-test-skill-drift-check-43-43-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-security-review-was-pass-comment-its-two-meds-were-the-symlink-error-containment-items-fixed-above-remaining-lows-pid-tmp-name-convention-cli-path-display-sanitization-accepted-with-reasons-in-the-deliver-artifact",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-439/review-fix-resolution",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.policy-compliance",
+      "fieldOrBehavior": "All blocking findings from tool-code-reviewer + codex-independent resolved by fix wave (agent fix-wave-review): exit-code contract (hasDrift→1, HIGH), Dirent walk symlink parity (MED), manifest-key containment (MED), CLI/init error containment (MED), kit_removed state (MED), eval coverage for unbaselined/missing_install/kit_removed/corrupt-manifest + always-rebuild (LOW). Post-fix suites green: test_skill_drift_check 43/43, test_install_merge 66/66, test_bundle_install 77/77, evals/run.sh static exit 0. Security review was PASS(comment); its two MEDs were the symlink + error-containment items fixed above; remaining LOWs (pid tmp-name convention, CLI path display sanitization) accepted with reasons in the deliver artifact.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "orchestrator-consolidated",
+        "reviewed_at": "2026-07-07T00:30:14Z"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-review-code.flow-agents-workflow.supersedes-the-imported-changes-requested-critique-all-its-findings-fixed-by-fix-wave-review-and-independently-re-verified-exit-code-contract-kit-removed-labeling-init-error-containment-see-review-fix-resolution-for-per-finding-detail",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-439/review-code",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.policy-compliance",
+      "fieldOrBehavior": "Supersedes the imported CHANGES_REQUESTED critique: all its findings fixed by fix-wave-review and independently re-verified (exit-code contract, kit_removed labeling, init error containment); see review-fix-resolution for per-finding detail.",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T00:51:34Z"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-review-codex.flow-agents-workflow.supersedes-the-imported-fail-critique-high-exit-code-contract-med-containment-symlink-findings-fixed-by-fix-wave-review-and-independently-re-verified-eval-blind-spots-closed-scenarios-7-10",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-439/review-codex",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.policy-compliance",
+      "fieldOrBehavior": "Supersedes the imported fail critique: HIGH exit-code contract + MED containment/symlink findings fixed by fix-wave-review and independently re-verified; eval blind spots closed (scenarios 7-10).",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "codex-independent",
+        "reviewed_at": "2026-07-07T00:51:36Z"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-439-review-codex.flow-agents-workflow.supersedes-imported-fail-critique-review-codex-md-high-exit-code-contract-and-med-containment-symlink-findings-fixed-by-fix-wave-review-independently-re-verified-eval-scenarios-7-10-close-the-blind-spots-original-reviewer-independent-codex-imported-via-tool-code-reviewer-lane",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-439/review-codex",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.policy-compliance",
+      "fieldOrBehavior": "Supersedes imported fail critique review-codex-md: HIGH exit-code contract and MED containment/symlink findings fixed by fix-wave-review, independently re-verified; eval scenarios 7-10 close the blind spots. (Original reviewer: independent Codex, imported via tool-code-reviewer lane.)",
+      "value": "pass",
+      "createdAt": "2026-07-07T00:52:34Z",
+      "updatedAt": "2026-07-07T00:52:34Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T00:52:34Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:kontourai-flow-agents-439-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-439-slice-1-detect-refresh-installed-skill-drift-scope-clear-acceptance-criteria-present-liveness-assignment-claims-confirmed-self-is-holder",
+      "claimId": "kontourai-flow-agents-439-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-439-slice-1-detect-refresh-installed-skill-drift-scope-clear-acceptance-criteria-present-liveness-assignment-claims-confirmed-self-is-holder",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Selected kontourai/flow-agents#439 slice 1 (detect+refresh installed-skill drift): scope clear, acceptance criteria present, liveness + assignment claims confirmed self_is_holder.",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-goal-fit-confirmed-blockers-checked-baseline-drift-researched-origin-main-c19c3e6-no-material-drift-vs-planning-scope-acceptance-criteria-verified-executable",
+      "claimId": "kontourai-flow-agents-439-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-goal-fit-confirmed-blockers-checked-baseline-drift-researched-origin-main-c19c3e6-no-material-drift-vs-planning-scope-acceptance-criteria-verified-executable",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Pickup probe passed: goal fit confirmed, blockers checked, baseline drift researched (origin/main c19c3e6, no material drift vs planning scope), acceptance criteria verified executable.",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-3-decisions-3-accepted-gaps-planning-readiness-ready",
+      "claimId": "kontourai-flow-agents-439-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-3-decisions-3-accepted-gaps-planning-readiness-ready",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Probe decisions recorded: 3 decisions, 3 accepted gaps. Planning readiness: ready.",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-3-waves-ac1-ac5-with-stable-ids-per-task-supports-traceability-files-named-stop-short-risks-and-sandbox-mode-worktree-recorded",
+      "claimId": "kontourai-flow-agents-439-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-3-waves-ac1-ac5-with-stable-ids-per-task-supports-traceability-files-named-stop-short-risks-and-sandbox-mode-worktree-recorded",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Implementation plan recorded: 3 waves, AC1-AC5 with stable ids, per-task Supports traceability, files named, stop-short risks and sandbox mode (worktree) recorded.",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-11-modified-3-new-files-all-within-plan-work-scope-drift-lib-manifest-write-cli-hook-advisory-evals-mirror-inventory-registrations-context-map-no-unrelated-changes-full-suite-evidence-green-28-28-66-66-77-77-static-clean",
+      "claimId": "kontourai-flow-agents-439-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-11-modified-3-new-files-all-within-plan-work-scope-drift-lib-manifest-write-cli-hook-advisory-evals-mirror-inventory-registrations-context-map-no-unrelated-changes-full-suite-evidence-green-28-28-66-66-77-77-static-clean",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Implementation scope: 11 modified + 3 new files, all within plan work_scope (drift lib, manifest write, CLI, hook advisory, evals, mirror/inventory registrations, context-map); no unrelated changes; full suite evidence green (28/28, 66/66, 77/77, static clean).",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-git-c-users-brian-dev-github-kontourai-flow-agents-worktrees-439-skill-drift-st.flow-agents-workflow.session-attestation-worktree-scope-audit-every-changed-path-within-the-plan-work-scope-allowlist-11-modified-3-new-files-deliver-artifact-per-wave-list-prior-command-shaped-check-contained-exit-0-inversion-folded-to-external-per-laundering-rule",
+      "claimId": "kontourai-flow-agents-439-git-c-users-brian-dev-github-kontourai-flow-agents-worktrees-439-skill-drift-st.flow-agents-workflow.session-attestation-worktree-scope-audit-every-changed-path-within-the-plan-work-scope-allowlist-11-modified-3-new-files-deliver-artifact-per-wave-list-prior-command-shaped-check-contained-exit-0-inversion-folded-to-external-per-laundering-rule",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Session attestation: worktree scope audit — every changed path within the plan work_scope allowlist (11 modified + 3 new files; deliver artifact per-wave list). Prior command-shaped check contained || exit 0 inversion; folded to external per laundering rule.",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-the-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-439-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-the-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Session attestation: npm run build --silent exited 0 in the worktree (verifier re-run). Non-manifest command folded to external per #381.",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-ac1-install-manifest.flow-agents-workflow.session-attestation-evals-integration-test-install-merge-sh-66-66-incl-manifest-write-generatedat-regeneration-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-439-ac1-install-manifest.flow-agents-workflow.session-attestation-evals-integration-test-install-merge-sh-66-66-incl-manifest-write-generatedat-regeneration-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Session attestation: evals/integration/test_install_merge.sh 66/66 incl. manifest write + generatedAt regeneration (verifier re-run). Non-manifest command folded to external per #381.",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-ac2-ac4-drift-check.flow-agents-workflow.session-attestation-evals-integration-test-skill-drift-check-sh-43-43-unbaselined-missing-install-exit-1-spot-checked-help-documents-0-1-2-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-439-ac2-ac4-drift-check.flow-agents-workflow.session-attestation-evals-integration-test-skill-drift-check-sh-43-43-unbaselined-missing-install-exit-1-spot-checked-help-documents-0-1-2-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Session attestation: evals/integration/test_skill_drift_check.sh 43/43; unbaselined/missing_install exit-1 spot-checked; --help documents 0/1/2 (verifier re-run). Non-manifest command folded to external per #381.",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-ac3-sessionstart.flow-agents-workflow.session-attestation-sessionstart-advisory-scenarios-green-present-when-drifted-absent-when-clean-corrupt-manifest-no-crash-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-439-ac3-sessionstart.flow-agents-workflow.session-attestation-sessionstart-advisory-scenarios-green-present-when-drifted-absent-when-clean-corrupt-manifest-no-crash-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Session attestation: SessionStart advisory scenarios green — present when drifted, absent when clean, corrupt manifest no-crash (verifier re-run). Non-manifest command folded to external per #381.",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-ac5-regressions.flow-agents-workflow.test-bundle-install-sh-77-77-context-map-check-exit-0-evals-run-sh-static-exit-0",
+      "claimId": "kontourai-flow-agents-439-ac5-regressions.flow-agents-workflow.test-bundle-install-sh-77-77-context-map-check-exit-0-evals-run-sh-static-exit-0",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "test_bundle_install.sh 77/77; context-map:check exit 0; evals/run.sh static exit 0",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-init-manifest-failure-path.flow-agents-workflow.warn-without-failing-install-path-source-verified-src-cli-init-ts-try-catch-but-no-fault-injection-eval-accepted-gap-non-blocking",
+      "claimId": "kontourai-flow-agents-439-init-manifest-failure-path.flow-agents-workflow.warn-without-failing-install-path-source-verified-src-cli-init-ts-try-catch-but-no-fault-injection-eval-accepted-gap-non-blocking",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "warn-without-failing-install path source-verified (src/cli/init.ts try/catch) but no fault-injection eval; accepted gap, non-blocking",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false
+    },
+    {
+      "id": "ev:kontourai-flow-agents-439-gate-claim-tests-evidence.flow-agents-workflow.independent-verifier-re-ran-all-ac-evidence-ac1-ac5-pass-43-43-66-66-77-77-static-context-map-green-exit-code-regression-spot-checked-fixed-one-accepted-non-blocking-gap-init-manifest-failure-fault-injection",
+      "claimId": "kontourai-flow-agents-439-gate-claim-tests-evidence.flow-agents-workflow.independent-verifier-re-ran-all-ac-evidence-ac1-ac5-pass-43-43-66-66-77-77-static-context-map-green-exit-code-regression-spot-checked-fixed-one-accepted-non-blocking-gap-init-manifest-failure-fault-injection",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-439/evidence.json",
+      "excerptOrSummary": "Independent verifier re-ran all AC evidence: AC1-AC5 PASS (43/43, 66/66, 77/77, static+context-map green); exit-code regression spot-checked fixed; one accepted non-blocking gap (init manifest-failure fault injection).",
+      "observedAt": "2026-07-07T00:52:34Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:attestation",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.design-probe.pickup-readiness:attestation",
+      "claimType": "builder.design-probe.pickup-readiness",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.design-probe.pickup-readiness claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.design-probe.decisions:attestation",
+      "claimType": "builder.design-probe.decisions",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.design-probe.decisions claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.plan.implementation:attestation",
+      "claimType": "builder.plan.implementation",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.plan.implementation claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:attestation",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:attestation",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:test_output",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    },
+    {
+      "id": "policy:builder.verify.policy-compliance",
+      "claimType": "builder.verify.policy-compliance",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.policy-compliance claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-439-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-439-slice-1-detect-refresh-installed-skill-drift-scope-clear-acceptance-criteria-present-liveness-assignment-claims-confirmed-self-is-holder",
+      "claimId": "kontourai-flow-agents-439-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-439-slice-1-detect-refresh-installed-skill-drift-scope-clear-acceptance-criteria-present-liveness-assignment-claims-confirmed-self-is-holder",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-439-slice-1-detect-refresh-installed-skill-drift-scope-clear-acceptance-criteria-present-liveness-assignment-claims-confirmed-self-is-holder"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-goal-fit-confirmed-blockers-checked-baseline-drift-researched-origin-main-c19c3e6-no-material-drift-vs-planning-scope-acceptance-criteria-verified-executable",
+      "claimId": "kontourai-flow-agents-439-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-goal-fit-confirmed-blockers-checked-baseline-drift-researched-origin-main-c19c3e6-no-material-drift-vs-planning-scope-acceptance-criteria-verified-executable",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-goal-fit-confirmed-blockers-checked-baseline-drift-researched-origin-main-c19c3e6-no-material-drift-vs-planning-scope-acceptance-criteria-verified-executable"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-3-decisions-3-accepted-gaps-planning-readiness-ready",
+      "claimId": "kontourai-flow-agents-439-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-3-decisions-3-accepted-gaps-planning-readiness-ready",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-3-decisions-3-accepted-gaps-planning-readiness-ready"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-3-waves-ac1-ac5-with-stable-ids-per-task-supports-traceability-files-named-stop-short-risks-and-sandbox-mode-worktree-recorded",
+      "claimId": "kontourai-flow-agents-439-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-3-waves-ac1-ac5-with-stable-ids-per-task-supports-traceability-files-named-stop-short-risks-and-sandbox-mode-worktree-recorded",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-3-waves-ac1-ac5-with-stable-ids-per-task-supports-traceability-files-named-stop-short-risks-and-sandbox-mode-worktree-recorded"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-11-modified-3-new-files-all-within-plan-work-scope-drift-lib-manifest-write-cli-hook-advisory-evals-mirror-inventory-registrations-context-map-no-unrelated-changes-full-suite-evidence-green-28-28-66-66-77-77-static-clean",
+      "claimId": "kontourai-flow-agents-439-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-11-modified-3-new-files-all-within-plan-work-scope-drift-lib-manifest-write-cli-hook-advisory-evals-mirror-inventory-registrations-context-map-no-unrelated-changes-full-suite-evidence-green-28-28-66-66-77-77-static-clean",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-gate-claim-implementation-scope.flow-agents-workflow.implementation-scope-11-modified-3-new-files-all-within-plan-work-scope-drift-lib-manifest-write-cli-hook-advisory-evals-mirror-inventory-registrations-context-map-no-unrelated-changes-full-suite-evidence-green-28-28-66-66-77-77-static-clean"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-git-c-users-brian-dev-github-kontourai-flow-agents-worktrees-439-skill-drift-st.flow-agents-workflow.session-attestation-worktree-scope-audit-every-changed-path-within-the-plan-work-scope-allowlist-11-modified-3-new-files-deliver-artifact-per-wave-list-prior-command-shaped-check-contained-exit-0-inversion-folded-to-external-per-laundering-rule",
+      "claimId": "kontourai-flow-agents-439-git-c-users-brian-dev-github-kontourai-flow-agents-worktrees-439-skill-drift-st.flow-agents-workflow.session-attestation-worktree-scope-audit-every-changed-path-within-the-plan-work-scope-allowlist-11-modified-3-new-files-deliver-artifact-per-wave-list-prior-command-shaped-check-contained-exit-0-inversion-folded-to-external-per-laundering-rule",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-git-c-users-brian-dev-github-kontourai-flow-agents-worktrees-439-skill-drift-st.flow-agents-workflow.session-attestation-worktree-scope-audit-every-changed-path-within-the-plan-work-scope-allowlist-11-modified-3-new-files-deliver-artifact-per-wave-list-prior-command-shaped-check-contained-exit-0-inversion-folded-to-external-per-laundering-rule"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-the-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-439-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-the-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-the-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-ac1-install-manifest.flow-agents-workflow.session-attestation-evals-integration-test-install-merge-sh-66-66-incl-manifest-write-generatedat-regeneration-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-439-ac1-install-manifest.flow-agents-workflow.session-attestation-evals-integration-test-install-merge-sh-66-66-incl-manifest-write-generatedat-regeneration-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-ac1-install-manifest.flow-agents-workflow.session-attestation-evals-integration-test-install-merge-sh-66-66-incl-manifest-write-generatedat-regeneration-verifier-re-run-non-manifest-command-folded-to-external-per-381"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-ac2-ac4-drift-check.flow-agents-workflow.session-attestation-evals-integration-test-skill-drift-check-sh-43-43-unbaselined-missing-install-exit-1-spot-checked-help-documents-0-1-2-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-439-ac2-ac4-drift-check.flow-agents-workflow.session-attestation-evals-integration-test-skill-drift-check-sh-43-43-unbaselined-missing-install-exit-1-spot-checked-help-documents-0-1-2-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-ac2-ac4-drift-check.flow-agents-workflow.session-attestation-evals-integration-test-skill-drift-check-sh-43-43-unbaselined-missing-install-exit-1-spot-checked-help-documents-0-1-2-verifier-re-run-non-manifest-command-folded-to-external-per-381"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-ac3-sessionstart.flow-agents-workflow.session-attestation-sessionstart-advisory-scenarios-green-present-when-drifted-absent-when-clean-corrupt-manifest-no-crash-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-439-ac3-sessionstart.flow-agents-workflow.session-attestation-sessionstart-advisory-scenarios-green-present-when-drifted-absent-when-clean-corrupt-manifest-no-crash-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-ac3-sessionstart.flow-agents-workflow.session-attestation-sessionstart-advisory-scenarios-green-present-when-drifted-absent-when-clean-corrupt-manifest-no-crash-verifier-re-run-non-manifest-command-folded-to-external-per-381"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-ac5-regressions.flow-agents-workflow.test-bundle-install-sh-77-77-context-map-check-exit-0-evals-run-sh-static-exit-0",
+      "claimId": "kontourai-flow-agents-439-ac5-regressions.flow-agents-workflow.test-bundle-install-sh-77-77-context-map-check-exit-0-evals-run-sh-static-exit-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-ac5-regressions.flow-agents-workflow.test-bundle-install-sh-77-77-context-map-check-exit-0-evals-run-sh-static-exit-0"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-gate-claim-tests-evidence.flow-agents-workflow.independent-verifier-re-ran-all-ac-evidence-ac1-ac5-pass-43-43-66-66-77-77-static-context-map-green-exit-code-regression-spot-checked-fixed-one-accepted-non-blocking-gap-init-manifest-failure-fault-injection",
+      "claimId": "kontourai-flow-agents-439-gate-claim-tests-evidence.flow-agents-workflow.independent-verifier-re-ran-all-ac-evidence-ac1-ac5-pass-43-43-66-66-77-77-static-context-map-green-exit-code-regression-spot-checked-fixed-one-accepted-non-blocking-gap-init-manifest-failure-fault-injection",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-439-gate-claim-tests-evidence.flow-agents-workflow.independent-verifier-re-ran-all-ac-evidence-ac1-ac5-pass-43-43-66-66-77-77-static-context-map-green-exit-code-regression-spot-checked-fixed-one-accepted-non-blocking-gap-init-manifest-failure-fault-injection"
+      ],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-ac1-install-writes-skill-manifest-flow-agents-init-runtime-claude-code-global-writes-a-per-skill-file-sha256-content-hash-manifest-claude-flow-agents-skills-manifest-json-sibling-of-install-json-alongside-the-existing-install-record-re-running-init-refreshes-drifted-skills-existing-copydirmerge-additive-sync-behavior-unchanged-and-regenerates-the-manifest-settings-preservation-430-is-untouched.flow-agents-workflow.ac1-install-writes-skill-manifest-flow-agents-init-runtime-claude-code-global-writes-a-per-skill-file-sha256-content-hash-manifest-claude-flow-agents-skills-manifest-json-sibling-of-install-json-alongside-the-existing-install-record-re-running-init-refreshes-drifted-skills-existing-copydirmerge-additive-sync-behavior-unchanged-and-regenerates-the-manifest-settings-preservation-430-is-untouched",
+      "claimId": "kontourai-flow-agents-439-ac1-install-writes-skill-manifest-flow-agents-init-runtime-claude-code-global-writes-a-per-skill-file-sha256-content-hash-manifest-claude-flow-agents-skills-manifest-json-sibling-of-install-json-alongside-the-existing-install-record-re-running-init-refreshes-drifted-skills-existing-copydirmerge-additive-sync-behavior-unchanged-and-regenerates-the-manifest-settings-preservation-430-is-untouched.flow-agents-workflow.ac1-install-writes-skill-manifest-flow-agents-init-runtime-claude-code-global-writes-a-per-skill-file-sha256-content-hash-manifest-claude-flow-agents-skills-manifest-json-sibling-of-install-json-alongside-the-existing-install-record-re-running-init-refreshes-drifted-skills-existing-copydirmerge-additive-sync-behavior-unchanged-and-regenerates-the-manifest-settings-preservation-430-is-untouched",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-ac2-standalone-drift-check-flow-agents-skill-drift-check-detects-and-reports-drift-between-installed-claude-skills-copies-and-the-current-kit-bundle-source-within-one-command-run-exit-code-distinguishes-drift-found-non-zero-from-clean-0-output-names-the-exact-refresh-command-flow-agents-init-runtime-claude-code-global-each-skill-file-is-classified-as-exactly-one-of-in-sync-kit-updated-user-modified-the-command-never-writes-under-the-installed-skills-directory.flow-agents-workflow.ac2-standalone-drift-check-flow-agents-skill-drift-check-detects-and-reports-drift-between-installed-claude-skills-copies-and-the-current-kit-bundle-source-within-one-command-run-exit-code-distinguishes-drift-found-non-zero-from-clean-0-output-names-the-exact-refresh-command-flow-agents-init-runtime-claude-code-global-each-skill-file-is-classified-as-exactly-one-of-in-sync-kit-updated-user-modified-the-command-never-writes-under-the-installed-skills-directory",
+      "claimId": "kontourai-flow-agents-439-ac2-standalone-drift-check-flow-agents-skill-drift-check-detects-and-reports-drift-between-installed-claude-skills-copies-and-the-current-kit-bundle-source-within-one-command-run-exit-code-distinguishes-drift-found-non-zero-from-clean-0-output-names-the-exact-refresh-command-flow-agents-init-runtime-claude-code-global-each-skill-file-is-classified-as-exactly-one-of-in-sync-kit-updated-user-modified-the-command-never-writes-under-the-installed-skills-directory.flow-agents-workflow.ac2-standalone-drift-check-flow-agents-skill-drift-check-detects-and-reports-drift-between-installed-claude-skills-copies-and-the-current-kit-bundle-source-within-one-command-run-exit-code-distinguishes-drift-found-non-zero-from-clean-0-output-names-the-exact-refresh-command-flow-agents-init-runtime-claude-code-global-each-skill-file-is-classified-as-exactly-one-of-in-sync-kit-updated-user-modified-the-command-never-writes-under-the-installed-skills-directory",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-ac3-sessionstart-advisory-a-claude-code-sessionstart-advisory-line-surfaces-the-drift-summary-when-running-inside-a-kit-bearing-checkout-repo-has-kits-and-a-built-dist-claude-code-claude-skills-the-advisory-never-blocks-session-start-continue-true-always-a-failure-inside-the-drift-check-is-caught-and-produces-no-advisory-rather-than-breaking-the-hook-chain-mirrors-every-other-steering-helper-s-try-catch-return-convention-already-in-workflow-steering-js.flow-agents-workflow.ac3-sessionstart-advisory-a-claude-code-sessionstart-advisory-line-surfaces-the-drift-summary-when-running-inside-a-kit-bearing-checkout-repo-has-kits-and-a-built-dist-claude-code-claude-skills-the-advisory-never-blocks-session-start-continue-true-always-a-failure-inside-the-drift-check-is-caught-and-produces-no-advisory-rather-than-breaking-the-hook-chain-mirrors-every-other-steering-helper-s-try-catch-return-convention-already-in-workflow-steering-js",
+      "claimId": "kontourai-flow-agents-439-ac3-sessionstart-advisory-a-claude-code-sessionstart-advisory-line-surfaces-the-drift-summary-when-running-inside-a-kit-bearing-checkout-repo-has-kits-and-a-built-dist-claude-code-claude-skills-the-advisory-never-blocks-session-start-continue-true-always-a-failure-inside-the-drift-check-is-caught-and-produces-no-advisory-rather-than-breaking-the-hook-chain-mirrors-every-other-steering-helper-s-try-catch-return-convention-already-in-workflow-steering-js.flow-agents-workflow.ac3-sessionstart-advisory-a-claude-code-sessionstart-advisory-line-surfaces-the-drift-summary-when-running-inside-a-kit-bearing-checkout-repo-has-kits-and-a-built-dist-claude-code-claude-skills-the-advisory-never-blocks-session-start-continue-true-always-a-failure-inside-the-drift-check-is-caught-and-produces-no-advisory-rather-than-breaking-the-hook-chain-mirrors-every-other-steering-helper-s-try-catch-return-convention-already-in-workflow-steering-js",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-ac4-fixture-drift-classification-a-fixture-based-integration-eval-proves-using-an-isolated-home-equivalent-destination-and-a-synthetic-kit-source-override-no-network-a-kit-source-newer-than-the-last-installed-manifest-baseline-the-changed-file-is-reported-kit-updated-unchanged-files-remain-in-sync-b-a-locally-edited-installed-file-bytes-differ-from-the-manifest-baseline-reported-user-modified-and-is-not-overwritten-by-the-check-or-by-any-messaging-that-implies-auto-refresh-happened.flow-agents-workflow.ac4-fixture-drift-classification-a-fixture-based-integration-eval-proves-using-an-isolated-home-equivalent-destination-and-a-synthetic-kit-source-override-no-network-a-kit-source-newer-than-the-last-installed-manifest-baseline-the-changed-file-is-reported-kit-updated-unchanged-files-remain-in-sync-b-a-locally-edited-installed-file-bytes-differ-from-the-manifest-baseline-reported-user-modified-and-is-not-overwritten-by-the-check-or-by-any-messaging-that-implies-auto-refresh-happened",
+      "claimId": "kontourai-flow-agents-439-ac4-fixture-drift-classification-a-fixture-based-integration-eval-proves-using-an-isolated-home-equivalent-destination-and-a-synthetic-kit-source-override-no-network-a-kit-source-newer-than-the-last-installed-manifest-baseline-the-changed-file-is-reported-kit-updated-unchanged-files-remain-in-sync-b-a-locally-edited-installed-file-bytes-differ-from-the-manifest-baseline-reported-user-modified-and-is-not-overwritten-by-the-check-or-by-any-messaging-that-implies-auto-refresh-happened.flow-agents-workflow.ac4-fixture-drift-classification-a-fixture-based-integration-eval-proves-using-an-isolated-home-equivalent-destination-and-a-synthetic-kit-source-override-no-network-a-kit-source-newer-than-the-last-installed-manifest-baseline-the-changed-file-is-reported-kit-updated-unchanged-files-remain-in-sync-b-a-locally-edited-installed-file-bytes-differ-from-the-manifest-baseline-reported-user-modified-and-is-not-overwritten-by-the-check-or-by-any-messaging-that-implies-auto-refresh-happened",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-ac5-existing-evals-and-context-map-green-existing-installer-bundle-evals-stay-green-after-this-change-docs-context-map-md-passes-its-drift-check-if-the-command-list-changed.flow-agents-workflow.ac5-existing-evals-and-context-map-green-existing-installer-bundle-evals-stay-green-after-this-change-docs-context-map-md-passes-its-drift-check-if-the-command-list-changed",
+      "claimId": "kontourai-flow-agents-439-ac5-existing-evals-and-context-map-green-existing-installer-bundle-evals-stay-green-after-this-change-docs-context-map-md-passes-its-drift-check-if-the-command-list-changed.flow-agents-workflow.ac5-existing-evals-and-context-map-green-existing-installer-bundle-evals-stay-green-after-this-change-docs-context-map-md-passes-its-drift-check-if-the-command-list-changed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-review-security.flow-agents-workflow.imported-critique-from-review-security-md",
+      "claimId": "kontourai-flow-agents-439-review-security.flow-agents-workflow.imported-critique-from-review-security-md",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-review-fix-resolution.flow-agents-workflow.all-blocking-findings-from-tool-code-reviewer-codex-independent-resolved-by-fix-wave-agent-fix-wave-review-exit-code-contract-hasdrift-1-high-dirent-walk-symlink-parity-med-manifest-key-containment-med-cli-init-error-containment-med-kit-removed-state-med-eval-coverage-for-unbaselined-missing-install-kit-removed-corrupt-manifest-always-rebuild-low-post-fix-suites-green-test-skill-drift-check-43-43-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-security-review-was-pass-comment-its-two-meds-were-the-symlink-error-containment-items-fixed-above-remaining-lows-pid-tmp-name-convention-cli-path-display-sanitization-accepted-with-reasons-in-the-deliver-artifact",
+      "claimId": "kontourai-flow-agents-439-review-fix-resolution.flow-agents-workflow.all-blocking-findings-from-tool-code-reviewer-codex-independent-resolved-by-fix-wave-agent-fix-wave-review-exit-code-contract-hasdrift-1-high-dirent-walk-symlink-parity-med-manifest-key-containment-med-cli-init-error-containment-med-kit-removed-state-med-eval-coverage-for-unbaselined-missing-install-kit-removed-corrupt-manifest-always-rebuild-low-post-fix-suites-green-test-skill-drift-check-43-43-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-security-review-was-pass-comment-its-two-meds-were-the-symlink-error-containment-items-fixed-above-remaining-lows-pid-tmp-name-convention-cli-path-display-sanitization-accepted-with-reasons-in-the-deliver-artifact",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-review-code.flow-agents-workflow.supersedes-the-imported-changes-requested-critique-all-its-findings-fixed-by-fix-wave-review-and-independently-re-verified-exit-code-contract-kit-removed-labeling-init-error-containment-see-review-fix-resolution-for-per-finding-detail",
+      "claimId": "kontourai-flow-agents-439-review-code.flow-agents-workflow.supersedes-the-imported-changes-requested-critique-all-its-findings-fixed-by-fix-wave-review-and-independently-re-verified-exit-code-contract-kit-removed-labeling-init-error-containment-see-review-fix-resolution-for-per-finding-detail",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-review-codex.flow-agents-workflow.supersedes-the-imported-fail-critique-high-exit-code-contract-med-containment-symlink-findings-fixed-by-fix-wave-review-and-independently-re-verified-eval-blind-spots-closed-scenarios-7-10",
+      "claimId": "kontourai-flow-agents-439-review-codex.flow-agents-workflow.supersedes-the-imported-fail-critique-high-exit-code-contract-med-containment-symlink-findings-fixed-by-fix-wave-review-and-independently-re-verified-eval-blind-spots-closed-scenarios-7-10",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-439-review-codex.flow-agents-workflow.supersedes-imported-fail-critique-review-codex-md-high-exit-code-contract-and-med-containment-symlink-findings-fixed-by-fix-wave-review-independently-re-verified-eval-scenarios-7-10-close-the-blind-spots-original-reviewer-independent-codex-imported-via-tool-code-reviewer-lane",
+      "claimId": "kontourai-flow-agents-439-review-codex.flow-agents-workflow.supersedes-imported-fail-critique-review-codex-md-high-exit-code-contract-and-med-containment-symlink-findings-fixed-by-fix-wave-review-independently-re-verified-eval-scenarios-7-10-close-the-blind-spots-original-reviewer-independent-codex-imported-via-tool-code-reviewer-lane",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T00:52:34Z",
+      "verifiedAt": "2026-07-07T00:52:34Z"
+    }
+  ]
+}

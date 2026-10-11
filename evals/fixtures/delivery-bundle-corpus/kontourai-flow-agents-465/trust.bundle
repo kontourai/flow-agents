@@ -1,0 +1,933 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-465-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-465-foreign-file-false-positives-in-skill-drift-check-scope-ac-concrete-from-live-reproduction-claims-confirmed-self-is-holder",
+      "subjectType": "work-item",
+      "subjectId": "kontourai-flow-agents-465/gate-claim-selected-work",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Selected kontourai/flow-agents#465 (foreign-file false positives in skill-drift-check): scope + AC concrete from live reproduction; claims confirmed self_is_holder.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-465/kontourai-flow-agents-465--pull-work.md",
+            "summary": "Pull-work artifact with selection, probe, anchor, claims."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "selected-work",
+          "claim_type": "builder.pull-work.selected",
+          "subject_type": "work-item",
+          "step_id": "pull-work"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-inline-continuation-fix-live-evidence-ac-fresh-baseline-1f8e56b-recorded-at-pickup-no-blockers",
+      "subjectType": "work-item",
+      "subjectId": "kontourai-flow-agents-465/gate-claim-pickup-probe-readiness",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.design-probe.pickup-readiness",
+      "fieldOrBehavior": "Pickup probe passed inline: continuation fix, live-evidence AC, fresh baseline 1f8e56b recorded at pickup, no blockers.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-465/kontourai-flow-agents-465--pull-work.md",
+            "summary": "Probe record §pickup_probe."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "pickup-probe-readiness",
+          "claim_type": "builder.design-probe.pickup-readiness",
+          "subject_type": "work-item",
+          "step_id": "design-probe"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-foreign-exclusion-semantics-decided-0-accepted-gaps-planning-readiness-ready-issue-acceptance-sketch-is-the-plan",
+      "subjectType": "decision",
+      "subjectId": "kontourai-flow-agents-465/gate-claim-probe-decisions-or-accepted-gaps",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.design-probe.decisions",
+      "fieldOrBehavior": "Probe decisions recorded: foreign-exclusion semantics decided; 0 accepted gaps; planning readiness: ready (issue acceptance sketch is the plan).",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-465/kontourai-flow-agents-465--pull-work.md",
+            "summary": "Decisions and route in pull-work artifact."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "probe-decisions-or-accepted-gaps",
+          "claim_type": "builder.design-probe.decisions",
+          "subject_type": "decision",
+          "step_id": "design-probe"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-gate-claim-implementation-plan.flow-agents-workflow.plan-recorded-single-task-wave-ac1-ac4-with-evidence-commands-files-named-stop-short-risks-worktree-sandbox-fresh-baseline-1f8e56b",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-465/gate-claim-implementation-plan",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.plan.implementation",
+      "fieldOrBehavior": "Plan recorded: single-task wave, AC1-AC4 with evidence commands, files named, stop-short risks, worktree sandbox, fresh baseline 1f8e56b.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.plan.implementation:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-465/kontourai-flow-agents-465--plan-work.md",
+            "summary": "Plan artifact with DoD and AC traceability."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "implementation-plan",
+          "claim_type": "builder.plan.implementation",
+          "subject_type": "artifact",
+          "step_id": "plan"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-gate-claim-implementation-scope.flow-agents-workflow.scope-exactly-2-files-scripts-hooks-lib-skill-drift-js-one-branch-skip-eval-scenario-11-suites-green-52-52-66-66-77-77-static-clean-no-unrelated-changes",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-465/gate-claim-implementation-scope",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Scope: exactly 2 files (scripts/hooks/lib/skill-drift.js one-branch skip + eval Scenario 11); suites green 52/52, 66/66, 77/77, static clean; no unrelated changes.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-465/kontourai-flow-agents-465--plan-work.md",
+            "summary": "Plan scope matches worker-reported diff."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "implementation-scope",
+          "claim_type": "builder.execute.scope",
+          "subject_type": "change",
+          "step_id": "execute"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/build",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Session attestation: npm run build --silent exited 0 in worktree (verifier re-run). Non-manifest command folded to external per #381.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-tests-skill-drift-and-siblings.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-incl-scenario-11-a-b-c-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/tests-skill-drift-and-siblings",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Session attestation: test_skill_drift_check 52/52 (incl. Scenario 11 a/b/c), test_install_merge 66/66, test_bundle_install 77/77, evals/run.sh static exit 0 (verifier re-run). Non-manifest commands folded to external per #381.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-ac1-foreign-files-skipped.flow-agents-workflow.compareskilldrift-s-skip-branch-kithash-null-manifesthash-null-continue-excludes-installed-only-no-manifest-entry-paths-from-files-summary-hasdrift-before-any-state-is-assigned-independently-confirmed-via-a-scratch-fixture-scratchpad-v465-spotcheck-js-requiring-the-worktree-lib-directly-built-a-kit-installed-dir-manifest-via-buildmanifest-added-one-foreign-installed-only-file-no-kit-manifest-counterpart-report-files-excludes-the-foreign-path-summary-total-1-kit-file-only-hasdrift-false-then-drifted-the-sole-kit-file-hasdrift-true-with-files-length-1-only-skill-one-skill-md-state-kit-updated-reported-foreign-path-still-absent",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/ac1-foreign-files-skipped",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "compareSkillDrift's skip branch (kitHash===null && manifestHash===null -> continue) excludes installed-only, no-manifest-entry paths from files[]/summary/hasDrift before any state is assigned. Independently confirmed via a scratch fixture (scratchpad/v465/spotcheck.js) requiring the worktree lib directly: built a kit+installed dir+manifest via buildManifest, added one foreign installed-only file (no kit/manifest counterpart) -> report.files excludes the foreign path, summary.total===1 (kit file only), hasDrift===false; then drifted the sole kit file -> hasDrift===true with files.length===1, only skill-one/SKILL.md (state kit_updated) reported, foreign path still absent.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:source_excerpt",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "diff",
+        "artifact_refs": [
+          {
+            "kind": "source",
+            "file": "scripts/hooks/lib/skill-drift.js",
+            "line_start": 271,
+            "line_end": 280,
+            "excerpt": "if (kitHash === null && manifestHash === null) continue;"
+          },
+          {
+            "kind": "command",
+            "summary": "node /private/tmp/.../scratchpad/v465/spotcheck.js -> 6/6 PASS lines incl. 'foreign path absent from files[]', 'hasDrift === false', 'summary.total === 1', 'hasDrift === true after kit-file drift', 'foreign path still absent from files[] after drift', 'only skill-one/SKILL.md reported, state=kit_updated'; exit 0"
+          }
+        ]
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-ac2-eval-proves-foreign-clean.flow-agents-workflow.session-attestation-scenario-11-a-b-c-green-within-test-skill-drift-check-sh-52-52-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/ac2-eval-proves-foreign-clean",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Session attestation: Scenario 11 a/b/c green within test_skill_drift_check.sh 52/52 (verifier re-run). Non-manifest command folded to external per #381.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-ac3-suites-green.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-build-green-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/ac3-suites-green",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Session attestation: test_skill_drift_check 52/52, test_install_merge 66/66, test_bundle_install 77/77, evals/run.sh static exit 0, build green (verifier re-run). Non-manifest commands folded to external per #381.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-ac4-live-machine-clean.flow-agents-workflow.ac4-requires-a-live-machine-run-of-node-build-src-cli-js-skill-drift-check-plus-the-sessionstart-run-advisory-on-the-orchestrator-s-actual-machine-kit-baseline-established-32-foreign-files-present-post-merge-candidate-build-this-is-explicitly-orchestrator-owned-per-task-scope-external-attestation-not-something-the-verifier-s-sandboxed-worktree-check-can-reproduce-not-run-by-this-verification-pass-recorded-as-not-verified-pending-orchestrator-not-a-failure-of-the-diff-under-review",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/ac4-live-machine-clean",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC4 requires a live-machine run of node build/src/cli.js skill-drift-check plus the SessionStart run() advisory on the orchestrator's actual machine (kit baseline established, 32 foreign files present), post-merge-candidate build. This is explicitly orchestrator-owned per task scope (external attestation, not something the verifier's sandboxed worktree check can reproduce). Not run by this verification pass; recorded as not_verified pending orchestrator, not a failure of the diff under review.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "kontourai-flow-agents-465-gate-claim-tests-evidence.flow-agents-workflow.verifier-re-ran-ac1-ac3-52-52-66-66-77-77-static-clean-6-6-lib-spot-check-ac4-live-on-owner-machine-foreign-noise-eliminated-57-to-25-files-0-foreign-reported-advisory-silent-vs-default-root-genuine-upstream-kit-drift-464-learning-review-correctly-detected-vs-fresh-bundle-stale-dist-follow-up-filed-as-467",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/gate-claim-tests-evidence",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Verifier re-ran AC1-AC3 (52/52, 66/66, 77/77, static clean, 6/6 lib spot-check); AC4 live on owner machine: foreign noise eliminated (57 to 25 files, 0 foreign reported), advisory silent vs default root, genuine upstream kit drift (#464 learning-review) correctly detected vs fresh bundle. Stale-dist follow-up filed as #467.",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/kontourai-flow-agents-465/kontourai-flow-agents-465--review.md",
+            "summary": "Verifier verdict artifact + orchestrator live AC4 evidence."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "tests-evidence",
+          "claim_type": "builder.verify.tests",
+          "subject_type": "flow-step",
+          "step_id": "verify"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-ac1-foreign-files-skipped-installed-only-paths-with-no-kit-source-counterpart-and-no-manifest-entry-are-absent-from-files-all-summary-counts-and-never-set-hasdrift.flow-agents-workflow.ac1-foreign-files-skipped-installed-only-paths-with-no-kit-source-counterpart-and-no-manifest-entry-are-absent-from-files-all-summary-counts-and-never-set-hasdrift",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/ac1-foreign-files-skipped-installed-only-paths-with-no-kit-source-counterpart-and-no-manifest-entry-are-absent-from-files-all-summary-counts-and-never-set-hasdrift",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC1 `foreign-files-skipped`: installed-only paths with no kit-source counterpart and no manifest entry are absent from `files[]`, all summary counts, and never set `hasDrift`",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-ac2-eval-proves-foreign-clean-eval-seeds-a-foreign-file-into-the-installed-dir-clean-kit-state-stays-exit-0-with-no-foreign-path-in-output-a-drifted-kit-file-still-exits-1-listing-only-the-kit-file-sessionstart-advisory-scenario-with-foreign-file-present-and-kit-in-sync-emits-no-skill-drift.flow-agents-workflow.ac2-eval-proves-foreign-clean-eval-seeds-a-foreign-file-into-the-installed-dir-clean-kit-state-stays-exit-0-with-no-foreign-path-in-output-a-drifted-kit-file-still-exits-1-listing-only-the-kit-file-sessionstart-advisory-scenario-with-foreign-file-present-and-kit-in-sync-emits-no-skill-drift",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/ac2-eval-proves-foreign-clean-eval-seeds-a-foreign-file-into-the-installed-dir-clean-kit-state-stays-exit-0-with-no-foreign-path-in-output-a-drifted-kit-file-still-exits-1-listing-only-the-kit-file-sessionstart-advisory-scenario-with-foreign-file-present-and-kit-in-sync-emits-no-skill-drift",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC2 `eval-proves-foreign-clean`: eval seeds a foreign file into the installed dir — clean kit state stays exit 0 with no foreign path in output; a drifted kit file still exits 1 listing only the kit file; SessionStart advisory scenario with foreign file present and kit in sync emits no `[SKILL DRIFT]`",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-ac3-suites-green-full-test-skill-drift-check-sh-existing-43-new-test-install-merge-sh-66-66-test-bundle-install-sh-77-77-evals-run-sh-static-all-pass.flow-agents-workflow.ac3-suites-green-full-test-skill-drift-check-sh-existing-43-new-test-install-merge-sh-66-66-test-bundle-install-sh-77-77-evals-run-sh-static-all-pass",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/ac3-suites-green-full-test-skill-drift-check-sh-existing-43-new-test-install-merge-sh-66-66-test-bundle-install-sh-77-77-evals-run-sh-static-all-pass",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC3 `suites-green`: full `test_skill_drift_check.sh` (existing 43 + new), `test_install_merge.sh` 66/66, `test_bundle_install.sh` 77/77, `evals/run.sh static` all pass",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-ac4-live-machine-clean-on-this-machine-kit-baseline-established-32-foreign-files-present-node-build-src-cli-js-skill-drift-check-exits-0-and-the-sessionstart-run-emits-no-advisory.flow-agents-workflow.ac4-live-machine-clean-on-this-machine-kit-baseline-established-32-foreign-files-present-node-build-src-cli-js-skill-drift-check-exits-0-and-the-sessionstart-run-emits-no-advisory",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-465/ac4-live-machine-clean-on-this-machine-kit-baseline-established-32-foreign-files-present-node-build-src-cli-js-skill-drift-check-exits-0-and-the-sessionstart-run-emits-no-advisory",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC4 `live-machine-clean`: on this machine (kit baseline established, 32 foreign files present), `node build/src/cli.js skill-drift-check` exits 0 and the SessionStart `run()` emits no advisory",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-465-review-code.flow-agents-workflow.imported-critique-from-review-code-md",
+      "subjectType": "artifact",
+      "subjectId": "kontourai-flow-agents-465/review-code",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.policy-compliance",
+      "fieldOrBehavior": "Imported critique from review-code.md",
+      "value": "pass",
+      "createdAt": "2026-07-07T04:41:44Z",
+      "updatedAt": "2026-07-07T04:41:44Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T04:29:10Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:kontourai-flow-agents-465-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-465-foreign-file-false-positives-in-skill-drift-check-scope-ac-concrete-from-live-reproduction-claims-confirmed-self-is-holder",
+      "claimId": "kontourai-flow-agents-465-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-465-foreign-file-false-positives-in-skill-drift-check-scope-ac-concrete-from-live-reproduction-claims-confirmed-self-is-holder",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Selected kontourai/flow-agents#465 (foreign-file false positives in skill-drift-check): scope + AC concrete from live reproduction; claims confirmed self_is_holder.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-inline-continuation-fix-live-evidence-ac-fresh-baseline-1f8e56b-recorded-at-pickup-no-blockers",
+      "claimId": "kontourai-flow-agents-465-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-inline-continuation-fix-live-evidence-ac-fresh-baseline-1f8e56b-recorded-at-pickup-no-blockers",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Pickup probe passed inline: continuation fix, live-evidence AC, fresh baseline 1f8e56b recorded at pickup, no blockers.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-foreign-exclusion-semantics-decided-0-accepted-gaps-planning-readiness-ready-issue-acceptance-sketch-is-the-plan",
+      "claimId": "kontourai-flow-agents-465-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-foreign-exclusion-semantics-decided-0-accepted-gaps-planning-readiness-ready-issue-acceptance-sketch-is-the-plan",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Probe decisions recorded: foreign-exclusion semantics decided; 0 accepted gaps; planning readiness: ready (issue acceptance sketch is the plan).",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-gate-claim-implementation-plan.flow-agents-workflow.plan-recorded-single-task-wave-ac1-ac4-with-evidence-commands-files-named-stop-short-risks-worktree-sandbox-fresh-baseline-1f8e56b",
+      "claimId": "kontourai-flow-agents-465-gate-claim-implementation-plan.flow-agents-workflow.plan-recorded-single-task-wave-ac1-ac4-with-evidence-commands-files-named-stop-short-risks-worktree-sandbox-fresh-baseline-1f8e56b",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Plan recorded: single-task wave, AC1-AC4 with evidence commands, files named, stop-short risks, worktree sandbox, fresh baseline 1f8e56b.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-gate-claim-implementation-scope.flow-agents-workflow.scope-exactly-2-files-scripts-hooks-lib-skill-drift-js-one-branch-skip-eval-scenario-11-suites-green-52-52-66-66-77-77-static-clean-no-unrelated-changes",
+      "claimId": "kontourai-flow-agents-465-gate-claim-implementation-scope.flow-agents-workflow.scope-exactly-2-files-scripts-hooks-lib-skill-drift-js-one-branch-skip-eval-scenario-11-suites-green-52-52-66-66-77-77-static-clean-no-unrelated-changes",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Scope: exactly 2 files (scripts/hooks/lib/skill-drift.js one-branch skip + eval Scenario 11); suites green 52/52, 66/66, 77/77, static clean; no unrelated changes.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-465-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Session attestation: npm run build --silent exited 0 in worktree (verifier re-run). Non-manifest command folded to external per #381.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-tests-skill-drift-and-siblings.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-incl-scenario-11-a-b-c-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-465-tests-skill-drift-and-siblings.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-incl-scenario-11-a-b-c-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Session attestation: test_skill_drift_check 52/52 (incl. Scenario 11 a/b/c), test_install_merge 66/66, test_bundle_install 77/77, evals/run.sh static exit 0 (verifier re-run). Non-manifest commands folded to external per #381.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-ac1-foreign-files-skipped.flow-agents-workflow.compareskilldrift-s-skip-branch-kithash-null-manifesthash-null-continue-excludes-installed-only-no-manifest-entry-paths-from-files-summary-hasdrift-before-any-state-is-assigned-independently-confirmed-via-a-scratch-fixture-scratchpad-v465-spotcheck-js-requiring-the-worktree-lib-directly-built-a-kit-installed-dir-manifest-via-buildmanifest-added-one-foreign-installed-only-file-no-kit-manifest-counterpart-report-files-excludes-the-foreign-path-summary-total-1-kit-file-only-hasdrift-false-then-drifted-the-sole-kit-file-hasdrift-true-with-files-length-1-only-skill-one-skill-md-state-kit-updated-reported-foreign-path-still-absent",
+      "claimId": "kontourai-flow-agents-465-ac1-foreign-files-skipped.flow-agents-workflow.compareskilldrift-s-skip-branch-kithash-null-manifesthash-null-continue-excludes-installed-only-no-manifest-entry-paths-from-files-summary-hasdrift-before-any-state-is-assigned-independently-confirmed-via-a-scratch-fixture-scratchpad-v465-spotcheck-js-requiring-the-worktree-lib-directly-built-a-kit-installed-dir-manifest-via-buildmanifest-added-one-foreign-installed-only-file-no-kit-manifest-counterpart-report-files-excludes-the-foreign-path-summary-total-1-kit-file-only-hasdrift-false-then-drifted-the-sole-kit-file-hasdrift-true-with-files-length-1-only-skill-one-skill-md-state-kit-updated-reported-foreign-path-still-absent",
+      "evidenceType": "source_excerpt",
+      "method": "extraction",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "compareSkillDrift's skip branch (kitHash===null && manifestHash===null -> continue) excludes installed-only, no-manifest-entry paths from files[]/summary/hasDrift before any state is assigned. Independently confirmed via a scratch fixture (scratchpad/v465/spotcheck.js) requiring the worktree lib directly: built a kit+installed dir+manifest via buildManifest, added one foreign installed-only file (no kit/manifest counterpart) -> report.files excludes the foreign path, summary.total===1 (kit file only), hasDrift===false; then drifted the sole kit file -> hasDrift===true with files.length===1, only skill-one/SKILL.md (state kit_updated) reported, foreign path still absent.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-ac2-eval-proves-foreign-clean.flow-agents-workflow.session-attestation-scenario-11-a-b-c-green-within-test-skill-drift-check-sh-52-52-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-465-ac2-eval-proves-foreign-clean.flow-agents-workflow.session-attestation-scenario-11-a-b-c-green-within-test-skill-drift-check-sh-52-52-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Session attestation: Scenario 11 a/b/c green within test_skill_drift_check.sh 52/52 (verifier re-run). Non-manifest command folded to external per #381.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-ac3-suites-green.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-build-green-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-465-ac3-suites-green.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-build-green-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Session attestation: test_skill_drift_check 52/52, test_install_merge 66/66, test_bundle_install 77/77, evals/run.sh static exit 0, build green (verifier re-run). Non-manifest commands folded to external per #381.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-ac4-live-machine-clean.flow-agents-workflow.ac4-requires-a-live-machine-run-of-node-build-src-cli-js-skill-drift-check-plus-the-sessionstart-run-advisory-on-the-orchestrator-s-actual-machine-kit-baseline-established-32-foreign-files-present-post-merge-candidate-build-this-is-explicitly-orchestrator-owned-per-task-scope-external-attestation-not-something-the-verifier-s-sandboxed-worktree-check-can-reproduce-not-run-by-this-verification-pass-recorded-as-not-verified-pending-orchestrator-not-a-failure-of-the-diff-under-review",
+      "claimId": "kontourai-flow-agents-465-ac4-live-machine-clean.flow-agents-workflow.ac4-requires-a-live-machine-run-of-node-build-src-cli-js-skill-drift-check-plus-the-sessionstart-run-advisory-on-the-orchestrator-s-actual-machine-kit-baseline-established-32-foreign-files-present-post-merge-candidate-build-this-is-explicitly-orchestrator-owned-per-task-scope-external-attestation-not-something-the-verifier-s-sandboxed-worktree-check-can-reproduce-not-run-by-this-verification-pass-recorded-as-not-verified-pending-orchestrator-not-a-failure-of-the-diff-under-review",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "AC4 requires a live-machine run of node build/src/cli.js skill-drift-check plus the SessionStart run() advisory on the orchestrator's actual machine (kit baseline established, 32 foreign files present), post-merge-candidate build. This is explicitly orchestrator-owned per task scope (external attestation, not something the verifier's sandboxed worktree check can reproduce). Not run by this verification pass; recorded as not_verified pending orchestrator, not a failure of the diff under review.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false
+    },
+    {
+      "id": "ev:kontourai-flow-agents-465-gate-claim-tests-evidence.flow-agents-workflow.verifier-re-ran-ac1-ac3-52-52-66-66-77-77-static-clean-6-6-lib-spot-check-ac4-live-on-owner-machine-foreign-noise-eliminated-57-to-25-files-0-foreign-reported-advisory-silent-vs-default-root-genuine-upstream-kit-drift-464-learning-review-correctly-detected-vs-fresh-bundle-stale-dist-follow-up-filed-as-467",
+      "claimId": "kontourai-flow-agents-465-gate-claim-tests-evidence.flow-agents-workflow.verifier-re-ran-ac1-ac3-52-52-66-66-77-77-static-clean-6-6-lib-spot-check-ac4-live-on-owner-machine-foreign-noise-eliminated-57-to-25-files-0-foreign-reported-advisory-silent-vs-default-root-genuine-upstream-kit-drift-464-learning-review-correctly-detected-vs-fresh-bundle-stale-dist-follow-up-filed-as-467",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-465/evidence.json",
+      "excerptOrSummary": "Verifier re-ran AC1-AC3 (52/52, 66/66, 77/77, static clean, 6/6 lib spot-check); AC4 live on owner machine: foreign noise eliminated (57 to 25 files, 0 foreign reported), advisory silent vs default root, genuine upstream kit drift (#464 learning-review) correctly detected vs fresh bundle. Stale-dist follow-up filed as #467.",
+      "observedAt": "2026-07-07T04:41:44Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:attestation",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.design-probe.pickup-readiness:attestation",
+      "claimType": "builder.design-probe.pickup-readiness",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.design-probe.pickup-readiness claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.design-probe.decisions:attestation",
+      "claimType": "builder.design-probe.decisions",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.design-probe.decisions claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.plan.implementation:attestation",
+      "claimType": "builder.plan.implementation",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.plan.implementation claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:attestation",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:attestation",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.diff:source_excerpt",
+      "claimType": "workflow.check.diff",
+      "requiredEvidence": [
+        "source_excerpt"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.diff claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:source_excerpt",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "source_excerpt"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    },
+    {
+      "id": "policy:builder.verify.policy-compliance",
+      "claimType": "builder.verify.policy-compliance",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.policy-compliance claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-465-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-465-foreign-file-false-positives-in-skill-drift-check-scope-ac-concrete-from-live-reproduction-claims-confirmed-self-is-holder",
+      "claimId": "kontourai-flow-agents-465-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-465-foreign-file-false-positives-in-skill-drift-check-scope-ac-concrete-from-live-reproduction-claims-confirmed-self-is-holder",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-465-foreign-file-false-positives-in-skill-drift-check-scope-ac-concrete-from-live-reproduction-claims-confirmed-self-is-holder"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-inline-continuation-fix-live-evidence-ac-fresh-baseline-1f8e56b-recorded-at-pickup-no-blockers",
+      "claimId": "kontourai-flow-agents-465-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-inline-continuation-fix-live-evidence-ac-fresh-baseline-1f8e56b-recorded-at-pickup-no-blockers",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-passed-inline-continuation-fix-live-evidence-ac-fresh-baseline-1f8e56b-recorded-at-pickup-no-blockers"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-foreign-exclusion-semantics-decided-0-accepted-gaps-planning-readiness-ready-issue-acceptance-sketch-is-the-plan",
+      "claimId": "kontourai-flow-agents-465-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-foreign-exclusion-semantics-decided-0-accepted-gaps-planning-readiness-ready-issue-acceptance-sketch-is-the-plan",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-recorded-foreign-exclusion-semantics-decided-0-accepted-gaps-planning-readiness-ready-issue-acceptance-sketch-is-the-plan"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-gate-claim-implementation-plan.flow-agents-workflow.plan-recorded-single-task-wave-ac1-ac4-with-evidence-commands-files-named-stop-short-risks-worktree-sandbox-fresh-baseline-1f8e56b",
+      "claimId": "kontourai-flow-agents-465-gate-claim-implementation-plan.flow-agents-workflow.plan-recorded-single-task-wave-ac1-ac4-with-evidence-commands-files-named-stop-short-risks-worktree-sandbox-fresh-baseline-1f8e56b",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-gate-claim-implementation-plan.flow-agents-workflow.plan-recorded-single-task-wave-ac1-ac4-with-evidence-commands-files-named-stop-short-risks-worktree-sandbox-fresh-baseline-1f8e56b"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-gate-claim-implementation-scope.flow-agents-workflow.scope-exactly-2-files-scripts-hooks-lib-skill-drift-js-one-branch-skip-eval-scenario-11-suites-green-52-52-66-66-77-77-static-clean-no-unrelated-changes",
+      "claimId": "kontourai-flow-agents-465-gate-claim-implementation-scope.flow-agents-workflow.scope-exactly-2-files-scripts-hooks-lib-skill-drift-js-one-branch-skip-eval-scenario-11-suites-green-52-52-66-66-77-77-static-clean-no-unrelated-changes",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-gate-claim-implementation-scope.flow-agents-workflow.scope-exactly-2-files-scripts-hooks-lib-skill-drift-js-one-branch-skip-eval-scenario-11-suites-green-52-52-66-66-77-77-static-clean-no-unrelated-changes"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-465-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-build.flow-agents-workflow.session-attestation-npm-run-build-silent-exited-0-in-worktree-verifier-re-run-non-manifest-command-folded-to-external-per-381"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-tests-skill-drift-and-siblings.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-incl-scenario-11-a-b-c-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-465-tests-skill-drift-and-siblings.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-incl-scenario-11-a-b-c-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-tests-skill-drift-and-siblings.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-incl-scenario-11-a-b-c-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-verifier-re-run-non-manifest-commands-folded-to-external-per-381"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-ac1-foreign-files-skipped.flow-agents-workflow.compareskilldrift-s-skip-branch-kithash-null-manifesthash-null-continue-excludes-installed-only-no-manifest-entry-paths-from-files-summary-hasdrift-before-any-state-is-assigned-independently-confirmed-via-a-scratch-fixture-scratchpad-v465-spotcheck-js-requiring-the-worktree-lib-directly-built-a-kit-installed-dir-manifest-via-buildmanifest-added-one-foreign-installed-only-file-no-kit-manifest-counterpart-report-files-excludes-the-foreign-path-summary-total-1-kit-file-only-hasdrift-false-then-drifted-the-sole-kit-file-hasdrift-true-with-files-length-1-only-skill-one-skill-md-state-kit-updated-reported-foreign-path-still-absent",
+      "claimId": "kontourai-flow-agents-465-ac1-foreign-files-skipped.flow-agents-workflow.compareskilldrift-s-skip-branch-kithash-null-manifesthash-null-continue-excludes-installed-only-no-manifest-entry-paths-from-files-summary-hasdrift-before-any-state-is-assigned-independently-confirmed-via-a-scratch-fixture-scratchpad-v465-spotcheck-js-requiring-the-worktree-lib-directly-built-a-kit-installed-dir-manifest-via-buildmanifest-added-one-foreign-installed-only-file-no-kit-manifest-counterpart-report-files-excludes-the-foreign-path-summary-total-1-kit-file-only-hasdrift-false-then-drifted-the-sole-kit-file-hasdrift-true-with-files-length-1-only-skill-one-skill-md-state-kit-updated-reported-foreign-path-still-absent",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-ac1-foreign-files-skipped.flow-agents-workflow.compareskilldrift-s-skip-branch-kithash-null-manifesthash-null-continue-excludes-installed-only-no-manifest-entry-paths-from-files-summary-hasdrift-before-any-state-is-assigned-independently-confirmed-via-a-scratch-fixture-scratchpad-v465-spotcheck-js-requiring-the-worktree-lib-directly-built-a-kit-installed-dir-manifest-via-buildmanifest-added-one-foreign-installed-only-file-no-kit-manifest-counterpart-report-files-excludes-the-foreign-path-summary-total-1-kit-file-only-hasdrift-false-then-drifted-the-sole-kit-file-hasdrift-true-with-files-length-1-only-skill-one-skill-md-state-kit-updated-reported-foreign-path-still-absent"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-ac2-eval-proves-foreign-clean.flow-agents-workflow.session-attestation-scenario-11-a-b-c-green-within-test-skill-drift-check-sh-52-52-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-465-ac2-eval-proves-foreign-clean.flow-agents-workflow.session-attestation-scenario-11-a-b-c-green-within-test-skill-drift-check-sh-52-52-verifier-re-run-non-manifest-command-folded-to-external-per-381",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-ac2-eval-proves-foreign-clean.flow-agents-workflow.session-attestation-scenario-11-a-b-c-green-within-test-skill-drift-check-sh-52-52-verifier-re-run-non-manifest-command-folded-to-external-per-381"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-ac3-suites-green.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-build-green-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "claimId": "kontourai-flow-agents-465-ac3-suites-green.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-build-green-verifier-re-run-non-manifest-commands-folded-to-external-per-381",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-ac3-suites-green.flow-agents-workflow.session-attestation-test-skill-drift-check-52-52-test-install-merge-66-66-test-bundle-install-77-77-evals-run-sh-static-exit-0-build-green-verifier-re-run-non-manifest-commands-folded-to-external-per-381"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-gate-claim-tests-evidence.flow-agents-workflow.verifier-re-ran-ac1-ac3-52-52-66-66-77-77-static-clean-6-6-lib-spot-check-ac4-live-on-owner-machine-foreign-noise-eliminated-57-to-25-files-0-foreign-reported-advisory-silent-vs-default-root-genuine-upstream-kit-drift-464-learning-review-correctly-detected-vs-fresh-bundle-stale-dist-follow-up-filed-as-467",
+      "claimId": "kontourai-flow-agents-465-gate-claim-tests-evidence.flow-agents-workflow.verifier-re-ran-ac1-ac3-52-52-66-66-77-77-static-clean-6-6-lib-spot-check-ac4-live-on-owner-machine-foreign-noise-eliminated-57-to-25-files-0-foreign-reported-advisory-silent-vs-default-root-genuine-upstream-kit-drift-464-learning-review-correctly-detected-vs-fresh-bundle-stale-dist-follow-up-filed-as-467",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-465-gate-claim-tests-evidence.flow-agents-workflow.verifier-re-ran-ac1-ac3-52-52-66-66-77-77-static-clean-6-6-lib-spot-check-ac4-live-on-owner-machine-foreign-noise-eliminated-57-to-25-files-0-foreign-reported-advisory-silent-vs-default-root-genuine-upstream-kit-drift-464-learning-review-correctly-detected-vs-fresh-bundle-stale-dist-follow-up-filed-as-467"
+      ],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-ac1-foreign-files-skipped-installed-only-paths-with-no-kit-source-counterpart-and-no-manifest-entry-are-absent-from-files-all-summary-counts-and-never-set-hasdrift.flow-agents-workflow.ac1-foreign-files-skipped-installed-only-paths-with-no-kit-source-counterpart-and-no-manifest-entry-are-absent-from-files-all-summary-counts-and-never-set-hasdrift",
+      "claimId": "kontourai-flow-agents-465-ac1-foreign-files-skipped-installed-only-paths-with-no-kit-source-counterpart-and-no-manifest-entry-are-absent-from-files-all-summary-counts-and-never-set-hasdrift.flow-agents-workflow.ac1-foreign-files-skipped-installed-only-paths-with-no-kit-source-counterpart-and-no-manifest-entry-are-absent-from-files-all-summary-counts-and-never-set-hasdrift",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-ac2-eval-proves-foreign-clean-eval-seeds-a-foreign-file-into-the-installed-dir-clean-kit-state-stays-exit-0-with-no-foreign-path-in-output-a-drifted-kit-file-still-exits-1-listing-only-the-kit-file-sessionstart-advisory-scenario-with-foreign-file-present-and-kit-in-sync-emits-no-skill-drift.flow-agents-workflow.ac2-eval-proves-foreign-clean-eval-seeds-a-foreign-file-into-the-installed-dir-clean-kit-state-stays-exit-0-with-no-foreign-path-in-output-a-drifted-kit-file-still-exits-1-listing-only-the-kit-file-sessionstart-advisory-scenario-with-foreign-file-present-and-kit-in-sync-emits-no-skill-drift",
+      "claimId": "kontourai-flow-agents-465-ac2-eval-proves-foreign-clean-eval-seeds-a-foreign-file-into-the-installed-dir-clean-kit-state-stays-exit-0-with-no-foreign-path-in-output-a-drifted-kit-file-still-exits-1-listing-only-the-kit-file-sessionstart-advisory-scenario-with-foreign-file-present-and-kit-in-sync-emits-no-skill-drift.flow-agents-workflow.ac2-eval-proves-foreign-clean-eval-seeds-a-foreign-file-into-the-installed-dir-clean-kit-state-stays-exit-0-with-no-foreign-path-in-output-a-drifted-kit-file-still-exits-1-listing-only-the-kit-file-sessionstart-advisory-scenario-with-foreign-file-present-and-kit-in-sync-emits-no-skill-drift",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-ac3-suites-green-full-test-skill-drift-check-sh-existing-43-new-test-install-merge-sh-66-66-test-bundle-install-sh-77-77-evals-run-sh-static-all-pass.flow-agents-workflow.ac3-suites-green-full-test-skill-drift-check-sh-existing-43-new-test-install-merge-sh-66-66-test-bundle-install-sh-77-77-evals-run-sh-static-all-pass",
+      "claimId": "kontourai-flow-agents-465-ac3-suites-green-full-test-skill-drift-check-sh-existing-43-new-test-install-merge-sh-66-66-test-bundle-install-sh-77-77-evals-run-sh-static-all-pass.flow-agents-workflow.ac3-suites-green-full-test-skill-drift-check-sh-existing-43-new-test-install-merge-sh-66-66-test-bundle-install-sh-77-77-evals-run-sh-static-all-pass",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-ac4-live-machine-clean-on-this-machine-kit-baseline-established-32-foreign-files-present-node-build-src-cli-js-skill-drift-check-exits-0-and-the-sessionstart-run-emits-no-advisory.flow-agents-workflow.ac4-live-machine-clean-on-this-machine-kit-baseline-established-32-foreign-files-present-node-build-src-cli-js-skill-drift-check-exits-0-and-the-sessionstart-run-emits-no-advisory",
+      "claimId": "kontourai-flow-agents-465-ac4-live-machine-clean-on-this-machine-kit-baseline-established-32-foreign-files-present-node-build-src-cli-js-skill-drift-check-exits-0-and-the-sessionstart-run-emits-no-advisory.flow-agents-workflow.ac4-live-machine-clean-on-this-machine-kit-baseline-established-32-foreign-files-present-node-build-src-cli-js-skill-drift-check-exits-0-and-the-sessionstart-run-emits-no-advisory",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-465-review-code.flow-agents-workflow.imported-critique-from-review-code-md",
+      "claimId": "kontourai-flow-agents-465-review-code.flow-agents-workflow.imported-critique-from-review-code-md",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T04:41:44Z",
+      "verifiedAt": "2026-07-07T04:41:44Z"
+    }
+  ]
+}

@@ -1,0 +1,417 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-352/learning-review-proposals-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Learning review proposals integration covers AC1-AC5 plus ledger corruption and ISO-8601 regressions; all checks passed.",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:21:31Z",
+      "updatedAt": "2026-07-07T03:21:31Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.observed-shellcheck-clean-exit-0-zero-warnings-on-learning-review-proposals-sh-learning-review-decide-sh-and-test-learning-review-proposals-sh-in-the-fa352-worktree-one-scoped-sc2016-disable-with-justification-matching-the-file-precedent",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-352/learning-review-proposals-shellcheck",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "OBSERVED: shellcheck clean (exit 0, zero warnings) on learning-review-proposals.sh, learning-review-decide.sh, and test_learning_review_proposals.sh in the fa352 worktree; one scoped SC2016 disable with justification matching the file precedent.",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:21:31Z",
+      "updatedAt": "2026-07-07T03:21:31Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.observed-npm-run-validate-source-passed-source-tree-mirror-invariants-npm-run-context-map-check-passed-bash-evals-ci-run-baseline-sh-check-learning-review-proposals-integration-passed-proving-the-new-eval-is-registered-in-the-ci-lane-that-ci-itself-re-runs-post-merge",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-352/source-validation-context-map-and-ci-lane",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "OBSERVED: npm run validate:source passed (source tree + mirror invariants); npm run context-map --check passed; bash evals/ci/run-baseline.sh --check learning-review-proposals-integration passed, proving the new eval is registered in the CI lane that CI itself re-runs post-merge.",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:21:31Z",
+      "updatedAt": "2026-07-07T03:21:31Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-352-ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values.flow-agents-workflow.ac1-r1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-352/ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC1 (R1): fixture aggregates match hand-computed per-kit/per-gate values",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:21:31Z",
+      "updatedAt": "2026-07-07T03:21:31Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-352-ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none.flow-agents-workflow.ac2-r2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-paired-cost-defect-balanced-fixture-yields-none",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-352/ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC2 (R2): engineered pattern fixture yields >=1 evidence-cited proposal (paired cost+defect); balanced fixture yields none",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:21:31Z",
+      "updatedAt": "2026-07-07T03:21:31Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-352-ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item.flow-agents-workflow.ac3-r3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-352/ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC3 (R3): zero mutation to kit/gate/flow config; human decision recorded before follow-on work item",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:21:31Z",
+      "updatedAt": "2026-07-07T03:21:31Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-352-ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold.flow-agents-workflow.ac4-r4-idempotent-over-same-window-no-duplicate-proposals-explicit-insufficient-data-outcome-under-threshold",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-352/ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC4 (R4): idempotent over same window (no duplicate proposals); explicit insufficient-data outcome under threshold",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:21:31Z",
+      "updatedAt": "2026-07-07T03:21:31Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-352-ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect.flow-agents-workflow.ac5-r5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-352/ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC5 (R5): proposal trail links ratified proposal to follow-on item and later observed effect",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:21:31Z",
+      "updatedAt": "2026-07-07T03:21:31Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-352-review.flow-agents-workflow.review-clean-after-remediation-critical-ledger-silent-wipe-fixed-and-regression-pinned-timestamp-parsing-fixed-acceptance-evidence-now-names-runnable-command-refs-for-stop-gate-backstop-stale-fail-valued-critique-history-preserved-in-trust-bundle-superseded-history-backup-fresh-trust-bundle-carries-only-live-pass-critique",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-352/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Review CLEAN after remediation: CRITICAL ledger silent-wipe fixed and regression-pinned; timestamp parsing fixed; acceptance evidence now names runnable command refs for stop-gate backstop; stale fail-valued critique history preserved in trust.bundle.superseded-history backup, fresh trust.bundle carries only live pass critique.",
+      "value": "pass",
+      "createdAt": "2026-07-07T03:21:31Z",
+      "updatedAt": "2026-07-07T03:21:31Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T03:20:57Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+      "claimId": "kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-352/command-log.jsonl",
+      "excerptOrSummary": "Learning review proposals integration covers AC1-AC5 plus ledger corruption and ISO-8601 regressions; all checks passed.",
+      "observedAt": "2026-07-07T03:21:31Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_learning_review_proposals.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.observed-shellcheck-clean-exit-0-zero-warnings-on-learning-review-proposals-sh-learning-review-decide-sh-and-test-learning-review-proposals-sh-in-the-fa352-worktree-one-scoped-sc2016-disable-with-justification-matching-the-file-precedent",
+      "claimId": "kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.observed-shellcheck-clean-exit-0-zero-warnings-on-learning-review-proposals-sh-learning-review-decide-sh-and-test-learning-review-proposals-sh-in-the-fa352-worktree-one-scoped-sc2016-disable-with-justification-matching-the-file-precedent",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-352/evidence.json",
+      "excerptOrSummary": "OBSERVED: shellcheck clean (exit 0, zero warnings) on learning-review-proposals.sh, learning-review-decide.sh, and test_learning_review_proposals.sh in the fa352 worktree; one scoped SC2016 disable with justification matching the file precedent.",
+      "observedAt": "2026-07-07T03:21:31Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.observed-npm-run-validate-source-passed-source-tree-mirror-invariants-npm-run-context-map-check-passed-bash-evals-ci-run-baseline-sh-check-learning-review-proposals-integration-passed-proving-the-new-eval-is-registered-in-the-ci-lane-that-ci-itself-re-runs-post-merge",
+      "claimId": "kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.observed-npm-run-validate-source-passed-source-tree-mirror-invariants-npm-run-context-map-check-passed-bash-evals-ci-run-baseline-sh-check-learning-review-proposals-integration-passed-proving-the-new-eval-is-registered-in-the-ci-lane-that-ci-itself-re-runs-post-merge",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-352/evidence.json",
+      "excerptOrSummary": "OBSERVED: npm run validate:source passed (source tree + mirror invariants); npm run context-map --check passed; bash evals/ci/run-baseline.sh --check learning-review-proposals-integration passed, proving the new eval is registered in the CI lane that CI itself re-runs post-merge.",
+      "observedAt": "2026-07-07T03:21:31Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:test_output",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:attestation",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+      "claimId": "kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed"
+      ],
+      "createdAt": "2026-07-07T03:21:31Z",
+      "verifiedAt": "2026-07-07T03:21:31Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.observed-shellcheck-clean-exit-0-zero-warnings-on-learning-review-proposals-sh-learning-review-decide-sh-and-test-learning-review-proposals-sh-in-the-fa352-worktree-one-scoped-sc2016-disable-with-justification-matching-the-file-precedent",
+      "claimId": "kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.observed-shellcheck-clean-exit-0-zero-warnings-on-learning-review-proposals-sh-learning-review-decide-sh-and-test-learning-review-proposals-sh-in-the-fa352-worktree-one-scoped-sc2016-disable-with-justification-matching-the-file-precedent",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.observed-shellcheck-clean-exit-0-zero-warnings-on-learning-review-proposals-sh-learning-review-decide-sh-and-test-learning-review-proposals-sh-in-the-fa352-worktree-one-scoped-sc2016-disable-with-justification-matching-the-file-precedent"
+      ],
+      "createdAt": "2026-07-07T03:21:31Z",
+      "verifiedAt": "2026-07-07T03:21:31Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.observed-npm-run-validate-source-passed-source-tree-mirror-invariants-npm-run-context-map-check-passed-bash-evals-ci-run-baseline-sh-check-learning-review-proposals-integration-passed-proving-the-new-eval-is-registered-in-the-ci-lane-that-ci-itself-re-runs-post-merge",
+      "claimId": "kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.observed-npm-run-validate-source-passed-source-tree-mirror-invariants-npm-run-context-map-check-passed-bash-evals-ci-run-baseline-sh-check-learning-review-proposals-integration-passed-proving-the-new-eval-is-registered-in-the-ci-lane-that-ci-itself-re-runs-post-merge",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.observed-npm-run-validate-source-passed-source-tree-mirror-invariants-npm-run-context-map-check-passed-bash-evals-ci-run-baseline-sh-check-learning-review-proposals-integration-passed-proving-the-new-eval-is-registered-in-the-ci-lane-that-ci-itself-re-runs-post-merge"
+      ],
+      "createdAt": "2026-07-07T03:21:31Z",
+      "verifiedAt": "2026-07-07T03:21:31Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-352-ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values.flow-agents-workflow.ac1-r1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values",
+      "claimId": "kontourai-flow-agents-352-ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values.flow-agents-workflow.ac1-r1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:21:31Z",
+      "verifiedAt": "2026-07-07T03:21:31Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-352-ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none.flow-agents-workflow.ac2-r2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-paired-cost-defect-balanced-fixture-yields-none",
+      "claimId": "kontourai-flow-agents-352-ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none.flow-agents-workflow.ac2-r2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-paired-cost-defect-balanced-fixture-yields-none",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:21:31Z",
+      "verifiedAt": "2026-07-07T03:21:31Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-352-ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item.flow-agents-workflow.ac3-r3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item",
+      "claimId": "kontourai-flow-agents-352-ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item.flow-agents-workflow.ac3-r3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:21:31Z",
+      "verifiedAt": "2026-07-07T03:21:31Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-352-ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold.flow-agents-workflow.ac4-r4-idempotent-over-same-window-no-duplicate-proposals-explicit-insufficient-data-outcome-under-threshold",
+      "claimId": "kontourai-flow-agents-352-ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold.flow-agents-workflow.ac4-r4-idempotent-over-same-window-no-duplicate-proposals-explicit-insufficient-data-outcome-under-threshold",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:21:31Z",
+      "verifiedAt": "2026-07-07T03:21:31Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-352-ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect.flow-agents-workflow.ac5-r5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect",
+      "claimId": "kontourai-flow-agents-352-ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect.flow-agents-workflow.ac5-r5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:21:31Z",
+      "verifiedAt": "2026-07-07T03:21:31Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-352-review.flow-agents-workflow.review-clean-after-remediation-critical-ledger-silent-wipe-fixed-and-regression-pinned-timestamp-parsing-fixed-acceptance-evidence-now-names-runnable-command-refs-for-stop-gate-backstop-stale-fail-valued-critique-history-preserved-in-trust-bundle-superseded-history-backup-fresh-trust-bundle-carries-only-live-pass-critique",
+      "claimId": "kontourai-flow-agents-352-review.flow-agents-workflow.review-clean-after-remediation-critical-ledger-silent-wipe-fixed-and-regression-pinned-timestamp-parsing-fixed-acceptance-evidence-now-names-runnable-command-refs-for-stop-gate-backstop-stale-fail-valued-critique-history-preserved-in-trust-bundle-superseded-history-backup-fresh-trust-bundle-carries-only-live-pass-critique",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T03:21:31Z",
+      "verifiedAt": "2026-07-07T03:21:31Z"
+    }
+  ]
+}

@@ -1,0 +1,381 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "telemetry-attribution-pricing-fix-source-tree-validation.flow-agents-workflow.validate-source-green-mirror-invariant-telemetry-sh-config-sh-pricing-sh-source-context-byte-identical-ci-trust-reconcile-authoritative",
+      "subjectType": "work-item",
+      "subjectId": "telemetry-attribution-pricing-fix/source-tree-validation",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "validate:source green (mirror invariant: telemetry.sh/config.sh/pricing.sh source==context byte-identical). CI Trust Reconcile authoritative.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T19:42:50Z",
+      "updatedAt": "2026-07-07T19:42:50Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "telemetry-attribution-pricing-fix-usage-and-cost-integration.flow-agents-workflow.test-usage-cost-sh-green-incl-new-assertion-failed-401-remote-falls-through-to-bundled-registry-with-non-zero-cost-0-31-not-0-ci-reconciles",
+      "subjectType": "work-item",
+      "subjectId": "telemetry-attribution-pricing-fix/usage-and-cost-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "test_usage_cost.sh green incl new assertion: failed/401 remote falls through to bundled registry with non-zero cost (0.31), not $0. CI reconciles.",
+      "value": "pass",
+      "createdAt": "2026-07-07T19:42:50Z",
+      "updatedAt": "2026-07-07T19:42:50Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-attribution-pricing-fix-telemetry-attribution-pricing-impl.flow-agents-workflow.codex-implemented-the-3-fixes-correctly-verified-by-orchestrator-diff-review-telemetry-sh-reads-kontourai-flow-agents-current-json-first-then-legacy-config-sh-drops-the-auto-derived-console-pricing-url-explicit-only-pricing-sh-adds-pricing-registry-valid-json-guard-on-cached-fetched-stale-cache-bodies-so-a-poisoned-html-cache-401-can-never-degrade-cost-when-bundled-can-price-mirrors-byte-identical",
+      "subjectType": "work-item",
+      "subjectId": "telemetry-attribution-pricing-fix/telemetry-attribution-pricing-impl",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Codex implemented the 3 fixes correctly (verified by orchestrator diff review): telemetry.sh reads .kontourai/flow-agents/current.json first then legacy; config.sh drops the auto-derived console pricing URL (explicit-only); pricing.sh adds pricing_registry_valid_json guard on cached+fetched+stale-cache bodies so a poisoned HTML cache/401 can never degrade cost when bundled can price. Mirrors byte-identical.",
+      "value": "pass",
+      "createdAt": "2026-07-07T19:42:50Z",
+      "updatedAt": "2026-07-07T19:42:50Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-attribution-pricing-fix-telemetry-evals-local.flow-agents-workflow.orchestrator-ran-all-4-telemetry-evals-in-the-worktree-no-sandbox-limits-test-usage-cost-test-telemetry-usage-pipeline-test-economics-record-test-telemetry-all-pass-including-localhost-bind-cases-codex-sandbox-could-not-run",
+      "subjectType": "work-item",
+      "subjectId": "telemetry-attribution-pricing-fix/telemetry-evals-local",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Orchestrator ran all 4 telemetry evals in the worktree (no sandbox limits): test_usage_cost, test_telemetry_usage_pipeline, test_economics_record, test_telemetry — all pass, including localhost-bind cases Codex sandbox could not run.",
+      "value": "pass",
+      "createdAt": "2026-07-07T19:42:50Z",
+      "updatedAt": "2026-07-07T19:42:50Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-attribution-pricing-fix-attribution-economics-record-from-a-run-with-an-active-builder-session-carries-the-real-task-slug-phase-telemetry-sh-reads-canonical-kontourai-flow-agents-current-json-falls-back-to-legacy.flow-agents-workflow.attribution-economics-record-from-a-run-with-an-active-builder-session-carries-the-real-task-slug-phase-telemetry-sh-reads-canonical-kontourai-flow-agents-current-json-falls-back-to-legacy",
+      "subjectType": "work-item",
+      "subjectId": "telemetry-attribution-pricing-fix/attribution-economics-record-from-a-run-with-an-active-builder-session-carries-the-real-task-slug-phase-telemetry-sh-reads-canonical-kontourai-flow-agents-current-json-falls-back-to-legacy",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Attribution: economics record from a run with an active Builder session carries the real task_slug + phase (telemetry.sh reads canonical .kontourai/flow-agents/current.json, falls back to legacy)",
+      "value": "pass",
+      "createdAt": "2026-07-07T19:42:50Z",
+      "updatedAt": "2026-07-07T19:42:50Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-attribution-pricing-fix-pricing-robustness-pricing-sh-validates-a-fetched-cached-body-is-json-with-current-version-versions-before-caching-returning-never-caches-non-json-on-fetch-fail-prefers-bundled-pricing-json-over-stale-invalid-cache-a-poisoned-html-cache-or-401-remote-no-longer-forces-cost-to-0-when-bundled-can-price-the-model.flow-agents-workflow.pricing-robustness-pricing-sh-validates-a-fetched-cached-body-is-json-with-current-version-versions-before-caching-returning-never-caches-non-json-on-fetch-fail-prefers-bundled-pricing-json-over-stale-invalid-cache-a-poisoned-html-cache-or-401-remote-no-longer-forces-cost-to-0-when-bundled-can-price-the-model",
+      "subjectType": "work-item",
+      "subjectId": "telemetry-attribution-pricing-fix/pricing-robustness-pricing-sh-validates-a-fetched-cached-body-is-json-with-current-version-versions-before-caching-returning-never-caches-non-json-on-fetch-fail-prefers-bundled-pricing-json-over-stale-invalid-cache-a-poisoned-html-cache-or-401-remote-no-longer-forces-cost-to-0-when-bundled-can-price-the-model",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Pricing robustness: pricing.sh validates a fetched/cached body is JSON with current_version+versions before caching/returning; never caches non-JSON; on fetch-fail prefers bundled pricing.json over stale/invalid cache; a poisoned HTML cache or 401 remote no longer forces cost to $0 when bundled can price the model",
+      "value": "pass",
+      "createdAt": "2026-07-07T19:42:50Z",
+      "updatedAt": "2026-07-07T19:42:50Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-attribution-pricing-fix-pricing-default-source-config-sh-no-longer-silently-derives-an-authed-console-pricing-url-that-fails-unauth-default-path-uses-the-valid-bundled-registry.flow-agents-workflow.pricing-default-source-config-sh-no-longer-silently-derives-an-authed-console-pricing-url-that-fails-unauth-default-path-uses-the-valid-bundled-registry",
+      "subjectType": "work-item",
+      "subjectId": "telemetry-attribution-pricing-fix/pricing-default-source-config-sh-no-longer-silently-derives-an-authed-console-pricing-url-that-fails-unauth-default-path-uses-the-valid-bundled-registry",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Pricing default source: config.sh no longer silently derives an authed console pricing URL that fails unauth; default path uses the valid bundled registry",
+      "value": "pass",
+      "createdAt": "2026-07-07T19:42:50Z",
+      "updatedAt": "2026-07-07T19:42:50Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "telemetry-attribution-pricing-fix-no-regression-context-mirrors-byte-identical-for-telemetry-sh-config-sh-pricing-sh-validate-source-green-telemetry-usage-economics-evals-green-new-behavior-covered-by-tests.flow-agents-workflow.no-regression-context-mirrors-byte-identical-for-telemetry-sh-config-sh-pricing-sh-validate-source-green-telemetry-usage-economics-evals-green-new-behavior-covered-by-tests",
+      "subjectType": "work-item",
+      "subjectId": "telemetry-attribution-pricing-fix/no-regression-context-mirrors-byte-identical-for-telemetry-sh-config-sh-pricing-sh-validate-source-green-telemetry-usage-economics-evals-green-new-behavior-covered-by-tests",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "No regression: context/ mirrors byte-identical for telemetry.sh/config.sh/pricing.sh; validate:source green; telemetry/usage/economics evals green; new behavior covered by tests",
+      "value": "pass",
+      "createdAt": "2026-07-07T19:42:50Z",
+      "updatedAt": "2026-07-07T19:42:50Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:telemetry-attribution-pricing-fix-source-tree-validation.flow-agents-workflow.validate-source-green-mirror-invariant-telemetry-sh-config-sh-pricing-sh-source-context-byte-identical-ci-trust-reconcile-authoritative",
+      "claimId": "telemetry-attribution-pricing-fix-source-tree-validation.flow-agents-workflow.validate-source-green-mirror-invariant-telemetry-sh-config-sh-pricing-sh-source-context-byte-identical-ci-trust-reconcile-authoritative",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "telemetry-attribution-pricing-fix/evidence.json",
+      "excerptOrSummary": "validate:source green (mirror invariant: telemetry.sh/config.sh/pricing.sh source==context byte-identical). CI Trust Reconcile authoritative.",
+      "observedAt": "2026-07-07T19:42:50Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run validate:source --",
+        "isError": true
+      }
+    },
+    {
+      "id": "ev:telemetry-attribution-pricing-fix-usage-and-cost-integration.flow-agents-workflow.test-usage-cost-sh-green-incl-new-assertion-failed-401-remote-falls-through-to-bundled-registry-with-non-zero-cost-0-31-not-0-ci-reconciles",
+      "claimId": "telemetry-attribution-pricing-fix-usage-and-cost-integration.flow-agents-workflow.test-usage-cost-sh-green-incl-new-assertion-failed-401-remote-falls-through-to-bundled-registry-with-non-zero-cost-0-31-not-0-ci-reconciles",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "telemetry-attribution-pricing-fix/command-log.jsonl",
+      "excerptOrSummary": "test_usage_cost.sh green incl new assertion: failed/401 remote falls through to bundled registry with non-zero cost (0.31), not $0. CI reconciles.",
+      "observedAt": "2026-07-07T19:42:50Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_usage_cost.sh",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:telemetry-attribution-pricing-fix-telemetry-attribution-pricing-impl.flow-agents-workflow.codex-implemented-the-3-fixes-correctly-verified-by-orchestrator-diff-review-telemetry-sh-reads-kontourai-flow-agents-current-json-first-then-legacy-config-sh-drops-the-auto-derived-console-pricing-url-explicit-only-pricing-sh-adds-pricing-registry-valid-json-guard-on-cached-fetched-stale-cache-bodies-so-a-poisoned-html-cache-401-can-never-degrade-cost-when-bundled-can-price-mirrors-byte-identical",
+      "claimId": "telemetry-attribution-pricing-fix-telemetry-attribution-pricing-impl.flow-agents-workflow.codex-implemented-the-3-fixes-correctly-verified-by-orchestrator-diff-review-telemetry-sh-reads-kontourai-flow-agents-current-json-first-then-legacy-config-sh-drops-the-auto-derived-console-pricing-url-explicit-only-pricing-sh-adds-pricing-registry-valid-json-guard-on-cached-fetched-stale-cache-bodies-so-a-poisoned-html-cache-401-can-never-degrade-cost-when-bundled-can-price-mirrors-byte-identical",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-attribution-pricing-fix/evidence.json",
+      "excerptOrSummary": "Codex implemented the 3 fixes correctly (verified by orchestrator diff review): telemetry.sh reads .kontourai/flow-agents/current.json first then legacy; config.sh drops the auto-derived console pricing URL (explicit-only); pricing.sh adds pricing_registry_valid_json guard on cached+fetched+stale-cache bodies so a poisoned HTML cache/401 can never degrade cost when bundled can price. Mirrors byte-identical.",
+      "observedAt": "2026-07-07T19:42:50Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:telemetry-attribution-pricing-fix-telemetry-evals-local.flow-agents-workflow.orchestrator-ran-all-4-telemetry-evals-in-the-worktree-no-sandbox-limits-test-usage-cost-test-telemetry-usage-pipeline-test-economics-record-test-telemetry-all-pass-including-localhost-bind-cases-codex-sandbox-could-not-run",
+      "claimId": "telemetry-attribution-pricing-fix-telemetry-evals-local.flow-agents-workflow.orchestrator-ran-all-4-telemetry-evals-in-the-worktree-no-sandbox-limits-test-usage-cost-test-telemetry-usage-pipeline-test-economics-record-test-telemetry-all-pass-including-localhost-bind-cases-codex-sandbox-could-not-run",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "telemetry-attribution-pricing-fix/evidence.json",
+      "excerptOrSummary": "Orchestrator ran all 4 telemetry evals in the worktree (no sandbox limits): test_usage_cost, test_telemetry_usage_pipeline, test_economics_record, test_telemetry — all pass, including localhost-bind cases Codex sandbox could not run.",
+      "observedAt": "2026-07-07T19:42:50Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:test_output",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:attestation",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:telemetry-attribution-pricing-fix-usage-and-cost-integration.flow-agents-workflow.test-usage-cost-sh-green-incl-new-assertion-failed-401-remote-falls-through-to-bundled-registry-with-non-zero-cost-0-31-not-0-ci-reconciles",
+      "claimId": "telemetry-attribution-pricing-fix-usage-and-cost-integration.flow-agents-workflow.test-usage-cost-sh-green-incl-new-assertion-failed-401-remote-falls-through-to-bundled-registry-with-non-zero-cost-0-31-not-0-ci-reconciles",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-attribution-pricing-fix-usage-and-cost-integration.flow-agents-workflow.test-usage-cost-sh-green-incl-new-assertion-failed-401-remote-falls-through-to-bundled-registry-with-non-zero-cost-0-31-not-0-ci-reconciles"
+      ],
+      "createdAt": "2026-07-07T19:42:50Z",
+      "verifiedAt": "2026-07-07T19:42:50Z"
+    },
+    {
+      "id": "evt:telemetry-attribution-pricing-fix-telemetry-attribution-pricing-impl.flow-agents-workflow.codex-implemented-the-3-fixes-correctly-verified-by-orchestrator-diff-review-telemetry-sh-reads-kontourai-flow-agents-current-json-first-then-legacy-config-sh-drops-the-auto-derived-console-pricing-url-explicit-only-pricing-sh-adds-pricing-registry-valid-json-guard-on-cached-fetched-stale-cache-bodies-so-a-poisoned-html-cache-401-can-never-degrade-cost-when-bundled-can-price-mirrors-byte-identical",
+      "claimId": "telemetry-attribution-pricing-fix-telemetry-attribution-pricing-impl.flow-agents-workflow.codex-implemented-the-3-fixes-correctly-verified-by-orchestrator-diff-review-telemetry-sh-reads-kontourai-flow-agents-current-json-first-then-legacy-config-sh-drops-the-auto-derived-console-pricing-url-explicit-only-pricing-sh-adds-pricing-registry-valid-json-guard-on-cached-fetched-stale-cache-bodies-so-a-poisoned-html-cache-401-can-never-degrade-cost-when-bundled-can-price-mirrors-byte-identical",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-attribution-pricing-fix-telemetry-attribution-pricing-impl.flow-agents-workflow.codex-implemented-the-3-fixes-correctly-verified-by-orchestrator-diff-review-telemetry-sh-reads-kontourai-flow-agents-current-json-first-then-legacy-config-sh-drops-the-auto-derived-console-pricing-url-explicit-only-pricing-sh-adds-pricing-registry-valid-json-guard-on-cached-fetched-stale-cache-bodies-so-a-poisoned-html-cache-401-can-never-degrade-cost-when-bundled-can-price-mirrors-byte-identical"
+      ],
+      "createdAt": "2026-07-07T19:42:50Z",
+      "verifiedAt": "2026-07-07T19:42:50Z"
+    },
+    {
+      "id": "evt:telemetry-attribution-pricing-fix-telemetry-evals-local.flow-agents-workflow.orchestrator-ran-all-4-telemetry-evals-in-the-worktree-no-sandbox-limits-test-usage-cost-test-telemetry-usage-pipeline-test-economics-record-test-telemetry-all-pass-including-localhost-bind-cases-codex-sandbox-could-not-run",
+      "claimId": "telemetry-attribution-pricing-fix-telemetry-evals-local.flow-agents-workflow.orchestrator-ran-all-4-telemetry-evals-in-the-worktree-no-sandbox-limits-test-usage-cost-test-telemetry-usage-pipeline-test-economics-record-test-telemetry-all-pass-including-localhost-bind-cases-codex-sandbox-could-not-run",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:telemetry-attribution-pricing-fix-telemetry-evals-local.flow-agents-workflow.orchestrator-ran-all-4-telemetry-evals-in-the-worktree-no-sandbox-limits-test-usage-cost-test-telemetry-usage-pipeline-test-economics-record-test-telemetry-all-pass-including-localhost-bind-cases-codex-sandbox-could-not-run"
+      ],
+      "createdAt": "2026-07-07T19:42:50Z",
+      "verifiedAt": "2026-07-07T19:42:50Z"
+    },
+    {
+      "id": "evt:telemetry-attribution-pricing-fix-attribution-economics-record-from-a-run-with-an-active-builder-session-carries-the-real-task-slug-phase-telemetry-sh-reads-canonical-kontourai-flow-agents-current-json-falls-back-to-legacy.flow-agents-workflow.attribution-economics-record-from-a-run-with-an-active-builder-session-carries-the-real-task-slug-phase-telemetry-sh-reads-canonical-kontourai-flow-agents-current-json-falls-back-to-legacy",
+      "claimId": "telemetry-attribution-pricing-fix-attribution-economics-record-from-a-run-with-an-active-builder-session-carries-the-real-task-slug-phase-telemetry-sh-reads-canonical-kontourai-flow-agents-current-json-falls-back-to-legacy.flow-agents-workflow.attribution-economics-record-from-a-run-with-an-active-builder-session-carries-the-real-task-slug-phase-telemetry-sh-reads-canonical-kontourai-flow-agents-current-json-falls-back-to-legacy",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T19:42:50Z",
+      "verifiedAt": "2026-07-07T19:42:50Z"
+    },
+    {
+      "id": "evt:telemetry-attribution-pricing-fix-pricing-robustness-pricing-sh-validates-a-fetched-cached-body-is-json-with-current-version-versions-before-caching-returning-never-caches-non-json-on-fetch-fail-prefers-bundled-pricing-json-over-stale-invalid-cache-a-poisoned-html-cache-or-401-remote-no-longer-forces-cost-to-0-when-bundled-can-price-the-model.flow-agents-workflow.pricing-robustness-pricing-sh-validates-a-fetched-cached-body-is-json-with-current-version-versions-before-caching-returning-never-caches-non-json-on-fetch-fail-prefers-bundled-pricing-json-over-stale-invalid-cache-a-poisoned-html-cache-or-401-remote-no-longer-forces-cost-to-0-when-bundled-can-price-the-model",
+      "claimId": "telemetry-attribution-pricing-fix-pricing-robustness-pricing-sh-validates-a-fetched-cached-body-is-json-with-current-version-versions-before-caching-returning-never-caches-non-json-on-fetch-fail-prefers-bundled-pricing-json-over-stale-invalid-cache-a-poisoned-html-cache-or-401-remote-no-longer-forces-cost-to-0-when-bundled-can-price-the-model.flow-agents-workflow.pricing-robustness-pricing-sh-validates-a-fetched-cached-body-is-json-with-current-version-versions-before-caching-returning-never-caches-non-json-on-fetch-fail-prefers-bundled-pricing-json-over-stale-invalid-cache-a-poisoned-html-cache-or-401-remote-no-longer-forces-cost-to-0-when-bundled-can-price-the-model",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T19:42:50Z",
+      "verifiedAt": "2026-07-07T19:42:50Z"
+    },
+    {
+      "id": "evt:telemetry-attribution-pricing-fix-pricing-default-source-config-sh-no-longer-silently-derives-an-authed-console-pricing-url-that-fails-unauth-default-path-uses-the-valid-bundled-registry.flow-agents-workflow.pricing-default-source-config-sh-no-longer-silently-derives-an-authed-console-pricing-url-that-fails-unauth-default-path-uses-the-valid-bundled-registry",
+      "claimId": "telemetry-attribution-pricing-fix-pricing-default-source-config-sh-no-longer-silently-derives-an-authed-console-pricing-url-that-fails-unauth-default-path-uses-the-valid-bundled-registry.flow-agents-workflow.pricing-default-source-config-sh-no-longer-silently-derives-an-authed-console-pricing-url-that-fails-unauth-default-path-uses-the-valid-bundled-registry",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T19:42:50Z",
+      "verifiedAt": "2026-07-07T19:42:50Z"
+    },
+    {
+      "id": "evt:telemetry-attribution-pricing-fix-no-regression-context-mirrors-byte-identical-for-telemetry-sh-config-sh-pricing-sh-validate-source-green-telemetry-usage-economics-evals-green-new-behavior-covered-by-tests.flow-agents-workflow.no-regression-context-mirrors-byte-identical-for-telemetry-sh-config-sh-pricing-sh-validate-source-green-telemetry-usage-economics-evals-green-new-behavior-covered-by-tests",
+      "claimId": "telemetry-attribution-pricing-fix-no-regression-context-mirrors-byte-identical-for-telemetry-sh-config-sh-pricing-sh-validate-source-green-telemetry-usage-economics-evals-green-new-behavior-covered-by-tests.flow-agents-workflow.no-regression-context-mirrors-byte-identical-for-telemetry-sh-config-sh-pricing-sh-validate-source-green-telemetry-usage-economics-evals-green-new-behavior-covered-by-tests",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T19:42:50Z",
+      "verifiedAt": "2026-07-07T19:42:50Z"
+    }
+  ]
+}

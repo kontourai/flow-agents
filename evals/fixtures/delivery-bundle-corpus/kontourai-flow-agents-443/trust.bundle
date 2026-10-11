@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-443-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-443/bash-evals-run.sh-static",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "record-check: bash evals/run.sh static (exit 0)",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:02:00Z",
+      "updatedAt": "2026-07-06T23:02:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command",
+        "output_digest": {
+          "algorithm": "sha256",
+          "hex": "34eed2b34e9d7483d020ec86a1a7a371aa85c3673ce79fa85004f2819e44a898"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-443-bash-evals-integration-test-pull-work-provider-sh.flow-agents-workflow.record-check-bash-evals-integration-test-pull-work-provider-sh-exit-0",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-443/bash-evals-integration-test_pull_work_provider.sh",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "record-check: bash evals/integration/test_pull_work_provider.sh (exit 0)",
+      "value": "pass",
+      "createdAt": "2026-07-06T23:02:00Z",
+      "updatedAt": "2026-07-06T23:02:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command",
+        "output_digest": {
+          "algorithm": "sha256",
+          "hex": "4fa19e2acda5d672e71ee67916a122de1095319e4d2428ba0deadb39573de540"
+        }
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:kontourai-flow-agents-443-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "claimId": "kontourai-flow-agents-443-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-443/evidence.json",
+      "excerptOrSummary": "record-check: bash evals/run.sh static (exit 0)",
+      "observedAt": "2026-07-06T23:02:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-443-bash-evals-integration-test-pull-work-provider-sh.flow-agents-workflow.record-check-bash-evals-integration-test-pull-work-provider-sh-exit-0",
+      "claimId": "kontourai-flow-agents-443-bash-evals-integration-test-pull-work-provider-sh.flow-agents-workflow.record-check-bash-evals-integration-test-pull-work-provider-sh-exit-0",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-443/evidence.json",
+      "excerptOrSummary": "record-check: bash evals/integration/test_pull_work_provider.sh (exit 0)",
+      "observedAt": "2026-07-06T23:02:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_pull_work_provider.sh",
+        "isError": false
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-443-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "claimId": "kontourai-flow-agents-443-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-443-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0"
+      ],
+      "createdAt": "2026-07-06T23:02:00Z",
+      "verifiedAt": "2026-07-06T23:02:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-443-bash-evals-integration-test-pull-work-provider-sh.flow-agents-workflow.record-check-bash-evals-integration-test-pull-work-provider-sh-exit-0",
+      "claimId": "kontourai-flow-agents-443-bash-evals-integration-test-pull-work-provider-sh.flow-agents-workflow.record-check-bash-evals-integration-test-pull-work-provider-sh-exit-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-443-bash-evals-integration-test-pull-work-provider-sh.flow-agents-workflow.record-check-bash-evals-integration-test-pull-work-provider-sh-exit-0"
+      ],
+      "createdAt": "2026-07-06T23:02:00Z",
+      "verifiedAt": "2026-07-06T23:02:00Z"
+    }
+  ]
+}

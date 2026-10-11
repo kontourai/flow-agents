@@ -1,0 +1,525 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "multi-tenant-install-proof-console-tenant-isolation-integration.flow-agents-workflow.new-evals-integration-test-console-tenant-isolation-sh-installs-tenant-a-and-tenant-b-via-the-real-path-install-console-config-sh-sourced-config-sh-transport-sh-console-telemetry-emit-against-a-local-node-http-stub-asserts-each-tenant-s-outbound-post-carries-only-its-own-x-console-tenant-id-bearer-token-never-the-other-tenant-s-7-assertions-x-3-checkpoints-21-assertions-all-pass-re-run-3x-consecutively-with-0-flakiness-21-21-pass-each-run-exit-0-fault-injected-set-token-b-token-a-and-confirmed-the-eval-fails-6-checks-fail-exit-1-proving-it-genuinely-catches-cross-tenant-token-leakage-rather-than-trivially-passing-reverted-re-ran-clean-21-21-exit-0",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/console-tenant-isolation-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "New evals/integration/test_console_tenant_isolation.sh installs tenant-a and tenant-b via the REAL path (install-console-config.sh -> sourced config.sh -> transport.sh console_telemetry_emit) against a local Node HTTP stub; asserts each tenant's outbound POST carries only its own x-console-tenant-id + Bearer token, never the other tenant's (7 assertions x 3 checkpoints = 21 assertions, all pass). Re-run 3x consecutively with 0 flakiness (21/21 pass each run, exit 0). Fault-injected (set TOKEN_B=TOKEN_A) and confirmed the eval FAILS (6 checks fail, exit 1), proving it genuinely catches cross-tenant token leakage rather than trivially passing. Reverted; re-ran clean (21/21, exit 0).",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "multi-tenant-install-proof-bundle-install-integration.flow-agents-workflow.79-79-passed-including-the-2-new-negative-case-assertions-for-the-warn-only-dx-guard-hosted-console-sink-with-no-console-tenant-still-installs-with-exit-0-and-prints-the-dx-warning-to-stderr-fault-injected-the-guard-changed-echo-warning-to-die-and-confirmed-the-two-new-assertions-fail-and-the-failure-cascades-to-6-other-pre-existing-installs-that-also-omit-console-tenant-8-total-failures-exit-1-proving-the-negative-case-genuinely-guards-the-warn-only-non-fatal-contract-reverted-re-ran-clean-79-79-exit-0",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/bundle-install-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "79/79 passed, including the 2 new negative-case assertions for the warn-only DX guard (hosted Console sink with no --console-tenant still installs with exit 0, and prints the DX warning to stderr). Fault-injected the guard (changed 'echo warning' to 'die') and confirmed the two new assertions FAIL, and the failure cascades to 6 other pre-existing installs that also omit --console-tenant (8 total failures, exit 1) -- proving the negative case genuinely guards the warn-only (non-fatal) contract. Reverted; re-ran clean (79/79, exit 0).",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "multi-tenant-install-proof-telemetry-contract-integration.flow-agents-workflow.56-56-passed-no-regression-in-telemetry-event-mapping-redaction-or-console-transport-headers-from-the-dx-guard-addition",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/telemetry-contract-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "56/56 passed -- no regression in telemetry event mapping, redaction, or Console transport headers from the DX guard addition.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "multi-tenant-install-proof-liveness-console-relay-integration.flow-agents-workflow.all-checks-passed-no-regression-in-the-liveness-console-relay-bearer-tenant-header-injection-opt-in-respect-non-fatal-relay-failure-injection-discipline",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/liveness-console-relay-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "All checks passed -- no regression in the liveness Console relay (Bearer + tenant header injection, opt-in respect, non-fatal relay failure, injection discipline).",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "multi-tenant-install-proof-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passes-clean-verified-scripts-telemetry-install-console-config-sh-and-context-scripts-telemetry-install-console-config-sh-are-byte-identical-diff-exits-0-fault-injected-a-stray-comment-into-only-the-context-mirror-and-confirmed-validate-source-fails-with-differ-outside-allowed-mirror-policy-reverted-diff-empty-again-validate-source-passes-again",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/source-tree-validation",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "npm run validate:source passes clean. Verified scripts/telemetry/install-console-config.sh and context/scripts/telemetry/install-console-config.sh are byte-identical ('diff' exits 0). Fault-injected a stray comment into only the context/ mirror and confirmed validate:source FAILS with 'differ outside allowed mirror policy'; reverted, diff empty again, validate:source passes again.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "multi-tenant-install-proof-ci-wiring-console-tenant-isolation-lane.flow-agents-workflow.verified-evals-ci-run-baseline-sh-check-console-tenant-isolation-integration-resolves-and-runs-the-new-eval-pass-exit-0-confirming-the-checks-and-lane-workflow-contracts-wiring-in-evals-ci-run-baseline-sh-and-the-new-console-tenant-isolation-integration-step-in-github-workflows-ci-yml-reference-a-real-working-slug-fault-injected-a-misspelled-slug-console-tenant-isolashun-integration-in-ci-yml-and-confirmed-run-baseline-sh-check-wrong-slug-reports-unknown-ci-baseline-check-for-lane-all-exit-2-rather-than-silently-no-oping-reverted-slug-restored",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/ci-wiring-console-tenant-isolation-lane",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Verified evals/ci/run-baseline.sh --check console-tenant-isolation-integration resolves and runs the new eval (PASS, exit 0), confirming the CHECKS[] and LANE_WORKFLOW_CONTRACTS[] wiring in evals/ci/run-baseline.sh and the new 'Console tenant isolation integration' step in .github/workflows/ci.yml reference a real, working slug. Fault-injected a misspelled slug (console-tenant-isolashun-integration) in ci.yml and confirmed run-baseline.sh --check <wrong-slug> reports 'Unknown CI baseline check for lane all' (exit 2) rather than silently no-oping; reverted, slug restored.",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "multi-tenant-install-proof-docs-multi-tenant-runbook-citation-audit.flow-agents-workflow.manually-cross-checked-every-line-citation-in-docs-integrations-flow-agents-console-md-s-new-multi-tenant-subsection-against-source-install-sh-21-console-config-args-install-sh-24-27-flag-collection-incl-console-tenant-install-sh-54-55-passthrough-to-install-console-config-sh-src-cli-init-ts-385-408-installbundle-390-398-mkdtemp-0o600-token-file-write-src-cli-telemetry-doctor-ts-208-209-tokenconfigured-tenantconfigured-210-reachability-scripts-telemetry-install-console-config-sh-88-100-set-config-key-awk-filter-then-append-idempotency-all-citations-verified-accurate-correct-line-numbers-correct-described-behavior-the-doc-explicitly-states-the-client-vs-server-tenant-isolation-boundary-console-98-100-out-of-scope-and-cross-references-the-new-eval-as-the-isolation-proof-and-gives-a-literal-one-command-runbook-npx-kontourai-flow-agents-init-bash-install-sh-with-console-tenant-console-token-file-plus-a-telemetry-doctor-json-headless-post-install-verification-step",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/docs-multi-tenant-runbook-citation-audit",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Manually cross-checked every line citation in docs/integrations/flow-agents-console.md's new multi-tenant subsection against source: install.sh:21 (CONSOLE_CONFIG_ARGS=()), install.sh:24-27 (flag collection incl. --console-tenant), install.sh:54-55 (passthrough to install-console-config.sh); src/cli/init.ts:385-408 installBundle(), :390-398 mkdtemp 0o600 token-file write; src/cli/telemetry-doctor.ts:208-209 tokenConfigured/tenantConfigured, :210 reachability; scripts/telemetry/install-console-config.sh:88-100 set_config_key awk-filter-then-append idempotency. All citations verified accurate (correct line numbers, correct described behavior). The doc explicitly states the client-vs-server tenant-isolation boundary (console #98-#100 out of scope) and cross-references the new eval as the isolation proof, and gives a literal one-command runbook (npx @kontourai/flow-agents init ... / bash install.sh ... with --console-tenant + --console-token-file) plus a telemetry-doctor --json --headless post-install verification step.",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "multi-tenant-install-proof-mirror-pair-byte-identity.flow-agents-workflow.diff-scripts-telemetry-install-console-config-sh-context-scripts-telemetry-install-console-config-sh-is-empty-exit-0-both-before-and-after-the-fault-injection-run-the-mirror-pair-is-byte-identical-as-required",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/mirror-pair-byte-identity",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "diff scripts/telemetry/install-console-config.sh context/scripts/telemetry/install-console-config.sh is empty (exit 0) both before and after the fault-injection run -- the mirror pair is byte-identical as required.",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "multi-tenant-install-proof-final-scope-and-tree-cleanliness.flow-agents-workflow.git-status-porcelain-before-and-after-fault-injection-shows-exactly-the-intended-8-files-plus-1-new-untracked-eval-script-plus-one-pre-existing-unrelated-file-explicitly-out-of-scope-per-the-task-instructions-a-timestamp-only-change-in-a-sibling-delivery-directory-s-verification-record-artifact-unrelated-to-this-change-s-8-files-all-4-fault-injection-edits-were-reverted-final-git-diff-stat-is-byte-identical-to-the-initial-git-diff-stat-144-insertions-87-deletions-across-8-files",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/final-scope-and-tree-cleanliness",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "git status --porcelain before and after fault injection shows exactly the intended 8 files plus 1 new untracked eval script, plus one pre-existing unrelated file explicitly out of scope per the task instructions (a timestamp-only change in a sibling delivery directory's verification-record artifact, unrelated to this change's 8 files). All 4 fault-injection edits were reverted; final git diff --stat is byte-identical to the initial git diff --stat (144 insertions, 87 deletions across 8 files).",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "multi-tenant-install-proof-end-to-end-eval-proves-a-telemetry-post-from-a-configured-tenant-carries-x-console-tenant-id-tenant-bearer-token-to-a-mock-receiver-for-two-distinct-tenants-isolation.flow-agents-workflow.end-to-end-eval-proves-a-telemetry-post-from-a-configured-tenant-carries-x-console-tenant-id-tenant-bearer-token-to-a-mock-receiver-for-two-distinct-tenants-isolation",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/end-to-end-eval-proves-a-telemetry-post-from-a-configured-tenant-carries-x-console-tenant-id-tenant-bearer-token-to-a-mock-receiver-for-two-distinct-tenants-isolation",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "End-to-end eval proves a telemetry POST from a configured tenant carries x-console-tenant-id:<tenant> + Bearer token to a mock receiver, for two distinct tenants (isolation)",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "multi-tenant-install-proof-durable-doc-gives-a-one-command-multi-tenant-install-runbook-incl-token-provisioning-telemetry-doctor-verification.flow-agents-workflow.durable-doc-gives-a-one-command-multi-tenant-install-runbook-incl-token-provisioning-telemetry-doctor-verification",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/durable-doc-gives-a-one-command-multi-tenant-install-runbook-incl-token-provisioning-telemetry-doctor-verification",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Durable doc gives a one-command multi-tenant install runbook incl. token provisioning + telemetry-doctor verification",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "multi-tenant-install-proof-no-regression-validate-source-existing-telemetry-bundle-install-evals-stay-green-mirror-invariant-preserved.flow-agents-workflow.no-regression-validate-source-existing-telemetry-bundle-install-evals-stay-green-mirror-invariant-preserved",
+      "subjectType": "change",
+      "subjectId": "multi-tenant-install-proof/no-regression-validate-source-existing-telemetry-bundle-install-evals-stay-green-mirror-invariant-preserved",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "No regression: validate:source + existing telemetry/bundle-install evals stay green; mirror invariant preserved",
+      "value": "pass",
+      "createdAt": "2026-07-07T15:37:45Z",
+      "updatedAt": "2026-07-07T15:37:45Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:multi-tenant-install-proof-console-tenant-isolation-integration.flow-agents-workflow.new-evals-integration-test-console-tenant-isolation-sh-installs-tenant-a-and-tenant-b-via-the-real-path-install-console-config-sh-sourced-config-sh-transport-sh-console-telemetry-emit-against-a-local-node-http-stub-asserts-each-tenant-s-outbound-post-carries-only-its-own-x-console-tenant-id-bearer-token-never-the-other-tenant-s-7-assertions-x-3-checkpoints-21-assertions-all-pass-re-run-3x-consecutively-with-0-flakiness-21-21-pass-each-run-exit-0-fault-injected-set-token-b-token-a-and-confirmed-the-eval-fails-6-checks-fail-exit-1-proving-it-genuinely-catches-cross-tenant-token-leakage-rather-than-trivially-passing-reverted-re-ran-clean-21-21-exit-0",
+      "claimId": "multi-tenant-install-proof-console-tenant-isolation-integration.flow-agents-workflow.new-evals-integration-test-console-tenant-isolation-sh-installs-tenant-a-and-tenant-b-via-the-real-path-install-console-config-sh-sourced-config-sh-transport-sh-console-telemetry-emit-against-a-local-node-http-stub-asserts-each-tenant-s-outbound-post-carries-only-its-own-x-console-tenant-id-bearer-token-never-the-other-tenant-s-7-assertions-x-3-checkpoints-21-assertions-all-pass-re-run-3x-consecutively-with-0-flakiness-21-21-pass-each-run-exit-0-fault-injected-set-token-b-token-a-and-confirmed-the-eval-fails-6-checks-fail-exit-1-proving-it-genuinely-catches-cross-tenant-token-leakage-rather-than-trivially-passing-reverted-re-ran-clean-21-21-exit-0",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "multi-tenant-install-proof/command-log.jsonl",
+      "excerptOrSummary": "New evals/integration/test_console_tenant_isolation.sh installs tenant-a and tenant-b via the REAL path (install-console-config.sh -> sourced config.sh -> transport.sh console_telemetry_emit) against a local Node HTTP stub; asserts each tenant's outbound POST carries only its own x-console-tenant-id + Bearer token, never the other tenant's (7 assertions x 3 checkpoints = 21 assertions, all pass). Re-run 3x consecutively with 0 flakiness (21/21 pass each run, exit 0). Fault-injected (set TOKEN_B=TOKEN_A) and confirmed the eval FAILS (6 checks fail, exit 1), proving it genuinely catches cross-tenant token leakage rather than trivially passing. Reverted; re-ran clean (21/21, exit 0).",
+      "observedAt": "2026-07-07T15:37:45Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_console_tenant_isolation.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:multi-tenant-install-proof-bundle-install-integration.flow-agents-workflow.79-79-passed-including-the-2-new-negative-case-assertions-for-the-warn-only-dx-guard-hosted-console-sink-with-no-console-tenant-still-installs-with-exit-0-and-prints-the-dx-warning-to-stderr-fault-injected-the-guard-changed-echo-warning-to-die-and-confirmed-the-two-new-assertions-fail-and-the-failure-cascades-to-6-other-pre-existing-installs-that-also-omit-console-tenant-8-total-failures-exit-1-proving-the-negative-case-genuinely-guards-the-warn-only-non-fatal-contract-reverted-re-ran-clean-79-79-exit-0",
+      "claimId": "multi-tenant-install-proof-bundle-install-integration.flow-agents-workflow.79-79-passed-including-the-2-new-negative-case-assertions-for-the-warn-only-dx-guard-hosted-console-sink-with-no-console-tenant-still-installs-with-exit-0-and-prints-the-dx-warning-to-stderr-fault-injected-the-guard-changed-echo-warning-to-die-and-confirmed-the-two-new-assertions-fail-and-the-failure-cascades-to-6-other-pre-existing-installs-that-also-omit-console-tenant-8-total-failures-exit-1-proving-the-negative-case-genuinely-guards-the-warn-only-non-fatal-contract-reverted-re-ran-clean-79-79-exit-0",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "multi-tenant-install-proof/command-log.jsonl",
+      "excerptOrSummary": "79/79 passed, including the 2 new negative-case assertions for the warn-only DX guard (hosted Console sink with no --console-tenant still installs with exit 0, and prints the DX warning to stderr). Fault-injected the guard (changed 'echo warning' to 'die') and confirmed the two new assertions FAIL, and the failure cascades to 6 other pre-existing installs that also omit --console-tenant (8 total failures, exit 1) -- proving the negative case genuinely guards the warn-only (non-fatal) contract. Reverted; re-ran clean (79/79, exit 0).",
+      "observedAt": "2026-07-07T15:37:45Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_bundle_install.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:multi-tenant-install-proof-telemetry-contract-integration.flow-agents-workflow.56-56-passed-no-regression-in-telemetry-event-mapping-redaction-or-console-transport-headers-from-the-dx-guard-addition",
+      "claimId": "multi-tenant-install-proof-telemetry-contract-integration.flow-agents-workflow.56-56-passed-no-regression-in-telemetry-event-mapping-redaction-or-console-transport-headers-from-the-dx-guard-addition",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "multi-tenant-install-proof/command-log.jsonl",
+      "excerptOrSummary": "56/56 passed -- no regression in telemetry event mapping, redaction, or Console transport headers from the DX guard addition.",
+      "observedAt": "2026-07-07T15:37:45Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_telemetry.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:multi-tenant-install-proof-liveness-console-relay-integration.flow-agents-workflow.all-checks-passed-no-regression-in-the-liveness-console-relay-bearer-tenant-header-injection-opt-in-respect-non-fatal-relay-failure-injection-discipline",
+      "claimId": "multi-tenant-install-proof-liveness-console-relay-integration.flow-agents-workflow.all-checks-passed-no-regression-in-the-liveness-console-relay-bearer-tenant-header-injection-opt-in-respect-non-fatal-relay-failure-injection-discipline",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "multi-tenant-install-proof/command-log.jsonl",
+      "excerptOrSummary": "All checks passed -- no regression in the liveness Console relay (Bearer + tenant header injection, opt-in respect, non-fatal relay failure, injection discipline).",
+      "observedAt": "2026-07-07T15:37:45Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_liveness_console_relay.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:multi-tenant-install-proof-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passes-clean-verified-scripts-telemetry-install-console-config-sh-and-context-scripts-telemetry-install-console-config-sh-are-byte-identical-diff-exits-0-fault-injected-a-stray-comment-into-only-the-context-mirror-and-confirmed-validate-source-fails-with-differ-outside-allowed-mirror-policy-reverted-diff-empty-again-validate-source-passes-again",
+      "claimId": "multi-tenant-install-proof-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passes-clean-verified-scripts-telemetry-install-console-config-sh-and-context-scripts-telemetry-install-console-config-sh-are-byte-identical-diff-exits-0-fault-injected-a-stray-comment-into-only-the-context-mirror-and-confirmed-validate-source-fails-with-differ-outside-allowed-mirror-policy-reverted-diff-empty-again-validate-source-passes-again",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "multi-tenant-install-proof/command-log.jsonl",
+      "excerptOrSummary": "npm run validate:source passes clean. Verified scripts/telemetry/install-console-config.sh and context/scripts/telemetry/install-console-config.sh are byte-identical ('diff' exits 0). Fault-injected a stray comment into only the context/ mirror and confirmed validate:source FAILS with 'differ outside allowed mirror policy'; reverted, diff empty again, validate:source passes again.",
+      "observedAt": "2026-07-07T15:37:45Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run validate:source --",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:multi-tenant-install-proof-ci-wiring-console-tenant-isolation-lane.flow-agents-workflow.verified-evals-ci-run-baseline-sh-check-console-tenant-isolation-integration-resolves-and-runs-the-new-eval-pass-exit-0-confirming-the-checks-and-lane-workflow-contracts-wiring-in-evals-ci-run-baseline-sh-and-the-new-console-tenant-isolation-integration-step-in-github-workflows-ci-yml-reference-a-real-working-slug-fault-injected-a-misspelled-slug-console-tenant-isolashun-integration-in-ci-yml-and-confirmed-run-baseline-sh-check-wrong-slug-reports-unknown-ci-baseline-check-for-lane-all-exit-2-rather-than-silently-no-oping-reverted-slug-restored",
+      "claimId": "multi-tenant-install-proof-ci-wiring-console-tenant-isolation-lane.flow-agents-workflow.verified-evals-ci-run-baseline-sh-check-console-tenant-isolation-integration-resolves-and-runs-the-new-eval-pass-exit-0-confirming-the-checks-and-lane-workflow-contracts-wiring-in-evals-ci-run-baseline-sh-and-the-new-console-tenant-isolation-integration-step-in-github-workflows-ci-yml-reference-a-real-working-slug-fault-injected-a-misspelled-slug-console-tenant-isolashun-integration-in-ci-yml-and-confirmed-run-baseline-sh-check-wrong-slug-reports-unknown-ci-baseline-check-for-lane-all-exit-2-rather-than-silently-no-oping-reverted-slug-restored",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "multi-tenant-install-proof/evidence.json",
+      "excerptOrSummary": "Verified evals/ci/run-baseline.sh --check console-tenant-isolation-integration resolves and runs the new eval (PASS, exit 0), confirming the CHECKS[] and LANE_WORKFLOW_CONTRACTS[] wiring in evals/ci/run-baseline.sh and the new 'Console tenant isolation integration' step in .github/workflows/ci.yml reference a real, working slug. Fault-injected a misspelled slug (console-tenant-isolashun-integration) in ci.yml and confirmed run-baseline.sh --check <wrong-slug> reports 'Unknown CI baseline check for lane all' (exit 2) rather than silently no-oping; reverted, slug restored.",
+      "observedAt": "2026-07-07T15:37:45Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:multi-tenant-install-proof-docs-multi-tenant-runbook-citation-audit.flow-agents-workflow.manually-cross-checked-every-line-citation-in-docs-integrations-flow-agents-console-md-s-new-multi-tenant-subsection-against-source-install-sh-21-console-config-args-install-sh-24-27-flag-collection-incl-console-tenant-install-sh-54-55-passthrough-to-install-console-config-sh-src-cli-init-ts-385-408-installbundle-390-398-mkdtemp-0o600-token-file-write-src-cli-telemetry-doctor-ts-208-209-tokenconfigured-tenantconfigured-210-reachability-scripts-telemetry-install-console-config-sh-88-100-set-config-key-awk-filter-then-append-idempotency-all-citations-verified-accurate-correct-line-numbers-correct-described-behavior-the-doc-explicitly-states-the-client-vs-server-tenant-isolation-boundary-console-98-100-out-of-scope-and-cross-references-the-new-eval-as-the-isolation-proof-and-gives-a-literal-one-command-runbook-npx-kontourai-flow-agents-init-bash-install-sh-with-console-tenant-console-token-file-plus-a-telemetry-doctor-json-headless-post-install-verification-step",
+      "claimId": "multi-tenant-install-proof-docs-multi-tenant-runbook-citation-audit.flow-agents-workflow.manually-cross-checked-every-line-citation-in-docs-integrations-flow-agents-console-md-s-new-multi-tenant-subsection-against-source-install-sh-21-console-config-args-install-sh-24-27-flag-collection-incl-console-tenant-install-sh-54-55-passthrough-to-install-console-config-sh-src-cli-init-ts-385-408-installbundle-390-398-mkdtemp-0o600-token-file-write-src-cli-telemetry-doctor-ts-208-209-tokenconfigured-tenantconfigured-210-reachability-scripts-telemetry-install-console-config-sh-88-100-set-config-key-awk-filter-then-append-idempotency-all-citations-verified-accurate-correct-line-numbers-correct-described-behavior-the-doc-explicitly-states-the-client-vs-server-tenant-isolation-boundary-console-98-100-out-of-scope-and-cross-references-the-new-eval-as-the-isolation-proof-and-gives-a-literal-one-command-runbook-npx-kontourai-flow-agents-init-bash-install-sh-with-console-tenant-console-token-file-plus-a-telemetry-doctor-json-headless-post-install-verification-step",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "multi-tenant-install-proof/evidence.json",
+      "excerptOrSummary": "Manually cross-checked every line citation in docs/integrations/flow-agents-console.md's new multi-tenant subsection against source: install.sh:21 (CONSOLE_CONFIG_ARGS=()), install.sh:24-27 (flag collection incl. --console-tenant), install.sh:54-55 (passthrough to install-console-config.sh); src/cli/init.ts:385-408 installBundle(), :390-398 mkdtemp 0o600 token-file write; src/cli/telemetry-doctor.ts:208-209 tokenConfigured/tenantConfigured, :210 reachability; scripts/telemetry/install-console-config.sh:88-100 set_config_key awk-filter-then-append idempotency. All citations verified accurate (correct line numbers, correct described behavior). The doc explicitly states the client-vs-server tenant-isolation boundary (console #98-#100 out of scope) and cross-references the new eval as the isolation proof, and gives a literal one-command runbook (npx @kontourai/flow-agents init ... / bash install.sh ... with --console-tenant + --console-token-file) plus a telemetry-doctor --json --headless post-install verification step.",
+      "observedAt": "2026-07-07T15:37:45Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:multi-tenant-install-proof-mirror-pair-byte-identity.flow-agents-workflow.diff-scripts-telemetry-install-console-config-sh-context-scripts-telemetry-install-console-config-sh-is-empty-exit-0-both-before-and-after-the-fault-injection-run-the-mirror-pair-is-byte-identical-as-required",
+      "claimId": "multi-tenant-install-proof-mirror-pair-byte-identity.flow-agents-workflow.diff-scripts-telemetry-install-console-config-sh-context-scripts-telemetry-install-console-config-sh-is-empty-exit-0-both-before-and-after-the-fault-injection-run-the-mirror-pair-is-byte-identical-as-required",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "multi-tenant-install-proof/evidence.json",
+      "excerptOrSummary": "diff scripts/telemetry/install-console-config.sh context/scripts/telemetry/install-console-config.sh is empty (exit 0) both before and after the fault-injection run -- the mirror pair is byte-identical as required.",
+      "observedAt": "2026-07-07T15:37:45Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:multi-tenant-install-proof-final-scope-and-tree-cleanliness.flow-agents-workflow.git-status-porcelain-before-and-after-fault-injection-shows-exactly-the-intended-8-files-plus-1-new-untracked-eval-script-plus-one-pre-existing-unrelated-file-explicitly-out-of-scope-per-the-task-instructions-a-timestamp-only-change-in-a-sibling-delivery-directory-s-verification-record-artifact-unrelated-to-this-change-s-8-files-all-4-fault-injection-edits-were-reverted-final-git-diff-stat-is-byte-identical-to-the-initial-git-diff-stat-144-insertions-87-deletions-across-8-files",
+      "claimId": "multi-tenant-install-proof-final-scope-and-tree-cleanliness.flow-agents-workflow.git-status-porcelain-before-and-after-fault-injection-shows-exactly-the-intended-8-files-plus-1-new-untracked-eval-script-plus-one-pre-existing-unrelated-file-explicitly-out-of-scope-per-the-task-instructions-a-timestamp-only-change-in-a-sibling-delivery-directory-s-verification-record-artifact-unrelated-to-this-change-s-8-files-all-4-fault-injection-edits-were-reverted-final-git-diff-stat-is-byte-identical-to-the-initial-git-diff-stat-144-insertions-87-deletions-across-8-files",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "multi-tenant-install-proof/evidence.json",
+      "excerptOrSummary": "git status --porcelain before and after fault injection shows exactly the intended 8 files plus 1 new untracked eval script, plus one pre-existing unrelated file explicitly out of scope per the task instructions (a timestamp-only change in a sibling delivery directory's verification-record artifact, unrelated to this change's 8 files). All 4 fault-injection edits were reverted; final git diff --stat is byte-identical to the initial git diff --stat (144 insertions, 87 deletions across 8 files).",
+      "observedAt": "2026-07-07T15:37:45Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:test_output",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:attestation",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:multi-tenant-install-proof-ci-wiring-console-tenant-isolation-lane.flow-agents-workflow.verified-evals-ci-run-baseline-sh-check-console-tenant-isolation-integration-resolves-and-runs-the-new-eval-pass-exit-0-confirming-the-checks-and-lane-workflow-contracts-wiring-in-evals-ci-run-baseline-sh-and-the-new-console-tenant-isolation-integration-step-in-github-workflows-ci-yml-reference-a-real-working-slug-fault-injected-a-misspelled-slug-console-tenant-isolashun-integration-in-ci-yml-and-confirmed-run-baseline-sh-check-wrong-slug-reports-unknown-ci-baseline-check-for-lane-all-exit-2-rather-than-silently-no-oping-reverted-slug-restored",
+      "claimId": "multi-tenant-install-proof-ci-wiring-console-tenant-isolation-lane.flow-agents-workflow.verified-evals-ci-run-baseline-sh-check-console-tenant-isolation-integration-resolves-and-runs-the-new-eval-pass-exit-0-confirming-the-checks-and-lane-workflow-contracts-wiring-in-evals-ci-run-baseline-sh-and-the-new-console-tenant-isolation-integration-step-in-github-workflows-ci-yml-reference-a-real-working-slug-fault-injected-a-misspelled-slug-console-tenant-isolashun-integration-in-ci-yml-and-confirmed-run-baseline-sh-check-wrong-slug-reports-unknown-ci-baseline-check-for-lane-all-exit-2-rather-than-silently-no-oping-reverted-slug-restored",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:multi-tenant-install-proof-ci-wiring-console-tenant-isolation-lane.flow-agents-workflow.verified-evals-ci-run-baseline-sh-check-console-tenant-isolation-integration-resolves-and-runs-the-new-eval-pass-exit-0-confirming-the-checks-and-lane-workflow-contracts-wiring-in-evals-ci-run-baseline-sh-and-the-new-console-tenant-isolation-integration-step-in-github-workflows-ci-yml-reference-a-real-working-slug-fault-injected-a-misspelled-slug-console-tenant-isolashun-integration-in-ci-yml-and-confirmed-run-baseline-sh-check-wrong-slug-reports-unknown-ci-baseline-check-for-lane-all-exit-2-rather-than-silently-no-oping-reverted-slug-restored"
+      ],
+      "createdAt": "2026-07-07T15:37:45Z",
+      "verifiedAt": "2026-07-07T15:37:45Z"
+    },
+    {
+      "id": "evt:multi-tenant-install-proof-docs-multi-tenant-runbook-citation-audit.flow-agents-workflow.manually-cross-checked-every-line-citation-in-docs-integrations-flow-agents-console-md-s-new-multi-tenant-subsection-against-source-install-sh-21-console-config-args-install-sh-24-27-flag-collection-incl-console-tenant-install-sh-54-55-passthrough-to-install-console-config-sh-src-cli-init-ts-385-408-installbundle-390-398-mkdtemp-0o600-token-file-write-src-cli-telemetry-doctor-ts-208-209-tokenconfigured-tenantconfigured-210-reachability-scripts-telemetry-install-console-config-sh-88-100-set-config-key-awk-filter-then-append-idempotency-all-citations-verified-accurate-correct-line-numbers-correct-described-behavior-the-doc-explicitly-states-the-client-vs-server-tenant-isolation-boundary-console-98-100-out-of-scope-and-cross-references-the-new-eval-as-the-isolation-proof-and-gives-a-literal-one-command-runbook-npx-kontourai-flow-agents-init-bash-install-sh-with-console-tenant-console-token-file-plus-a-telemetry-doctor-json-headless-post-install-verification-step",
+      "claimId": "multi-tenant-install-proof-docs-multi-tenant-runbook-citation-audit.flow-agents-workflow.manually-cross-checked-every-line-citation-in-docs-integrations-flow-agents-console-md-s-new-multi-tenant-subsection-against-source-install-sh-21-console-config-args-install-sh-24-27-flag-collection-incl-console-tenant-install-sh-54-55-passthrough-to-install-console-config-sh-src-cli-init-ts-385-408-installbundle-390-398-mkdtemp-0o600-token-file-write-src-cli-telemetry-doctor-ts-208-209-tokenconfigured-tenantconfigured-210-reachability-scripts-telemetry-install-console-config-sh-88-100-set-config-key-awk-filter-then-append-idempotency-all-citations-verified-accurate-correct-line-numbers-correct-described-behavior-the-doc-explicitly-states-the-client-vs-server-tenant-isolation-boundary-console-98-100-out-of-scope-and-cross-references-the-new-eval-as-the-isolation-proof-and-gives-a-literal-one-command-runbook-npx-kontourai-flow-agents-init-bash-install-sh-with-console-tenant-console-token-file-plus-a-telemetry-doctor-json-headless-post-install-verification-step",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:multi-tenant-install-proof-docs-multi-tenant-runbook-citation-audit.flow-agents-workflow.manually-cross-checked-every-line-citation-in-docs-integrations-flow-agents-console-md-s-new-multi-tenant-subsection-against-source-install-sh-21-console-config-args-install-sh-24-27-flag-collection-incl-console-tenant-install-sh-54-55-passthrough-to-install-console-config-sh-src-cli-init-ts-385-408-installbundle-390-398-mkdtemp-0o600-token-file-write-src-cli-telemetry-doctor-ts-208-209-tokenconfigured-tenantconfigured-210-reachability-scripts-telemetry-install-console-config-sh-88-100-set-config-key-awk-filter-then-append-idempotency-all-citations-verified-accurate-correct-line-numbers-correct-described-behavior-the-doc-explicitly-states-the-client-vs-server-tenant-isolation-boundary-console-98-100-out-of-scope-and-cross-references-the-new-eval-as-the-isolation-proof-and-gives-a-literal-one-command-runbook-npx-kontourai-flow-agents-init-bash-install-sh-with-console-tenant-console-token-file-plus-a-telemetry-doctor-json-headless-post-install-verification-step"
+      ],
+      "createdAt": "2026-07-07T15:37:45Z",
+      "verifiedAt": "2026-07-07T15:37:45Z"
+    },
+    {
+      "id": "evt:multi-tenant-install-proof-mirror-pair-byte-identity.flow-agents-workflow.diff-scripts-telemetry-install-console-config-sh-context-scripts-telemetry-install-console-config-sh-is-empty-exit-0-both-before-and-after-the-fault-injection-run-the-mirror-pair-is-byte-identical-as-required",
+      "claimId": "multi-tenant-install-proof-mirror-pair-byte-identity.flow-agents-workflow.diff-scripts-telemetry-install-console-config-sh-context-scripts-telemetry-install-console-config-sh-is-empty-exit-0-both-before-and-after-the-fault-injection-run-the-mirror-pair-is-byte-identical-as-required",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:multi-tenant-install-proof-mirror-pair-byte-identity.flow-agents-workflow.diff-scripts-telemetry-install-console-config-sh-context-scripts-telemetry-install-console-config-sh-is-empty-exit-0-both-before-and-after-the-fault-injection-run-the-mirror-pair-is-byte-identical-as-required"
+      ],
+      "createdAt": "2026-07-07T15:37:45Z",
+      "verifiedAt": "2026-07-07T15:37:45Z"
+    },
+    {
+      "id": "evt:multi-tenant-install-proof-final-scope-and-tree-cleanliness.flow-agents-workflow.git-status-porcelain-before-and-after-fault-injection-shows-exactly-the-intended-8-files-plus-1-new-untracked-eval-script-plus-one-pre-existing-unrelated-file-explicitly-out-of-scope-per-the-task-instructions-a-timestamp-only-change-in-a-sibling-delivery-directory-s-verification-record-artifact-unrelated-to-this-change-s-8-files-all-4-fault-injection-edits-were-reverted-final-git-diff-stat-is-byte-identical-to-the-initial-git-diff-stat-144-insertions-87-deletions-across-8-files",
+      "claimId": "multi-tenant-install-proof-final-scope-and-tree-cleanliness.flow-agents-workflow.git-status-porcelain-before-and-after-fault-injection-shows-exactly-the-intended-8-files-plus-1-new-untracked-eval-script-plus-one-pre-existing-unrelated-file-explicitly-out-of-scope-per-the-task-instructions-a-timestamp-only-change-in-a-sibling-delivery-directory-s-verification-record-artifact-unrelated-to-this-change-s-8-files-all-4-fault-injection-edits-were-reverted-final-git-diff-stat-is-byte-identical-to-the-initial-git-diff-stat-144-insertions-87-deletions-across-8-files",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:multi-tenant-install-proof-final-scope-and-tree-cleanliness.flow-agents-workflow.git-status-porcelain-before-and-after-fault-injection-shows-exactly-the-intended-8-files-plus-1-new-untracked-eval-script-plus-one-pre-existing-unrelated-file-explicitly-out-of-scope-per-the-task-instructions-a-timestamp-only-change-in-a-sibling-delivery-directory-s-verification-record-artifact-unrelated-to-this-change-s-8-files-all-4-fault-injection-edits-were-reverted-final-git-diff-stat-is-byte-identical-to-the-initial-git-diff-stat-144-insertions-87-deletions-across-8-files"
+      ],
+      "createdAt": "2026-07-07T15:37:45Z",
+      "verifiedAt": "2026-07-07T15:37:45Z"
+    },
+    {
+      "id": "evt:multi-tenant-install-proof-end-to-end-eval-proves-a-telemetry-post-from-a-configured-tenant-carries-x-console-tenant-id-tenant-bearer-token-to-a-mock-receiver-for-two-distinct-tenants-isolation.flow-agents-workflow.end-to-end-eval-proves-a-telemetry-post-from-a-configured-tenant-carries-x-console-tenant-id-tenant-bearer-token-to-a-mock-receiver-for-two-distinct-tenants-isolation",
+      "claimId": "multi-tenant-install-proof-end-to-end-eval-proves-a-telemetry-post-from-a-configured-tenant-carries-x-console-tenant-id-tenant-bearer-token-to-a-mock-receiver-for-two-distinct-tenants-isolation.flow-agents-workflow.end-to-end-eval-proves-a-telemetry-post-from-a-configured-tenant-carries-x-console-tenant-id-tenant-bearer-token-to-a-mock-receiver-for-two-distinct-tenants-isolation",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:37:45Z",
+      "verifiedAt": "2026-07-07T15:37:45Z"
+    },
+    {
+      "id": "evt:multi-tenant-install-proof-durable-doc-gives-a-one-command-multi-tenant-install-runbook-incl-token-provisioning-telemetry-doctor-verification.flow-agents-workflow.durable-doc-gives-a-one-command-multi-tenant-install-runbook-incl-token-provisioning-telemetry-doctor-verification",
+      "claimId": "multi-tenant-install-proof-durable-doc-gives-a-one-command-multi-tenant-install-runbook-incl-token-provisioning-telemetry-doctor-verification.flow-agents-workflow.durable-doc-gives-a-one-command-multi-tenant-install-runbook-incl-token-provisioning-telemetry-doctor-verification",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:37:45Z",
+      "verifiedAt": "2026-07-07T15:37:45Z"
+    },
+    {
+      "id": "evt:multi-tenant-install-proof-no-regression-validate-source-existing-telemetry-bundle-install-evals-stay-green-mirror-invariant-preserved.flow-agents-workflow.no-regression-validate-source-existing-telemetry-bundle-install-evals-stay-green-mirror-invariant-preserved",
+      "claimId": "multi-tenant-install-proof-no-regression-validate-source-existing-telemetry-bundle-install-evals-stay-green-mirror-invariant-preserved.flow-agents-workflow.no-regression-validate-source-existing-telemetry-bundle-install-evals-stay-green-mirror-invariant-preserved",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T15:37:45Z",
+      "verifiedAt": "2026-07-07T15:37:45Z"
+    }
+  ]
+}

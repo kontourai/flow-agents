@@ -1,0 +1,620 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "install-flow-console-connect-source-tree-validation.flow-agents-workflow.validate-source-source-tree-mirror-invariant-green-in-worktree-neither-init-ts-nor-telemetry-doctor-ts-is-mirrored",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/source-tree-validation",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "validate:source (source-tree + mirror invariant) green in worktree; neither init.ts nor telemetry-doctor.ts is mirrored.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "install-flow-console-connect-bundle-install-integration.flow-agents-workflow.bundle-install-eval-incl-new-g2-g3-summary-no-token-leak-headless-self-hosted-die-on-blank-regression-assertions-90-90-in-worktree",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/bundle-install-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "bundle-install eval incl. new G2/G3 summary + no-token-leak + headless self-hosted die-on-blank regression assertions; 90/90 in worktree.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "install-flow-console-connect-telemetry-doctor-integration.flow-agents-workflow.telemetry-doctor-eval-buildreport-export-reuse-hosted-reachability-carve-out-11-11-in-worktree-export-only-change-zero-behavior-diff",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/telemetry-doctor-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "telemetry-doctor eval (buildReport export reuse, hosted reachability carve-out) 11/11 in worktree; export-only change, zero behavior diff.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "install-flow-console-connect-console-tenant-isolation-integration.flow-agents-workflow.tenant-isolation-eval-unaffected-by-pr2-install-time-ts-only-all-checks-pass-in-worktree",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/console-tenant-isolation-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "tenant-isolation eval unaffected by PR2 (install-time TS only); all checks pass in worktree.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "install-flow-console-connect-independent-security-review.flow-agents-workflow.tool-security-reviewer-clean-0-critical-high-medium-1-low-validate-before-persist-invariant-pin-addressed-via-eval-assertion-token-never-printed-logged-argv-d-persisted-outside-pre-existing-mode-600-mkdtemp-no-shell-interpolation-of-user-values-ssrf-allowlist-posture-unchanged",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/independent-security-review",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "tool-security-reviewer CLEAN: 0 critical/high/medium, 1 low (validate-before-persist invariant-pin, addressed via eval assertion). Token never printed/logged/argv-d/persisted outside pre-existing mode-600 mkdtemp; no shell interpolation of user values; SSRF/allowlist posture unchanged.",
+      "value": "pass",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-console-connect-independent-code-review.flow-agents-workflow.tool-code-reviewer-iter1-changes-requested-1-high-self-hosted-auto-verify-disclosure-2-medium-length-2-low-all-addressed-iter2-delta-re-review-approve-re-reviewer-self-ran-suite-139-139-90-90",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/independent-code-review",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "tool-code-reviewer iter1 CHANGES_REQUESTED (1 HIGH self-hosted auto-verify disclosure + 2 MEDIUM length + 2 LOW) all addressed; iter2 delta re-review APPROVE, re-reviewer self-ran suite 139/139 + 90/90.",
+      "value": "pass",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-console-connect-fault-injection-verification.flow-agents-workflow.tool-verifier-pass-all-4-acs-5-5-fault-injections-discriminating-token-leak-90-88-self-hosted-false-verified-2-unit-tests-headless-guard-leak-90-89-validate-before-persist-90-88-w-hostile-tenant-landing-in-telemetry-conf-auto-verify-throw-90-81-all-reverted-with-byte-identical-md5-tree-clean-before-after",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/fault-injection-verification",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "tool-verifier PASS all 4 ACs; 5/5 fault injections discriminating (token-leak 90->88, self-hosted-false-verified 2 unit tests, headless-guard-leak 90->89, validate-before-persist 90->88 w/ hostile tenant landing in telemetry.conf, auto-verify-throw 90->81); all reverted with byte-identical md5, tree clean before/after.",
+      "value": "pass",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-console-connect-unit-tests-console-connect.flow-agents-workflow.test-unit-139-139-incl-31-new-console-connect-options-wizard-tests-exercising-full-runconsoleconnectwizard-orchestration-via-injected-ask-askhidden-stubs-not-a-reconcile-manifest-command-attested-from-worktree-run",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/unit-tests-console-connect",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "test:unit 139/139 incl. 31 new console-connect-options wizard tests exercising full runConsoleConnectWizard orchestration via injected ask/askHidden stubs. Not a reconcile-manifest command; attested from worktree run.",
+      "value": "pass",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-console-connect-manual-tty-smoke-gap.flow-agents-workflow.disclosed-accepted-gap-manual-interactive-tty-smoke-test-not-run-no-pty-in-env-mitigated-by-the-31-wizard-unit-tests-covering-all-decision-logic-only-the-thin-rl-question-questionhidden-wiring-is-untested-matching-the-plan-stop-short-risk",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/manual-tty-smoke-gap",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Disclosed accepted gap: manual interactive-TTY smoke test not run (no PTY in env). Mitigated by the 31 wizard unit tests covering all decision logic; only the thin rl.question/questionHidden wiring is untested, matching the plan Stop-short risk.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "install-flow-console-connect-init-interactive-flow-presents-an-explicit-connect-to-kontour-console-step-hosted-local-self-hosted-skip-defaulting-to-hosted-console-kontourai-io-replacing-the-hidden-sink-keyword-branch-hosted-prompts-inline-for-token-tenant-with-a-printed-provisioning-link.flow-agents-workflow.init-interactive-flow-interactiveoptions-in-src-cli-init-ts-prompts-connect-to-kontour-console-hosted-local-self-hosted-skip-defaulting-to-hosted-with-the-real-console-presets-sh-resolved-url-shown-not-hardcoded-maps-hosted-kontour-hosted-console-local-local-kontour-console-self-hosted-user-hosted-console-validated-url-required-blank-falls-back-to-local-files-with-a-warning-instead-of-a-downstream-bash-crash-skip-local-files-hosted-local-self-hosted-prompt-inline-hidden-for-token-tenant-with-a-printed-console-auth-tokens-json-provisioning-hint-pr1-s-isvalidconsoleurl-isvalidconsoletoken-isvalidconsoletenant-validate-at-prompt-time-with-warn-not-block-full-retry-loop-is-pr3",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/init-interactive-flow-presents-an-explicit-connect-to-kontour-console-step-hosted-local-self-hosted-skip-defaulting-to-hosted-console-kontourai-io-replacing-the-hidden-sink-keyword-branch-hosted-prompts-inline-for-token-tenant-with-a-printed-provisioning-link",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "init interactive flow (interactiveOptions in src/cli/init.ts) prompts 'Connect to Kontour Console? [Hosted/Local/Self-hosted/Skip]' defaulting to Hosted with the real console-presets.sh-resolved URL shown (not hardcoded); maps Hosted->kontour-hosted-console, Local->local-kontour-console, Self-hosted->user-hosted-console (validated URL required; blank falls back to local-files with a warning instead of a downstream bash crash), Skip->local-files; Hosted/Local/Self-hosted prompt inline (hidden) for token+tenant with a printed CONSOLE_AUTH_TOKENS_JSON provisioning hint; PR1's isValidConsoleUrl/isValidConsoleToken/isValidConsoleTenant validate at prompt time with warn-not-block (full retry loop is PR3)",
+      "value": "pass",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-console-connect-after-a-console-connect-init-auto-runs-telemetry-doctor-for-the-just-written-endpoint-and-prints-reachability-token-tenant-configured-results.flow-agents-workflow.after-installbundle-succeeds-in-main-init-ts-calls-telemetry-doctor-ts-s-exported-buildreport-dest-options-dest-in-process-and-folds-reachability-tokenconfigured-tenantconfigured-into-the-g3-summary-no-op-no-network-call-for-local-files-only-installs-a-reachability-failure-or-thrown-error-becomes-a-warning-line-never-a-non-zero-exit-or-hang",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/after-a-console-connect-init-auto-runs-telemetry-doctor-for-the-just-written-endpoint-and-prints-reachability-token-tenant-configured-results",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "After installBundle() succeeds in main(), init.ts calls telemetry-doctor.ts's exported buildReport(['--dest', options.dest]) in-process and folds reachability/tokenConfigured/tenantConfigured into the G3 summary; no-op (no network call) for local-files-only installs; a reachability failure or thrown error becomes a warning line, never a non-zero exit or hang",
+      "value": "pass",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-console-connect-init-ends-with-a-post-install-summary-block-checkmark-cross-for-runtime-dest-telemetry-sink-console-status-2-3-next-step-lines-replacing-the-bare-installed-line.flow-agents-workflow.main-s-successful-install-path-interactive-and-headless-prints-a-structured-summary-runtime-auto-detected-annotation-when-applicable-destination-telemetry-sink-console-status-connected-verified-connected-unverified-local-only-plus-2-3-next-step-lines-replacing-the-bare-installed-flow-agents-bundle-into-dest-line-the-console-token-value-is-never-printed-only-tokenconfigured-tenantconfigured-booleans-and-safereporturl-redacted-urls",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/init-ends-with-a-post-install-summary-block-checkmark-cross-for-runtime-dest-telemetry-sink-console-status-2-3-next-step-lines-replacing-the-bare-installed-line",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "main()'s successful install path (interactive and headless) prints a structured summary (runtime + auto-detected annotation when applicable, destination, telemetry sink, console status: connected+verified/connected-unverified/local-only) plus 2-3 next-step lines, replacing the bare 'Installed Flow Agents bundle into <dest>' line; the console token value is never printed, only tokenConfigured/tenantConfigured booleans and safeReportUrl-redacted URLs",
+      "value": "pass",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-console-connect-no-regression-headless-yes-path-unchanged-for-scripted-installs-existing-bundle-install-init-evals-green-validate-source-mirror-invariant-preserved-new-interactive-behavior-covered-by-evals-unit-tests.flow-agents-workflow.headlessoptions-in-src-cli-init-ts-is-untouched-no-new-required-prompts-identical-flag-surface-existing-evals-integration-test-bundle-install-sh-assertions-plus-the-new-ones-all-pass-npm-run-validate-source-passes-mirror-invariant-untouched-init-ts-telemetry-doctor-ts-are-not-in-validate-source-tree-ts-s-mirroredfiles-map-npm-run-test-unit-passes-including-the-new-src-cli-console-connect-options-test-mjs",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/no-regression-headless-yes-path-unchanged-for-scripted-installs-existing-bundle-install-init-evals-green-validate-source-mirror-invariant-preserved-new-interactive-behavior-covered-by-evals-unit-tests",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "headlessOptions() in src/cli/init.ts is untouched (no new required prompts, identical flag surface); existing evals/integration/test_bundle_install.sh assertions plus the new ones all pass; npm run validate:source passes (mirror invariant untouched -- init.ts/telemetry-doctor.ts are not in validate-source-tree.ts's mirroredFiles map); npm run test:unit passes including the new src/cli/console-connect-options.test.mjs",
+      "value": "pass",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-console-connect-review.flow-agents-workflow.security-review-clean-0-critical-high-medium-1-low-traced-token-from-hidden-prompt-to-disk-never-printed-logged-argv-d-persisted-outside-pre-existing-mode-600-mkdtemp-summary-emits-only-tokenconfigured-tenantconfigured-booleans-redacted-urls-unit-eval-no-token-leak-assertions-confirm-spawnsync-into-console-presets-sh-uses-a-root-derived-path-with-no-user-influence-no-user-values-shell-interpolated-ssrf-posture-unchanged-auto-verify-skips-non-allowlisted-endpoints-no-allow-network-tenant-isolation-token-file-handling-byte-for-byte-unchanged",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Security review CLEAN: 0 critical/high/medium, 1 low. Traced token from hidden prompt to disk — never printed/logged/argv'd/persisted outside pre-existing mode-600 mkdtemp; summary emits only tokenConfigured/tenantConfigured booleans + redacted URLs (unit + eval no-token-leak assertions confirm). spawnSync into console-presets.sh uses a root-derived path with no user influence; no user values shell-interpolated. SSRF posture unchanged (auto-verify skips non-allowlisted endpoints, no --allow-network). Tenant isolation + token-file handling byte-for-byte unchanged.",
+      "value": "approve",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-security-reviewer",
+        "reviewed_at": "2026-07-07T17:52:15Z"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "install-flow-console-connect-review.flow-agents-workflow.code-review-changes-requested-minor-no-blockers-build-test-unit-138-138-validate-source-bundle-install-85-85-live-fault-injection-all-pass-1-high-self-hosted-https-never-reaches-connected-verified-via-auto-verify-honest-but-undisclosed-to-user-add-clearer-detail-telemetry-doctor-allow-network-next-step-hint-medium-interactiveoptions-87-lines-extract-flag-override-branch-init-ts-1046-lines-pre-existing-trend-accepted-follow-up-low-preset-url-dedup-extract-helper-telemetrysink-re-decl-documented-tradeoff-no-action-plus-security-low-pin-validate-before-persist-invariant-with-an-eval-assertion-confirmed-clean-writer-contract-byte-identical-token-never-logged-auto-verify-never-hangs-fails-install-headless-untouched-self-hosted-guard-interactive-only-purity-no-injection-superseded-review-2026-07-07t18-06-19z-2026-07-07t17-55-13z",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Code review CHANGES_REQUESTED (minor); no blockers — build/test:unit 138/138/validate:source/bundle-install 85/85 + live fault-injection all pass. 1 HIGH (self-hosted HTTPS never reaches connected-verified via auto-verify; honest but undisclosed to user -> add clearer detail + telemetry-doctor --allow-network next-step hint). MEDIUM: interactiveOptions 87 lines (extract flag-override branch), init.ts 1046 lines (pre-existing trend, accepted follow-up). LOW: preset-url dedup (extract helper); TelemetrySink re-decl (documented tradeoff, no action). Plus security LOW: pin validate-before-persist invariant with an eval assertion. Confirmed clean: writer-contract byte-identical, token never logged, auto-verify never hangs/fails install, headless untouched, self-hosted guard interactive-only, purity + no injection.",
+      "value": "changes_requested",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T17:55:13Z",
+        "superseded_by": "review@2026-07-07T18:06:19Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "install-flow-console-connect-review.flow-agents-workflow.delta-re-review-iteration-2-approve-all-4-fixes-verified-correct-no-regressions-no-new-findings-re-reviewer-self-ran-suite-build-clean-test-unit-139-139-bundle-install-90-90-confirmed-1-self-hosted-disclosure-discriminates-purely-on-reachability-checked-verified-every-checked-true-is-inside-the-http-attempt-every-checked-false-is-a-pre-attempt-guard-in-telemetry-doctor-ts-attempted-failed-branch-untouched-hint-gated-correctly-never-falsely-connected-verified-not-allowed-error-edge-still-gets-hint-unit-tested-2-gatherconsoleconnectoptions-extraction-behavior-preserving-no-prompt-match-misfire-3-presetconsoleurl-dedup-identical-fallback-literals-match-console-presets-sh-4-validate-before-persist-eval-non-tautological-checks-exit-exact-die-message-and-telemetry-conf-absence-of-hostile-value-code-review-security-both-clean-this-iteration",
+      "subjectType": "work-item",
+      "subjectId": "install-flow-console-connect/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Delta re-review (iteration 2) APPROVE — all 4 fixes verified correct, no regressions, no new findings. Re-reviewer self-ran suite: build clean, test:unit 139/139, bundle-install 90/90. Confirmed: (1) self-hosted disclosure discriminates purely on reachability.checked (verified every checked:true is inside the HTTP attempt, every checked:false is a pre-attempt guard in telemetry-doctor.ts; attempted-failed branch untouched; hint gated correctly, never falsely connected-verified; not-allowed+error edge still gets hint, unit-tested); (2) gatherConsoleConnectOptions extraction behavior-preserving, no prompt-match misfire; (3) presetConsoleUrl dedup identical, fallback literals match console-presets.sh; (4) validate-before-persist eval non-tautological (checks exit, exact die-message, AND telemetry.conf absence of hostile value). Code review + security both clean this iteration.",
+      "value": "approve",
+      "createdAt": "2026-07-07T18:19:30Z",
+      "updatedAt": "2026-07-07T18:19:30Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-07T18:06:19Z"
+      },
+      "status": "proposed"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:install-flow-console-connect-source-tree-validation.flow-agents-workflow.validate-source-source-tree-mirror-invariant-green-in-worktree-neither-init-ts-nor-telemetry-doctor-ts-is-mirrored",
+      "claimId": "install-flow-console-connect-source-tree-validation.flow-agents-workflow.validate-source-source-tree-mirror-invariant-green-in-worktree-neither-init-ts-nor-telemetry-doctor-ts-is-mirrored",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "install-flow-console-connect/evidence.json",
+      "excerptOrSummary": "validate:source (source-tree + mirror invariant) green in worktree; neither init.ts nor telemetry-doctor.ts is mirrored.",
+      "observedAt": "2026-07-07T18:19:30Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run validate:source --",
+        "isError": true
+      }
+    },
+    {
+      "id": "ev:install-flow-console-connect-bundle-install-integration.flow-agents-workflow.bundle-install-eval-incl-new-g2-g3-summary-no-token-leak-headless-self-hosted-die-on-blank-regression-assertions-90-90-in-worktree",
+      "claimId": "install-flow-console-connect-bundle-install-integration.flow-agents-workflow.bundle-install-eval-incl-new-g2-g3-summary-no-token-leak-headless-self-hosted-die-on-blank-regression-assertions-90-90-in-worktree",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "install-flow-console-connect/evidence.json",
+      "excerptOrSummary": "bundle-install eval incl. new G2/G3 summary + no-token-leak + headless self-hosted die-on-blank regression assertions; 90/90 in worktree.",
+      "observedAt": "2026-07-07T18:19:30Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_bundle_install.sh",
+        "isError": true
+      }
+    },
+    {
+      "id": "ev:install-flow-console-connect-telemetry-doctor-integration.flow-agents-workflow.telemetry-doctor-eval-buildreport-export-reuse-hosted-reachability-carve-out-11-11-in-worktree-export-only-change-zero-behavior-diff",
+      "claimId": "install-flow-console-connect-telemetry-doctor-integration.flow-agents-workflow.telemetry-doctor-eval-buildreport-export-reuse-hosted-reachability-carve-out-11-11-in-worktree-export-only-change-zero-behavior-diff",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "install-flow-console-connect/evidence.json",
+      "excerptOrSummary": "telemetry-doctor eval (buildReport export reuse, hosted reachability carve-out) 11/11 in worktree; export-only change, zero behavior diff.",
+      "observedAt": "2026-07-07T18:19:30Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_telemetry_doctor.sh",
+        "isError": true
+      }
+    },
+    {
+      "id": "ev:install-flow-console-connect-console-tenant-isolation-integration.flow-agents-workflow.tenant-isolation-eval-unaffected-by-pr2-install-time-ts-only-all-checks-pass-in-worktree",
+      "claimId": "install-flow-console-connect-console-tenant-isolation-integration.flow-agents-workflow.tenant-isolation-eval-unaffected-by-pr2-install-time-ts-only-all-checks-pass-in-worktree",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "install-flow-console-connect/evidence.json",
+      "excerptOrSummary": "tenant-isolation eval unaffected by PR2 (install-time TS only); all checks pass in worktree.",
+      "observedAt": "2026-07-07T18:19:30Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_console_tenant_isolation.sh",
+        "isError": true
+      }
+    },
+    {
+      "id": "ev:install-flow-console-connect-independent-security-review.flow-agents-workflow.tool-security-reviewer-clean-0-critical-high-medium-1-low-validate-before-persist-invariant-pin-addressed-via-eval-assertion-token-never-printed-logged-argv-d-persisted-outside-pre-existing-mode-600-mkdtemp-no-shell-interpolation-of-user-values-ssrf-allowlist-posture-unchanged",
+      "claimId": "install-flow-console-connect-independent-security-review.flow-agents-workflow.tool-security-reviewer-clean-0-critical-high-medium-1-low-validate-before-persist-invariant-pin-addressed-via-eval-assertion-token-never-printed-logged-argv-d-persisted-outside-pre-existing-mode-600-mkdtemp-no-shell-interpolation-of-user-values-ssrf-allowlist-posture-unchanged",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-console-connect/evidence.json",
+      "excerptOrSummary": "tool-security-reviewer CLEAN: 0 critical/high/medium, 1 low (validate-before-persist invariant-pin, addressed via eval assertion). Token never printed/logged/argv-d/persisted outside pre-existing mode-600 mkdtemp; no shell interpolation of user values; SSRF/allowlist posture unchanged.",
+      "observedAt": "2026-07-07T18:19:30Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:install-flow-console-connect-independent-code-review.flow-agents-workflow.tool-code-reviewer-iter1-changes-requested-1-high-self-hosted-auto-verify-disclosure-2-medium-length-2-low-all-addressed-iter2-delta-re-review-approve-re-reviewer-self-ran-suite-139-139-90-90",
+      "claimId": "install-flow-console-connect-independent-code-review.flow-agents-workflow.tool-code-reviewer-iter1-changes-requested-1-high-self-hosted-auto-verify-disclosure-2-medium-length-2-low-all-addressed-iter2-delta-re-review-approve-re-reviewer-self-ran-suite-139-139-90-90",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-console-connect/evidence.json",
+      "excerptOrSummary": "tool-code-reviewer iter1 CHANGES_REQUESTED (1 HIGH self-hosted auto-verify disclosure + 2 MEDIUM length + 2 LOW) all addressed; iter2 delta re-review APPROVE, re-reviewer self-ran suite 139/139 + 90/90.",
+      "observedAt": "2026-07-07T18:19:30Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:install-flow-console-connect-fault-injection-verification.flow-agents-workflow.tool-verifier-pass-all-4-acs-5-5-fault-injections-discriminating-token-leak-90-88-self-hosted-false-verified-2-unit-tests-headless-guard-leak-90-89-validate-before-persist-90-88-w-hostile-tenant-landing-in-telemetry-conf-auto-verify-throw-90-81-all-reverted-with-byte-identical-md5-tree-clean-before-after",
+      "claimId": "install-flow-console-connect-fault-injection-verification.flow-agents-workflow.tool-verifier-pass-all-4-acs-5-5-fault-injections-discriminating-token-leak-90-88-self-hosted-false-verified-2-unit-tests-headless-guard-leak-90-89-validate-before-persist-90-88-w-hostile-tenant-landing-in-telemetry-conf-auto-verify-throw-90-81-all-reverted-with-byte-identical-md5-tree-clean-before-after",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-console-connect/evidence.json",
+      "excerptOrSummary": "tool-verifier PASS all 4 ACs; 5/5 fault injections discriminating (token-leak 90->88, self-hosted-false-verified 2 unit tests, headless-guard-leak 90->89, validate-before-persist 90->88 w/ hostile tenant landing in telemetry.conf, auto-verify-throw 90->81); all reverted with byte-identical md5, tree clean before/after.",
+      "observedAt": "2026-07-07T18:19:30Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:install-flow-console-connect-unit-tests-console-connect.flow-agents-workflow.test-unit-139-139-incl-31-new-console-connect-options-wizard-tests-exercising-full-runconsoleconnectwizard-orchestration-via-injected-ask-askhidden-stubs-not-a-reconcile-manifest-command-attested-from-worktree-run",
+      "claimId": "install-flow-console-connect-unit-tests-console-connect.flow-agents-workflow.test-unit-139-139-incl-31-new-console-connect-options-wizard-tests-exercising-full-runconsoleconnectwizard-orchestration-via-injected-ask-askhidden-stubs-not-a-reconcile-manifest-command-attested-from-worktree-run",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-console-connect/evidence.json",
+      "excerptOrSummary": "test:unit 139/139 incl. 31 new console-connect-options wizard tests exercising full runConsoleConnectWizard orchestration via injected ask/askHidden stubs. Not a reconcile-manifest command; attested from worktree run.",
+      "observedAt": "2026-07-07T18:19:30Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:install-flow-console-connect-manual-tty-smoke-gap.flow-agents-workflow.disclosed-accepted-gap-manual-interactive-tty-smoke-test-not-run-no-pty-in-env-mitigated-by-the-31-wizard-unit-tests-covering-all-decision-logic-only-the-thin-rl-question-questionhidden-wiring-is-untested-matching-the-plan-stop-short-risk",
+      "claimId": "install-flow-console-connect-manual-tty-smoke-gap.flow-agents-workflow.disclosed-accepted-gap-manual-interactive-tty-smoke-test-not-run-no-pty-in-env-mitigated-by-the-31-wizard-unit-tests-covering-all-decision-logic-only-the-thin-rl-question-questionhidden-wiring-is-untested-matching-the-plan-stop-short-risk",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-console-connect/evidence.json",
+      "excerptOrSummary": "Disclosed accepted gap: manual interactive-TTY smoke test not run (no PTY in env). Mitigated by the 31 wizard unit tests covering all decision logic; only the thin rl.question/questionHidden wiring is untested, matching the plan Stop-short risk.",
+      "observedAt": "2026-07-07T18:19:30Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:test_output",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:attestation",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:install-flow-console-connect-independent-security-review.flow-agents-workflow.tool-security-reviewer-clean-0-critical-high-medium-1-low-validate-before-persist-invariant-pin-addressed-via-eval-assertion-token-never-printed-logged-argv-d-persisted-outside-pre-existing-mode-600-mkdtemp-no-shell-interpolation-of-user-values-ssrf-allowlist-posture-unchanged",
+      "claimId": "install-flow-console-connect-independent-security-review.flow-agents-workflow.tool-security-reviewer-clean-0-critical-high-medium-1-low-validate-before-persist-invariant-pin-addressed-via-eval-assertion-token-never-printed-logged-argv-d-persisted-outside-pre-existing-mode-600-mkdtemp-no-shell-interpolation-of-user-values-ssrf-allowlist-posture-unchanged",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-console-connect-independent-security-review.flow-agents-workflow.tool-security-reviewer-clean-0-critical-high-medium-1-low-validate-before-persist-invariant-pin-addressed-via-eval-assertion-token-never-printed-logged-argv-d-persisted-outside-pre-existing-mode-600-mkdtemp-no-shell-interpolation-of-user-values-ssrf-allowlist-posture-unchanged"
+      ],
+      "createdAt": "2026-07-07T18:19:30Z",
+      "verifiedAt": "2026-07-07T18:19:30Z"
+    },
+    {
+      "id": "evt:install-flow-console-connect-independent-code-review.flow-agents-workflow.tool-code-reviewer-iter1-changes-requested-1-high-self-hosted-auto-verify-disclosure-2-medium-length-2-low-all-addressed-iter2-delta-re-review-approve-re-reviewer-self-ran-suite-139-139-90-90",
+      "claimId": "install-flow-console-connect-independent-code-review.flow-agents-workflow.tool-code-reviewer-iter1-changes-requested-1-high-self-hosted-auto-verify-disclosure-2-medium-length-2-low-all-addressed-iter2-delta-re-review-approve-re-reviewer-self-ran-suite-139-139-90-90",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-console-connect-independent-code-review.flow-agents-workflow.tool-code-reviewer-iter1-changes-requested-1-high-self-hosted-auto-verify-disclosure-2-medium-length-2-low-all-addressed-iter2-delta-re-review-approve-re-reviewer-self-ran-suite-139-139-90-90"
+      ],
+      "createdAt": "2026-07-07T18:19:30Z",
+      "verifiedAt": "2026-07-07T18:19:30Z"
+    },
+    {
+      "id": "evt:install-flow-console-connect-fault-injection-verification.flow-agents-workflow.tool-verifier-pass-all-4-acs-5-5-fault-injections-discriminating-token-leak-90-88-self-hosted-false-verified-2-unit-tests-headless-guard-leak-90-89-validate-before-persist-90-88-w-hostile-tenant-landing-in-telemetry-conf-auto-verify-throw-90-81-all-reverted-with-byte-identical-md5-tree-clean-before-after",
+      "claimId": "install-flow-console-connect-fault-injection-verification.flow-agents-workflow.tool-verifier-pass-all-4-acs-5-5-fault-injections-discriminating-token-leak-90-88-self-hosted-false-verified-2-unit-tests-headless-guard-leak-90-89-validate-before-persist-90-88-w-hostile-tenant-landing-in-telemetry-conf-auto-verify-throw-90-81-all-reverted-with-byte-identical-md5-tree-clean-before-after",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-console-connect-fault-injection-verification.flow-agents-workflow.tool-verifier-pass-all-4-acs-5-5-fault-injections-discriminating-token-leak-90-88-self-hosted-false-verified-2-unit-tests-headless-guard-leak-90-89-validate-before-persist-90-88-w-hostile-tenant-landing-in-telemetry-conf-auto-verify-throw-90-81-all-reverted-with-byte-identical-md5-tree-clean-before-after"
+      ],
+      "createdAt": "2026-07-07T18:19:30Z",
+      "verifiedAt": "2026-07-07T18:19:30Z"
+    },
+    {
+      "id": "evt:install-flow-console-connect-unit-tests-console-connect.flow-agents-workflow.test-unit-139-139-incl-31-new-console-connect-options-wizard-tests-exercising-full-runconsoleconnectwizard-orchestration-via-injected-ask-askhidden-stubs-not-a-reconcile-manifest-command-attested-from-worktree-run",
+      "claimId": "install-flow-console-connect-unit-tests-console-connect.flow-agents-workflow.test-unit-139-139-incl-31-new-console-connect-options-wizard-tests-exercising-full-runconsoleconnectwizard-orchestration-via-injected-ask-askhidden-stubs-not-a-reconcile-manifest-command-attested-from-worktree-run",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-console-connect-unit-tests-console-connect.flow-agents-workflow.test-unit-139-139-incl-31-new-console-connect-options-wizard-tests-exercising-full-runconsoleconnectwizard-orchestration-via-injected-ask-askhidden-stubs-not-a-reconcile-manifest-command-attested-from-worktree-run"
+      ],
+      "createdAt": "2026-07-07T18:19:30Z",
+      "verifiedAt": "2026-07-07T18:19:30Z"
+    },
+    {
+      "id": "evt:install-flow-console-connect-init-interactive-flow-presents-an-explicit-connect-to-kontour-console-step-hosted-local-self-hosted-skip-defaulting-to-hosted-console-kontourai-io-replacing-the-hidden-sink-keyword-branch-hosted-prompts-inline-for-token-tenant-with-a-printed-provisioning-link.flow-agents-workflow.init-interactive-flow-interactiveoptions-in-src-cli-init-ts-prompts-connect-to-kontour-console-hosted-local-self-hosted-skip-defaulting-to-hosted-with-the-real-console-presets-sh-resolved-url-shown-not-hardcoded-maps-hosted-kontour-hosted-console-local-local-kontour-console-self-hosted-user-hosted-console-validated-url-required-blank-falls-back-to-local-files-with-a-warning-instead-of-a-downstream-bash-crash-skip-local-files-hosted-local-self-hosted-prompt-inline-hidden-for-token-tenant-with-a-printed-console-auth-tokens-json-provisioning-hint-pr1-s-isvalidconsoleurl-isvalidconsoletoken-isvalidconsoletenant-validate-at-prompt-time-with-warn-not-block-full-retry-loop-is-pr3",
+      "claimId": "install-flow-console-connect-init-interactive-flow-presents-an-explicit-connect-to-kontour-console-step-hosted-local-self-hosted-skip-defaulting-to-hosted-console-kontourai-io-replacing-the-hidden-sink-keyword-branch-hosted-prompts-inline-for-token-tenant-with-a-printed-provisioning-link.flow-agents-workflow.init-interactive-flow-interactiveoptions-in-src-cli-init-ts-prompts-connect-to-kontour-console-hosted-local-self-hosted-skip-defaulting-to-hosted-with-the-real-console-presets-sh-resolved-url-shown-not-hardcoded-maps-hosted-kontour-hosted-console-local-local-kontour-console-self-hosted-user-hosted-console-validated-url-required-blank-falls-back-to-local-files-with-a-warning-instead-of-a-downstream-bash-crash-skip-local-files-hosted-local-self-hosted-prompt-inline-hidden-for-token-tenant-with-a-printed-console-auth-tokens-json-provisioning-hint-pr1-s-isvalidconsoleurl-isvalidconsoletoken-isvalidconsoletenant-validate-at-prompt-time-with-warn-not-block-full-retry-loop-is-pr3",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T18:19:30Z",
+      "verifiedAt": "2026-07-07T18:19:30Z"
+    },
+    {
+      "id": "evt:install-flow-console-connect-after-a-console-connect-init-auto-runs-telemetry-doctor-for-the-just-written-endpoint-and-prints-reachability-token-tenant-configured-results.flow-agents-workflow.after-installbundle-succeeds-in-main-init-ts-calls-telemetry-doctor-ts-s-exported-buildreport-dest-options-dest-in-process-and-folds-reachability-tokenconfigured-tenantconfigured-into-the-g3-summary-no-op-no-network-call-for-local-files-only-installs-a-reachability-failure-or-thrown-error-becomes-a-warning-line-never-a-non-zero-exit-or-hang",
+      "claimId": "install-flow-console-connect-after-a-console-connect-init-auto-runs-telemetry-doctor-for-the-just-written-endpoint-and-prints-reachability-token-tenant-configured-results.flow-agents-workflow.after-installbundle-succeeds-in-main-init-ts-calls-telemetry-doctor-ts-s-exported-buildreport-dest-options-dest-in-process-and-folds-reachability-tokenconfigured-tenantconfigured-into-the-g3-summary-no-op-no-network-call-for-local-files-only-installs-a-reachability-failure-or-thrown-error-becomes-a-warning-line-never-a-non-zero-exit-or-hang",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T18:19:30Z",
+      "verifiedAt": "2026-07-07T18:19:30Z"
+    },
+    {
+      "id": "evt:install-flow-console-connect-init-ends-with-a-post-install-summary-block-checkmark-cross-for-runtime-dest-telemetry-sink-console-status-2-3-next-step-lines-replacing-the-bare-installed-line.flow-agents-workflow.main-s-successful-install-path-interactive-and-headless-prints-a-structured-summary-runtime-auto-detected-annotation-when-applicable-destination-telemetry-sink-console-status-connected-verified-connected-unverified-local-only-plus-2-3-next-step-lines-replacing-the-bare-installed-flow-agents-bundle-into-dest-line-the-console-token-value-is-never-printed-only-tokenconfigured-tenantconfigured-booleans-and-safereporturl-redacted-urls",
+      "claimId": "install-flow-console-connect-init-ends-with-a-post-install-summary-block-checkmark-cross-for-runtime-dest-telemetry-sink-console-status-2-3-next-step-lines-replacing-the-bare-installed-line.flow-agents-workflow.main-s-successful-install-path-interactive-and-headless-prints-a-structured-summary-runtime-auto-detected-annotation-when-applicable-destination-telemetry-sink-console-status-connected-verified-connected-unverified-local-only-plus-2-3-next-step-lines-replacing-the-bare-installed-flow-agents-bundle-into-dest-line-the-console-token-value-is-never-printed-only-tokenconfigured-tenantconfigured-booleans-and-safereporturl-redacted-urls",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T18:19:30Z",
+      "verifiedAt": "2026-07-07T18:19:30Z"
+    },
+    {
+      "id": "evt:install-flow-console-connect-no-regression-headless-yes-path-unchanged-for-scripted-installs-existing-bundle-install-init-evals-green-validate-source-mirror-invariant-preserved-new-interactive-behavior-covered-by-evals-unit-tests.flow-agents-workflow.headlessoptions-in-src-cli-init-ts-is-untouched-no-new-required-prompts-identical-flag-surface-existing-evals-integration-test-bundle-install-sh-assertions-plus-the-new-ones-all-pass-npm-run-validate-source-passes-mirror-invariant-untouched-init-ts-telemetry-doctor-ts-are-not-in-validate-source-tree-ts-s-mirroredfiles-map-npm-run-test-unit-passes-including-the-new-src-cli-console-connect-options-test-mjs",
+      "claimId": "install-flow-console-connect-no-regression-headless-yes-path-unchanged-for-scripted-installs-existing-bundle-install-init-evals-green-validate-source-mirror-invariant-preserved-new-interactive-behavior-covered-by-evals-unit-tests.flow-agents-workflow.headlessoptions-in-src-cli-init-ts-is-untouched-no-new-required-prompts-identical-flag-surface-existing-evals-integration-test-bundle-install-sh-assertions-plus-the-new-ones-all-pass-npm-run-validate-source-passes-mirror-invariant-untouched-init-ts-telemetry-doctor-ts-are-not-in-validate-source-tree-ts-s-mirroredfiles-map-npm-run-test-unit-passes-including-the-new-src-cli-console-connect-options-test-mjs",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T18:19:30Z",
+      "verifiedAt": "2026-07-07T18:19:30Z"
+    }
+  ]
+}
