@@ -6,13 +6,14 @@ import { access, readFile, realpath, stat, readdir, lstat } from "node:fs/promis
 import { constants } from "node:fs";
 import path from "node:path";
 
-export type EngineId = "codex" | "claude" | "kiro" | "cursor" | "opencode" | "copilot";
+export type EngineId = "codex" | "claude" | "kiro" | "cursor" | "opencode" | "copilot" | "muse";
 const profiles = {
   codex: { executable: "codex", surfaces: ["cli"] },
   claude: { executable: "claude", surfaces: ["cli"] },
   kiro: { executable: "kiro-cli", surfaces: ["cli", "ide"] },
   cursor: { executable: "cursor-agent", surfaces: ["cli", "ide"] },
   opencode: { executable: "opencode", surfaces: ["cli"] },
+  muse: { executable: "muse", surfaces: ["cli"] },
   copilot: { executable: "copilot", surfaces: ["cli", "vscode"] },
 } as const;
 export function listEngineProfiles() {
@@ -45,7 +46,7 @@ export async function detectEngine(engine: EngineId, options: { environment?: No
   }
   return { engine, installed: false as const, executable: null, version: null, entrypoint_digest: null, authentication: "NOT_VERIFIED" as const };
 }
-export function prepareEngineInvocation(engine: EngineId, prompt: string, options: { model?: string; allowTools?: boolean } = {}) {
+export function prepareEngineInvocation(engine: EngineId, prompt: string, options: { model?: string; allowTools?: boolean; workspace?: string } = {}) {
   profile(engine);
   if (!prompt || prompt.includes("\0")) throw new Error("Nonempty NUL-free prompt required");
   if (options.model !== undefined && (!options.model || options.model.includes("\0"))) throw new Error("Nonempty NUL-free model required");
@@ -56,12 +57,14 @@ export function prepareEngineInvocation(engine: EngineId, prompt: string, option
     case "kiro": return { args: ["chat", "--agent-engine", "v2", "--no-interactive", "--output-format", "stream-json", ...model, ...(options.allowTools ? ["--trust-all-tools"] : []), "--", prompt], stdin: "" };
     case "cursor": return { args: ["-p", "--output-format", "stream-json", ...model, ...(options.allowTools ? ["--force"] : []), "--", prompt], stdin: "" };
     case "opencode": return { args: ["run", "--format", "json", ...model, ...(options.allowTools ? ["--auto"] : []), "--", prompt], stdin: "" };
+    case "muse": return { args: ["exec", "--json", ...model, ...(options.workspace ? ["--workspace", options.workspace] : []), ...(options.allowTools ? ["--yolo"] : []), "--", prompt], stdin: "" };
     case "copilot": return { args: ["-p", prompt, "--output-format", "json", "--no-ask-user", ...model, ...(options.allowTools ? ["--allow-all-tools"] : [])], stdin: "" };
   }
 }
 type Event = Record<string, any>;
 export function parseEngineOutput(engine: EngineId, stdout: string, options: { version?: string | null } = {}) {
   profile(engine);
+  if (Buffer.byteLength(stdout) > 16 * 1024 * 1024) throw new Error("Engine event stream exceeds protocol bound");
   const events: Event[] = stdout.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = JSON.parse(line);
     if (!event || typeof event !== "object" || Array.isArray(event)) throw new Error("Expected JSON event object");
@@ -74,6 +77,9 @@ export function parseEngineOutput(engine: EngineId, stdout: string, options: { v
   const tokens = (value: any, source: string) => {
     if (Number.isSafeInteger(value?.input_tokens) && value.input_tokens >= 0 && Number.isSafeInteger(value?.output_tokens) && value.output_tokens >= 0) usage = { complete: true, input_tokens: value.input_tokens, output_tokens: value.output_tokens, source };
   };
+  let openMessage: string | null = null, openText = "", protocolInvalid = false;
+  const openMessages = new Set<string>();
+  let museRun: string | null = null, museSequence = 0;
   for (const e of events) {
     const eventSession = e.session_id ?? e.sessionID ?? e.sessionId ?? e.data?.sessionId ?? (e.type === "thread.started" ? e.thread_id : null);
     if (typeof eventSession === "string" && eventSession) sessions.add(eventSession);
@@ -89,13 +95,45 @@ export function parseEngineOutput(engine: EngineId, stdout: string, options: { v
         if (e.session_id) sessionId = e.session_id;
         if (e.type === "result") { terminals++; final = e.result; complete = true; failed ||= e.is_error === true || (e.subtype !== undefined && e.subtype !== "success"); if (!failed) tokens(e.usage, `${engine}-result`); }
         break;
-      case "opencode":
+      case "opencode": {
         if (e.sessionID) sessionId = e.sessionID;
-        if (e.type === "text") final = (final ?? "") + (e.part?.text ?? "");
-        if (e.type === "step_finish" && e.part?.reason === "stop") { terminals++; complete = true; }
+        if (["step_start", "text", "step_finish", "tool_use"].includes(e.type)) {
+          const id = e.part?.messageID;
+          if (typeof id !== "string" || !id || e.part?.sessionID !== e.sessionID || typeof e.sessionID !== "string" || !e.sessionID || terminals) protocolInvalid = true;
+          if (e.type === "step_start") {
+            if (openMessage !== null || openMessages.has(id)) protocolInvalid = true;
+            openMessage = id; openText = ""; openMessages.add(id);
+          } else {
+            if (id !== openMessage || openMessage === null) protocolInvalid = true;
+            if (e.type === "text") { if (typeof e.part?.text !== "string") protocolInvalid = true; else openText += e.part.text; }
+            if (e.type === "step_finish") {
+              if (e.part?.reason === "stop") { terminals++; complete = true; final = openText; }
+              else if (e.part?.reason !== "tool-calls") protocolInvalid = true;
+              openMessage = null; openText = "";
+            }
+          }
+        }
         if (e.type === "error") failed = true;
-        // Per-step usage is not a full invocation total.
         break;
+      }
+      case "muse": {
+        if (e.schema_version !== 1 || e.payload_schema_version !== 1 || e.stream?.kind !== "session" || typeof e.stream?.id !== "string" || !e.stream.id || !Number.isSafeInteger(e.sequence) || e.sequence <= museSequence || terminals) protocolInvalid = true;
+        museSequence = e.sequence; sessionId = e.stream?.id;
+        if (typeof sessionId === "string") sessions.add(sessionId);
+        const p = e.payload;
+        if (e.payload_type === "run.lifecycle.started") {
+          if (museRun !== null || p?.kind !== "run_started" || p.run_stream?.kind !== "run" || typeof p.command_id !== "string" || !p.command_id || p.run_stream.id !== p.command_id || e.causation_id !== p.command_id) protocolInvalid = true;
+          museRun = p?.command_id;
+        }
+        if (e.payload_type?.startsWith("run.terminal.")) {
+          terminals++;
+          if (!museRun || p?.command_id !== museRun || p.run_stream?.kind !== "run" || p.run_stream.id !== museRun || e.causation_id !== museRun || p.kind !== "run_terminal") protocolInvalid = true;
+          complete = options.version === "Muse Code 1.4.4 (1.4.4-R5419.1)" && e.payload_type === "run.terminal.completed" && p.terminal === "completed" && p.reason === null;
+          final = typeof p?.text === "string" ? p.text : null;
+          failed ||= !complete;
+        }
+        break;
+      }
       case "copilot":
         if (e.type === "assistant.message") final = e.data?.content;
         if (e.type === "result") { terminals++; sessionId = e.sessionId; complete = true; failed ||= e.exitCode !== 0; }
@@ -113,7 +151,7 @@ export function parseEngineOutput(engine: EngineId, stdout: string, options: { v
         break;
     }
   }
-  complete &&= sessions.size === 1 && (engine !== "codex" || (codexThreads === 1 && codexTurns === 1)) && terminals === 1 && typeof sessionId === "string" && sessionId.length > 0 && typeof final === "string" && final.length > 0;
+  complete &&= !protocolInvalid && openMessage === null && sessions.size === 1 && (engine !== "codex" || (codexThreads === 1 && codexTurns === 1)) && terminals === 1 && typeof sessionId === "string" && sessionId.length > 0 && typeof final === "string" && final.length > 0;
   return { final: typeof final === "string" ? final : null, session_id: typeof sessionId === "string" ? sessionId : null, complete, failed, usage };
 }
 async function readOnlyRevision(workspace: string) {
@@ -146,8 +184,8 @@ export async function runEngine(options: RunEngineOptions) {
   if (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs <= 0 || options.timeoutMs > 2147483647) throw new Error("Positive bounded timeout required");
   const limit = options.maxOutputBytes ?? 16 * 1024 * 1024;
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Positive output bound required");
-  const invocation = prepareEngineInvocation(options.engine, options.prompt, options);
   const workspace = await realpath(options.workspace);
+  const invocation = prepareEngineInvocation(options.engine, options.prompt, { ...options, workspace });
   if (!(await stat(workspace)).isDirectory()) throw new Error("Workspace directory required");
   const revision = options.readOnlyWorkspace ? readOnlyRevision : null;
   const workspaceBefore = revision ? await revision(workspace) : null;

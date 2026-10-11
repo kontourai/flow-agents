@@ -87,3 +87,16 @@ under `/tmp/flow-engine-smoke-20261010/*.runner-receipt.json`; no authentication
 values are published here. Unit tests exercise real fake child processes for
 split streams, terminal evidence, exit failures, process-group cancellation,
 combined output bounds, redaction, identity, read-only changes and explicit refusal.
+
+Muse is an additional explicit native CLI profile. Its version-qualified MSP parser
+requires one session, a correlated started run and a single completed terminal.
+The terminal text is returned exactly; echo protocol qualification does not verify
+a model provider or account. Muse 1.4.4 on brian-media lacks usable Meta credentials
+and remains **NOT_VERIFIED** for provider-backed workflows. Grok and Copilot were
+not substituted. Native login remains owned by the selected engine.
+
+OpenCode's JSONL profile returns text belonging to its final `stop` message only.
+Every step and part must bind the current message and session. Tool-step narration
+is retained in the raw transcript but excluded from the final message; prose or
+fenced JSON within the terminal message remains intact. This parser does not
+repair application output contracts or manufacture a successful artifact result.
