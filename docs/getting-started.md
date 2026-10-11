@@ -67,7 +67,7 @@ Keep generated Codex base config lean. Put profile-specific model, provider, and
 - `kits/builder/` — Builder Kit flows and skills
 - `console.telemetry.json` — telemetry descriptor (writes locally by default)
 
-At L2 conformance (Claude Code, Codex, Kiro) all four hooks are active and the stop hook blocks early exits that lack evidence. At L1 (opencode, pi) steering and stop-goal-fit run but without blocking capability; see the [Runtime Hook Surface spec](spec/runtime-hook-surface.html) for the gaps.
+At L2 conformance (Claude Code, Codex, Kiro) all four hooks are active and the stop hook blocks early exits that lack evidence. At L1 (opencode, pi) steering and stop-goal-fit run but without blocking capability; see the [Runtime Hook Surface spec](spec/runtime-hook-surface.md) for the gaps.
 
 ## 2. What the Builder Kit gives you
 
@@ -222,8 +222,8 @@ npm run eval:static
 
 ## What to read next
 
-- [Workflow Usage Guide](workflow-usage-guide.html) — example prompts and expected behavior for every skill and stage
-- [Agent System Guidebook](agent-system-guidebook.html) — how the pieces fit together conceptually
-- [Kit Authoring Guide](kit-authoring-guide.html) — author your own Flow Kit from scratch
-- [Runtime Hook Surface spec](spec/runtime-hook-surface.html) — hook events, conformance levels, and host gaps
-- [Workflow Artifact Lifecycle](workflow-artifact-lifecycle.html) — when to promote local artifacts to durable docs
+- [Workflow Usage Guide](workflow-usage-guide.md) — example prompts and expected behavior for every skill and stage
+- [Agent System Guidebook](agent-system-guidebook.md) — how the pieces fit together conceptually
+- [Kit Authoring Guide](kit-authoring-guide.md) — author your own Flow Kit from scratch
+- [Runtime Hook Surface spec](spec/runtime-hook-surface.md) — hook events, conformance levels, and host gaps
+- [Workflow Artifact Lifecycle](workflow-artifact-lifecycle.md) — when to promote local artifacts to durable docs

@@ -4,6 +4,8 @@ Flow Agents exposes its supported consumer workflow surface through the primary 
 Consumer repositories do not need a `package.json`, a local dependency, or a repository-owned
 writer script.
 
+## Run a workflow from the package binary
+
 Use an exact package version from an isolated npm prefix. This prevents a repository-local
 dependency with the same version from intercepting the command. Generated workflow actions and
 doctor remediation include this isolation automatically:

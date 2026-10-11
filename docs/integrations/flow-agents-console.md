@@ -261,7 +261,7 @@ fleet view whole.
 
 ## Dogfooding
 
-`console.kontourai.io` runs from the `console` repo; the deployment lives in `console-deploy` (the
+`console.kontourai.io` runs from the `console` repo; the deployment lives in a private deployment repository (the
 dogfood instance). Flow Agents development itself is intended to run against it — the fleet view of our
 own parallel Builder sessions is both the first real test and the first sales demo of the tier.
 

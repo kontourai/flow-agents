@@ -270,7 +270,7 @@ Exit criteria:
 
 ## Veritas Fit Assessment
 
-`~/dev/github/kontourai/veritas` appears strongly aligned with the evidence and governance parts of the north star.
+[Veritas](https://github.com/kontourai/veritas) appears strongly aligned with the evidence and governance parts of the north star.
 
 Veritas already provides:
 

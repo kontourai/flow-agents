@@ -24,32 +24,32 @@ Flow Agents reaches host runtimes and agent frameworks through two distinct dist
 
 Claude Code and Codex are L2 reference implementations. opencode is L1 (no prompt-submit hook). pi is L1 (no stop hook). The Strands Python adapter is L0 plus config protection via `BeforeToolCallEvent` cancellation. The Strands TypeScript adapter ships telemetry callbacks plus native config protection; workflow steering, quality-gate, and stop-goal-fit policy coverage is available through the conformance shim only.
 
-The <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> defines the canonical event taxonomy, policy classes, conformance levels, and engine contract in full.
+The <a href="../spec/runtime-hook-surface.md">Runtime Hook Surface spec</a> defines the canonical event taxonomy, policy classes, conformance levels, and engine contract in full.
 
 ## Pages in this section
 
 <div class="doc-grid">
-  <a class="doc-card" href="harness-install.html">
+  <a class="doc-card" href="harness-install.md">
     <strong>Harness Install</strong>
     <span>Worked example installing into a Claude Code project, and the two newest runtimes: opencode and pi. Includes the dogfood variant and scope-collision warning behavior.</span>
   </a>
-  <a class="doc-card" href="framework-adapter.html">
+  <a class="doc-card" href="framework-adapter.md">
     <strong>Framework Adapter</strong>
     <span>Worked example based on <code>integrations/strands/</code>: constructing FlowAgentsHooks, telemetry emitted, the engine-contract binding for policy, and documented limitations.</span>
   </a>
-  <a class="doc-card" href="conformance.html">
+  <a class="doc-card" href="conformance.md">
     <strong>Conformance</strong>
     <span>How a third-party adapter self-certifies: the engine contract 1.0, running the conformance runner, what each level requires, and how to declare gaps.</span>
   </a>
-  <a class="doc-card" href="../spec/runtime-hook-surface.html">
+  <a class="doc-card" href="../spec/runtime-hook-surface.md">
     <strong>Runtime Hook Surface Spec</strong>
     <span>Canonical event taxonomy, four policy classes, conformance levels L0/L1/L2, mapping tables, and the engine contract for adapter authors.</span>
   </a>
-  <a class="doc-card" href="knowledge-kit-live.html">
+  <a class="doc-card" href="knowledge-kit-live.md">
     <strong>Knowledge Kit Live Example</strong>
     <span>End-to-end proof of the Knowledge Kit ingest + compile flows against a real Strands agent (OllamaModel / qwen3:1.7b). No API key required. Includes acceptance test with telemetry and provenance assertions.</span>
   </a>
-  <a class="doc-card" href="flow-agents-console.html">
+  <a class="doc-card" href="flow-agents-console.md">
     <strong>Flow Agents × Console</strong>
     <span>The optional fleet tier over the local coordination substrate: a liveness relay, team/project insight views, an in-hub janitor, and (Phase 2) a Console-backed AssignmentProvider. Local-first stands; the Console never becomes the authority.</span>
   </a>
@@ -59,4 +59,4 @@ The <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> de
 
 ## TypeScript native-import adapter
 
-`integrations/strands-ts/` (`@kontourai/flow-agents-strands`) is the first native-import consumer of the policy engine contract. It binds the `config-protection.js` `run()` function directly — no subprocess on the hot path. Shipped native behavior is telemetry callbacks plus config-protection blocking; workflow steering, quality-gate, and stop-goal-fit run through the conformance shim rather than production Strands TS callbacks. See `integrations/strands-ts/README.md` and the [Framework Adapter](framework-adapter.html) page for the full comparison with the Python adapter.
+`integrations/strands-ts/` (`@kontourai/flow-agents-strands`) is the first native-import consumer of the policy engine contract. It binds the `config-protection.js` `run()` function directly — no subprocess on the hot path. Shipped native behavior is telemetry callbacks plus config-protection blocking; workflow steering, quality-gate, and stop-goal-fit run through the conformance shim rather than production Strands TS callbacks. See `integrations/strands-ts/README.md` and the [Framework Adapter](framework-adapter.md) page for the full comparison with the Python adapter.
