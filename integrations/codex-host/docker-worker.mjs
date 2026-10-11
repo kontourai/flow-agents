@@ -20,6 +20,26 @@ export function dockerHostUserArgs(platform=process.platform,{uid=process.getuid
 }
 async function regular(file){const s=await lstat(file);must(s.isFile()&&!s.isSymbolicLink(),'regular file required');return realpath(file);}
 function sync(argv){const r=spawnSync(argv[0],argv.slice(1),{encoding:'utf8'});must(r.status===0,r.stderr||'command failed');return r.stdout.trim();}
+/** Resolve a named bridge to its immutable identity before creating a worker. */
+export function resolveDockerWorkerNetwork(network,{command=sync}={}){
+ must(typeof network==='string'&&/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(network),'network policy required');
+ if(network==='bridge'||network==='none')return {requested:network,mode:network,id:null};
+ must(!['host','default'].includes(network),'unsupported worker network');
+ const records=JSON.parse(command(['docker','network','inspect',network]));
+ must(Array.isArray(records)&&records.length===1,'one observed worker network required');
+ const record=records[0];
+ must(record&&record.Driver==='bridge'&&record.Scope==='local'&&/^[a-f0-9]{64}$/.test(record.Id)&&record.Name===network,'named local bridge network required');
+ return {requested:network,mode:record.Id,id:record.Id};
+}
+/** Refuse replacement or extra attachments before any model process starts. */
+export function verifyDockerWorkerNetwork(inspected,admission){
+ must(inspected.HostConfig?.NetworkMode===admission.mode,'worker network mode mismatch');
+ if(admission.id){
+  const attachments=Object.entries(inspected.NetworkSettings?.Networks??{});
+  // Docker create reserves the attachment by name but fills NetworkID only on start.
+  must(attachments.length===1&&attachments[0][0]===admission.requested&&['',admission.id].includes(attachments[0][1]?.NetworkID),'worker network attachment mismatch');
+ }
+}
 /** Admit only the Linux identity mapping exercised by this host primitive. */
 export function resolveDockerHostIdentity({platform=process.platform}={}){
  const args=dockerHostUserArgs(platform);
@@ -46,7 +66,7 @@ export function parseCodexEvents(stdout){
  return {events,provider_thread_id:starts[0].thread_id,usage:{complete:true,source:'codex-turn-completed',input_tokens:usage.input_tokens,output_tokens:usage.output_tokens,cached_input_tokens:usage.cached_input_tokens??null},final};
 }
 export async function runCodexDockerWorker({image,workspace,sourceRoot,contextFile,providerProxy,model,timeoutMs,reasoningEffort='medium',network='bridge',readOnlyWorkspace=false,artifactRoot,signal,invocationId=randomUUID(),runId,workspaceSetup,storageBudget,forbiddenMountRoots,ownerId,platform=process.platform}){
- must(/^sha256:[a-f0-9]{64}$/.test(image),'immutable image ID required');must(typeof model==='string'&&model.length>0,'explicit model required');must(Number.isSafeInteger(timeoutMs)&&timeoutMs>0,'positive deadline required');must(['bridge','none'].includes(network),'network policy required');
+ must(/^sha256:[a-f0-9]{64}$/.test(image),'immutable image ID required');must(typeof model==='string'&&model.length>0,'explicit model required');must(Number.isSafeInteger(timeoutMs)&&timeoutMs>0,'positive deadline required');const networkAdmission=resolveDockerWorkerNetwork(network);
  must(['minimal','low','medium','high','xhigh'].includes(reasoningEffort),'explicit supported reasoning effort required');
  workspace=await realpath(workspace);sourceRoot=await realpath(sourceRoot);contextFile=await regular(contextFile);artifactRoot=await realpath(artifactRoot);must(providerProxy&&/^http:\/\/host\.docker\.internal:[0-9]+$/.test(providerProxy.baseUrl)&&/^[a-f0-9]{64}$/.test(providerProxy.capability)&&providerProxy.model===model,'host-scoped provider capability required');
  const name=`kontour-worker-${invocationId}`;must(/^[a-z0-9-]+$/.test(name),'safe invocation ID required');
@@ -74,7 +94,7 @@ trust_level = "trusted"
  const gitSetup=readOnlyWorkspace?'':`git add -A && git -c user.name='Kontour Worker' -c user.email='worker@example.invalid' -c commit.gpgsign=false commit -q --allow-empty -m 'Immutable worker workspace seed' && `;
  const fileBlocks=Math.floor(budget.max_file_bytes/512);
  const bootstrap=`ulimit -f ${fileBlocks} && mkdir -p "$CODEX_HOME" && printf '%s' "$1" > "$CODEX_HOME/config.toml" && shift && ${gitInit}${hostBootstrap?hostBootstrap+' && ':''}${gitSetup}exec "$@"`;
- const argv=['docker','create','--name',name,'--network',network,'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','256','--memory','2g','--cpus','2','--tmpfs','/tmp:rw,nosuid,size=1g','--mount',`type=bind,source=${workspace},target=/workspace${readOnlyWorkspace?',readonly':''}`,'--mount',`type=bind,source=${sourceRoot},target=/treatment,readonly`,'--mount',`type=bind,source=${contextFile},target=/context/request.json,readonly`,'--env',`KONTOUR_PROVIDER_CAPABILITY=${providerProxy.capability}`,'--env','CODEX_HOME=/tmp/codex-home','--workdir','/workspace','-i',image,'sh','-c',bootstrap,'worker',providerConfig,'codex','exec','--json','--skip-git-repo-check','--dangerously-bypass-approvals-and-sandbox','--config','model_provider="kontour_proxy"','--config','model_providers.kontour_proxy.name="OpenAI via scoped host proxy"','--config',`model_providers.kontour_proxy.base_url=${JSON.stringify(providerProxy.baseUrl)}`,'--config','model_providers.kontour_proxy.env_key="KONTOUR_PROVIDER_CAPABILITY"','--config','model_providers.kontour_proxy.wire_api="responses"','--config','model_providers.kontour_proxy.requires_openai_auth=false','--config','model_providers.kontour_proxy.supports_websockets=false','--config',`model_reasoning_effort=${JSON.stringify(reasoningEffort)}`,'--model',model,'-'];
+ const argv=['docker','create','--name',name,'--network',networkAdmission.mode,'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--pids-limit','256','--memory','2g','--cpus','2','--tmpfs','/tmp:rw,nosuid,size=1g','--mount',`type=bind,source=${workspace},target=/workspace${readOnlyWorkspace?',readonly':''}`,'--mount',`type=bind,source=${sourceRoot},target=/treatment,readonly`,'--mount',`type=bind,source=${contextFile},target=/context/request.json,readonly`,'--env',`KONTOUR_PROVIDER_CAPABILITY=${providerProxy.capability}`,'--env','CODEX_HOME=/tmp/codex-home','--workdir','/workspace','-i',image,'sh','-c',bootstrap,'worker',providerConfig,'codex','exec','--json','--skip-git-repo-check','--dangerously-bypass-approvals-and-sandbox','--config','model_provider="kontour_proxy"','--config','model_providers.kontour_proxy.name="OpenAI via scoped host proxy"','--config',`model_providers.kontour_proxy.base_url=${JSON.stringify(providerProxy.baseUrl)}`,'--config','model_providers.kontour_proxy.env_key="KONTOUR_PROVIDER_CAPABILITY"','--config','model_providers.kontour_proxy.wire_api="responses"','--config','model_providers.kontour_proxy.requires_openai_auth=false','--config','model_providers.kontour_proxy.supports_websockets=false','--config',`model_reasoning_effort=${JSON.stringify(reasoningEffort)}`,'--model',model,'-'];
  must(typeof runId==='string'&&/^[a-z0-9][a-z0-9._-]*$/.test(runId),'runId required for worker termination');argv.splice(4,0,'--label',`kontour.worker.run=${runId}`);
  const hostIdentity=resolveDockerHostIdentity({platform}),hostUserArgs=hostIdentity.args;
  argv.splice(4,0,...dockerHostGatewayArgs(platform),...hostUserArgs);
@@ -85,6 +105,8 @@ trust_level = "trusted"
  let terminal,observed,parsed=null,storageViolation=null,storageTimer;
  try {
   const inspected=JSON.parse(sync(['docker','inspect',created]))[0];
+  if(networkAdmission.id){const records=JSON.parse(sync(['docker','network','inspect',networkAdmission.id]));must(Array.isArray(records)&&records.length===1&&records[0]?.Id===networkAdmission.id&&records[0]?.Name===networkAdmission.requested&&records[0]?.Driver==='bridge'&&records[0]?.Scope==='local','worker network identity changed before start');}
+  verifyDockerWorkerNetwork(inspected,networkAdmission);
   const expectedMounts=[['/workspace',workspace,!readOnlyWorkspace],['/treatment',sourceRoot,false],['/context/request.json',contextFile,false]];
   expectedMounts.push(...extraMounts.map(m=>[m.destination,m.source,false]));
   must(inspected.Image===image&&inspected.Mounts.length===expectedMounts.length,'worker image or mount count mismatch');
@@ -97,7 +119,7 @@ trust_level = "trusted"
   const extraHosts=inspected.HostConfig.ExtraHosts??null;
   if(platform==='linux')must(Array.isArray(extraHosts)&&extraHosts.includes('host.docker.internal:host-gateway'),'worker host gateway mapping missing');
   const contextBytes=await readFile(contextFile);const context=JSON.parse(contextBytes);
-  observed={execution_owner:ownerId??null,storage_admission:admission,canonical_workspace:context.canonical_workspace??null,source_fork_digest:await workspaceRevision(workspace),unit_scope:context.unit_scope??null,read_only_workspace:readOnlyWorkspace,context_digest:`sha256:${hash(await readFile(contextFile))}`,container_id:created,invocation_id:invocationId,image,argv_model:model,reasoning_effort:reasoningEffort,reasoning_observation:'explicit CLI argv and private user config; upstream request requires separate broker observation',model_observation:'effective-client-request-model; server physical model unverified',provider:'openai',provider_observation:'client configured for capability-scoped OpenAI Responses broker; upstream identity requires separate broker observation; server model identity unverified',mounts:inspected.Mounts.map(m=>({destination:m.Destination,source:m.Source,rw:m.RW})),network:inspected.HostConfig.NetworkMode,read_only_root:true,forbidden_mount_roots:forbidden,controller_mounted:forbidden.some(r=>r.kind==='controller')?false:null,hidden_oracles_mounted:forbidden.some(r=>r.kind==='hidden-oracle')?false:null,credentials_mounted:forbidden.some(r=>r.kind==='credentials')?false:null};
+  observed={execution_owner:ownerId??null,storage_admission:admission,canonical_workspace:context.canonical_workspace??null,source_fork_digest:await workspaceRevision(workspace),unit_scope:context.unit_scope??null,read_only_workspace:readOnlyWorkspace,context_digest:`sha256:${hash(await readFile(contextFile))}`,container_id:created,invocation_id:invocationId,image,argv_model:model,reasoning_effort:reasoningEffort,reasoning_observation:'explicit CLI argv and private user config; upstream request requires separate broker observation',model_observation:'effective-client-request-model; server physical model unverified',provider:'openai',provider_observation:'client configured for capability-scoped OpenAI Responses broker; upstream identity requires separate broker observation; server model identity unverified',mounts:inspected.Mounts.map(m=>({destination:m.Destination,source:m.Source,rw:m.RW})),network:inspected.HostConfig.NetworkMode,network_admission:networkAdmission,read_only_root:true,forbidden_mount_roots:forbidden,controller_mounted:forbidden.some(r=>r.kind==='controller')?false:null,hidden_oracles_mounted:forbidden.some(r=>r.kind==='hidden-oracle')?false:null,credentials_mounted:forbidden.some(r=>r.kind==='credentials')?false:null};
   const prompt=workspaceSetup?.prompt??`Execute the following exact stage request. The frozen treatment files are available at /treatment. Work only within the permitted output scope and return the requested structured result.\n\n${contextBytes.toString()}`;
   observed.extra_hosts=extraHosts;observed.container_user=containerUser;observed.host_user=hostIdentity.host_user;observed.host_user_mapping=hostIdentity.qualification;observed.daemon_security_options=hostIdentity.daemon_security_options;observed.user_namespace_mode=inspected.HostConfig.UsernsMode??null;
   if(typeof prompt!=='string'||!prompt)throw new Error('Worker prompt missing');

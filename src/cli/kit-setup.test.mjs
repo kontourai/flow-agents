@@ -52,6 +52,18 @@ test('first run creates bound secret-free request, refuses cross-identity, symli
  assert.throws(()=>createKitRequest({...options,host:{...native,host_access_granted:false}}),/allow-host-execution/);
  const dry=spawnSync(process.execPath,['build/src/cli.js','kit','setup','portable','--dest',dest,'--workspace',workspace,'--controller-root',path.join(root,'private'),'--engine','codex','--model','example-model','--auth','native','--allow-host-execution','--prompt','Build a portable project','--dry-run'],{encoding:'utf8'});assert.ok([0,1].includes(dry.status),dry.stderr);const preview=JSON.parse(dry.stdout);assert.equal(preview.dry_run,true);assert.equal(preview.request.host_setup.host_access_granted,true);
  const request=createKitRequest(options);assert.equal(request.kit_id,'portable');assert.equal(request.execution.engine,'codex');assert.equal(request.host_setup.auth.mode,'native');assert.equal(request.parameters.constructor,Object);
+ const multiline='Build an offline inventory library.\nRequirements:\r\n\t- Preserve Unicode: café and 🧭.\n';
+ assert.equal(createKitRequest({...options,prompt:multiline}).prompt,multiline);
+ assert.equal(createKitRequest({...options,prompt:'x'.repeat(1_048_576)}).prompt.length,1_048_576);
+ for(const prompt of [null,42,'',' \t\r\n','x'.repeat(1_048_577),'é'.repeat(524_289),'bad\0text','bad\u001btext','bad\u000btext','bad\u007ftext','bad\u0085text','bad\u202etext','bad\u200btext'])assert.throws(()=>createKitRequest({...options,prompt}),/Valid prompt required/);
+ assert.throws(()=>createKitRequest({...options,runId:'bad\nidentifier'}),/Valid run id required/);
+ const setupArgs=['build/src/cli.js','kit','setup','portable','--dest',dest,'--workspace',workspace,'--controller-root',path.join(root,'private'),'--engine','codex','--model','example-model','--auth','native','--allow-host-execution'];
+ const multilineOutput=path.join(root,'multiline-request.json');
+ const created=spawnSync(process.execPath,[...setupArgs,'--prompt',multiline,'--output',multilineOutput],{encoding:'utf8'});
+ assert.ok([0,1].includes(created.status),created.stderr);assert.equal(JSON.parse(fs.readFileSync(multilineOutput,'utf8')).prompt,multiline);
+ const rejectedOutput=path.join(root,'rejected-request.json');
+ const rejected=spawnSync(process.execPath,[...setupArgs,'--prompt','bad\u001btext','--output',rejectedOutput],{encoding:'utf8'});
+ assert.equal(rejected.status,2,rejected.stderr);assert.match(rejected.stderr,/Valid prompt required/);assert.equal(fs.existsSync(rejectedOutput),false);
  const output=path.join(root,'request.json');writeKitRequest(output,request);assert.throws(()=>writeKitRequest(output,request));
  if(process.platform!=='win32')assert.equal(fs.statSync(output).mode&0o777,0o600);
  for(const change of [{template:{kit_id:'other'}},{parameters:{api_key:'private'}},{maxProviderRequests:Infinity},{controllerRoot:path.join(workspace,'controller')}])assert.throws(()=>createKitRequest({...options,...change}));

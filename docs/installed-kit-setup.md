@@ -21,7 +21,7 @@ flow-agents kit setup <kit-id> --dest <installation-root> \
 ```
 
 Choose an engine explicitly: `codex`, `claude`, `kiro`, `cursor`, `opencode`, or
-`copilot`. Native execution uses a **trusted host** and the engine's native login
+`copilot`, or `muse`. Native execution uses a **trusted host** and the engine's native login
 store. It is not a Docker sandbox. `--allow-host-execution` is required to explicitly authorize this host execution profile. Run the engine's sign-in flow first. For Codex,
 use `codex login`, or `codex login --device-auth` on a headless host; `codex login
 status` checks login readiness. Codex can keep credentials in `~/.codex/auth.json`
