@@ -8,7 +8,7 @@ A portable process-discipline layer for agentic work: a kit-neutral engine for F
 
 - **Kit-neutral engine.** FlowDefinition interpretation, gates, runtime and harness adapters, SDK/evidence/trust primitives, and kit validation. The engine is not Builder Kit; Builder is one kit on top.
 - **Survive context loss.** Durable sidecar state under `.kontourai/flow-agents/` records acceptance criteria, evidence, critique, and handoff, so any session resumes from recorded state instead of chat memory.
-- **Tamper-evident trust.** Local capture is advisory and best-effort; the controlled CI re-run reconciles manifest commands and git diff as the authoritative anchor before evidence is treated as CI-verified.
+- **Tamper-evident trust.** Local capture is advisory and best-effort; the repository's required CI checks on the exact pull request head, and the git diff, remain the authoritative boundary.
 - **Flow Kits — workflow + output shape.** A kit bundles flows and optional skills, docs, adapters, evals, and assets as a validated, installable unit. The catalog lists Builder, Knowledge, Release Evidence, and Veritas Governance; [bring your own kit](kit-authoring-guide.md) through the same manifest path.
 
 ## How it works

@@ -18,7 +18,7 @@ Verifiers and reviewers do not modify source code. They may run commands, inspec
 
 ## Writing Evidence Through The Sidecar Writer
 
-Verifiers write evidence and acceptance status **through** `record-evidence` (directly, or via the orchestrating skill), never by hand-authoring `evidence.json`, `acceptance.json`, or `trust.bundle`. Those bespoke sidecars were retired as the source of truth by ADR 0010 Phase 4c; the `trust.bundle` is the sole verification artifact, and only the sidecar writer performs the evidence classification (`evidenceType`/`method` derivation and manifest reconciliation) the CI trust anchor depends on (ADR 0020). `config-protection.js` blocks direct tool writes to these gate files by design. If the sidecar writer is unavailable, record the exact gap instead of writing the files by hand.
+Verifiers write evidence and acceptance status **through** `record-evidence` (directly, or via the orchestrating skill), never by hand-authoring `evidence.json`, `acceptance.json`, or `trust.bundle`. Those bespoke sidecars were retired as the source of truth by ADR 0010 Phase 4c; the `trust.bundle` is the sole verification artifact, and only the sidecar writer performs the evidence classification (`evidenceType`/`method` derivation and manifest reconciliation) the Stop gate and delivery preflight depend on (ADR 0020). `config-protection.js` blocks direct tool writes to these gate files by design. If the sidecar writer is unavailable, record the exact gap instead of writing the files by hand.
 
 ### Critique Generations Across Route-Backs
 

@@ -114,7 +114,7 @@ flow-agents workflow-sidecar promote <session-dir> \
 The claim is **session-local by construction** (check kind `policy` ->
 `policy_rule` evidence, no command / `execution.label`). It therefore needs **no
 new reconcile-manifest entry** and can **never** become a `[not-run]` /
-unbacked-command divergence at CI `trust-reconcile`: the reconciler classifies it
+unbacked-command divergence in the delivery `reconcile-preflight`: the shared reconcile shape check classifies it
 session-local and accepts it as an ATTESTED claim. The durable doc paths are the
 claim's evidence refs; each is verified to exist on disk when the claim is
 recorded (a missing path fails loud), and they are mirrored into an auditable

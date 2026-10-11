@@ -63,14 +63,6 @@ terms or treating absence as success.
    `--route-reason missing_evidence`. The artifact's own `not_verified` verdict
    remains visible even though the readiness expectation fails to select the
    declared route-back. A changed PR head makes the observation stale.
-   When a required provider check reports only that a delivery bundle is missing, do not record
-   that structural lifecycle ordering gap as a product CI failure and do not manufacture PASS.
-   At `merge-ready-ci`, first run `workflow publish-provisional-delivery-request`, have the
-   lifecycle operator sign its exact `authorization` payload, then invoke
-   `workflow publish-provisional-delivery --authorization-file <protected-signed-file>`.
-   Commit and push that session's `delivery/<slug>/`
-   companions, then collect the provider result for that exact revision. A provisional delivery
-   is CI visibility only; it is not this readiness decision and cannot satisfy it by itself.
    When the repository has `.veritas/repo-map.json`, run the pinned Veritas
    engine for the same base/head revision (prefer
    `npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas readiness
@@ -90,7 +82,7 @@ terms or treating absence as success.
    If committing or publishing the reviewed change makes the canonical critique
    or verification snapshot stale, record `NOT_VERIFIED` with route reason
    `missing_evidence`; `merge-ready-ci` routes back to `verify` so the exact
-   committed head can be reviewed and verified before provisional delivery.
+   committed head can be reviewed and verified before terminal delivery.
 3. Evaluate change publication, release and deployment implications through the
    available providers. Before `RELEASE` or `DEPLOY`, require an owner, an
    executable rollback or recovery path, observable success and failure

@@ -97,7 +97,6 @@ renamed, or changes category, update the table and the validator together.
 | `lib/runnable-command.js` | shared hook library | `evals/integration/test_goal_fit_hook.sh` | Shared runnable-command-text heuristic (`isRunnableCommandText`) consumed by `stop-goal-fit.js` and `workflow-sidecar.js` so record-time and Stop-time checks never drift (issue #412). |
 | `lib/skill-drift.js` | shared hook library | `evals/integration/test_skill_drift_check.sh` | Shared installed-Claude-Code-skill manifest builder and drift classifier (`buildManifest`, `compareSkillDrift`) — the single choke point the `init --global` manifest writer, the `flow-agents skill-drift-check` CLI, and the SessionStart advisory all route through so they never disagree on drift classification (issue #439). |
 | `lib/trusted-git.js` | shared hook library | `src/cli/trusted-git.test.mjs`, `evals/integration/test_trusted_git_namespace.sh` | Canonical bounded system Git primitive shared by CLI and hooks, with protected executable routes, sanitized configuration, identity checks and supported Linux namespace provenance. |
-| `lib/unstarted-delivery.js` | shared hook library | `src/cli/unstarted-delivery-advisory.test.mjs` | Never-blocking Stop advisory predicate (`unstartedDeliveryWarning`) for a turn that changed modified tracked source in a Kit-configured repo without ever starting a workflow session. Arms only where `workflowTriggersFor()` finds an `implementation-work-detected` trigger, and stays silent under a well-formed in-scope `delivery/DECLARED` exemption. |
 
 ## Telemetry
 

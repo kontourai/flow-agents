@@ -5,8 +5,9 @@
 //   1. A fresh reviewed delivery written by the real sidecar CLI records the reviewer's verdict as
 //      evidence its policy requires, so the critique derives `verified` from the bundle's own data,
 //      the critique gate accepts it, and the CI reconciler converges on it.
-//   2. Every delivery bundle committed in this repository re-derives, through the reconciler's own
-//      re-derivation helper and shape check, to exactly the status it recorded.
+//   2. Every delivery bundle this repository committed (now evals/fixtures/delivery-bundle-corpus)
+//      re-derives, through the reconciler's own re-derivation helper and shape check, to exactly
+//      the status it recorded.
 //   3. `workflow-sidecar claim` renders evidence that reports no result as "no result", never FAIL.
 //
 // These hold on the installed Surface. On Surface >= 5 properties 1 and 2 are the ones that break
@@ -31,6 +32,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const SIDECAR = path.join(ROOT, "build/src/cli/workflow-sidecar.js");
 const DERIVE = path.join(ROOT, "scripts/ci/derive-claim-status.mjs");
 const RECONCILE = path.join(ROOT, "scripts/ci/trust-reconcile.js");
+// The session trust bundles this repository once committed under delivery/, preserved as a
+// fixture corpus when that directory was retired: every historical writer shape must keep
+// re-deriving to the status it recorded.
+const DELIVERY_CORPUS = path.join(ROOT, "evals/fixtures/delivery-bundle-corpus");
 const shape = require("../../scripts/lib/reconcile-shape.js");
 const { stampedStatusFunctionVersion, statusFunctionVersionForBundle } = require("../../scripts/lib/status-function-version.js");
 
@@ -103,7 +108,7 @@ test("#1422: a fresh reviewed delivery derives verified from the reviewer's verd
 });
 
 test("#1422: every committed delivery bundle re-derives to the verdict it recorded", () => {
-  const deliveryRoot = path.join(ROOT, "delivery");
+  const deliveryRoot = DELIVERY_CORPUS;
   const bundles = fs.readdirSync(deliveryRoot)
     .map((name) => path.join(deliveryRoot, name, "trust.bundle"))
     .filter((file) => fs.existsSync(file));
@@ -191,7 +196,7 @@ test("#1422: `workflow-sidecar claim` explains a bundle with its stamped status 
 // committed delivery as it was derived. Its critiques were verified under a policy that requires
 // nothing, which status function "3" derives `proposed`.
 test("#1422: `workflow-sidecar claim` explains a committed status-function-2 delivery as it was derived", () => {
-  const dir = path.join(ROOT, "delivery/kontourai-flow-agents-1000");
+  const dir = path.join(DELIVERY_CORPUS, "kontourai-flow-agents-1000");
   const bundle = JSON.parse(fs.readFileSync(path.join(dir, "trust.bundle"), "utf8"));
   assert.equal(stampedStatusFunctionVersion(bundle), "2");
   const policies = new Map(bundle.policies.map((policy) => [policy.id, policy]));

@@ -7,7 +7,7 @@ import path from "node:path";
 import { warnIfEvidenceCommandUnreconcilable } from "../../build/src/cli/workflow.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
-// #1056: `publish-delivery` refuses a command claim that is not in the CI reconcile manifest. That
+// #1056: `publish-delivery` refuses a command claim that is not in the trust-reconcile-manifest. That
 // refusal is correct; discovering it at publish time is not, because the run is `completed` by then
 // and an earlier step's expectation can no longer be rebound. These pin the record-time warning
 // that makes the problem visible while the owning step can still fix it.
@@ -40,7 +40,7 @@ test("#1056: warns on a command that is not in the reconcile manifest", () => {
   // The exact mistake that stranded two complete evidence sets: a measurement recorded as a
   // command claim. It is accepted at `execute` and fatal at `publish-delivery`.
   const out = captureStderr(() => warnIfEvidenceCommandUnreconcilable(["git diff --stat origin/main...HEAD"], root));
-  assert.match(out, /not in the CI reconcile manifest/);
+  assert.match(out, /not in the trust-reconcile-manifest/);
   assert.match(out, /git diff --stat origin\/main\.\.\.HEAD/);
   assert.match(out, /publish-delivery/, "the warning must name the step that will refuse it");
   assert.match(out, /--summary/, "and the remedy, since the operator can still act here");

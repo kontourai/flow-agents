@@ -140,9 +140,8 @@ const MERGE_CHANGE_AUTHORIZATION_FIELDS = [
 const record = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * The single gate a definition declares as requiring CURRENT verification — the freshness
- * turnstile that a provisional delivery exists to satisfy, and the one merge-change requires
- * evidence-refresh control on.
+ * The single gate a definition declares as requiring CURRENT verification — the one
+ * merge-change requires evidence-refresh control on.
  *
  * #1336: replaces the composed gate-id literal `builder.publish-learn:merge-ready-ci-gate` and the
  * `builder.build` / `merge-ready-ci` name pins. The coordinator deliberately reads only the

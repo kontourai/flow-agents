@@ -105,10 +105,6 @@
       "section": "Guides"
     },
     {
-      "source": "docs/trust-anchor-adoption.md",
-      "section": "Guides"
-    },
-    {
       "source": "docs/survey-utterance-check.md",
       "section": "Guides"
     },
@@ -554,7 +550,7 @@
     "suite-config-adoption-audit.html": "https://github.com/kontourai/flow-agents/blob/main/docs/suite-config-adoption-audit.md",
     "survey-utterance-check.html": "docs/survey-utterance-check.md",
     "system-git-provenance.html": "docs/system-git-provenance.md",
-    "trust-anchor-adoption.html": "docs/trust-anchor-adoption.md",
+    "trust-anchor-adoption.html": "docs/decisions/trust-reconcile.md",
     "verifiable-trust.html": "docs/verifiable-trust.md",
     "veritas-integration.html": "docs/veritas-integration.md",
     "vision.html": "docs/vision.md",

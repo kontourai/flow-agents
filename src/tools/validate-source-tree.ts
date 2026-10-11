@@ -47,7 +47,6 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   ["scripts/hooks/lib/continuation-turn-authority.js", { mirror: "context/scripts/hooks/lib/continuation-turn-authority.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/kit-catalog.js", { mirror: "context/scripts/hooks/lib/kit-catalog.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/runnable-command.js", { mirror: "context/scripts/hooks/lib/runnable-command.js", allowedDifferences: [] }],
-  ["scripts/hooks/lib/unstarted-delivery.js", { mirror: "context/scripts/hooks/lib/unstarted-delivery.js", allowedDifferences: [] }],
   ["scripts/hooks/stop-goal-fit.js", { mirror: "context/scripts/hooks/stop-goal-fit.js", allowedDifferences: [] }],
   ["scripts/hooks/run-hook.js", { mirror: "context/scripts/hooks/run-hook.js", allowedDifferences: [] }],
   ["scripts/hooks/workflow-steering.js", { mirror: "context/scripts/hooks/workflow-steering.js", allowedDifferences: [] }],
@@ -126,12 +125,12 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/runnable-command.js", { category: "shared hook library", requiredNeedles: ["isRunnableCommandText"] }],
   ["scripts/hooks/lib/skill-drift.js", { category: "shared hook library", requiredNeedles: ["compareSkillDrift", "buildManifest"] }],
   ["scripts/hooks/lib/trusted-git.js", { category: "shared hook library", requiredNeedles: ["execTrustedGitSync", "readTrustedGitBlobSync", "resolveTrustedLocalGitCommit"] }],
-  ["scripts/hooks/lib/unstarted-delivery.js", { category: "shared hook library", requiredNeedles: ["unstartedDeliveryWarning", "UNSTARTED_DELIVERY_PATTERN"] }],
 ]);
 const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification: string }>([
   ["evals/fixtures/assignment-provider", { owners: ["evals/integration/test_assignment_provider_local_file.sh", "evals/integration/test_assignment_provider_github.sh", "evals/integration/test_pull_work_assignment_join.sh", "evals/integration/test_ensure_session_ownership_guard.sh"], classification: "AssignmentProvider local-file and GitHub render/status fixtures (#290); hostile-effective-state.json is the #291 ensure-session ownership guard's AC9 sanitization fixture" }],
   ["evals/fixtures/backlog-provider-settings", { owners: ["evals/integration/test_effective_backlog_settings.sh"], classification: "settings precedence fixtures" }],
   ["evals/fixtures/builder-kit-workflow-state", { owners: ["evals/static/test_workflow_skills.sh"], classification: "Builder Kit workflow-state fixtures" }],
+  ["evals/fixtures/delivery-bundle-corpus", { owners: ["src/cli/surface-status-function.test.mjs", "evals/integration/test_trust_reconcile_negatives.sh"], classification: "Session trust bundles once committed under delivery/, preserved as a status-function re-derivation corpus (#1422)" }],
   ["evals/fixtures/console-declared-projection", { owners: ["evals/integration/test_console_declared_projection.sh"], classification: "delivery/DECLARED accepted-gap projection fixtures (#1267): mixed structured gaps[] / legacy / invalid entries proving the no-prose-scraping fold and its disclosed legacy count" }],
   ["evals/fixtures/console-learning-projection", { owners: ["evals/integration/test_console_learning_projection.sh"], classification: "console learning projection fixtures" }],
   ["evals/fixtures/console-process-projection", { owners: ["evals/integration/test_console_process_projection.sh"], classification: "console process-state projection fixtures" }],

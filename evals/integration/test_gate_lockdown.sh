@@ -169,7 +169,6 @@ copy_isolated_goal_fit_hook() { # $1=isolated hook directory
     runnable-command.js \
     flow-recovery-fence.js \
     effective-flow-agents-config.js \
-    unstarted-delivery.js \
     kit-catalog.js
   do
     cp "$ROOT/scripts/hooks/lib/$dependency" "$dir/lib/"

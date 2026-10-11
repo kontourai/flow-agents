@@ -394,7 +394,7 @@ non-colliding. Three mechanisms
 
 **Per-session delivery paths (#379).** Each session writes its bundle under `delivery/<slug>/` instead
 of a shared `delivery/trust.bundle`. Two sessions delivering concurrently no longer overwrite each
-other; CI selects prefer-newest. (A recurring publish trap: after a soft-reset, `git add -A` would
+other. (A recurring publish trap: after a soft-reset, `git add -A` would
 stage the *deletion* of other sessions' `delivery/<slug>/` dirs — always restore sibling delivery dirs
 from `origin/main` before committing.)
 
@@ -408,12 +408,13 @@ from `origin/main` before committing.)
 These are **distinct error types**, asserted by `.code`/`instanceof` (not message text) so a future
 refactor can't silently collapse them.
 
-**reconcile-preflight (#356).** A local, pre-push mirror of the CI reconcile check, sharing
-`scripts/lib/reconcile-shape.js` so it can never drift from CI. It runs the *same* shape classification
-CI enforces, catching an invalid bundle on your laptop instead of in a red CI run. Its one deliberate
-difference is the `onUnderivable` mode: CI passes `'fail'` (fail-closed — an underivable status fails
-the run); the local preflight may pass `'reduce'` (trust a session-local self-reported status when
-re-derivation is unavailable). The default is `'fail'`, so nothing degrades to fail-open by accident.
+**reconcile-preflight (#356).** A local, pre-push bundle shape check built on
+`scripts/lib/reconcile-shape.js`, which `publishDelivery` also runs before copying anything. It was
+written as the mirror of a CI reconcile check; that check was retired on 2026-10-11 (see the
+[trust-reconcile decision](decisions/trust-reconcile.md)), so the preflight is now the only place the
+shape classification gates anything. The local preflight may pass `onUnderivable: 'reduce'` (trust a
+session-local self-reported status when re-derivation is unavailable); the default is `'fail'`, so
+nothing degrades to fail-open by accident.
 
 **Staleness binding (ADR 0022).** A checkpoint's `commit_sha` must be an ancestor of `HEAD`, achieved
 by *sealing at the parent commit*: soft-reset `HEAD~1` → seal → publish → recommit. This binds a bundle

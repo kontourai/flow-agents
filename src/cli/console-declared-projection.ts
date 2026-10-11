@@ -21,7 +21,7 @@
  * across emissions and a hosted `on conflict do update` upsert converges.
  *
  * NO PROSE SCRAPING: only entries carrying the structured optional `gaps: []` array (an array
- * of non-empty strings — see ADR 0022 addendum part 6 and delivery/README.md) are projected.
+ * of non-empty strings — see ADR 0022 addendum part 6) are projected.
  * Legacy entries whose `reason` prose merely NAMES a gap are never parsed for it; they are
  * counted and disclosed in the summary (`legacy_entries_not_projected`) so their absence from
  * the projection is visible, not silent.
@@ -106,7 +106,7 @@ const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 const DEFAULT_KONTOUR_ROOT = path.join(".kontourai", "console");
 const DEFAULT_DECLARED_PATH = path.join("delivery", "DECLARED");
 /** Required fields on every well-formed delivery/DECLARED entry (ADR 0022 §2 — same normative
- * definition scripts/ci/trust-reconcile.js and scripts/hooks/lib/unstarted-delivery.js apply). */
+ * definition scripts/ci/trust-reconcile.js applies). */
 const DECLARED_REQUIRED_FIELDS = ["scope", "reason", "approved_by", "declared_at"] as const;
 
 function printHelp(): void {

@@ -5,9 +5,7 @@
 allowBuilds:
   # postinstall selects the platform binary; without it esbuild falls back to
   # its slower JS implementation. Needed by the build, which bundles with
-  # esbuild. Not reached by the trust-verify composite action, which passes
-  # --ignore-scripts and so runs no build script at all -- it needs only the
-  # published runtime modules. Bump this pin together with the dependency.
+  # esbuild. Bump this pin together with the dependency.
   esbuild@0.28.1: true
 
   # The five below are refused, not merely unlisted. pnpm fails the install on
@@ -16,8 +14,7 @@ allowBuilds:
   #
   # All five arrive under promptfoo, a devDependency used only by the LLM eval
   # layer (`evals/run.sh llm`). Neither CI path needs them: publish-npm.yml runs
-  # `evals/run.sh static`, whose suites are shell scripts, and the composite
-  # action installs `--prod`, which excludes promptfoo entirely. promptfoo's own
+  # `evals/run.sh static`, whose suites are shell scripts. promptfoo's own
   # bin is linked either way, because it is a direct devDependency.
   #
   # If you run the LLM eval layer locally and hit a missing native binary, flip

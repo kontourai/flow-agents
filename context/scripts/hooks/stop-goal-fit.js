@@ -61,7 +61,6 @@ const { readCurrentPointer, readOwnCurrentPointer } = require('./lib/current-poi
 const { resolveHookWorkflowScope } = require('./lib/hook-workflow-scope.js');
 const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
 const { resolveGoalFitConfig } = require('./lib/effective-flow-agents-config.js');
-const { unstartedDeliveryWarning, UNSTARTED_DELIVERY_PATTERN } = require('./lib/unstarted-delivery.js');
 let validateActiveTurnAuthority = () => ({ valid: false, reason: 'continuation authority validator is unavailable' });
 let validateSignedActiveTurnAssignmentAuthority = validateActiveTurnAuthority;
 try {
@@ -3220,11 +3219,6 @@ function isHardStopWarning(warning, relPath, activeTurnAuthority) {
   // remain eligible for the MAX_BLOCKS operator release valve (belt-and-braces with the
   // message wording that avoids FULL_BLOCK tokens; see learningGateOutstandingWarning).
   if (LEARNING_GATE_PATTERN.test(warning)) return false;
-  // Defense in depth for the unstarted-delivery advisory. run() injects it only with
-  // blocking:false and returns before any hard-block classification, so this branch is not
-  // reachable today — it exists so that MOVING the injection (e.g. into analyze()) cannot
-  // silently convert a "you never started a session" advisory into a non-releasable hard block.
-  if (UNSTARTED_DELIVERY_PATTERN.test(warning)) return false;
   if (!activeTurnAuthority) return HARD_BLOCK.test(warning);
   return FULL_BLOCK.test(warning) && !isOrdinaryActiveGateWarning(warning, relPath);
 }
@@ -3646,31 +3640,6 @@ async function run(rawInput) {
   // liveness release must always be attempted on a non-terminal Stop, independent of
   // whether goal-fit found anything to warn about).
   releaseOnNonTerminalStop(root, result.latestArtifactDir || null);
-  // Unstarted-delivery advisory (never blocking). analyze() enforces ADHERENCE to a session once
-  // one exists; it has no opinion about work that never started one — both no-session paths
-  // return `{ warnings: [], blocking: false, latestArtifactDir: null }`. `latestArtifactDir ===
-  // null` is exactly that "no session to scope to" marker, so a session that merely has nothing
-  // to warn about this turn is untouched here. blocking stays false: this advisory must never
-  // gain teeth by accident, and whether it ever arms is a later decision informed by whether it
-  // catches anything real. See scripts/hooks/lib/unstarted-delivery.js for the four conditions.
-  //
-  // DISCLOSED GAP: `!result.latestArtifactDir` is not independently test-covered, because no
-  // reachable fixture separates it from `warnings.length === 0`. Measured, not assumed: a real
-  // `ensure-session --flow-id builder.build` session emits 6 warnings at its very first step, and
-  // hand-built terminal sidecars still emit 3 — a session that exists effectively always warns, so
-  // the emptiness check already implies "no session" today. Fault injection confirms it: deleting
-  // this clause changes no test outcome. It stays anyway, and deliberately: relying on "sessions
-  // always produce a warning" would make correctness depend on an unstated empirical property of
-  // an unrelated code path, which is exactly the coupling that breaks silently later. The clause
-  // states the actual intent — advise only when there is no session to scope to.
-
-  if (result.warnings.length === 0 && !result.latestArtifactDir) {
-    const advisory = unstartedDeliveryWarning({ root, cwd: input.cwd || process.cwd(), env: process.env });
-    if (advisory) {
-      result.warnings = [advisory];
-      result.blocking = false;
-    }
-  }
   if (result.warnings.length === 0) {
     clearBlockStreak(root);
     return rawInput;
@@ -3804,4 +3773,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { STOP_CONTROL_PREFIX, analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, unstartedDeliveryWarning, currentCanonicalWorkspaceSnapshot, resolveObservedWorkspaceRoot };
+module.exports = { STOP_CONTROL_PREFIX, analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, testScopeDivergence, isNarrowedTestInvocation, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead, learningGateOutstandingWarning, hasLearningEvidence, currentCanonicalWorkspaceSnapshot, resolveObservedWorkspaceRoot };

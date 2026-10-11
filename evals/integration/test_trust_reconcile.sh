@@ -11,9 +11,9 @@
 #      'bundle-required-no-declared-marker' issue fires (no more fail-open on absence).
 #   4. LAUNDERING-CAUGHT:  bundle claims "something || true" passed.
 #      Exit 1 with laundering message (checked before "CI never ran" check).
-#   YAML-VALID:            .github/workflows/trust-reconcile.yml parses as valid YAML.
 #
-# Also validates the workflow YAML parses (yamllint or python3 yaml or structural check).
+# The CI workflow and trust-verify action that ran this reconciler were retired
+# (2026-10-11); the workflow/action YAML checks went with them.
 #
 # Deterministic, no model spend, self-cleaning.
 # Usage: bash evals/integration/test_trust_reconcile.sh
@@ -229,74 +229,6 @@ if echo "$out4" | grep -q "trust divergence"; then
   _pass "LAUNDERING-CAUGHT: output contains 'trust divergence'"
 else
   _fail "LAUNDERING-CAUGHT: expected 'trust divergence' in output, got: $out4"
-fi
-
-# ─── YAML-VALID ───────────────────────────────────────────────────────────────
-echo ""
-echo "=== YAML-VALID: .github/workflows/trust-reconcile.yml parses ==="
-
-WORKFLOW_FILE="$ROOT/.github/workflows/trust-reconcile.yml"
-ACTION_FILE="$ROOT/.github/actions/trust-verify/action.yml"
-
-if [[ ! -f "$WORKFLOW_FILE" ]]; then
-  _fail "YAML-VALID: workflow file not found at $WORKFLOW_FILE"
-else
-  yaml_valid=0
-
-  # Try python3 yaml first (standard on macOS and Ubuntu)
-  if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" 2>/dev/null; then
-    if python3 - "$WORKFLOW_FILE" << 'PY' 2>/dev/null
-import sys, yaml
-try:
-    yaml.safe_load(open(sys.argv[1]).read())
-    sys.exit(0)
-except yaml.YAMLError as e:
-    print("YAML error: " + str(e))
-    sys.exit(1)
-PY
-    then
-      _pass "YAML-VALID: trust-reconcile.yml parses (python3 yaml)"
-      yaml_valid=1
-    else
-      _fail "YAML-VALID: trust-reconcile.yml failed python3 yaml parse"
-      yaml_valid=1  # tested, failed
-    fi
-  fi
-
-  # Fall back to yamllint if available and python3 not tried
-  if [[ $yaml_valid -eq 0 ]] && command -v yamllint >/dev/null 2>&1; then
-    if yamllint -d relaxed "$WORKFLOW_FILE" >/dev/null 2>&1; then
-      _pass "YAML-VALID: trust-reconcile.yml parses (yamllint)"
-      yaml_valid=1
-    else
-      _fail "YAML-VALID: trust-reconcile.yml failed yamllint"
-      yaml_valid=1
-    fi
-  fi
-
-  # Structural fallback: check key fields with grep
-  if [[ $yaml_valid -eq 0 ]]; then
-    structural_ok=1
-    grep -q "^name:" "$WORKFLOW_FILE" || structural_ok=0
-    grep -q "trust-reconcile" "$WORKFLOW_FILE" || structural_ok=0
-    grep -q "ubuntu-latest" "$WORKFLOW_FILE" || structural_ok=0
-    grep -q "node-version" "$WORKFLOW_FILE" || structural_ok=0
-    grep -q "pnpm install --frozen-lockfile" "$WORKFLOW_FILE" || structural_ok=0
-    grep -q "trust-reconcile.js" "$WORKFLOW_FILE" || structural_ok=0
-    if [[ $structural_ok -eq 1 ]]; then
-      _pass "YAML-VALID: trust-reconcile.yml has expected structure (yaml parser not available)"
-    else
-      _fail "YAML-VALID: trust-reconcile.yml missing expected structural fields"
-    fi
-  fi
-fi
-
-if grep -q '^outputs:' "$ACTION_FILE" &&
-   grep -q 'failure-summary:' "$ACTION_FILE" &&
-   grep -q 'steps.trust-verify.outputs.failure-summary' "$ACTION_FILE"; then
-  _pass "ACTION-OUTPUT: Trust Verify exposes the reconciler failure summary"
-else
-  _fail "ACTION-OUTPUT: Trust Verify does not expose failure-summary"
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────

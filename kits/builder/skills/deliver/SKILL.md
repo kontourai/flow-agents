@@ -139,14 +139,14 @@ Reclaim a clean linked worktree only after a fresh authenticated provider
 observation confirms the exact head was merged; otherwise report the explicit
 retention reason. Opening a pull request is never cleanup authority.
 
-When an eligible code-host change needs its verified trust state committed for
-CI reconciliation, use the public `flow-agents workflow publish-delivery
+When an eligible code-host change will be merged through `merge-change`, which
+requires the session's terminal delivery companions committed at the exact head,
+use the public `flow-agents workflow publish-delivery
 --session-dir <session>` command after release readiness while the assignment actor
 and reviewed source snapshot still exactly match. A later source change requires
 canonical review and verification again; older sessions without a verification
 workspace snapshot must also rerun verification before public publishing. Do not manufacture a
-prior session, invoke a private writer, or use a `delivery/DECLARED` exemption
-for agent-delivered work.
+prior session or invoke a private writer.
 
 ## Standalone and No-Active-Run Behavior
 

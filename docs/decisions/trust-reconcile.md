@@ -1,7 +1,7 @@
 ---
 status: current
 subject: Trust-reconcile and delivery reconciliation
-decided: 2026-07-29
+decided: 2026-10-11
 evidence:
   - kind: issue
     ref: https://github.com/kontourai/flow-agents/issues/1094
@@ -11,8 +11,39 @@ evidence:
     ref: docs/adr/0022-fail-closed-delivery-reconciliation-with-governed-exemptions.md
   - kind: doc
     ref: docs/coordination-guide.md
+  - kind: doc
+    ref: docs/verifiable-trust.md
 ---
 # Trust-reconcile and delivery reconciliation
+
+## Retired as a CI check (2026-10-11)
+
+**Decision.** The CI trust anchor is retired. The Trust Reconcile workflow, the `trust-verify`
+composite action, CI attestation minting (`scripts/ci/mint-attestation.js`), the `flow-agents
+verify` subcommand, the `delivery/DECLARED` exemption marker, and the unstarted-delivery Stop
+advisory are removed. Agents are no longer asked to keep a delivery bundle or an exemption entry
+current so that a CI reconcile step passes. A repository's own required checks, re-run on the
+exact pull request head, are the external boundary.
+
+**Rationale.** In the owner's measurement across the 16 repositories that ran the anchor, it
+consumed roughly 90 runner-hours per ~100 runs per repository with 30–83% failure rates, and those
+failures were overwhelmingly exemption-scope bookkeeping or verify failures the required lanes
+already caught. In about 200 sampled failures exactly one was a claimed-versus-observed
+divergence, and it was a flake. No consuming repository's default-branch protection listed it as
+a required check (checked against each repository's branch protection on 2026-10-11). Its only
+unique step reconciled claims that the required lanes re-run anyway.
+
+**What stays, and why.** The Hachure `trust.bundle` format, the session writer, the Stop gate's
+local evidence checks, checkpoint sealing, and `flow-agents workflow publish-delivery` remain:
+`flow-agents merge-change` still requires the delivering session's terminal companions committed
+at the exact head. `scripts/ci/trust-reconcile.js` remains as the home of the manifest helpers the
+runtime loads for evidence admission and the local `reconcile-preflight`. Retiring the
+delivery-commit step from the Builder lifecycle (and with it the remaining reconcile helpers and
+the provisional-delivery verbs) is a separate lifecycle decision, not made here.
+
+Everything below records the decision as it stood before the retirement.
+
+## Before 2026-10-11
 
 **Decision.** Delivery is **fail-closed with governed exemptions**. `publishDelivery()` passes a
 bundle through three distinct, type-discriminated tiers — fail-soft (absent bundle tolerated) →
