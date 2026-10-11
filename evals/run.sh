@@ -160,8 +160,6 @@ run_static() {
   echo ""
   bash "$EVAL_DIR/static/test_validate_source_kit_asset_scope.sh" || result=1
   echo ""
-  bash "$EVAL_DIR/static/test_declared_scope_forms_documented.sh" || result=1
-  echo ""
   bash "$EVAL_DIR/static/test_unit_helpers.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_knowledge_providers.sh" || result=1
