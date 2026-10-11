@@ -8,7 +8,7 @@ import {parseAuthRef, materializeAuthRef, describeAuth, defaultSecretRunner, res
 import {verifyInstalledKit} from './kit-execution.js';
 import {listEngineProfiles} from './engine-host.js';
 
-export const setupEngines = ['codex','claude','kiro','cursor','opencode','copilot'] as const;
+export const setupEngines = ['codex','claude','kiro','cursor','opencode','copilot','muse'] as const;
 export type SetupEngine = typeof setupEngines[number];
 export type KitAuth = {mode:'native'} | {mode:'codex-file';file:string} | {mode:'secret-ref';ref:AuthRef};
 export type HostSetup = {engine:SetupEngine;provider:string;model:string;auth:KitAuth;isolation:'trusted-host'|'docker';host_access_granted?:boolean};
