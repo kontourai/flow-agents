@@ -1195,7 +1195,7 @@ function provisionalDeliveryIsExactCheckedRevision(repoRoot, bundlePath, bundleS
  * Run the full trust reconcile logic and return an exit code.
  *
  * This is the same logic as the CLI entrypoint, extracted so it can be called
- * programmatically (e.g. from the `flow-agents verify` CLI subcommand).
+ * programmatically (the regression evals call it directly).
  * All output is written directly to process.stdout/stderr.
  *
  * @param {object}        opts
@@ -1660,7 +1660,7 @@ function main() {
   });
 }
 
-// Export core function for programmatic use (e.g. flow-agents verify CLI subcommand).
+// Export core function for programmatic use (the regression evals call it directly).
 // The direct-CLI behavior is preserved: when run as a script, main() is called below.
 module.exports.runTrustReconcile = runTrustReconcile;
 

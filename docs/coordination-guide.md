@@ -411,8 +411,8 @@ refactor can't silently collapse them.
 **reconcile-preflight (#356).** A local, pre-push bundle shape check built on
 `scripts/lib/reconcile-shape.js`, which `publishDelivery` also runs before copying anything. It was
 written as the mirror of a CI reconcile check; that check was retired on 2026-10-11 (see the
-[trust-reconcile decision](decisions/trust-reconcile.md)), and the preflight is now the only place the
-shape classification runs. The local preflight may pass `onUnderivable: 'reduce'` (trust a
+[trust-reconcile decision](decisions/trust-reconcile.md)), so the preflight is now the only place the
+shape classification gates anything. The local preflight may pass `onUnderivable: 'reduce'` (trust a
 session-local self-reported status when re-derivation is unavailable); the default is `'fail'`, so
 nothing degrades to fail-open by accident.
 

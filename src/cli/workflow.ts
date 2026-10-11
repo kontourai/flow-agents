@@ -80,7 +80,7 @@ Public workflow verbs:
   drive               Continue the canonical run through an explicit runtime adapter.
   publish-provisional-delivery-request  Build the exact provisional-delivery authorization payload.
   publish-provisional-delivery  Publish a checkpoint-bound bundle for required PR CI reconciliation.
-  publish-delivery    Publish the terminal, learning-inclusive delivery bundle for CI reconciliation.
+  publish-delivery    Publish the terminal, learning-inclusive delivery bundle that merge-change requires.
   execute-sealed-workload  Execute one externally signed, staged provider workload.
   execute-sealed-workload-request  Emit the exact canonical authorization payload for external signing.
   pause               Pause the current run as its assignment actor.
@@ -141,7 +141,7 @@ function verbSpecs(): Map<string, VerbSpec> {
     ["drive", { summary: 'Continue the canonical run through an explicit runtime adapter.', options: new Set<string>(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "evidence-checkpoint-dir", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms", "context-policy"]), enforcement: "workflow" }],
     ["publish-provisional-delivery-request", { summary: 'Build the exact provisional-delivery authorization payload.', options: new Set<string>(["artifact-root", "session-dir", "expires-in-hours"]), enforcement: "workflow" }],
     ["publish-provisional-delivery", { summary: 'Publish a checkpoint-bound bundle for required PR CI reconciliation.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file"]), enforcement: "workflow" }],
-    ["publish-delivery", { summary: 'Publish the terminal, learning-inclusive delivery bundle for CI reconciliation.', options: new Set<string>(["artifact-root", "session-dir", "json"]), enforcement: "workflow" }],
+    ["publish-delivery", { summary: 'Publish the terminal, learning-inclusive delivery bundle that merge-change requires.', options: new Set<string>(["artifact-root", "session-dir", "json"]), enforcement: "workflow" }],
     ["execute-sealed-workload-request", { summary: 'Emit the exact canonical authorization payload for external signing.', options: new Set<string>(["artifact-root", "session-dir", "sealed-workload-file", "subject", "nonce", "expires-in-minutes", "max-staged-bytes", "max-runtime-ms", "max-output-bytes", "max-provider-calls", "max-cost-microusd", "max-tokens"]), enforcement: "workflow" }],
     ["execute-sealed-workload", { summary: 'Execute one externally signed, staged provider workload.', options: new Set<string>(["artifact-root", "session-dir", "json", "authorization-file", "sealed-workload-file"]), enforcement: "workflow" }],
     ["pause", { summary: 'Pause the current run as its assignment actor.', options: forwardedVerbOptions("pause"), enforcement: "builder-run" }],

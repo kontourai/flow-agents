@@ -52,6 +52,6 @@ evals/acceptance/*.gif
 # delivery/<slug>/ holds a session's terminal delivery companions (trust.bundle +
 # trust.checkpoint*). `flow-agents workflow publish-delivery` writes them locally, so the
 # directory is ignored by default to keep stray local runs out of `git add -A`;
-# merge-change requires the delivering session's own companions to be committed, so the
-# delivery step force-adds exactly that session's directory.
+# merge-change requires the delivering session's own companions to be committed, and
+# because of this rule they have to be force-added (`git add -f delivery/<slug>/`).
 delivery/*

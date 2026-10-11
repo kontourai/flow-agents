@@ -25,12 +25,13 @@ advisory are removed. Agents are no longer asked to keep a delivery bundle or an
 current so that a CI reconcile step passes. A repository's own required checks, re-run on the
 exact pull request head, are the external boundary.
 
-**Rationale.** Measured across the repositories that ran the anchor, it consumed roughly 90
-runner-hours per ~100 runs per repository with 30–83% failure rates, and those failures were
-overwhelmingly exemption-scope bookkeeping or verify failures the required lanes already caught.
-In about 200 sampled failures exactly one was a claimed-versus-observed divergence, and it was a
-flake. It was not a required check anywhere. Its only unique step reconciled claims that the
-required lanes re-run anyway.
+**Rationale.** In the owner's measurement across the 16 repositories that ran the anchor, it
+consumed roughly 90 runner-hours per ~100 runs per repository with 30–83% failure rates, and those
+failures were overwhelmingly exemption-scope bookkeeping or verify failures the required lanes
+already caught. In about 200 sampled failures exactly one was a claimed-versus-observed
+divergence, and it was a flake. No consuming repository's default-branch protection listed it as
+a required check (checked against each repository's branch protection on 2026-10-11). Its only
+unique step reconciled claims that the required lanes re-run anyway.
 
 **What stays, and why.** The Hachure `trust.bundle` format, the session writer, the Stop gate's
 local evidence checks, checkpoint sealing, and `flow-agents workflow publish-delivery` remain:
