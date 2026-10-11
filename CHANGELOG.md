@@ -1,5 +1,17 @@
 # Changelog
 
+## [7.2.0](https://github.com/kontourai/flow-agents/compare/v7.1.0...v7.2.0) (2026-10-11)
+
+
+### Features
+
+* finish native engine contracts and named worker networks ([#1456](https://github.com/kontourai/flow-agents/issues/1456)) ([9cc5eaa](https://github.com/kontourai/flow-agents/commit/9cc5eaa9fa95a3b261f17108461bb46832830425))
+
+
+### Documentation
+
+* adopt docs-kit gate, Pages site, and MCP bundle ([#1458](https://github.com/kontourai/flow-agents/issues/1458)) ([6f4d909](https://github.com/kontourai/flow-agents/commit/6f4d909edaf748d2047488a6481e7264d701e29c))
+
 ## [7.1.0](https://github.com/kontourai/flow-agents/compare/v7.0.2...v7.1.0) (2026-10-10)
 
 
