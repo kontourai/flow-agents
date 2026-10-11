@@ -79,14 +79,15 @@ The provider status must confirm the calling actor holds that exact Work Item. `
 provider result as selected-work evidence and begins at the canonical Builder entry step. A
 portfolio approval, a branch name, or a finished change is not a substitute for that binding. If
 the work has already been changed without a bound run, record the gap and create a follow-up Work
-Item; do not manufacture a prior session, use a private writer, or use a `delivery/DECLARED`
-exemption for agent-delivered work.
+Item; do not manufacture a prior session or use a private writer.
 
 The agent executes the reported public `next_action` through planning, implementation, review,
 verification, and release readiness, produces the required artifacts, and records their evidence.
-Starting the run does not launch a worker. A repository may make CI reconciliation of the session's delivery bundle
-a required pull-request check. In that case, publish a **provisional** delivery after the pull
-request is open and before recording `ci-merge-readiness`:
+Starting the run does not launch a worker. Flow Agents no longer ships a CI check that reconciles
+committed delivery bundles (the Trust Reconcile check and `trust-verify` action were retired on
+2026-10-11), so an ordinary run skips provisional delivery. The verb remains for a repository that
+runs its own pull-request check over the session's delivery bundle; in that case, publish a
+**provisional** delivery after the pull request is open and before recording `ci-merge-readiness`:
 
 ```bash
 flow_agents workflow publish-provisional-delivery-request \
@@ -112,9 +113,8 @@ the root-owned coordinator rechecks every binding, appends a signed-authorizatio
 Flow run lock, and installs a purpose-specific signed completion before the package records the
 delivery. It then writes only that session's `delivery/<slug>/` transport. Commit
 and push those companion files before provider checks and before recording `ci-merge-readiness`,
-so the provider's Trust Verify check can reconcile the PR revision. It is not a release decision,
+so that check can read the PR revision's bundle. It is not a release decision,
 does not add a `ci-merge-readiness` claim, and cannot complete or declare the run.
-`delivery/DECLARED` remains unavailable to agent work.
 
 After those provider checks, record the explicit readiness decision and complete learning. Only
 when the canonical `builder.build` run has advanced through `learn` to completed `done`, publish
@@ -145,18 +145,14 @@ copy. A post-copy source change restores the exact prior `delivery/<session>/` d
 any) and leaves every sibling delivery untouched before failing. It then seals against the derived
 target checkout's current `HEAD`, replaces stale companions with one newly emitted signed or
 in-toto companion, and verifies that companion binds both the checkpoint digest and current trust
-bundle before copying the set into `delivery/<session>/`. Trust Verify accepts a provisional
-candidate only when the checked PR revision differs from the authenticated published head by
-exactly the fixed checkpoint-bound files in that one `delivery/<slug>/` directory.
+bundle before copying the set into `delivery/<session>/`.
 
 At terminal publication, the Git delta may contain all four transport files, or exactly the three
 mutable files: `trust.bundle`, `trust.checkpoint.json`, and the signed or in-toto companion selected
 by the attestation descriptor. The three-file form is permitted only when
 `trust.checkpoint.attestation.json` is raw-byte identical in the terminal revision and the
-checkpoint revision. Even when Git omits that descriptor from the delta, Trust Verify still treats
-it as one of the validated four transport files at the checked revision and compares its raw bytes
-with the checkpoint revision. Ordinary ancestry, tree equivalence, inherited bundles, extra source
-changes, altered or missing companions, and unrelated session bundles cannot satisfy the check.
+checkpoint revision. Ordinary ancestry, tree equivalence, inherited bundles, extra source
+changes, altered or missing companions, and unrelated session bundles are refused.
 
 Terminal publication is unavailable while `learn` is active, even when a release decision is
 positive; provisional publication is the only CI-transport path before learning closes.

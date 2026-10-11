@@ -17,7 +17,7 @@ title: Kontour Flow Agents
   </section>
   <section>
     <strong>Tamper-evident trust</strong>
-    <span>Local capture is advisory and best-effort; the controlled CI re-run reconciles manifest commands and git diff as the authoritative anchor before evidence is treated as CI-verified.</span>
+    <span>Local capture is advisory and best-effort; the repository's required CI checks on the exact pull request head, and the git diff, remain the authoritative boundary.</span>
   </section>
   <section>
     <strong>Flow Kits — workflow + output shape</strong>

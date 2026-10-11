@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Anti-gaming + trust regression suite — the tests that prove the gate, the CI
-# anchor, and their protections actually work. These MUST run in a required CI
+# Anti-gaming + trust regression suite — the tests that prove the gate, the
+# delivery reconcile helpers, and their protections actually work. These MUST run in a required CI
 # lane so that weakening the gate code (stop-goal-fit.js, trust-reconcile.js,
 # config-protection.js, evidence-capture.js, flow-resolver.ts, the producer) is
 # caught: if any of these fail, the lane goes red and the change cannot merge.
@@ -57,7 +57,7 @@ for t in "${TESTS[@]}"; do
 done
 
 if [[ "$fail" -ne 0 ]]; then
-  echo "ANTI-GAMING SUITE FAILED — the gate / CI anchor / protections regressed or a regression test was removed."
+  echo "ANTI-GAMING SUITE FAILED — the gate / protections regressed or a regression test was removed."
   exit 1
 fi
 echo "ANTI-GAMING SUITE PASSED (${#TESTS[@]} tests)."

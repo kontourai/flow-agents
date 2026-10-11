@@ -414,7 +414,7 @@ The FlowDefinition-driven, kit-agnostic model that names the three hard boundari
 
 ### Anti-gaming trust security
 
-The layered-defense trust security model that assumes the local agent can be gamed and anchors enforcement in an external CI check, freezing the local shell-parsing heuristics and routing new enforcement to the CI anchor. Subject open in the Decision Registry as [docs/decisions/anti-gaming-trust-security.md](docs/decisions/anti-gaming-trust-security.md).
+The layered-defense trust security model that assumes the local agent can be gamed and keeps the authoritative boundary external (the repository's required CI checks, the git diff, and owner review), freezing the local shell-parsing heuristics rather than growing them. The dedicated CI reconcile check it originally relied on was retired on 2026-10-11 (see [docs/decisions/trust-reconcile.md](docs/decisions/trust-reconcile.md)). Subject open in the Decision Registry as [docs/decisions/anti-gaming-trust-security.md](docs/decisions/anti-gaming-trust-security.md).
 
 ### Kit dependency ownership
 
@@ -422,7 +422,7 @@ The rule for which layer owns a kit's runtime dependencies, keeping dependency d
 
 ### Trust-reconcile and delivery reconciliation
 
-The CI-anchored reconciliation of a session's trust claims against a manifest — classifying command, session-local, and attested claims, honoring governed waivers — and the fail-closed delivery reconciliation that blocks publication on unreconciled residue unless an exemption is recorded. Subject open in the Decision Registry as [docs/decisions/trust-reconcile.md](docs/decisions/trust-reconcile.md).
+The reconciliation of a session's trust claims against the repository's verification manifest — classifying command, session-local, and attested claims, honoring governed waivers — which now runs only locally (evidence admission, `reconcile-preflight`, and `workflow publish-delivery`). The CI reconcile check and its `delivery/DECLARED` exemption marker were retired on 2026-10-11. Subject in the Decision Registry as [docs/decisions/trust-reconcile.md](docs/decisions/trust-reconcile.md).
 
 ### Model Routing
 

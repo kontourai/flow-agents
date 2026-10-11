@@ -45,8 +45,8 @@
  *
  * FROZEN bar-raiser (ADR 0018). The redirect / interpreter-write / cp-target detection
  * is intentionally non-exhaustive and is NOT to be grown with new evasion-pattern rules.
- * A newly-discovered self-tamper vector belongs in the external CI anchor (trust-reconcile
- * does not trust agent-written files) and the required anti-gaming suite — not another
+ * A newly-discovered self-tamper vector belongs in the external boundary (required CI
+ * checks and owner review) and the required anti-gaming suite — not another
  * local string matcher. Bug fixes that don't expand the pattern surface are still welcome.
  *
  * Exit codes: 0 = allow, 2 = block
@@ -616,7 +616,7 @@ function containsUnmodelledShellConstruct(command) {
  *
  * What this function IS good for: raising the cost of casual and accidental evasion, and
  * keeping the declared-root scoping honest for the ordinary command shapes agents actually
- * write. The real anchor remains external — signed checkpoints, CI trust-reconcile, and human
+ * write. The real anchor remains external — required CI checks, signed checkpoints, and human
  * review — exactly as for every other detector in this file.
  *
  * #783 review F2: any in-command directory change makes token-vs-cwd resolution unsound —
@@ -845,7 +845,7 @@ const INTERPRETER_PROTECTED_TOKENS = [
   // (blocked) unless the command spells out a directory that provably lands outside every
   // declared artifact root -- see interpreterCandidateBlocks.
   'current.json', 'state.json', 'trust.bundle',
-  // Delivery CI anchor paths. The existing trust.bundle token catches delivery/trust.bundle
+  // Delivery evidence paths. The existing trust.bundle token catches delivery/trust.bundle
   // as a path tail; explicit path added for clarity. trust.checkpoint.json is new.
   'delivery/trust.bundle', 'delivery/trust.checkpoint.json',
 ];
@@ -1057,7 +1057,7 @@ function checkInterpreterWriteToProtected(command, cwd) {
 
 /**
  * Delivery-protected path regex: delivery/trust.bundle and delivery/trust.checkpoint.json.
- * These are the CI anchor files whose contents must not be agent-forged.
+ * These are the committed delivery evidence files whose contents must not be agent-forged.
  * Used by checkCopyMoveToProtected to catch `cp x delivery/trust.bundle`.
  * #379: the optional (?:[^/]+\/)? segment also catches the per-session path
  * `cp forged.json delivery/<slug>/trust.bundle`.
@@ -1082,7 +1082,7 @@ function matchesDeliveryProtected(token) {
  *
  * Root-scoping (issue 783 follow-up) via isCandidateWithinDeclaredRoots(dest, cwd) applies
  * here too -- a destination provably outside every declared artifact root is allowed (a
- * fixture-authoring scratch dir is not the CI trust anchor), fails closed on ambiguity.
+ * fixture-authoring scratch dir is not committed delivery evidence), fails closed on ambiguity.
  *
  * INCOMPLETE COVERAGE: only cp, mv, install are checked. Other copy tools
  * (rsync, scp, dd, etc.) and runtime-constructed path arguments are NOT caught.
@@ -1302,7 +1302,7 @@ function run(inputOrRaw, options = {}) {
         exitCode: 2,
         stderr: `BLOCKED: Detected ${copyMove} in a Bash command. ` +
           'Writing to delivery/trust.bundle or delivery/trust.checkpoint.json via cp/mv/install ' +
-          'could forge the CI trust anchor. Do not disable this hook. ' +
+          'could forge committed delivery evidence. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
           'NOTE: This check covers cp/mv/install only -- other copy tools may evade it. ' +
           FIXTURE_AFFORDANCE_HINT + ' ' + READ_REMEDIATION_HINT,

@@ -1,5 +1,10 @@
 # Implementing Trust Reconciliation Correctly
 
+> **Retired (2026-10-11).** The CI trust anchor this guide describes — the Trust Reconcile
+> workflow, the `trust-verify` action, and the `delivery/DECLARED` exemption marker — has been
+> removed. Do not port it to another repository. This page is kept as history; see
+> [the decision record](decisions/trust-reconcile.md) for why and what remains.
+
 > Status: DRAFT for review (not yet a merged doc). Companion to
 > ADR 0017 (anti-gaming trust/security model), ADR 0020 (reconcile manifest +
 > claim classification), and ADR 0022 (fail-closed delivery reconciliation).
