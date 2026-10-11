@@ -83,7 +83,7 @@ function hasHelp(argv: string[]): boolean {
 }
 
 function printKitUsage(): void {
-  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|setup|doctor|prepare-worker|workspace> [args]
+  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|run|setup|doctor|prepare-worker|workspace> [args]
 
 Commands:
   install    Install a Flow Kit from a local path or Git URL.
@@ -95,6 +95,7 @@ Commands:
   inspect    Report a kit's conformance and consumer targets.
   list       List locally installed Flow Kits.
   status     Report local Flow Kit installation status.
+  run        Execute an installed kit with --request <json> --controller-root <private-root>.
   setup      Configure an installed kit execution request.
   prepare-worker Build a generic pinned Codex Docker worker.
   doctor     Check engine, auth backend, and Docker availability.
@@ -1599,7 +1600,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "validate") return await validate(rest);
   if (command === "provision") return await provision(rest);
   if (command === "inspect") return await inspect(rest);
-  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|setup|doctor|prepare-worker|workspace> ...");
+  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|run|setup|doctor|prepare-worker|workspace> ...");
   return 2;
 }
 
