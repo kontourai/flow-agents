@@ -19,6 +19,13 @@ const contained=(root:string,target:string)=>{const rel=path.relative(root,targe
 function physical(file:string):string {let current=path.resolve(file),tail:string[]=[];while(!fs.existsSync(current)){tail.unshift(path.basename(current));const next=path.dirname(current);if(next===current)throw new Error('Path has no existing ancestor');current=next;}return path.join(fs.realpathSync(current),...tail);}
 function object(value:unknown):Record<string,unknown>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Expected JSON object');return value as Record<string,unknown>;}
 function safeText(value:unknown,name:string):string {if(typeof value!=='string'||!value.trim()||/[\p{Cc}\p{Cf}]/u.test(value))throw new Error(`Valid ${name} required`);return value;}
+// Prompts are prose, not identifiers. Preserve ordinary formatting without admitting
+// invisible format characters or terminal controls; bound the serialized UTF-8 payload.
+const MAX_PROMPT_BYTES=1_048_576;
+function safePrompt(value:unknown):string {
+ if(typeof value!=='string'||!value.trim()||Buffer.byteLength(value,'utf8')>MAX_PROMPT_BYTES||/[\p{Cc}\p{Cf}]/u.test(value.replace(/[\t\n\r]/g,'')))throw new Error('Valid prompt required (nonempty text, at most 1048576 UTF-8 bytes, only tab/line-break controls)');
+ return value;
+}
 export function parseHostSetup(value:unknown):HostSetup {
  const v=object(value);if(Object.keys(v).some(k=>!['engine','provider','model','auth','isolation','host_access_granted'].includes(k)))throw new Error('Unknown host setup field');
  if(!setupEngines.includes(v.engine as SetupEngine))throw new Error('Unsupported engine');
@@ -79,7 +86,7 @@ export function createKitRequest(options:{kitId:string;dest:string;workspace:str
  const sandbox={...object(request.engine_sandbox??{})};
  if(host.isolation==='docker'){const image=options.image??sandbox.image;if(typeof image!=='string'||!(/^sha256:[a-f0-9]{64}$/).test(image))throw new Error('Docker requires an immutable image digest');sandbox.image=image;}
  else if(sandbox.image!==undefined)throw new Error('Native execution cannot claim Docker sandbox identity');
- const output={...request,schema:'kontour.kit.execution_request',version:'1.0',kit_id:options.kitId,source_root:kitRoot,workspace,run_id:safeText(options.runId??randomUUID(),'run id'),prompt:safeText(options.prompt,'prompt'),parameters,execution,engine_sandbox:sandbox,host_setup:host};noSecrets(output);return output;
+ const output={...request,schema:'kontour.kit.execution_request',version:'1.0',kit_id:options.kitId,source_root:kitRoot,workspace,run_id:safeText(options.runId??randomUUID(),'run id'),prompt:safePrompt(options.prompt),parameters,execution,engine_sandbox:sandbox,host_setup:host};noSecrets(output);return output;
 }
 export function doctorKitSetup(host:HostSetup,options:{env?:NodeJS.ProcessEnv;secretRunner?:SecretRunner;probe?:Probe;image?:string}={}):Check[] {
  host=parseHostSetup(host);const run=options.probe??probe,checks:Check[]=[];
