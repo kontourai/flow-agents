@@ -51,6 +51,7 @@ import { assertAcceptedTurnEvidenceCapacity, assertRecoveryLedgerCoverage, asser
 import { publishDeliveryFromPublicWorkflowWithAuthorityForTest, publishTerminalDeliveryFromPublicWorkflowWithAuthorityForTest } from "../../build/src/cli/workflow.test-support.js";
 import * as workflowRuntime from "../../build/src/cli/workflow.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+import { useFixtureGitHooks } from "./fixture-git.mjs";
 
 let releaseRuntimeTestSeams;
 const runtimeTestSeamsReady = new Promise((resolve) => {
@@ -418,6 +419,7 @@ test("terminal delivery accepts only its own intact provisional CI transport as 
   const run = (args) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
   fs.writeFileSync(path.join(root, ".gitignore"), ".kontourai/\n");
   run(["init"]);
+  useFixtureGitHooks(root);
   run(["config", "user.email", "test@example.invalid"]);
   run(["config", "user.name", "Flow Agents Test"]);
   run(["add", ".gitignore"]);
@@ -1120,6 +1122,7 @@ test("Trust Verify accepts exact four-path and byte-identical terminal companion
     const root = makeFixtureDir("flow-agents-provisional-trust-verify-");
     const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     git("init");
+    useFixtureGitHooks(root);
     git("config", "user.email", "test@example.invalid");
     git("config", "user.name", "Flow Agents Test");
     fs.writeFileSync(path.join(root, "source.txt"), "reviewed source\n");
@@ -4808,6 +4811,7 @@ function initGitWorktreeFixture(projectRoot) {
   // untracked scan honors — otherwise every bundle write would change the workspace digest.
   fs.writeFileSync(path.join(projectRoot, ".gitignore"), ".kontourai/\n");
   execFileSync("git", ["init", "-q"], { cwd: projectRoot, stdio: "ignore" });
+  useFixtureGitHooks(projectRoot);
   execFileSync("git", ["config", "user.email", "fixture@example.test"], { cwd: projectRoot });
   execFileSync("git", ["config", "user.name", "Fixture"], { cwd: projectRoot });
   // Commit every ordinary fixture file that existed before Git initialization. Later test
@@ -7839,6 +7843,7 @@ test("trusted Git ancestry rejects a divergent repair snapshot", () => {
     return result.stdout.trim();
   };
   git(["init", "--initial-branch=main"]);
+  useFixtureGitHooks(projectRoot);
   git(["config", "user.email", "fixture@example.test"]);
   git(["config", "user.name", "Fixture"]);
   fs.writeFileSync(path.join(projectRoot, "review.txt"), "base\n");
@@ -8379,6 +8384,7 @@ test("workspace review uses reviewed files only for a genuine non-Git root", () 
 test("workspace review rejects a nested root inside a Git worktree", () => {
   const session = makeSession("nested-git-review-snapshot");
   execFileSync("git", ["init", "-q"], { cwd: session.projectRoot });
+  useFixtureGitHooks(session.projectRoot);
   const nestedRoot = path.join(session.projectRoot, "review-target");
   assert.throws(
     () => captureReviewWorkspaceSnapshot(nestedRoot, [{ file: "delivery.md", sha256: createHash("sha256").update("reviewed delivery\n").digest("hex") }]),
@@ -8980,6 +8986,7 @@ test("provider failures cannot leak hostile output into publish-change artifacts
 function initializePublishChangeGitRepository(projectRoot) {
   fs.writeFileSync(path.join(projectRoot, "README.md"), "publish-change fixture\n");
   execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+  useFixtureGitHooks(projectRoot);
   execFileSync("git", ["config", "user.email", "fixture@example.test"], { cwd: projectRoot });
   execFileSync("git", ["config", "user.name", "Fixture"], { cwd: projectRoot });
   execFileSync("git", ["add", "README.md"], { cwd: projectRoot });
