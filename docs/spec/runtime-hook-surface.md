@@ -13,7 +13,7 @@ Adapter authors building:
 - **Harness adapters** — install-time file wiring for agent runtimes (Claude Code, Codex, Kiro, opencode, pi).
 - **Framework adapters** — in-process language-native packages for agent frameworks (AWS Strands, VoltAgent, LangGraph, OpenAI Agents SDK).
 
-Readers should be familiar with the Flow Agents operating layer described in [Developer Architecture](../developer-architecture.html) and the operating layers in [Operating Layers](../operating-layers.html).
+Readers should be familiar with the Flow Agents operating layer described in [Developer Architecture](../developer-architecture.md) and the operating layers in [Operating Layers](../operating-layers.md).
 
 ---
 
@@ -721,10 +721,10 @@ named_gaps:
 
 ## Related Documents
 
-- [Developer Architecture](../developer-architecture.html) — coordination map and product boundaries.
-- [Operating Layers](../operating-layers.html) — layer model and placement rules.
-- [Eval Strategy](../workflow-eval-strategy.html) — how hook influence behavior is validated.
-- [Developer Hook Setup](../developer-hook-setup.html) — runtime boundary for repo-local git hooks vs. runtime hooks.
+- [Developer Architecture](../developer-architecture.md) — coordination map and product boundaries.
+- [Operating Layers](../operating-layers.md) — layer model and placement rules.
+- [Eval Strategy](../workflow-eval-strategy.md) — how hook influence behavior is validated.
+- [Developer Hook Setup](../developer-hook-setup.md) — runtime boundary for repo-local git hooks vs. runtime hooks.
 - `scripts/hooks/` — canonical policy implementations.
 - `src/tools/build-universal-bundles.ts` — bundle generation logic including hook command patterns.
 - `evals/fixtures/hook-influence/cases.json` — behavioral cases that define expected agent responses to hook guidance.

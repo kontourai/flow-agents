@@ -53,7 +53,7 @@ Thresholds are tunable via env: `ROUTING_MIN_SAMPLE` (default 3), `ROUTING_HIGH_
 
 ## Relationship to the value plane
 
-This is the same question the external value proof (`kontourai/evals`, #409) asks — "does routing the
+This is the same question the external value proof (an internal evals repository, #409) asks — "does routing the
 right model to each task pay off?" — asked of our *internal* delegation. The console renders the
 `(role, model)` cost + acceptance surface (#415 console panel); this analyzer produces the actionable
 proposal that closes the loop back to the routing ladder.

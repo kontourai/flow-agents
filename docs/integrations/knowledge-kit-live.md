@@ -207,5 +207,5 @@ This matches telemetry events where the `flow` attribute includes `"knowledge."`
 - `kits/knowledge/adapters/flow-runner/index.js` — the kit flow-runner (capture + compile)
 - `kits/knowledge/adapters/default-store/index.js` — the store adapter
 - `kits/knowledge/kit.json` — kit manifest
-- <a href="framework-adapter.html">Framework Adapter</a> — `FlowAgentsHooks` documentation and limitations
-- <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> — canonical event taxonomy
+- <a href="framework-adapter.md">Framework Adapter</a> — `FlowAgentsHooks` documentation and limitations
+- <a href="../spec/runtime-hook-surface.md">Runtime Hook Surface spec</a> — canonical event taxonomy

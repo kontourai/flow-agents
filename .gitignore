@@ -55,3 +55,5 @@ evals/acceptance/*.gif
 # merge-change requires the delivering session's own companions to be committed, and
 # because of this rule they have to be force-added (`git add -f delivery/<slug>/`).
 delivery/*
+# docs-kit build output
+dist-pages/

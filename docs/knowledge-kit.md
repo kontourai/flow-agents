@@ -91,6 +91,6 @@ KNOWLEDGE_ADAPTER=/path/to/my-adapter.js \
 
 ## Related
 
-- [Kit Authoring Guide](kit-authoring-guide.html) — build your own kit using the same `kit.json` contract
-- [Flow Kit Repository Contract](flow-kit-repository-contract.html) — validation rules and activation diagnostics
-- [Vision and Direction](vision.html) — the kits-as-ecosystem arc and the sequenced path toward domain kits and a registry
+- [Kit Authoring Guide](kit-authoring-guide.md) — build your own kit using the same `kit.json` contract
+- [Flow Kit Repository Contract](flow-kit-repository-contract.md) — validation rules and activation diagnostics
+- [Vision and Direction](vision.md) — the kits-as-ecosystem arc and the sequenced path toward domain kits and a registry

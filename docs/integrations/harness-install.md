@@ -122,7 +122,7 @@ other paths the pre-edit hook cannot observe.
 
 ## opencode
 
-opencode is an L1 adapter. It has no native `prompt.submit`-equivalent event, so workflow steering is approximated at `session.created` rather than at each user turn. This is a documented gap: see <a href="../spec/runtime-hook-surface.html">the spec, section 2.1</a>.
+opencode is an L1 adapter. It has no native `prompt.submit`-equivalent event, so workflow steering is approximated at `session.created` rather than at each user turn. This is a documented gap: see <a href="../spec/runtime-hook-surface.md">the spec, section 2.1</a>.
 
 ### Install
 
@@ -187,7 +187,7 @@ The plugin at `.opencode/plugins/flow-agents.js` is auto-loaded at opencode star
 
 ## pi
 
-pi is an L1 adapter. It has no stop hook, so stop-goal-fit cannot fire at session end. This is a documented gap: see <a href="../spec/runtime-hook-surface.html">the spec, section 2.3</a>.
+pi is an L1 adapter. It has no stop hook, so stop-goal-fit cannot fire at session end. This is a documented gap: see <a href="../spec/runtime-hook-surface.md">the spec, section 2.3</a>.
 
 ### Install
 
@@ -247,5 +247,5 @@ Same behavior as Claude Code: if an existing `.pi/extensions/` directory contain
 - `dist/pi/` — generated pi bundle (do not edit by hand)
 - `dist/claude-code/` — generated Claude Code bundle
 - `scripts/hooks/run-hook.js` — canonical hook runner
-- <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> — event taxonomy, policy classes, conformance levels
-- <a href="conformance.html">Conformance</a> — how to self-certify a new adapter
+- <a href="../spec/runtime-hook-surface.md">Runtime Hook Surface spec</a> — event taxonomy, policy classes, conformance levels
+- <a href="conformance.md">Conformance</a> — how to self-certify a new adapter

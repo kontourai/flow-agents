@@ -4,7 +4,7 @@ title: Flow Agents Vision and Direction
 
 # Vision and Direction
 
-This page captures where Flow Agents is headed, clearly labeled as direction rather than shipped capability. Shipped artifacts are documented in the [Runtime Hook Surface spec](spec/runtime-hook-surface.html) and the [Runtime and support matrix](index.html#runtime-and-support-matrix) on the overview page.
+This page captures where Flow Agents is headed, clearly labeled as direction rather than shipped capability. Shipped artifacts are documented in the [Runtime Hook Surface spec](spec/runtime-hook-surface.md) and the [Runtime and support matrix](index.md#runtime-and-support-matrix) on the overview page.
 
 ---
 
@@ -20,7 +20,7 @@ Two official AWS Strands framework adapters exist. `integrations/strands/` is a 
 
 ### What ships today
 
-Kit authoring is shipped. The `kit.json` contract at schema version 1.0 is validated by the `flow-agents kit` CLI before any install. The [Kit Authoring Guide](kit-authoring-guide.html) walks from an empty directory to a validated, locally installed kit. Two reference kits ship in `kits/`:
+Kit authoring is shipped. The `kit.json` contract at schema version 1.0 is validated by the `flow-agents kit` CLI before any install. The [Kit Authoring Guide](kit-authoring-guide.md) walks from an empty directory to a validated, locally installed kit. Two reference kits ship in `kits/`:
 
 **Builder Kit** packages the full `idea → backlog → plan → build → review → verify → evidence → release → learning` pipeline as two flows (`builder.shape`, `builder.build`). It installs automatically.
 
@@ -44,11 +44,11 @@ The items below are direction, not committed delivery dates. They record the int
 
 ### Kits beyond coding
 
-The process-discipline layer is not coding-specific. The canonical policies, sidecar state model, and evidence taxonomy are defined without reference to source code, build systems, or CI. The direction is deployable agentic workflows — Flow Kits for domains beyond software delivery: knowledge work, research, operations, sales contexts, and personal productivity. The [North Star](north-star.html) records the broader scope.
+The process-discipline layer is not coding-specific. The canonical policies, sidecar state model, and evidence taxonomy are defined without reference to source code, build systems, or CI. The direction is deployable agentic workflows — Flow Kits for domains beyond software delivery: knowledge work, research, operations, sales contexts, and personal productivity. The [North Star](north-star.md) records the broader scope.
 
 ### TypeScript framework adapters
 
-The Strands Python spike proves the thesis: the policy engine is not harness-specific. `integrations/strands-ts/` ships that natively for Strands today. The direction is extending the same native-import pattern — consuming the canonical policy engine directly via the published `@kontourai/flow-agents` npm package, rather than shelling out to bash scripts — to other frameworks. Candidate frameworks include LangGraph, VoltAgent, and the OpenAI Agents SDK. The [Runtime Hook Surface spec](spec/runtime-hook-surface.html) documents the adapter contract and the framework event mapping tables for each.
+The Strands Python spike proves the thesis: the policy engine is not harness-specific. `integrations/strands-ts/` ships that natively for Strands today. The direction is extending the same native-import pattern — consuming the canonical policy engine directly via the published `@kontourai/flow-agents` npm package, rather than shelling out to bash scripts — to other frameworks. Candidate frameworks include LangGraph, VoltAgent, and the OpenAI Agents SDK. The [Runtime Hook Surface spec](spec/runtime-hook-surface.md) documents the adapter contract and the framework event mapping tables for each.
 
 ### Kontour Console as the unifying telemetry surface
 
@@ -64,4 +64,4 @@ The runtime matrix includes a "conformance-certified" tier for community and thi
 
 Flow Agents is not building another agent runtime, coding assistant, workflow engine, or orchestration control plane. The model, the runtime, the IDE, the agent UI, the workflow engine, and the repo governance engine are all deliberately out of scope. Flow Agents owns the glue: discovery, just-in-time guidance, scoped delegation, Flow-backed workflow state inside agent runtimes, evidence-backed completion, and feedback loops.
 
-See the [North Star](north-star.html) for the full design principles and the [Developer Architecture](developer-architecture.html) for the product boundary map.
+See the [North Star](north-star.md) for the full design principles and the [Developer Architecture](developer-architecture.md) for the product boundary map.
