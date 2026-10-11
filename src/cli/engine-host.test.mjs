@@ -1,15 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import { mkdtemp, writeFile, rm, access } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { detectEngine, listEngineProfiles, parseEngineOutput, prepareEngineInvocation, runEngine, runIsolatedEngine } from '../../build/src/engine-host.js';
 const complete=[{type:'thread.started',thread_id:'thread-1'},{type:'turn.started'},{type:'item.completed',item:{type:'agent_message',text:'OK'}},{type:'turn.completed',usage:{input_tokens:2,output_tokens:1}}].map(e=>JSON.stringify(e)).join('\n');
-async function fixture(t,source) {
+async function fixture(t,source,version='fake-engine 1') {
  const root=await mkdtemp(path.join(os.tmpdir(),'engine-host-'));
  t.after(()=>rm(root,{recursive:true,force:true}));
  const executable=path.join(root,'engine');
- await writeFile(executable,`#!${process.execPath}\nif(process.argv.includes("--version")){console.log("fake-engine 1");process.exit(0);}
+ await writeFile(executable,`#!${process.execPath}\nif(process.argv.includes("--version")){console.log(${JSON.stringify(version)});process.exit(0);}
 ${source}`,{mode:0o700});
  return {root,executable};
 }
@@ -122,4 +123,36 @@ test('Muse partial, failed, duplicated and unbound MSP envelopes cannot complete
  const cases=[[museStarted],[museTerminal],[museStarted,museTerminal,museTerminal]];
  for(const mutate of [e=>e.payload.command_id='other',e=>e.stream.id='other',e=>e.sequence=1,e=>e.schema_version=2,e=>e.payload.terminal='failed',e=>e.payload.run_stream.id='other']) {const t=copy(museTerminal);mutate(t);cases.push([museStarted,t]);}
  for(const events of cases) assert.equal(parseEngineOutput('muse',museStream(events),{version:'Muse Code 1.4.4 (1.4.4-R5419.1)'}).complete,false);
+});
+
+const largePrompt='é'.repeat(600000)+'\n--literal $(unchanged)';
+const promptHash=value=>`sha256:${createHash('sha256').update(value).digest('hex')}`;
+test('OpenCode sends greater-than-1MiB exact UTF8 through stdin without argv prompt',async t=>{
+ const stream=openStream('OK');
+ const f=await fixture(t,`import {createHash} from 'node:crypto';let input='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{console.error(JSON.stringify({bytes:Buffer.byteLength(input),hash:'sha256:'+createHash('sha256').update(input).digest('hex'),argvMax:Math.max(...process.argv.map(a=>Buffer.byteLength(a)))}));console.log(${JSON.stringify(stream)});});`);
+ const r=await runEngine(options(f,{engine:'opencode',prompt:largePrompt,timeoutMs:3000}));
+ assert.equal(r.outcome,'completed');assert.equal(r.observed.prompt_digest,promptHash(largePrompt));const proof=JSON.parse(r.stderr);assert.equal(proof.hash,promptHash(largePrompt));assert.ok(proof.bytes>1024*1024);assert.ok(proof.argvMax<131072);
+});
+const museVersion='Muse Code 1.4.4 (1.4.4-R5419.1)';
+const museFileReader=`import {readFileSync,statSync,writeFileSync} from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';const file=process.argv[process.argv.indexOf('--prompt-file')+1];const input=readFileSync(file);console.error(JSON.stringify({file,parent:path.dirname(file),fileMode:statSync(file).mode&0o777,dirMode:statSync(path.dirname(file)).mode&0o777,hash:'sha256:'+createHash('sha256').update(input).digest('hex'),bytes:input.length}));writeFileSync('started.marker','ready');`;
+test('Muse stages greater-than-1MiB exact input privately outside read-only workspace and removes it',async t=>{
+ const f=await fixture(t,museFileReader.replace("writeFileSync('started.marker','ready');",'')+`console.log(${JSON.stringify(museStream([museStarted,museTerminal]))});`,museVersion);
+ const r=await runEngine(options(f,{engine:'muse',prompt:largePrompt,readOnlyWorkspace:true,timeoutMs:3000}));
+ assert.equal(r.outcome,'completed');assert.equal(r.observed.prompt_digest,promptHash(largePrompt));assert.equal(r.observed.workspace_before,r.observed.workspace_after);
+ const proof=JSON.parse(r.stderr);assert.equal(proof.hash,promptHash(largePrompt));assert.ok(proof.bytes>1024*1024);assert.equal(proof.fileMode,0o400);assert.equal(proof.dirMode,0o700);assert.ok(!proof.parent.startsWith(f.root+path.sep));await assert.rejects(access(proof.parent));
+});
+test('Muse owned prompt staging cleans timeout, cancellation, output bound, nonzero and invalid protocol outcomes',async t=>{
+ for(const [outcome,source,extra] of [
+  ['timeout','setInterval(()=>{},1000);',{timeoutMs:1500}],
+  ['cancelled','setInterval(()=>{},1000);',{cancel:true,timeoutMs:3000}],
+  ['engine_error','process.exitCode=7;',{}],
+  ['protocol_error',"console.log('not json');",{}],
+  ['output_limit',"process.stdout.write('x'.repeat(10000));setInterval(()=>{},1000);",{maxOutputBytes:2048}],
+ ]) {
+  const f=await fixture(t,museFileReader+source,museVersion);const controller=new AbortController();let poll;if(extra.cancel){poll=setInterval(()=>access(path.join(f.root,'started.marker')).then(()=>controller.abort()).catch(()=>{}),20);t.after(()=>clearInterval(poll));}
+  const r=await runEngine(options(f,{engine:'muse',prompt:largePrompt,timeoutMs:3000,...extra,signal:controller.signal}));if(poll)clearInterval(poll);assert.equal(r.outcome,outcome);const proof=JSON.parse(r.stderr);await assert.rejects(access(proof.parent));assert.equal(r.observed.prompt_digest,promptHash(largePrompt));
+ }
+});
+test('native prompt admission is bounded without including prompt content in errors',()=>{
+ const secret='sensitive-value';assert.throws(()=>prepareEngineInvocation('opencode',secret+'x'.repeat(16*1024*1024)),error=>/input bound/.test(error.message)&&!error.message.includes(secret));
 });

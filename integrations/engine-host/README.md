@@ -100,3 +100,17 @@ Every step and part must bind the current message and session. Tool-step narrati
 is retained in the raw transcript but excluded from the final message; prose or
 fenced JSON within the terminal message remains intact. This parser does not
 repair application output contracts or manufacture a successful artifact result.
+
+Large native inputs use engine-owned transports: OpenCode reads the exact prompt
+from stdin, and `runEngine` supplies Muse with `--prompt-file` in an invocation-owned
+0700 temporary directory containing a 0400 UTF-8 file outside the application
+workspace. The file is removed after process settlement on success, errors,
+timeout or cancellation. No raw prompt is added to wrapper diagnostics. Prompt
+identity remains the digest of the original UTF-8 bytes. Admission is bounded to
+16 MiB; it does not depend on OS command-line argument limits.
+
+OpenCode stdin behavior is source-confirmed in
+[v1.18.28 run.ts](https://github.com/anomalyco/opencode/blob/v1.18.28/packages/opencode/src/cli/cmd/run.ts#L400),
+and Muse 1.4.4 documents `exec --prompt-file` in its installed CLI help. The pure
+`prepareEngineInvocation` helper retains Muse positional invocation unless a
+`promptFile` is explicitly supplied; filesystem staging belongs to `runEngine`.

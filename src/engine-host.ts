@@ -2,9 +2,10 @@
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
-import { access, readFile, realpath, stat, readdir, lstat } from "node:fs/promises";
+import { access, readFile, realpath, stat, readdir, lstat, mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
+import { tmpdir } from "node:os";
 
 export type EngineId = "codex" | "claude" | "kiro" | "cursor" | "opencode" | "copilot" | "muse";
 const profiles = {
@@ -46,8 +47,9 @@ export async function detectEngine(engine: EngineId, options: { environment?: No
   }
   return { engine, installed: false as const, executable: null, version: null, entrypoint_digest: null, authentication: "NOT_VERIFIED" as const };
 }
-export function prepareEngineInvocation(engine: EngineId, prompt: string, options: { model?: string; allowTools?: boolean; workspace?: string } = {}) {
+export function prepareEngineInvocation(engine: EngineId, prompt: string, options: { model?: string; allowTools?: boolean; workspace?: string; promptFile?: string } = {}) {
   profile(engine);
+  if (Buffer.byteLength(prompt) > 16 * 1024 * 1024) throw new Error("Engine prompt exceeds input bound");
   if (!prompt || prompt.includes("\0")) throw new Error("Nonempty NUL-free prompt required");
   if (options.model !== undefined && (!options.model || options.model.includes("\0"))) throw new Error("Nonempty NUL-free model required");
   const model = options.model ? ["--model", options.model] : [];
@@ -56,8 +58,8 @@ export function prepareEngineInvocation(engine: EngineId, prompt: string, option
     case "claude": return { args: ["-p", "--output-format", "stream-json", "--verbose", ...model, ...(options.allowTools ? ["--dangerously-skip-permissions"] : []), "--", prompt], stdin: "" };
     case "kiro": return { args: ["chat", "--agent-engine", "v2", "--no-interactive", "--output-format", "stream-json", ...model, ...(options.allowTools ? ["--trust-all-tools"] : []), "--", prompt], stdin: "" };
     case "cursor": return { args: ["-p", "--output-format", "stream-json", ...model, ...(options.allowTools ? ["--force"] : []), "--", prompt], stdin: "" };
-    case "opencode": return { args: ["run", "--format", "json", ...model, ...(options.allowTools ? ["--auto"] : []), "--", prompt], stdin: "" };
-    case "muse": return { args: ["exec", "--json", ...model, ...(options.workspace ? ["--workspace", options.workspace] : []), ...(options.allowTools ? ["--yolo"] : []), "--", prompt], stdin: "" };
+    case "opencode": return { args: ["run", "--format", "json", ...model, ...(options.allowTools ? ["--auto"] : [])], stdin: prompt };
+    case "muse": return { args: ["exec", "--json", ...model, ...(options.workspace ? ["--workspace", options.workspace] : []), ...(options.allowTools ? ["--yolo"] : []), ...(options.promptFile ? ["--prompt-file", options.promptFile] : ["--", prompt])], stdin: "" };
     case "copilot": return { args: ["-p", prompt, "--output-format", "json", "--no-ask-user", ...model, ...(options.allowTools ? ["--allow-all-tools"] : [])], stdin: "" };
   }
 }
@@ -185,7 +187,7 @@ export async function runEngine(options: RunEngineOptions) {
   const limit = options.maxOutputBytes ?? 16 * 1024 * 1024;
   if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Positive output bound required");
   const workspace = await realpath(options.workspace);
-  const invocation = prepareEngineInvocation(options.engine, options.prompt, { ...options, workspace });
+  let invocation = prepareEngineInvocation(options.engine, options.prompt, { ...options, workspace });
   if (!(await stat(workspace)).isDirectory()) throw new Error("Workspace directory required");
   const revision = options.readOnlyWorkspace ? readOnlyRevision : null;
   const workspaceBefore = revision ? await revision(workspace) : null;
@@ -194,6 +196,18 @@ export async function runEngine(options: RunEngineOptions) {
   const suppliedSecrets = [...(options.redactValues ?? []), ...Object.values(options.environment ?? {}).filter((value): value is string => typeof value === "string" && value.length > 0)];
   const secrets = [...new Set(suppliedSecrets.flatMap(value => [value, JSON.stringify(value).slice(1, -1)]).filter(Boolean))].sort((a, b) => b.length - a.length);
   const redact = (value: string) => secrets.reduce((text, secret) => text.split(secret).join("[redacted]"), value);
+  let inputDirectory: string | null = null;
+  try {
+    if (options.engine === "muse" && !options.signal?.aborted) {
+      const inputRoot = await realpath(tmpdir());
+      const relative = path.relative(workspace, inputRoot);
+      if (!relative || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))) throw new Error("Private engine input root must be outside the workspace");
+      inputDirectory = await mkdtemp(path.join(inputRoot, "flow-agents-engine-input-"));
+      await chmod(inputDirectory, 0o700);
+      const promptFile = path.join(inputDirectory, "prompt.txt");
+      await writeFile(promptFile, options.prompt, { encoding: "utf8", mode: 0o400, flag: "wx" });
+      invocation = prepareEngineInvocation(options.engine, options.prompt, { ...options, workspace, promptFile });
+    }
   let stdout = "", stderr = "", bytes = 0, timeout = false, cancelled = options.signal?.aborted ?? false, overflow = false;
   let status: number | null = null, exitSignal: NodeJS.Signals | null = null, spawnError: string | null = null;
   if (!cancelled) await new Promise<void>(resolve => {
@@ -230,6 +244,10 @@ export async function runEngine(options: RunEngineOptions) {
     usage: output?.usage ?? { complete: false, source: "unavailable" }, protocol_error: protocolError,
     stdout: redact(stdout), stderr: redact(stderr), stdout_digest: digest(redact(stdout)), stderr_digest: digest(redact(stderr)),
   };
+  } finally {
+    if (inputDirectory !== null) await rm(inputDirectory, { recursive: true, force: true });
+  }
+
 }
 
 /** Broker protocol admission is explicit; never fall back to native or another engine. */
