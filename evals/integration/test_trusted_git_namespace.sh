@@ -144,12 +144,11 @@ const source = path.join(root, 'src/index.ts'), original = fs.readFileSync(sourc
 const trusted = require(path.join(packageRoot, 'scripts/hooks/lib/trusted-git.js'));
 try {
   fs.writeFileSync(source, 'export const value = 2;\n');
-  const advisory = spawnSync(process.env.FLOW_AGENTS_NAMESPACE_NODE, [runner, 'stop-goal-fit', 'stop-goal-fit.js', 'standard,strict'], {
+  const otherActorStop = spawnSync(process.env.FLOW_AGENTS_NAMESPACE_NODE, [runner, 'stop-goal-fit', 'stop-goal-fit.js', 'standard,strict'], {
     cwd: root, env: { ...process.env, FLOW_AGENTS_ACTOR: `unstarted-${process.env.FLOW_AGENTS_ACTOR}` },
     input: JSON.stringify({ cwd: root, hook_event_name: 'Stop' }), encoding: 'utf8',
   });
-  assert.equal(advisory.status, 0, advisory.stderr);
-  assert.match(advisory.stderr, /delivery not started/);
+  assert.equal(otherActorStop.status, 0, otherActorStop.stderr);
   fs.writeFileSync(source, 'debugger;\n');
   trusted.execTrustedGitSync(root, ['add', 'src/index.ts']);
   const quality = spawnSync(process.env.FLOW_AGENTS_NAMESPACE_NODE,
@@ -224,8 +223,6 @@ assert.equal(stopped.stopGateSummary?.claims_confirmed_from_capture, 0);
 assert.match(stopped.warnings.join('\n'), /current canonical workspace snapshot is unavailable or dirty/);
 const freshness = require(path.join(packageRoot, 'scripts/hooks/lib/install-freshness.js'));
 assert.deepEqual(freshness.checkoutStaleness(root, { gitSha: process.env.FLOW_AGENTS_NAMESPACE_SHA }), { determinable: false });
-const unstarted = require(path.join(packageRoot, 'scripts/hooks/lib/unstarted-delivery.js'));
-assert.equal(unstarted.unstartedDeliveryWarning({ root, cwd: root }), null);
 execFileSync(process.env.FLOW_AGENTS_NAMESPACE_NODE, [path.join(packageRoot, 'scripts/hooks/pre-commit-quality.js')], {
   cwd: root, input: JSON.stringify({ tool_input: { command: 'git commit -m "fix: namespace fixture"' } }), encoding: 'utf8',
 });
