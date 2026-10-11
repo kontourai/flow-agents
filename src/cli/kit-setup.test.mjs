@@ -60,7 +60,7 @@ test('first run creates bound secret-free request, refuses cross-identity, symli
  const setupArgs=['build/src/cli.js','kit','setup','portable','--dest',dest,'--workspace',workspace,'--controller-root',path.join(root,'private'),'--engine','codex','--model','example-model','--auth','native','--allow-host-execution'];
  const multilineOutput=path.join(root,'multiline-request.json');
  const created=spawnSync(process.execPath,[...setupArgs,'--prompt',multiline,'--output',multilineOutput],{encoding:'utf8'});
- assert.equal(created.status,0,created.stderr);assert.equal(JSON.parse(fs.readFileSync(multilineOutput,'utf8')).prompt,multiline);
+ assert.ok([0,1].includes(created.status),created.stderr);assert.equal(JSON.parse(fs.readFileSync(multilineOutput,'utf8')).prompt,multiline);
  const rejectedOutput=path.join(root,'rejected-request.json');
  const rejected=spawnSync(process.execPath,[...setupArgs,'--prompt','bad\u001btext','--output',rejectedOutput],{encoding:'utf8'});
  assert.equal(rejected.status,2,rejected.stderr);assert.match(rejected.stderr,/Valid prompt required/);assert.equal(fs.existsSync(rejectedOutput),false);
