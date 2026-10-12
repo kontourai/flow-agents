@@ -82,6 +82,14 @@
       "section": "Guides"
     },
     {
+      "source": "docs/survey-review-transports.md",
+      "section": "Guides",
+      "covers": [
+        "src/survey-flow-gate-adapter.ts",
+        "src/survey-flow-gate-review-work.ts"
+      ]
+    },
+    {
       "source": "docs/native-harness-activation.md",
       "section": "Guides",
       "covers": [
