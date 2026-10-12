@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.github.io/flow-agents/schemas/kit-review-request.schema.json",
+  "title": "Installed kit review request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "kit_id", "input"],
+  "properties": {
+    "schema": {"const": "kontour.kit.review_request"},
+    "version": {"const": "1.0"},
+    "kit_id": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"},
+    "input": {"type": "object", "description": "Domain arguments validated by the kit producer; no trusted host authority is conferred by these values."}
+  }
+}

@@ -595,3 +595,12 @@ Commit the declaration and generated `.flow-agents/workspace.kits.lock.json` whe
 A matching lock can resolve offline from verified cached bytes without `--bindings`. Use `--update` explicitly to select changed source bytes. Inspect reports the prior identity when the declaration is stale, never fetches sources and never writes. Both commands emit JSON; `verified` exits 0 and all refusal outcomes exit 2. Library callers use the same implementation through `@kontourai/flow-agents/workspace-kits`.
 
 Artifacts publish before the lock and are never repaired or overwritten in place. Failure before lock replacement preserves the old lock; complete unreferenced entries can remain after interruption. A cleanup failure after replacement returns `recovery-required` with the newly published lock identity. Existing operation markers report `busy` and require deliberate recovery by the owner; v1 has no automatic lock reclamation or cache cleanup. Verification establishes supported manifest/closure checks and exact cached bytes, not publisher trust, coherent source capture, workflow readiness or power-loss durability. Active runs and the legacy install/activation paths are unchanged.
+
+### Review kit-owned pending actions
+
+Use `flow-agents kit review <kit-id> --dest <installed-root> --request <private-review-request.json>`
+for a kit's declared Survey review producer. This shares the native host interface
+across AI-DLC and governance kits while preserving their domain decisions. See
+[the review producer contract](flow-kit-repository-contract.md#native-pending-action-review)
+for request shape, host authority and stale-source rejection. No kit-specific
+binary is required to present and apply this review.

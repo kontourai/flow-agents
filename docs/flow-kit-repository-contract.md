@@ -246,3 +246,43 @@ This contract covers local and Git-backed repository installation, local runtime
 - `kit.json: .flows must be a non-empty list`: declare at least one Flow Definition.
 - `kit.json: flows[0].path points at missing Flow Definition`: add the file or fix the relative path.
 - `kit.json: docs[0].path points at missing asset`: add the asset or remove the entry.
+
+## Native pending-action review
+
+A kit can declare optional `review` metadata alongside (or without) `execution`:
+
+```json
+{"review":{"contract":"kontour.kit.review_request@1.0","module":"scripts/review.mjs","export":"prepareKitReview"}}
+```
+
+The declared async producer accepts `{input, host}` and returns
+`{sessionPath, binding, apply}`. `sessionPath` is absolute; `binding` is Survey's
+producer-created `ReviewQueueBinding`; `apply()` returns a durable `{reference,
+summary?}` receipt. The producer owns current subject/basis validation, deadlines,
+identity resolution and idempotent domain application under its own lock. A local
+actor string is not authenticated human approval.
+
+The request must be a regular non-symlink JSON file at most 1 MiB.
+The public schema is `schemas/kit-review-request.schema.json`.
+Create a private request with only `schema: "kontour.kit.review_request"`,
+`version: "1.0"`, `kit_id` and domain-specific `input`, then run:
+
+```sh
+flow-agents kit review <kit-id> --dest <installed-root> --request <private-review-request.json> --port 0
+```
+
+Flow Agents verifies installed content and jailed `.mjs` entry, opens Survey on
+loopback, and prints the URL, session path, kit ID and source hash. It rechecks
+installed integrity before application. Changed kit bytes reject an open review;
+restart a long-lived SDK host after updating a previously imported kit so cached
+ES modules cannot supply old dependencies. SIGINT/SIGTERM close only this console.
+The host creates no model worker and performs no gate continuation. Survey derives
+persisted events against the original binding and refuses unresolved or consumed
+sessions. The producer remains responsible for cross-store write-loss recovery.
+
+SDK consumers can import `openInstalledKitReview` or `serveSurveyReview` from
+`@kontourai/flow-agents/kit-review`. Trusted host applications may pass
+`host.resolveAuthority` directly in memory; JSON requests cannot supply host
+capabilities. Kits with protected human decisions must require their own trusted
+resolver and durable authority artifact. Existing paused-gate Survey APIs continue
+to handle Flow-owned gates; a kit-owned pending action does not become a paused gate.

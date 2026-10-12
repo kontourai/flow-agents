@@ -1,3 +1,4 @@
+import {openInstalledKitReview} from '../kit-review.js';
 import {kitSetupMain} from './kit-setup.js';
 import {executeInstalledKit} from '../kit-execution.js';
 import { workspaceKitMain } from "./workspace-kit.js";
@@ -64,6 +65,7 @@ export function setKitCliTestHooksForTests(hooks: KitCliTestHooks | undefined): 
 }
 
 const KIT_USAGE: Record<string, string> = {
+  review: "usage: flow-agents kit review <kit-id> --dest <installed-root> --request <private-review-request.json> [--port <0..65535>]",
   run: "usage: flow-agents kit run <kit-id> --request <json> --controller-root <private-root> [--auth-file <host-auth.json>] [--dest <workspace>]",
   install: "usage: flow-agents kit install <path-or-git-url> [--dest <path>] [--ref <ref>] [--record-source <locator>] [--force] [--update]",
   activate: "usage: flow-agents kit activate [--adapter <codex-local|strands-local|claude-code|codex|kiro-cli|kiro-ide|cursor|opencode|copilot-cli|vscode>] [--dest <installed-root>] [--target <project>] [--kits <id,id>] [--source-root <path>]\n"
@@ -83,7 +85,7 @@ function hasHelp(argv: string[]): boolean {
 }
 
 function printKitUsage(): void {
-  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|run|setup|doctor|prepare-worker|workspace> [args]
+  console.log(`Usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|run|review|setup|doctor|prepare-worker|workspace> [args]
 
 Commands:
   install    Install a Flow Kit from a local path or Git URL.
@@ -96,6 +98,7 @@ Commands:
   list       List locally installed Flow Kits.
   status     Report local Flow Kit installation status.
   run        Execute an installed kit with --request <json> --controller-root <private-root>.
+  review     Open an installed kit pending action in Survey.
   setup      Configure an installed kit execution request.
   prepare-worker Build a generic pinned Codex Docker worker.
   doctor     Check engine, auth backend, and Docker availability.
@@ -1570,6 +1573,20 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     printCommandUsage("status");
     return 0;
   }
+  if(command==='review'){
+    if(hasHelp(rest)){printCommandUsage('review');return 0;}
+    const args=parseArgs(rest),kitId=args.positionals[0],requestFile=flagString(args.flags,'request');
+    if(!kitId||!requestFile){printCommandUsage('review');return 2;}
+    const portText=flagString(args.flags,'port');
+    if(portText!==undefined&&!/^\d+$/.test(portText))throw new Error('Invalid review port');
+    const server=await openInstalledKitReview({kitId,dest:resolveDest(args.flags),requestFile,port:portText===undefined?undefined:Number(portText)});
+    console.log(JSON.stringify({url:server.url,sessionPath:server.sessionPath,kitId:server.kitId,sourceHash:server.sourceHash}));
+    await new Promise<void>((resolve,reject)=>{
+      const close=()=>{process.removeListener('SIGINT',close);process.removeListener('SIGTERM',close);server.close().then(resolve,reject);};
+      process.once('SIGINT',close);process.once('SIGTERM',close);
+    });
+    return 0;
+  }
   if(command==='run'){
     if(hasHelp(rest)){printCommandUsage('run');return 0;}
     const args=parseArgs(rest),kitId=args.positionals[0],requestFile=flagString(args.flags,'request'),controllerRoot=flagString(args.flags,'controller-root');
@@ -1600,7 +1617,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "validate") return await validate(rest);
   if (command === "provision") return await provision(rest);
   if (command === "inspect") return await inspect(rest);
-  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|run|setup|doctor|prepare-worker|workspace> ...");
+  console.error("usage: flow-agents kit <install|activate|deactivate|validate|provision|inspect|list|status|run|review|setup|doctor|prepare-worker|workspace> ...");
   return 2;
 }
 
