@@ -90,6 +90,10 @@ combined output bounds, redaction, identity, read-only changes and explicit refu
 
 Muse is an additional explicit native CLI profile. Its version-qualified MSP parser
 requires one session, a correlated started run and a single completed terminal.
+The admitted builds are exactly `Muse Code 1.4.4 (1.4.4-R5419.1)` and
+`Muse Code 1.4.6 (1.4.6-R6000.1)`. Other builds refuse before native worker
+launch with an unsupported MSP protocol version error; installation alone does
+not establish protocol compatibility.
 The terminal text is returned exactly; echo protocol qualification does not verify
 a model provider or account. Muse 1.4.4 on brian-media lacks usable Meta credentials
 and remains **NOT_VERIFIED** for provider-backed workflows. Grok and Copilot were

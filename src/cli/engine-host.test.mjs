@@ -115,14 +115,14 @@ const museTerminal=museEvent(2,'run.terminal.completed',{kind:'run_terminal',com
 const museStream=(events)=>events.map(JSON.stringify).join('\n');
 test('Muse MSP envelope correlates one complete run without claiming provider identity',()=>{
  const r=parseEngineOutput('muse',museStream([museStarted,museTerminal]),{version:'Muse Code 1.4.4 (1.4.4-R5419.1)'});assert.equal(r.complete,true);assert.equal(r.final,'echo: hello');assert.equal(r.usage.complete,false);
- assert.equal(parseEngineOutput('muse',museStream([museStarted,museTerminal]),{version:'Muse Code 1.5.0'}).complete,false);
+ for(const version of ['Muse Code 1.5.0','Muse Code 1.4.6 (1.4.6-R6000.2)',null]) assert.throws(()=>parseEngineOutput('muse',museStream([museStarted,museTerminal]),{version}),/Unsupported Muse MSP protocol version/);
  const call=prepareEngineInvocation('muse','--literal',{workspace:'/root/work',allowTools:true,model:'requested'});assert.deepEqual(call.args,['exec','--json','--model','requested','--workspace','/root/work','--yolo','--','--literal']);
 });
 test('Muse partial, failed, duplicated and unbound MSP envelopes cannot complete',()=>{
  const copy=(value)=>JSON.parse(JSON.stringify(value));
  const cases=[[museStarted],[museTerminal],[museStarted,museTerminal,museTerminal]];
- for(const mutate of [e=>e.payload.command_id='other',e=>e.stream.id='other',e=>e.sequence=1,e=>e.schema_version=2,e=>e.payload.terminal='failed',e=>e.payload.run_stream.id='other']) {const t=copy(museTerminal);mutate(t);cases.push([museStarted,t]);}
- for(const events of cases) assert.equal(parseEngineOutput('muse',museStream(events),{version:'Muse Code 1.4.4 (1.4.4-R5419.1)'}).complete,false);
+ for(const mutate of [e=>e.payload.command_id='other',e=>e.stream.id='other',e=>e.sequence=1,e=>e.schema_version=2,e=>e.payload.terminal='failed',e=>e.payload.run_stream.id='other',e=>e.causation_id='other',e=>e.payload_schema_version=2,e=>e.payload.reason='cancelled',e=>e.payload.text='' ]) {const t=copy(museTerminal);mutate(t);cases.push([museStarted,t]);}
+ for(const version of ['Muse Code 1.4.4 (1.4.4-R5419.1)','Muse Code 1.4.6 (1.4.6-R6000.1)']) for(const events of cases) assert.equal(parseEngineOutput('muse',museStream(events),{version}).complete,false);
 });
 
 const largePrompt='é'.repeat(600000)+'\n--literal $(unchanged)';
@@ -155,4 +155,28 @@ test('Muse owned prompt staging cleans timeout, cancellation, output bound, nonz
 });
 test('native prompt admission is bounded without including prompt content in errors',()=>{
  const secret='sensitive-value';assert.throws(()=>prepareEngineInvocation('opencode',secret+'x'.repeat(16*1024*1024)),error=>/input bound/.test(error.message)&&!error.message.includes(secret));
+});
+
+test('Muse 1.4.6 observed schema-v1 run completes through the native host',async t=>{
+ const version='Muse Code 1.4.6 (1.4.6-R6000.1)';
+ const events=[museStarted,museTerminal];
+ const parsed=parseEngineOutput('muse',museStream(events),{version});
+ assert.equal(parsed.complete,true);assert.equal(parsed.failed,false);assert.equal(parsed.session_id,'session');assert.equal(parsed.final,'echo: hello');
+ const f=await fixture(t,`console.log(${JSON.stringify(museStream(events))});`,version);
+ const r=await runEngine(options(f,{engine:'muse',timeoutMs:3000}));
+ assert.equal(r.outcome,'completed');assert.equal(r.protocol_error,null);assert.equal(r.terminal.status,0);assert.equal(r.observed.harness_version,version);assert.equal(r.final,'echo: hello');
+});
+test('unknown Muse build refuses before any native worker launch',async t=>{
+ for(const version of ['Muse Code 1.5.0','Muse Code 1.4.6 (1.4.6-R6000.2)','']) {
+  const f=await fixture(t,`import {writeFileSync} from 'node:fs';writeFileSync('worker.marker','started');console.log(${JSON.stringify(museStream([museStarted,museTerminal]))});`,version);
+  await assert.rejects(runEngine(options(f,{engine:'muse'})),/Unsupported Muse MSP protocol version/);
+  await assert.rejects(access(path.join(f.root,'worker.marker')));
+ }
+});
+
+// Selected observed 1.4.6 envelopes: identifiers, timestamps, prompt and final redacted.
+const observedMuse146=[{"schema_version":1,"id":"observed-5","stream":{"kind":"session","id":"observed-session"},"sequence":5,"recorded_at":0,"record_type":"event","durability":"durable","causation_id":"observed-run","payload_type":"run.lifecycle.started","payload_schema_version":1,"payload":{"kind":"run_started","command_id":"observed-run","run_stream":{"kind":"run","id":"observed-run"},"prompt":"[redacted prompt]"}},{"schema_version":1,"id":"observed-483","stream":{"kind":"session","id":"observed-session"},"sequence":483,"recorded_at":0,"record_type":"event","durability":"durable","causation_id":"observed-run","payload_type":"run.terminal.completed","payload_schema_version":1,"payload":{"kind":"run_terminal","command_id":"observed-run","run_stream":{"kind":"run","id":"observed-run"},"terminal":"completed","text":"[redacted final]","reason":null}}];
+test('observed Muse 1.4.6 lifecycle envelope shape and sequence complete',()=>{
+ const r=parseEngineOutput('muse',museStream(observedMuse146),{version:'Muse Code 1.4.6 (1.4.6-R6000.1)'});
+ assert.equal(r.complete,true);assert.equal(r.failed,false);assert.equal(r.session_id,'observed-session');assert.equal(r.final,'[redacted final]');
 });
