@@ -63,9 +63,15 @@ export function prepareEngineInvocation(engine: EngineId, prompt: string, option
     case "copilot": return { args: ["-p", prompt, "--output-format", "json", "--no-ask-user", ...model, ...(options.allowTools ? ["--allow-all-tools"] : [])], stdin: "" };
   }
 }
+// These exact CLI builds have observed schema-v1 MSP completion evidence.
+const museProtocolVersions = new Set(["Muse Code 1.4.4 (1.4.4-R5419.1)", "Muse Code 1.4.6 (1.4.6-R6000.1)"]);
+function assertMuseProtocolVersion(version: string | null | undefined) {
+  if (!version || !museProtocolVersions.has(version)) throw new Error("Unsupported Muse MSP protocol version");
+}
 type Event = Record<string, any>;
 export function parseEngineOutput(engine: EngineId, stdout: string, options: { version?: string | null } = {}) {
   profile(engine);
+  if (engine === "muse") assertMuseProtocolVersion(options.version);
   if (Buffer.byteLength(stdout) > 16 * 1024 * 1024) throw new Error("Engine event stream exceeds protocol bound");
   const events: Event[] = stdout.split(/\r?\n/).filter(line => line.trim()).map(line => {
     const event = JSON.parse(line);
@@ -130,7 +136,7 @@ export function parseEngineOutput(engine: EngineId, stdout: string, options: { v
         if (e.payload_type?.startsWith("run.terminal.")) {
           terminals++;
           if (!museRun || p?.command_id !== museRun || p.run_stream?.kind !== "run" || p.run_stream.id !== museRun || e.causation_id !== museRun || p.kind !== "run_terminal") protocolInvalid = true;
-          complete = options.version === "Muse Code 1.4.4 (1.4.4-R5419.1)" && e.payload_type === "run.terminal.completed" && p.terminal === "completed" && p.reason === null;
+          complete = e.payload_type === "run.terminal.completed" && p.terminal === "completed" && p.reason === null;
           final = typeof p?.text === "string" ? p.text : null;
           failed ||= !complete;
         }
@@ -193,6 +199,7 @@ export async function runEngine(options: RunEngineOptions) {
   const workspaceBefore = revision ? await revision(workspace) : null;
   const installed = await detectEngine(options.engine, options);
   if (!installed.installed) throw new Error(`Engine not installed: ${options.engine}`);
+  if (options.engine === "muse") assertMuseProtocolVersion(installed.version);
   const suppliedSecrets = [...(options.redactValues ?? []), ...Object.values(options.environment ?? {}).filter((value): value is string => typeof value === "string" && value.length > 0)];
   const secrets = [...new Set(suppliedSecrets.flatMap(value => [value, JSON.stringify(value).slice(1, -1)]).filter(Boolean))].sort((a, b) => b.length - a.length);
   const redact = (value: string) => secrets.reduce((text, secret) => text.split(secret).join("[redacted]"), value);
