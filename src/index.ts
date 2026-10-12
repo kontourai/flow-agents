@@ -782,4 +782,4 @@ export function writeSidecar(dir: string, name: string, payload: Record<string, 
 }
 
 export {openInstalledKitReview,serveSurveyReview,parseKitReview} from './kit-review.js';
-export type {KitReviewDescriptor,KitReviewHost,PreparedKitReview} from './kit-review.js';
+export type {KitReviewDescriptor,KitReviewHost,KitReviewServices,PreparedKitReview} from './kit-review.js';

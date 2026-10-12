@@ -255,10 +255,15 @@ A kit can declare optional `review` metadata alongside (or without) `execution`:
 {"review":{"contract":"kontour.kit.review_request@1.0","module":"scripts/review.mjs","export":"prepareKitReview"}}
 ```
 
-The declared async producer accepts `{input, host}` and returns
+The declared async producer accepts `{input, host, services}` and returns
 `{sessionPath, binding, apply}`. `sessionPath` is absolute; `binding` is Survey's
 producer-created `ReviewQueueBinding`; `apply()` returns a durable `{reference,
-summary?}` receipt. The producer owns current subject/basis validation, deadlines,
+summary?}` receipt. The host supplies frozen `services.survey.bindReviewQueue` and
+`services.survey.deriveReviewSessionApplyResultForSnapshot` from its own Survey
+dependency. Installed producers should use these instead of importing Survey
+from the copied kit tree: a pnpm or global installation need not expose the SDK's
+transitive dependency at the bootstrap root. Services cannot be supplied by JSON.
+The producer owns current subject/basis validation, deadlines,
 identity resolution and idempotent domain application under its own lock. A local
 actor string is not authenticated human approval.
 

@@ -2,13 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {startReviewConsoleServer} from '@kontourai/survey/review-console';
-import type {ReviewQueueBinding} from '@kontourai/survey/review-workbench';
+import {bindReviewQueue,deriveReviewSessionApplyResultForSnapshot,type ReviewQueueBinding} from '@kontourai/survey/review-workbench';
 import {verifyInstalledKitEntry} from './kit-execution.js';
 
 const loadedKitHashes=new Map<string,string>();
 
 export interface KitReviewDescriptor {contract:'kontour.kit.review_request@1.0';module:string;export:string}
 export interface KitReviewHost {resolveAuthority?: (...args:unknown[])=>unknown|Promise<unknown>}
+export interface KitReviewServices {readonly survey:{readonly bindReviewQueue:typeof bindReviewQueue;readonly deriveReviewSessionApplyResultForSnapshot:typeof deriveReviewSessionApplyResultForSnapshot}}
+const reviewServices:KitReviewServices=Object.freeze({survey:Object.freeze({bindReviewQueue,deriveReviewSessionApplyResultForSnapshot})});
+
 export interface PreparedKitReview {
  sessionPath:string;
  binding:ReviewQueueBinding;
@@ -43,7 +46,7 @@ export async function openInstalledKitReview(options:{kitId:string;dest:string;r
  loadedKitHashes.set(initial.kitRoot,initial.hash);
  const entry=await import(pathToFileURL(initial.modulePath).href+`?kitIntegrity=${initial.hash}`);
  if(typeof entry[initial.descriptor.export]!=='function')throw new Error('Declared review export must be a function');
- const prepared=await entry[initial.descriptor.export]({input:structuredClone(request.input),host:options.host}) as PreparedKitReview;
+ const prepared=await entry[initial.descriptor.export]({input:structuredClone(request.input),host:options.host,services:reviewServices}) as PreparedKitReview;
  if(!prepared||typeof prepared.sessionPath!=='string'||typeof prepared.apply!=='function'||!prepared.binding)throw new Error('Kit review producer returned an invalid session binding');
  const current=installed();if(current.hash!==initial.hash||current.registryBasis!==initial.registryBasis)throw new Error('Installed kit changed while preparing review');
  const server=await serveSurveyReview({...prepared,port:options.port,apply:async()=>{
