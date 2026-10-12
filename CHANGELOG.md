@@ -1,5 +1,27 @@
 # Changelog
 
+## [8.1.0](https://github.com/kontourai/flow-agents/compare/v8.0.1...v8.1.0) (2026-10-12)
+
+
+### Features
+
+* host installed kit Survey reviews natively ([6823192](https://github.com/kontourai/flow-agents/commit/682319220dd176545dd4946a7beb68e51267c526))
+* host installed kit Survey reviews natively ([#1472](https://github.com/kontourai/flow-agents/issues/1472)) ([368155f](https://github.com/kontourai/flow-agents/commit/368155f2d455f8cfbcdc3ce81d8df0e2cc63327f))
+
+
+### Fixes
+
+* consume published Survey shutdown repair for native reviews ([b945725](https://github.com/kontourai/flow-agents/commit/b945725154700fae0f2277c45e188847817c4140))
+* provide Survey services to installed review producers ([6c8f094](https://github.com/kontourai/flow-agents/commit/6c8f094ac31420ed25f18761619afcdf52b71345))
+* ship Survey review in standalone installed bundles ([f8aae2e](https://github.com/kontourai/flow-agents/commit/f8aae2ec67b9640913beae63acf14d00a4bdb1c2))
+
+
+### Documentation
+
+* explain Survey workflow review transports ([4a34bbb](https://github.com/kontourai/flow-agents/commit/4a34bbb20e7e95453cad540a9d64ee018ca32e02))
+* explain Survey workflow review transports ([#1471](https://github.com/kontourai/flow-agents/issues/1471)) ([c7d3b09](https://github.com/kontourai/flow-agents/commit/c7d3b09c5447023d6915d8ddb0afeea80af97e84))
+* **readme:** add Docs badge and kontourai.io link to header ([#1469](https://github.com/kontourai/flow-agents/issues/1469)) ([f25da69](https://github.com/kontourai/flow-agents/commit/f25da69258f7964e4066ca77ff0547a0c1cc747f))
+
 ## [8.0.1](https://github.com/kontourai/flow-agents/compare/v8.0.0...v8.0.1) (2026-10-12)
 
 
