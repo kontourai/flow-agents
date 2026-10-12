@@ -7,7 +7,7 @@ title: Survey review transports for workflow hosts
 A workflow host can present evidence and proposed decisions in Survey's browser
 workbench or MCP App, retain the review events, and apply the result through its
 own workflow authority. Flow Agents already exports the provider-neutral review
-work and paused-gate adapters. The UI is optional; it is not a new Flow gate kind
+work and paused-gate adapters, and a native installed-kit review host. The UI is optional; it is not a new Flow gate kind
 or an engine-specific agent framework.
 
 ## Choose the workflow boundary
@@ -15,7 +15,7 @@ or an engine-specific agent framework.
 | Situation | Application boundary |
 | --- | --- |
 | A persisted Flow gate is blocked or paused on explicitly classified review expectations | Use the Flow Agents discovery and paused-gate adapters below. |
-| A kit is waiting for an operator decision during an active stage | The kit owns checkpoint admission, artifact freshness, budget and decision application. Use Survey's producer callback without pretending the run is paused. |
+| A kit is waiting for an operator decision during an active stage | Use `flow-agents kit review` with its declared producer. The kit owns checkpoint admission, artifact freshness, budget and decision application; the run need not be paused. |
 | Protected Veritas Standards need approval | Veritas owns the authority and attestation contract. A local review record alone does not supply a human approval artifact. |
 
 For example, the [AI-DLC Kit guide](https://kontourai.github.io/aidlc-kit/docs/using-the-kit.html)
@@ -23,18 +23,46 @@ describes its optional requirements review command. The kit validates its sealed
 checkpoint and current artifacts before recording its canonical decision. Its
 review UI does not itself run a model or advance Flow.
 
+## Review a kit-owned pending action
+
+Use the native host when an installed kit declares the review producer contract:
+
+```sh
+flow-agents kit review <kit-id> --dest <installed-root> --request <private-review-request.json>
+```
+
+The private request binds `schema: "kontour.kit.review_request"`, `version: "1.0"`,
+`kit_id` and producer-defined `input`. Flow Agents verifies the installed bytes,
+opens the loopback workbench and rechecks source currency before application.
+It supplies frozen Survey queue/session functions to the producer, so Git-installed
+kits need no separate bootstrap Survey dependency for this transport. Standalone
+installed bundles include the same published server and original browser assets,
+with license and digest records, and work without `node_modules`.
+
+The producer supplies the original queue binding and applies the persisted decision
+under its domain lock. The host creates no model worker and advances no Flow gate.
+Stopping the console closes its own browser streams, while preserving unrelated
+servers and work. Trusted authority resolvers remain in memory; request JSON,
+MCP calls and browser actor labels cannot provide human authority.
+
+The [review producer contract](flow-kit-repository-contract.md#native-pending-action-review)
+describes SDK entrypoints, request admission and source-change rejection. A kit's
+release must actually include this descriptor; older tags do not gain it merely
+because the host supports review.
+
 ## Provision Survey independently
 
-The examples use the published Survey 8.1.0 transport package and require Node
-22 or later. Flow Agents 8.0.1 retains its own Survey dependency; installing a
-separate UI package does not replace that dependency or grant workflow authority.
+The examples use the published Survey 8.1.1 transport package and require Node
+22 or later. The standalone commands are optional transports for producer-created sessions;
+installing them does not grant workflow authority. Native kit review already owns
+its Survey runtime.
 A host owns the producer-created session file, its access permissions and its
 lifecycle. Do not point the commands at a caller-created approval document.
 
 For a producer-created session at an absolute path:
 
 ```sh
-npx --yes --package=@kontourai/survey@8.1.0 survey-review-console \
+npx --yes --package=@kontourai/survey@8.1.1 survey-review-console \
   --session /absolute/path/review-session.json --port 4243
 ```
 
@@ -44,7 +72,7 @@ arguments do not configure a workflow application callback.
 An MCP-capable host can launch the same session through stdio:
 
 ```sh
-npx --yes --package=@kontourai/survey@8.1.0 survey-review-mcp \
+npx --yes --package=@kontourai/survey@8.1.1 survey-review-mcp \
   --session /absolute/path/review-session.json
 ```
 

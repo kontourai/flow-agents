@@ -17,7 +17,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/evals/lib/node.sh"
 
 TMPDIR_EVAL="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR_EVAL"; [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null' EXIT
+cleanup() { stop_stub; rm -rf "$TMPDIR_EVAL"; }
+trap cleanup EXIT
 
 # Hermetic HOME: the conf-driven relay resolver (#567) reads ~/.flow-agents/telemetry-console.conf
 # as a resolution slot. Point HOME at an empty dir so these tests never read the running machine's
@@ -25,7 +26,9 @@ trap 'rm -rf "$TMPDIR_EVAL"; [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev
 # TELEMETRY_CONFIG_FILE, exactly as each case sets up.
 export HOME="$TMPDIR_EVAL/clean-home"
 mkdir -p "$HOME"
-PORT=38795
+PORT=0
+STUB_GENERATION=0
+USED_PORTS=""
 RECV="$TMPDIR_EVAL/recv.jsonl"
 
 errors=0
@@ -36,31 +39,48 @@ fail() { echo "  [FAIL] $1"; errors=$((errors + 1)); }
 # controls the response — "ok" (200) or "fail" (500) — to exercise the relay-failure path.
 start_stub() {
   local mode="$1"
-  # Fresh port per stub: the relay POST is detached/async, so a late POST from a PRIOR "on" case
-  # could otherwise race into the next case's freshly-cleared RECV on a reused port and cause a
-  # spurious "a POST happened" failure in a "no POST" assertion. A new port each time sends any
-  # stray prior-case POST to a now-dead port (connection refused), never into this case's RECV.
-  PORT=$((PORT + 1))
-  ENDPOINT="http://127.0.0.1:${PORT}/records"
+  STUB_GENERATION=$((STUB_GENERATION + 1))
+  RECV="$TMPDIR_EVAL/recv-${STUB_GENERATION}.jsonl"
+  local ready="$TMPDIR_EVAL/stub-${STUB_GENERATION}.ready.json"
+  local log="$TMPDIR_EVAL/stub-${STUB_GENERATION}.log"
+  : > "$RECV"
+  # The bound child publishes its own PID+OS-assigned port. A TCP probe of a
+  # fixed port can accept another listener even after our child failed to bind.
+  # Never reuse a prior case port: detached late deliveries remain isolated.
   STUB_MODE="$mode" node -e '
 const http=require("http"),fs=require("fs");
-const out=process.argv[1], mode=process.env.STUB_MODE||"ok";
+const out=process.argv[1], ready=process.argv[2], used=new Set(process.argv[3].split(",").filter(Boolean).map(Number)),mode=process.env.STUB_MODE||"ok";
 const s=http.createServer((req,res)=>{let b="";req.on("data",d=>b+=d);req.on("end",()=>{
-  fs.appendFileSync(out, JSON.stringify({method:req.method,headers:req.headers,body:b})+"\n");
-  res.writeHead(mode==="fail"?500:200); res.end(mode==="fail"?"err":"ok");
+  res.on("finish",()=>fs.appendFileSync(out,JSON.stringify({method:req.method,headers:req.headers,body:b,response_status:res.statusCode})+"\n"));
+  res.writeHead(mode==="fail"?500:200);res.end(mode==="fail"?"err":"ok");
 });});
-s.listen(Number(process.argv[2]),"127.0.0.1");
+s.on("error",error=>{console.error(error);process.exit(1)});
+let attempts=0;
+function bind(){if(++attempts>32)throw new Error("Could not allocate a distinct fixture port");s.listen(0,"127.0.0.1",()=>{const port=s.address().port;if(used.has(port)){s.close(bind);return;}fs.writeFileSync(ready,JSON.stringify({pid:process.pid,port}));});}
+bind();process.on("SIGTERM",()=>s.close(()=>process.exit(0)));
 setTimeout(()=>process.exit(0),30000);
-' "$RECV" "$PORT" >/dev/null 2>&1 &
+' "$RECV" "$ready" "$USED_PORTS" >"$log" 2>&1 &
   STUB_PID=$!
-  # wait for bind
   for _ in $(seq 1 20); do
-    if node -e 'const n=require("net");const s=n.connect(Number(process.argv[1]),"127.0.0.1");s.on("connect",()=>{s.end();process.exit(0)});s.on("error",()=>process.exit(1))' "$PORT" 2>/dev/null; then return 0; fi
+    if [[ -s "$ready" ]] && kill -0 "$STUB_PID" 2>/dev/null; then
+      PORT="$(node -e 'const fs=require("fs");const r=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(r.pid!==Number(process.argv[2])||!Number.isInteger(r.port)||r.port<=0||r.port>65535)process.exit(1);process.stdout.write(String(r.port));' "$ready" "$STUB_PID")" || continue
+      USED_PORTS="${USED_PORTS:+$USED_PORTS,}$PORT"
+      ENDPOINT="http://127.0.0.1:${PORT}/records"
+      return 0
+    fi
     sleep 0.2
   done
+  fail "owned stub did not bind: $(cat "$log")"
+  stop_stub
   return 1
 }
-stop_stub() { [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null; STUB_PID=""; }
+stop_stub() {
+  if [[ -n "${STUB_PID:-}" ]]; then
+    kill "$STUB_PID" 2>/dev/null || true
+    wait "$STUB_PID" 2>/dev/null || true
+  fi
+  STUB_PID=""
+}
 
 # Emit a liveness event through the REAL wire-in (appendLivenessEvent), inheriting the caller's env.
 emit_event() {
@@ -146,7 +166,12 @@ ROOT_D="$TMPDIR_EVAL/d"
 )
 rc=$?
 [[ "$rc" -eq 0 ]] && pass "liveness emit exits 0 even when the relay endpoint fails (non-fatal)" || fail "liveness emit exited non-zero ($rc) on relay failure"
-[[ -s "$ROOT_D/liveness/events.jsonl" ]] && pass "local write happened despite relay 500 (local-first)" || fail "local write missing on relay failure"
+[[ -s "$ROOT_D/liveness/events.jsonl" ]] && pass "local write happened before the detached relay result (local-first)" || fail "local write missing on relay failure"
+if wait_for_post && node -e 'const fs=require("fs");const r=JSON.parse(fs.readFileSync(process.argv[1],"utf8").trim().split("\n")[0]);if(r.response_status!==500||JSON.parse(r.body).subjectId!=="fail-1")process.exit(1);' "$RECV"; then
+  pass "the owned failing endpoint received this relay and completed its HTTP 500 response"
+else
+  fail "HTTP 500 relay was not observed before fixture shutdown"
+fi
 stop_stub
 
 # ─── 5. Injection: a hostile actor/branch is JSON-escaped, never raw in the POST body ──────────
@@ -160,15 +185,21 @@ HOSTILE_EVT="$(node -e 'const esc=String.fromCharCode(27),bel=String.fromCharCod
   export FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL="$ENDPOINT"
   emit_event "$ROOT_E" "$HOSTILE_EVT"
 )
-wait_for_post || true
+if wait_for_post; then
 node -e '
 const fs=require("fs"); const raw=fs.readFileSync(process.argv[1],"utf8").trim();
 if(!raw){console.log("NO_POST");process.exit(0)}
 const body=JSON.parse(raw.split("\n")[0]).body;
 const hasRawCtl=/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(body);
-console.log(hasRawCtl?"RAW":"ESCAPED");
-' "$RECV" > "$TMPDIR_EVAL/inj.txt" 2>&1
-if grep -q ESCAPED "$TMPDIR_EVAL/inj.txt"; then pass "hostile actor/branch control bytes are JSON-escaped, never raw in the POST body (injection discipline)"; else fail "raw control bytes reached the POST body: $(cat "$TMPDIR_EVAL/inj.txt")"; fi
+const expected=JSON.parse(process.argv[2]);
+let actual;try{actual=JSON.parse(body)}catch{console.log("INVALID_JSON");process.exit(0)}
+const matches=actual.subjectId==="inj-1"&&actual.actor===expected.actor&&actual.branch===expected.branch;
+console.log(hasRawCtl?"RAW":matches?"ESCAPED":"MISMATCHED_POST");
+' "$RECV" "$HOSTILE_EVT" > "$TMPDIR_EVAL/inj.txt" 2>&1
+if grep -q ESCAPED "$TMPDIR_EVAL/inj.txt"; then pass "hostile actor/branch control bytes are JSON-escaped, never raw in the POST body (injection discipline)"; else fail "hostile payload escaping or correlation failed: $(cat "$TMPDIR_EVAL/inj.txt")"; fi
+else
+  fail "NO_POST: hostile payload delivery was not observed; escaping is NOT_VERIFIED"
+fi
 stop_stub
 
 # ─── 6. CONF-DRIVEN enablement (#567): NO env flag, `console_liveness_relay=1` in the conf → POST ─

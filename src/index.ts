@@ -780,3 +780,6 @@ export function readSidecar(dir: string, name: string): Record<string, any> {
 export function writeSidecar(dir: string, name: string, payload: Record<string, any>): void {
   _writeJson(path.join(dir, name), payload);
 }
+
+export {openInstalledKitReview,serveSurveyReview,parseKitReview} from './kit-review.js';
+export type {KitReviewDescriptor,KitReviewHost,KitReviewServices,PreparedKitReview} from './kit-review.js';

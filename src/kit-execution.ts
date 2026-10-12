@@ -15,7 +15,7 @@ export function parseKitExecution(manifest: Record<string, unknown>): KitExecuti
 }
 
 /** Resolve only an explicitly installed, integrity-bound kit host entry. */
-export function verifyInstalledKit({kitId,dest}: {kitId:string;dest:string}):{kitRoot:string;modulePath:string;descriptor:KitExecutionDescriptor;hash:string}{
+export function verifyInstalledKitEntry<T extends {module:string;export:string}>({kitId,dest,parseDescriptor,kind}: {kitId:string;dest:string;parseDescriptor:(manifest:Record<string,unknown>)=>T|null;kind:string}):{kitRoot:string;modulePath:string;descriptor:T;hash:string;registryBasis:string}{
  if(!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(kitId))throw new Error('Invalid kit id');
  const registry=JSON.parse(fs.readFileSync(path.join(dest,'kits/local/installed-kits.json'),'utf8'));
  const entries=(registry.kits as Record<string, unknown>[]).filter(entry=>entry.id===kitId);
@@ -26,11 +26,15 @@ export function verifyInstalledKit({kitId,dest}: {kitId:string;dest:string}):{ki
  const inspectTree=(directory:string):void=>{for(const entry of fs.readdirSync(directory,{withFileTypes:true})){if(['.git','__pycache__','.pytest_cache'].includes(entry.name))throw new Error('Installed execution tree contains unhashed entries');if(entry.isDirectory())inspectTree(path.join(directory,entry.name));}};
  inspectTree(kitRoot);
  const manifest=JSON.parse(fs.readFileSync(path.join(kitRoot,'kit.json'),'utf8'));
- const descriptor=parseKitExecution(manifest);if(!descriptor)throw new Error('Kit has no declared execution entry');
+ const descriptor=parseDescriptor(manifest);if(!descriptor)throw new Error(`Kit has no declared ${kind} entry`);
  let modulePath=kitRoot;
  for(const component of descriptor.module.split('/')){modulePath=path.join(modulePath,component);if(fs.lstatSync(modulePath).isSymbolicLink())throw new Error('Execution module may not traverse symlinks');}
  if(!fs.statSync(modulePath).isFile())throw new Error('Execution module must be a regular file');
- return {kitRoot,modulePath,descriptor,hash:integrity.observed_hash!};
+ return {kitRoot,modulePath,descriptor,hash:integrity.observed_hash!,registryBasis:JSON.stringify(entries[0])};
+}
+
+export function verifyInstalledKit(options:{kitId:string;dest:string}) {
+ return verifyInstalledKitEntry({...options,parseDescriptor:parseKitExecution,kind:'execution'});
 }
 
 export async function executeInstalledKit({kitId,dest,requestFile,controllerRoot,authFile}: {kitId:string;dest:string;requestFile:string;controllerRoot:string;authFile?:string}):Promise<unknown>{
