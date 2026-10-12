@@ -9,4 +9,6 @@ permissions:
 
 jobs:
   readiness:
-    uses: kontourai/.github/.github/workflows/veritas-advisory.yml@main
+    uses: kontourai/.github/.github/workflows/veritas-advisory.yml@dd03fbe8134a09ecf1ef09d82585291424cf5828
+    with:
+      require-ready: true
