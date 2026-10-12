@@ -8,10 +8,11 @@ In plain terms: it keeps your coding agent honest — tracking what it did, chec
 
 [![npm version](https://img.shields.io/npm/v/%40kontourai%2Fflow-agents)](https://www.npmjs.com/package/@kontourai/flow-agents)
 [![CI](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-kontourai.github.io-blue)](https://kontourai.github.io/flow-agents/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node >= 22](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json)
 
-[Documentation](https://kontourai.github.io/flow-agents/) · [Workflow Guide](docs/workflow-usage-guide.md) · [System Guidebook](docs/agent-system-guidebook.md) · [Runtime Hook Spec](docs/spec/runtime-hook-surface.md) · [Kontour Flow](https://kontourai.github.io/flow/)
+[Documentation](https://kontourai.github.io/flow-agents/) · [Workflow Guide](docs/workflow-usage-guide.md) · [System Guidebook](docs/agent-system-guidebook.md) · [Runtime Hook Spec](docs/spec/runtime-hook-surface.md) · [Kontour Flow](https://kontourai.github.io/flow/) · [kontourai.io/flow-agents](https://kontourai.io/flow-agents/)
 
 </div>
 
