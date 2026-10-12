@@ -279,7 +279,10 @@ flow-agents kit review <kit-id> --dest <installed-root> --request <private-revie
 Flow Agents verifies installed content and jailed `.mjs` entry, opens Survey on
 loopback, and prints the URL, session path, kit ID and source hash. It rechecks
 installed integrity before application. Changed kit bytes reject an open review;
-restart a long-lived SDK host after updating a previously imported kit so cached
+Standalone installed bundles include the exact published Survey server, queue
+services, original browser assets, license notices and digest provenance. They
+require no `node_modules`; ordinary kit commands load no Survey runtime.
+Restart a long-lived SDK host after updating a previously imported kit so cached
 ES modules cannot supply old dependencies. SIGINT/SIGTERM close only this console.
 The host creates no model worker and performs no gate continuation. Survey derives
 persisted events against the original binding and refuses unresolved or consumed

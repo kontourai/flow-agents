@@ -697,6 +697,7 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   writeBundledFlowValidator(targetRoot);
   writeBundledConduit(targetRoot);
   writeBundledDatum(targetRoot);
+  writeBundledSurvey(targetRoot);
   // #620: ship the build-only capability-declarations JSON inside each bundle so an
   // installed economics-record emitter (and hooks) can read it at build/generated/
   // relative to the bundle root. It is generated unconditionally by `npm run build`
@@ -841,6 +842,49 @@ function writeBundledDatum(targetRoot: string): void {
       .replace(/\bimport\(\s*(["'])@kontourai\/datum\1\s*\)/g, `import(${JSON.stringify(specifier)})`);
     if (rewritten !== source) writeText(file, rewritten);
   }
+}
+
+/** Public Survey server and original browser assets, relocatable without npm. */
+function writeBundledSurvey(targetRoot:string):void {
+ const packageName='@kontourai/survey';
+ const declared=loadJson<{dependencies?:Record<string,string>}>(path.join(root,'package.json')).dependencies?.[packageName];
+ const surveyRoot=installedPackageRoot(packageName,`${root}/`);
+ const metadata=loadJson<{name:string;version:string}>(path.join(surveyRoot,'package.json'));
+ if(!declared||metadata.name!==packageName||metadata.version!==declared)throw new Error('Standalone Survey must match exact published dependency');
+ const vendorRoot=path.join(targetRoot,'build/src/vendor/survey');
+ const assetRoot=path.join(surveyRoot,'dist');
+ const assets=[];
+ for(const source of walkFiles(assetRoot)) {
+  const relative=path.relative(assetRoot,source).replaceAll(path.sep,'/');
+  const bytes=fs.readFileSync(source);const destination=path.join(vendorRoot,'dist',relative);
+  fs.mkdirSync(path.dirname(destination),{recursive:true});fs.writeFileSync(destination,bytes);
+  assets.push({path:`dist/${relative}`,digest:`sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`});
+ }
+ const packages=new Map<string,{name:string;version:string;license:unknown;notices:string[]}>();
+ const bundles=[];
+ for(const [specifier,relative] of [[`${packageName}/review-console`,'dist/src/console/review-console-server.bundle.mjs'],[`${packageName}/review-workbench`,'review-workbench.bundle.mjs']]) {
+  const result=buildSync({absWorkingDir:root,entryPoints:[createRequire(`${root}/`).resolve(specifier!)],bundle:true,platform:'node',format:'esm',target:'node22',mainFields:['module','main'],minifyWhitespace:true,legalComments:'eof',write:false,metafile:true,banner:{js:'import {createRequire as surveyCreateRequire} from "node:module"; const require=surveyCreateRequire(import.meta.url);'}});
+  const output=result.outputFiles?.[0];if(!output||!result.metafile)throw new Error('Standalone Survey produced no bundle');
+  const bundleFile=path.join(vendorRoot,relative!);writeText(bundleFile,output.text);
+  bundles.push({path:relative!,digest:`sha256:${crypto.createHash('sha256').update(output.text).digest('hex')}`});
+  for(const built of Object.values(result.metafile.outputs))for(const [input,contribution] of Object.entries(built.inputs)) {
+   if(!contribution.bytesInOutput)continue;
+   let directory=path.dirname(path.resolve(root,input));let info:{name?:string;version?:string;license?:unknown}|undefined;
+   while(directory!==path.parse(directory).root){const file=path.join(directory,'package.json');if(fs.existsSync(file)){const candidate=loadJson<{name?:string;version?:string;license?:unknown}>(file);if(candidate.name&&candidate.version){info=candidate;break;}}directory=path.dirname(directory);}
+   if(!info?.name||!info.version)throw new Error(`Survey bundle input lacks provenance: ${input}`);
+   const identity=`${info.name}@${info.version}`;if(packages.has(identity))continue;
+   const notices=fs.readdirSync(directory).filter(file=>/^(?:licen[sc]e|copying|notice)(?:[._-].*)?$/i.test(file)&&fs.statSync(path.join(directory,file)).isFile()).sort();
+   if(!notices.length)throw new Error(`Survey bundled dependency lacks license/notice: ${identity}`);
+   const copied=notices.map(notice=>{const target=`licenses/${encodeURIComponent(identity)}/${notice}`;writeText(path.join(vendorRoot,target),readText(path.join(directory,notice)));return target;});
+   packages.set(identity,{name:info.name,version:info.version,license:info.license??null,notices:copied});
+  }
+  const reviewFile=path.join(targetRoot,'build/src/kit-review.js');const source=readText(reviewFile);
+  const relativeVendor=path.relative(path.dirname(reviewFile),bundleFile).replaceAll(path.sep,'/');
+  const rewritten=source.replace(`import('${specifier}')`,`import(${JSON.stringify('./'+relativeVendor)})`).replace(`import("${specifier}")`,`import(${JSON.stringify('./'+relativeVendor)})`);
+  if(rewritten===source)throw new Error(`Native review no longer imports expected Survey entry: ${specifier}`);
+  writeText(reviewFile,rewritten);
+ }
+ writeText(path.join(vendorRoot,'survey.bundle.json'),JSON.stringify({schema_version:'1.0',entry_package:packageName,entry_version:metadata.version,bundles,assets,packages:[...packages.values()].sort((a,b)=>`${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`))},null,2)+'\n');
 }
 
 function writeBundledFlowValidator(targetRoot: string): void {
