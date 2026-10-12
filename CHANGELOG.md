@@ -1,5 +1,20 @@
 # Changelog
 
+## [8.0.1](https://github.com/kontourai/flow-agents/compare/v8.0.0...v8.0.1) (2026-10-12)
+
+
+### Fixes
+
+* **ci:** require captured source-bound Veritas readiness ([#1468](https://github.com/kontourai/flow-agents/issues/1468)) ([145e75e](https://github.com/kontourai/flow-agents/commit/145e75ea7b53797fdc757d5006c690bfec01df22))
+* **engine:** admit observed Muse 1.4.6 MSP protocol ([130146d](https://github.com/kontourai/flow-agents/commit/130146d4ba61be0cbf83d7233625cda5cab3567c))
+* **engine:** support observed Muse 1.4.6 protocol ([#1466](https://github.com/kontourai/flow-agents/issues/1466)) ([c6fecb3](https://github.com/kontourai/flow-agents/commit/c6fecb35844e00b975e87150a15daf5999d20f99))
+
+
+### Documentation
+
+* **cli:** expose installed kit run in general help ([67f744c](https://github.com/kontourai/flow-agents/commit/67f744cd16aae8385fdd8146e2ba22b15fe82175))
+* **cli:** expose installed kit run in general help ([#1462](https://github.com/kontourai/flow-agents/issues/1462)) ([a88a5c5](https://github.com/kontourai/flow-agents/commit/a88a5c5751b773546c4e8b9432070780598298ca))
+
 ## [8.0.0](https://github.com/kontourai/flow-agents/compare/v7.2.0...v8.0.0) (2026-10-11)
 
 
