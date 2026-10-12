@@ -27,8 +27,8 @@ importers:
         specifier: 5.0.0
         version: 5.0.0
       '@kontourai/survey':
-        specifier: 8.1.0
-        version: 8.1.0(typescript@7.0.2)
+        specifier: 8.1.1
+        version: 8.1.1(typescript@7.0.2)
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
@@ -1109,8 +1109,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/survey@8.1.0':
-    resolution: {integrity: sha512-+MKmYvzlcXnrVIakNVKG0uGIrKXx0DX0APfr+PlELg0SbrJxdZsk5Yhm+IYzWaKqFMWJ3WWfw6FO9G2ckp+r+w==}
+  '@kontourai/survey@8.1.1':
+    resolution: {integrity: sha512-TwIfUeauyNZ88L+aE3zfDsw9UtCY5fTKlADtdBwhtV43ViFD6QwTd9vWl2KCPywbMpXB1LW6Wwq9C4Cg8LwFsA==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -5373,7 +5373,7 @@ snapshots:
       - kerberos
       - supports-color
 
-  '@kontourai/survey@8.1.0(typescript@7.0.2)':
+  '@kontourai/survey@8.1.1(typescript@7.0.2)':
     dependencies:
       '@kontourai/surface': 2.17.0
       '@modelcontextprotocol/server': 2.0.0

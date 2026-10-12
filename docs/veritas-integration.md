@@ -14,9 +14,13 @@ The Veritas repository is a root-installable Flow Kit, so the normal Git install
 without a repository-specific command:
 
 ```bash
-flow-agents kit install https://github.com/kontourai/veritas.git#v1.5.1
+flow-agents kit install https://github.com/kontourai/veritas.git#v1.9.0
 flow-agents kit activate --adapter codex-local
 ```
+
+The example pins the standalone engine/setup kit release. Its tag does not contain
+the newer native review producer; use a release or source revision that actually
+declares `review` for native kit review.
 
 Use a release tag or commit ref when reproducibility matters. Git installation requires
 `kit.json` at the repository root; Flow Agents does not execute installation scripts from
