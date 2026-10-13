@@ -8,7 +8,7 @@ This bundle was generated from the canonical source in this repo. Treat the repo
 - **Never hand-edit release PRs** (`release-please--branches--*`); they are regenerated on every push to main.
 - **Use the pinned Veritas CLI.** `.veritas/README.md` gives the exact package command for the `veritas readiness` gate named in the canonical governance block.
 - **Evidence hygiene:** issue/PR permalinks must pin a real commit SHA (`git rev-parse`, never typed by hand); claims about behavior need command/test evidence.
-- **Docs are published with docs-kit.** `docs-kit.json` lists the published docs and the MCP topics; `npm run docs:check` is the gate. When you change code that a document `covers`, update that document.
+- **Docs are published with docs-kit.** `corpus.json` lists the published docs and the MCP topics; `npm run docs:check` is the gate. When you change code that a document `covers`, update that document.
 - `.kontourai/flow-agents/` runtime artifacts stay untracked; durable records belong in docs/, issues, `.flow-agents/` config/state when explicitly owned by Flow Agents, or tracked source.
 
 ### Operating discipline (working agreements)

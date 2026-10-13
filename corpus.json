@@ -1,5 +1,43 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "purpose": "Carry evidence-backed workflow discipline across agent harnesses so completion stays inspectable.",
+  "builtOn": [
+    {
+      "product": "conduit",
+      "via": "@kontourai/conduit",
+      "for": "Project kit assets and policies into agent harness installations."
+    },
+    {
+      "product": "datum",
+      "via": "@kontourai/datum",
+      "for": "Resolve kit model configuration and materialize authentication references."
+    },
+    {
+      "product": "dispatch",
+      "via": "@kontourai/dispatch",
+      "for": "Route utterance extraction across model runtimes with attempt receipts."
+    },
+    {
+      "product": "flow",
+      "via": "@kontourai/flow",
+      "for": "Evaluate workflow gates and persist resumable, evidence-bound process runs."
+    },
+    {
+      "product": "relay",
+      "via": "@kontourai/relay",
+      "for": "Invoke configured model runtimes for provenance-bearing utterance extraction."
+    },
+    {
+      "product": "surface",
+      "via": "@kontourai/surface",
+      "for": "Validate evidence bundles and derive workflow claim trust reports."
+    },
+    {
+      "product": "survey",
+      "via": "@kontourai/survey",
+      "for": "Bind review queues and apply persisted decisions to workflow evidence."
+    }
+  ],
   "product": "flow-agents",
   "title": "Flow Agents",
   "tagline": "Evidence-gated workflows for coding agents, carried into the agent tools you already use",
