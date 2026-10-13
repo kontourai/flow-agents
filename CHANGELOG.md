@@ -1,5 +1,12 @@
 # Changelog
 
+## [8.1.2](https://github.com/kontourai/flow-agents/compare/v8.1.1...v8.1.2) (2026-10-13)
+
+
+### Fixes
+
+* **knowledge:** enforce store identity and root containment ([#1475](https://github.com/kontourai/flow-agents/issues/1475)) ([0fa8e13](https://github.com/kontourai/flow-agents/commit/0fa8e13158b07f57d8928914fd037f65bb7d6f2c))
+
 ## [8.1.1](https://github.com/kontourai/flow-agents/compare/v8.1.0...v8.1.1) (2026-10-13)
 
 
