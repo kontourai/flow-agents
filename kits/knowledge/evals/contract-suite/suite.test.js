@@ -176,6 +176,106 @@ describe("Knowledge Kit Store Contract Suite", () => {
     });
   });
 
+  describe("round 1 path and identity regressions", () => {
+    const input = (overrides = {}) => ({
+      type: "raw", title: "Round 1", body: "Preserved body", category: "test",
+      provenance: { agent: "tester" }, ...overrides,
+    });
+    function fixture(t, defaultOnly = false) {
+      const dir = makeTempDir();
+      t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+      const root = path.join(dir, "store");
+      const store = makeStore(root);
+      const records = path.join(root, "records");
+      if (defaultOnly && !fs.existsSync(records)) {
+        t.skip("Default adapter filename boundary");
+        return null;
+      }
+      return { dir, root, store, records };
+    }
+
+    for (const id of ["../x", "a/../../x", "/etc/passwd"]) {
+      test(`get treats escaping lookup ID ${id} as missing`, async (t) => {
+        const { store } = fixture(t);
+        assert.equal(await store.get(id), null);
+      });
+      test(`update reports NOT_FOUND for escaping lookup ID ${id}`, async (t) => {
+        const { store } = fixture(t);
+        await assert.rejects(() => store.update(id, { body: "Replacement" }, { agent: "tester" }), { code: "NOT_FOUND" });
+      });
+      test(`link reports NOT_FOUND for escaping lookup ID ${id}`, async (t) => {
+        const { store } = fixture(t);
+        const source = await store.create(input());
+        const before = await store.get(source);
+        await assert.rejects(() => store.link(source, [{ target_id: id, kind: "related" }], { agent: "tester" }), { code: "NOT_FOUND" });
+        await assert.rejects(() => store.link(id, [{ target_id: source, kind: "related" }], { agent: "tester" }), { code: "NOT_FOUND" });
+        assert.deepEqual(await store.get(source), before);
+      });
+    }
+
+    test("refuses create when records itself is a symlink outside the store root", async (t) => {
+      const f = fixture(t, true);
+      if (!f) return;
+      const outside = path.join(f.dir, "outside-records");
+      fs.renameSync(f.records, outside);
+      fs.symlinkSync(outside, f.records, "dir");
+      await assertMissingEvidence(() => f.store.create(input()), "external records root");
+      assert.deepEqual(fs.readdirSync(outside), []);
+    });
+
+    for (const refusal of ["NUL", "long filename", "dangling directory", "missing records"]) {
+      test(`create maps ${refusal} path refusal to MISSING_EVIDENCE`, async (t) => {
+        const f = fixture(t, true);
+        if (!f) return;
+        let id = "safe";
+        if (refusal === "NUL") id = "invalid\0";
+        if (refusal === "long filename") id = "x".repeat(256);
+        if (refusal === "dangling directory") {
+          fs.symlinkSync(path.join(f.dir, "missing-directory"), path.join(f.records, "dangling"), "dir");
+          id = "dangling/record";
+        }
+        if (refusal === "missing records") fs.rmdirSync(f.records);
+        await assertMissingEvidence(() => f.store.create(input({ id })), refusal);
+      });
+    }
+
+    test("create preserves unrelated graph write I/O errors", async (t) => {
+      const { root, store } = fixture(t);
+      fs.mkdirSync(path.join(root, "graph-index.json"));
+      await assert.rejects(() => store.create(input()), { code: "EISDIR" });
+    });
+
+    for (const id of ["constructor", "__proto__", "toString"]) {
+      test(`creates and reloads opaque ID ${id} then refuses its duplicate`, async (t) => {
+        const { root, store } = fixture(t);
+        assert.equal(await store.get(id), null);
+        assert.equal(await store.create(input({ id })), id);
+        const reopened = makeStore(root);
+        assert.equal((await reopened.get(id)).id, id);
+        await assertMissingEvidence(() => reopened.create(input({ id })), "real duplicate");
+        assert.equal((await reopened.get(id)).body, "Preserved body");
+      });
+    }
+
+    test("lexical records containment refuses a path still inside the store root", async (t) => {
+      const f = fixture(t, true);
+      if (!f) return;
+      await assertMissingEvidence(() => f.store.create(input({ id: "../lexical" })), "lexical records boundary");
+      assert.equal(fs.existsSync(path.join(f.root, "lexical.md")), false);
+    });
+
+    test("dangling record symlink reserves the ID without writing its target", async (t) => {
+      const f = fixture(t, true);
+      if (!f) return;
+      const target = path.join(f.root, "unwritten.md");
+      const link = path.join(f.records, "reserved.md");
+      fs.symlinkSync(target, link);
+      await assertMissingEvidence(() => f.store.create(input({ id: "reserved" })), "dangling record duplicate");
+      assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+      assert.equal(fs.existsSync(target), false);
+    });
+  });
+
   // -----------------------------------------------------------------------
   // §1  create — field enforcement
   // -----------------------------------------------------------------------

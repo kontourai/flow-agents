@@ -125,7 +125,7 @@ export class ObsidianKnowledgeStore {
     pathIndex = pathIndex || this._loadPathIndex();
     aliasIndex = aliasIndex || loadAliasIndex(this._aliasPath);
     return resolveRecordId(input, {
-      idExists: (rid) => Boolean(pathIndex.by_id[rid]),
+      idExists: (rid) => Object.hasOwn(pathIndex.by_id, rid),
       listIds: () => Object.keys(pathIndex.by_id),
       bySlug: aliasIndex.by_slug,
     });
@@ -288,8 +288,9 @@ export class ObsidianKnowledgeStore {
    * Returns the absolute path for a record id, or null if not indexed.
    */
   _getAbsPath(id, pathIndex) {
-    const entry = (pathIndex || this._loadPathIndex()).by_id[id];
-    if (!entry) return null;
+    const index = pathIndex || this._loadPathIndex();
+    if (!Object.hasOwn(index.by_id, id)) return null;
+    const entry = index.by_id[id];
     return this._resolveStorePath(entry.path);
   }
 
@@ -324,7 +325,7 @@ export class ObsidianKnowledgeStore {
     const ownedIndex = !pathIndex;
     if (ownedIndex) pathIndex = this._loadPathIndex();
 
-    const existingEntry = pathIndex.by_id[record.id];
+    const existingEntry = Object.hasOwn(pathIndex.by_id, record.id) ? pathIndex.by_id[record.id] : null;
     let targetRelPath;
 
     if (existingEntry && existingEntry.archived) {
@@ -351,7 +352,10 @@ export class ObsidianKnowledgeStore {
       // New record
       const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex, record.type);
       this._resolveStorePath(newRelPath);
-      pathIndex.by_id[record.id] = { path: newRelPath, archived: false };
+      Object.defineProperty(pathIndex.by_id, record.id, {
+        value: { path: newRelPath, archived: false },
+        enumerable: true, configurable: true, writable: true,
+      });
       pathIndex.by_path[newRelPath] = record.id;
       targetRelPath = newRelPath;
     }
@@ -540,7 +544,7 @@ export class ObsidianKnowledgeStore {
       throw missingEvidenceError("create: missing required provenance field: provenance.agent");
 
     const id = input.id || randomUUID();
-    if (this._loadPathIndex().by_id[id])
+    if (Object.hasOwn(this._loadPathIndex().by_id, id))
       throw missingEvidenceError(`create: record ID already exists: ${id}`);
     const now = this._now();
 

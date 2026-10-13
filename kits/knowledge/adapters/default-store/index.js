@@ -275,7 +275,7 @@ export class DefaultKnowledgeStore {
     const recordPath = path.resolve(this._recordsDir, `${id}.md`);
     const relative = path.relative(this._recordsDir, recordPath);
     if (path.isAbsolute(id) || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
-      throw missingEvidenceError("Record path escapes records directory");
+      return null;
     return recordPath;
   }
 
@@ -283,7 +283,8 @@ export class DefaultKnowledgeStore {
 
   /** Does a record file exist for this exact full id? */
   _idExists(id) {
-    return fs.existsSync(this._recordPath(id));
+    const recordPath = this._recordPath(id);
+    return recordPath !== null && fs.existsSync(recordPath);
   }
 
   /** All full record ids, derived cheaply from the records/ directory. */
@@ -310,7 +311,7 @@ export class DefaultKnowledgeStore {
 
   _readRecord(id) {
     const p = this._recordPath(id);
-    if (!fs.existsSync(p)) return null;
+    if (p === null || !fs.existsSync(p)) return null;
     const relative = path.relative(fs.realpathSync(this._root), fs.realpathSync(p));
     if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
     const text = fs.readFileSync(p, "utf8");
@@ -352,13 +353,20 @@ export class DefaultKnowledgeStore {
 
     const id = input.id || randomUUID();
     const recordPath = this._recordPath(id);
-    if (fs.existsSync(recordPath) || fs.lstatSync(recordPath, { throwIfNoEntry: false }))
-      throw missingEvidenceError(`create: record ID already exists: ${id}`);
-    let parent = path.dirname(recordPath);
-    while (!fs.existsSync(parent)) parent = path.dirname(parent);
-    const relative = path.relative(fs.realpathSync(this._recordsDir), fs.realpathSync(parent));
-    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+    if (recordPath === null)
       throw missingEvidenceError("Record path escapes records directory");
+    try {
+      if (fs.existsSync(recordPath) || fs.lstatSync(recordPath, { throwIfNoEntry: false }))
+        throw missingEvidenceError(`create: record ID already exists: ${id}`);
+      const parent = fs.realpathSync(path.dirname(recordPath));
+      const relative = path.relative(fs.realpathSync(this._root), parent);
+      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+        throw missingEvidenceError("Record path escapes store root");
+    } catch (err) {
+      if (["ERR_INVALID_ARG_VALUE", "ENAMETOOLONG", "ENOENT", "ENOTDIR"].includes(err.code))
+        throw missingEvidenceError(`create: invalid record path: ${err.code}`);
+      throw err;
+    }
     const now = this._now();
 
     // Validate slug aliases (issue #339) and reserve them in the alias map
