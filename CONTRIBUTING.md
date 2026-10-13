@@ -21,7 +21,7 @@ Agents. This file is the footnote for people developing the product itself.
 ## Docs Site Preview
 
 The GitHub Pages site and the agent docs bundle are built by
-[docs-kit](https://github.com/kontourai/docs-kit) from `docs-kit.json`, which
+[docs-kit](https://github.com/kontourai/docs-kit) from `corpus.json`, which
 lists the published documents, their navigation sections, and the MCP topics.
 The `Docs` workflow runs the gate on every pull request and publishes Pages from
 `main`. Every `docs/**/*.md` file must be listed in `documents` or matched by
@@ -32,7 +32,7 @@ npm run docs:check
 npm run docs:build -- --out dist-pages
 ```
 
-When you change code that a document `covers` in `docs-kit.json`, update that
+When you change code that a document `covers` in `corpus.json`, update that
 document in the same pull request.
 
 Set `FLOW_CLI_ROOT` to a Flow checkout or installed `@kontourai/flow` package
