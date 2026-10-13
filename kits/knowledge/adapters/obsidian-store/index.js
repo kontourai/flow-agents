@@ -300,6 +300,8 @@ export class ObsidianKnowledgeStore {
   _readRecord(id, pathIndex) {
     const absPath = this._getAbsPath(id, pathIndex);
     if (!absPath || !fs.existsSync(absPath)) return null;
+    const relative = path.relative(fs.realpathSync(this._root), fs.realpathSync(absPath));
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
     const text = fs.readFileSync(absPath, "utf8");
     const { meta, body: renderedText } = parseMarkdown(text);
     if (!meta.id) return null;
@@ -527,7 +529,7 @@ export class ObsidianKnowledgeStore {
       throw missingEvidenceError(`create: type must be one of raw, compiled, concept, snapshot, person; got: ${input.type}`);
     if (!input.title || !input.title.trim())
       throw missingEvidenceError("create: missing required field: title");
-    if (!input.body && input.body !== "")
+    if (!input.body)
       throw missingEvidenceError("create: missing required field: body");
     if (input.body !== undefined && !input.body.trim && typeof input.body !== "string")
       throw missingEvidenceError("create: body must be a string");
@@ -538,6 +540,8 @@ export class ObsidianKnowledgeStore {
       throw missingEvidenceError("create: missing required provenance field: provenance.agent");
 
     const id = input.id || randomUUID();
+    if (this._loadPathIndex().by_id[id])
+      throw missingEvidenceError(`create: record ID already exists: ${id}`);
     const now = this._now();
 
     // Validate + reserve slug aliases before any write (issue #339); a

@@ -18,6 +18,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { fileURLToPath } from "node:url";
+import { parseMarkdown } from "../../adapters/shared/codec.js";
 
 // ---------------------------------------------------------------------------
 // Adapter resolution
@@ -70,6 +71,111 @@ function assertMissingEvidence(fn, labelHint) {
 // ---------------------------------------------------------------------------
 
 describe("Knowledge Kit Store Contract Suite", () => {
+  describe("identity and root containment", () => {
+    let dir, root, store;
+    before(() => {
+      dir = makeTempDir();
+      root = path.join(dir, "store");
+      store = makeStore(root);
+    });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    const input = (overrides = {}) => ({
+      type: "raw", title: "Original", body: "Original body", category: "test",
+      provenance: { agent: "tester", note: "Original provenance" }, ...overrides,
+    });
+    const recordFiles = () => fs.readdirSync(root, { recursive: true })
+      .filter((name) => name.endsWith(".md"))
+      .map((name) => path.join(root, name));
+    const fileFor = (id) => recordFiles().find((file) =>
+      parseMarkdown(fs.readFileSync(file, "utf8")).meta.id === id);
+
+    for (const status of ["active", "retired"]) {
+      test(`refuses duplicate ${status} record ID without changing record bytes`, async () => {
+        const id = await store.create(input());
+        await store.update(id, { body: "Updated original body" }, { agent: "updater" });
+        if (status === "retired")
+          await store.retire(id, "retired", { agent: "retirer", rationale: "Finished" });
+        const file = fileFor(id);
+        assert.ok(file, "record exists on disk");
+        const before = fs.readFileSync(file);
+        const record = await store.get(id);
+        await assertMissingEvidence(() => store.create(input({
+          id, title: "Replacement", body: "Replacement body",
+          provenance: { agent: "replacement" },
+        })), "duplicate ID");
+        assert.deepEqual(fs.readFileSync(file), before);
+        assert.deepEqual(await store.get(id), record);
+      });
+    }
+
+    test("keeps writes with escaping IDs inside the records location", async () => {
+      const ids = ["../../escaped", "../escaped", "nested/../../escaped", path.join(dir, "absolute")];
+      const before = recordFiles();
+      // The vault maps opaque IDs to contained title slugs; the default store
+      // uses IDs as filenames and must reject these inputs.
+      const usesRecordFilenames = fs.existsSync(path.join(root, "records"));
+      for (const id of ids) {
+        if (usesRecordFilenames) {
+          await assertMissingEvidence(() => store.create(input({ id })), "escaping ID");
+        } else {
+          assert.equal(await store.create(input({ id })), id);
+          assert.equal((await store.get(id)).id, id);
+        }
+      }
+      assert.equal(fs.existsSync(path.join(dir, "escaped.md")), false);
+      assert.equal(fs.existsSync(path.join(root, "escaped.md")), false);
+      assert.equal(fs.existsSync(path.join(dir, "absolute.md")), false);
+      if (usesRecordFilenames) assert.deepEqual(recordFiles(), before);
+    });
+
+    test("refuses a write through a records directory symlink outside the root", async (t) => {
+      const records = path.join(root, "records");
+      if (!fs.existsSync(records)) {
+        t.skip("Vault IDs do not select paths");
+        return;
+      }
+      const outside = path.join(dir, "outside-writes");
+      fs.mkdirSync(outside);
+      fs.symlinkSync(outside, path.join(records, "redirect"), "dir");
+      await assertMissingEvidence(() => store.create(input({ id: "redirect/escaped" })), "symlink parent");
+      assert.deepEqual(fs.readdirSync(outside), []);
+    });
+
+    test("omits external record symlinks from get and both listings", async () => {
+      const id = await store.create(input());
+      const safeId = await store.create(input({ title: "Safe" }));
+      const file = fileFor(id);
+      assert.ok(file, "record exists on disk");
+      const outside = path.join(dir, "store-neighbor");
+      fs.mkdirSync(outside);
+      const target = path.join(outside, "external.md");
+      fs.renameSync(file, target);
+      fs.symlinkSync(target, file);
+      assert.equal(await store.get(id), null);
+      for (const records of [await store.listByType("raw"), await store.listByCategory("test")]) {
+        assert.ok(!records.some((record) => record.id === id));
+        assert.ok(records.some((record) => record.id === safeId));
+      }
+    });
+
+    test("rejects empty body while preserving whitespace-only create", async () => {
+      await assertMissingEvidence(() => store.create(input({ body: "" })), "empty body");
+      assert.ok(await store.create(input({ body: "   " })));
+    });
+
+    test("rejects numeric-string TTL on create and update without mutation", async () => {
+      await assertMissingEvidence(() => store.create(input({ ttl_seconds: "88" })), "string TTL create");
+      const id = await store.create(input({ ttl_seconds: 88 }));
+      const file = fileFor(id);
+      assert.ok(file, "record exists on disk");
+      const before = fs.readFileSync(file);
+      await assertMissingEvidence(() => store.update(id, { ttl_seconds: "88" }, { agent: "tester" }), "string TTL update");
+      assert.deepEqual(fs.readFileSync(file), before);
+      assert.equal((await store.get(id)).ttl_seconds, 88);
+    });
+  });
+
   // -----------------------------------------------------------------------
   // §1  create — field enforcement
   // -----------------------------------------------------------------------

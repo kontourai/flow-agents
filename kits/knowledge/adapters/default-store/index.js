@@ -272,7 +272,11 @@ export class DefaultKnowledgeStore {
   // -------------------------------------------------------------------------
 
   _recordPath(id) {
-    return path.join(this._recordsDir, `${id}.md`);
+    const recordPath = path.resolve(this._recordsDir, `${id}.md`);
+    const relative = path.relative(this._recordsDir, recordPath);
+    if (path.isAbsolute(id) || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+      throw missingEvidenceError("Record path escapes records directory");
+    return recordPath;
   }
 
   // -- Record-identity resolution (short-id prefix + slug alias, issue #339) --
@@ -307,6 +311,8 @@ export class DefaultKnowledgeStore {
   _readRecord(id) {
     const p = this._recordPath(id);
     if (!fs.existsSync(p)) return null;
+    const relative = path.relative(fs.realpathSync(this._root), fs.realpathSync(p));
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
     const text = fs.readFileSync(p, "utf8");
     const { meta, body } = parseMarkdown(text);
     // Coerce record-carried freshness fields to canonical types (#341).
@@ -334,7 +340,7 @@ export class DefaultKnowledgeStore {
       throw missingEvidenceError(`create: type must be one of raw, compiled, concept, snapshot, person; got: ${input.type}`);
     if (!input.title || !input.title.trim())
       throw missingEvidenceError("create: missing required field: title");
-    if (!input.body && input.body !== "")
+    if (!input.body)
       throw missingEvidenceError("create: missing required field: body");
     if (input.body !== undefined && !input.body.trim && typeof input.body !== "string")
       throw missingEvidenceError("create: body must be a string");
@@ -345,6 +351,14 @@ export class DefaultKnowledgeStore {
       throw missingEvidenceError("create: missing required provenance field: provenance.agent");
 
     const id = input.id || randomUUID();
+    const recordPath = this._recordPath(id);
+    if (fs.existsSync(recordPath) || fs.lstatSync(recordPath, { throwIfNoEntry: false }))
+      throw missingEvidenceError(`create: record ID already exists: ${id}`);
+    let parent = path.dirname(recordPath);
+    while (!fs.existsSync(parent)) parent = path.dirname(parent);
+    const relative = path.relative(fs.realpathSync(this._recordsDir), fs.realpathSync(parent));
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+      throw missingEvidenceError("Record path escapes records directory");
     const now = this._now();
 
     // Validate slug aliases (issue #339) and reserve them in the alias map

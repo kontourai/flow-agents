@@ -398,7 +398,7 @@ export function validateExpiresAt(value) {
 
 /** Validate a `ttl_seconds` value: a positive, finite number of seconds. */
 export function validateTtlSeconds(value) {
-  const n = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  const n = value;
   if (typeof n !== "number" || !Number.isFinite(n) || n <= 0)
     throw missingEvidenceError(
       `ttl_seconds must be a positive number of seconds; got: ${JSON.stringify(value)}`
