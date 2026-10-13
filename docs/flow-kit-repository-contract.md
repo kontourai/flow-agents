@@ -63,8 +63,14 @@ Reinstalling the same kit id from the same source metadata with the same content
 
 Git sources are shallow-cloned into a temporary directory and validated at the clone root. A
 repository installed from Git must therefore place `kit.json` at its root; subdirectory selection
-is not supported. Use a URL `#ref` fragment or `--ref <branch|tag|sha>` to pin the source. Install
-records the normalized URL/ref and content hash, and never executes scripts from the cloned
+is not supported. Use a URL `#ref` fragment or `--ref <branch|tag|sha>` to pin the source.
+Full 40-character SHA-1 or 64-character SHA-256 commit references are fetched
+directly and checked out detached; the fetched commit identity must match exactly.
+An unavailable commit fails without falling back to a branch or changing the
+installed copy. Branches and tags retain shallow-clone behavior. HTTP credentials
+belong in Git credential helpers rather than URL userinfo, which is rejected
+before any fetch or provenance write. Install records the normalized URL/ref and
+content hash, and never executes scripts from the cloned
 repository.
 
 `list` and `status` are read-only. `list` prints one summary line per installed kit. `status` prints JSON provenance plus `recorded_hash` and `observed_hash`, and reports copied-kit state as one of:
