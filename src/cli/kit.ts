@@ -458,19 +458,39 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
   const force = flagBool(args.flags, "force") ?? false;
   const update = flagBool(args.flags, "update") ?? false;
 
-  // Shallow-clone into a temporary directory.
+  // Credential helpers/SSH agents remain supported; source provenance must not
+  // store HTTP credentials or echo them when an acquisition fails.
+  const httpAuthority = /^https?:\/\/([^/?#]*)/i.exec(repoUrl.replace(/^git\+/, ""))?.[1];
+  if (httpAuthority?.includes("@")) {
+    console.error("install: HTTP Git credentials must use a credential helper, not URL userinfo");
+    return 2;
+  }
+  const gitEnv = { ...process.env };
+  for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX"]) delete gitEnv[key];
   const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "flow-kit-git-"));
   try {
-    const cloneArgs = ["clone", "--depth", "1"];
-    if (ref) cloneArgs.push("--branch", ref);
-    cloneArgs.push("--", repoUrl, tmpBase);
+    const git = (values: string[]) => child_process.execFileSync("git", values, { env: gitEnv, stdio: ["ignore", "pipe", "pipe"] });
     try {
-      child_process.execFileSync("git", cloneArgs, { stdio: ["ignore", "pipe", "pipe"] });
+      if (ref && /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/.test(ref)) {
+        // clone --branch names refs, not commit objects. Fetch the requested
+        // immutable object directly and never substitute the remote's HEAD.
+        git(["init", "--quiet", ...(ref.length === 64 ? ["--object-format=sha256"] : []), tmpBase]);
+        git(["-C", tmpBase, "remote", "add", "--", "origin", repoUrl]);
+        git(["-C", tmpBase, "fetch", "--depth", "1", "--no-tags", "origin", ref.toLowerCase()]);
+        git(["-C", tmpBase, "checkout", "--detach", "FETCH_HEAD"]);
+        const observed = git(["-C", tmpBase, "rev-parse", "HEAD^{commit}"]).toString().trim();
+        if (observed.toLowerCase() !== ref.toLowerCase()) throw new Error("Fetched Git commit does not match the requested immutable object");
+      } else {
+        const cloneArgs = ["clone", "--depth", "1"];
+        if (ref) cloneArgs.push("--branch", ref);
+        cloneArgs.push("--", repoUrl, tmpBase);
+        git(cloneArgs);
+      }
     } catch (err) {
       const msg = err instanceof Error && (err as NodeJS.ErrnoException & { stderr?: Buffer }).stderr
         ? ((err as NodeJS.ErrnoException & { stderr?: Buffer }).stderr as Buffer).toString().trim()
         : String(err);
-      console.error(`install: git clone failed: ${msg}`);
+      console.error(`install: git acquisition failed: ${msg}`);
       return 1;
     }
 
