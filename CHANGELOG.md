@@ -1,5 +1,12 @@
 # Changelog
 
+## [8.1.1](https://github.com/kontourai/flow-agents/compare/v8.1.0...v8.1.1) (2026-10-13)
+
+
+### Fixes
+
+* acquire installed kits from immutable Git commits ([#1473](https://github.com/kontourai/flow-agents/issues/1473)) ([2b95b82](https://github.com/kontourai/flow-agents/commit/2b95b828d4e5ba2a851c081dd442bcd4b6b63375))
+
 ## [8.1.0](https://github.com/kontourai/flow-agents/compare/v8.0.1...v8.1.0) (2026-10-12)
 
 
