@@ -117,7 +117,7 @@ Enable `features.hooks` in the user Codex config, then review and trust the
 handler's exact command through `/hooks`. The install receipt reports
 `hostActivation: "not_verified"`; only a host edit that receives Veritas guidance
 proves activation. Codex also requires each matching tool path to support hooks.
-Keep `veritas readiness` as an independent completion gate for shell edits and
+Keep `npx --no @kontourai/veritas readiness` as an independent completion gate for shell edits and
 other paths the pre-edit hook cannot observe.
 
 ## opencode
