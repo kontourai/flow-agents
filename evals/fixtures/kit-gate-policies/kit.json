@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "atelier",
+  "name": "Atelier Kit",
+  "description": "A non-Builder kit whose flow declares Work Item selection, a reason-routed draft gate, and a tests gate under its own gate ids and claim types.",
+  "flows": [
+    {
+      "id": "atelier.commission",
+      "path": "flows/commission.flow.json",
+      "description": "Take a commission from selection through a reviewed, tested proof."
+    }
+  ]
+}

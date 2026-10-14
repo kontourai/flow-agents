@@ -9,7 +9,7 @@ import { definitionDigest, expectationsForGate, flowRunHead, loadRun, openGates,
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
-import { assertSourceHeadStartable, currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { assertSourceHeadStartable, currentGateVisit, gateRequiresFailureRouteReason, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { declaredStepBindsInterface } from "../builder-gate-action-envelope.js";
 import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
@@ -2946,29 +2946,35 @@ function formatCommandOutcomes(observations: CommandObservationReport[]): string
 }
 
 // Exported for the #1304 byte-stability tests: these refusal strings predate the route-back
-// disclosure and consumers substring-match them, so they must stay byte-identical.
+// disclosure and consumers substring-match them, so they must stay byte-identical. The step id is
+// interpolated where the original text said "execute"; for Builder's execute step that reproduces
+// the original bytes exactly.
+//
+// Which step requires a route reason is derived, not named: the gate at the current step declares
+// route-back reasons with no `default` route (gateRequiresFailureRouteReason, the same predicate
+// the runtime applies at synchronization). The exported name is kept for existing callers.
 export function assertExecuteFailureRouteBeforeMutation(
   definition: JsonRecord,
   currentStep: string,
   status: string,
   routeReason: string | undefined,
 ): void {
-  if (currentStep !== "execute" || status !== "fail") return;
-  if (!routeReason) {
-    throw new Error("workflow evidence --route-reason is required for failed execute evidence");
-  }
+  if (status !== "fail") return;
   const gates = definition.gates;
   if (!gates || typeof gates !== "object" || Array.isArray(gates)) {
-    throw new Error("workflow evidence cannot resolve the active execute gate route map");
+    throw new Error(`workflow evidence cannot resolve the active ${currentStep} gate route map`);
   }
-  const executeGate = Object.values(gates).find((candidate) => {
+  const routedGate = Object.values(gates).find((candidate) => {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
-    return (candidate as JsonRecord).step === "execute";
+    return (candidate as JsonRecord).step === currentStep && gateRequiresFailureRouteReason(candidate);
   }) as JsonRecord | undefined;
-  const routes = executeGate?.on_route_back;
-  if (!routes || typeof routes !== "object" || Array.isArray(routes)
-    || typeof (routes as JsonRecord)[routeReason] !== "string") {
-    throw new Error(`workflow evidence --route-reason ${routeReason} is not declared by the active execute gate`);
+  if (!routedGate) return;
+  if (!routeReason) {
+    throw new Error(`workflow evidence --route-reason is required for failed ${currentStep} evidence`);
+  }
+  const routes = routedGate.on_route_back as JsonRecord;
+  if (typeof routes[routeReason] !== "string") {
+    throw new Error(`workflow evidence --route-reason ${routeReason} is not declared by the active ${currentStep} gate`);
   }
 }
 

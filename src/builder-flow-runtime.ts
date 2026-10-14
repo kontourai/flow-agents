@@ -1657,6 +1657,54 @@ export function gateAdvancementFreshnessSatisfied(
   }
 }
 
+// ─── Gate policies derived from what the gate declares ─────────────────────────────────────
+//
+// Three engine policies used to be keyed on Builder's gate ids and claim types. Each is now
+// derived from the evaluated gate's own declaration, so any kit that declares the same thing gets
+// the same policy, and a kit that does not declare it never does. The expectation ids below are
+// engine role vocabulary (already read by flowSelectsWorkItem and the evidence writers), not a
+// kit's names; the gate ids and claim types come from the declaring flow definition.
+
+/** Expectation id the engine reads as Work Item selection (see flowSelectsWorkItem). */
+export const WORK_SELECTION_EXPECTATION_ID = "selected-work";
+/** Expectation id the engine reads as command-backed test evidence subject to verified-tests trust. */
+export const TESTS_EVIDENCE_EXPECTATION_ID = "tests-evidence";
+
+/**
+ * Claim types this gate declares for the expectation playing `role`. Every matching expectation
+ * is read, required or optional: an optional tests expectation still lets a passing tests claim
+ * through, so it must not escape the trust check. A role expectation that names no claim type is
+ * refused rather than read as "declares nothing", which would silently drop the policy.
+ */
+function declaredRoleClaimTypes(gate: FlowGate, expectations: readonly FlowExpectation[], role: string): ReadonlySet<string> {
+  const claimTypes = new Set<string>();
+  for (const expectation of expectations) {
+    if (expectation.id !== role) continue;
+    const claimType = isRecord(expectation.bundle_claim) ? expectation.bundle_claim.claimType : undefined;
+    if (typeof claimType !== "string" || claimType.length === 0) {
+      throw new BuilderBuildRunInputError(
+        "definition.gates.expects.bundle_claim.claimType",
+        `gate ${String((gate as AnyRecord).id ?? "<unknown>")} declares expectation ${role} without a bundle_claim claimType`,
+      );
+    }
+    claimTypes.add(claimType);
+  }
+  return claimTypes;
+}
+
+/**
+ * True when a failed claim at this gate must name its route reason. The gate declares at least
+ * one route-back reason and no `default` route, so Flow's routeTargetForReason has no declared
+ * destination for a reason-less failure (it would fall back to the gate's own step). A gate with
+ * no route map, or an empty one, keeps reason-less failed evidence pending instead.
+ */
+export function gateRequiresFailureRouteReason(gate: unknown): boolean {
+  if (!isRecord(gate) || !isRecord(gate.on_route_back)) return false;
+  const routes = gate.on_route_back;
+  if (typeof routes.default === "string" && routes.default.length > 0) return false;
+  return Object.entries(routes).some(([reason, target]) => reason !== "default" && typeof target === "string" && target.length > 0);
+}
+
 export async function bundleGateEvidence(
   bundle: unknown,
   gate: FlowGate,
@@ -1674,6 +1722,10 @@ export async function bundleGateEvidence(
   const enteredAt = visit.enteredAt;
   const synchronizedAt = Date.now();
   const maxClockSkewMs = 30_000;
+  // The initial-visit acquisition allowance belongs to the claim this gate declares for Work Item
+  // selection (the same `selected-work` role flowSelectsWorkItem reads), not to any one kit's claim
+  // type: selection evidence is written right after the run starts and may predate its updated_at.
+  const workSelectionClaimTypes = declaredRoleClaimTypes(gate, expectations, WORK_SELECTION_EXPECTATION_ID);
   const priorVisitClaimIds = new Set<string>();
   const priorVisitEvidenceIds = new Set<string>();
   for (const entry of manifest) {
@@ -1698,7 +1750,7 @@ export async function bundleGateEvidence(
       const observedAt = parseTimestamp(evidence.observedAt);
       if (observedAt !== null) timestamps.push(observedAt);
     }
-    const initialAcquisitionSkew = visit.initial && claim.claimType === "builder.pull-work.selected" ? maxClockSkewMs : 0;
+    const initialAcquisitionSkew = visit.initial && workSelectionClaimTypes.has(String(claim.claimType)) ? maxClockSkewMs : 0;
     return timestamps.some((timestamp) => timestamp >= enteredAt - initialAcquisitionSkew
       && timestamp <= synchronizedAt + maxClockSkewMs);
   };
@@ -1752,7 +1804,8 @@ export async function bundleGateEvidence(
     executionEvidenceByClaimId.set(evidence.claimId, linked);
   }
   assertPinnedSourceHead(relevant, state, projectRoot);
-  assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot, executionEvidenceByClaimId);
+  const testsEvidenceClaimTypes = declaredRoleClaimTypes(gate, expectations, TESTS_EVIDENCE_EXPECTATION_ID);
+  assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot, executionEvidenceByClaimId, testsEvidenceClaimTypes);
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
   // #1302: a PASSING claim at a gate declaring requires_current_verification may not advance the
   // cursor while review/verification evidence is stale — evaluated here, at the seam, after any
@@ -1773,7 +1826,7 @@ export async function bundleGateEvidence(
   }
   const routeReason = routeReasons[0] ?? null;
   if (failed && !routeReason) {
-    if (String((gate as AnyRecord).id) === "execute-gate") {
+    if (gateRequiresFailureRouteReason(gate)) {
       throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "is required for failed current-gate evidence");
     }
     return null;
@@ -1789,9 +1842,9 @@ export async function bundleGateEvidence(
   if (routeReason && (!routeMap || typeof routeMap[routeReason] !== "string")) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", `is not declared by gate ${String((gate as AnyRecord).id ?? "<unknown>")}`);
   }
-  if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
+  if (relevant.some((claim) => testsEvidenceClaimTypes.has(String(claim.claimType)) && claim.value === "pass")) {
     const authority = verifiedResolutionAuthority(bundle as AnyRecord, sessionDir);
-    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
+    await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified, testsEvidenceClaimTypes);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
 }
@@ -1987,7 +2040,7 @@ const GATE_CLAIM_STALE_REASON = "must match the canonical Flow state authorized 
  * writer-declared file list, so honoring it here would let a claim carry an empty list and
  * declare itself permanently current.
  */
-function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string, executionEvidenceByClaimId: ReadonlyMap<string, readonly AnyRecord[]>): void {
+function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state: FlowRunState, projectRoot: string, executionEvidenceByClaimId: ReadonlyMap<string, readonly AnyRecord[]>, testsEvidenceClaimTypes: ReadonlySet<string>): void {
   if (headBoundGateClaims.length === 0) return;
   const currentHead = flowRunHead(state);
   const currentStep = state.current_step;
@@ -2008,7 +2061,7 @@ function assertCurrentGateClaimFreshness(headBoundGateClaims: AnyRecord[], state
     // tests-evidence claim is command-backed by contract even if an older or
     // malformed record omitted its observation array, so it cannot evade this
     // check through a matching Flow head.
-    const commandBacked = claim.claimType === "builder.verify.tests"
+    const commandBacked = testsEvidenceClaimTypes.has(String(claim.claimType))
       || claim.claimType === "workflow.check.command"
       || observedCommands.length > 0
       || hasCommandReference
@@ -2312,13 +2365,13 @@ function verifiedResolutionAuthority(bundle: AnyRecord, sessionDir: string): { e
   return { events, verified: true };
 }
 
-async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean): Promise<void> {
+async function assertVerifiedTestsTrust(currentGateClaims: AnyRecord[], projectRoot: string, resolutionEvents: AnyRecord[], externalCompletionVerified: boolean, testsEvidenceClaimTypes: ReadonlySet<string>): Promise<void> {
   const testClaims = currentGateClaims.filter((claim): claim is AnyRecord => isRecord(claim)
-    && claim.claimType === "builder.verify.tests"
+    && testsEvidenceClaimTypes.has(String(claim.claimType))
     && claim.value === "pass"
     && isRecord(claim.metadata)
     && isRecord(claim.metadata.gate_claim)
-    && claim.metadata.gate_claim.expectation_id === "tests-evidence");
+    && claim.metadata.gate_claim.expectation_id === TESTS_EVIDENCE_EXPECTATION_ID);
   if (testClaims.length === 0) throw new BuilderBuildRunInputError("evidence.tests", "is missing a passing tests-evidence claim");
   // A route-back starts a new gate visit and therefore a new critique generation. Historical
   // reviewer slices remain in the bundle and manifest for audit, but only critiques acquired
@@ -2667,7 +2720,7 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
       };
   const phase = phaseForStep(definition.phase_map, run.state.current_step) ?? sidecar.phase;
   const verificationGateIds = Object.entries(definition.gates ?? {}).filter(([, gate]) =>
-    (expectationsForGate(gate, run.config) as FlowExpectation[]).some(expectation => expectation.id === "tests-evidence" && expectation.required))
+    (expectationsForGate(gate, run.config) as FlowExpectation[]).some(expectation => expectation.id === TESTS_EVIDENCE_EXPECTATION_ID && expectation.required))
     .map(([id]) => id);
   let verificationStatus = verificationStatusFromFlowGateOutcomes(run.state.gate_outcomes, verificationGateIds);
   const codeProducing = complete && installedBuilderImplementationAllowed(run.definitionId, undefined, context.projectRoot);
