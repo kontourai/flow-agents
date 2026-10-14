@@ -836,4 +836,29 @@ for RUNTIME in base claude-code opencode pi kiro; do
   pass "doctor validates $RUNTIME runtime wiring"
 done
 
+# #1415: the packed install ships builder.review-existing, and its public start pins the exact
+# clean HEAD. The full route is exercised in src/cli/builder-review-existing.test.mjs.
+REVIEW_CONSUMER="$TMP/review-existing-consumer"
+REVIEW_ROOT="$REVIEW_CONSUMER/.kontourai/flow-agents"
+mkdir -p "$REVIEW_ROOT/acme-widgets-301"
+printf '.kontourai/\n' > "$REVIEW_CONSUMER/.gitignore"
+printf 'existing change\n' > "$REVIEW_CONSUMER/feature.txt"
+(cd "$REVIEW_CONSUMER" && git init -q && git config user.email review-existing@example.invalid && git config user.name 'Review Existing Eval' && git add . && git commit -qm 'existing change')
+REVIEW_HEAD="$(git -C "$REVIEW_CONSUMER" rev-parse HEAD)"
+printf 'Selected Work Item: acme/widgets#301\n' > "$REVIEW_ROOT/acme-widgets-301/acme-widgets-301--pull-work.md"
+run_review_start() {
+  (cd "$REVIEW_CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$FLOW_AGENTS_BIN" workflow start \
+    --artifact-root "$REVIEW_ROOT" --flow builder.review-existing --work-item acme/widgets#301 --assignment-provider local-file "$@")
+}
+set +e
+REVIEW_UNPINNED="$(run_review_start 2>&1)"
+REVIEW_UNPINNED_RC=$?
+set -e
+[[ "$REVIEW_UNPINNED_RC" -ne 0 && "$REVIEW_UNPINNED" == *"pins the reviewed commit at start"* && ! -e "$REVIEW_ROOT/acme-widgets-301/state.json" ]] || fail "packed start admitted builder.review-existing without a pinned source head or mutated before refusing"
+run_review_start --source-head "$REVIEW_HEAD" >/dev/null
+REVIEW_STATUS="$(cd "$REVIEW_CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$FLOW_AGENTS_BIN" workflow status --session-dir "$REVIEW_ROOT/acme-widgets-301" --json)"
+node -e 'const r=JSON.parse(process.argv[1]);if(r.definition_id!=="builder.review-existing"||r.current_step!=="existing-change")process.exit(1)' "$REVIEW_STATUS" || fail "packed builder.review-existing did not start at existing-change"
+node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(s.params?.source_head!==process.argv[2])process.exit(1)' "$REVIEW_CONSUMER/.kontourai/flow/runs/acme-widgets-301/state.json" "$REVIEW_HEAD" || fail "packed builder.review-existing did not persist the pinned source head"
+pass "packed builder.review-existing requires and persists the exact clean source head"
+
 printf 'public workflow CLI integration passed\n'
