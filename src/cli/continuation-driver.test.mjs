@@ -2126,6 +2126,31 @@ test("adapter integrity hashes raw file bytes", async (t) => {
   );
 });
 
+test("adapter refuses POSIX worker admission when the identity observer is unavailable", { skip: process.platform === "win32" }, async (t) => {
+  const root = makeFixtureDir("continuation-observer-");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const command = path.join(root, "command.json");
+  fs.writeFileSync(command, JSON.stringify({ argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"] }));
+  const childProcess = require("node:child_process");
+  const originalObserver = childProcess.execFileSync;
+  const originalSpawn = childProcess.spawn;
+  let admitted = false;
+  childProcess.execFileSync = () => { throw Object.assign(new Error("identity observer unavailable"), { code: "ENOENT" }); };
+  childProcess.spawn = () => { admitted = true; throw new Error("worker must not spawn"); };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(executeContinuationAdapter(command, {
+      schema_version: "1.0", run_id: "observer", definition_id: "builder.build",
+      current_step: "execute", iteration: 1, max_turns: 3, next_action: null,
+    }, { cwd: root, timeoutMs: 50 }), /identity observer unavailable/);
+    assert.equal(admitted, false);
+  } finally {
+    childProcess.execFileSync = originalObserver;
+    childProcess.spawn = originalSpawn;
+    syncBuiltinESMExports();
+  }
+});
+
 test("adapter timeout retains escalation after leader exit and kills a ready SIGTERM-ignoring descendant", { skip: process.platform === "win32" }, async (t) => {
   const root = makeFixtureDir("continuation-timeout-");
   const adapter = path.join(root, "adapter.mjs");

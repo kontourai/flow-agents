@@ -85,6 +85,9 @@ function spawnAdapter(
   options: ContinuationAdapterOptions,
 ): Promise<ContinuationTurnResult> {
   return new Promise((resolve, reject) => {
+    // Refuse admission before creating a worker on hosts without the observer
+    // needed to bind POSIX termination escalation to the original group.
+    if (process.platform !== "win32") processGroupMembers(process.pid);
     const child = spawn(command.argv[0]!, command.argv.slice(1), {
       cwd: options.cwd,
       env: adapterEnvironment(options),
@@ -254,10 +257,13 @@ async function terminateOwnedProcessGroup(pid: number | undefined): Promise<void
 function processGroupMembers(group: number): Map<number, string> {
   const output = execFileSync("/bin/ps", ["-eo", "pid=,pgid=,lstart="], { encoding: "utf8", timeout: 5_000, maxBuffer: 4 * 1024 * 1024 });
   const members = new Map<number, string>();
+  let observedSelf = false;
   for (const line of output.split("\n")) {
     const match = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
+    if (match && Number(match[1]) === process.pid) observedSelf = true;
     if (match && Number(match[2]) === group) members.set(Number(match[1]), match[3]!);
   }
+  if (!observedSelf) throw new Error("continuation adapter identity observer could not identify the current process");
   return members;
 }
 

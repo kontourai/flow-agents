@@ -25,34 +25,12 @@ allowBuilds:
   protobufjs: false
   sharp: false
 
-# A newly published version must be at least 24 hours old before it can be
-# resolved into this lockfile. Blunts the most common supply-chain shape (a
-# compromised maintainer publishes and the ecosystem installs within hours).
-# Does not affect installs from an existing lockfile. An urgent security patch
-# is opted in explicitly, by name and version, with the reason in the commit:
-#   minimumReleaseAgeExclude:
-#     - some-package@1.2.3
+# Third-party releases must mature for 24 hours. Kontour packages use their
+# source-bound release and consumer qualification instead; the owner explicitly
+# exempts the internal namespace while retaining the third-party default.
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
-  # Exact internal release built from merged Conduit PRs #30 and #32; the
-  # provider-backed publish receipt is verified before this consumer lands.
-  - '@kontourai/conduit@0.7.1'
-  # Exact Flow budget repair from merged PR #262 and release PR #263; registry
-  # gitHead, tarball integrity and tag-bound publish provenance verified before adoption.
-  - '@kontourai/flow@5.1.3'
-  # Exact AI-DLC invalidation repair from merged Flow #269 and release #266.
-  # Registry gitHead/tag 756ebfd, tarball integrity and source-bound publish provenance
-  # verified before adoption; this excludes only the verified internal version.
-  - '@kontourai/flow@5.1.4'
-  # Exact pending-forward amendment release from merged Flow #270 and release #271.
-  # Registry gitHead/tag f7d6a7f, integrity, signatures and tag-bound provenance verified.
-  - '@kontourai/flow@5.2.0'
-  # Exact Survey owned-stream shutdown repair from merged PR #337/release #338.
-  # Registry gitHead d063b49 and public tarball integrity verified before adoption.
-  - '@kontourai/survey@8.1.1'
-  # Exact review usability release from merged Survey #341/release #342.
-  # Registry gitHead/tag 0fc7e28 and sha512 tarball receipt verified before adoption.
-  - '@kontourai/survey@8.2.0'
+  - '@kontourai/*'
 
 # mise supplies node and pnpm on developer machines; CI installs the exact
 # version pinned in package.json. Do not reject a same-major pnpm from mise.
