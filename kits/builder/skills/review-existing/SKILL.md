@@ -34,10 +34,11 @@ exactly as they do at `builder.build` `verify`.
 
 ## Start
 
-1. Check out the exact commit under review in a clean Git worktree. Workflow
-   artifacts under `.kontourai/` must be gitignored (commit the
-   `.kontourai/.gitignore` that `init` writes), and earlier `delivery/` output
-   must be committed or removed, because the run refuses a dirty tree.
+1. Check out the exact commit under review in a clean Git worktree; the run
+   refuses a dirty tree. If the reviewed head does not already ignore
+   `.kontourai/` and `delivery/`, add both to `.git/info/exclude`, which is
+   local and does not change the head under review. Commit an ignore rule only
+   if the repository wants it anyway: a commit makes a new head.
 2. Complete `pull-work` selection, write
    `<session-dir>/<slug>--pull-work.md` naming the Work Item reference, and hold
    the assignment. The assignment holder is the implementation owner, normally
@@ -117,8 +118,8 @@ the same Work Item resumes the old run. Resuming with a different
 
 - `flow-agents workflow publish-delivery` accepts a completed run; its
   checkpoint commit is the pinned head. Its untracked `delivery/<slug>/` output
-  makes the next pinned start in the same checkout refuse until it is committed
-  or removed.
+  makes the next pinned start in the same checkout refuse until `delivery/` is
+  in `.git/info/exclude` or the output is removed.
 - `merge-change` refuses these runs by name: the flow binds no step to the
   publish-change operation. Merge through the provider's own controls.
 - That the reviewer is not the change's author on the provider (for example

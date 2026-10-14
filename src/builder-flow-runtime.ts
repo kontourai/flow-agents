@@ -1857,8 +1857,10 @@ export function assertSourceHeadStartable(definition: unknown, flowId: string, s
     // Paths are caller-controlled bytes: quote each so a newline, comma, or terminal escape in a
     // filename cannot forge or garble the refusal.
     const shown = dirty.length === 0 ? "" : ` (${dirty.slice(0, 5).map((file) => JSON.stringify(file)).join(", ")}${dirty.length > 5 ? `, and ${dirty.length - 5} more` : ""})`;
-    const gitignoreHint = `${dirty.includes(".kontourai/.gitignore") ? " An untracked .kontourai/.gitignore (written by flow-agents init) counts too: commit it." : ""}${dirty.some((file) => file.startsWith("delivery/")) ? " Untracked workflow publish-delivery output under delivery/ counts too: commit or remove it." : ""}`;
-    throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes${shown}; ${flowId} reviews exactly the committed head, so commit or remove them first (workflow artifacts under .kontourai/ must be gitignored).${gitignoreHint}`);
+    const gitignoreHint = `${dirty.includes(".kontourai/.gitignore") ? " An untracked .kontourai/.gitignore (written by flow-agents init) counts too." : ""}${dirty.some((file) => file.startsWith("delivery/")) ? " Untracked workflow publish-delivery output under delivery/ counts too." : ""}`;
+    // Committing an ignore rule would change the head under review, so the local exclude file is
+    // the primary remedy.
+    throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes${shown}; ${flowId} reviews exactly the committed head, so remove them, or ignore workflow output locally by adding .kontourai/ and delivery/ to .git/info/exclude, which does not change the reviewed head (commit an ignore rule only if the repository wants it anyway).${gitignoreHint}`);
   }
   return sourceHead;
 }

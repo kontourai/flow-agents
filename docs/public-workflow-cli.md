@@ -418,8 +418,11 @@ commit, such as an open pull request, without claiming that the run implemented 
 Before starting:
 
 1. Check out the exact commit under review in a Git worktree with no uncommitted or untracked
-   files. `.kontourai/` must be gitignored (commit the `.kontourai/.gitignore` that `init`
-   writes), and so must any earlier `delivery/` output, or it must be committed.
+   files. Workflow output must be ignored. If the reviewed head does not already ignore
+   `.kontourai/` and `delivery/`, add both to `.git/info/exclude`: that is local to the checkout
+   and does not change the head under review. Commit an ignore rule (for example the
+   `.kontourai/.gitignore` that `init` writes) only if the repository wants it anyway; a commit
+   makes a new head, which is then the head you review.
 2. Select the Work Item and write `.kontourai/flow-agents/<slug>/<slug>--pull-work.md` naming its
    reference, as for `builder.build`.
 3. Use a provider reference (`owner/repo#numeric-id` or `provider:id`). A `local:` reference only
@@ -450,8 +453,8 @@ flow_agents workflow start \
 
 The run persists the head in its canonical state. `start` refuses before writing any session
 artifact when the head is missing, is not a full lowercase 40-hex SHA, is not the checked-out
-`HEAD`, or the Git worktree has uncommitted or untracked changes. Workflow artifacts under
-`.kontourai/` must therefore be gitignored. Every other flow refuses `--source-head`. The rule
+`HEAD`, or the Git worktree has uncommitted or untracked changes. The refusal names up to five
+dirty paths and suggests `.git/info/exclude` for workflow output. Every other flow refuses `--source-head`. The rule
 is enforced by the shared runtime that starts every run, so the exported `startBuilderFlowSession`
 API refuses the same inputs as `workflow start`.
 
@@ -505,7 +508,8 @@ runs within one Work Item.
 
 `workflow publish-delivery` accepts a completed run and seals its checkpoint at the pinned head.
 Its `delivery/<slug>/` output is untracked, so the next pinned `start` in the same checkout refuses
-the dirty tree and names those files; commit or remove them first. `merge-change` refuses these
+the dirty tree and names those files; add `delivery/` to `.git/info/exclude` (it does not change the
+reviewed head) or remove them first. `merge-change` refuses these
 runs by name ("`builder.review-existing` runs do not publish a change") before reading provider
 settings or calling the provider, because the flow binds no step to the publish-change operation.
 Merge through the provider's own controls.

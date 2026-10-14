@@ -274,7 +274,8 @@ test("start refuses a missing, malformed, non-HEAD, or dirty-tree source head be
   result = start(fx, unpinnedHead);
   assert.notEqual(result.status, 0);
   assert.match(result.output, /has uncommitted or untracked changes \("\.kontourai\/\.gitignore"\)/);
-  assert.match(result.output, /An untracked \.kontourai\/\.gitignore \(written by flow-agents init\) counts too: commit it\./);
+  assert.match(result.output, /An untracked \.kontourai\/\.gitignore \(written by flow-agents init\) counts too\./);
+  assert.match(result.output, /adding \.kontourai\/ and delivery\/ to \.git\/info\/exclude, which does not change the reviewed head/);
   assertNoRunCreated(fx, "untracked .kontourai/.gitignore");
   git(fx.project, ["add", ".kontourai/.gitignore"]);
   git(fx.project, ["commit", "-qm", "track .kontourai/.gitignore"]);
@@ -450,8 +451,13 @@ test("a completed run records the existing change truthfully and publishes at th
   const afterDelivery = start(next, fx.head);
   assert.notEqual(afterDelivery.status, 0);
   assert.match(afterDelivery.output, new RegExp(`has uncommitted or untracked changes \\("delivery/${fx.slug}/`));
-  assert.match(afterDelivery.output, /Untracked workflow publish-delivery output under delivery\/ counts too: commit or remove it\./);
+  assert.match(afterDelivery.output, /Untracked workflow publish-delivery output under delivery\/ counts too\./);
   assertNoRunCreated(next, "start after publish-delivery");
+  // The documented remedy works without changing the reviewed head: exclude delivery/ locally.
+  fs.appendFileSync(path.join(fx.project, ".git", "info", "exclude"), "delivery/\n");
+  assert.equal(git(fx.project, ["rev-parse", "HEAD"]), fx.head, "the local exclude must not move the reviewed head");
+  assertOk(start(next, fx.head), "start after excluding delivery/ locally");
+  assert.equal(runState(next).params.source_head, fx.head);
 
   // CONSUMER 2: merge-change refuses this flow BY NAME before any authorization or provider call,
   // and before it reads provider settings or a publish-change result (the provider IS configured).
