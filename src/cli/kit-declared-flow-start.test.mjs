@@ -548,6 +548,14 @@ test("builder.build and builder.shape pass flow validation and keep their byte-s
     assert.match(shape.stderr, /workflow start --flow builder\.shape requires an explicit safe --task-slug/);
     assert.ok(!shape.stderr.includes("is not a flow declared"), `builder.shape must stay startable: ${shape.stderr}`);
     assert.ok(!shape.stderr.includes("cannot bind it"), `builder.shape must stay startable: ${shape.stderr}`);
+
+    // #1415: the existing-change review passes the same derived validation and stops on the same
+    // input contract as builder.build, before its own source-head precondition is consulted.
+    const review = runStart(["--flow", "builder.review-existing"], dir);
+    assert.notEqual(review.status, 0);
+    assert.match(review.stderr, /workflow start requires --work-item <provider-ref>/);
+    assert.ok(!review.stderr.includes("is not a flow declared"), `builder.review-existing must be startable: ${review.stderr}`);
+    assert.ok(!review.stderr.includes("cannot bind it"), `builder.review-existing must be startable: ${review.stderr}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -184,7 +184,10 @@
     },
     {
       "source": "docs/public-workflow-cli.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "kits/builder/flows/review-existing.flow.json"
+      ]
     },
     {
       "source": "docs/spec/runtime-hook-surface.md",
