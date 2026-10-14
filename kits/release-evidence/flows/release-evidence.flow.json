@@ -20,7 +20,7 @@
           "bundle_claim": {
             "claimType": "release.evidence",
             "accepted_statuses": [
-              "trusted"
+              "verified"
             ]
           }
         }
