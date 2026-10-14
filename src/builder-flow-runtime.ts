@@ -25,7 +25,7 @@ import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentSt
 import { CRITIQUE_CHAIN_GENESIS, validateCritiqueResolutionGraph } from "./cli/critique-resolution.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
-import type { ChangeProviderRequest } from "./cli/change-provider.js";
+import type { ChangeProvider, ChangeProviderRequest } from "./cli/change-provider.js";
 import type { ChangeProviderSettings } from "./cli/public-contracts.js";
 import { assertTrustedGitAncestor, execTrustedGitSync, isExactLowercaseCommitSha, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
@@ -116,9 +116,22 @@ export interface BuilderFlowSessionResult {
   attachmentExpectationIds?: string[];
 }
 
+/**
+ * #1415 slice 2: what a publish-change caller supplies. A run whose definition pins its source head
+ * ADOPTS the existing pull request rather than opening one, so its caller supplies no title, body,
+ * or draft flag; every other run requires a title and body, as before.
+ */
+export type PublishChangeOperationIntent = Omit<PublishChangeIntent, "title" | "body" | "draft"> & {
+  title?: string;
+  body?: string;
+  draft?: boolean;
+};
+
 export interface ExecutePublishChangeOperationInput extends BuilderFlowSessionInput {
-  intent: PublishChangeIntent;
+  intent: PublishChangeOperationIntent;
 }
+
+type ChangeProviderFactory = (settings: ChangeProviderSettings, configurationId: string) => ChangeProvider;
 
 export interface CompletePublishChangeOperationInput extends BuilderFlowSessionInput {
   /**
@@ -540,7 +553,7 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
  */
 async function issuePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<IssuedPublishChangeAction> {
   const context = resolveSessionContext(input.sessionDir);
-  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => await currentPublishChangeAction(context, input.intent));
+  return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => await currentPublishChangeAction(context, input.intent, "caller"));
 }
 
 /**
@@ -550,12 +563,23 @@ async function issuePublishChangeOperation(input: ExecutePublishChangeOperationI
  */
 export async function executePublishChangeOperation(input: ExecutePublishChangeOperationInput): Promise<CompletePublishChangeOperationResult> {
   resolveTrustedGithubExecutable();
+  return await executePublishChangeOperationWithProvider(input, (settings, configurationId) => createGithubChangeProvider(settings, configurationId));
+}
+
+/**
+ * #1415 slice 2: the provider factory is a parameter so tests can drive the real GitHub adapter
+ * with an injected executor; production always passes the trusted-executable factory above.
+ * Whether the operation opens or adopts a change is derived from the run's definition, never chosen
+ * by the caller: a run pinned to a source head adopts its existing pull request.
+ */
+async function executePublishChangeOperationWithProvider(input: ExecutePublishChangeOperationInput, createProvider: ChangeProviderFactory): Promise<CompletePublishChangeOperationResult> {
   const context = resolveSessionContext(input.sessionDir);
   const trustedHeadSha = resolveTrustedLocalGitCommit(context.projectRoot, input.intent.head_ref);
   if (trustedHeadSha !== input.intent.head_sha.toLowerCase()) {
     throw new BuilderBuildRunInputError("publish-change.intent.head_sha", "does not match the trusted local head ref");
   }
   const action = await issuePublishChangeOperation(input);
+  const adoptsExistingChange = await publishChangeAdoptsExistingChange(context);
   const effective = resolveEffectiveChangeProviderSettings(
     context.projectRoot,
     path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"),
@@ -563,11 +587,27 @@ export async function executePublishChangeOperation(input: ExecutePublishChangeO
   if (effective.status !== "configured" || !effective.provider || typeof effective.provider !== "object") {
     throw new Error("publish-change execute requires a configured ChangeProvider for this repository");
   }
-  const provider = createGithubChangeProvider(effective.provider as ChangeProviderSettings, action.provider.configuration_id);
+  const provider = createProvider(effective.provider as ChangeProviderSettings, action.provider.configuration_id);
   return await completePublishChangeOperation({ sessionDir: input.sessionDir, action }, async (issued) => {
     const { action_id: _actionId, ...request } = issued;
-    return await provider.createOrRecover(request as ChangeProviderRequest);
+    return adoptsExistingChange
+      ? await provider.adoptExisting(request as ChangeProviderRequest)
+      : await provider.createOrRecover(request as ChangeProviderRequest);
   });
+}
+
+/**
+ * #1415 slice 2: true when this session's run pins its source head, so publish-change adopts the
+ * existing pull request instead of opening one. The CLI reads it only to refuse --title/--body/--draft
+ * early; the operation re-derives the mode from the canonical run itself.
+ */
+export async function publishChangeSessionAdoptsExistingChange(sessionDir: string): Promise<boolean> {
+  return await publishChangeAdoptsExistingChange(resolveSessionContext(sessionDir));
+}
+
+async function publishChangeAdoptsExistingChange(context: SessionContext): Promise<boolean> {
+  const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  return pinnedRunSourceHead(run.startDefinition, run.state) !== null;
 }
 
 async function completePublishChangeOperation(
@@ -589,12 +629,15 @@ async function completePublishChangeOperation(
     }
     const recovery = await recoverPublishChangeIfCommitted(context, issued, observation);
     if (recovery) return recovery;
-    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));
+    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued), "issued");
     if (!isDeepStrictEqual(current, issued)) {
       throw new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration");
     }
+    // #1415 slice 2: this path attaches evidence without bundleGateEvidence, so the source-head pin
+    // is re-proved here, under the lock, immediately before the gate advances.
+    const pinnedWorkspace = await pinnedPublishChangeCommitCheck(context, observation);
     const persisted = persistPublishChangeResult(context, issued, observation);
-    const run = await advancePublishChangeGate(context, issued, observation, persisted.sha256);
+    const run = await advancePublishChangeGate(context, issued, observation, persisted.sha256, pinnedWorkspace);
     return projectCompletedPublishChange(context, issued, observation, run);
   });
 }
@@ -605,7 +648,7 @@ async function assertPublishChangeActionCurrentOrRecoverable(
   issued: IssuedPublishChangeAction,
 ): Promise<void> {
   try {
-    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued));
+    const current = await currentPublishChangeAction(context, publishChangeIntentFromAction(issued), "issued");
     if (!isDeepStrictEqual(current, issued)) {
       throw new BuilderBuildRunInputError("publish-change.action", "does not match the current canonical run, gate visit, assignment actor, or provider configuration");
     }
@@ -641,8 +684,9 @@ async function advancePublishChangeGate(
   issued: IssuedPublishChangeAction,
   observation: AuthenticatedPublishChangeObservation,
   resultSha256: string,
+  pinnedWorkspace: AnyRecord | null,
 ): Promise<BuilderFlowRunResult> {
-  const evidenceFile = await writePublishChangeEvidence(context, issued, observation, resultSha256);
+  const evidenceFile = await writePublishChangeEvidence(context, issued, observation, resultSha256, pinnedWorkspace);
   try {
     const run = await evaluateBuilderFlowRun({
       cwd: context.projectRoot,
@@ -1298,13 +1342,22 @@ function assertRunSubjectBinding(run: BuilderFlowRunResult, subject: string): vo
   }
 }
 
-async function currentPublishChangeAction(context: SessionContext, intent: PublishChangeIntent): Promise<IssuedPublishChangeAction> {
+/**
+ * `origin` says where `intent` came from: a caller ("caller") or the re-derivation of an already
+ * issued action ("issued"). The two differ only for a pinned run, whose caller supplies no title or
+ * body while its issued action carries the fixed adoption intent below.
+ */
+async function currentPublishChangeAction(context: SessionContext, intent: PublishChangeOperationIntent, origin: "caller" | "issued"): Promise<IssuedPublishChangeAction> {
   const sidecarSnapshot = readSidecarSnapshot(context);
   const subject = workflowSubject(sidecarSnapshot.state);
   const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   assertRunSubjectBinding(run, subject);
   const gates = openGatesForResult(run);
   if (run.state.status !== "active" || gates.length !== 1) throw new BuilderBuildRunInputError("publish-change", "requires exactly one active canonical gate");
+  const sourceHead = pinnedRunSourceHead(run.startDefinition, run.state);
+  const canonicalIntent = sourceHead === null
+    ? openChangeIntent(intent)
+    : adoptedChangeIntent(intent, origin, sourceHead, run.definitionId, run.state, context.projectRoot);
   const envelope = deriveBuilderGateActionEnvelope({ sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, definition: JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8")) as AnyRecord });
   const operation = envelope.public_interfaces.mutations.find((mutation): mutation is Extract<GateActionEnvelope["public_interfaces"]["mutations"][number], { interface: "operation" }> => mutation.interface === "operation" && mutation.operation === "publish-change");
   if (!operation || operation.expectation_id !== "pull-request-opened" || operation.protocol.availability.status !== "configured") {
@@ -1322,7 +1375,117 @@ async function currentPublishChangeAction(context: SessionContext, intent: Publi
   if (!assignment.record || assignment.record.status !== "claimed" || (assignment.record.actor_key ?? assignment.assignee) !== actor.actorKey) {
     throw new BuilderBuildRunInputError("publish-change.assignment", "is no longer held by the current actor");
   }
-  return issuePublishChangeAction({ binding: operation.binding, provider: effective.provider as any, assignment_actor: actor.actorKey, intent });
+  return issuePublishChangeAction({ binding: operation.binding, provider: effective.provider as any, assignment_actor: actor.actorKey, intent: canonicalIntent });
+}
+
+// ─── #1415 slice 2: adopting an existing pull request ───────────────────────────────────────
+//
+// A run pinned to a source head reviews a change that already exists, so its publish-change step
+// adopts that change's open pull request instead of opening one. The adoption intent is a fixed
+// value: it identifies the action (its digest feeds action_id) and is never sent to or compared
+// with the provider, because the pull request's title and body are not this run's to set.
+
+const ADOPTED_CHANGE_TITLE = "Adopt the existing pull request at the pinned source head";
+const ADOPTED_CHANGE_BODY = "This run adopts an existing pull request; it does not set or compare its title or body.";
+const PRE_EXISTING_IMPLEMENTATION_CLAIM_TYPE = "builder.existing-change.pre-existing-implementation";
+
+function openChangeIntent(intent: PublishChangeOperationIntent): PublishChangeIntent {
+  if (typeof intent.title !== "string" || typeof intent.body !== "string") {
+    throw new BuilderBuildRunInputError("publish-change.intent", "requires a title and body to open a change");
+  }
+  return { ...intent, title: intent.title, body: intent.body };
+}
+
+function adoptedChangeIntent(
+  intent: PublishChangeOperationIntent,
+  origin: "caller" | "issued",
+  sourceHead: string,
+  definitionId: string,
+  state: FlowRunState,
+  projectRoot: string,
+): PublishChangeIntent {
+  const supplied = intent.title !== undefined || intent.body !== undefined || intent.draft !== undefined;
+  const reissued = origin === "issued" && intent.title === ADOPTED_CHANGE_TITLE && intent.body === ADOPTED_CHANGE_BODY && intent.draft === undefined;
+  if (origin === "caller" ? supplied : !reissued) {
+    throw new BuilderBuildRunInputError("publish-change.intent", `${definitionId} adopts the existing pull request at its pinned source head and never opens one, so it takes no title, body, or draft flag; remove --title, --body, and --draft`);
+  }
+  if (intent.head_sha.toLowerCase() !== sourceHead) {
+    throw new BuilderBuildRunInputError("publish-change.intent.head_sha", `${intent.head_sha} is not the source head ${sourceHead} this ${definitionId} run was started at; it adopts a pull request only at that commit`);
+  }
+  assertPinnedSourceHead([], state, projectRoot);
+  assertCleanPinnedWorkspace(projectRoot, sourceHead, definitionId);
+  return { title: ADOPTED_CHANGE_TITLE, body: ADOPTED_CHANGE_BODY, base_ref: intent.base_ref, head_ref: intent.head_ref, head_sha: intent.head_sha };
+}
+
+/** The clean Git worktree at the pinned head, or a refusal naming why it is not one. */
+function assertCleanPinnedWorkspace(projectRoot: string, sourceHead: string, definitionId: string): AnyRecord {
+  const captured = captureCurrentGitWorkspaceSnapshot(projectRoot);
+  if (captured.snapshot === null || captured.snapshot.head_sha !== sourceHead || captured.snapshot.worktree_clean !== true) {
+    const why = captured.error !== null ? `cannot be captured (${captured.error})` : captured.snapshot === null ? "cannot be captured" : captured.snapshot.head_sha !== sourceHead ? `is at ${String(captured.snapshot.head_sha)}` : "has uncommitted or untracked changes";
+    throw new BuilderBuildRunInputError("publish-change.workspace", `the Git worktree ${why}; ${definitionId} adopts its pull request only from a clean worktree at its pinned source head ${sourceHead}`);
+  }
+  return captured.snapshot;
+}
+
+/**
+ * Commit-phase half of adoption, run under the subject lock right before the gate advances. For a
+ * pinned run it re-proves the head and a clean worktree (returning that worktree's snapshot for the
+ * claim) and requires the adopted pull request to be the one the run's pre-existing-implementation
+ * claim names. Returns null for every other run.
+ */
+async function pinnedPublishChangeCommitCheck(context: SessionContext, observation: AuthenticatedPublishChangeObservation): Promise<AnyRecord | null> {
+  const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  const sourceHead = pinnedRunSourceHead(run.startDefinition, run.state);
+  if (sourceHead === null) return null;
+  if (observation.change_ref.state !== "open" || observation.change_ref.head_sha !== sourceHead) {
+    throw new BuilderBuildRunInputError("publish-change.observation", `${run.definitionId} adopts only an open pull request whose head is its pinned source head ${sourceHead}`);
+  }
+  assertPinnedSourceHead([], run.state, context.projectRoot);
+  const workspace = assertCleanPinnedWorkspace(context.projectRoot, sourceHead, run.definitionId);
+  const named = preExistingChangeProviderUrls(run);
+  const adopted = normalizedUrl(observation.change_ref.url);
+  if (named.length !== 1 || adopted === null || named[0] !== adopted) {
+    const recorded = named.length === 0 ? "names no provider record" : named.length === 1 ? `names ${named[0]}` : `names ${named.length} different provider records`;
+    throw new BuilderBuildRunInputError("publish-change.observation.change_ref.url", `the adopted pull request ${observation.change_ref.url} must be the one this run's pre-existing-implementation claim names as its provider record, and that claim ${recorded}`);
+  }
+  return workspace;
+}
+
+/**
+ * Provider-record URLs on the live pre-existing-implementation claims that satisfied the gate
+ * declaring that claim type. Read from the canonical Flow manifest, not the mutable session bundle.
+ */
+function preExistingChangeProviderUrls(run: BuilderFlowRunResult): string[] {
+  const definition = run.definition as AnyRecord;
+  const gateIds = new Set(Object.entries(isRecord(definition.gates) ? definition.gates as AnyRecord : {})
+    .filter(([, gate]) => isRecord(gate) && Array.isArray(gate.expects) && gate.expects.some((expectation: unknown) =>
+      isRecord(expectation) && isRecord(expectation.bundle_claim) && expectation.bundle_claim.claimType === PRE_EXISTING_IMPLEMENTATION_CLAIM_TYPE))
+    .map(([id]) => id));
+  const urls = new Set<string>();
+  for (const entry of manifestEvidence(run.manifest)) {
+    if (!gateIds.has(String(entry.gate_id)) || typeof entry.superseded_by === "string") continue;
+    const claims = isRecord(entry.bundle) && Array.isArray(entry.bundle.claims) ? entry.bundle.claims : [];
+    for (const claim of claims) {
+      if (!isRecord(claim) || claim.claimType !== PRE_EXISTING_IMPLEMENTATION_CLAIM_TYPE || claim.value !== "pass" || claim.producerStatus === "superseded") continue;
+      const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+      if (!metadata || typeof metadata.superseded_by === "string" || !Array.isArray(metadata.artifact_refs)) continue;
+      for (const ref of metadata.artifact_refs) {
+        if (!isRecord(ref) || ref.kind !== "provider" || typeof ref.url !== "string") continue;
+        const url = normalizedUrl(ref.url);
+        urls.add(url ?? ref.url);
+      }
+    }
+  }
+  return [...urls];
+}
+
+function normalizedUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function persistPublishChangeResult(
@@ -1462,6 +1625,7 @@ async function writePublishChangeEvidence(
   action: IssuedPublishChangeAction,
   observation: AuthenticatedPublishChangeObservation,
   resultSha256: string,
+  pinnedWorkspace: AnyRecord | null,
 ): Promise<{ file: string; sha256: string }> {
   const file = path.join(context.sessionDir, `.publish-change.evidence-${randomBytes(16).toString("hex")}.json`);
   const timestamp = observation.observed_at;
@@ -1477,6 +1641,9 @@ async function writePublishChangeEvidence(
     _producer: "publish-change-operation-authority",
     _recorded_by: action.assignment_actor,
     artifact_refs: [{ kind: "provider", url: observation.change_ref.url, summary: `Authenticated ${observation.provider.kind} observation by ${observation.provider_actor}`, sha256: resultSha256 }],
+    // #1415 slice 2: a pinned run's adoption claim carries the clean worktree it was observed in,
+    // like every other claim such a run accepts.
+    ...(pinnedWorkspace ? { _verification_workspace_snapshot: pinnedWorkspace } : {}),
   };
   const bundle = await buildTrustBundle(
     context.slug,
