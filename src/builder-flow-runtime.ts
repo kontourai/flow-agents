@@ -1841,7 +1841,7 @@ export function assertSourceHeadStartable(definition: unknown, flowId: string, s
     throw new BuilderBuildRunInputError("sourceHead", `cannot resolve the trusted checked-out HEAD (${errorMessage(error)})`);
   }
   if (head !== sourceHead) {
-    throw new BuilderBuildRunInputError("sourceHead", `${sourceHead} is not the checked-out HEAD ${head}; check out the exact commit under review before starting or resuming ${flowId}`);
+    throw new BuilderBuildRunInputError("sourceHead", `${sourceHead} is not the checked-out HEAD ${head} of ${projectRoot}; check out the exact commit under review there, or pass --artifact-root <checkout>/.kontourai/flow-agents for the checkout that has it (a linked worktree defaults to the main checkout's store), before starting or resuming ${flowId}`);
   }
   let snapshot: Record<string, unknown>;
   try {
@@ -1860,7 +1860,7 @@ export function assertSourceHeadStartable(definition: unknown, flowId: string, s
     const gitignoreHint = `${dirty.includes(".kontourai/.gitignore") ? " An untracked .kontourai/.gitignore (written by flow-agents init) counts too." : ""}${dirty.some((file) => file.startsWith("delivery/")) ? " Untracked workflow publish-delivery output under delivery/ counts too." : ""}`;
     // Committing an ignore rule would change the head under review, so the local exclude file is
     // the primary remedy.
-    throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes${shown}; ${flowId} reviews exactly the committed head, so remove them, or ignore workflow output locally by appending .kontourai/ and delivery/ to the exclude file at "$(git rev-parse --git-path info/exclude)", which does not change the reviewed head and is shared by all worktrees of the repository (commit an ignore rule only if the repository wants it anyway).${gitignoreHint}`);
+    throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes${shown}; ${flowId} reviews exactly the committed head, so remove them, or ignore workflow output locally by appending .kontourai/ and delivery/ to the exclude file at "$(git rev-parse --git-path info/exclude)" (create its directory first if missing), which does not change the reviewed head and is shared by all worktrees of the repository (commit an ignore rule only if the repository wants it anyway).${gitignoreHint}`);
   }
   return sourceHead;
 }

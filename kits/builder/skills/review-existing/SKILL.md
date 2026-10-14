@@ -38,7 +38,7 @@ exactly as they do at `builder.build` `verify`.
    refuses a dirty tree. If the reviewed head does not already ignore
    `.kontourai/` and `delivery/`, append both to the local exclude file, which
    does not change the head under review:
-   `printf '.kontourai/\ndelivery/\n' >> "$(git rev-parse --git-path info/exclude)"`.
+   `exclude="$(git rev-parse --git-path info/exclude)"; mkdir -p "$(dirname "$exclude")"; printf '.kontourai/\ndelivery/\n' >> "$exclude"`.
    That path also works in a linked worktree, where `.git` is a file. The
    exclude file is shared by all worktrees of the repository. Commit an ignore
    rule only if the repository wants it anyway: a commit makes a new head.
@@ -50,7 +50,13 @@ exactly as they do at `builder.build` `verify`.
    `local:` reference only resumes an existing `builder.shape` session and
    cannot start this flow; without a provider assignment, use a provider-style
    reference with `--assignment-provider local-file`.
-4. Start the run with the head pinned:
+4. In a linked Git worktree the default artifact root is the main checkout's
+   store, so the pin would be compared with the main checkout's `HEAD`. Pass
+   `--artifact-root "$(git rev-parse --show-toplevel)/.kontourai/flow-agents"`
+   to `start` (write the pull-work report under that root), and give every later
+   verb `--session-dir` under the worktree; without it a verb looks the session
+   up through the main checkout's store, does not find it, and refuses.
+5. Start the run with the head pinned:
 
 ```bash
 flow-agents workflow start --flow builder.review-existing \

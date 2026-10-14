@@ -275,7 +275,7 @@ test("start refuses a missing, malformed, non-HEAD, or dirty-tree source head be
   assert.notEqual(result.status, 0);
   assert.match(result.output, /has uncommitted or untracked changes \("\.kontourai\/\.gitignore"\)/);
   assert.match(result.output, /An untracked \.kontourai\/\.gitignore \(written by flow-agents init\) counts too\./);
-  assert.match(result.output, /appending \.kontourai\/ and delivery\/ to the exclude file at "\$\(git rev-parse --git-path info\/exclude\)", which does not change the reviewed head and is shared by all worktrees of the repository/);
+  assert.match(result.output, /appending \.kontourai\/ and delivery\/ to the exclude file at "\$\(git rev-parse --git-path info\/exclude\)" \(create its directory first if missing\), which does not change the reviewed head and is shared by all worktrees of the repository/);
   assertNoRunCreated(fx, "untracked .kontourai/.gitignore");
   git(fx.project, ["add", ".kontourai/.gitignore"]);
   git(fx.project, ["commit", "-qm", "track .kontourai/.gitignore"]);
@@ -324,36 +324,73 @@ test("dirty paths in the start refusal are quoted, so a filename cannot inject l
   assertNoRunCreated(fx, "hostile untracked filename");
 });
 
-test("the documented exclude command works in a linked worktree, where .git is a file", () => {
-  // A reviewer often checks the change out in a linked worktree. There `.git` is a FILE, so a
-  // literal `.git/info/exclude` path fails; `git rev-parse --git-path info/exclude` resolves the
-  // repository's shared exclude file. This drives the exact command the docs give.
+test("in a linked worktree: the default store is refused with the root it inspected; the documented commands start it", () => {
+  // A reviewer often checks the change out in a linked worktree. Two things differ there:
+  //  - the default artifact root is the MAIN checkout's store (#413), so a start without
+  //    --artifact-root pins against the main checkout's HEAD and must say which root it inspected;
+  //  - `.git` is a FILE, so a literal `.git/info/exclude` path fails and the documented
+  //    `git rev-parse --git-path info/exclude` command is needed.
   const fx = makeExistingChange(28);
   fs.writeFileSync(path.join(fx.project, ".gitignore"), "");
   git(fx.project, ["commit", "-qam", "head under review does not ignore workflow output"]);
+  const mainHead = git(fx.project, ["rev-parse", "HEAD"]);
   const linked = path.join(path.dirname(fx.project), `${path.basename(fx.project)}-linked`);
   git(fx.project, ["worktree", "add", "-q", "--detach", linked, "HEAD"]);
   try {
     const wt = { ...fx, project: fs.realpathSync(linked) };
+    // The change under review is a commit only the linked worktree has checked out.
+    fs.writeFileSync(path.join(wt.project, "feature.txt"), "the pull request head\n");
+    git(wt.project, ["commit", "-qam", "pull request head"]);
+    wt.head = git(wt.project, ["rev-parse", "HEAD"]);
+    assert.notEqual(wt.head, mainHead);
     wt.artifactRoot = path.join(wt.project, ".kontourai", "flow-agents");
     wt.sessionDir = path.join(wt.artifactRoot, wt.slug);
     wt.runDir = path.join(wt.project, ".kontourai", "flow", "runs", wt.slug);
-    wt.head = git(wt.project, ["rev-parse", "HEAD"]);
     assert.ok(fs.statSync(path.join(wt.project, ".git")).isFile(), "the fixture must be a linked worktree");
     fs.mkdirSync(wt.sessionDir, { recursive: true });
     fs.writeFileSync(path.join(wt.sessionDir, `${wt.slug}--pull-work.md`), `Selected Work Item: ${wt.workItem}\n`);
 
-    const dirty = start(wt);
+    // 1. Without --artifact-root the store is the main checkout's, and the refusal names it.
+    const defaulted = workflow(wt, ["start", "--flow", FLOW, "--work-item", wt.workItem, "--assignment-provider", "local-file", "--source-head", wt.head]);
+    assert.notEqual(defaulted.status, 0);
+    assert.ok(defaulted.output.includes(`${wt.head} is not the checked-out HEAD ${mainHead} of ${fx.project};`),
+      `the refusal must name the root it inspected:\n${defaulted.output}`);
+    assert.match(defaulted.output, /pass --artifact-root <checkout>\/\.kontourai\/flow-agents for the checkout that has it/);
+    assertNoRunCreated(fx, "default-root start from a linked worktree");
+    assertNoRunCreated(wt, "default-root start from a linked worktree");
+
+    // 2. The documented --artifact-root reaches the worktree, whose tree is dirty with workflow output.
+    const startCommand = `"${process.execPath}" "${CLI}" workflow start --artifact-root "$(git rev-parse --show-toplevel)/.kontourai/flow-agents" --flow ${FLOW} --work-item '${wt.workItem}' --assignment-provider local-file --source-head "$(git rev-parse HEAD)"`;
+    const shell = (command) => spawnSync("sh", ["-c", command], { cwd: wt.project, encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: HOLDER } });
+    const dirty = shell(startCommand);
     assert.notEqual(dirty.status, 0);
-    assert.match(dirty.output, /has uncommitted or untracked changes \("\.kontourai\/flow-agents\//);
-    const literal = spawnSync("sh", ["-c", "printf '.kontourai/\\n' >> .git/info/exclude"], { cwd: wt.project, encoding: "utf8" });
+    assert.match(`${dirty.stdout}${dirty.stderr}`, /has uncommitted or untracked changes \("\.kontourai\/flow-agents\//);
+    const literal = shell("printf '.kontourai/\\n' >> .git/info/exclude");
     assert.notEqual(literal.status, 0, "a literal .git/info/exclude path must not work in a linked worktree");
 
-    const documented = spawnSync("sh", ["-c", `printf '.kontourai/\\ndelivery/\\n' >> "$(git rev-parse --git-path info/exclude)"`], { cwd: wt.project, encoding: "utf8" });
-    assert.equal(documented.status, 0, `the documented exclude command failed: ${documented.stderr}`);
+    // 3. The documented exclude command, then the documented start, pin the worktree's head.
+    const excluded = shell(`exclude="$(git rev-parse --git-path info/exclude)"; mkdir -p "$(dirname "$exclude")"; printf '.kontourai/\\ndelivery/\\n' >> "$exclude"`);
+    assert.equal(excluded.status, 0, `the documented exclude command failed: ${excluded.stderr}`);
     assert.equal(git(wt.project, ["rev-parse", "HEAD"]), wt.head, "the exclude must not move the reviewed head");
-    assertOk(start(wt), "start after the documented exclude");
-    assert.equal(runState(wt).params.source_head, wt.head);
+    const started = shell(startCommand);
+    assert.equal(started.status, 0, `the documented start failed:\n${started.stdout}${started.stderr}`);
+    assert.equal(runState(wt).params.source_head, wt.head, "the run pins the worktree's head, not the main checkout's");
+    assert.equal(fs.existsSync(fx.runDir), false, "nothing is written to the main checkout's store");
+
+    // 4. Later verbs reach the session through a worktree-relative --session-dir.
+    const sessionArg = `.kontourai/flow-agents/${wt.slug}`;
+    const status = shell(`"${process.execPath}" "${CLI}" workflow status --session-dir ${sessionArg} --json`);
+    assert.equal(status.status, 0, status.stderr);
+    assert.equal(JSON.parse(status.stdout).current_step, "existing-change");
+    const report = path.join(wt.sessionDir, `${wt.slug}--existing-change.md`);
+    fs.writeFileSync(report, `# Existing change\n\nHead: ${wt.head}\n`);
+    const recorded = shell(`"${process.execPath}" "${CLI}" workflow evidence --session-dir ${sessionArg} --expectation pre-existing-implementation --status pass --summary 'Existed before this run.' --evidence-ref-json '${JSON.stringify({ kind: "provider", url: PR_URL })}' --evidence-ref-json '${JSON.stringify({ kind: "artifact", file: `${sessionArg}/${wt.slug}--existing-change.md`, summary: "record" })}' --json`);
+    assert.equal(recorded.status, 0, `${recorded.stdout}${recorded.stderr}`);
+    assert.equal(runState(wt).current_step, "verify");
+    // Without --session-dir the lookup goes through the main checkout's store and does not find it.
+    const unscoped = shell(`"${process.execPath}" "${CLI}" workflow status --json`);
+    assert.notEqual(unscoped.status, 0);
+    assert.match(`${unscoped.stdout}${unscoped.stderr}`, /pass --session-dir explicitly/);
   } finally {
     spawnSync("git", ["worktree", "remove", "--force", linked], { cwd: fx.project });
   }

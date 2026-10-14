@@ -423,7 +423,9 @@ Before starting:
    change the head under review:
 
    ```bash
-   printf '.kontourai/\ndelivery/\n' >> "$(git rev-parse --git-path info/exclude)"
+   exclude="$(git rev-parse --git-path info/exclude)"
+   mkdir -p "$(dirname "$exclude")"
+   printf '.kontourai/\ndelivery/\n' >> "$exclude"
    ```
 
    `git rev-parse --git-path` finds the file in a linked worktree too, where `.git` is a file
@@ -434,6 +436,14 @@ Before starting:
    reference, as for `builder.build`.
 3. Use a provider reference (`owner/repo#numeric-id` or `provider:id`). A `local:` reference only
    resumes an existing local session created by `builder.shape`, so it cannot start this flow.
+4. In a linked Git worktree, the default artifact root is the main checkout's
+   `.kontourai/flow-agents` (one shared store per repository), so the pin would be compared with
+   the main checkout's `HEAD` and refused. Pass the worktree's own store to `start`:
+   `--artifact-root "$(git rev-parse --show-toplevel)/.kontourai/flow-agents"`, and write the
+   pull-work report under that root. Every later verb for the session (`status`, `evidence`,
+   `critique`, `publish-delivery`) must then name the session with `--session-dir` under the
+   worktree, as the examples below do (a worktree-relative path works). Without it, a verb looks
+   the session up through the main checkout's store, does not find it, and refuses.
 
 Then start with the head pinned. With a provider assignment:
 
@@ -517,8 +527,9 @@ runs within one Work Item.
 `workflow publish-delivery` accepts a completed run and seals its checkpoint at the pinned head.
 Its `delivery/<slug>/` output is untracked, so the next pinned `start` in the same checkout refuses
 the dirty tree and names those files; append `delivery/` to
-`"$(git rev-parse --git-path info/exclude)"` (shared by all worktrees of the repository; it does
-not change the reviewed head) or remove them first. `merge-change` refuses these
+`"$(git rev-parse --git-path info/exclude)"` (create its directory first if missing; the file is
+shared by all worktrees of the repository and does not change the reviewed head) or remove them
+first. `merge-change` refuses these
 runs by name ("`builder.review-existing` runs do not publish a change") before reading provider
 settings or calling the provider, because the flow binds no step to the publish-change operation.
 Merge through the provider's own controls.
