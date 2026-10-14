@@ -24,7 +24,7 @@ import { spawnSync } from "node:child_process";
 import { flowAdmissionRefusal } from "../../build/src/lib/flow-admission.js";
 import { canonicalRunFlowIds, isCanonicalRunFlowId } from "../../build/src/builder-flow-run-adapter.js";
 import { resolveEffectiveFlowDefinition } from "../../build/src/lib/flow-resolver.js";
-import { startBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
+import { definitionPinsSourceHead, pinnedRunSourceHead, startBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
 import { main as mergeChangeMain } from "../../build/src/cli/merge-change.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
@@ -202,6 +202,24 @@ test("the flow is admitted and canonically runnable through the shared admission
   assert.ok(canonicalRunFlowIds().includes(FLOW));
   const resolved = resolveEffectiveFlowDefinition(FLOW, REPO_ROOT);
   assert.deepEqual(resolved.source_binding, { head: "pinned-at-start" }, "the pin survives composition, so the definition digest covers it");
+});
+
+test("an unrecognised source_binding, or a run whose pin disagrees with its definition, is refused", () => {
+  const pinned = resolveEffectiveFlowDefinition(FLOW, REPO_ROOT);
+  const unpinned = resolveEffectiveFlowDefinition("builder.build", REPO_ROOT);
+  const sha = "a".repeat(40);
+  assert.equal(definitionPinsSourceHead(pinned), true);
+  assert.equal(definitionPinsSourceHead(unpinned), false);
+  // A declared binding the runtime does not understand must not silently read as "unpinned".
+  for (const binding of [{ head: "follows-branch" }, { head: "pinned-at-start", base: "pinned" }, "pinned-at-start", null]) {
+    assert.throws(() => definitionPinsSourceHead({ ...unpinned, source_binding: binding }), /source_binding: must be exactly \{"head":"pinned-at-start"\}/);
+  }
+  // The persisted head and the definition's declaration must agree in both directions.
+  assert.equal(pinnedRunSourceHead(pinned, { params: { subject: "s", source_head: sha } }), sha);
+  assert.equal(pinnedRunSourceHead(unpinned, { params: { subject: "s" } }), null);
+  assert.throws(() => pinnedRunSourceHead(pinned, { params: { subject: "s" } }), /source_head: must be the 40-hex commit/);
+  assert.throws(() => pinnedRunSourceHead(pinned, { params: { subject: "s", source_head: sha.toUpperCase() } }), /source_head: must be the 40-hex commit/);
+  assert.throws(() => pinnedRunSourceHead(unpinned, { params: { subject: "s", source_head: sha } }), /is present but the run's start definition declares no source_binding/);
 });
 
 // ─── (a) the start pin ───────────────────────────────────────────────────────────────────────
