@@ -1753,7 +1753,7 @@ export async function bundleGateEvidence(
   }
   assertPinnedSourceHead(relevant, state, projectRoot);
   assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot, executionEvidenceByClaimId);
-  const failed =relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
+  const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
   // #1302: a PASSING claim at a gate declaring requires_current_verification may not advance the
   // cursor while review/verification evidence is stale — evaluated here, at the seam, after any
   // evidence commands ran. Failing claims stay attachable: they are the route-back repair path.

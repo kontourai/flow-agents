@@ -431,8 +431,8 @@ The run persists the head in its canonical state. `start` refuses before writing
 artifact when the head is missing, is not a full lowercase 40-hex SHA, is not the checked-out
 `HEAD`, or the Git worktree has uncommitted or untracked changes. Workflow artifacts under
 `.kontourai/` must therefore be gitignored. Every other flow refuses `--source-head`. The rule
-is enforced by the shared runtime, so the package API and the sidecar entry refuse the same
-inputs.
+is enforced by the shared runtime that starts every run, so the exported `startBuilderFlowSession`
+API refuses the same inputs as `workflow start`.
 
 At `existing-change`, write `<slug>--existing-change.md` with the change's provider record, base,
 exact head, and changed files, then record it:

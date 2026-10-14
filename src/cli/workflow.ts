@@ -1508,7 +1508,7 @@ async function start(argv: string[]): Promise<number> {
   // #1415: a flow whose definition pins the reviewed commit refuses a missing, malformed,
   // non-HEAD, or dirty-tree head here, before any session artifact is written. The shared runtime
   // re-applies the same rule (and the resume comparison) when the run starts, for every door.
-  // A bare `--source-head` is passed on as "" so it is refused rather than ignored.
+  // A bare `--source-head` becomes "" so it is refused rather than ignored.
   const sourceHead = parsed.flags["source-head"] === undefined ? undefined : flagString(parsed.flags, "source-head", "");
   assertSourceHeadStartable(resolveEffectiveFlowDefinition(flow, findRepoRootFromDir(artifactRoot)), flow, sourceHead, path.dirname(path.dirname(artifactRoot)));
   const existingSlug = taskSlug ?? (workItem ? workItemSlug(workItem) : null);
