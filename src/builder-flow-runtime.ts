@@ -27,7 +27,7 @@ import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-p
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
 import type { ChangeProviderSettings } from "./cli/public-contracts.js";
-import { assertTrustedGitAncestor, isExactLowercaseCommitSha, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
+import { assertTrustedGitAncestor, execTrustedGitSync, isExactLowercaseCommitSha, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
 // Circular at module level (workflow.ts imports this file) — safe: the binding is only
 // dereferenced inside function bodies, the same tolerated shape as the sidecar import above.
@@ -484,7 +484,7 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
       // cannot carry an existing run (active or completed) onto a different commit.
       const persisted = pinnedRunSourceHead(run.startDefinition, run.state);
       if (persisted !== null && input.sourceHead !== undefined && input.sourceHead !== persisted) {
-        throw new BuilderBuildRunInputError("sourceHead", `${input.sourceHead} does not match the source head ${persisted} this ${requestedFlowId} run was started at; a new head needs a new run (a new Work Item, or archive this run first)`);
+        throw new BuilderBuildRunInputError("sourceHead", `${input.sourceHead} does not match the source head ${persisted} this ${requestedFlowId} run was started at; a new head needs a new run under a new provider Work Item`);
       }
       assertSourceHeadStartable(run.startDefinition, requestedFlowId, input.sourceHead, context.projectRoot);
     } catch (error) {
@@ -1853,9 +1853,30 @@ export function assertSourceHeadStartable(definition: unknown, flowId: string, s
     throw new BuilderBuildRunInputError("sourceHead", `${flowId} requires a Git worktree checked out at ${sourceHead}`);
   }
   if (snapshot.worktree_clean !== true) {
-    throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes; ${flowId} reviews exactly the committed head, so commit or remove them first (workflow artifacts under .kontourai/ must be gitignored)`);
+    const dirty = dirtyWorktreePaths(projectRoot);
+    const shown = dirty.length === 0 ? "" : ` (${dirty.slice(0, 5).join(", ")}${dirty.length > 5 ? `, and ${dirty.length - 5} more` : ""})`;
+    const gitignoreHint = dirty.includes(".kontourai/.gitignore") ? " An untracked .kontourai/.gitignore (written by flow-agents init) counts too: commit it." : "";
+    throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes${shown}; ${flowId} reviews exactly the committed head, so commit or remove them first (workflow artifacts under .kontourai/ must be gitignored).${gitignoreHint}`);
   }
   return sourceHead;
+}
+
+/** Changed and untracked paths, for a dirty-tree refusal message only. Never an authorization input. */
+function dirtyWorktreePaths(projectRoot: string): string[] {
+  try {
+    const entries = String(execTrustedGitSync(projectRoot, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])).split("\0");
+    const paths: string[] = [];
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index]!;
+      if (entry.length < 4) continue;
+      paths.push(entry.slice(3));
+      // A rename or copy is followed by its source path as a separate entry.
+      if (entry[0] === "R" || entry[0] === "C") index += 1;
+    }
+    return paths;
+  } catch {
+    return [];
+  }
 }
 
 /** The head a pinned run was started at, or null for an unpinned run. Definition and run must agree. */
@@ -1875,7 +1896,8 @@ export function pinnedRunSourceHead(definition: unknown, state: FlowRunState): s
 /**
  * Gate-evaluation half of the pin. For a run carrying `params.source_head`: the trusted HEAD must
  * still be that commit, and every non-failing claim that carries a Git workspace snapshot must
- * have been observed in a clean worktree at that commit. The second clause covers claims that
+ * have been observed in a clean worktree at that commit, and one that carries no snapshot at all is
+ * refused (acceptance criteria excepted, see below). The second clause covers claims that
  * no command backs: `assertCurrentGateClaimFreshness` lets those through on a matching Flow head
  * alone, without consulting their snapshot. Failing claims stay recordable: a defect blocks the
  * run wherever it was observed.
@@ -1898,10 +1920,15 @@ function assertPinnedSourceHead(claims: AnyRecord[], state: FlowRunState, projec
   }
   for (const claim of claims) {
     if (claim.value === "fail" || claim.status === "disputed") continue;
+    const claimId = typeof claim.id === "string" ? claim.id : "<unknown>";
     const snapshot = gateClaimWorkspaceSnapshot(claim);
-    if (snapshot === null) continue;
+    if (snapshot === null) {
+      // An acceptance criterion carries no snapshot of its own: the writer produces it only with a
+      // passing command-backed tests-evidence claim, which this loop checks and the gate requires.
+      if (isRecord(claim.metadata) && claim.metadata.origin === "acceptance") continue;
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot", `claim '${claimId}' carries no Git workspace snapshot: the writer could not capture the worktree when it was recorded (for example an assume-unchanged or skip-worktree index entry). This run accepts only evidence observed in a clean, ordinary worktree at its pinned source head ${sourceHead}; restore one and re-record it.`);
+    }
     if (snapshot.head_sha !== sourceHead || snapshot.worktree_clean !== true) {
-      const claimId = typeof claim.id === "string" ? claim.id : "<unknown>";
       const observed = `${String(snapshot.head_sha)}${snapshot.worktree_clean === true ? "" : " in a dirty worktree"}`;
       throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot", `claim '${claimId}' was observed at ${observed}; this run accepts only evidence observed in a clean worktree at its pinned source head ${sourceHead}. Clean the worktree and re-record it.`);
     }

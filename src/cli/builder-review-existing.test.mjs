@@ -24,9 +24,11 @@ import { spawnSync } from "node:child_process";
 import { flowAdmissionRefusal } from "../../build/src/lib/flow-admission.js";
 import { canonicalRunFlowIds, isCanonicalRunFlowId } from "../../build/src/builder-flow-run-adapter.js";
 import { resolveEffectiveFlowDefinition } from "../../build/src/lib/flow-resolver.js";
-import { definitionPinsSourceHead, pinnedRunSourceHead, startBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
+import { acceptException } from "@kontourai/flow";
+import { definitionPinsSourceHead, pinnedRunSourceHead, startBuilderFlowSession, syncBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
 import { main as mergeChangeMain } from "../../build/src/cli/merge-change.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+import { createRequire } from "node:module";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -171,7 +173,8 @@ test("the definition reviews an existing change: no execute step, verify identic
   assert.deepEqual(flow.source_binding, { head: "pinned-at-start" });
   assert.deepEqual(flow.steps.map((step) => step.id), ["pull-work", "existing-change", "verify", "done"]);
   assert.deepEqual(Object.keys(flow.gates).sort(), ["existing-change-gate", "pull-work-gate", "verify-gate"]);
-  // Selection and verification are the control's own gates, so this route is not a weaker review.
+  // Selection and verification reuse the control's own gates. The route omits merge-ready-gate
+  // and the publish-learn closeout, so it is a narrower route than builder.build, not the same one.
   assert.deepEqual(flow.gates["pull-work-gate"], build.gates["pull-work-gate"]);
   assert.deepEqual(flow.gates["verify-gate"].expects, build.gates["verify-gate"].expects);
   // Defects block: only the evidence-refresh routes survive, and no route reaches an implementation step.
@@ -252,6 +255,20 @@ test("start refuses a missing, malformed, non-HEAD, or dirty-tree source head be
   assert.match(result.output, /has uncommitted or untracked changes/);
   assertNoRunCreated(fx, "untracked file");
   fs.rmSync(path.join(fx.project, "scratch.txt"));
+  // The refusal names the dirty paths, including the .kontourai/.gitignore that init writes when
+  // it was never committed.
+  fs.writeFileSync(path.join(fx.project, ".gitignore"), "");
+  git(fx.project, ["commit", "-qam", "stop ignoring .kontourai at the root"]);
+  fs.writeFileSync(path.join(fx.project, ".kontourai", ".gitignore"), "*\n!.gitignore\n");
+  const unpinnedHead = git(fx.project, ["rev-parse", "HEAD"]);
+  result = start(fx, unpinnedHead);
+  assert.notEqual(result.status, 0);
+  assert.match(result.output, /has uncommitted or untracked changes \(\.kontourai\/\.gitignore\)/);
+  assert.match(result.output, /An untracked \.kontourai\/\.gitignore \(written by flow-agents init\) counts too: commit it\./);
+  assertNoRunCreated(fx, "untracked .kontourai/.gitignore");
+  git(fx.project, ["add", ".kontourai/.gitignore"]);
+  git(fx.project, ["commit", "-qm", "track .kontourai/.gitignore"]);
+  fx.head = git(fx.project, ["rev-parse", "HEAD"]);
 
   // DISCRIMINATOR: the same fixture starts once the head is exact and the tree clean.
   assertOk(start(fx), "exact clean start");
@@ -263,6 +280,15 @@ test("start refuses a missing, malformed, non-HEAD, or dirty-tree source head be
 
 test("a flow without the pin refuses --source-head rather than ignoring it", () => {
   const fx = makeExistingChange(12);
+  // A non-canonical artifact root gets the canonical-root refusal, not a misleading Git error.
+  const customRoot = path.join(fx.project, "custom-root");
+  fs.mkdirSync(path.join(customRoot, fx.slug), { recursive: true });
+  fs.writeFileSync(path.join(customRoot, fx.slug, `${fx.slug}--pull-work.md`), `Selected Work Item: ${fx.workItem}\n`);
+  const custom = workflow(fx, ["start", "--artifact-root", customRoot, "--flow", FLOW, "--work-item", fx.workItem,
+    "--assignment-provider", "local-file", "--source-head", fx.head]);
+  assert.notEqual(custom.status, 0);
+  assert.match(custom.output, /requires --artifact-root <project>\/\.kontourai\/flow-agents/);
+  assert.equal(fs.existsSync(fx.runDir), false);
   for (const extra of [["--source-head", fx.head], ["--source-head"]]) {
     const result = workflow(fx, [...startArgs(fx, "builder.build"), ...extra]);
     assert.notEqual(result.status, 0);
@@ -353,6 +379,28 @@ test("a completed run records the existing change truthfully and publishes at th
     "workflow.acceptance.criterion", "workflow.critique.review",
   ]);
 
+  // NO LEARNING NAG: the flow declares no learn step, and the Stop hook does not ask for one.
+  // Completion retires the actor's workflow binding (reason flow_<status>, flow-name agnostic),
+  // so the goal-fit analysis scopes to nothing; the learning-outstanding rule never sees it.
+  const require = createRequire(import.meta.url);
+  const { resolveHookWorkflowScope } = require("../../scripts/hooks/lib/hook-workflow-scope.js");
+  const stopHook = require("../../scripts/hooks/stop-goal-fit.js");
+  const hookEnv = { ...process.env, FLOW_AGENTS_ACTOR: HOLDER };
+  const scope = resolveHookWorkflowScope(fx.project, hookEnv);
+  assert.equal(scope.status, "retired", `a completed run's binding must be retired: ${JSON.stringify(scope).slice(0, 300)}`);
+  assert.equal(scope.pointer.binding_reason, "flow_completed");
+  const previousHookActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = HOLDER;
+  let stopAnalysis;
+  try {
+    stopAnalysis = await stopHook.analyze(fx.project);
+  } finally {
+    if (previousHookActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousHookActor;
+  }
+  assert.equal(stopAnalysis.blocking, false);
+  assert.deepEqual(stopAnalysis.warnings.filter((warning) => /learning outstanding/.test(warning)), []);
+
   // A completed run cannot be resumed onto another head either.
   fs.writeFileSync(path.join(fx.project, "feature.txt"), "post-completion revision\n");
   git(fx.project, ["commit", "-qam", "post-completion revision"]);
@@ -438,6 +486,50 @@ test("a non-command pre-existing claim observed in a dirty tree cannot satisfy i
   fs.rmSync(path.join(fx.project, "scratch.txt"));
   assertOk(recordPreExisting(fx), "clean pre-existing-implementation");
   assert.equal(runState(fx).current_step, "verify");
+});
+
+test("a passing claim the writer could not snapshot cannot satisfy a pinned gate", () => {
+  const fx = makeExistingChange(22);
+  assertOk(start(fx), "start");
+  // An assume-unchanged entry hides the edit from Git, and the snapshot writer refuses a
+  // non-ordinary index, so the claim is recorded with NO workspace snapshot at all.
+  git(fx.project, ["update-index", "--assume-unchanged", "feature.txt"]);
+  fs.writeFileSync(path.join(fx.project, "feature.txt"), "edited behind an assume-unchanged entry\n");
+  const hidden = recordPreExisting(fx);
+  assert.notEqual(hidden.status, 0, `a snapshot-less claim must be refused:\n${hidden.output}`);
+  assert.match(hidden.output, /carries no Git workspace snapshot: the writer could not capture the worktree when it was recorded/);
+  assert.equal(runState(fx).current_step, "existing-change");
+  // DISCRIMINATOR: an ordinary index at the pinned head lets the same claim through.
+  git(fx.project, ["update-index", "--no-assume-unchanged", "feature.txt"]);
+  git(fx.project, ["checkout", "--", "feature.txt"]);
+  assertOk(recordPreExisting(fx), "ordinary pre-existing-implementation");
+  assert.equal(runState(fx).current_step, "verify");
+});
+
+test("a gate waived by an accepted exception still advances only at the pinned head", async () => {
+  const previousActor = process.env.FLOW_AGENTS_ACTOR;
+  process.env.FLOW_AGENTS_ACTOR = HOLDER;
+  try {
+    for (const moveHead of [true, false]) {
+      const fx = makeExistingChange(moveHead ? 23 : 24);
+      assertOk(start(fx), "start");
+      await acceptException(fx.slug, { cwd: fx.project, gate: "existing-change-gate", reason: "fixture waiver", authority: "test-reviewer" });
+      if (moveHead) {
+        fs.writeFileSync(path.join(fx.project, "feature.txt"), "edited after the waiver\n");
+        git(fx.project, ["commit", "-qam", "edited after the waiver"]);
+        await assert.rejects(() => syncBuilderFlowSession({ sessionDir: fx.sessionDir }),
+          new RegExp(`pinned to source head ${fx.head}, but the checked-out HEAD is`));
+        assert.equal(runState(fx).current_step, "existing-change", "the waived gate must not advance at another head");
+      } else {
+        // DISCRIMINATOR: the waiver itself is honoured at the pinned head.
+        await syncBuilderFlowSession({ sessionDir: fx.sessionDir });
+        assert.equal(runState(fx).current_step, "verify");
+      }
+    }
+  } finally {
+    if (previousActor === undefined) delete process.env.FLOW_AGENTS_ACTOR;
+    else process.env.FLOW_AGENTS_ACTOR = previousActor;
+  }
 });
 
 // ─── Reviewer identity, tests, and concurrency ───────────────────────────────────────────────

@@ -85,15 +85,20 @@ Run `review-work` and `verify-work` as for `builder.build` `verify`:
   changed files as `--artifact-ref` values.
 - `tests-evidence` must be command-backed (`--command`) and observed in the
   clean worktree at the pinned head.
+- This flow creates no `<slug>--plan-work.md` or `<slug>--deliver.md`. Where the
+  `review-work` and `verify-work` examples cite those files, cite
+  `<slug>--existing-change.md` instead; a reference to a missing file is
+  refused.
 
 ## Defects And New Heads
 
 Defects block the run. There is no in-run repair, no `execute` step, and no
 `implementation_defect`, `plan_gap`, or `decision_gap` route back. Fix the
 change through `builder.build`, or push a new commit and review it in a new
-run. A new head needs a new run: a new Work Item, or archive this run first.
-Resuming with a different `--source-head` is refused, including for a completed
-run.
+run. A new head needs a new run under a new provider Work Item. The run is
+keyed by the Work Item and archiving keeps its canonical record, so restarting
+the same Work Item resumes the old run. Resuming with a different
+`--source-head` is refused, including for a completed run.
 
 ## Consumers And Gaps
 
@@ -105,4 +110,8 @@ run.
 - That the reviewer is not the change's author on the provider (for example
   the GitHub pull request author) is `NOT_VERIFIED`. The runtime enforces only
   that the reviewer differs from the assignment holder.
+- That `--source-head` is the change's actual head on the provider is
+  `NOT_VERIFIED`; nothing compares it with the pull request. The provider URL,
+  base, and head in `<slug>--existing-change.md` are written by the caller and
+  are `NOT_VERIFIED`.
 - `acceptance.json` is not anchored to a planning step in this flow.

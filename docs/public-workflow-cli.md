@@ -450,7 +450,9 @@ flow_agents workflow evidence \
 `verify` has the same expectations as `builder.build`: a clean critique from a reviewer whose
 runtime identity differs from the assignment holder, acceptance criteria, command-backed
 `tests-evidence` such as `--command "npm test"` with matching `--criterion-json`, and applicable
-policy compliance. Passing the verify gate completes the run.
+policy compliance. This flow writes no `<slug>--plan-work.md` or `<slug>--deliver.md` execution
+report, so artifact references cite `<slug>--existing-change.md` instead. Passing the verify gate
+completes the run.
 
 The run fails closed when:
 
@@ -459,11 +461,14 @@ The run fails closed when:
 - a claim carrying a Git snapshot was observed at another commit or in a dirty worktree (a
   failing claim stays recordable, so a defect still blocks the run);
 - `start` is re-run with a different `--source-head`, for an active or a completed run;
+- a non-failing claim carries no Git snapshot, because the writer could not capture the worktree;
 - the critique comes from the assignment holder, or `tests-evidence` names a vacuous command;
 - the same Work Item already has a `builder.build` run, or the reverse.
 
-A new head needs a new run: create a new Work Item, or archive this run and start again. This is
-deliberate friction in this release; there are no per-head runs within one Work Item.
+A new head needs a new run under a new provider Work Item. The run is keyed by the Work Item, and
+archiving a run keeps its canonical record, so starting the same Work Item again resumes the old
+run and refuses the new head. This is deliberate friction in this release; there are no per-head
+runs within one Work Item.
 
 `workflow publish-delivery` accepts a completed run and seals its checkpoint at the pinned head.
 `merge-change` refuses these runs before any authorization or provider call, because they have
@@ -475,6 +480,9 @@ Not verified by this route:
 - The runtime requires the reviewer to differ from the assignment holder, and the skill asks the
   assignment holder to be the change's owner. That the reviewer is not the change's author on the
   provider, for example the GitHub pull request author, is `NOT_VERIFIED`.
+- Nothing checks that `--source-head` is the change's actual head on the provider, for example the
+  pull request's current head commit. The provider URL, base, and head in
+  `<slug>--existing-change.md` are written by the caller. Both are `NOT_VERIFIED`.
 - `acceptance.json` is not anchored to a planning step, the same as in `builder.build-lean`.
 
 ## Resolving repaired critique history

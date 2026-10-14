@@ -26,7 +26,7 @@ when only that informational appendix changes.
 | Context | Binding | Flow expectations |
 | --- | --- | --- |
 | Active Builder run | `builder.build` at `verify` | `acceptance-criteria` and `tests-evidence`; `policy-compliance` only when applicable. `review-work` separately produces `clean-critique`. |
-| Active existing-change run | `builder.review-existing` at `verify` | The same expectations, observed in a clean worktree at the run's pinned source head. |
+| Active existing-change run | `builder.review-existing` at `verify` | The same expectations, observed in a clean worktree at the run's pinned source head. That run has no `<slug>--plan-work.md`; cite `<slug>--existing-change.md` in evidence refs instead. |
 | Standalone invocation | No Flow binding | No workflow mutation. |
 
 For an active run, verify the binding first:

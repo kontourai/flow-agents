@@ -1509,8 +1509,12 @@ async function start(argv: string[]): Promise<number> {
   // non-HEAD, or dirty-tree head here, before any session artifact is written. The shared runtime
   // re-applies the same rule (and the resume comparison) when the run starts, for every door.
   // A bare `--source-head` becomes "" so it is refused rather than ignored.
+  // A non-canonical --artifact-root has no project root to inspect; ensure-session refuses it with
+  // the canonical-root error before any run starts, so the preflight defers to that refusal.
   const sourceHead = parsed.flags["source-head"] === undefined ? undefined : flagString(parsed.flags, "source-head", "");
-  assertSourceHeadStartable(resolveEffectiveFlowDefinition(flow, findRepoRootFromDir(artifactRoot)), flow, sourceHead, path.dirname(path.dirname(artifactRoot)));
+  if (path.basename(artifactRoot) === "flow-agents" && path.basename(path.dirname(artifactRoot)) === ".kontourai") {
+    assertSourceHeadStartable(resolveEffectiveFlowDefinition(flow, findRepoRootFromDir(artifactRoot)), flow, sourceHead, path.dirname(path.dirname(artifactRoot)));
+  }
   const existingSlug = taskSlug ?? (workItem ? workItemSlug(workItem) : null);
   if (existingSlug && fs.existsSync(path.join(artifactRoot, existingSlug, "state.json"))) {
     try {
