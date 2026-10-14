@@ -23,7 +23,7 @@ only while the active gate definition declares it, and status/sync do not backtr
 | --- | --- | --- |
 | Entrypoint | `builder-shape`, `deliver` | User selects the Builder product workflow; the skill coordinates but owns no step evidence. |
 | Profile | `fix-bug`, `tdd-workflow` | Explicit workflow variant; never selected as an automatic step action. |
-| Step producer | `idea-to-backlog`, `pull-work`, `pickup-probe`, `plan-work`, `execute-plan`, `review-work`, `verify-work`, `evidence-gate`, `release-readiness`, `learning-review` | Activated only for its declared Flow step; publishes only its declared expectations. |
+| Step producer | `idea-to-backlog`, `pull-work`, `pickup-probe`, `plan-work`, `execute-plan`, `review-existing`, `review-work`, `verify-work`, `evidence-gate`, `release-readiness`, `learning-review` | Activated only for its declared Flow step; publishes only its declared expectations. |
 | Shared primitive | `design-probe` | Reused interview behavior with no Builder expectation ownership. |
 | Extension | `continue-work`, `gate-review` | Explicit continuation or retrospective operation outside automatic step actions. |
 
@@ -46,6 +46,7 @@ arbitrary reference formats.
 - `pickup-probe`: Builder Kit specialization of `design-probe` for selected work items; records scope, provider state, WIP/conflict scans, risks, decisions, unresolved questions, accepted gaps, and planning readiness.
 - `plan-work` / `execute-plan` / `deliver`: Definition Of Done, execution orchestration, and local delivery closure.
 - `continue-work`: advance a multi-slice work item to its next increment via an ephemeral fresh-context handoff; derives the next undone slice from the Work Item plus completed changes, then routes it **through** `pull-work` + `pickup-probe` before handing off fresh per ADR 0013.
+- `review-existing`: the `existing-change` step of `builder.review-existing`; records a change that already existed at the run's pinned head as `pre-existing-implementation` in `<slug>--existing-change.md`, with no implementation claim. See [Review and verify an existing change](public-workflow-cli.md#review-and-verify-an-existing-change).
 - `review-work`: report-only critique for quality, security triggers, architecture fit, and standards findings.
 - `verify-work`: behavior evidence mapped to acceptance criteria and Goal Fit.
 - `evidence-gate`: trust assessment for completed work: acceptance evidence, integrity checks, CI confidence, and next step.
@@ -172,6 +173,7 @@ Each workflow phase ends with an explicit gate and durable artifact:
 - `idea-to-backlog` owns `<slug>--idea-to-backlog.md` and the `builder.shape` slices in `trust.bundle`.
 - `pull-work` and `pickup-probe` own the selected-work and Probe sections of `<slug>--pull-work.md` plus their `trust.bundle` slices.
 - `plan-work` owns `<slug>--plan-work.md`, `acceptance.json`, `handoff.json`, and its `trust.bundle` plan slice; `execute-plan` owns the session execution report and its scope slice. Flow Agents owns workflow and continuation control state.
+- `review-existing` owns `<slug>--existing-change.md` and the `pre-existing-implementation` slice for `builder.review-existing`.
 - `review-work` records report-only critique through public `workflow critique` and owns `clean-critique`.
 - `verify-work` records command-backed `acceptance-criteria`, `tests-evidence`, and applicable `policy-compliance` evidence in `trust.bundle`.
 - `evidence-gate` owns `<slug>--evidence-gate.md`; `release-readiness` owns `release.json`; `learning-review` owns `learning.json`; each also records its declared `trust.bundle` slice.

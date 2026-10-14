@@ -70,13 +70,14 @@ test("Builder flow step actions are structured, complete, and operation-aware", 
   const result = parseKitFlowStepActions(manifest, "kits/builder/kit.json");
 
   assert.deepEqual(result.errors, []);
-  // Three flows declare step actions: builder.build (10), its reduced-gate ablation variant
-  // builder.build-lean (10), and builder.shape (4). Counted per flow rather than in total, so a
-  // row moving between flows cannot keep the sum right while changing what each flow declares.
-  assert.equal(result.entries.length, 24);
+  // Four flows declare step actions: builder.build (10), its reduced-gate ablation variant
+  // builder.build-lean (10), the existing-change review builder.review-existing (4, #1415), and
+  // builder.shape (4). Counted per flow rather than in total, so a row moving between flows cannot
+  // keep the sum right while changing what each flow declares.
+  assert.equal(result.entries.length, 28);
   assert.deepEqual(
     Object.fromEntries([...new Set(result.entries.map((entry) => entry.flow_id))].sort().map((flowId) => [flowId, result.entries.filter((entry) => entry.flow_id === flowId).length])),
-    { "builder.build": 10, "builder.build-lean": 10, "builder.shape": 4 },
+    { "builder.build": 10, "builder.build-lean": 10, "builder.review-existing": 4, "builder.shape": 4 },
   );
   const action = (flowId, stepId) => result.entries.find((entry) => entry.flow_id === flowId && entry.step_id === stepId);
   assert.deepEqual(action("builder.build", "plan")?.skills, ["plan-work"]);
@@ -86,7 +87,10 @@ test("Builder flow step actions are structured, complete, and operation-aware", 
   assert.deepEqual(action("builder.build-lean", "plan")?.expectation_ids, []);
   assert.deepEqual(action("builder.build-lean", "design-probe")?.skills, []);
   assert.deepEqual(action("builder.build-lean", "design-probe")?.expectation_ids, []);
+  // #1415: the existing-change review adds no implementation step, so this list is unchanged.
   assert.deepEqual(result.entries.filter((entry) => entry.implementation_allowed).map((entry) => `${entry.flow_id}/${entry.step_id}`), ["builder.build/execute", "builder.build-lean/execute"]);
+  assert.deepEqual(action("builder.review-existing", "existing-change")?.skills, ["review-existing"]);
+  assert.deepEqual(action("builder.review-existing", "existing-change")?.expectation_ids, ["pre-existing-implementation"]);
   assert.equal(action("builder.build", "verify")?.expectation_bindings.find((binding) => binding.expectation_id === "clean-critique")?.interface, "workflow.critique");
   assert.deepEqual(action("builder.build", "pr-open"), {
     flow_id: "builder.build",
@@ -355,11 +359,11 @@ test("Builder skill roles form one complete role and producer matrix", async () 
   const result = parseKitSkillRoles(manifest, "kits/builder/kit.json");
 
   assert.deepEqual(result.errors, []);
-  assert.equal(result.entries.length, 17);
+  assert.equal(result.entries.length, 18);
   assert.deepEqual(Object.fromEntries([...new Set(result.entries.map((entry) => entry.role))].map((role) => [role, result.entries.filter((entry) => entry.role === role).length])), {
     entrypoint: 2,
     profile: 2,
-    step: 10,
+    step: 11,
     "shared-primitive": 1,
     extension: 2,
   });
@@ -501,10 +505,11 @@ test("mixed skill and operation ownership follows each expectation binding inter
   fs.cpSync("kits/builder", kit, { recursive: true });
   const manifestFile = path.join(kit, "kit.json");
   const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
-  // The verify producer role is shared by builder.build and its reduced-gate variant, so moving
-  // policy-compliance off that role moves it in BOTH flows; the action rebinding has to follow in
-  // both or the variant is left with an expectation no producer owns.
-  const policyBindings = ["builder.build", "builder.build-lean"].map((flowId) => {
+  // The verify producer role is shared by builder.build, its reduced-gate variant, and the
+  // existing-change review (#1415), so moving policy-compliance off that role moves it in EVERY
+  // such flow; the action rebinding has to follow in each or one is left with an expectation no
+  // producer owns.
+  const policyBindings = ["builder.build", "builder.build-lean", "builder.review-existing"].map((flowId) => {
     const entry = manifest.flow_step_actions.find((candidate) => candidate.flow_id === flowId && candidate.step_id === "verify");
     entry.operations = ["publish-change"];
     const policyBinding = entry.expectation_bindings.find((candidate) => candidate.expectation_id === "policy-compliance");

@@ -155,9 +155,10 @@ test("the derived canonical run set is exactly what the declaring kit binds", ()
   // VARIANT runnable with no core change, and the builder kit now ships one: `builder.build-lean`
   // (#1280's ablation). Its presence here is the proof the set is derived rather than enumerated —
   // no core file was edited to make it runnable — and the original pair is still exactly as
-  // runnable as before, because nothing about it is special-cased.
-  assert.deepEqual(canonicalRunFlowIds(), ["builder.build", "builder.build-lean", "builder.shape"]);
-  for (const flowId of ["builder.build", "builder.build-lean", "builder.shape"]) {
+  // runnable as before, because nothing about it is special-cased. `builder.review-existing`
+  // (#1415) joined the same way: a kit declaration with complete producer bindings.
+  assert.deepEqual(canonicalRunFlowIds(), ["builder.build", "builder.build-lean", "builder.review-existing", "builder.shape"]);
+  for (const flowId of ["builder.build", "builder.build-lean", "builder.review-existing", "builder.shape"]) {
     assert.equal(isCanonicalRunFlowId(flowId), true, `${flowId} must be canonically runnable`);
     assert.equal(canonicalRunFlowRefusal(flowId), null, `${flowId} must have no run refusal`);
   }

@@ -1,0 +1,123 @@
+{
+  "id": "builder.review-existing",
+  "version": "1.0",
+  "description": "EXISTING-CHANGE REVIEW: no implementation step; the head is pinned at start. Reviews and verifies a change that already exists at an exact Git commit (for example an open pull request) without claiming that this run implemented it. workflow start requires --source-head <40-hex commit> equal to the clean checkout HEAD; the commit is persisted in the run and every gate re-checks it, so a new head needs a new run. There is no execute step and no in-run repair: a failing verify claim routes back to verify (at most three route-backs; a fourth failing visit blocks), and a code fix is a new head that needs a new run. It has no pr-open, merge-ready-ci, or learn step, so merge-change refuses its runs.",
+  "source_binding": {
+    "head": "pinned-at-start"
+  },
+  "phase_map": {
+    "pickup": "pull-work",
+    "verification": "verify",
+    "evidence": "verify"
+  },
+  "steps": [
+    { "id": "pull-work", "next": "existing-change" },
+    { "id": "existing-change", "next": "verify" },
+    { "id": "verify", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "pull-work-gate": {
+      "step": "pull-work",
+      "expects": [
+        {
+          "id": "selected-work",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A ready work item is selected with scope and acceptance context.",
+          "bundle_claim": {
+            "claimType": "builder.pull-work.selected",
+            "subjectType": "work-item",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ]
+    },
+    "existing-change-gate": {
+      "step": "existing-change",
+      "expects": [
+        {
+          "id": "pre-existing-implementation",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The change under review already existed before this run: its provider record (for example the pull request URL), base, exact head commit, and changed files are recorded in <slug>--existing-change.md. This run makes no implementation claim.",
+          "bundle_claim": {
+            "claimType": "builder.existing-change.pre-existing-implementation",
+            "subjectType": "change",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ]
+    },
+    "verify-gate": {
+      "step": "verify",
+      "on_route_back": {
+        "missing_evidence": "verify",
+        "default": "verify"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
+      "expects": [
+        {
+          "id": "clean-critique",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A distinct reviewer recorded a current clean critique of the delivered change.",
+          "bundle_claim": {
+            "claimType": "workflow.critique.review",
+            "subjectType": "workflow-critique",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        },
+        {
+          "id": "acceptance-criteria",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The selected Work Item acceptance criteria have verified evidence.",
+          "bundle_claim": {
+            "claimType": "workflow.acceptance.criterion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        },
+        {
+          "id": "tests-evidence",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Relevant tests or checks have evidence tied to the implemented change.",
+          "bundle_claim": {
+            "claimType": "builder.verify.tests",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        },
+        {
+          "id": "policy-compliance",
+          "kind": "trust.bundle",
+          "required": false,
+          "description": "Policy compliance evidence is attached when policy gates apply.",
+          "explore_hint": "Use as advisory evidence for scope, security, privacy, release, or repository policy checks.",
+          "bundle_claim": {
+            "claimType": "builder.verify.policy-compliance",
+            "subjectType": "artifact",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -123,6 +123,7 @@ Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validatio
 | github-cli | skills/github-cli/SKILL.md | Interact with GitHub via gh CLI — PRs, issues, repos, releases, workflows, gists. |
 | knowledge-capture | kits/knowledge/skills/knowledge-capture/SKILL.md | Save durable knowledge, lightweight pointers, user corrections, decisions, lessons, relationship context, or source references into the knowledge base. Use when the user says save, remember, capture, file this, bookmark context, or when... |
 | pickup-probe | kits/builder/skills/pickup-probe/SKILL.md | Provider-grounded pickup probe used at the Builder design-probe step before planning. |
+| review-existing | kits/builder/skills/review-existing/SKILL.md | Record an existing exact-head change as pre-existing implementation for a builder.review-existing run; no implementation claim. |
 | search-first | skills/search-first/SKILL.md | Research-before-coding workflow. Search for existing tools, libraries, and patterns before writing custom code. |
 
 ## Agents

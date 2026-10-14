@@ -548,6 +548,15 @@ async function loadBoundKitFlowDefinition(binding: KitFlowBinding): Promise<{ id
   return definition;
 }
 
+/**
+ * The exact validated definition `startBuilderFlowRun` would pin for `flowId`, resolved through
+ * the same declaring-kit binding, so a caller can apply a definition-declared start precondition
+ * (#1415: `source_binding`) BEFORE a run exists rather than after one was created.
+ */
+export async function loadBoundBuilderFlowDefinition(flowId: BuilderFlowId, cwd: string): Promise<{ id: string; version: string }> {
+  return loadBoundKitFlowDefinition(requireKitFlowBinding(flowId, cwd));
+}
+
 async function loadShippedBuilderFlowDefinitionForRun(runId: string, actualDefinition: { id: string; version: string }, cwd: string): Promise<{ id: string; version: string }> {
   const flowId = actualDefinition.id;
   if (!isCanonicalRunFlowId(flowId, cwd)) {
