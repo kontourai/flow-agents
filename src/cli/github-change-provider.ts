@@ -770,13 +770,9 @@ async function adoptExistingGithubChange(request: ChangeProviderRequest, depende
   if (headRepo.full_name !== repoSlug(request)) {
     throw new ChangeProviderError("provider_observation_mismatch", "the pull request head branch is not in the configured repository; an existing-change run adopts only a same-repository pull request");
   }
-  if (raw.merged === true || raw.state !== "open") {
-    throw new ChangeProviderError("provider_observation_mismatch", "the pull request for the pinned head ref is closed or merged; an existing-change run adopts only an open pull request");
-  }
+  // The fresh record's state, refs, and head are bound by buildAdoptedChangeProviderResult below,
+  // which refuses anything but an open change at exactly the requested refs and head.
   const record = parseProviderRecord(raw, request);
-  if (providerSha(record.headRefOid, "provider record head SHA") !== request.head_sha) {
-    throw new ChangeProviderError("provider_observation_mismatch", "the pull request head has moved off the pinned source head");
-  }
   const finalCapability = await checkGithubCapability({
     role: "ChangeProvider", kind: "github", repository: request.repository,
     capabilities: ["change.create", "change.observe"], executor: "gh-cli",

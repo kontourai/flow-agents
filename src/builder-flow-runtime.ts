@@ -1428,19 +1428,18 @@ function assertCleanPinnedWorkspace(projectRoot: string, sourceHead: string, def
 }
 
 /**
- * Commit-phase half of adoption, run under the subject lock right before the gate advances. For a
- * pinned run it re-proves the head and a clean worktree (returning that worktree's snapshot for the
- * claim) and requires the adopted pull request to be the one the run's pre-existing-implementation
- * claim names. Returns null for every other run.
+ * Commit-phase half of adoption, run under the subject lock right before the gate advances, after
+ * currentPublishChangeAction has re-derived the issued action (which re-proves HEAD and a clean
+ * worktree at the pinned head). For a pinned run it requires the adopted pull request to be the one
+ * the run's pre-existing-implementation claim names, and returns the clean worktree's snapshot for
+ * the adoption claim. The provider and the authenticated observation already bind the change to
+ * the action's head, which adoptedChangeIntent required to be the pinned head. Returns null for
+ * every other run.
  */
 async function pinnedPublishChangeCommitCheck(context: SessionContext, observation: AuthenticatedPublishChangeObservation): Promise<AnyRecord | null> {
   const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   const sourceHead = pinnedRunSourceHead(run.startDefinition, run.state);
   if (sourceHead === null) return null;
-  if (observation.change_ref.state !== "open" || observation.change_ref.head_sha !== sourceHead) {
-    throw new BuilderBuildRunInputError("publish-change.observation", `${run.definitionId} adopts only an open pull request whose head is its pinned source head ${sourceHead}`);
-  }
-  assertPinnedSourceHead([], run.state, context.projectRoot);
   const workspace = assertCleanPinnedWorkspace(context.projectRoot, sourceHead, run.definitionId);
   const named = preExistingChangeProviderUrls(run);
   const adopted = normalizedUrl(observation.change_ref.url);
