@@ -120,17 +120,23 @@ remain accepted. `--console-token-file` and `--console-tenant` can be used with
 any Console sink. Prefer `flow-agents init` for a prompted setup; use `--yes`
 with the same flags for CI/headless installs.
 
-The installed `telemetry.conf` is used only when no operator Console config
-exists. At runtime the hooks read exactly one file, in this order: the
-`TELEMETRY_CONFIG_FILE` environment variable, then
-`<workspace>/.kontourai/telemetry-console.conf`, then
-`~/.flow-agents/telemetry-console.conf`, then the installed `telemetry.conf`.
-The two `telemetry-console.conf` files count only when they are mode 600 and
-owned by the current user. When one of them sets a Console URL, telemetry and
-the economics and liveness relays go to that Console even if the workspace was
-installed with `--telemetry-sink local-files`. To keep one workspace local-only
-on a machine that has a user-global Console config, launch the agent host with
-`TELEMETRY_CONFIG_FILE=<workspace>/scripts/telemetry/telemetry.conf`.
+`local-files` writes no Console settings; the installed `telemetry.conf` simply
+has none. At runtime the telemetry scripts read exactly one config file:
+`TELEMETRY_CONFIG_FILE` if set; otherwise a trusted
+`.kontourai/telemetry-console.conf` under the install destination (the
+directory that contains `scripts/telemetry/`); otherwise a trusted
+`~/.flow-agents/telemetry-console.conf`; otherwise the installed
+`telemetry.conf`. Trusted means mode 600, owned by the current user, and not a
+symlink; an untrusted file is skipped with a warning. The chosen file replaces
+the installed `telemetry.conf` entirely. If it sets a Console URL, telemetry is
+mirrored to that Console even for a `local-files` install, the economics and
+liveness relays turn on unless that file sets `console_economics_relay=0` or
+`console_liveness_relay=0`, and receipt relay and board sync use the same
+Console. To keep one install local-only on a machine with a user-global Console
+config, launch the agent host with `TELEMETRY_CONFIG_FILE` pointing at a file
+with no Console keys, such as the installed `scripts/telemetry/telemetry.conf`,
+and with `CONSOLE_URL`, `CONSOLE_TELEMETRY_URL` and `FLOW_AGENTS_CONSOLE_URL`
+unset.
 
 Run `flow-agents telemetry-doctor --dest PATH --json --headless` to inspect an
 installed telemetry configuration. It reports active sinks, local JSONL paths,
