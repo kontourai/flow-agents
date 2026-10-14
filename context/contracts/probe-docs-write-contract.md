@@ -166,8 +166,8 @@ is still true and giving it a living home.
 ## Relationship To Other Contracts
 
 - **`context/contracts/decision-registry-contract.md`** is the normative
-  frontmatter/slug/tombstone/validation contract for every `docs/decisions/`
-  file, Probe-written or not. This contract only adds *when* and *in what
+  slug/supersession/tombstone contract for every `docs/decisions/` file,
+  Probe-written or not; it defers the record format to Corpus. This contract only adds *when* and *in what
   sequence* a Probe writes to that registry.
 - **`context/contracts/artifact-contract.md`** governs the Probe's session
   artifact itself (the thing this contract's transcript-provenance rule links
@@ -180,8 +180,7 @@ is still true and giving it a living home.
 
 - `npm run check:decisions` / `npm run gen:decisions-index` — the decision
   delta must pass the registry validator and keep the index current (wired into
-  the required `source-and-static` CI lane).
+  the required `source-and-static` CI lane). Corpus owns the validator,
+  the generator, and their regression tests.
 - `evals/static/test_workflow_skills.sh` — asserts `design-probe` and
   `pickup-probe` reference this contract and describe the two-delta behavior.
-- `evals/static/test_decisions.sh` — regression coverage for the validator and
-  generator this contract's decision deltas depend on.

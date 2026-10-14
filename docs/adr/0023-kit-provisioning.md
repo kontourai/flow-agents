@@ -2,6 +2,8 @@
 title: "ADR 0023: Declarative Kit Provisioning"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0023: Declarative Kit Provisioning
 
 **Date:** 2026-07-16

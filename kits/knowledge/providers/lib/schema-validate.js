@@ -6,8 +6,8 @@
  * additionalProperties:false, enum, const, items, minLength, minItems, pattern,
  * uniqueItems, anyOf, oneOf, integer, maxItems, and local `$ref` into `#/$defs/*`. It is intentionally NOT a general validator
  * — it exists so health reports and conformance tests can assert schema validity
- * without pulling an external dependency (the same zero-dep discipline the
- * decision-registry validator follows).
+ * without pulling an external dependency (the same zero-dep discipline as the
+ * promote sub-flow's decision-delta validator in promote/lib.js).
  *
  * @module providers/lib/schema-validate
  */
