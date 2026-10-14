@@ -605,5 +605,10 @@
     "workflow-eval-strategy.html": "docs/workflow-eval-strategy.md",
     "workflow-shared-contracts.html": "docs/workflow-shared-contracts.md",
     "workflow-usage-guide.html": "docs/workflow-usage-guide.md"
+  },
+  "decisions": {
+    "adr": {
+      "dir": "docs/adr"
+    }
   }
 }

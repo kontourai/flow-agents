@@ -9,6 +9,7 @@ This bundle was generated from the canonical source in this repo. Treat the repo
 - **Use the pinned Veritas CLI.** `.veritas/README.md` gives the exact package command for the `veritas readiness` gate named in the canonical governance block.
 - **Evidence hygiene:** issue/PR permalinks must pin a real commit SHA (`git rev-parse`, never typed by hand); claims about behavior need command/test evidence.
 - **Docs are published with docs-kit.** `corpus.json` lists the published docs and the MCP topics; `npm run docs:check` is the gate. When you change code that a document `covers`, update that document.
+- **Decisions** are one living record per subject in `docs/decisions/<slug>.md`, in the [Corpus decision-record format](https://github.com/kontourai/corpus/blob/main/docs/decisions.md); Flow Agents' conventions are in `context/contracts/decision-registry-contract.md`. Numbered ADRs in `docs/adr/` are frozen history; never add one. After editing a record, run `npm run gen:decisions-index`. `npm run check:decisions` validates the records and the index, and refuses ADR files added since `$DECISIONS_BASE` (default `origin/main`; CI sets it to the pull request base).
 - `.kontourai/flow-agents/` runtime artifacts stay untracked; durable records belong in docs/, issues, `.flow-agents/` config/state when explicitly owned by Flow Agents, or tracked source.
 
 ### Operating discipline (working agreements)

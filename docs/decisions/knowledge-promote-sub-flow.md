@@ -25,8 +25,8 @@ flow and the first "flow within a flow".
 
 - **Four steps.** *ingest* reads a completed session dir (read-only) for its
   plan/evidence/critique/learnings/transcripts; *distill* produces DRAFT deltas —
-  decision-registry topic files (validated against
-  `schemas/decision-record.schema.json` before proposing), CONTEXT.md vocabulary
+  decision-registry topic files (validated against the
+  [Corpus decision-record format](https://github.com/kontourai/corpus/blob/main/docs/decisions.md) before proposing), CONTEXT.md vocabulary
   additions, and `docs/learnings` entries; *link* attaches provenance (PR, merge
   SHA, session-archive path, touched topics) as `evidence[]` refs; *health* runs
   contradiction detection over the topic files.
