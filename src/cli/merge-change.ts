@@ -314,11 +314,36 @@ export function evidenceRefreshRoutesSatisfied(gate: Record<string, unknown>): b
     && isDeepStrictEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" });
 }
 
-function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, definitions: CanonicalRunDefinitions): void {
+/**
+ * The single gate the run's effective definition declares as requiring CURRENT verification: the
+ * gate merge-change requires evidence-refresh control on.
+ *
+ * This was the composed gate-id literal `builder.publish-learn:merge-ready-ci-gate`, which refused
+ * every flow whose kit spells that gate differently. The lifecycle-authority coordinator already
+ * derives the same gate from the same declaration (`freshnessTurnstileGateEntry`, #1336); this is
+ * the unprivileged side's copy of that rule, kept in step with it by a conformance test because the
+ * coordinator is a separate authority boundary that src/ does not import. Null unless exactly one
+ * gate declares it, so an ambiguous definition refuses rather than picks.
+ */
+export function freshnessTurnstileGate(definition: Record<string, unknown>): { id: string; gate: Record<string, unknown> } | null {
+  const gates = definition.gates;
+  if (!gates || typeof gates !== "object" || Array.isArray(gates)) return null;
+  const matches = Object.entries(gates as Record<string, unknown>).filter(([, gate]) =>
+    gate !== null && typeof gate === "object" && !Array.isArray(gate)
+    && (gate as Record<string, unknown>).requires_current_verification === true);
+  return matches.length === 1 ? { id: matches[0][0], gate: matches[0][1] as Record<string, unknown> } : null;
+}
+
+/** Exported for tests: the evidence-refresh control merge-change applies to a completed run. */
+export function assertEvidenceRefreshControl(inspected: Pick<Awaited<ReturnType<typeof inspectBuilderFlowSession>>, "run">, definitions: Pick<CanonicalRunDefinitions, "effectiveDefinition">): void {
   const manifestFile = path.join(inspected.run.dir, "evidence", "manifest.json");
   const definition = definitions.effectiveDefinition;
-  const gates = record(definition.gates, "canonical Flow definition gates");
-  const gate = record(gates["builder.publish-learn:merge-ready-ci-gate"], "canonical merge-ready-ci gate");
+  record(definition.gates, "canonical Flow definition gates");
+  const turnstile = freshnessTurnstileGate(definition);
+  if (!turnstile) {
+    throw new Error(`merge-change requires the completed run's definition ${String(definition.id)} to declare exactly one gate with requires_current_verification; that gate carries the evidence-refresh control`);
+  }
+  const gate = turnstile.gate;
   if (!evidenceRefreshRoutesSatisfied(gate)) {
     throw new Error("merge-change requires the completed run to semantically adopt merge-ready-ci evidence refresh (missing_evidence/default -> verify with bounded block policy)");
   }

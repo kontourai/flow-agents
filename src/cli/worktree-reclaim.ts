@@ -5,8 +5,10 @@ import type { ChangeProviderSettings } from "./public-contracts.js";
 import { resolveEffectiveChangeProviderSettings } from "./effective-change-provider-settings.js";
 import { observeGithubMergedChange, type GithubMergedChangeObservation } from "./github-change-provider.js";
 import { execTrustedGitSync } from "../lib/trusted-git.js";
+import { validateRunStateConsistency } from "@kontourai/flow";
 
 const MAX_PROVIDER_RESULT_BYTES = 65_536;
+const MAX_FLOW_RUN_FILE_BYTES = 4 * 1024 * 1024;
 const SHA = /^[0-9a-f]{40,64}$/u;
 
 type PublishedChange = Readonly<{
@@ -118,7 +120,10 @@ export async function reclaimBuilderWorktree(
   return receipt;
 }
 
+type LearningClaimSelector = Readonly<{ claimType: string; acceptedStatuses: readonly string[] }>;
+
 function assertLearningComplete(sessionDir: string): void {
+  const selectors = terminalGateLearningSelectors(sessionDir);
   const file = path.join(sessionDir, "trust.bundle");
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   let root: Record<string, unknown>;
@@ -130,11 +135,82 @@ function assertLearningComplete(sessionDir: string): void {
     fs.closeSync(descriptor);
   }
   const claims = Array.isArray(root.claims) ? root.claims.map((claim) => record(claim, "trust bundle claim")) : [];
-  for (const claimType of ["builder.learn.decisions", "builder.learn.evidence"]) {
+  for (const { claimType, acceptedStatuses } of selectors) {
     const matching = claims.filter((claim) => claim.claimType === claimType);
     const accepted = matching.length > 0
-      && matching.every((claim) => ["verified", "trusted", "accepted"].includes(String(claim.status)));
+      && matching.every((claim) => acceptedStatuses.includes(String(claim.status)));
     if (!accepted) throw new Error(`builder-run reclaim requires only accepted current ${claimType} learning evidence`);
+  }
+}
+
+/**
+ * The learning evidence reclaim requires, taken from the run's own effective Flow definition: the
+ * required trust-bundle claims of the gate on its terminal step (the step whose `next` is null).
+ *
+ * This was the literal pair `builder.learn.decisions` / `builder.learn.evidence` with the statuses
+ * verified/trusted/accepted, which is exactly what Builder's composed `learn-gate` declares
+ * (publish-learn.flow.json), so the derivation is identical for Builder while a kit with its own
+ * closing gate and claim types gets the same check. The statuses come from the expectation's
+ * `bundle_claim.accepted_statuses`, defaulting to ["verified"] as Flow's own gate evaluation does.
+ *
+ * Fails closed: a missing or inconsistent run, an ambiguous terminal step, or a terminal gate that
+ * declares no required trust-bundle claim refuses reclaim rather than skipping the learning check.
+ */
+function terminalGateLearningSelectors(sessionDir: string): LearningClaimSelector[] {
+  const artifactRoot = path.dirname(sessionDir);
+  const kontouraiRoot = path.dirname(artifactRoot);
+  if (path.basename(artifactRoot) !== "flow-agents" || path.basename(kontouraiRoot) !== ".kontourai") {
+    throw new Error("builder-run reclaim requires a session directory at .kontourai/flow-agents/<slug>");
+  }
+  const runId = path.basename(sessionDir);
+  const runDir = path.join(kontouraiRoot, "flow", "runs", runId);
+  let definition: Record<string, unknown>;
+  try {
+    const startDefinition = record(JSON.parse(readBoundedRegularFile(path.join(runDir, "definition.json"), MAX_FLOW_RUN_FILE_BYTES)), "Flow start definition");
+    const state = record(JSON.parse(readBoundedRegularFile(path.join(runDir, "state.json"), MAX_FLOW_RUN_FILE_BYTES)), "Flow state");
+    definition = record(validateRunStateConsistency(startDefinition, state, { runId }).definition, "Flow effective definition");
+  } catch {
+    throw new Error("builder-run reclaim requires the session's canonical Flow run definition to identify its learning evidence");
+  }
+  const steps = Array.isArray(definition.steps) ? definition.steps : [];
+  const terminal = steps.filter((step) => step !== null && typeof step === "object" && !Array.isArray(step)
+    && (step as Record<string, unknown>).next === null);
+  const terminalStep = terminal.length === 1 ? (terminal[0] as Record<string, unknown>).id : undefined;
+  const gates = definition.gates && typeof definition.gates === "object" && !Array.isArray(definition.gates)
+    ? Object.values(definition.gates as Record<string, unknown>) : [];
+  const selectors: LearningClaimSelector[] = [];
+  for (const gate of gates) {
+    if (typeof terminalStep !== "string" || !gate || typeof gate !== "object" || Array.isArray(gate)) continue;
+    if ((gate as Record<string, unknown>).step !== terminalStep) continue;
+    const expects = (gate as Record<string, unknown>).expects;
+    for (const expectation of Array.isArray(expects) ? expects : []) {
+      if (!expectation || typeof expectation !== "object" || Array.isArray(expectation)) continue;
+      const entry = expectation as Record<string, unknown>;
+      const selector = entry.bundle_claim;
+      if (entry.required !== true || !selector || typeof selector !== "object" || Array.isArray(selector)) continue;
+      const claimType = (selector as Record<string, unknown>).claimType;
+      const statuses = (selector as Record<string, unknown>).accepted_statuses;
+      if (typeof claimType !== "string" || claimType.length === 0) continue;
+      selectors.push(Object.freeze({
+        claimType,
+        acceptedStatuses: Array.isArray(statuses) ? statuses.filter((status): status is string => typeof status === "string") : ["verified"],
+      }));
+    }
+  }
+  if (selectors.length === 0) {
+    throw new Error(`builder-run reclaim requires the run's terminal gate to declare required learning evidence; ${String(definition.id)} declares none`);
+  }
+  return selectors;
+}
+
+function readBoundedRegularFile(file: string, maxBytes: number): string {
+  const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > maxBytes) throw new Error(`${path.basename(file)} is not a bounded regular file`);
+    return fs.readFileSync(descriptor, "utf8");
+  } finally {
+    fs.closeSync(descriptor);
   }
 }
 

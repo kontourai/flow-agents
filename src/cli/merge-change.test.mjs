@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 import { amendRunDefinition, definitionDigest, definitionIdentity, flowRunHead, loadRun, startRun } from "@kontourai/flow";
-import { main as mergeChangeMain } from "../../build/src/cli/merge-change.js";
+import { assertEvidenceRefreshControl, freshnessTurnstileGate, main as mergeChangeMain } from "../../build/src/cli/merge-change.js";
 import { issueMergeChangeAction } from "../../build/src/merge-change-operation-authority.js";
 import { issuePublishChangeAction } from "../../build/src/publish-change-operation-authority.js";
 import { performLocalClaim, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
@@ -335,6 +335,76 @@ test("evidence-refresh route predicate accepts the SHIPPED builder definition an
   assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "execute" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
   assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "warn" } }), false);
   assert.equal(evidenceRefreshRoutesSatisfied({}), false);
+});
+
+/**
+ * A non-Builder delivery flow in the real composed shape: Builder's resolved builder.build with its
+ * flow id and the requires_current_verification gate renamed, as a kit that ships its own CI
+ * freshness gate would spell it.
+ */
+function acmeDeliveryDefinition() {
+  const definition = structuredClone(resolveEffectiveFlowDefinition("builder.build", path.resolve(import.meta.dirname, "../..")));
+  definition.id = "acme.deliver";
+  const [turnstileId, turnstile] = Object.entries(definition.gates).find(([, gate]) => gate.requires_current_verification === true);
+  delete definition.gates[turnstileId];
+  definition.gates["acme.release:ci-freshness-gate"] = turnstile;
+  return definition;
+}
+
+function evidenceRefreshFixture(definition) {
+  const dir = makeFixtureDir("flow-agents-merge-refresh-");
+  fs.mkdirSync(path.join(dir, "evidence"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "evidence", "manifest.json"), JSON.stringify({ evidence: [] }));
+  const inspected = { run: { dir, state: {}, definitionId: definition.id, definitionVersion: definition.version, definitionDigest: "d".repeat(64) } };
+  return { dir, check: () => assertEvidenceRefreshControl(inspected, { effectiveDefinition: definition }) };
+}
+
+test("evidence-refresh control finds a non-Builder kit's requires_current_verification gate by declaration", async () => {
+  const acme = evidenceRefreshFixture(acmeDeliveryDefinition());
+  try {
+    // The kit's own freshness gate carries the control: accepted with no Builder gate key present.
+    assert.doesNotThrow(acme.check);
+  } finally {
+    fs.rmSync(acme.dir, { recursive: true, force: true });
+  }
+  // The same route-map policy still binds that gate: an unrefreshable map is refused as Builder's is.
+  const weakened = acmeDeliveryDefinition();
+  weakened.gates["acme.release:ci-freshness-gate"].on_route_back = { missing_evidence: "verify" };
+  const refused = evidenceRefreshFixture(weakened);
+  try {
+    assert.throws(refused.check, /semantically adopt merge-ready-ci evidence refresh/);
+  } finally {
+    fs.rmSync(refused.dir, { recursive: true, force: true });
+  }
+  // No declaring gate, or two, is ambiguous: refuse rather than pick.
+  const none = acmeDeliveryDefinition();
+  delete none.gates["acme.release:ci-freshness-gate"].requires_current_verification;
+  const two = acmeDeliveryDefinition();
+  two.gates["acme.release:second-gate"] = structuredClone(two.gates["acme.release:ci-freshness-gate"]);
+  for (const definition of [none, two]) {
+    const fixture = evidenceRefreshFixture(definition);
+    try {
+      assert.throws(fixture.check, /acme\.deliver to declare exactly one gate with requires_current_verification/);
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("merge-change and the lifecycle-authority coordinator derive the same freshness gate", async () => {
+  // The coordinator is a separate authority boundary src/ does not import, so the two copies of
+  // this rule are bound here over every packaged publishing definition and a non-Builder one.
+  const { freshnessTurnstileGateEntry } = await import("../../packaging/lifecycle-authority/coordinator.mjs");
+  const repoRoot = path.resolve(import.meta.dirname, "../..");
+  const definitions = ["builder.build", "builder.build-lean", "builder.review-existing", "builder.shape"]
+    .map((id) => resolveEffectiveFlowDefinition(id, repoRoot));
+  definitions.push(acmeDeliveryDefinition());
+  for (const definition of definitions) {
+    assert.ok(definition);
+    assert.deepEqual(freshnessTurnstileGate(definition), freshnessTurnstileGateEntry(definition), definition.id);
+  }
+  assert.equal(freshnessTurnstileGate(definitions[0]).id, "builder.publish-learn:merge-ready-ci-gate", "Builder's gate is unchanged");
+  assert.equal(freshnessTurnstileGate(definitions.at(-1)).id, "acme.release:ci-freshness-gate");
 });
 
 test("start-definition provenance derives when the stamp is absent and refuses a mismatched stamp (#1307)", async () => {
