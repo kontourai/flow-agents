@@ -118,27 +118,127 @@ function handlerCommands(group: unknown): string[] {
   });
 }
 
-function mergeHooksJson(sourceText: string, existingText: string | undefined, id: string): string {
+/** One hook handler a kit provisioned into a hooks-json target, recorded in its provision manifest. */
+export type ProvisionedHookHandler = { id: string; target: string; event: string; command: string };
+
+/**
+ * What this kit's previous provision manifest proves about a hooks-json target:
+ * - `recorded`: the exact commands it provisioned there, per event;
+ * - `legacy`: a manifest written before handler provenance existed lists the
+ *   target, so a group identical to the kit's current declaration is the kit's;
+ * - `none`: the kit never provisioned the target, so every handler there
+ *   belongs to someone else.
+ */
+type HookOwnership =
+  | { kind: "recorded"; commands: Map<string, Set<string>> }
+  | { kind: "legacy" }
+  | { kind: "none" };
+
+function mergeHooksJson(
+  sourceText: string,
+  existingText: string | undefined,
+  id: string,
+  ownership: HookOwnership,
+): { content: string; handlers: { event: string; command: string }[] } {
   const source = hooksConfig(sourceText, `source ${id}`);
   const existing = existingText === undefined ? { hooks: {} as Record<string, unknown[]> } : hooksConfig(existingText, `target ${id}`);
   const hooks: Record<string, unknown[]> = Object.assign(Object.create(null), existing.hooks);
-  for (const [event, sourceGroups] of Object.entries(source.hooks)) {
-    const currentGroups = [...(hooks[event] ?? [])];
+  const handlers: { event: string; command: string }[] = [];
+  const events = new Set([
+    ...Object.keys(source.hooks),
+    ...(ownership.kind === "recorded" ? ownership.commands.keys() : []),
+  ]);
+  for (const event of events) {
+    const sourceGroups = source.hooks[event] ?? [];
     for (const group of sourceGroups) {
       const commands = handlerCommands(group);
       if (commands.length === 0 || commands.length !== (group as { hooks: unknown[] }).hooks.length || new Set(commands).size !== commands.length) {
         throw new Error(`hooks-json source ${id}:${event} must declare command handlers`);
       }
-      if (currentGroups.some((current) => JSON.stringify(current) === JSON.stringify(group))) continue;
+    }
+    const sourceKeys = new Set(sourceGroups.map((group) => JSON.stringify(group)));
+    const previous = ownership.kind === "recorded" ? ownership.commands.get(event) ?? new Set<string>() : new Set<string>();
+    let removed = false;
+    // Replace only what this kit provisioned before: drop each handler whose
+    // command it recorded, unless the group is already exactly what the kit
+    // declares now (keeping it in place keeps re-provisioning byte-stable).
+    const currentGroups = (hooks[event] ?? []).flatMap((group) => {
+      if (sourceKeys.has(JSON.stringify(group))) return [group];
+      const groupHandlers = (group as { hooks: unknown[] }).hooks;
+      const kept = groupHandlers.filter((handler) => {
+        const command = (handler as { command?: unknown })?.command;
+        return !(typeof command === "string" && previous.has(command));
+      });
+      if (kept.length === groupHandlers.length) return [group];
+      removed = true;
+      return kept.length > 0 ? [{ ...(group as Record<string, unknown>), hooks: kept }] : [];
+    });
+    for (const group of sourceGroups) {
+      const commands = handlerCommands(group);
+      if (currentGroups.some((current) => JSON.stringify(current) === JSON.stringify(group))) {
+        // An identical group already present is the kit's only when the kit's
+        // own record says so; otherwise a user or another kit wrote it first.
+        const owned = ownership.kind === "legacy" || commands.every((command) => previous.has(command));
+        if (owned) handlers.push(...commands.map((command) => ({ event, command })));
+        continue;
+      }
       const existingCommands = new Set(currentGroups.flatMap(handlerCommands));
       if (commands.some((command) => existingCommands.has(command))) {
         throw new Error(`hooks-json merge conflicts with an existing command in ${id}:${event}`);
       }
       currentGroups.push(group);
+      handlers.push(...commands.map((command) => ({ event, command })));
     }
-    hooks[event] = currentGroups;
+    if (currentGroups.length === 0 && removed) delete hooks[event];
+    else if (currentGroups.length > 0 || event in hooks) hooks[event] = currentGroups;
   }
-  return `${JSON.stringify({ ...existing, hooks }, null, 2)}\n`;
+  return { content: `${JSON.stringify({ ...existing, hooks }, null, 2)}\n`, handlers };
+}
+
+type PreviousHookHandlers = { ownership: (target: string) => HookOwnership; recorded: ProvisionedHookHandler[] };
+
+const NO_PREVIOUS_HOOK_HANDLERS: PreviousHookHandlers = { ownership: () => ({ kind: "none" }), recorded: [] };
+
+/**
+ * Reads this kit's previous provision manifest to learn which hooks-json
+ * handlers it provisioned. A missing manifest means the kit never provisioned
+ * here; an unreadable one fails closed rather than guessing ownership.
+ */
+function previousHookHandlers(manifestPath: string, kitId: string, targetRoot: string): PreviousHookHandlers {
+  assertSafeDestination(targetRoot, manifestPath);
+  if (!fs.existsSync(manifestPath)) return NO_PREVIOUS_HOOK_HANDLERS;
+  const label = `provision manifest for kit '${kitId}'`;
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readHostText(manifestPath, label));
+  } catch (error) {
+    throw new Error(`${label} is unreadable, so its hook handlers cannot be replaced safely: ${manifestPath} (${(error as Error).message})`);
+  }
+  const record = manifest as Record<string, unknown> | null;
+  if (!record || typeof record !== "object" || Array.isArray(record) || record.kit_id !== kitId) {
+    throw new Error(`${label} does not describe kit '${kitId}': ${manifestPath}`);
+  }
+  if (record.hook_handlers === undefined) {
+    const files = Array.isArray(record.files) ? record.files : [];
+    const targets = new Set(files.map((file) => (file as { target?: unknown })?.target).filter((target) => typeof target === "string"));
+    return { ownership: (target) => (targets.has(target) ? { kind: "legacy" } : { kind: "none" }), recorded: [] };
+  }
+  if (!Array.isArray(record.hook_handlers)) throw new Error(`${label} has malformed hook_handlers: ${manifestPath}`);
+  const byTarget = new Map<string, Map<string, Set<string>>>();
+  const recorded: ProvisionedHookHandler[] = [];
+  for (const entry of record.hook_handlers) {
+    const handler = entry as Partial<ProvisionedHookHandler> | null;
+    if (!handler || typeof handler.id !== "string" || typeof handler.target !== "string" || typeof handler.event !== "string" || typeof handler.command !== "string" || handler.command.length === 0) {
+      throw new Error(`${label} has malformed hook_handlers: ${manifestPath}`);
+    }
+    recorded.push({ id: handler.id, target: handler.target, event: handler.event, command: handler.command });
+    const events = byTarget.get(handler.target) ?? new Map<string, Set<string>>();
+    const commands = events.get(handler.event) ?? new Set<string>();
+    commands.add(handler.command);
+    events.set(handler.event, commands);
+    byTarget.set(handler.target, events);
+  }
+  return { ownership: (target) => ({ kind: "recorded", commands: byTarget.get(target) ?? new Map() }), recorded };
 }
 
 function readHostText(filePath: string, id: string): string {
@@ -188,6 +288,22 @@ export async function provisionKit(
   const conflicts = options.force ? [] : files.filter((file) => fs.existsSync(file.destination) && file.merge !== "hooks-json");
   if (conflicts.length) throw new ProvisionConflictError(conflicts);
 
+  const manifestPath = path.join(targetRoot, ...PROVISION_MANIFEST_DIR.split("/"), `${kitId}.json`);
+  const hookTargets = new Set(files.filter((file) => file.merge === "hooks-json").map((file) => file.target));
+  let previousHooks: PreviousHookHandlers;
+  try {
+    previousHooks = previousHookHandlers(manifestPath, kitId, targetRoot);
+  } catch (error) {
+    // A kit that merges no hooks now needs the old record only to carry it
+    // forward, so an unreadable one is replaced as before.
+    if (hookTargets.size > 0) throw error;
+    previousHooks = NO_PREVIOUS_HOOK_HANDLERS;
+  }
+  // A kit that stops declaring a hooks-json target leaves its handlers there,
+  // as it leaves any provisioned file. Keep their record so a later
+  // provisioning of that target still replaces them.
+  const hookHandlers: ProvisionedHookHandler[] = previousHooks.recorded.filter((handler) => !hookTargets.has(handler.target));
+
   const hostAssets = files.filter((file) => file.host && file.kind);
   const hostGroups = new Map<string, ProvisionPlanEntry[]>();
   for (const file of hostAssets) {
@@ -210,9 +326,13 @@ export async function provisionKit(
     const byTarget = new Map(group.map((file) => [file.destination, file]));
     const assets = group.map((file) => {
       const content = readHostText(file.source, file.id);
-      const installedContent = file.merge === "hooks-json"
-        ? mergeHooksJson(content, fs.existsSync(file.destination) ? readHostText(file.destination, file.id) : undefined, file.id)
-        : content;
+      let installedContent = content;
+      if (file.merge === "hooks-json") {
+        const existing = fs.existsSync(file.destination) ? readHostText(file.destination, file.id) : undefined;
+        const merged = mergeHooksJson(content, existing, file.id, previousHooks.ownership(file.target));
+        installedContent = merged.content;
+        hookHandlers.push(...merged.handlers.map((handler) => ({ id: file.id, target: file.target, ...handler })));
+      }
       if (Buffer.byteLength(installedContent, "utf8") > MAX_HOST_ASSET_BYTES) {
         throw new Error(`Conduit host asset exceeds ${MAX_HOST_ASSET_BYTES} bytes after merge: ${file.id}`);
       }
@@ -244,7 +364,6 @@ export async function provisionKit(
   const kitHash = kitContentHash(kitRoot);
   if (options.dryRun || files.length === 0) return { kit_id: kitId, kit_hash: kitHash, files, dry_run: Boolean(options.dryRun) };
 
-  const manifestPath = path.join(targetRoot, ...PROVISION_MANIFEST_DIR.split("/"), `${kitId}.json`);
   assertSafeDestination(targetRoot, manifestPath);
   const conduitReceipts: InstallationReceipt[] = [];
   for (const plan of hostPlans) {
@@ -263,6 +382,9 @@ export async function provisionKit(
     kit_hash: kitHash,
     provisioned_at: new Date().toISOString(),
     files: files.map(({ id, target }) => ({ id, target })),
+    // Provenance for hooks-json merges: the next provisioning of this kit
+    // replaces exactly these handlers and leaves every other handler alone.
+    hook_handlers: hookHandlers,
     conduit_receipts: conduitReceipts,
   });
   return { kit_id: kitId, kit_hash: kitHash, files, manifest_path: manifestPath, dry_run: false, conduit_receipts: conduitReceipts };

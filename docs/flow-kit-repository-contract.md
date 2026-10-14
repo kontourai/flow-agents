@@ -195,6 +195,22 @@ Re-running the provision leaves the handler set unchanged; a surrounding host
 installer may reorder unrelated groups, in which case the next Conduit receipt
 names the newly installed bytes.
 
+The provision manifest records each handler the kit added as `hook_handlers`
+(the provision id, target, event, and exact command). When the kit is
+provisioned again, Flow Agents first removes the handlers that kit recorded and
+then merges the kit's current declaration, so a kit that changes or drops a
+hook command replaces its earlier handler instead of leaving both to run. A
+group that is already identical to the current declaration stays in place.
+Handlers from users and other kits are never removed, even when they share a
+group with the kit's handler. A handler the kit did not add, such as an
+identical group that existed before the kit was first provisioned, is not
+recorded as the kit's. A manifest written before `hook_handlers` existed proves
+only that the kit provisioned the target, so re-provisioning adopts groups that
+are identical to the kit's current declaration and records them. It cannot
+identify an earlier handler whose command has since changed; remove that one by
+hand. An unreadable manifest, or one with malformed `hook_handlers`, fails the
+provision before any write.
+
 Provision a catalog kit, an installed-registry kit, or a kit at a direct local path with:
 
 ```bash
@@ -209,7 +225,7 @@ After a successful non-dry-run copy, Flow Agents writes or replaces this bookkee
 <target>/.kontourai/flow-agents/provisions/<kit-id>.json
 ```
 
-The schema is `{ schema_version: "1.0", kit_id, kit_hash, provisioned_at, files: [{ id, target }], conduit_receipts }`. Provisioned files become consumer-repository content; uninstalling or deactivating the kit does not remove them.
+The schema is `{ schema_version: "1.0", kit_id, kit_hash, provisioned_at, files: [{ id, target }], hook_handlers: [{ id, target, event, command }], conduit_receipts }`. Provisioned files become consumer-repository content; uninstalling or deactivating the kit does not remove them.
 
 When `flow-agents init --activate-kit <id>` successfully activates a selected kit, init invokes the same provisioning engine against its destination with create-only semantics. Existing destinations are reported as skipped warnings and do not fail an init rerun. Provisions never enter the runtime projection directory.
 
