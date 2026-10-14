@@ -7,13 +7,12 @@ const skillPath = fileURLToPath(
   new URL("../../kits/builder/skills/release-readiness/SKILL.md", import.meta.url),
 );
 
-test("Builder release readiness consumes the pinned Veritas verdict contract", () => {
+test("Builder release readiness consumes the installed Veritas verdict contract", () => {
   const skill = readFileSync(skillPath, "utf8");
 
-  assert.match(
-    skill,
-    /npm exec --yes --package=@kontourai\/veritas@1\.7\.3 -- veritas readiness/,
-  );
+  assert.match(skill, /npx --no @kontourai\/veritas readiness --check evidence/);
+  // A registry-fetching, version-pinned spelling drifts from the repository's install.
+  assert.doesNotMatch(skill, /--package=@kontourai\/veritas@/);
   assert.match(skill, /software-readiness-verdict/);
   assert.match(skill, /reportArtifactPath/);
   assert.match(skill, /record the[\s\S]*artifact reference in[\s\S]*release\.json/);

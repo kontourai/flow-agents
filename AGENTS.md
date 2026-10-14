@@ -6,7 +6,7 @@ This bundle was generated from the canonical source in this repo. Treat the repo
 
 - **Commit messages drive releases.** Releases are automated with release-please: `feat:` bumps minor, `fix:` bumps patch, `feat!:`/`BREAKING CHANGE` bumps major; `docs:`/`chore:`/`test:`/`refactor:` don't bump. Commits without a conventional prefix are invisible to version inference — use one. Details: CONTRIBUTING.md ("Releases").
 - **Never hand-edit release PRs** (`release-please--branches--*`); they are regenerated on every push to main.
-- **Use the pinned Veritas CLI.** `.veritas/README.md` gives the exact package command for the `veritas readiness` gate named in the canonical governance block.
+- **Use the installed Veritas CLI.** `@kontourai/veritas` is an exact devDependency. Run it as `npx --no @kontourai/veritas …`, the spelling the canonical governance block uses; `.veritas/README.md` lists the commands.
 - **Evidence hygiene:** issue/PR permalinks must pin a real commit SHA (`git rev-parse`, never typed by hand); claims about behavior need command/test evidence.
 - **Docs are published with docs-kit.** `corpus.json` lists the published docs and the MCP topics; `npm run docs:check` is the gate. When you change code that a document `covers`, update that document.
 - **Decisions** are one living record per subject in `docs/decisions/<slug>.md`, in the [Corpus decision-record format](https://github.com/kontourai/corpus/blob/main/docs/decisions.md); Flow Agents' conventions are in `context/contracts/decision-registry-contract.md`. Numbered ADRs in `docs/adr/` are frozen history; never add one. After editing a record, run `npm run gen:decisions-index`. `npm run check:decisions` validates the records and the index, and refuses ADR files added since `$DECISIONS_BASE` (default `origin/main`; CI sets it to the pull request base).
@@ -50,5 +50,5 @@ Confirmed agreements for developing this repo — the *kit-discipline* bucket of
 
 <!-- veritas:governance-block:start -->
 This repo uses Veritas for AI governance. Read `.veritas/GOVERNANCE.md` before making changes.
-After changes, run `veritas readiness` and address any FAIL lines before finishing.
+After changes, run `npx --no @kontourai/veritas readiness` and address any FAIL lines before finishing.
 <!-- veritas:governance-block:end -->

@@ -50,6 +50,9 @@ minimumReleaseAgeExclude:
   # Exact Survey owned-stream shutdown repair from merged PR #337/release #338.
   # Registry gitHead d063b49 and public tarball integrity verified before adoption.
   - '@kontourai/survey@8.1.1'
+  # Exact Veritas release from Veritas release PR #290 (tag v1.11.2). Registry gitHead d267d56,
+  # tarball integrity and tag-bound SLSA publish provenance verified before adoption.
+  - '@kontourai/veritas@1.11.2'
 
 # mise supplies node and pnpm on developer machines; CI installs the exact
 # version pinned in package.json. Do not reject a same-major pnpm from mise.
