@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   assertRequestMatchesProvider,
+  buildAdoptedChangeProviderResult,
   buildChangeProviderResult,
   ChangeProviderError,
   parseChangeProviderRequest,
@@ -89,6 +90,17 @@ export function createGithubChangeProvider(settings: ChangeProviderSettings, con
       try {
         const capability = await checkGithubCapability(provider, authenticatedExecution);
         return await createOrRecoverGithubChange(request, authenticatedExecution, capability.provider_actor);
+      } finally {
+        releaseGithubAuthentication(authenticatedExecution);
+      }
+    },
+    adoptExisting: async (requestInput: ChangeProviderRequest) => {
+      const request = parseChangeProviderRequest(requestInput);
+      assertRequestMatchesProvider(request, provider, normalizedConfigurationId);
+      const authenticatedExecution = await bindGithubAuthentication(execution);
+      try {
+        const capability = await checkGithubCapability(provider, authenticatedExecution);
+        return await adoptExistingGithubChange(request, authenticatedExecution, capability.provider_actor);
       } finally {
         releaseGithubAuthentication(authenticatedExecution);
       }
@@ -728,6 +740,57 @@ async function observeExactChange(request: ChangeProviderRequest, number: number
     throw new ChangeProviderError("provider_observation_mismatch", "authenticated provider actor changed during provider observation");
   }
   return buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, providerActor: finalCapability.provider_actor, observedAt: dependencies.now() });
+}
+
+/**
+ * #1415 slice 2: adopt the one open, same-repository pull request that already exists for the
+ * request's exact head and base refs at its exact head SHA. It never runs `pr create` and never
+ * reads or compares the pull request's title, body, or draft flag. Every refusal is a fixed
+ * message; provider output never reaches it.
+ */
+async function adoptExistingGithubChange(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies, providerActor: string): Promise<ChangeProviderResult> {
+  const listed = await listMatchingChanges(request, dependencies);
+  const sameRefs = listed.filter((record) => record.baseRefName === request.base_ref && record.headRefName === request.head_ref);
+  if (sameRefs.length === 0) {
+    throw new ChangeProviderError("provider_observation_mismatch", "no pull request exists for the pinned head and base refs; an existing-change run adopts a pull request and never opens one");
+  }
+  if (sameRefs.length > 1) {
+    throw new ChangeProviderError("ambiguous_provider_change", "more than one pull request exists for the pinned head and base refs; an existing-change run adopts exactly one");
+  }
+  const listedChange = sameRefs[0]!;
+  if (listedChange.state.toLowerCase() !== "open") {
+    throw new ChangeProviderError("provider_observation_mismatch", "the pull request for the pinned head ref is closed or merged; an existing-change run adopts only an open pull request");
+  }
+  if (listedChange.headRefOid.toLowerCase() !== request.head_sha) {
+    throw new ChangeProviderError("provider_observation_mismatch", "the pull request head has moved off the pinned source head");
+  }
+  const raw = plainObject(parseProviderJson(await invoke(dependencies, ["api", `repos/${repoSlug(request)}/pulls/${listedChange.number}`]), "provider record output"), "provider record output");
+  const head = plainObject(raw.head, "provider record head");
+  const headRepo = plainObject(head.repo, "provider record head repository");
+  if (headRepo.full_name !== repoSlug(request)) {
+    throw new ChangeProviderError("provider_observation_mismatch", "the pull request head branch is not in the configured repository; an existing-change run adopts only a same-repository pull request");
+  }
+  if (raw.merged === true || raw.state !== "open") {
+    throw new ChangeProviderError("provider_observation_mismatch", "the pull request for the pinned head ref is closed or merged; an existing-change run adopts only an open pull request");
+  }
+  const record = parseProviderRecord(raw, request);
+  if (providerSha(record.headRefOid, "provider record head SHA") !== request.head_sha) {
+    throw new ChangeProviderError("provider_observation_mismatch", "the pull request head has moved off the pinned source head");
+  }
+  const finalCapability = await checkGithubCapability({
+    role: "ChangeProvider", kind: "github", repository: request.repository,
+    capabilities: ["change.create", "change.observe"], executor: "gh-cli",
+  }, dependencies);
+  if (finalCapability.provider_actor !== providerActor) {
+    throw new ChangeProviderError("provider_observation_mismatch", "authenticated provider actor changed during provider observation");
+  }
+  return buildAdoptedChangeProviderResult({
+    request,
+    providerRecord: { id: record.id, number: record.number, url: record.url, state: record.state, baseRefName: record.baseRefName, headRefName: record.headRefName, headRefOid: record.headRefOid },
+    adapter: ADAPTER_ID,
+    providerActor: finalCapability.provider_actor,
+    observedAt: dependencies.now(),
+  });
 }
 
 function createArgv(request: ChangeProviderRequest): string[] {
