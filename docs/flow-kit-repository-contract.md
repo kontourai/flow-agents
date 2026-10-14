@@ -170,7 +170,8 @@ Optional fields:
   A host asset also declares `host` (`codex`, `claude-code`, `opencode`, `kiro`, or `pi`)
   and Conduit `kind` (`skill`, `agent`, `hook`, `prompt`, `command`, or `context`)
   together. Neither field is inferred from a target path. A host hook may opt
-  into `merge: "hooks-json"` for an idempotent merge into a host `hooks` object.
+  into `merge: "hooks-json"` for an idempotent merge into a host `hooks` object,
+  and may then list earlier commands in `supersedes`.
 
 ## Repository Provisioning
 
@@ -195,21 +196,63 @@ Re-running the provision leaves the handler set unchanged; a surrounding host
 installer may reorder unrelated groups, in which case the next Conduit receipt
 names the newly installed bytes.
 
-The provision manifest records each handler the kit added as `hook_handlers`
-(the provision id, target, event, and exact command). When the kit is
-provisioned again, Flow Agents first removes the handlers that kit recorded and
-then merges the kit's current declaration, so a kit that changes or drops a
-hook command replaces its earlier handler instead of leaving both to run. A
-group that is already identical to the current declaration stays in place.
-Handlers from users and other kits are never removed, even when they share a
-group with the kit's handler. A handler the kit did not add, such as an
-identical group that existed before the kit was first provisioned, is not
-recorded as the kit's. A manifest written before `hook_handlers` existed proves
-only that the kit provisioned the target, so re-provisioning adopts groups that
-are identical to the kit's current declaration and records them. It cannot
-identify an earlier handler whose command has since changed; remove that one by
-hand. An unreadable manifest, or one with malformed `hook_handlers`, fails the
-provision before any write.
+The provision manifest records each handler the kit added as `hook_handlers`:
+the provision id, target, event, command, the group's own fields (such as
+`matcher`), and the exact handler object. When the kit is provisioned again,
+Flow Agents first removes the handlers that match those records, then merges
+the kit's current declaration. A kit that changes or drops a hook command
+therefore replaces its earlier handler instead of leaving both to run. A group
+that is already identical to the current declaration stays in place.
+
+- Replacement by provenance never removes user handlers. That includes a user handler in the
+  kit's group, and a user handler that reuses the kit's command under another
+  matcher or with other settings. An identical group that existed before the
+  kit was first provisioned is not recorded as the kit's.
+- A command that another kit's provision manifest records for the same target
+  and event is never removed. When two kits declare an identical group, both
+  record it, and it stays until neither declares it.
+- Before writing any host file, Flow Agents records the previous and the new
+  handlers together, and it narrows the record once every write succeeds. If a
+  later write fails or the process stops, the next provisioning still recognises
+  whichever handlers reached the host file as the kit's. Legacy handlers adopted
+  from the existing file are also recorded before writing their replacements.
+- A manifest written before `hook_handlers` existed proves only that the kit
+  provisioned the target. Re-provisioning adopts the handlers that sit in a
+  group with the same fields as one the kit declares now and carry a command
+  the kit declares now, and records them. It cannot recognise a handler whose
+  command has since changed; use `supersedes` for that.
+- If the kit stops declaring a hooks-json target, its records for that target
+  are kept, because provisioned content is never removed and a later
+  provisioning of that target must still replace them.
+
+A hooks-json provision may also declare `supersedes`: 1 to 32 unique, non-blank
+command strings of at most 4,096 characters each. Re-provisioning removes
+handlers whose command exactly equals one of them from the provision's target,
+only in the events the provision declares, and never a command another kit
+records there. Each removal is added to the manifest's `superseded_handlers`.
+List only commands this kit shipped in earlier versions: `supersedes` removes a
+matching handler whoever wrote it. A command the provision still declares is
+refused.
+
+```json
+{
+  "id": "example.governance-hook",
+  "path": "hooks/codex.json",
+  "target": ".codex/hooks.json",
+  "host": "codex",
+  "kind": "hook",
+  "merge": "hooks-json",
+  "supersedes": ["npm exec -- example hooks codex pre-tool-use"]
+}
+```
+
+For a kit with a hooks-json provision, an unreadable provision manifest (its own
+or another kit's), malformed `hook_handlers`, or a manifest naming another kit
+fails provisioning before any write. This includes `--dry-run`, and an
+`init --activate-kit` rerun. Repair or remove the named manifest to continue.
+A kit that merges no hooks replaces its own unreadable manifest, as before. A
+host settings file with no `hooks` key yet, such as a Claude `settings.json`
+holding only permissions, is merged into as empty.
 
 Provision a catalog kit, an installed-registry kit, or a kit at a direct local path with:
 
@@ -225,7 +268,7 @@ After a successful non-dry-run copy, Flow Agents writes or replaces this bookkee
 <target>/.kontourai/flow-agents/provisions/<kit-id>.json
 ```
 
-The schema is `{ schema_version: "1.0", kit_id, kit_hash, provisioned_at, files: [{ id, target }], hook_handlers: [{ id, target, event, command }], conduit_receipts }`. Provisioned files become consumer-repository content; uninstalling or deactivating the kit does not remove them.
+The schema is `{ schema_version: "1.0", kit_id, kit_hash, provisioned_at, files: [{ id, target }], hook_handlers: [{ id, target, event, command, group, handler }], superseded_handlers: [{ id, target, event, command }], conduit_receipts }`. Provisioned files become consumer-repository content; uninstalling or deactivating the kit does not remove them.
 
 When `flow-agents init --activate-kit <id>` successfully activates a selected kit, init invokes the same provisioning engine against its destination with create-only semantics. Existing destinations are reported as skipped warnings and do not fail an init rerun. Provisions never enter the runtime projection directory.
 
