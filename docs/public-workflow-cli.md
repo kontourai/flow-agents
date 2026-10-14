@@ -526,8 +526,8 @@ runs within one Work Item.
 
 `workflow publish-delivery` accepts a completed run and seals its checkpoint at the pinned head.
 It first checks the bundle against the repository's reconcile manifest, and refuses with "command
-is not in the reconcile manifest" unless every command-backed `tests-evidence` command is in it.
-It resolves the manifest in this order:
+is not in the reconcile manifest" unless every command recorded on a passing claim (for example
+`tests-evidence`, or `policy-compliance` recorded with `--command`) is in it. It resolves the manifest in this order:
 
 1. a `trust-reconcile-manifest` entry in `package.json` (an inline array, or a script that prints
    the manifest JSON);
@@ -550,8 +550,10 @@ TRUST_RECONCILE_COMMANDS="npm test" flow_agents workflow publish-delivery \
 Use the exact `--command` text the `tests-evidence` claim recorded, one entry per command,
 separated by newlines or commas. If the reviewed head already defines `trust-reconcile-verify`,
 record `tests-evidence` with `--command "npm run trust-reconcile-verify"` and no variable is needed.
-If the repository declares tier 1 or 2, the variable is not consulted, and the recorded commands
-must appear in that manifest instead.
+If tier 1 or 2 yields a valid manifest, the variable is not consulted, and the recorded commands
+must appear in that manifest instead; a declared tier 1 or 2 source that fails or prints invalid
+JSON falls through to tier 3. Tiers 1 and 2 run repository code from the reviewed head, the same
+trust boundary as running its tests.
 
 Its `delivery/<slug>/` output is untracked, so the next pinned `start` in the same checkout refuses
 the dirty tree and names those files; append `delivery/` to

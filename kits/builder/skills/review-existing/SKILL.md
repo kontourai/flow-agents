@@ -128,8 +128,8 @@ the same Work Item resumes the old run. Resuming with a different
 
 - `flow-agents workflow publish-delivery` accepts a completed run; its
   checkpoint commit is the pinned head. It refuses unless every
-  `tests-evidence` command is in the repository's reconcile manifest. Unless the
-  repository declares one (`package.json` `trust-reconcile-manifest`, or
+  command recorded on a passing claim (for example `tests-evidence`) is in the
+  repository's reconcile manifest. Unless the repository declares a valid one (`package.json` `trust-reconcile-manifest`, or
   `evals/ci/run-baseline.sh --manifest-json`), list the exact recorded
   `--command` text in `TRUST_RECONCILE_COMMANDS` (comma- or newline-separated;
   whitespace runs are collapsed before an exact match), for example
