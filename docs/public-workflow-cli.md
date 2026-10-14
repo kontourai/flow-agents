@@ -412,11 +412,20 @@ commit, such as an open pull request, without claiming that the run implemented 
 | Starts from | A selected Work Item with no implementation yet | A selected Work Item whose change already exists at one commit |
 | Steps | pull-work, design-probe, plan, execute, verify, merge-ready, pr-open, merge-ready-ci, learn | pull-work, existing-change, verify |
 | Implementation claim | `implementation-scope` at `execute` | None. `pre-existing-implementation` records the change as it existed. |
-| Defect at verify | Routes back to execute, plan, or design-probe | Blocks the run. Fix the change through `builder.build`, or review a new head in a new run. |
+| Failing check at verify | Routes back to execute, plan, design-probe, or verify | Routes back to `verify` only, for at most three visits, then blocks. A code fix is a new head, so it needs a new run. |
 | Source head | Follows the branch | Pinned at start with `--source-head` and re-checked at every gate |
 
-Check out the exact commit under review, complete `pull-work` selection, and start with the head
-pinned:
+Before starting:
+
+1. Check out the exact commit under review in a Git worktree with no uncommitted or untracked
+   files. `.kontourai/` must be gitignored (commit the `.kontourai/.gitignore` that `init`
+   writes), and so must any earlier `delivery/` output, or it must be committed.
+2. Select the Work Item and write `.kontourai/flow-agents/<slug>/<slug>--pull-work.md` naming its
+   reference, as for `builder.build`.
+3. Use a provider reference (`owner/repo#numeric-id` or `provider:id`). A `local:` reference only
+   resumes an existing local session created by `builder.shape`, so it cannot start this flow.
+
+Then start with the head pinned. With a provider assignment:
 
 ```bash
 flow_agents workflow start \
@@ -424,6 +433,18 @@ flow_agents workflow start \
   --work-item kontourai/target-repository#123 \
   --assignment-provider github \
   --effective-state-json .kontourai/flow-agents/target-assignment-status.json \
+  --source-head "$(git rev-parse HEAD)"
+```
+
+Without a provider assignment, the local assignment mirror works with a provider-style reference:
+
+```bash
+mkdir -p .kontourai/flow-agents/provider-review-1
+printf 'Selected Work Item: provider:review-1\n' > .kontourai/flow-agents/provider-review-1/provider-review-1--pull-work.md
+flow_agents workflow start \
+  --flow builder.review-existing \
+  --work-item provider:review-1 \
+  --assignment-provider local-file \
   --source-head "$(git rev-parse HEAD)"
 ```
 
@@ -454,16 +475,26 @@ policy compliance. This flow writes no `<slug>--plan-work.md` or `<slug>--delive
 report, so artifact references cite `<slug>--existing-change.md` instead. Passing the verify gate
 completes the run.
 
+A failing verify claim does not end the run. `verify-gate` declares only the `missing_evidence` and
+`default` route-backs, both to `verify`, so a failure opens a new `verify` visit. Passing evidence
+re-recorded at the same pinned head in that visit, a fresh critique and fresh `tests-evidence`, can
+then complete the run; that is how a flaky or mis-invoked check recovers. A real code fix changes
+the head, so it needs a new run. After three failed visits the gate blocks.
+
 The run fails closed when:
 
 - the checked-out `HEAD` is no longer the pinned head when any gate is evaluated, even if every
   claim was re-recorded at the new commit;
 - a claim carrying a Git snapshot was observed at another commit or in a dirty worktree (a
-  failing claim stays recordable, so a defect still blocks the run);
+  failing claim stays recordable and routes the run back to `verify`);
 - `start` is re-run with a different `--source-head`, for an active or a completed run;
 - a non-failing claim carries no Git snapshot, because the writer could not capture the worktree;
 - the critique comes from the assignment holder, or `tests-evidence` names a vacuous command;
 - the same Work Item already has a `builder.build` run, or the reverse.
+
+Any excursion off the pinned head needs a new run, even if the checkout returns to the pin. For
+example, a critique recorded while `HEAD` was another commit leaves the review history bound to
+that commit, and the run stays refused after the pin is restored.
 
 A new head needs a new run under a new provider Work Item. The run is keyed by the Work Item, and
 archiving a run keeps its canonical record, so starting the same Work Item again resumes the old
@@ -471,9 +502,11 @@ run and refuses the new head. This is deliberate friction in this release; there
 runs within one Work Item.
 
 `workflow publish-delivery` accepts a completed run and seals its checkpoint at the pinned head.
-`merge-change` refuses these runs before any authorization or provider call, because they have
-no `pr-open` or `merge-ready-ci` step and produce no publish-change result. Merge through the
-provider's own controls.
+Its `delivery/<slug>/` output is untracked, so the next pinned `start` in the same checkout refuses
+the dirty tree and names those files; commit or remove them first. `merge-change` refuses these
+runs by name ("`builder.review-existing` runs do not publish a change") before reading provider
+settings or calling the provider, because the flow binds no step to the publish-change operation.
+Merge through the provider's own controls.
 
 Not verified by this route:
 

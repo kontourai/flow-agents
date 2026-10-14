@@ -1520,7 +1520,10 @@ async function start(argv: string[]): Promise<number> {
     try {
       const existing = await loadBuilderFlowRun({ cwd: path.dirname(path.dirname(artifactRoot)), runId: existingSlug });
       if (existing.definitionId !== flow) {
-        throw new Error(`workflow start cannot resume ${existing.definitionId} as ${flow}; local shape sessions are not build retries. Create or claim a provider Work Item for the builder.build handoff.`);
+        // The run id is the Work Item slug, so a Work Item keeps the flow its run started with.
+        throw new Error(existing.definitionId === "builder.shape"
+          ? `workflow start cannot resume ${existing.definitionId} as ${flow}; local shape sessions are not build retries. Create or claim a provider Work Item for the ${flow} handoff.`
+          : `workflow start cannot resume ${existing.definitionId} as ${flow}; this Work Item's run was started as ${existing.definitionId} and keeps that flow. Create or claim a different provider Work Item for ${flow}.`);
       }
     } catch (error) {
       if ((error as { code?: string }).code !== "flow.run_location.not_found") throw error;

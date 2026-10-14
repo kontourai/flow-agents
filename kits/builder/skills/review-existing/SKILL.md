@@ -35,11 +35,18 @@ exactly as they do at `builder.build` `verify`.
 ## Start
 
 1. Check out the exact commit under review in a clean Git worktree. Workflow
-   artifacts under `.kontourai/` must be gitignored, because the run refuses a
-   dirty tree.
-2. Complete `pull-work` selection and hold the assignment. The assignment
-   holder is the implementation owner, normally the author of the change.
-3. Start the run with the head pinned:
+   artifacts under `.kontourai/` must be gitignored (commit the
+   `.kontourai/.gitignore` that `init` writes), and earlier `delivery/` output
+   must be committed or removed, because the run refuses a dirty tree.
+2. Complete `pull-work` selection, write
+   `<session-dir>/<slug>--pull-work.md` naming the Work Item reference, and hold
+   the assignment. The assignment holder is the implementation owner, normally
+   the author of the change.
+3. Use a provider reference (`owner/repo#numeric-id` or `provider:id`). A
+   `local:` reference only resumes an existing `builder.shape` session and
+   cannot start this flow; without a provider assignment, use a provider-style
+   reference with `--assignment-provider local-file`.
+4. Start the run with the head pinned:
 
 ```bash
 flow-agents workflow start --flow builder.review-existing \
@@ -92,10 +99,14 @@ Run `review-work` and `verify-work` as for `builder.build` `verify`:
 
 ## Defects And New Heads
 
-Defects block the run. There is no in-run repair, no `execute` step, and no
-`implementation_defect`, `plan_gap`, or `decision_gap` route back. Fix the
-change through `builder.build`, or push a new commit and review it in a new
-run. A new head needs a new run under a new provider Work Item. The run is
+There is no in-run repair, no `execute` step, and no `implementation_defect`,
+`plan_gap`, or `decision_gap` route back. A failing verify claim routes the run
+back to `verify` (at most three visits, then the gate blocks). Passing evidence
+re-recorded at the same pinned head in the new visit, a fresh critique and
+fresh `tests-evidence`, can complete it, which covers a flaky or mis-invoked
+check. A real code fix is a new head: fix the change through `builder.build`,
+or push a new commit and review it in a new run. Any excursion off the pinned
+head needs a new run, even if the checkout returns to the pin. A new head needs a new run under a new provider Work Item. The run is
 keyed by the Work Item and archiving keeps its canonical record, so restarting
 the same Work Item resumes the old run. Resuming with a different
 `--source-head` is refused, including for a completed run.
@@ -103,10 +114,11 @@ the same Work Item resumes the old run. Resuming with a different
 ## Consumers And Gaps
 
 - `flow-agents workflow publish-delivery` accepts a completed run; its
-  checkpoint commit is the pinned head.
-- `merge-change` refuses these runs: they have no `pr-open` or
-  `merge-ready-ci` step and produce no publish-change result. Merge through the
-  provider's own controls.
+  checkpoint commit is the pinned head. Its untracked `delivery/<slug>/` output
+  makes the next pinned start in the same checkout refuse until it is committed
+  or removed.
+- `merge-change` refuses these runs by name: the flow binds no step to the
+  publish-change operation. Merge through the provider's own controls.
 - That the reviewer is not the change's author on the provider (for example
   the GitHub pull request author) is `NOT_VERIFIED`. The runtime enforces only
   that the reviewer differs from the assignment holder.

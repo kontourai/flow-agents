@@ -326,7 +326,7 @@ nothing.
 | --- | --- | --- |
 | Implementation | `plan-work` then `execute-plan` in the run | Already done before the run; `review-existing` records it as `pre-existing-implementation` |
 | Review and verification | `review-work` then `verify-work` at `verify` | The same skills and expectations at `verify` |
-| A defect | Routes back to `execute` | Blocks the run; fix through `builder.build` |
+| A failing check | Routes back to `execute` (or plan, design-probe, verify) | Routes back to `verify` only; three failed visits block. A code fix needs a new run |
 | A new commit | Re-verify in the same run | Needs a new run |
 
 Start it with `--source-head` set to the checked-out commit in a clean worktree. The full

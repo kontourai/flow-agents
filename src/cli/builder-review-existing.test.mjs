@@ -177,7 +177,8 @@ test("the definition reviews an existing change: no execute step, verify identic
   // and the publish-learn closeout, so it is a narrower route than builder.build, not the same one.
   assert.deepEqual(flow.gates["pull-work-gate"], build.gates["pull-work-gate"]);
   assert.deepEqual(flow.gates["verify-gate"].expects, build.gates["verify-gate"].expects);
-  // Defects block: only the evidence-refresh routes survive, and no route reaches an implementation step.
+  // A failing verify claim routes back to verify only (bounded, then block); no route reaches an
+  // implementation, plan, or design step.
   assert.deepEqual(flow.gates["verify-gate"].on_route_back, { missing_evidence: "verify", default: "verify" });
   assert.deepEqual(flow.gates["verify-gate"].route_back_policy, { max_attempts: 3, on_exceeded: "block" });
   assert.deepEqual(flow.gates["existing-change-gate"].expects.map((expect) => [expect.id, expect.required, expect.bundle_claim]), [[
@@ -417,9 +418,21 @@ test("a completed run records the existing change truthfully and publishes at th
   const checkpoint = JSON.parse(fs.readFileSync(path.join(fx.sessionDir, "trust.checkpoint.json"), "utf8"));
   assert.equal(checkpoint.commit_sha, fx.head);
   assert.ok(fs.existsSync(path.join(fx.project, "delivery", fx.slug, "trust.bundle")));
+  // The untracked delivery/ output dirties the checkout, so the next pinned start here refuses and
+  // names it rather than failing with an unexplained dirty tree.
+  const next = { ...fx, workItem: "acme/widgets#160", slug: "acme-widgets-160" };
+  next.sessionDir = path.join(fx.artifactRoot, next.slug);
+  next.runDir = path.join(fx.project, ".kontourai", "flow", "runs", next.slug);
+  fs.mkdirSync(next.sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(next.sessionDir, `${next.slug}--pull-work.md`), `Selected Work Item: ${next.workItem}\n`);
+  const afterDelivery = start(next, fx.head);
+  assert.notEqual(afterDelivery.status, 0);
+  assert.match(afterDelivery.output, new RegExp(`has uncommitted or untracked changes \\(delivery/${fx.slug}/`));
+  assert.match(afterDelivery.output, /Untracked workflow publish-delivery output under delivery\/ counts too: commit or remove it\./);
+  assertNoRunCreated(next, "start after publish-delivery");
 
-  // CONSUMER 2: merge-change refuses before any authorization or provider call. The provider is
-  // configured, so the refusal is the missing publish-change result, not missing configuration.
+  // CONSUMER 2: merge-change refuses this flow BY NAME before any authorization or provider call,
+  // and before it reads provider settings or a publish-change result (the provider IS configured).
   const calls = [];
   const errors = [];
   const previousActor = process.env.FLOW_AGENTS_ACTOR;
@@ -438,7 +451,8 @@ test("a completed run records the existing change truthfully and publishes at th
     else process.env.FLOW_AGENTS_ACTOR = previousActor;
   }
   assert.equal(exitCode, 1, `merge-change must refuse a review-existing run: ${errors.join("\n")}`);
-  assert.match(errors.join("\n"), /merge-change: .*publish-change\.result\.json/);
+  assert.match(errors.join("\n"), /merge-change: builder\.review-existing runs do not publish a change; merge-change is not supported for them yet/);
+  assert.doesNotMatch(errors.join("\n"), /ENOENT|publish-change\.result\.json/);
   assert.deepEqual(calls, [], "merge-change must refuse before authorization or any provider mutation");
   assert.equal(fs.existsSync(path.join(fx.sessionDir, "merge-change.result.json")), false);
 });
@@ -551,16 +565,39 @@ test("verify requires an independent reviewer and real tests", () => {
   assert.equal(runState(fx).status, "completed");
 });
 
+test("a failing check routes back to verify; passing evidence at the same head can then complete", () => {
+  // A failing claim does not end the run: verify-gate routes it back to verify (bounded at three
+  // visits). Re-recorded passing evidence at the SAME pinned head can then complete it, which is
+  // how a flaky or mis-invoked check recovers. A real code fix is a new head, and a new run.
+  const fx = makeExistingChange(25);
+  assertOk(start(fx), "start");
+  assertOk(recordPreExisting(fx), "pre-existing-implementation");
+  assertOk(critique(fx), "critique");
+  const failed = workflow(fx, ["evidence", "--session-dir", fx.sessionDir, "--expectation", "tests-evidence", "--status", "fail",
+    "--route-reason", "missing_evidence", "--summary", "The check was mis-invoked.", "--command", "false", "--json"]);
+  assertOk(failed, "failing tests-evidence");
+  let state = runState(fx);
+  assert.equal(state.status, "active");
+  assert.equal(state.current_step, "verify", "a failing verify claim routes back to verify, it does not block on the first visit");
+  // The route-back opens a new verify visit, so the gate needs that visit's own critique and tests.
+  assertOk(critique(fx), "critique for the new visit");
+  assertOk(testsEvidence(fx), "tests-evidence after route-back");
+  state = runState(fx);
+  assert.equal(state.status, "completed");
+  assert.equal(state.params.source_head, fx.head);
+});
+
 test("one Work Item cannot carry a builder.build run and an existing-change run at once", () => {
   const review = makeExistingChange(20);
   assertOk(start(review), "review start");
   const build = workflow(review, startArgs(review, "builder.build"));
   assert.notEqual(build.status, 0);
-  assert.match(build.output, /cannot resume builder\.review-existing as builder\.build/);
+  assert.match(build.output, /cannot resume builder\.review-existing as builder\.build; this Work Item's run was started as builder\.review-existing and keeps that flow/);
+  assert.doesNotMatch(build.output, /local shape sessions/, "the shape-only explanation must not describe a review-existing run");
 
   const built = makeExistingChange(21);
   assertOk(workflow(built, startArgs(built, "builder.build")), "build start");
   const reviewed = start(built);
   assert.notEqual(reviewed.status, 0);
-  assert.match(reviewed.output, /cannot resume builder\.build as builder\.review-existing/);
+  assert.match(reviewed.output, /cannot resume builder\.build as builder\.review-existing; this Work Item's run was started as builder\.build/);
 });
