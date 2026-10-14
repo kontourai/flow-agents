@@ -82,8 +82,10 @@ provider result as selected-work evidence and begins at the canonical Builder en
 portfolio approval, a branch name, or a finished change is not a substitute for that binding. If
 the work has already been changed without a bound run, do not manufacture a prior session or use a
 private writer. Review and verify the finished change through `builder.review-existing` instead
-(see [Review and verify an existing change](#review-and-verify-an-existing-change)), or record
-the gap and create a follow-up Work Item.
+(see [Review and verify an existing change](#review-and-verify-an-existing-change)), deliver and
+merge it through `builder.deliver-existing` (see
+[Review, verify, and merge an existing change](#review-verify-and-merge-an-existing-change)), or
+record the gap and create a follow-up Work Item.
 
 The agent executes the reported public `next_action` through planning, implementation, review,
 verification, and release readiness, produces the required artifacts, and records their evidence.
@@ -563,7 +565,8 @@ shared by all worktrees of the repository and does not change the reviewed head)
 first. `merge-change` refuses these
 runs by name ("`builder.review-existing` runs do not publish a change") before reading provider
 settings or calling the provider, because the flow binds no step to the publish-change operation.
-Merge through the provider's own controls.
+Merge through the provider's own controls, or deliver the change through `builder.deliver-existing`
+(next section), which `merge-change` supports.
 
 Not verified by this route:
 
@@ -574,6 +577,97 @@ Not verified by this route:
   pull request's current head commit. The provider URL, base, and head in
   `<slug>--existing-change.md` are written by the caller. Both are `NOT_VERIFIED`.
 - `acceptance.json` is not anchored to a planning step, the same as in `builder.build-lean`.
+
+## Review, verify, and merge an existing change
+
+`builder.deliver-existing` does everything `builder.review-existing` does and then delivers the
+change: it adopts the change's open pull request, records CI readiness and learning at the same
+pinned head, and lets `merge-change` merge it. It still makes no implementation claim and has no
+`execute` step, and it never opens a pull request.
+
+| | `builder.build` | `builder.review-existing` | `builder.deliver-existing` |
+| --- | --- | --- | --- |
+| Steps | pull-work, design-probe, plan, execute, verify, merge-ready, pr-open, merge-ready-ci, learn | pull-work, existing-change, verify | pull-work, existing-change, verify, pr-open, merge-ready-ci, learn |
+| Implementation claim | `implementation-scope` at `execute` | None | None |
+| `pr-open` | `publish-change` opens or recovers the pull request | No step | `publish-change` adopts the existing pull request |
+| Provisional delivery | Allowed at `merge-ready-ci` | No step | Refused |
+| Source head | Follows the branch | Pinned at start | Pinned at start |
+| `merge-change` | Supported | Refused | Supported |
+
+Start, record `pre-existing-implementation`, and verify exactly as in
+[Review and verify an existing change](#review-and-verify-an-existing-change), with
+`--flow builder.deliver-existing`. The pull-work, existing-change, and verify gates are the same
+gates. Two things differ:
+
+- Check out the pull request's head branch: a local branch with the pull request's head branch
+  name, at the pull request's head commit, which is the head you pin.
+- The `pre-existing-implementation` claim must name the pull request with exactly one `provider`
+  evidence ref, its URL. `pr-open` adopts a pull request only when its URL is that one.
+
+At `pr-open`, adopt the pull request:
+
+```bash
+flow_agents publish-change execute \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 \
+  --head-ref feature/existing-change --base-ref main
+```
+
+For a run pinned to a source head the operation adopts rather than opens, and the mode comes from
+the run's definition, not from a flag. It takes no `--title`, `--body`, or `--draft` (the command
+refuses them), and it never sets, reads, or compares the pull request's title or body. It refuses,
+without advancing the gate, when:
+
+- the provider shows no pull request for that head and base ref, or more than one;
+- the pull request is closed or merged, or its head branch is in another repository (a fork);
+- the pull request's head is not the pinned head, or `--head-ref` does not name the pinned head;
+- the checked-out `HEAD` is not the pinned head, or the worktree is dirty, either before the
+  provider call or when the result is committed under the session lock afterwards;
+- the pull request's URL is not the one the `pre-existing-implementation` claim names.
+
+The adoption claim carries the clean Git snapshot it was observed in, like every other claim this
+run accepts.
+
+At `merge-ready-ci` and `learn`, produce `ci-merge-readiness`, `decision-evidence`, and
+`learning-evidence` as for `builder.build` (with `release-readiness` and `learning-review`). Record
+CI readiness for the pinned head, which is the pull request's head at this point.
+`workflow publish-provisional-delivery-request` and `workflow publish-provisional-delivery` refuse
+these runs, because a provisional delivery commit would move the pull request head off the pinned
+head. A `merge-ready-ci` or `learn` claim made after `HEAD` moves is refused, and there is no
+`implementation_defect` route: a failing claim routes back to `verify`. A completed run ends at
+`learn`.
+
+Then deliver and merge:
+
+1. Run `workflow publish-delivery` as above. It seals the checkpoint at the pinned head.
+2. Commit exactly `delivery/<slug>/` as one commit on the pull request branch, and push it. This
+   needs push rights to the pull request's branch, which must be in the same repository, and it
+   starts one more CI round, on the new head.
+3. Run `merge-change request` and `merge-change execute` as in
+   [Authenticated `merge-change`](#authenticated-merge-change). The terminal head they merge is the
+   pinned head plus that one delivery-only commit.
+
+`merge-change` holds the run to the pinned head: the adopted pull request must have been observed at
+the pinned head, the delivery checkpoint must be sealed at the pinned head, the terminal head must
+be the checkpoint commit plus exactly this session's delivery files, and the provider's pull request
+head must be that terminal head when it merges. A moved or retargeted pull request, failing,
+pending, or missing required checks, a review that is not `APPROVED`, a merge state that is not
+`CLEAN`, or a different `gh` actor is refused before the merge call.
+
+Disclosures:
+
+- The pull request branch gains one commit, the delivery files, which is what is merged.
+- Nothing refuses a second session that adopts the same pull request. Its delivery commit moves the
+  pull request head, so the first session's merge refuses because the head is no longer its
+  terminal head.
+- That the reviewer is not the pull request's author is `NOT_VERIFIED`. The merge relies on the
+  provider's approval policy (see [Target-branch policy precondition](#target-branch-policy-precondition);
+  GitHub forbids approving your own pull request). Whether an approval given before the delivery
+  commit still counts for the terminal head is decided by the repository's dismiss-stale-reviews
+  setting.
+- That the pinned head is the pull request's head is checked when `pr-open` adopts it, not at start.
+  The base and changed files in `<slug>--existing-change.md` are written by the caller and are
+  `NOT_VERIFIED`.
+- `acceptance.json` is not anchored to a planning step, as in `builder.review-existing`.
 
 ## Resolving repaired critique history
 
@@ -957,6 +1051,12 @@ reacquires the subject lock and revalidates assignment ownership, active gate vi
 binding, and effective provider configuration; it then re-observes the provider record, attaches
 only `pull-request-opened`, requires that bound evaluation to advance exactly one canonical step,
 and projects the resulting state.
+
+For a run whose definition pins its source head (`builder.deliver-existing`), the same operation
+adopts instead: it takes only `--session-dir`, `--head-ref`, and `--base-ref`, never runs a create,
+and never reads the title, body, or draft flag. It accepts exactly one open, same-repository pull
+request at the pinned head, the one the run's `pre-existing-implementation` claim names; see
+[Review, verify, and merge an existing change](#review-verify-and-merge-an-existing-change).
 
 A caller-authored `publish-change.result.json`, generic adapter JSON/evidence, or a package
 internal/private writer cannot complete this gate. Provider/authentication failures leave the

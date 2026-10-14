@@ -20,15 +20,15 @@ It does not prove accepted behavior and it does not fix source files.
 | Context | Binding | Flow expectation |
 | --- | --- | --- |
 | Active Builder run | `builder.build` at `verify` | `clean-critique`. Review Work owns the critique claim, not verification completion. |
-| Active existing-change run | `builder.review-existing` at `verify` | `clean-critique`, for a change that existed before the run. Cite `<slug>--existing-change.md` instead of the execution report. |
+| Active existing-change run | `builder.review-existing` or `builder.deliver-existing` at `verify` | `clean-critique`, for a change that existed before the run. Cite `<slug>--existing-change.md` instead of the execution report. |
 | Standalone invocation | No Flow binding | No workflow mutation. |
 
 For an active run, inspect the binding before work:
 
 The steering hook injects the run state at session start and re-injects it whenever it changes; if a steering state block appears anywhere in your context and you have not recorded evidence or a critique since it appeared, it is current. Run `flow-agents workflow status --session-dir <session-dir> --json` only after such a write or when no steering state block appears in your context at all; the write itself refuses an unbound, stale, or wrong-step binding either way.
 
-Run this skill only when the reported run is `builder.build` or
-`builder.review-existing` at `verify`.
+Run this skill only when the reported run is `builder.build`,
+`builder.review-existing`, or `builder.deliver-existing` at `verify`.
 If there is no matching active run, operate standalone. Do not publish a gate
 expectation from this skill.
 
