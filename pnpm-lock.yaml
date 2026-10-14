@@ -39,6 +39,9 @@ importers:
       '@kontourai/traverse':
         specifier: 0.19.1
         version: 0.19.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@6.42.0(ws@8.21.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
+      '@kontourai/veritas':
+        specifier: 1.11.2
+        version: 1.11.2(@kontourai/survey@8.1.1(typescript@7.0.2))(zod@4.4.3)
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
@@ -1074,6 +1077,11 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
+  '@kontourai/plumb@0.2.0':
+    resolution: {integrity: sha512-LiYmwDpsBiAjeHFSqbtA51CGjdOKY0l+r/tneqV9aPdT4Ct+5zq7o6fH5NbRhoTW2h9sqiIZL0SOA69CSGJlnA==}
+    engines: {node: '>=22'}
+    hasBin: true
+
   '@kontourai/relay@0.2.0':
     resolution: {integrity: sha512-hKNm4eQl3i+O834cJppava0D+DFcCENkzZHPLqh/nB8oQFgyaT5AsqdDIfZDv7coGxIT0BFMjsx7cBWGviZdTg==}
     engines: {node: '>=22'}
@@ -1153,6 +1161,16 @@ packages:
       openai:
         optional: true
       typescript:
+        optional: true
+
+  '@kontourai/veritas@1.11.2':
+    resolution: {integrity: sha512-hneXxMe0kpwzzhF6d9Qu2OgBv3GlAbs/9IlIF4r72Y4YvNO2Dgofalz6/ZgL+xIh28emetN4PBdMTY1agzxMTw==}
+    engines: {node: '>=22'}
+    hasBin: true
+    peerDependencies:
+      '@kontourai/survey': '>=8.2.0 <9'
+    peerDependenciesMeta:
+      '@kontourai/survey':
         optional: true
 
   '@kwsites/file-exists@1.1.1':
@@ -3567,6 +3585,10 @@ packages:
   pgpass@1.0.5:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
+  picomatch@4.0.7:
+    resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
+    engines: {node: '>=12'}
+
   pkce-challenge@5.0.1:
     resolution: {integrity: sha512-wQ0b/W4Fr01qtpHlqSqspcj3EhBvimsdh0KlHhH8HRZnMsEa0ea2fTULOXOS9ccQr3om+GcGRk4e+isrZWV8qQ==}
     engines: {node: '>=16.20.0'}
@@ -4950,7 +4972,6 @@ snapshots:
   '@hono/node-server@1.19.14(hono@4.12.25)':
     dependencies:
       hono: 4.12.25
-    optional: true
 
   '@huggingface/jinja@0.5.9':
     optional: true
@@ -5336,6 +5357,8 @@ snapshots:
       - playwright
       - typescript
 
+  '@kontourai/plumb@0.2.0': {}
+
   '@kontourai/relay@0.2.0(@ai-sdk/provider@3.0.10)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))':
     dependencies:
       '@ai-sdk/provider': 3.0.10
@@ -5409,6 +5432,24 @@ snapshots:
     transitivePeerDependencies:
       - canvas
       - playwright
+
+  '@kontourai/veritas@1.11.2(@kontourai/survey@8.1.1(typescript@7.0.2))(zod@4.4.3)':
+    dependencies:
+      '@kontourai/plumb': 0.2.0
+      '@kontourai/surface': 2.17.0
+      '@modelcontextprotocol/sdk': 1.29.0(zod@4.4.3)
+      ajv: 8.20.0
+      ajv-formats: 3.0.1(ajv@8.20.0)
+      cross-spawn: 7.0.6
+      hachure: 0.15.0
+      picomatch: 4.0.7
+    optionalDependencies:
+      '@kontourai/survey': 8.1.1(typescript@7.0.2)
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - kerberos
+      - supports-color
+      - zod
 
   '@kwsites/file-exists@1.1.1':
     dependencies:
@@ -5503,7 +5544,6 @@ snapshots:
       zod-to-json-schema: 3.25.2(zod@4.4.3)
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   '@modelcontextprotocol/server@2.0.0':
     dependencies:
@@ -6770,7 +6810,6 @@ snapshots:
   eventsource@3.0.7:
     dependencies:
       eventsource-parser: 3.1.0
-    optional: true
 
   execa@9.6.1:
     dependencies:
@@ -6791,7 +6830,6 @@ snapshots:
     dependencies:
       express: 5.2.1
       ip-address: 10.2.0
-    optional: true
 
   express@5.2.1:
     dependencies:
@@ -7145,8 +7183,7 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
-  hono@4.12.25:
-    optional: true
+  hono@4.12.25: {}
 
   hookified@1.15.1: {}
 
@@ -7314,8 +7351,7 @@ snapshots:
       node-rsa: 1.1.1
     optional: true
 
-  jose@6.2.3:
-    optional: true
+  jose@6.2.3: {}
 
   js-base64@3.7.8: {}
 
@@ -7340,8 +7376,7 @@ snapshots:
 
   json-schema-traverse@1.0.0: {}
 
-  json-schema-typed@8.0.2:
-    optional: true
+  json-schema-typed@8.0.2: {}
 
   json-schema@0.4.0: {}
 
@@ -7969,8 +8004,9 @@ snapshots:
       split2: 4.2.0
     optional: true
 
-  pkce-challenge@5.0.1:
-    optional: true
+  picomatch@4.0.7: {}
+
+  pkce-challenge@5.0.1: {}
 
   platform@1.3.6:
     optional: true
@@ -8867,6 +8903,5 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@4.4.3):
     dependencies:
       zod: 4.4.3
-    optional: true
 
   zod@4.4.3: {}

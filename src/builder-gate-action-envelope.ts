@@ -303,6 +303,24 @@ export function declaredStepBindsInterface(
   }
 }
 
+/**
+ * True when the kit declaring `definitionId` binds some step's expectation to the external
+ * `operation` (e.g. `publish-change`). An unreadable or invalid declaration throws rather than
+ * answering false, so a caller cannot mistake a broken kit for a flow without the operation.
+ */
+export function declaredFlowBindsOperation(definitionId: string, operation: string, projectRoot?: string): boolean {
+  let parsed: ReturnType<typeof parseKitFlowStepActions>;
+  try {
+    const { manifest: kit, manifestRef } = declaringKitForFlow(definitionId, projectRoot);
+    parsed = parseKitFlowStepActions(kit, manifestRef);
+  } catch (error) {
+    throw new Error(`could not resolve the kit declaration for ${definitionId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (parsed.errors.length) throw new Error(`could not resolve the kit declaration for ${definitionId}: ${parsed.errors.join("; ")}`);
+  return parsed.entries.some((entry) => entry.flow_id === definitionId
+    && entry.expectation_bindings.some((binding) => binding.interface === "operation" && binding.operation === operation));
+}
+
 export function installedBuilderGateActionAuthority(definitionId: string, currentStep: string, runId: string, projectRoot?: string): {
   definition_version: string;
   gate_id: string;

@@ -63,10 +63,11 @@ terms or treating absence as success.
    `--route-reason missing_evidence`. The artifact's own `not_verified` verdict
    remains visible even though the readiness expectation fails to select the
    declared route-back. A changed PR head makes the observation stale.
-   When the repository has `.veritas/repo-map.json`, run the pinned Veritas
-   engine for the same base/head revision (prefer
-   `npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas readiness
-   --check evidence --changed-from <base> --changed-to <head> --format json`),
+   When the repository has `.veritas/repo-map.json`, run the repository's
+   installed Veritas engine for the same base/head revision (prefer
+   `npx --no @kontourai/veritas readiness --check evidence
+   --changed-from <base> --changed-to <head> --format json`; it refuses rather
+   than fetching when Veritas is not installed, which is an unavailable verdict),
    follow its returned `reportArtifactPath`, and record the
    `software-readiness-verdict` claim plus that artifact reference in
    `release.json`. If the Veritas Governance Kit is active, its

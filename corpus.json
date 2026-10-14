@@ -184,7 +184,10 @@
     },
     {
       "source": "docs/public-workflow-cli.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "kits/builder/flows/review-existing.flow.json"
+      ]
     },
     {
       "source": "docs/spec/runtime-hook-surface.md",
@@ -605,5 +608,10 @@
     "workflow-eval-strategy.html": "docs/workflow-eval-strategy.md",
     "workflow-shared-contracts.html": "docs/workflow-shared-contracts.md",
     "workflow-usage-guide.html": "docs/workflow-usage-guide.md"
+  },
+  "decisions": {
+    "adr": {
+      "dir": "docs/adr"
+    }
   }
 }

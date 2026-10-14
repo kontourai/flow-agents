@@ -399,10 +399,13 @@ else
   fail "skill file count $ACTUAL_SKILLS != declared $EXPECTED_SKILLS (namespacing regression: skills collapsing onto one file per kit)"
 fi
 
-if [[ "$BUILDER_SKILLS" == "17" ]]; then
-  pass "all 17 Builder Kit skills survive activation (not collapsed to 1)"
+# Derived from the Builder kit manifest so adding a Builder skill does not trip an exact-count
+# ratchet; the "> 1" floor still catches the collapse-to-one-file regression this guards.
+BUILDER_EXPECTED="$(node -e 'const d=require(process.argv[1]); process.stdout.write(String(Array.isArray(d.skills) ? d.skills.length : 0))' "$ROOT/kits/builder/kit.json")"
+if [[ "$BUILDER_SKILLS" == "$BUILDER_EXPECTED" ]] && [[ "$BUILDER_SKILLS" -gt 1 ]]; then
+  pass "all $BUILDER_EXPECTED declared Builder Kit skills survive activation (not collapsed to 1)"
 else
-  fail "expected 17 Builder Kit skills to survive activation, found $BUILDER_SKILLS"
+  fail "expected $BUILDER_EXPECTED declared Builder Kit skills to survive activation, found $BUILDER_SKILLS"
 fi
 
 # -------------------------------------------------------------------------

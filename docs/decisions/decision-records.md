@@ -9,6 +9,8 @@ evidence:
     ref: .kontourai/flow-agents/decision-registry-shape/decision-registry-shape--idea-to-backlog.md
   - kind: pr
     ref: https://github.com/kontourai/flow-agents/pull/316
+  - kind: pr
+    ref: https://github.com/kontourai/corpus/pull/21
 ---
 
 # Decision records
@@ -35,10 +37,11 @@ decisions.
   interop). The numbered-ADR file format is not adopted for new decisions — the
   behavior is inherited, not the failure mode.
 - Existing ADRs are **frozen and indexed, never converted**; history stays
-  immutable provenance. (Freeze tooling is issue #314.)
-- Frontmatter is YAML validated by `schemas/decision-record.schema.json`
+  immutable provenance. Corpus's adr-freeze gate refuses new files under
+  `docs/adr/`.
+- Frontmatter is YAML in the [Corpus decision-record format](https://github.com/kontourai/corpus/blob/main/docs/decisions.md)
   (`status`, `subject`, `decided`, `evidence[]`, and the relationship fields),
-  enabling machine health checks.
+  checked by `npm run check:decisions`, enabling machine health checks.
 - A generated `docs/decisions/index.md` (slug + one-liner) is referenced from
   CONTEXT.md so retrieval-at-write matching has a cheap, always-loaded index.
 

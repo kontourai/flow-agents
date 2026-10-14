@@ -80,8 +80,10 @@ flow_agents workflow start \
 The provider status must confirm the calling actor holds that exact Work Item. `start` retains the
 provider result as selected-work evidence and begins at the canonical Builder entry step. A
 portfolio approval, a branch name, or a finished change is not a substitute for that binding. If
-the work has already been changed without a bound run, record the gap and create a follow-up Work
-Item; do not manufacture a prior session or use a private writer.
+the work has already been changed without a bound run, do not manufacture a prior session or use a
+private writer. Review and verify the finished change through `builder.review-existing` instead
+(see [Review and verify an existing change](#review-and-verify-an-existing-change)), or record
+the gap and create a follow-up Work Item.
 
 The agent executes the reported public `next_action` through planning, implementation, review,
 verification, and release readiness, produces the required artifacts, and records their evidence.
@@ -398,6 +400,180 @@ Current local runtime actor IDs provide coordination-level separation, not a
 cryptographic identity guarantee. A policy that requires externally attested
 reviewer identity must keep that assurance `NOT_VERIFIED` until the runtime
 supplies a trusted delegation credential.
+
+## Review and verify an existing change
+
+`builder.review-existing` reviews and verifies a change that already exists at one exact Git
+commit, such as an open pull request, without claiming that the run implemented it. Use
+`builder.build` for new work.
+
+| | `builder.build` | `builder.review-existing` |
+| --- | --- | --- |
+| Starts from | A selected Work Item with no implementation yet | A selected Work Item whose change already exists at one commit |
+| Steps | pull-work, design-probe, plan, execute, verify, merge-ready, pr-open, merge-ready-ci, learn | pull-work, existing-change, verify |
+| Implementation claim | `implementation-scope` at `execute` | None. `pre-existing-implementation` records the change as it existed. |
+| Failing check at verify | Routes back to execute, plan, design-probe, or verify | Routes back to `verify` only: at most three route-backs; a fourth failing visit blocks. A code fix is a new head, so it needs a new run. |
+| Source head | Follows the branch | Pinned at start with `--source-head` and re-checked at every gate |
+
+Before starting:
+
+1. Check out the exact commit under review in a Git worktree with no uncommitted or untracked
+   files. Workflow output must be ignored. If the reviewed head does not already ignore
+   `.kontourai/` and `delivery/`, add both to the repository's local exclude file, which does not
+   change the head under review:
+
+   ```bash
+   exclude="$(git rev-parse --git-path info/exclude)"
+   mkdir -p "$(dirname "$exclude")"
+   printf '.kontourai/\ndelivery/\n' >> "$exclude"
+   ```
+
+   `git rev-parse --git-path` finds the file in a linked worktree too, where `.git` is a file
+   rather than a directory. The exclude file is shared by all worktrees of the repository. Commit
+   an ignore rule (for example the `.kontourai/.gitignore` that `init` writes) only if the
+   repository wants it anyway; a commit makes a new head, which is then the head you review.
+2. Select the Work Item and write `.kontourai/flow-agents/<slug>/<slug>--pull-work.md` naming its
+   reference, as for `builder.build`.
+3. Use a provider reference (`owner/repo#numeric-id` or `provider:id`). A `local:` reference only
+   resumes an existing local session created by `builder.shape`, so it cannot start this flow.
+4. In a linked Git worktree, the default artifact root is the main checkout's
+   `.kontourai/flow-agents` (one shared store per repository), so the pin would be compared with
+   the main checkout's `HEAD` and refused. Pass the worktree's own store to `start`:
+   `--artifact-root "$(git rev-parse --show-toplevel)/.kontourai/flow-agents"`, and write the
+   pull-work report under that root. Every later verb for the session (`status`, `evidence`,
+   `critique`, `publish-delivery`) must then name the session with `--session-dir` under the
+   worktree, as the examples below do (a worktree-relative path works). Without it, a verb looks
+   the session up through the main checkout's store, does not find it, and refuses.
+
+Then start with the head pinned. With a provider assignment:
+
+```bash
+flow_agents workflow start \
+  --flow builder.review-existing \
+  --work-item kontourai/target-repository#123 \
+  --assignment-provider github \
+  --effective-state-json .kontourai/flow-agents/target-assignment-status.json \
+  --source-head "$(git rev-parse HEAD)"
+```
+
+Without a provider assignment, the local assignment mirror works with a provider-style reference:
+
+```bash
+mkdir -p .kontourai/flow-agents/provider-review-1
+printf 'Selected Work Item: provider:review-1\n' > .kontourai/flow-agents/provider-review-1/provider-review-1--pull-work.md
+flow_agents workflow start \
+  --flow builder.review-existing \
+  --work-item provider:review-1 \
+  --assignment-provider local-file \
+  --source-head "$(git rev-parse HEAD)"
+```
+
+The run persists the head in its canonical state. `start` refuses before writing any session
+artifact when the head is missing, is not a full lowercase 40-hex SHA, is not the checked-out
+`HEAD`, or the Git worktree has uncommitted or untracked changes. The refusal names up to five
+dirty paths and suggests the local exclude file (`git rev-parse --git-path info/exclude`) for
+workflow output. Every other flow refuses `--source-head`. The rule
+is enforced by the shared runtime that starts every run, so the exported `startBuilderFlowSession`
+API refuses the same inputs as `workflow start`.
+
+At `existing-change`, write `<slug>--existing-change.md` with the change's provider record, base,
+exact head, and changed files, then record it:
+
+```bash
+flow_agents workflow evidence \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 \
+  --expectation pre-existing-implementation \
+  --status pass \
+  --summary "The change existed before this run at the pinned head." \
+  --evidence-ref-json '{"kind":"provider","url":"https://github.com/kontourai/target-repository/pull/124","summary":"Provider record of the existing change."}' \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/kontourai-target-repository-123/kontourai-target-repository-123--existing-change.md","summary":"Base, exact head, and changed files."}'
+```
+
+`verify` has the same expectations as `builder.build`: a clean critique from a reviewer whose
+runtime identity differs from the assignment holder, acceptance criteria, command-backed
+`tests-evidence` such as `--command "npm test"` with matching `--criterion-json`, and applicable
+policy compliance. This flow has no `<slug>--plan-work.md` and no execution report (the
+`<slug>--deliver.md` that every session gets is only the session template), so artifact
+references cite `<slug>--existing-change.md` instead. Passing the verify gate
+completes the run.
+
+A failing verify claim does not end the run. `verify-gate` declares only the `missing_evidence` and
+`default` route-backs, both to `verify`, so a failure opens a new `verify` visit. Passing evidence
+re-recorded at the same pinned head in that visit, a fresh critique and fresh `tests-evidence`, can
+then complete the run; that is how a flaky or mis-invoked check recovers. A real code fix changes
+the head, so it needs a new run. The gate allows at most three route-backs; a fourth failing visit
+blocks.
+
+The run fails closed when:
+
+- the checked-out `HEAD` is no longer the pinned head when any gate is evaluated, even if every
+  claim was re-recorded at the new commit;
+- a claim carrying a Git snapshot was observed at another commit or in a dirty worktree (a
+  failing claim stays recordable and routes the run back to `verify`);
+- `start` is re-run with a different `--source-head`, for an active or a completed run;
+- a non-failing claim carries no Git snapshot, because the writer could not capture the worktree;
+- the critique comes from the assignment holder, or `tests-evidence` names a vacuous command;
+- the same Work Item already has a `builder.build` run, or the reverse.
+
+Any excursion off the pinned head needs a new run, even if the checkout returns to the pin. For
+example, a critique recorded while `HEAD` was another commit leaves the review history bound to
+that commit, and the run stays refused after the pin is restored.
+
+A new head needs a new run under a new provider Work Item. The run is keyed by the Work Item, and
+archiving a run keeps its canonical record, so starting the same Work Item again resumes the old
+run and refuses the new head. This is deliberate friction in this release; there are no per-head
+runs within one Work Item.
+
+`workflow publish-delivery` accepts a completed run and seals its checkpoint at the pinned head.
+It first checks the bundle against the repository's reconcile manifest, and refuses with "command
+is not in the reconcile manifest" unless every command recorded on a passing claim (for example
+`tests-evidence`, or `policy-compliance` recorded with `--command`) is in it. It resolves the manifest in this order:
+
+1. a `trust-reconcile-manifest` entry in `package.json` (an inline array, or a script that prints
+   the manifest JSON);
+2. `evals/ci/run-baseline.sh --manifest-json`, when the repository has that script;
+3. otherwise a manifest built from the `TRUST_RECONCILE_COMMANDS` environment variable, or, when
+   that is unset, from a `package.json` script named `trust-reconcile-verify` (which contributes
+   only the command `npm run trust-reconcile-verify`).
+
+An ambient `TRUST_RECONCILE_MANIFEST` is ignored by this check. `TRUST_RECONCILE_COMMANDS` is split
+on commas and newlines and each part is trimmed, so a command that contains a comma cannot be
+listed there. A claim matches an entry only when the two commands are identical after runs of
+whitespace are collapsed to one space. Adding a `package.json` script changes the head under review,
+so for a review the environment variable is usually the way:
+
+```bash
+TRUST_RECONCILE_COMMANDS="npm test" flow_agents workflow publish-delivery \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 --json
+```
+
+Use the exact `--command` text the `tests-evidence` claim recorded, one entry per command,
+separated by newlines or commas. If the reviewed head already defines `trust-reconcile-verify`,
+record `tests-evidence` with `--command "npm run trust-reconcile-verify"` and no variable is needed.
+If tier 1 or 2 yields a valid manifest, the variable is not consulted, and the recorded commands
+must appear in that manifest instead; a declared tier 1 or 2 source that fails or prints invalid
+JSON falls through to the next tier. A tier 1 script entry and the tier 2 script run repository code
+from the reviewed head (an inline tier 1 array runs nothing), the same trust boundary as running its
+tests.
+
+Its `delivery/<slug>/` output is untracked, so the next pinned `start` in the same checkout refuses
+the dirty tree and names those files; append `delivery/` to
+`"$(git rev-parse --git-path info/exclude)"` (create its directory first if missing; the file is
+shared by all worktrees of the repository and does not change the reviewed head) or remove them
+first. `merge-change` refuses these
+runs by name ("`builder.review-existing` runs do not publish a change") before reading provider
+settings or calling the provider, because the flow binds no step to the publish-change operation.
+Merge through the provider's own controls.
+
+Not verified by this route:
+
+- The runtime requires the reviewer to differ from the assignment holder, and the skill asks the
+  assignment holder to be the change's owner. That the reviewer is not the change's author on the
+  provider, for example the GitHub pull request author, is `NOT_VERIFIED`.
+- Nothing checks that `--source-head` is the change's actual head on the provider, for example the
+  pull request's current head commit. The provider URL, base, and head in
+  `<slug>--existing-change.md` are written by the caller. Both are `NOT_VERIFIED`.
+- `acceptance.json` is not anchored to a planning step, the same as in `builder.build-lean`.
 
 ## Resolving repaired critique history
 

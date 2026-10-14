@@ -6,6 +6,7 @@ import { parseArgs, flagString } from "../lib/args.js";
 import { atomicWriteFile } from "../lib/fs.js";
 import { execTrustedGitSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 import { inspectBuilderFlowSession, publishChangeAuthorityRef } from "../builder-flow-runtime.js";
+import { declaredFlowBindsOperation } from "../builder-gate-action-envelope.js";
 import { validateRunStateConsistency } from "@kontourai/flow";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync } from "./assignment-provider.js";
 import { validateTrustBundle } from "./workflow-sidecar.js";
@@ -253,6 +254,11 @@ async function currentAction(context: SessionContext, strategy: MergeChangeStrat
   // already asserts, and the definitions checked below.
   if (inspected.run.state.status !== "completed") {
     throw new Error(`merge-change requires a completed canonical run after learning and terminal delivery; ${inspected.run.definitionId} is ${inspected.run.state.status} at ${inspected.run.state.current_step}. Run flow-agents workflow publish-delivery, then refresh the exact-head provider checks before retrying`);
+  }
+  // A flow whose kit binds no step to the publish-change operation never produces the result this
+  // operation merges, so refuse it by name before reading provider settings or that result.
+  if (!declaredFlowBindsOperation(inspected.run.definitionId, "publish-change", context.projectRoot)) {
+    throw new Error(`${inspected.run.definitionId} runs do not publish a change; merge-change is not supported for them yet. Merge through the provider's own controls.`);
   }
   const actor = assertCurrentAssignment(context);
   const effective = resolveEffectiveChangeProviderSettings(context.projectRoot, path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"));

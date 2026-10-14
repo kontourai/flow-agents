@@ -111,8 +111,8 @@ write surface is:
 proposal, and the conformance suite asserts that `readNodes()` is byte-stable
 across a `proposeWrite` call. Enactment happens DOWNSTREAM of the provider:
 
-- **git-repo** renders a decision-registry topic file (frontmatter compatible
-  with `schemas/decision-record.schema.json`) shaped for the **promote sub-flow**
+- **git-repo** renders a decision-registry topic file (frontmatter in the
+  [Corpus decision-record format](https://github.com/kontourai/corpus/blob/main/docs/decisions.md)) shaped for the **promote sub-flow**
   (`docs/decisions/promotion-gate.md`). The promote step is the enactor.
 - **work-item** renders a draft `gh issue comment` / `gh issue edit --add-label`
   the operator files. The provider never runs a mutating `gh` command.

@@ -27,7 +27,7 @@ import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-p
 import { createGithubChangeProvider, resolveTrustedGithubExecutable } from "./cli/github-change-provider.js";
 import type { ChangeProviderRequest } from "./cli/change-provider.js";
 import type { ChangeProviderSettings } from "./cli/public-contracts.js";
-import { assertTrustedGitAncestor, isExactLowercaseCommitSha, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
+import { assertTrustedGitAncestor, execTrustedGitSync, isExactLowercaseCommitSha, resolveTrustedLocalGitCommit } from "./lib/trusted-git.js";
 import { buildTrustBundle, validateTrustBundle } from "./cli/workflow-sidecar.js";
 // Circular at module level (workflow.ts imports this file) — safe: the binding is only
 // dereferenced inside function bodies, the same tolerated shape as the sidecar import above.
@@ -48,6 +48,7 @@ import {
   actionableOpenGates,
   evaluateBuilderFlowRun,
   isCanonicalRunFlowId,
+  loadBoundBuilderFlowDefinition,
   loadBuilderFlowRun,
   pauseBuilderFlowRun,
   resumeBuilderFlowRun,
@@ -84,6 +85,12 @@ export interface BuilderFlowSessionInput {
    * gateAdvancementFreshnessSatisfied.
    */
   gateFreshnessCompletionVerifier?: GateFreshnessCompletionVerifier;
+  /**
+   * #1415: the exact commit a run of a flow declaring `source_binding.head` reviews. Required by
+   * such a flow at start and on every resume, refused by every other flow. Only
+   * `startBuilderFlowSession` reads it.
+   */
+  sourceHead?: string;
 }
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
@@ -473,8 +480,23 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
       if (run.definitionId !== requestedFlowId) {
         throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start ${requestedFlowId} from a provider Work Item instead of retrying an existing ${run.definitionId} session`);
       }
+      // #1415: a resume re-proves the pin. The persisted head is the run's identity, so a caller
+      // cannot carry an existing run (active or completed) onto a different commit.
+      const persisted = pinnedRunSourceHead(run.startDefinition, run.state);
+      if (persisted !== null && input.sourceHead !== undefined && input.sourceHead !== persisted) {
+        throw new BuilderBuildRunInputError("sourceHead", `${input.sourceHead} does not match the source head ${persisted} this ${requestedFlowId} run was started at; a new head needs a new run under a new provider Work Item`);
+      }
+      assertSourceHeadStartable(run.startDefinition, requestedFlowId, input.sourceHead, context.projectRoot);
     } catch (error) {
       if (!isRunNotFound(error)) throw error;
+      // #1415: a definition-declared source pin is checked BEFORE the run exists, against the
+      // exact definition the run would pin, so a refusal leaves no canonical run behind.
+      const sourceHead = assertSourceHeadStartable(
+        await loadBoundBuilderFlowDefinition(requestedFlowId, context.projectRoot),
+        requestedFlowId,
+        input.sourceHead,
+        context.projectRoot,
+      );
       const correlationActor = resolveBuilderCorrelationActor(context, subject);
       run = await startBuilderFlowRun({
         cwd: context.projectRoot,
@@ -489,6 +511,7 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
         }),
         params: {
           subject,
+          ...(sourceHead !== null ? { source_head: sourceHead } : {}),
         },
       });
     }
@@ -1086,6 +1109,8 @@ async function syncAndProject(
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
   assertLifecycleResolutionAttestation(context, run);
+  // #1415: the definition's pin and the run's persisted head must agree before any evaluation.
+  const pinnedSourceHead = pinnedRunSourceHead(run.startDefinition, run.state);
   let attached = false;
   let attachmentExpectationIds: string[] | null = null;
   const gates = openGatesForResult(run);
@@ -1165,6 +1190,9 @@ async function syncAndProject(
     // #1302: the no-new-evidence path is the route-back RE-ENTRY trap — a prior visit's passing
     // claim must not advance a requires_current_verification gate while verification is stale.
     && gateAdvancementFreshnessSatisfied(gates[0]!, context.sessionDir, context.projectRoot, gateFreshnessCompletionVerifier)) {
+    // A gate that passes without new evidence (an accepted exception) still advances only at
+    // the pinned head.
+    if (pinnedSourceHead !== null) assertPinnedSourceHead([], run.state, context.projectRoot);
     run = await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   }
   assertLifecycleResolutionAttestation(context, run);
@@ -1723,6 +1751,7 @@ export async function bundleGateEvidence(
     linked.push(evidence);
     executionEvidenceByClaimId.set(evidence.claimId, linked);
   }
+  assertPinnedSourceHead(relevant, state, projectRoot);
   assertCurrentGateClaimFreshness(headBoundGateClaims, state, projectRoot, executionEvidenceByClaimId);
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
   // #1302: a PASSING claim at a gate declaring requires_current_verification may not advance the
@@ -1765,6 +1794,159 @@ export async function bundleGateEvidence(
     await assertVerifiedTestsTrust(currentGateClaimsForTrust, projectRoot, authority.events, authority.verified);
   }
   return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
+}
+
+// ─── #1415: definition-declared source-head pin ─────────────────────────────────────────────
+//
+// A flow whose definition declares `source_binding: {"head": "pinned-at-start"}` reviews one
+// exact commit that existed before the run. The definition declares the pin (and its digest
+// covers it); the run persists the commit in `params.source_head` at start; every gate
+// evaluation re-proves it. The rule lives here, in the shared runtime, because `workflow start`
+// is not the only door that starts a run.
+
+const SOURCE_HEAD_PINNED_AT_START = "pinned-at-start";
+
+/** True when `definition` declares the start-pinned source head. Any other declared shape is refused. */
+export function definitionPinsSourceHead(definition: unknown): boolean {
+  if (!isRecord(definition) || !Object.prototype.hasOwnProperty.call(definition, "source_binding")) return false;
+  const binding = definition.source_binding;
+  if (!isRecord(binding) || Object.keys(binding).length !== 1 || binding.head !== SOURCE_HEAD_PINNED_AT_START) {
+    throw new BuilderBuildRunInputError("definition.source_binding", `must be exactly {"head":"${SOURCE_HEAD_PINNED_AT_START}"}`);
+  }
+  return true;
+}
+
+/**
+ * Start precondition for a pinned flow: `sourceHead` is a full lowercase commit SHA, equals the
+ * trusted checked-out HEAD, and the Git worktree is clean. Returns the head to persist, or null
+ * for a flow without the pin (which refuses any supplied head rather than ignoring it).
+ */
+export function assertSourceHeadStartable(definition: unknown, flowId: string, sourceHead: string | undefined, projectRoot: string): string | null {
+  if (!definitionPinsSourceHead(definition)) {
+    if (sourceHead !== undefined) {
+      throw new BuilderBuildRunInputError("sourceHead", `--source-head is accepted only by a flow whose definition declares source_binding.head; ${flowId} does not`);
+    }
+    return null;
+  }
+  if (sourceHead === undefined || sourceHead === "") {
+    throw new BuilderBuildRunInputError("sourceHead", `${flowId} pins the reviewed commit at start; pass --source-head <40-hex commit> naming the exact checked-out head under review`);
+  }
+  if (!isExactLowercaseCommitSha(sourceHead)) {
+    throw new BuilderBuildRunInputError("sourceHead", `${JSON.stringify(sourceHead)} must be a full 40-character lowercase hexadecimal commit SHA`);
+  }
+  let head: string;
+  try {
+    head = resolveTrustedLocalGitCommit(projectRoot, "HEAD");
+  } catch (error) {
+    throw new BuilderBuildRunInputError("sourceHead", `cannot resolve the trusted checked-out HEAD (${errorMessage(error)})`);
+  }
+  if (head !== sourceHead) {
+    throw new BuilderBuildRunInputError("sourceHead", `${sourceHead} is not the checked-out HEAD ${head} of ${projectRoot}; check out the exact commit under review there, or pass --artifact-root <checkout>/.kontourai/flow-agents for the checkout that has it (a linked worktree defaults to the main checkout's store), before starting or resuming ${flowId}`);
+  }
+  let snapshot: Record<string, unknown>;
+  try {
+    snapshot = captureReviewWorkspaceSnapshot(projectRoot, []);
+  } catch (error) {
+    throw new BuilderBuildRunInputError("sourceHead", `cannot capture the Git worktree at ${sourceHead} (${errorMessage(error)})`);
+  }
+  if (!isValidGitWorktreeSnapshot(snapshot) || snapshot.head_sha !== sourceHead) {
+    throw new BuilderBuildRunInputError("sourceHead", `${flowId} requires a Git worktree checked out at ${sourceHead}`);
+  }
+  if (snapshot.worktree_clean !== true) {
+    const dirty = dirtyWorktreePaths(projectRoot);
+    // Paths are caller-controlled bytes: quote each so a newline, comma, or terminal escape in a
+    // filename cannot forge or garble the refusal.
+    const shown = dirty.length === 0 ? "" : ` (${dirty.slice(0, 5).map(quoteDisplayPath).join(", ")}${dirty.length > 5 ? `, and ${dirty.length - 5} more` : ""})`;
+    const gitignoreHint = `${dirty.includes(".kontourai/.gitignore") ? " An untracked .kontourai/.gitignore (written by flow-agents init) counts too." : ""}${dirty.some((file) => file.startsWith("delivery/")) ? " Untracked workflow publish-delivery output under delivery/ counts too." : ""}`;
+    // Committing an ignore rule would change the head under review, so the local exclude file is
+    // the primary remedy.
+    throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes${shown}; ${flowId} reviews exactly the committed head, so remove them, or ignore workflow output locally by appending .kontourai/ and delivery/ to the exclude file at "$(git rev-parse --git-path info/exclude)" (create its directory first if missing), which does not change the reviewed head and is shared by all worktrees of the repository (commit an ignore rule only if the repository wants it anyway).${gitignoreHint}`);
+  }
+  return sourceHead;
+}
+
+/**
+ * A path quoted for display: JSON escaping covers C0 controls, quotes, and backslashes; DEL, C1
+ * controls (e.g. U+009B, a one-byte CSI), and bidi/format characters (e.g. U+202E) are escaped
+ * too, so a filename cannot reorder or restyle the surrounding text.
+ */
+function quoteDisplayPath(file: string): string {
+  return JSON.stringify(file).replace(/[\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
+/** Changed and untracked paths, for a dirty-tree refusal message only. Never an authorization input. */
+function dirtyWorktreePaths(projectRoot: string): string[] {
+  try {
+    const entries = String(execTrustedGitSync(projectRoot, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])).split("\0");
+    const paths: string[] = [];
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index]!;
+      if (entry.length < 4) continue;
+      paths.push(entry.slice(3));
+      // A rename or copy is followed by its source path as a separate entry.
+      if (entry[0] === "R" || entry[0] === "C") index += 1;
+    }
+    return paths;
+  } catch {
+    return [];
+  }
+}
+
+/** The head a pinned run was started at, or null for an unpinned run. Definition and run must agree. */
+export function pinnedRunSourceHead(definition: unknown, state: FlowRunState): string | null {
+  const params = isRecord(state.params) ? state.params : {};
+  const present = Object.prototype.hasOwnProperty.call(params, "source_head");
+  if (!definitionPinsSourceHead(definition)) {
+    if (present) throw new BuilderBuildRunInputError("flow_run.state.params.source_head", "is present but the run's start definition declares no source_binding");
+    return null;
+  }
+  if (!isExactLowercaseCommitSha(params.source_head)) {
+    throw new BuilderBuildRunInputError("flow_run.state.params.source_head", "must be the 40-hex commit the pinned run was started at");
+  }
+  return params.source_head;
+}
+
+/**
+ * Gate-evaluation half of the pin. For a run carrying `params.source_head`: the trusted HEAD must
+ * still be that commit, and every non-failing claim that carries a Git workspace snapshot must
+ * have been observed in a clean worktree at that commit, and one that carries no snapshot at all is
+ * refused (acceptance criteria excepted, see below). The second clause covers claims that
+ * no command backs: `assertCurrentGateClaimFreshness` lets those through on a matching Flow head
+ * alone, without consulting their snapshot. Failing claims stay recordable: a defect blocks the
+ * run wherever it was observed.
+ */
+function assertPinnedSourceHead(claims: AnyRecord[], state: FlowRunState, projectRoot: string): void {
+  const params = isRecord(state.params) ? state.params : null;
+  if (!params || !Object.prototype.hasOwnProperty.call(params, "source_head")) return;
+  const sourceHead = params.source_head;
+  if (!isExactLowercaseCommitSha(sourceHead)) {
+    throw new BuilderBuildRunInputError("flow_run.state.params.source_head", "must be the 40-hex commit the pinned run was started at");
+  }
+  let head: string;
+  try {
+    head = resolveTrustedLocalGitCommit(projectRoot, "HEAD");
+  } catch (error) {
+    throw new BuilderBuildRunInputError("flow_run.state.params.source_head", `cannot resolve the trusted checked-out HEAD to compare with the pinned source head ${sourceHead} (${errorMessage(error)})`);
+  }
+  if (head !== sourceHead) {
+    throw new BuilderBuildRunInputError("flow_run.state.params.source_head", `this run is pinned to source head ${sourceHead}, but the checked-out HEAD is ${head}; evidence about another commit cannot satisfy it. A new head needs a new run.`);
+  }
+  for (const claim of claims) {
+    if (claim.value === "fail" || claim.status === "disputed") continue;
+    const claimId = typeof claim.id === "string" ? claim.id : "<unknown>";
+    const snapshot = gateClaimWorkspaceSnapshot(claim);
+    if (snapshot === null) {
+      // An acceptance criterion carries no snapshot of its own: the writer produces it only with a
+      // passing command-backed tests-evidence claim, which this loop checks and the gate requires.
+      if (isRecord(claim.metadata) && claim.metadata.origin === "acceptance") continue;
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot", `claim '${claimId}' carries no Git workspace snapshot: the writer could not capture the worktree when it was recorded (for example an assume-unchanged or skip-worktree index entry). This run accepts only evidence observed in a clean, ordinary worktree at its pinned source head ${sourceHead}; restore one and re-record it.`);
+    }
+    if (snapshot.head_sha !== sourceHead || snapshot.worktree_clean !== true) {
+      const observed = `${String(snapshot.head_sha)}${snapshot.worktree_clean === true ? "" : " in a dirty worktree"}`;
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.verification_workspace_snapshot", `claim '${claimId}' was observed at ${observed}; this run accepts only evidence observed in a clean worktree at its pinned source head ${sourceHead}. Clean the worktree and re-record it.`);
+    }
+  }
 }
 
 const GATE_CLAIM_HEAD_FIELD = "evidence.claims.metadata.gate_claim.flow_run_head";

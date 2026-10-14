@@ -1,8 +1,8 @@
 /**
  * Shared helpers for the knowledge promote sub-flow.
  *
- * Zero external dependencies (mirrors scripts/check-decisions.cjs and
- * providers/lib/schema-validate.js) so the sub-flow runs in any node:test lane.
+ * Zero external dependencies (same discipline as providers/lib/schema-validate.js)
+ * so the sub-flow runs in any node:test lane.
  *
  * @module promote/lib
  */
@@ -77,6 +77,7 @@ export function readGlossaryTerms(repoRoot) {
 const EVIDENCE_KINDS = ["issue", "pr", "commit", "session-archive", "adr", "doc", "url"];
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 const SECRET_PATTERNS = [
   /AKIA[A-Z0-9]{16}/,
   /ASIA[A-Z0-9]{16}/,
@@ -87,10 +88,16 @@ const SECRET_PATTERNS = [
 ];
 
 /**
- * Validate a draft decision delta against the decision-record contract (#310)
- * BEFORE it is proposed. Mirrors schemas/decision-record.schema.json /
- * scripts/check-decisions.cjs rules directly (zero-dep, same discipline).
- * Returns a list of error strings; empty means schema-valid.
+ * Validate a draft decision delta BEFORE it is proposed. Hand-mirrors the
+ * per-field rules of the Corpus decision-record format
+ * (https://github.com/kontourai/corpus/blob/main/docs/decisions.md): status,
+ * subject, decided, slug, evidence kinds and refs, and secret refusal. It does
+ * not check relations, tombstones, unknown keys, or YAML parsing: the Kit only
+ * drafts `current` records and renders the frontmatter itself. A missing status
+ * defaults to `current`, because the git-repo renderer always writes
+ * `status: current`; Corpus refuses a record without one. promote.test.js
+ * runs it against Corpus's decision-record conformance vectors.
+ * Returns a list of error strings; empty means valid.
  */
 export function validateDecisionDelta(delta) {
   const errors = [];
@@ -99,6 +106,8 @@ export function validateDecisionDelta(delta) {
     errors.push(`status '${status}' is not a valid decision-record status`);
   }
   if (typeof subject !== "string" || subject.trim() === "") errors.push("subject must be a non-empty noun phrase");
+  // Corpus refuses a line break or control character: the subject is an index table cell.
+  else if (CONTROL_RE.test(subject)) errors.push("subject must be a single line without control characters");
   if (typeof slug !== "string" || !SLUG_RE.test(slug)) errors.push(`slug '${slug}' is not valid kebab-case`);
   if (typeof decided !== "string" || !DATE_RE.test(decided)) errors.push(`decided '${decided}' must be an ISO date (YYYY-MM-DD)`);
   if (!Array.isArray(evidence) || evidence.length === 0) {

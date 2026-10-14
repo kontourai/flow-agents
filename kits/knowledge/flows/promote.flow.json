@@ -39,7 +39,7 @@
           "id": "draft-deltas-schema-valid",
           "kind": "trust.bundle",
           "required": true,
-          "description": "The distilled residue is rendered as DRAFT deltas that validate BEFORE they are proposed: decision-registry topic files whose frontmatter satisfies schemas/decision-record.schema.json (one file per decision SUBJECT, the subject a CONTEXT.md vocabulary noun), CONTEXT.md vocabulary additions for any new subject noun, and docs/learnings entries. At least one schema-valid draft decision delta is produced for a session that ratified a durable decision. Every draft is written ONLY under <session>/proposals/ — the sub-flow proposes, it never writes into docs/.",
+          "description": "The distilled residue is rendered as DRAFT deltas that validate BEFORE they are proposed: decision-registry topic files whose frontmatter satisfies the Corpus decision-record format (one file per decision SUBJECT, the subject a CONTEXT.md vocabulary noun), CONTEXT.md vocabulary additions for any new subject noun, and docs/learnings entries. At least one schema-valid draft decision delta is produced for a session that ratified a durable decision. Every draft is written ONLY under <session>/proposals/ — the sub-flow proposes, it never writes into docs/.",
           "bundle_claim": {
             "claimType": "knowledge.promote.distill",
             "subjectType": "artifact",

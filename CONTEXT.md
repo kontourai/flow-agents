@@ -309,7 +309,7 @@ _Avoid_: Numbered ADR as the format for new decisions
 
 ### Decision Registry
 
-The system of Decision Records plus the generated index at [docs/decisions/index.md](docs/decisions/index.md) (slug + one-line summary). The contract is [context/contracts/decision-registry-contract.md](context/contracts/decision-registry-contract.md); the frontmatter schema is `schemas/decision-record.schema.json`; `npm run check:decisions` validates it. Consult the index at write time to decide revise-vs-create.
+The system of Decision Records plus the generated index at [docs/decisions/index.md](docs/decisions/index.md) (slug + one-line summary). The contract is [context/contracts/decision-registry-contract.md](context/contracts/decision-registry-contract.md); the record format is [Corpus's](https://github.com/kontourai/corpus/blob/main/docs/decisions.md); `npm run check:decisions` validates it. Consult the index at write time to decide revise-vs-create.
 
 ### Standing Directives
 

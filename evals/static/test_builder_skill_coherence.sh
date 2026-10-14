@@ -57,6 +57,20 @@ for (const [label, text] of [['kit.json flows[] description', leanDeclaration.de
 const buildDeclaration = (kit.flows || []).find((entry) => entry.id === 'builder.build');
 if (/reduced-gate/i.test(buildDeclaration?.description || '')) throw new Error('builder.build is the full flow and must not describe itself as reduced-gate');
 
+// ─── #1415 existing-change review: no implementation step, head pinned at start ──────────────
+const reviewFlow = JSON.parse(fs.readFileSync(path.join(root, 'kits/builder/flows/review-existing.flow.json'), 'utf8'));
+if (reviewFlow.id !== 'builder.review-existing') throw new Error('review-existing.flow.json must declare id builder.review-existing');
+if (JSON.stringify(reviewFlow.source_binding) !== JSON.stringify({ head: 'pinned-at-start' })) throw new Error('builder.review-existing must pin its source head at start');
+if (JSON.stringify(reviewFlow.steps.map((step) => step.id)) !== JSON.stringify(['pull-work', 'existing-change', 'verify', 'done'])) throw new Error('builder.review-existing must declare exactly pull-work, existing-change, verify, done');
+if (JSON.stringify(reviewFlow.gates['pull-work-gate']) !== JSON.stringify(buildFlow.gates['pull-work-gate'])) throw new Error('builder.review-existing pull-work-gate must be identical to builder.build');
+if (JSON.stringify(reviewFlow.gates['verify-gate']?.expects) !== JSON.stringify(buildFlow.gates['verify-gate'].expects)) throw new Error('builder.review-existing verify-gate expectations must be identical to builder.build');
+if (JSON.stringify(reviewFlow.gates['verify-gate']?.on_route_back) !== JSON.stringify({ missing_evidence: 'verify', default: 'verify' })) throw new Error('builder.review-existing verify-gate must not route back to an implementation, plan, or design step');
+const reviewDeclaration = (kit.flows || []).find((entry) => entry.id === 'builder.review-existing');
+if (!reviewDeclaration || reviewDeclaration.path !== 'flows/review-existing.flow.json') throw new Error('kit.json must declare builder.review-existing at flows/review-existing.flow.json');
+for (const [label, text] of [['kit.json flows[] description', reviewDeclaration.description], ['flow definition description', reviewFlow.description]]) {
+  if (!/EXISTING-CHANGE REVIEW/.test(text || '') || !/no implementation step/i.test(text || '')) throw new Error(`builder.review-existing ${label} must name itself as an existing-change review with no implementation step`);
+}
+
 const expected = {
   'builder-shape': ['entrypoint', 'builder.shape', []],
   deliver: ['entrypoint', 'builder.build', []],
@@ -70,6 +84,7 @@ const expected = {
   'review-work': ['step', 'builder.build', ['verify']],
   'verify-work': ['step', 'builder.build', ['verify']],
   'evidence-gate': ['step', 'builder.build', ['merge-ready']],
+  'review-existing': ['step', 'builder.review-existing', ['existing-change']],
   'release-readiness': ['step', 'builder.publish-learn', ['merge-ready-ci']],
   'learning-review': ['step', 'builder.publish-learn', ['learn']],
   'design-probe': ['shared-primitive', null, []],
@@ -85,6 +100,7 @@ const expectedExpectations = {
   'review-work': ['clean-critique'],
   'verify-work': ['acceptance-criteria', 'tests-evidence', 'policy-compliance'],
   'evidence-gate': ['merge-readiness'],
+  'review-existing': ['pre-existing-implementation'],
   'release-readiness': ['ci-merge-readiness'],
   'learning-review': ['decision-evidence', 'learning-evidence'],
 };
@@ -97,6 +113,7 @@ const expectedArtifacts = {
   'review-work': ['trust.bundle#critique'],
   'verify-work': ['trust.bundle#acceptance-criteria', 'trust.bundle#tests-evidence', 'trust.bundle#policy-compliance'],
   'evidence-gate': ['<slug>--evidence-gate.md', 'trust.bundle#merge-readiness'],
+  'review-existing': ['<slug>--existing-change.md', 'trust.bundle#pre-existing-implementation'],
   'release-readiness': ['release.json', 'trust.bundle#ci-merge-readiness'],
   'learning-review': ['learning.json', 'trust.bundle#decision-evidence', 'trust.bundle#learning-evidence'],
   'gate-review': ['<slug>--gate-review.md', 'gate-review.inquiries.json'],
@@ -131,6 +148,12 @@ const expectedActions = {
   'builder.build-lean/merge-ready-ci': { skills: ['release-readiness'], expectation_ids: ['ci-merge-readiness'] },
   'builder.build-lean/learn': { skills: ['learning-review'], expectation_ids: ['decision-evidence', 'learning-evidence'] },
   'builder.build-lean/done': { skills: [], expectation_ids: [] },
+  // #1415 existing-change review. No execute step: the only producer it adds records that the
+  // implementation already existed; verify reuses builder.build's producers unchanged.
+  'builder.review-existing/pull-work': { skills: ['pull-work'], expectation_ids: ['selected-work'] },
+  'builder.review-existing/existing-change': { skills: ['review-existing'], expectation_ids: ['pre-existing-implementation'] },
+  'builder.review-existing/verify': { skills: ['review-work', 'verify-work'], expectation_ids: ['clean-critique', 'acceptance-criteria', 'tests-evidence', 'policy-compliance'] },
+  'builder.review-existing/done': { skills: [], expectation_ids: [] },
 };
 
 const failures = [];
@@ -140,7 +163,7 @@ const rows = Array.isArray(kit.skill_roles) ? kit.skill_roles : [];
 const declared = (kit.skills || []).map((entry) => entry.id.replace(/^builder\./, '')).sort();
 const classified = rows.map((entry) => entry.skill_id.replace(/^builder\./, '')).sort();
 if (JSON.stringify(declared) !== JSON.stringify(classified)) failures.push('skill_roles must classify every declared Builder skill exactly once');
-if (rows.length !== 17) failures.push(`skill_roles must contain 17 rows, found ${rows.length}`);
+if (rows.length !== 18) failures.push(`skill_roles must contain 18 rows, found ${rows.length}`);
 
 for (const [skill, [role, flow, steps]] of Object.entries(expected)) {
   const row = rows.find((entry) => entry.skill_id === `builder.${skill}`);
@@ -189,7 +212,7 @@ for (const [skill, [role, flow, steps]] of Object.entries(expected)) {
       failures.push(`${skill}: --evidence-ref-json example is not valid JSON`);
     }
   }
-  const mayAttach = new Set(['idea-to-backlog', 'pickup-probe', 'plan-work', 'execute-plan', 'verify-work', 'evidence-gate', 'release-readiness', 'learning-review']);
+  const mayAttach = new Set(['idea-to-backlog', 'pickup-probe', 'plan-work', 'execute-plan', 'review-existing', 'verify-work', 'evidence-gate', 'release-readiness', 'learning-review']);
   if (mayAttach.has(skill) && !text.includes('flow-agents workflow evidence')) failures.push(`${skill}: active Flow evidence must use the public CLI`);
   if ((role === 'entrypoint' || role === 'profile' || role === 'shared-primitive' || role === 'extension') && text.includes('flow-agents workflow evidence')) {
     failures.push(`${skill}: role must not claim a Flow expectation`);
@@ -218,7 +241,9 @@ for (const [key, expectedAction] of Object.entries(expectedActions)) {
     failures.push(`${key}: operations differ from the canonical producer matrix`);
   }
 }
-if ((kit.flow_step_actions || []).length !== Object.keys(expectedActions).length) failures.push('flow_step_actions must declare every builder.build, builder.build-lean and builder.shape step exactly once');
+if ((kit.flow_step_actions || []).length !== Object.keys(expectedActions).length) failures.push('flow_step_actions must declare every builder.build, builder.build-lean, builder.review-existing and builder.shape step exactly once');
+const implementationRows = (kit.flow_step_actions || []).filter((entry) => entry.implementation_allowed).map((entry) => `${entry.flow_id}/${entry.step_id}`);
+if (JSON.stringify(implementationRows) !== JSON.stringify(['builder.build/execute', 'builder.build-lean/execute'])) failures.push('only builder.build and builder.build-lean execute may allow implementation; builder.review-existing must allow none');
 const publishAction = (kit.flow_step_actions || []).find((entry) => entry.flow_id === 'builder.build' && entry.step_id === 'pr-open');
 if (!publishAction || JSON.stringify(publishAction.operations) !== JSON.stringify(['publish-change']) || JSON.stringify(publishAction.expectation_ids) !== JSON.stringify(['pull-request-opened'])) failures.push('publish-change must explicitly own pull-request-opened');
 
@@ -312,5 +337,5 @@ if (failures.length) {
   for (const failure of failures) console.error(`  - ${failure}`);
   process.exit(1);
 }
-console.log('Builder skill coherence passed: 17 roles, producer boundaries, durable safeguards, public commands, and retired-pattern guards.');
+console.log('Builder skill coherence passed: 18 roles, producer boundaries, durable safeguards, public commands, and retired-pattern guards.');
 NODE
