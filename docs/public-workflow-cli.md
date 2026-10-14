@@ -709,7 +709,11 @@ runs stop as failed. Assignment ownership is revalidated before every adapter
 turn. A session-scoped process lock rejects concurrent drivers and safely removes unique lock files
 left by exited owners. The adapter argv plus the content digests of its executable and absolute
 regular-file arguments are bound to the mission on first invocation and rechecked before every turn.
-Adapter process groups are terminated after every non-wait result. In addition,
+Adapter process groups are terminated after every non-wait result and on timeout,
+output overflow or transport error. The driver retains custody through the 250 ms
+termination grace period even if the leader exits first; escalation checks original
+group member identities before sending SIGKILL. A valid wait result preserves the
+background process for its declared barrier. In addition,
 state rollback or deletion is rejected when its append-only event history proves turns already
 started. These local coordination records detect accidental or in-process rollback; they are not a
 cryptographic boundary against a process that can rewrite the entire artifact directory.

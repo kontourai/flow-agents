@@ -50,6 +50,9 @@ minimumReleaseAgeExclude:
   # Exact Survey owned-stream shutdown repair from merged PR #337/release #338.
   # Registry gitHead d063b49 and public tarball integrity verified before adoption.
   - '@kontourai/survey@8.1.1'
+  # Exact review usability release from merged Survey #341/release #342.
+  # Registry gitHead/tag 0fc7e28 and sha512 tarball receipt verified before adoption.
+  - '@kontourai/survey@8.2.0'
 
 # mise supplies node and pnpm on developer machines; CI installs the exact
 # version pinned in package.json. Do not reject a same-major pnpm from mise.
