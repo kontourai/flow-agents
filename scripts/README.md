@@ -120,6 +120,18 @@ remain accepted. `--console-token-file` and `--console-tenant` can be used with
 any Console sink. Prefer `flow-agents init` for a prompted setup; use `--yes`
 with the same flags for CI/headless installs.
 
+The installed `telemetry.conf` is used only when no operator Console config
+exists. At runtime the hooks read exactly one file, in this order: the
+`TELEMETRY_CONFIG_FILE` environment variable, then
+`<workspace>/.kontourai/telemetry-console.conf`, then
+`~/.flow-agents/telemetry-console.conf`, then the installed `telemetry.conf`.
+The two `telemetry-console.conf` files count only when they are mode 600 and
+owned by the current user. When one of them sets a Console URL, telemetry and
+the economics and liveness relays go to that Console even if the workspace was
+installed with `--telemetry-sink local-files`. To keep one workspace local-only
+on a machine that has a user-global Console config, launch the agent host with
+`TELEMETRY_CONFIG_FILE=<workspace>/scripts/telemetry/telemetry.conf`.
+
 Run `flow-agents telemetry-doctor --dest PATH --json --headless` to inspect an
 installed telemetry configuration. It reports active sinks, local JSONL paths,
 Console target settings, and bounded local Console reachability without
