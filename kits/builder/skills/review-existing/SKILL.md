@@ -36,9 +36,12 @@ exactly as they do at `builder.build` `verify`.
 
 1. Check out the exact commit under review in a clean Git worktree; the run
    refuses a dirty tree. If the reviewed head does not already ignore
-   `.kontourai/` and `delivery/`, add both to `.git/info/exclude`, which is
-   local and does not change the head under review. Commit an ignore rule only
-   if the repository wants it anyway: a commit makes a new head.
+   `.kontourai/` and `delivery/`, append both to the local exclude file, which
+   does not change the head under review:
+   `printf '.kontourai/\ndelivery/\n' >> "$(git rev-parse --git-path info/exclude)"`.
+   That path also works in a linked worktree, where `.git` is a file. The
+   exclude file is shared by all worktrees of the repository. Commit an ignore
+   rule only if the repository wants it anyway: a commit makes a new head.
 2. Complete `pull-work` selection, write
    `<session-dir>/<slug>--pull-work.md` naming the Work Item reference, and hold
    the assignment. The assignment holder is the implementation owner, normally
@@ -119,7 +122,8 @@ the same Work Item resumes the old run. Resuming with a different
 - `flow-agents workflow publish-delivery` accepts a completed run; its
   checkpoint commit is the pinned head. Its untracked `delivery/<slug>/` output
   makes the next pinned start in the same checkout refuse until `delivery/` is
-  in `.git/info/exclude` or the output is removed.
+  in the local exclude file (`git rev-parse --git-path info/exclude`) or the
+  output is removed.
 - `merge-change` refuses these runs by name: the flow binds no step to the
   publish-change operation. Merge through the provider's own controls.
 - That the reviewer is not the change's author on the provider (for example

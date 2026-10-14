@@ -275,7 +275,7 @@ test("start refuses a missing, malformed, non-HEAD, or dirty-tree source head be
   assert.notEqual(result.status, 0);
   assert.match(result.output, /has uncommitted or untracked changes \("\.kontourai\/\.gitignore"\)/);
   assert.match(result.output, /An untracked \.kontourai\/\.gitignore \(written by flow-agents init\) counts too\./);
-  assert.match(result.output, /adding \.kontourai\/ and delivery\/ to \.git\/info\/exclude, which does not change the reviewed head/);
+  assert.match(result.output, /appending \.kontourai\/ and delivery\/ to the exclude file at "\$\(git rev-parse --git-path info\/exclude\)", which does not change the reviewed head and is shared by all worktrees of the repository/);
   assertNoRunCreated(fx, "untracked .kontourai/.gitignore");
   git(fx.project, ["add", ".kontourai/.gitignore"]);
   git(fx.project, ["commit", "-qm", "track .kontourai/.gitignore"]);
@@ -310,15 +310,53 @@ test("a flow without the pin refuses --source-head rather than ignoring it", () 
 
 test("dirty paths in the start refusal are quoted, so a filename cannot inject lines or escapes", () => {
   const fx = makeExistingChange(27);
-  const hostile = "evil\n\u001b[31mforged, line.txt";
+  // C0 newline and ESC, a C1 CSI (U+009B), and a right-to-left override (U+202E).
+  const hostile = "evil\n\u001b[31mforged, \u009b2J\u202eline.txt";
   fs.writeFileSync(path.join(fx.project, hostile), "untracked\n");
   const result = start(fx);
   assert.notEqual(result.status, 0);
-  assert.ok(result.output.includes(`has uncommitted or untracked changes (${JSON.stringify(hostile)})`),
-    `the hostile path must appear JSON-quoted:\n${JSON.stringify(result.output)}`);
-  assert.ok(!result.output.includes("\u001b"), "no raw terminal escape may reach the refusal");
-  assert.ok(!result.output.includes("evil\n"), "no raw newline from the filename may reach the refusal");
+  const quoted = '"evil\\n\\u001b[31mforged, \\u009b2J\\u202eline.txt"';
+  assert.ok(result.output.includes(`has uncommitted or untracked changes (${quoted})`),
+    `the hostile path must appear quoted with every control escaped:\n${JSON.stringify(result.output)}`);
+  for (const [raw, label] of [["\u001b", "ESC"], ["evil\n", "newline"], ["\u009b", "C1 CSI"], ["\u202e", "right-to-left override"]]) {
+    assert.ok(!result.output.includes(raw), `no raw ${label} from the filename may reach the refusal`);
+  }
   assertNoRunCreated(fx, "hostile untracked filename");
+});
+
+test("the documented exclude command works in a linked worktree, where .git is a file", () => {
+  // A reviewer often checks the change out in a linked worktree. There `.git` is a FILE, so a
+  // literal `.git/info/exclude` path fails; `git rev-parse --git-path info/exclude` resolves the
+  // repository's shared exclude file. This drives the exact command the docs give.
+  const fx = makeExistingChange(28);
+  fs.writeFileSync(path.join(fx.project, ".gitignore"), "");
+  git(fx.project, ["commit", "-qam", "head under review does not ignore workflow output"]);
+  const linked = path.join(path.dirname(fx.project), `${path.basename(fx.project)}-linked`);
+  git(fx.project, ["worktree", "add", "-q", "--detach", linked, "HEAD"]);
+  try {
+    const wt = { ...fx, project: fs.realpathSync(linked) };
+    wt.artifactRoot = path.join(wt.project, ".kontourai", "flow-agents");
+    wt.sessionDir = path.join(wt.artifactRoot, wt.slug);
+    wt.runDir = path.join(wt.project, ".kontourai", "flow", "runs", wt.slug);
+    wt.head = git(wt.project, ["rev-parse", "HEAD"]);
+    assert.ok(fs.statSync(path.join(wt.project, ".git")).isFile(), "the fixture must be a linked worktree");
+    fs.mkdirSync(wt.sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(wt.sessionDir, `${wt.slug}--pull-work.md`), `Selected Work Item: ${wt.workItem}\n`);
+
+    const dirty = start(wt);
+    assert.notEqual(dirty.status, 0);
+    assert.match(dirty.output, /has uncommitted or untracked changes \("\.kontourai\/flow-agents\//);
+    const literal = spawnSync("sh", ["-c", "printf '.kontourai/\\n' >> .git/info/exclude"], { cwd: wt.project, encoding: "utf8" });
+    assert.notEqual(literal.status, 0, "a literal .git/info/exclude path must not work in a linked worktree");
+
+    const documented = spawnSync("sh", ["-c", `printf '.kontourai/\\ndelivery/\\n' >> "$(git rev-parse --git-path info/exclude)"`], { cwd: wt.project, encoding: "utf8" });
+    assert.equal(documented.status, 0, `the documented exclude command failed: ${documented.stderr}`);
+    assert.equal(git(wt.project, ["rev-parse", "HEAD"]), wt.head, "the exclude must not move the reviewed head");
+    assertOk(start(wt), "start after the documented exclude");
+    assert.equal(runState(wt).params.source_head, wt.head);
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", linked], { cwd: fx.project });
+  }
 });
 
 // ─── (b) the second door ─────────────────────────────────────────────────────────────────────
@@ -454,7 +492,8 @@ test("a completed run records the existing change truthfully and publishes at th
   assert.match(afterDelivery.output, /Untracked workflow publish-delivery output under delivery\/ counts too\./);
   assertNoRunCreated(next, "start after publish-delivery");
   // The documented remedy works without changing the reviewed head: exclude delivery/ locally.
-  fs.appendFileSync(path.join(fx.project, ".git", "info", "exclude"), "delivery/\n");
+  const excluded = spawnSync("sh", ["-c", `printf 'delivery/\\n' >> "$(git rev-parse --git-path info/exclude)"`], { cwd: fx.project, encoding: "utf8" });
+  assert.equal(excluded.status, 0, `the documented exclude command failed: ${excluded.stderr}`);
   assert.equal(git(fx.project, ["rev-parse", "HEAD"]), fx.head, "the local exclude must not move the reviewed head");
   assertOk(start(next, fx.head), "start after excluding delivery/ locally");
   assert.equal(runState(next).params.source_head, fx.head);

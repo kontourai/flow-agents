@@ -1856,13 +1856,23 @@ export function assertSourceHeadStartable(definition: unknown, flowId: string, s
     const dirty = dirtyWorktreePaths(projectRoot);
     // Paths are caller-controlled bytes: quote each so a newline, comma, or terminal escape in a
     // filename cannot forge or garble the refusal.
-    const shown = dirty.length === 0 ? "" : ` (${dirty.slice(0, 5).map((file) => JSON.stringify(file)).join(", ")}${dirty.length > 5 ? `, and ${dirty.length - 5} more` : ""})`;
+    const shown = dirty.length === 0 ? "" : ` (${dirty.slice(0, 5).map(quoteDisplayPath).join(", ")}${dirty.length > 5 ? `, and ${dirty.length - 5} more` : ""})`;
     const gitignoreHint = `${dirty.includes(".kontourai/.gitignore") ? " An untracked .kontourai/.gitignore (written by flow-agents init) counts too." : ""}${dirty.some((file) => file.startsWith("delivery/")) ? " Untracked workflow publish-delivery output under delivery/ counts too." : ""}`;
     // Committing an ignore rule would change the head under review, so the local exclude file is
     // the primary remedy.
-    throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes${shown}; ${flowId} reviews exactly the committed head, so remove them, or ignore workflow output locally by adding .kontourai/ and delivery/ to .git/info/exclude, which does not change the reviewed head (commit an ignore rule only if the repository wants it anyway).${gitignoreHint}`);
+    throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes${shown}; ${flowId} reviews exactly the committed head, so remove them, or ignore workflow output locally by appending .kontourai/ and delivery/ to the exclude file at "$(git rev-parse --git-path info/exclude)", which does not change the reviewed head and is shared by all worktrees of the repository (commit an ignore rule only if the repository wants it anyway).${gitignoreHint}`);
   }
   return sourceHead;
+}
+
+/**
+ * A path quoted for display: JSON escaping covers C0 controls, quotes, and backslashes; DEL, C1
+ * controls (e.g. U+009B, a one-byte CSI), and bidi/format characters (e.g. U+202E) are escaped
+ * too, so a filename cannot reorder or restyle the surrounding text.
+ */
+function quoteDisplayPath(file: string): string {
+  return JSON.stringify(file).replace(/[\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
 /** Changed and untracked paths, for a dirty-tree refusal message only. Never an authorization input. */
