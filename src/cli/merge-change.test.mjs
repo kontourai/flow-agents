@@ -337,6 +337,36 @@ test("evidence-refresh route predicate accepts the SHIPPED builder definition an
   assert.equal(evidenceRefreshRoutesSatisfied({}), false);
 });
 
+test("#1415 slice 2: merge-change finds the merge-ready-ci gate by its declared property, agreeing with the coordinator", async () => {
+  // merge-change used to read the composed id `builder.publish-learn:merge-ready-ci-gate`, which
+  // names only the child builder.build composes. The property lookup must pick EXACTLY the gate
+  // that literal picked for the shipped builder.build and builder.build-lean definitions, the
+  // adopting closeout's gate for builder.deliver-existing, and the same gate the lifecycle
+  // coordinator picks.
+  const { freshnessTurnstileGate, evidenceRefreshRoutesSatisfied } = await import("../../build/src/cli/merge-change.js");
+  const { freshnessTurnstileGateEntry } = await import("../../packaging/lifecycle-authority/coordinator.mjs");
+  const repoRoot = path.resolve(import.meta.dirname, "../..");
+  for (const [flowId, literal] of [
+    ["builder.build", "builder.publish-learn:merge-ready-ci-gate"],
+    ["builder.build-lean", "builder.publish-learn:merge-ready-ci-gate"],
+    ["builder.deliver-existing", "builder.publish-existing:merge-ready-ci-gate"],
+  ]) {
+    const definition = resolveEffectiveFlowDefinition(flowId, repoRoot);
+    assert.ok(definition, flowId);
+    assert.ok(definition.gates[literal], `${flowId} composes ${literal}`);
+    assert.equal(freshnessTurnstileGate(definition), definition.gates[literal], `${flowId}: the property lookup picks the gate the literal named`);
+    assert.equal(freshnessTurnstileGateEntry(definition)?.id, literal, `${flowId}: merge-change and the coordinator agree`);
+    assert.equal(evidenceRefreshRoutesSatisfied(freshnessTurnstileGate(definition)), true, `${flowId}: the shipped gate keeps evidence refresh`);
+  }
+  // The adopting closeout has no implementation_defect route to an execute step the route lacks.
+  assert.deepEqual(resolveEffectiveFlowDefinition("builder.deliver-existing", repoRoot).gates["builder.publish-existing:merge-ready-ci-gate"].on_route_back, { missing_evidence: "verify", default: "verify" });
+  // No gate, or two, is refused rather than guessed.
+  assert.throws(() => freshnessTurnstileGate(resolveEffectiveFlowDefinition("builder.review-existing", repoRoot)), /exactly one gate declaring requires_current_verification .*found 0/);
+  const ambiguous = structuredClone(resolveEffectiveFlowDefinition("builder.build", repoRoot));
+  ambiguous.gates["verify-gate"].requires_current_verification = true;
+  assert.throws(() => freshnessTurnstileGate(ambiguous), /found 2/);
+});
+
 test("start-definition provenance derives when the stamp is absent and refuses a mismatched stamp (#1307)", async () => {
   // @kontourai/flow has never written state.definition_digest (absent in every measured run
   // state; zero references in the flow dist). Demanding it failed EVERY unamended run — the
