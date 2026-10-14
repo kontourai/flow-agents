@@ -552,8 +552,9 @@ separated by newlines or commas. If the reviewed head already defines `trust-rec
 record `tests-evidence` with `--command "npm run trust-reconcile-verify"` and no variable is needed.
 If tier 1 or 2 yields a valid manifest, the variable is not consulted, and the recorded commands
 must appear in that manifest instead; a declared tier 1 or 2 source that fails or prints invalid
-JSON falls through to tier 3. Tiers 1 and 2 run repository code from the reviewed head, the same
-trust boundary as running its tests.
+JSON falls through to the next tier. A tier 1 script entry and the tier 2 script run repository code
+from the reviewed head (an inline tier 1 array runs nothing), the same trust boundary as running its
+tests.
 
 Its `delivery/<slug>/` output is untracked, so the next pinned `start` in the same checkout refuses
 the dirty tree and names those files; append `delivery/` to
