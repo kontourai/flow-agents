@@ -120,6 +120,17 @@ remain accepted. `--console-token-file` and `--console-tenant` can be used with
 any Console sink. Prefer `flow-agents init` for a prompted setup; use `--yes`
 with the same flags for CI/headless installs.
 
+`flow-agents init --global` for `claude-code` and `opencode` does not write
+Console settings anywhere, so it refuses every `--console-*` flag and any
+`--telemetry-sink` other than `local-files`, and exits without writing
+anything. Interactive `init --global` for these runtimes skips the Console
+prompt. Their telemetry reads the user-global
+`~/.flow-agents/telemetry-console.conf` described below. Write it with
+`bash scripts/telemetry/install-console-config.sh ~/.flow-agents/telemetry-console.conf --telemetry-sink ... --console-url ...`;
+the refusal prints this command with your flags. That file applies to every
+Flow Agents install for the user that has no `.kontourai/telemetry-console.conf`
+of its own. `--global` installs for the other runtimes apply the flags.
+
 Selecting only `local-files`, with no `--console-*` flag and no Console URL in
 the installer's environment, writes no Console settings. At runtime the
 telemetry scripts read exactly one config file: `TELEMETRY_CONFIG_FILE` if
