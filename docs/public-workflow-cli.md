@@ -525,6 +525,34 @@ run and refuses the new head. This is deliberate friction in this release; there
 runs within one Work Item.
 
 `workflow publish-delivery` accepts a completed run and seals its checkpoint at the pinned head.
+It first checks the bundle against the repository's reconcile manifest, and refuses with "command
+is not in the reconcile manifest" unless every command-backed `tests-evidence` command is in it.
+It resolves the manifest in this order:
+
+1. a `trust-reconcile-manifest` entry in `package.json` (an inline array, or a script that prints
+   the manifest JSON);
+2. `evals/ci/run-baseline.sh --manifest-json`, when the repository has that script;
+3. otherwise a manifest built from the `TRUST_RECONCILE_COMMANDS` environment variable, or, when
+   that is unset, from a `package.json` script named `trust-reconcile-verify` (which contributes
+   only the command `npm run trust-reconcile-verify`).
+
+An ambient `TRUST_RECONCILE_MANIFEST` is ignored by this check. `TRUST_RECONCILE_COMMANDS` is split
+on commas and newlines and each part is trimmed, so a command that contains a comma cannot be
+listed there. A claim matches an entry only when the two commands are identical after runs of
+whitespace are collapsed to one space. Adding a `package.json` script changes the head under review,
+so for a review the environment variable is usually the way:
+
+```bash
+TRUST_RECONCILE_COMMANDS="npm test" flow_agents workflow publish-delivery \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 --json
+```
+
+Use the exact `--command` text the `tests-evidence` claim recorded, one entry per command,
+separated by newlines or commas. If the reviewed head already defines `trust-reconcile-verify`,
+record `tests-evidence` with `--command "npm run trust-reconcile-verify"` and no variable is needed.
+If the repository declares tier 1 or 2, the variable is not consulted, and the recorded commands
+must appear in that manifest instead.
+
 Its `delivery/<slug>/` output is untracked, so the next pinned `start` in the same checkout refuses
 the dirty tree and names those files; append `delivery/` to
 `"$(git rev-parse --git-path info/exclude)"` (create its directory first if missing; the file is

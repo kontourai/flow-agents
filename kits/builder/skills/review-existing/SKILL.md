@@ -118,15 +118,25 @@ re-recorded at the same pinned head in the new visit, a fresh critique and
 fresh `tests-evidence`, can complete it, which covers a flaky or mis-invoked
 check. A real code fix is a new head: fix the change through `builder.build`,
 or push a new commit and review it in a new run. Any excursion off the pinned
-head needs a new run, even if the checkout returns to the pin. A new head needs a new run under a new provider Work Item. The run is
-keyed by the Work Item and archiving keeps its canonical record, so restarting
+head needs a new run, even if the checkout returns to the pin. A new head
+needs a new run under a new provider Work Item. The run is keyed by the Work
+Item and archiving keeps its canonical record, so restarting
 the same Work Item resumes the old run. Resuming with a different
 `--source-head` is refused, including for a completed run.
 
 ## Consumers And Gaps
 
 - `flow-agents workflow publish-delivery` accepts a completed run; its
-  checkpoint commit is the pinned head. Its untracked `delivery/<slug>/` output
+  checkpoint commit is the pinned head. It refuses unless every
+  `tests-evidence` command is in the repository's reconcile manifest. Unless the
+  repository declares one (`package.json` `trust-reconcile-manifest`, or
+  `evals/ci/run-baseline.sh --manifest-json`), list the exact recorded
+  `--command` text in `TRUST_RECONCILE_COMMANDS` (comma- or newline-separated;
+  whitespace runs are collapsed before an exact match), for example
+  `TRUST_RECONCILE_COMMANDS="npm test" flow-agents workflow publish-delivery --session-dir <session-dir> --json`.
+  Adding a `package.json` script would change the reviewed head; when the head
+  already defines `trust-reconcile-verify`, record `tests-evidence` with
+  `--command "npm run trust-reconcile-verify"` instead. Its untracked `delivery/<slug>/` output
   makes the next pinned start in the same checkout refuse until `delivery/` is
   in the local exclude file (`git rev-parse --git-path info/exclude`) or the
   output is removed.
