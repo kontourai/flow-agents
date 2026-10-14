@@ -67,7 +67,21 @@ Keep generated Codex base config lean. Put profile-specific model, provider, and
 - `kits/builder/` — Builder Kit flows and skills
 - `console.telemetry.json` — telemetry descriptor (writes locally by default)
 
-At L2 conformance (Claude Code, Codex, Kiro) all four hooks are active and the stop hook blocks early exits that lack evidence. At L1 (opencode, pi) steering and stop-goal-fit run but without blocking capability; see the [Runtime Hook Surface spec](spec/runtime-hook-surface.md) for the gaps.
+### Completion checks by runtime
+
+Installing hook files does not prove that a running agent loaded or executed them. Start a new session with the installed configuration and complete any host-required hook trust setup. Conformance levels describe supported policy behavior; they do not determine the installed enforcement mode.
+
+| Runtime | Shipped completion check | Configuration and limits |
+|---|---|---|
+| Claude Code | `Stop` hook with `FLOW_AGENTS_GOAL_FIT_MODE=block` as its default | Can block completion on qualifying evidence gaps once the host loads the hooks. |
+| Codex | `Stop` hook with the same `block` default | Requires the host to load and trust the installed hooks; files in a destination alone do not establish live enforcement. |
+| Kiro | `stop` hook on the shipped `dev` agent, enabled in the `standard` and `strict` hook profiles | Does not inject a blocking mode default. With no committed policy or environment override, the engine uses `warn`. Set `FLOW_AGENTS_GOAL_FIT_MODE=block` in the agent's environment to request blocking; selecting `strict` alone does not set that mode. |
+| opencode | Calls stop-goal-fit at `session.idle` | Advisory for completion: the generated plugin does not act on the returned stop decision. Setting `block` does not make this callback prevent completion. |
+| pi | No native Stop trigger; calls stop-goal-fit at `session_shutdown` | The shutdown callback does not act on the returned decision and cannot serve as a blocking completion check. |
+
+`FLOW_AGENTS_GOAL_FIT_MODE` accepts `block`, `warn`, or `off`. In development, an explicit value overrides the Claude Code/Codex default. With `NODE_ENV=production` or `prod`, environment overrides cannot weaken committed goal-fit policy in `.flow-agents/config/core.config.json`. Hook profile and disable settings also affect whether a check runs.
+
+Even in blocking mode, stop-goal-fit checks recorded workflow state and evidence; it is not a guarantee that every incomplete task is caught. Bounded retry and escalation behavior can end a turn with unresolved gaps. See the [Runtime Hook Surface spec](spec/runtime-hook-surface.md#23-stop-goal-fit) for policy resolution and limits. Repository-required CI checks remain a separate boundary.
 
 ## 2. What the Builder Kit gives you
 
@@ -78,7 +92,7 @@ The Builder Kit installs two flows:
 | Shape | `builder.shape` | Turns a raw idea into slices and executable work items |
 | Build | `builder.build` | Takes a ready work item through design probe → plan → execute → verify → PR → merge readiness → learn |
 
-These are not freeform chat sessions. Each flow has **evidence gates** — named checkpoints that expect specific claims before the next step starts. The agent cannot silently skip a gate; it either satisfies the expectation or the transition is blocked (at L2) or flagged (at L1).
+These are not freeform chat sessions. Each flow has **evidence gates** — named checkpoints that expect specific claims before the next step starts. Flow evaluates those expectations when a transition is requested. Whether the host can also prevent the agent from ending its turn depends on the completion-check wiring and configuration above.
 
 **Shape flow gates** (`builder.shape`):
 
@@ -169,7 +183,7 @@ Use verify-work on the current branch and report what evidence is present.
 
 - **Between each step**, the agent writes a local session sidecar under `.kontourai/flow-agents/<slug>/` — `state.json`, `acceptance.json`, `evidence.json`, and `handoff.json`. These survive compaction, tab close, or a new session. A future session resumes from recorded state.
 - **At each gate**, the agent either presents the evidence and moves forward, or blocks and explains what is missing. It does not make up a confident summary and proceed.
-- **The stop-goal-fit hook** (at L2) prevents the agent from stopping when evidence is still incomplete — you see a warning or block rather than "all done!" on partial work.
+- **The stop-goal-fit hook**, when loaded and configured to block on a host that supports it, can refuse completion for qualifying evidence gaps. Check the runtime table above; warning-only and shutdown callbacks do not provide the same completion control.
 - **If verify fails**, the verify-gate routes back to execution (or plan, or design-probe, depending on the failure class) and tries again — up to three times before hard-blocking.
 
 This is guided, not fully automated. The agent handles the mechanics; you make product decisions. Gates are explicit handoff points, not invisible checkboxes.
