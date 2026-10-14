@@ -412,7 +412,7 @@ commit, such as an open pull request, without claiming that the run implemented 
 | Starts from | A selected Work Item with no implementation yet | A selected Work Item whose change already exists at one commit |
 | Steps | pull-work, design-probe, plan, execute, verify, merge-ready, pr-open, merge-ready-ci, learn | pull-work, existing-change, verify |
 | Implementation claim | `implementation-scope` at `execute` | None. `pre-existing-implementation` records the change as it existed. |
-| Failing check at verify | Routes back to execute, plan, design-probe, or verify | Routes back to `verify` only, for at most three visits, then blocks. A code fix is a new head, so it needs a new run. |
+| Failing check at verify | Routes back to execute, plan, design-probe, or verify | Routes back to `verify` only: at most three route-backs; a fourth failing visit blocks. A code fix is a new head, so it needs a new run. |
 | Source head | Follows the branch | Pinned at start with `--source-head` and re-checked at every gate |
 
 Before starting:
@@ -471,15 +471,17 @@ flow_agents workflow evidence \
 `verify` has the same expectations as `builder.build`: a clean critique from a reviewer whose
 runtime identity differs from the assignment holder, acceptance criteria, command-backed
 `tests-evidence` such as `--command "npm test"` with matching `--criterion-json`, and applicable
-policy compliance. This flow writes no `<slug>--plan-work.md` or `<slug>--deliver.md` execution
-report, so artifact references cite `<slug>--existing-change.md` instead. Passing the verify gate
+policy compliance. This flow has no `<slug>--plan-work.md` and no execution report (the
+`<slug>--deliver.md` that every session gets is only the session template), so artifact
+references cite `<slug>--existing-change.md` instead. Passing the verify gate
 completes the run.
 
 A failing verify claim does not end the run. `verify-gate` declares only the `missing_evidence` and
 `default` route-backs, both to `verify`, so a failure opens a new `verify` visit. Passing evidence
 re-recorded at the same pinned head in that visit, a fresh critique and fresh `tests-evidence`, can
 then complete the run; that is how a flaky or mis-invoked check recovers. A real code fix changes
-the head, so it needs a new run. After three failed visits the gate blocks.
+the head, so it needs a new run. The gate allows at most three route-backs; a fourth failing visit
+blocks.
 
 The run fails closed when:
 

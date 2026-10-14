@@ -24,7 +24,7 @@
     {
       "id": "builder.review-existing",
       "path": "flows/review-existing.flow.json",
-      "description": "EXISTING-CHANGE REVIEW: review and verify a change that already exists at an exact Git commit, without a retroactive implementation claim. No implementation step; the head is pinned at start by workflow start --source-head and re-checked at every gate, so a new head needs a new run. A failing verify claim routes back to verify (three visits, then block); there is no in-run repair, so a code fix is a new head and needs a new run. merge-change refuses these runs: they have no pr-open or merge-ready-ci step."
+      "description": "EXISTING-CHANGE REVIEW: review and verify a change that already exists at an exact Git commit, without a retroactive implementation claim. No implementation step; the head is pinned at start by workflow start --source-head and re-checked at every gate, so a new head needs a new run. A failing verify claim routes back to verify (at most three route-backs; a fourth failing visit blocks); there is no in-run repair, so a code fix is a new head and needs a new run. merge-change refuses these runs: they have no pr-open or merge-ready-ci step."
     },
     {
       "id": "builder.publish-learn",

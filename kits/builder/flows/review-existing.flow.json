@@ -1,7 +1,7 @@
 {
   "id": "builder.review-existing",
   "version": "1.0",
-  "description": "EXISTING-CHANGE REVIEW: no implementation step; the head is pinned at start. Reviews and verifies a change that already exists at an exact Git commit (for example an open pull request) without claiming that this run implemented it. workflow start requires --source-head <40-hex commit> equal to the clean checkout HEAD; the commit is persisted in the run and every gate re-checks it, so a new head needs a new run. There is no execute step and no in-run repair: a failing verify claim routes back to verify (three visits, then block), and a code fix is a new head that needs a new run. It has no pr-open, merge-ready-ci, or learn step, so merge-change refuses its runs.",
+  "description": "EXISTING-CHANGE REVIEW: no implementation step; the head is pinned at start. Reviews and verifies a change that already exists at an exact Git commit (for example an open pull request) without claiming that this run implemented it. workflow start requires --source-head <40-hex commit> equal to the clean checkout HEAD; the commit is persisted in the run and every gate re-checks it, so a new head needs a new run. There is no execute step and no in-run repair: a failing verify claim routes back to verify (at most three route-backs; a fourth failing visit blocks), and a code fix is a new head that needs a new run. It has no pr-open, merge-ready-ci, or learn step, so merge-change refuses its runs.",
   "source_binding": {
     "head": "pinned-at-start"
   },

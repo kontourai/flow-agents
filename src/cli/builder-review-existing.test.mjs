@@ -29,6 +29,7 @@ import { definitionPinsSourceHead, pinnedRunSourceHead, startBuilderFlowSession,
 import { main as mergeChangeMain } from "../../build/src/cli/merge-change.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 import { createRequire } from "node:module";
+import { declaredFlowBindsOperation } from "../../build/src/builder-gate-action-envelope.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -177,7 +178,7 @@ test("the definition reviews an existing change: no execute step, verify identic
   // and the publish-learn closeout, so it is a narrower route than builder.build, not the same one.
   assert.deepEqual(flow.gates["pull-work-gate"], build.gates["pull-work-gate"]);
   assert.deepEqual(flow.gates["verify-gate"].expects, build.gates["verify-gate"].expects);
-  // A failing verify claim routes back to verify only (bounded, then block); no route reaches an
+  // A failing verify claim routes back to verify only (at most three route-backs); no route reaches an
   // implementation, plan, or design step.
   assert.deepEqual(flow.gates["verify-gate"].on_route_back, { missing_evidence: "verify", default: "verify" });
   assert.deepEqual(flow.gates["verify-gate"].route_back_policy, { max_attempts: 3, on_exceeded: "block" });
@@ -226,6 +227,14 @@ test("an unrecognised source_binding, or a run whose pin disagrees with its defi
   assert.throws(() => pinnedRunSourceHead(unpinned, { params: { subject: "s", source_head: sha } }), /is present but the run's start definition declares no source_binding/);
 });
 
+test("merge-change's capability check reads the kit declaration and refuses one it cannot resolve", () => {
+  assert.equal(declaredFlowBindsOperation("builder.build", "publish-change", REPO_ROOT), true);
+  assert.equal(declaredFlowBindsOperation(FLOW, "publish-change", REPO_ROOT), false);
+  // An unresolvable declaration is an error, never "this flow does not publish a change".
+  assert.throws(() => declaredFlowBindsOperation("acme.nonexistent", "publish-change", REPO_ROOT),
+    /could not resolve the kit declaration for acme\.nonexistent: /);
+});
+
 // ─── (a) the start pin ───────────────────────────────────────────────────────────────────────
 
 test("start refuses a missing, malformed, non-HEAD, or dirty-tree source head before writing anything", () => {
@@ -264,7 +273,7 @@ test("start refuses a missing, malformed, non-HEAD, or dirty-tree source head be
   const unpinnedHead = git(fx.project, ["rev-parse", "HEAD"]);
   result = start(fx, unpinnedHead);
   assert.notEqual(result.status, 0);
-  assert.match(result.output, /has uncommitted or untracked changes \(\.kontourai\/\.gitignore\)/);
+  assert.match(result.output, /has uncommitted or untracked changes \("\.kontourai\/\.gitignore"\)/);
   assert.match(result.output, /An untracked \.kontourai\/\.gitignore \(written by flow-agents init\) counts too: commit it\./);
   assertNoRunCreated(fx, "untracked .kontourai/.gitignore");
   git(fx.project, ["add", ".kontourai/.gitignore"]);
@@ -296,6 +305,19 @@ test("a flow without the pin refuses --source-head rather than ignoring it", () 
     assert.match(result.output, /--source-head is accepted only by a flow whose definition declares source_binding\.head; builder\.build does not/);
     assertNoRunCreated(fx, `builder.build ${extra.join(" ")}`);
   }
+});
+
+test("dirty paths in the start refusal are quoted, so a filename cannot inject lines or escapes", () => {
+  const fx = makeExistingChange(27);
+  const hostile = "evil\n\u001b[31mforged, line.txt";
+  fs.writeFileSync(path.join(fx.project, hostile), "untracked\n");
+  const result = start(fx);
+  assert.notEqual(result.status, 0);
+  assert.ok(result.output.includes(`has uncommitted or untracked changes (${JSON.stringify(hostile)})`),
+    `the hostile path must appear JSON-quoted:\n${JSON.stringify(result.output)}`);
+  assert.ok(!result.output.includes("\u001b"), "no raw terminal escape may reach the refusal");
+  assert.ok(!result.output.includes("evil\n"), "no raw newline from the filename may reach the refusal");
+  assertNoRunCreated(fx, "hostile untracked filename");
 });
 
 // ─── (b) the second door ─────────────────────────────────────────────────────────────────────
@@ -427,7 +449,7 @@ test("a completed run records the existing change truthfully and publishes at th
   fs.writeFileSync(path.join(next.sessionDir, `${next.slug}--pull-work.md`), `Selected Work Item: ${next.workItem}\n`);
   const afterDelivery = start(next, fx.head);
   assert.notEqual(afterDelivery.status, 0);
-  assert.match(afterDelivery.output, new RegExp(`has uncommitted or untracked changes \\(delivery/${fx.slug}/`));
+  assert.match(afterDelivery.output, new RegExp(`has uncommitted or untracked changes \\("delivery/${fx.slug}/`));
   assert.match(afterDelivery.output, /Untracked workflow publish-delivery output under delivery\/ counts too: commit or remove it\./);
   assertNoRunCreated(next, "start after publish-delivery");
 
@@ -566,8 +588,8 @@ test("verify requires an independent reviewer and real tests", () => {
 });
 
 test("a failing check routes back to verify; passing evidence at the same head can then complete", () => {
-  // A failing claim does not end the run: verify-gate routes it back to verify (bounded at three
-  // visits). Re-recorded passing evidence at the SAME pinned head can then complete it, which is
+  // A failing claim does not end the run: verify-gate routes it back to verify (at most three
+  // route-backs; a fourth failing visit blocks). Re-recorded passing evidence at the SAME pinned head can then complete it, which is
   // how a flaky or mis-invoked check recovers. A real code fix is a new head, and a new run.
   const fx = makeExistingChange(25);
   assertOk(start(fx), "start");
@@ -585,6 +607,23 @@ test("a failing check routes back to verify; passing evidence at the same head c
   state = runState(fx);
   assert.equal(state.status, "completed");
   assert.equal(state.params.source_head, fx.head);
+});
+
+test("the verify route-back allows three route-backs and a fourth failing visit blocks", () => {
+  // The documented bound, measured: verify-gate's route_back_policy is {max_attempts: 3, block}.
+  const fx = makeExistingChange(26);
+  assertOk(start(fx), "start");
+  assertOk(recordPreExisting(fx), "pre-existing-implementation");
+  const fail = (attempt) => workflow(fx, ["evidence", "--session-dir", fx.sessionDir, "--expectation", "tests-evidence", "--status", "fail",
+    "--route-reason", "missing_evidence", "--summary", `Failing visit ${attempt}.`, "--command", "false", "--json"]);
+  for (const attempt of [1, 2, 3]) {
+    assertOk(fail(attempt), `failing visit ${attempt}`);
+    const state = runState(fx);
+    assert.equal(state.status, "active", `failing visit ${attempt} routes back rather than blocking`);
+    assert.equal(state.current_step, "verify");
+  }
+  fail(4);
+  assert.equal(runState(fx).status, "blocked", "the fourth failing visit exceeds the route-back bound and blocks");
 });
 
 test("one Work Item cannot carry a builder.build run and an existing-change run at once", () => {

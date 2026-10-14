@@ -68,8 +68,9 @@ Write `<session-dir>/<slug>--existing-change.md` with:
 - the exact head commit, equal to `--source-head`;
 - the changed files, taken from the diff between base and head.
 
-Do not reuse `<slug>--deliver.md` for this record; that file is the Builder
-execution report and review treats it specially. Then record the expectation:
+Do not reuse `<slug>--deliver.md` for this record; every session gets that file
+as its session template, it is the Builder execution report in `builder.build`,
+and review treats it specially. Then record the expectation:
 
 ```bash
 flow-agents workflow evidence --session-dir <session-dir> \
@@ -92,8 +93,9 @@ Run `review-work` and `verify-work` as for `builder.build` `verify`:
   changed files as `--artifact-ref` values.
 - `tests-evidence` must be command-backed (`--command`) and observed in the
   clean worktree at the pinned head.
-- This flow creates no `<slug>--plan-work.md` or `<slug>--deliver.md`. Where the
-  `review-work` and `verify-work` examples cite those files, cite
+- This flow has no `<slug>--plan-work.md` and no execution report; the
+  `<slug>--deliver.md` that every session gets is only the session template.
+  Where the `review-work` and `verify-work` examples cite those files, cite
   `<slug>--existing-change.md` instead; a reference to a missing file is
   refused.
 
@@ -101,7 +103,7 @@ Run `review-work` and `verify-work` as for `builder.build` `verify`:
 
 There is no in-run repair, no `execute` step, and no `implementation_defect`,
 `plan_gap`, or `decision_gap` route back. A failing verify claim routes the run
-back to `verify` (at most three visits, then the gate blocks). Passing evidence
+back to `verify` (at most three route-backs; a fourth failing visit blocks). Passing evidence
 re-recorded at the same pinned head in the new visit, a fresh critique and
 fresh `tests-evidence`, can complete it, which covers a flaky or mis-invoked
 check. A real code fix is a new head: fix the change through `builder.build`,

@@ -1854,7 +1854,9 @@ export function assertSourceHeadStartable(definition: unknown, flowId: string, s
   }
   if (snapshot.worktree_clean !== true) {
     const dirty = dirtyWorktreePaths(projectRoot);
-    const shown = dirty.length === 0 ? "" : ` (${dirty.slice(0, 5).join(", ")}${dirty.length > 5 ? `, and ${dirty.length - 5} more` : ""})`;
+    // Paths are caller-controlled bytes: quote each so a newline, comma, or terminal escape in a
+    // filename cannot forge or garble the refusal.
+    const shown = dirty.length === 0 ? "" : ` (${dirty.slice(0, 5).map((file) => JSON.stringify(file)).join(", ")}${dirty.length > 5 ? `, and ${dirty.length - 5} more` : ""})`;
     const gitignoreHint = `${dirty.includes(".kontourai/.gitignore") ? " An untracked .kontourai/.gitignore (written by flow-agents init) counts too: commit it." : ""}${dirty.some((file) => file.startsWith("delivery/")) ? " Untracked workflow publish-delivery output under delivery/ counts too: commit or remove it." : ""}`;
     throw new BuilderBuildRunInputError("sourceHead", `the Git worktree at ${sourceHead} has uncommitted or untracked changes${shown}; ${flowId} reviews exactly the committed head, so commit or remove them first (workflow artifacts under .kontourai/ must be gitignored).${gitignoreHint}`);
   }
