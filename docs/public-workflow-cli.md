@@ -80,8 +80,10 @@ flow_agents workflow start \
 The provider status must confirm the calling actor holds that exact Work Item. `start` retains the
 provider result as selected-work evidence and begins at the canonical Builder entry step. A
 portfolio approval, a branch name, or a finished change is not a substitute for that binding. If
-the work has already been changed without a bound run, record the gap and create a follow-up Work
-Item; do not manufacture a prior session or use a private writer.
+the work has already been changed without a bound run, do not manufacture a prior session or use a
+private writer. Review and verify the finished change through `builder.review-existing` instead
+(see [Review and verify an existing change](#review-and-verify-an-existing-change)), or record
+the gap and create a follow-up Work Item.
 
 The agent executes the reported public `next_action` through planning, implementation, review,
 verification, and release readiness, produces the required artifacts, and records their evidence.
@@ -398,6 +400,82 @@ Current local runtime actor IDs provide coordination-level separation, not a
 cryptographic identity guarantee. A policy that requires externally attested
 reviewer identity must keep that assurance `NOT_VERIFIED` until the runtime
 supplies a trusted delegation credential.
+
+## Review and verify an existing change
+
+`builder.review-existing` reviews and verifies a change that already exists at one exact Git
+commit, such as an open pull request, without claiming that the run implemented it. Use
+`builder.build` for new work.
+
+| | `builder.build` | `builder.review-existing` |
+| --- | --- | --- |
+| Starts from | A selected Work Item with no implementation yet | A selected Work Item whose change already exists at one commit |
+| Steps | pull-work, design-probe, plan, execute, verify, merge-ready, pr-open, merge-ready-ci, learn | pull-work, existing-change, verify |
+| Implementation claim | `implementation-scope` at `execute` | None. `pre-existing-implementation` records the change as it existed. |
+| Defect at verify | Routes back to execute, plan, or design-probe | Blocks the run. Fix the change through `builder.build`, or review a new head in a new run. |
+| Source head | Follows the branch | Pinned at start with `--source-head` and re-checked at every gate |
+
+Check out the exact commit under review, complete `pull-work` selection, and start with the head
+pinned:
+
+```bash
+flow_agents workflow start \
+  --flow builder.review-existing \
+  --work-item kontourai/target-repository#123 \
+  --assignment-provider github \
+  --effective-state-json .kontourai/flow-agents/target-assignment-status.json \
+  --source-head "$(git rev-parse HEAD)"
+```
+
+The run persists the head in its canonical state. `start` refuses before writing any session
+artifact when the head is missing, is not a full lowercase 40-hex SHA, is not the checked-out
+`HEAD`, or the Git worktree has uncommitted or untracked changes. Workflow artifacts under
+`.kontourai/` must therefore be gitignored. Every other flow refuses `--source-head`. The rule
+is enforced by the shared runtime, so the package API and the sidecar entry refuse the same
+inputs.
+
+At `existing-change`, write `<slug>--existing-change.md` with the change's provider record, base,
+exact head, and changed files, then record it:
+
+```bash
+flow_agents workflow evidence \
+  --session-dir .kontourai/flow-agents/kontourai-target-repository-123 \
+  --expectation pre-existing-implementation \
+  --status pass \
+  --summary "The change existed before this run at the pinned head." \
+  --evidence-ref-json '{"kind":"provider","url":"https://github.com/kontourai/target-repository/pull/124","summary":"Provider record of the existing change."}' \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/kontourai-target-repository-123/kontourai-target-repository-123--existing-change.md","summary":"Base, exact head, and changed files."}'
+```
+
+`verify` has the same expectations as `builder.build`: a clean critique from a reviewer whose
+runtime identity differs from the assignment holder, acceptance criteria, command-backed
+`tests-evidence` such as `--command "npm test"` with matching `--criterion-json`, and applicable
+policy compliance. Passing the verify gate completes the run.
+
+The run fails closed when:
+
+- the checked-out `HEAD` is no longer the pinned head when any gate is evaluated, even if every
+  claim was re-recorded at the new commit;
+- a claim carrying a Git snapshot was observed at another commit or in a dirty worktree (a
+  failing claim stays recordable, so a defect still blocks the run);
+- `start` is re-run with a different `--source-head`, for an active or a completed run;
+- the critique comes from the assignment holder, or `tests-evidence` names a vacuous command;
+- the same Work Item already has a `builder.build` run, or the reverse.
+
+A new head needs a new run: create a new Work Item, or archive this run and start again. This is
+deliberate friction in this release; there are no per-head runs within one Work Item.
+
+`workflow publish-delivery` accepts a completed run and seals its checkpoint at the pinned head.
+`merge-change` refuses these runs before any authorization or provider call, because they have
+no `pr-open` or `merge-ready-ci` step and produce no publish-change result. Merge through the
+provider's own controls.
+
+Not verified by this route:
+
+- The runtime requires the reviewer to differ from the assignment holder, and the skill asks the
+  assignment holder to be the change's owner. That the reviewer is not the change's author on the
+  provider, for example the GitHub pull request author, is `NOT_VERIFIED`.
+- `acceptance.json` is not anchored to a planning step, the same as in `builder.build-lean`.
 
 ## Resolving repaired critique history
 

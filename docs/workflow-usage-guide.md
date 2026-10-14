@@ -314,6 +314,25 @@ Example prompt:
 Use verify-work for .kontourai/flow-agents/<slug>/<slug>--deliver.md. Map every acceptance criterion to evidence and record PASS, FAIL, or NOT_VERIFIED.
 ```
 
+### Reviewing a change that already exists
+
+The steps above build new work. When the implementation already exists at one exact commit,
+for example an open pull request, start `builder.review-existing` instead of retroactively
+claiming a Builder implementation. It is not `builder.build-lean`: build-lean is a reduced-gate
+variant of new-work delivery that still implements, while `builder.review-existing` implements
+nothing.
+
+| | New work (`builder.build`) | Existing change (`builder.review-existing`) |
+| --- | --- | --- |
+| Implementation | `plan-work` then `execute-plan` in the run | Already done before the run; `review-existing` records it as `pre-existing-implementation` |
+| Review and verification | `review-work` then `verify-work` at `verify` | The same skills and expectations at `verify` |
+| A defect | Routes back to `execute` | Blocks the run; fix through `builder.build` |
+| A new commit | Re-verify in the same run | Needs a new run |
+
+Start it with `--source-head` set to the checked-out commit in a clean worktree. The full
+contract, including what it refuses and what it does not verify, is in
+[Review and verify an existing change](public-workflow-cli.md#review-and-verify-an-existing-change).
+
 ## 6. Build Trust With Evidence Gate
 
 Use `evidence-gate` after verification to decide whether the evidence is trustworthy enough to publish, ask for review, or continue fixing.
