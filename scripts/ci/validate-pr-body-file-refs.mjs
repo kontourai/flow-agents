@@ -34,7 +34,8 @@ const MIN_REASON_CHARS = 8;
 //
 // This is NOT a general bot exemption: release-please's bodies are changelogs of THIS
 // repository and are checked like everyone else's (all release pull requests in the
-// 120-PR measurement pass).
+// 120-PR measurement pass). A verified generated release section may additionally name
+// paths changed since its previous release tag; see releaseHistory below.
 const EXEMPT_AUTHORS = new Map([
   [
     "dependabot[bot]",
@@ -124,8 +125,11 @@ function run(bodyText, head, base) {
     allowed.set(match[1], reason);
   }
 
+  const history = releaseHistory(bodyText, head, base, author);
+  const ordinaryCandidates = new Set(extractPaths(history ? bodyText.replace(history.section, "") : bodyText, roots));
   const candidates = extractPaths(bodyText, roots);
   const checked = [];
+  const historical = [];
   const skippedIgnored = [];
   const skippedAllowed = [];
 
@@ -156,6 +160,10 @@ function run(bodyText, head, base) {
     // A body may legitimately name a file the branch DELETES. It is gone from the head
     // tree and still unambiguously this PR's own work, so the diff is the second oracle.
     if (touched.has(candidate)) continue;
+    if (history && !ordinaryCandidates.has(candidate) && history.paths.has(candidate)) {
+      historical.push(candidate);
+      continue;
+    }
     fail(
       `  ${candidate}\n` +
         `      does not exist at the PR head (${head.slice(0, 8)}) and is not among the ` +
@@ -170,6 +178,7 @@ function run(bodyText, head, base) {
   if (problems.length === 0) {
     console.log(summary);
     for (const path of checked) console.log(`  ok  ${path}`);
+    for (const path of historical) console.log(`  historical  ${path} — changed in verified release range`);
     for (const path of skippedAllowed) console.log(`  allowed  ${path} — ${allowed.get(path)}`);
     return;
   }
@@ -228,4 +237,38 @@ function changedPaths(base, head) {
   const output = tryGit(["diff", "--no-renames", "--name-only", mergeBase, head]);
   if (output === null) return null;
   return new Set(output.split("\n").map((line) => line.trim()).filter(Boolean));
+}
+
+// Release notes describe a bounded interval of this repository, including deletions
+// already landed on main. This is not an author exemption: only the exact generated
+// section, version metadata and ancestor release range are admitted. Extra body claims
+// still use the head/diff oracle. Missing tags or malformed metadata fail closed.
+function releaseHistory(body, head, base, author) {
+  if (author !== "kontourai-releases[bot]" ||
+      process.env.PR_HEAD_REF !== "release-please--branches--main--components--flow-agents") return null;
+  try {
+    const read = (ref, path) => git(["show", `${ref}:${path}`]);
+    const previous = JSON.parse(read(base, ".release-please-manifest.json"))["."];
+    const version = JSON.parse(read(head, ".release-please-manifest.json"))["."];
+    const semver = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
+    if (!semver.test(previous) || !semver.test(version) || version === previous ||
+        JSON.parse(read(base, "package.json")).version !== previous ||
+        JSON.parse(read(head, "package.json")).version !== version) return null;
+    const changed = changedPaths(base, head);
+    if (!changed || changed.size !== 3 ||
+        !["CHANGELOG.md", "package.json", ".release-please-manifest.json"].every(path => changed.has(path))) return null;
+    const changelog = read(head, "CHANGELOG.md");
+    const section = changelog.split(/(?=^## )/m)[1]?.trim();
+    if (!section || !body.includes(section)) return null;
+    const heading = `## [${version}](https://github.com/kontourai/flow-agents/compare/v${previous}...v${version}) (`;
+    if (!section.startsWith(heading)) return null;
+    const tag = `refs/tags/v${previous}`;
+    if (tryGit(["merge-base", "--is-ancestor", tag, base]) === null) return null;
+    // Unlike a tip-to-tip diff, the log retains files introduced and then removed
+    // inside this interval. No other branch or older release can lend its paths.
+    const paths = git(["log", "--format=", "--name-only", "--no-renames", `${tag}..${base}`]);
+    return { section, paths: new Set(paths.split("\n").filter(Boolean)) };
+  } catch {
+    return null;
+  }
 }
