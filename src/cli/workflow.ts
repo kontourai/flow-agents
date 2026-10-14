@@ -9,7 +9,7 @@ import { definitionDigest, expectationsForGate, flowRunHead, loadRun, openGates,
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
-import { currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { assertSourceHeadStartable, currentGateVisit, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { declaredStepBindsInterface } from "../builder-gate-action-envelope.js";
 import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
@@ -125,7 +125,7 @@ let _verbSpecsCache: Map<string, VerbSpec> | null = null;
 function verbSpecs(): Map<string, VerbSpec> {
   if (_verbSpecsCache === null) {
     _verbSpecsCache = new Map<string, VerbSpec>([
-    ["start", { summary: 'Start or resume a workflow for a Work Item.', options: new Set<string>(["flow", "work-item", "task-slug", "artifact-root", "source-request", "summary", "title", "criterion", "assignment-provider", "effective-state-json"]), enforcement: "workflow" }],
+    ["start", { summary: 'Start or resume a workflow for a Work Item.', options: new Set<string>(["flow", "work-item", "task-slug", "artifact-root", "source-request", "summary", "title", "criterion", "assignment-provider", "effective-state-json", "source-head"]), enforcement: "workflow" }],
     ["status", { summary: 'Show the current canonical run and projected next action.', options: null, enforcement: null }],
     ["evidence-request", { summary: 'Emit an exact host-recovery evidence authorization for external signing.', options: EVIDENCE_FLAGS, enforcement: "workflow" }],
     ["evidence", { summary: 'Record evidence for the current Flow gate and synchronize it.', options: EVIDENCE_FLAGS, enforcement: "workflow" }],
@@ -1505,12 +1505,25 @@ async function start(argv: string[]): Promise<number> {
   } else if (taskSlug && flow !== "builder.shape") {
     throw new Error("--task-slug is reserved for an existing local Work Item retry");
   }
+  // #1415: a flow whose definition pins the reviewed commit refuses a missing, malformed,
+  // non-HEAD, or dirty-tree head here, before any session artifact is written. The shared runtime
+  // re-applies the same rule (and the resume comparison) when the run starts, for every door.
+  // A bare `--source-head` becomes "" so it is refused rather than ignored.
+  // A non-canonical --artifact-root has no project root to inspect; ensure-session refuses it with
+  // the canonical-root error before any run starts, so the preflight defers to that refusal.
+  const sourceHead = parsed.flags["source-head"] === undefined ? undefined : flagString(parsed.flags, "source-head", "");
+  if (path.basename(artifactRoot) === "flow-agents" && path.basename(path.dirname(artifactRoot)) === ".kontourai") {
+    assertSourceHeadStartable(resolveEffectiveFlowDefinition(flow, findRepoRootFromDir(artifactRoot)), flow, sourceHead, path.dirname(path.dirname(artifactRoot)));
+  }
   const existingSlug = taskSlug ?? (workItem ? workItemSlug(workItem) : null);
   if (existingSlug && fs.existsSync(path.join(artifactRoot, existingSlug, "state.json"))) {
     try {
       const existing = await loadBuilderFlowRun({ cwd: path.dirname(path.dirname(artifactRoot)), runId: existingSlug });
       if (existing.definitionId !== flow) {
-        throw new Error(`workflow start cannot resume ${existing.definitionId} as ${flow}; local shape sessions are not build retries. Create or claim a provider Work Item for the builder.build handoff.`);
+        // The run id is the Work Item slug, so a Work Item keeps the flow its run started with.
+        throw new Error(existing.definitionId === "builder.shape"
+          ? `workflow start cannot resume ${existing.definitionId} as ${flow}; local shape sessions are not build retries. Create or claim a provider Work Item for the ${flow} handoff.`
+          : `workflow start cannot resume ${existing.definitionId} as ${flow}; this Work Item's run was started as ${existing.definitionId} and keeps that flow. Create or claim a different provider Work Item for ${flow}.`);
       }
     } catch (error) {
       if ((error as { code?: string }).code !== "flow.run_location.not_found") throw error;
@@ -1545,6 +1558,7 @@ async function start(argv: string[]): Promise<number> {
     ...(effectiveStateJson ? ["--effective-state-json", path.resolve(effectiveStateJson)] : []),
     "--source-request", sourceRequest,
     "--summary", summary,
+    ...(sourceHead !== undefined ? ["--source-head", sourceHead] : []),
     ...forwarded,
   ]);
 }

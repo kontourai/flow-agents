@@ -2,15 +2,23 @@
 
 > Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
 
-Normative contract for the topic-keyed decision registry. This is the source of
-truth for how NEW decisions are recorded in a Kontour repository. Numbered ADRs
-under `docs/adr/` are frozen history and are never written for new decisions
-(see [Relationship to ADRs](#relationship-to-adrs-and-grill-with-docs)).
+How Flow Agents records NEW decisions in the topic-keyed decision registry.
+Numbered ADRs under `docs/adr/` are frozen history and are never written for new
+decisions (see [Relationship to ADRs](#relationship-to-adrs-and-grill-with-docs)).
 
-Machine-checkable structure lives in `schemas/decision-record.schema.json`; the
-validator/generator is `scripts/check-decisions.cjs`, exposed as
-`npm run check:decisions` and `npm run gen:decisions-index` and wired into the
-required `source-and-static` CI lane.
+**The record format is owned by Corpus.** The
+[Corpus decision-record format](https://github.com/kontourai/corpus/blob/main/docs/decisions.md)
+is the authority for the frontmatter fields, statuses, relations, evidence
+kinds, secret refusal, the generated index, and the numbered-ADR freeze. Corpus
+ships the JSON Schema (`@kontourai/corpus/schemas/decision-record.schema.json`)
+and the checker. This contract adds only the Flow Agents conventions on top:
+where subjects come from, how a decision changes, and when to consult the
+registry. Where this file and Corpus disagree about the format, Corpus wins.
+
+`corpus.json` declares the registry (`"decisions": { "adr": { "dir": "docs/adr" } }`).
+`npm run check:decisions` runs `corpus decisions check` at a pinned Corpus
+commit, and `npm run gen:decisions-index` runs `corpus decisions index`. The
+check runs in the required `source-and-static` CI lane.
 
 ## Why topic-keyed living records
 
@@ -65,52 +73,23 @@ The current answer, plus lean rationale. Derivation context is linked via
   contributors deciding the same subject land on the same slug rather than
   competing for the next number.
 
-## Frontmatter fields
+## Frontmatter, statuses, and evidence
 
-Validated by `schemas/decision-record.schema.json`:
+The fields (`status`, `subject`, `decided`, `evidence[]`, and the optional
+`supersedes`, `superseded_by`, `merged_into`), the four statuses, and the
+evidence kinds are defined in the
+[Corpus record format](https://github.com/kontourai/corpus/blob/main/docs/decisions.md#record-format).
+Flow Agents uses them this way:
 
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `status` | yes | `current` \| `superseded` \| `merged` \| `needs-decision` (see [Status](#status-values)). |
-| `subject` | yes | The decision subject, a CONTEXT.md vocabulary noun phrase. |
-| `decided` | yes | ISO date `YYYY-MM-DD` the current decision was ratified. |
-| `evidence[]` | yes | `{kind, ref}` links to durable provenance. Never a secret. |
-| `supersedes[]` | no | Topic slugs whose subjects this file absorbed. |
-| `superseded_by` | when superseded | The slug that now carries the answer. |
-| `merged_into` | when merged | The slug this subject was folded into. |
-
-### Status values
-
-- **`current`** — this file holds the live answer for its subject. Must not
-  carry `superseded_by` or `merged_into`.
-- **`superseded`** — a tombstone: the subject moved to a different topic slug
-  (renamed or split). Requires `superseded_by`.
-- **`merged`** — a tombstone: the subject was folded into another topic. Requires
-  `merged_into`.
-- **`needs-decision`** — a stub that names an open subject with no ratified answer
-  yet. It carries provenance `evidence[]` (e.g. the frozen ADR whose subject is
-  still open) but no live decision body. This value exists so ADR freeze tooling
-  (issue #314) can record that a frozen ADR's subject still needs a living
-  decision without inventing an answer. A `needs-decision` stub is not a
-  tombstone and must not carry `superseded_by`/`merged_into`.
-
-### Evidence refs
-
-Derivation context is LINKED, never inlined. Each `evidence[]` entry is
-`{kind, ref}` where `kind` is one of `issue`, `pr`, `commit`, `session-archive`,
-`adr`, `doc`, `url`:
-
-- **`session-archive`** — a path to an archived session artifact (under
-  `.kontourai/`) promoted at retirement. Grilling/probe transcripts retire into
-  the session archive and are linked here as decision provenance.
-- **`adr`** — a frozen numbered ADR under `docs/adr/` that is provenance for this
-  decision.
-- **`issue`/`pr`/`commit`** — GitHub references (number, URL, or SHA).
-- **`doc`/`url`** — a repository document path or external permalink.
-
-`ref` values must never contain secret-shaped material (AWS access keys, GitHub
-tokens, private-key blocks, JWTs, or `secret:`/`token:`-style literals). The
-validator refuses them; link durable provenance, never a credential.
+- **`subject`** is a CONTEXT.md vocabulary noun phrase (see [Slug rules](#slug-rules-vocabulary-is-the-namespace)).
+- **`needs-decision`** stubs record that a frozen ADR's subject still needs a
+  living decision, without inventing an answer. The stub links that ADR as `adr`
+  evidence.
+- **`session-archive`** evidence points at an archived session artifact under
+  `.kontourai/`, promoted at retirement. Grilling and probe transcripts retire
+  into the session archive and are linked here as decision provenance, never
+  pasted into the record.
+- Link durable provenance, never a credential. Corpus refuses secret-shaped refs.
 
 ## Supersession by edit
 
@@ -227,28 +206,21 @@ topic matching are required.
 ## Index
 
 `docs/decisions/index.md` is generated by `npm run gen:decisions-index`
-(`scripts/check-decisions.cjs gen-index`). It is deterministic and idempotent: a
-second run with no topic change is diff-clean. It lists each topic slug, its
-status, and a one-line summary (the `subject`, falling back to the first body
-line). Do not edit it by hand. `npm run check:decisions` fails if the index is
-missing or stale, so CI catches an out-of-date index.
+(`corpus decisions index`); see
+[the index](https://github.com/kontourai/corpus/blob/main/docs/decisions.md#the-index).
+Do not edit it by hand. Run the generator after adding or editing a record.
 
 The index is referenced from `CONTEXT.md` so retrieval-at-write always has a
 cheap, loaded pointer into the registry.
 
 ## Validation
 
-`npm run check:decisions` (wired into the required `source-and-static` CI lane)
-exits nonzero on any of:
-
-- invalid frontmatter (missing `status`/`subject`/`decided`/`evidence`);
-- unknown `status`;
-- a secret-shaped `evidence[].ref`;
-- a `superseded_by`/`merged_into`/`supersedes` slug that points at a missing
-  topic file;
-- a status/relationship mismatch (e.g. `current` carrying a tombstone field, or
-  `superseded` without `superseded_by`);
-- a stale or missing `docs/decisions/index.md`.
+`npm run check:decisions` runs `corpus decisions check --base "$DECISIONS_BASE"`
+(default `origin/main`; CI sets it to the pull request base, or to the pushed
+range on `main`). It fails on any record that breaks the Corpus format, on a
+missing or stale index, and on any file added under `docs/adr/` since the base.
+The full rule list is in
+[Corpus's docs](https://github.com/kontourai/corpus/blob/main/docs/decisions.md).
 
 ## Relationship to ADRs and grill-with-docs
 
@@ -256,10 +228,12 @@ exits nonzero on any of:
   interop reads the domain vocabulary from CONTEXT.md; the registry keys its
   slugs off that same vocabulary. We inherit the grill-with-docs behavior, not
   the numbered-ADR file format.
-- **Numbered ADRs (`docs/adr/NNNN-*.md`) are frozen history.** They are never
-  written for new decisions and are never converted into topic files. Existing
-  ADRs are frozen-and-indexed by separate tooling (issue #314); a topic file may
-  cite a frozen ADR via an `adr` evidence ref as provenance.
+- **Numbered ADRs (`docs/adr/`) are frozen history.** They are never written
+  for new decisions and are never converted into topic files, and their numbers
+  stay as they are (including the duplicate 0007). Corpus's adr-freeze gate
+  refuses any file added under `docs/adr/`; see
+  [Numbered ADRs](https://github.com/kontourai/corpus/blob/main/docs/decisions.md#numbered-adrs).
+  A topic file may cite a frozen ADR via an `adr` evidence ref as provenance.
 
 The pilot record self-hosting this contract is
 [docs/decisions/decision-records.md](../../docs/decisions/decision-records.md).

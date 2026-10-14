@@ -3249,6 +3249,7 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
       "--title", opt(p, "title", slug),
       "--summary", opt(p, "summary", "Workflow session is durable."),
       ...opts(p, "criterion").flatMap((criterion) => ["--criterion", criterion]),
+      ...(opt(p, "source-head") ? ["--source-head", opt(p, "source-head")] : []),
     ]);
     // #1341: the machine-readable next_action is not a privilege of one flow name. The bare-string
     // branch below dropped `skills` and the pinned start `command` from the sidecar for every
@@ -3312,7 +3313,10 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
   }
   if (allowCanonicalFlowMutation && isCanonicalRunFlowId(entry.flowId, findRepoRootFromDir(dir))) {
     try {
-      const started = await startBuilderFlowSession({ sessionDir: dir, flowId: entry.flowId });
+      // #1415: passthrough only. The source-head rule is the shared runtime's, so this door and
+      // `workflow start` cannot disagree about it. A bare `--source-head` reaches it as "".
+      const sourceHead = p.opts["source-head"] !== undefined || p.flags.has("source-head") ? opt(p, "source-head") : undefined;
+      const started = await startBuilderFlowSession({ sessionDir: dir, flowId: entry.flowId, ...(sourceHead !== undefined ? { sourceHead } : {}) });
       if (started.run.state.current_step === "pull-work"
         && selectedWorkEvidence
         && assignmentSubjectMatchesWorkItem(slug, workItem.ref)) {

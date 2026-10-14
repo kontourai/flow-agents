@@ -25,6 +25,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { syncBuiltinESMExports } from "node:module";
+import { createHash } from "node:crypto";
 
 import { runPromote, health } from "./index.js";
 import { snapshotDir, validateDecisionDelta } from "./lib.js";
@@ -287,5 +288,76 @@ describe("R1: the FlowDefinition is composable (true sub-flow nesting)", () => {
       // resolve (src/lib/flow-resolver.ts requires all child expects be exported).
       assert.ok(flow.exports.includes(claimType), `gate claim ${claimType} must be exported for composability`);
     }
+  });
+});
+
+// validateDecisionDelta hand-mirrors Corpus's per-field record rules. These
+// cases hold it to Corpus's own conformance vectors. The vectors are vendored
+// (the conformance package is not on npm), and the first test proves the bytes
+// are the file at the pinned Corpus commit: in any Corpus clone,
+//   git rev-parse 08c62ccd72880ff4bd4c378ae252ad437b4b4fb5:packages/conformance/decision-records.json
+// prints CORPUS_VECTORS_BLOB. To move the pin, copy the file from the new
+// commit and update both literals.
+describe("validateDecisionDelta against Corpus decision-record conformance vectors", () => {
+  const CORPUS_VECTORS = path.join(FIX, "corpus-decision-records.json");
+  const CORPUS_VECTORS_BLOB = "f443f617698bcc85a373eb6b57ec57982d132ba6";
+  // Rule codes the mirror implements.
+  const MIRRORED = ["decided", "evidence", "evidence-kind", "secret", "slug", "status", "subject"];
+  // Rule codes outside the mirror: the Kit renders the frontmatter itself
+  // (frontmatter, unknown-key) and only drafts `current` records with no
+  // relations (relation, self-reference, tombstone).
+  const NOT_MIRRORED = ["frontmatter", "relation", "self-reference", "tombstone", "unknown-key"];
+  // Vector ids where the mirror deliberately differs, with the reason.
+  const KNOWN_DIVERGENCES = {
+    "status-missing": "the delta API defaults a missing status to current, and the git-repo renderer always writes `status: current`",
+  };
+
+  const bytes = fs.readFileSync(CORPUS_VECTORS);
+  const corpus = JSON.parse(bytes.toString("utf8"));
+
+  const ruleOf = (message) => {
+    if (/^status '/.test(message)) return "status";
+    if (/^subject /.test(message)) return "subject";
+    if (/^slug '/.test(message)) return "slug";
+    if (/^decided '/.test(message)) return "decided";
+    if (/^evidence\[\d+\]\.kind /.test(message)) return "evidence-kind";
+    if (/secret-shaped/.test(message)) return "secret";
+    if (/^evidence must be |^evidence\[\d+\] must be an object|^evidence\[\d+\]\.ref must be /.test(message)) return "evidence";
+    throw new Error(`unmapped validateDecisionDelta message: ${message}`);
+  };
+
+  test("the vendored vectors are the file at the pinned Corpus commit", () => {
+    const blob = createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+    assert.equal(blob, CORPUS_VECTORS_BLOB);
+  });
+
+  test("every Corpus rule code is classified as mirrored or not", () => {
+    assert.deepEqual([...corpus.rules].sort(), [...MIRRORED, ...NOT_MIRRORED].sort());
+  });
+
+  test("the mirror reports exactly the mirrored rule codes each vector expects", () => {
+    const mismatches = {};
+    const rejectedBy = new Set();
+    let compared = 0;
+    for (const vector of corpus.vectors) {
+      for (const record of vector.records) {
+        // Unreadable frontmatter is the `frontmatter` rule, which the mirror does not take.
+        if (record.frontmatter === null) {
+          assert.deepEqual(record.expected, ["frontmatter"], `${vector.id}/${record.slug}`);
+          continue;
+        }
+        compared += 1;
+        const expected = record.expected.filter((code) => MIRRORED.includes(code)).sort();
+        const actual = [...new Set(validateDecisionDelta({ ...record.frontmatter, slug: record.slug }).map(ruleOf))].sort();
+        actual.forEach((code) => rejectedBy.add(code));
+        if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+          mismatches[vector.id] = { slug: record.slug, expected, actual };
+        }
+      }
+    }
+    assert.ok(compared > 0, "no vector records were compared");
+    // Each mirrored rule rejected at least one vector, so every rule was reached.
+    assert.deepEqual([...rejectedBy].sort(), [...MIRRORED].sort());
+    assert.deepEqual(Object.keys(mismatches).sort(), Object.keys(KNOWN_DIVERGENCES).sort(), JSON.stringify(mismatches, null, 2));
   });
 });

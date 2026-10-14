@@ -1,0 +1,1239 @@
+{
+  "schemaVersion": 1,
+  "description": "Decision-record conformance vectors for the Corpus decision registry (docs/decisions.md in kontourai/corpus). Each vector is a whole registry: records keyed by filename slug, with the file text, the frontmatter as JSON (null when the block cannot be read), and the expected rule codes (empty means valid). Index freshness and the ADR freeze are repository checks and are not covered here.",
+  "rules": [
+    "frontmatter",
+    "slug",
+    "unknown-key",
+    "status",
+    "subject",
+    "decided",
+    "evidence",
+    "evidence-kind",
+    "secret",
+    "relation",
+    "self-reference",
+    "tombstone"
+  ],
+  "vectors": [
+    {
+      "id": "valid-current",
+      "description": "A minimal current record.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "valid-needs-decision",
+      "description": "A needs-decision stub with provenance evidence.",
+      "records": [
+        {
+          "slug": "open-subject",
+          "markdown": "---\nstatus: needs-decision\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: adr\n    ref: docs/adr/0001-example.md\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "needs-decision",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "adr",
+                "ref": "docs/adr/0001-example.md"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "valid-superseded",
+      "description": "A superseded tombstone naming an existing record.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: superseded\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nsuperseded_by: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "superseded",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "superseded_by": "new-topic"
+          },
+          "expected": []
+        },
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: New topic\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# New topic\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "New topic",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "valid-merged",
+      "description": "A merged tombstone naming an existing record.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: merged\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nmerged_into: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "merged",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "merged_into": "new-topic"
+          },
+          "expected": []
+        },
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: New topic\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# New topic\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "New topic",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "valid-supersedes",
+      "description": "The surviving record lists the slugs it absorbed.",
+      "records": [
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nsupersedes:\n  - old-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "supersedes": [
+              "old-topic"
+            ]
+          },
+          "expected": []
+        },
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: merged\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nmerged_into: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "merged",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "merged_into": "new-topic"
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "valid-every-evidence-kind",
+      "description": "Every evidence kind is accepted.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: issue-ref\n  - kind: pr\n    ref: pr-ref\n  - kind: commit\n    ref: commit-ref\n  - kind: session-archive\n    ref: session-archive-ref\n  - kind: adr\n    ref: adr-ref\n  - kind: doc\n    ref: doc-ref\n  - kind: url\n    ref: url-ref\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "issue-ref"
+              },
+              {
+                "kind": "pr",
+                "ref": "pr-ref"
+              },
+              {
+                "kind": "commit",
+                "ref": "commit-ref"
+              },
+              {
+                "kind": "session-archive",
+                "ref": "session-archive-ref"
+              },
+              {
+                "kind": "adr",
+                "ref": "adr-ref"
+              },
+              {
+                "kind": "doc",
+                "ref": "doc-ref"
+              },
+              {
+                "kind": "url",
+                "ref": "url-ref"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "valid-unquoted-number-ref",
+      "description": "Every scalar is a string, so an unquoted number is a valid ref.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: 310\n---\n\n# Example subject\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "310"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "valid-inline-list",
+      "description": "Inline [a, b] lists are YAML flow sequences.",
+      "records": [
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: New topic\ndecided: 2026-07-03\nsupersedes: [old-a, old-b]\nevidence:\n  - kind: pr\n    ref: \"#12\"\n---\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "New topic",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "pr",
+                "ref": "#12"
+              }
+            ],
+            "supersedes": [
+              "old-a",
+              "old-b"
+            ]
+          },
+          "expected": []
+        },
+        {
+          "slug": "old-a",
+          "markdown": "---\nstatus: merged\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nmerged_into: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "merged",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "merged_into": "new-topic"
+          },
+          "expected": []
+        },
+        {
+          "slug": "old-b",
+          "markdown": "---\nstatus: merged\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nmerged_into: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "merged",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "merged_into": "new-topic"
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "status-accepted",
+      "description": "ADR status words are not registry statuses.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: accepted\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "accepted",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "status-missing",
+      "description": "status is required.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "status"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "subject-missing",
+      "description": "subject is required.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# Record\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "subject"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "subject-blank",
+      "description": "subject must have a non-whitespace character.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: \"   \"\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n#    \n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "   ",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "subject"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "subject-multiline",
+      "description": "The subject is one line: it is a cell of the index table.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: |-\n  First line\n  second line\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# First line\nsecond line\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "First line\nsecond line",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "subject"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "subject-escaped-newline",
+      "description": "A double-quoted escape can put a newline in the subject.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: \"Paths like C:\\new\"\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: \"#1\"\n---\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Paths like C:\new",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "#1"
+              }
+            ]
+          },
+          "expected": [
+            "subject"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "subject-not-a-string",
+      "description": "The subject is a string, not a mapping.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject:\n  x: y\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# [object Object]\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": {
+              "x": "y"
+            },
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "subject"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "decided-not-iso",
+      "description": "decided is YYYY-MM-DD.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: July 3, 2026\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "July 3, 2026",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "decided"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "decided-missing",
+      "description": "decided is required.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "decided"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "evidence-missing",
+      "description": "evidence is required.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03"
+          },
+          "expected": [
+            "evidence"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "evidence-empty",
+      "description": "evidence must be non-empty.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence: []\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": []
+          },
+          "expected": [
+            "evidence"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "evidence-item-not-object",
+      "description": "Each evidence item is {kind, ref}.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - \"#310\"\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              "#310"
+            ]
+          },
+          "expected": [
+            "evidence"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "evidence-kind-unknown",
+      "description": "Evidence kinds are a closed list.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: ticket\n    ref: T-1\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "ticket",
+                "ref": "T-1"
+              }
+            ]
+          },
+          "expected": [
+            "evidence-kind"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "evidence-ref-blank",
+      "description": "ref must have a non-whitespace character.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: \" \"\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": " "
+              }
+            ]
+          },
+          "expected": [
+            "evidence"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "evidence-ref-unquoted-hash",
+      "description": "An unquoted #310 is a YAML comment, so the ref is empty.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: #310\n---\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": ""
+              }
+            ]
+          },
+          "expected": [
+            "evidence"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "evidence-item-extra-key",
+      "description": "Evidence items refuse unknown keys.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n    note: context\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1",
+                "note": "context"
+              }
+            ]
+          },
+          "expected": [
+            "unknown-key"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "unknown-top-level-key",
+      "description": "Records refuse unknown frontmatter keys.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nowner: someone\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "owner": "someone"
+          },
+          "expected": [
+            "unknown-key"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "secret-shaped-ref",
+      "description": "A quoted secret assignment in a ref is refused.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: url\n    ref: https://example.com/?token=\"not-a-real-value\"\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "url",
+                "ref": "https://example.com/?token=\"not-a-real-value\""
+              }
+            ]
+          },
+          "expected": [
+            "secret"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "superseded-without-target",
+      "description": "superseded requires superseded_by.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: superseded\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "superseded",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "tombstone"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "superseded-dangling",
+      "description": "superseded_by must name an existing record.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: superseded\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nsuperseded_by: does-not-exist\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "superseded",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "superseded_by": "does-not-exist"
+          },
+          "expected": [
+            "relation"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "superseded-self",
+      "description": "superseded_by must not name the record itself.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: superseded\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nsuperseded_by: old-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "superseded",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "superseded_by": "old-topic"
+          },
+          "expected": [
+            "self-reference"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "superseded-not-a-slug",
+      "description": "superseded_by is one kebab-case slug.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: superseded\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nsuperseded_by: New Topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "superseded",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "superseded_by": "New Topic"
+          },
+          "expected": [
+            "relation"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "current-with-tombstone",
+      "description": "current must not carry a tombstone field.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nsuperseded_by: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "superseded_by": "new-topic"
+          },
+          "expected": [
+            "tombstone"
+          ]
+        },
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: New topic\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# New topic\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "New topic",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "needs-decision-with-tombstone",
+      "description": "needs-decision must not carry a tombstone field.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: needs-decision\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nmerged_into: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "needs-decision",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "merged_into": "new-topic"
+          },
+          "expected": [
+            "tombstone"
+          ]
+        },
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: New topic\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# New topic\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "New topic",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "merged-without-target",
+      "description": "merged requires merged_into.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: merged\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "merged",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "tombstone"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "merged-with-superseded-by",
+      "description": "merged must not carry superseded_by.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: merged\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nmerged_into: new-topic\nsuperseded_by: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "merged",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "merged_into": "new-topic",
+            "superseded_by": "new-topic"
+          },
+          "expected": [
+            "tombstone"
+          ]
+        },
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: New topic\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# New topic\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "New topic",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "superseded-with-merged-into",
+      "description": "superseded must not carry merged_into.",
+      "records": [
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: superseded\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nsuperseded_by: new-topic\nmerged_into: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "superseded",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "superseded_by": "new-topic",
+            "merged_into": "new-topic"
+          },
+          "expected": [
+            "tombstone"
+          ]
+        },
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: New topic\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# New topic\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "New topic",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "supersedes-dangling",
+      "description": "supersedes entries must name existing records.",
+      "records": [
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nsupersedes:\n  - does-not-exist\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "supersedes": [
+              "does-not-exist"
+            ]
+          },
+          "expected": [
+            "relation"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "supersedes-scalar",
+      "description": "supersedes is a list, not a scalar.",
+      "records": [
+        {
+          "slug": "new-topic",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nsupersedes: old-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "supersedes": "old-topic"
+          },
+          "expected": [
+            "relation"
+          ]
+        },
+        {
+          "slug": "old-topic",
+          "markdown": "---\nstatus: merged\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\nmerged_into: new-topic\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "merged",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ],
+            "merged_into": "new-topic"
+          },
+          "expected": []
+        }
+      ]
+    },
+    {
+      "id": "filename-not-a-slug",
+      "description": "The filename is a kebab-case slug.",
+      "records": [
+        {
+          "slug": "Example_Subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: https://github.com/kontourai/corpus/issues/1\n---\n\n# Example subject\n\nThe current answer.\n",
+          "frontmatter": {
+            "status": "current",
+            "subject": "Example subject",
+            "decided": "2026-07-03",
+            "evidence": [
+              {
+                "kind": "issue",
+                "ref": "https://github.com/kontourai/corpus/issues/1"
+              }
+            ]
+          },
+          "expected": [
+            "slug"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "no-frontmatter",
+      "description": "A record starts with a frontmatter block.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "# Example subject\n\nStatus: accepted\n",
+          "frontmatter": null,
+          "expected": [
+            "frontmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frontmatter-not-at-byte-0",
+      "description": "The frontmatter block starts at byte 0.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "\n---\nstatus: current\n---\n",
+          "frontmatter": null,
+          "expected": [
+            "frontmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frontmatter-after-bom",
+      "description": "A UTF-8 byte order mark is not allowed before the block.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "﻿---\nstatus: current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: \"#1\"\n---\n",
+          "frontmatter": null,
+          "expected": [
+            "frontmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frontmatter-unterminated",
+      "description": "The block ends with a --- line.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example subject\n",
+          "frontmatter": null,
+          "expected": [
+            "frontmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frontmatter-duplicate-key",
+      "description": "A key may appear once.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nstatus: merged\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: \"#1\"\n---\n",
+          "frontmatter": null,
+          "expected": [
+            "frontmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frontmatter-alias",
+      "description": "YAML anchors and aliases are refused.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: &s Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: doc\n    ref: *s\n---\n",
+          "frontmatter": null,
+          "expected": [
+            "frontmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frontmatter-tag",
+      "description": "Explicit YAML tags are refused.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: !!str current\nsubject: Example subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: \"#1\"\n---\n",
+          "frontmatter": null,
+          "expected": [
+            "frontmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frontmatter-not-a-mapping",
+      "description": "The frontmatter is a mapping.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\n- status\n- current\n---\n",
+          "frontmatter": null,
+          "expected": [
+            "frontmatter"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frontmatter-invalid-yaml",
+      "description": "A value containing \": \" is not valid YAML.",
+      "records": [
+        {
+          "slug": "example-subject",
+          "markdown": "---\nstatus: current\nsubject: Example: subject\ndecided: 2026-07-03\nevidence:\n  - kind: issue\n    ref: \"#1\"\n---\n",
+          "frontmatter": null,
+          "expected": [
+            "frontmatter"
+          ]
+        }
+      ]
+    }
+  ]
+}

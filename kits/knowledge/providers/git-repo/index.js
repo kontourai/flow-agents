@@ -9,8 +9,8 @@
  *   - docs/learnings/*.md         -> `note` nodes (learnings).
  *
  * Read side is authoritative here. The write side is proposals-only and renders
- * a decision-registry topic file shaped for the promote sub-flow (the same
- * frontmatter schemas/decision-record.schema.json validates) — the provider
+ * a decision-registry topic file shaped for the promote sub-flow (frontmatter
+ * in the Corpus decision-record format) — the provider
  * never writes to disk.
  *
  * @module providers/git-repo
@@ -199,8 +199,8 @@ export class GitRepoProvider {
   }
 
   /**
-   * Propose a decision-registry topic file. Renders frontmatter compatible with
-   * schemas/decision-record.schema.json + the promote sub-flow. Never writes.
+   * Propose a decision-registry topic file. Renders frontmatter in the Corpus
+   * decision-record format for the promote sub-flow. Never writes.
    */
   async proposeWrite(intent = {}) {
     const { subject, body = "", decided, evidence = [] } = intent;

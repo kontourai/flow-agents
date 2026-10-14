@@ -215,15 +215,14 @@
     "check:content-boundary": "node scripts/check-content-boundary.cjs",
     "check:layer-boundary": "node scripts/check-layer-boundary.mjs",
     "check:hachure-boundary": "node scripts/check-hachure-boundary.mjs",
-    "check:decisions": "node scripts/check-decisions.cjs check",
-    "gen:decisions-index": "node scripts/check-decisions.cjs gen-index",
-    "freeze:adrs": "node scripts/freeze-adrs.mjs",
+    "check:decisions": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus decisions check --base ${DECISIONS_BASE:-origin/main}",
+    "gen:decisions-index": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus decisions index",
     "prepack": "npm run build:bundles --silent && npm run validate:source --",
     "kit": "npm run build --silent && node build/src/cli.js kit",
     "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources",
     "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs",
-    "docs:check": "npx -y github:kontourai/corpus#340b66fc8f723c1babe35fce8240c82cd196b0db corpus check",
-    "docs:build": "npx -y github:kontourai/corpus#340b66fc8f723c1babe35fce8240c82cd196b0db corpus build"
+    "docs:check": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus check",
+    "docs:build": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus build"
   },
   "devDependencies": {
     "@kontourai/lookout": "0.3.2",

@@ -38,6 +38,8 @@ jobs:
         with:
           # The Codex legacy-instruction ownership audit independently walks
           # every seed-capable release tag and must not trust the catalog alone.
+          # check:decisions also diffs DECISIONS_BASE...HEAD to refuse new
+          # numbered ADRs, which needs the merge base a shallow clone lacks.
           fetch-depth: 0
 
       - name: Set up pnpm
@@ -102,6 +104,13 @@ jobs:
       - name: Decision registry
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check decision-registry
+        env:
+          # The ADR freeze in check:decisions compares against this ref. A pull
+          # request checks its own changes against its base; a push to main
+          # checks the pushed range, so an ADR that reached main without a pull
+          # request still turns main red. Empty (workflow_dispatch) falls back
+          # to origin/main in the npm script.
+          DECISIONS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
 
       - name: Source tree validation
         continue-on-error: true
