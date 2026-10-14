@@ -40,16 +40,16 @@ Use Veritas 1.7.3 or later for this Repo Map: its published schema declares
 the required static check's `timeoutMs` field.
 
 ```bash
-npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas readiness --working-tree
-npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas readiness --check coverage --working-tree
-npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas integrations codex status
-npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas attest bootstrap --actor <authority-id> --approval-ref <human-approval-reference> --non-interactive
+npx --no @kontourai/veritas readiness --working-tree
+npx --no @kontourai/veritas readiness --check coverage --working-tree
+npx --no @kontourai/veritas integrations codex status
+npx --no @kontourai/veritas attest bootstrap --actor <authority-id> --approval-ref <human-approval-reference> --non-interactive
 ```
 
 If you prefer explicit paths:
 
 ```bash
-npm exec --yes --package=@kontourai/veritas@1.7.3 -- veritas readiness --check evidence \
+npx --no @kontourai/veritas readiness --check evidence \
   --repo-map ./.veritas/repo-map.json \
   --repo-standards ./.veritas/repo-standards/default.repo-standards.json \
   package.json

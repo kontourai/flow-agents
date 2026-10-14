@@ -228,6 +228,7 @@
   "devDependencies": {
     "@kontourai/lookout": "0.3.2",
     "@kontourai/traverse": "0.19.1",
+    "@kontourai/veritas": "1.11.2",
     "@types/node": "^26.1.1",
     "ajv": "8.20.0",
     "gcp-metadata": "7.0.1",
