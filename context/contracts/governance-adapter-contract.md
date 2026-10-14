@@ -45,10 +45,10 @@ Use Veritas when a repo has Veritas configuration and the work needs repo-local 
 
 Do not require Veritas for the Flow Agents core surface or Builder Kit. Treat it as an optional development/governance provider:
 
-- `veritas readiness --check evidence --working-tree`: readiness evidence, native report, and feedback draft
-- `veritas readiness --check boundaries --working-tree`: protected-area and ownership signal
-- `veritas readiness --check coverage --working-tree`: evidence coverage signal
-- `veritas explain <rule|file|surface>`: just-in-time guidance
+- `npx --no @kontourai/veritas readiness --check evidence --working-tree`: readiness evidence, native report, and feedback draft
+- `npx --no @kontourai/veritas readiness --check boundaries --working-tree`: protected-area and ownership signal
+- `npx --no @kontourai/veritas readiness --check coverage --working-tree`: evidence coverage signal
+- `npx --no @kontourai/veritas explain <rule|file|surface>`: just-in-time guidance
 
 When a Veritas artifact is used, write a Flow Agents evidence check with `standard_refs[].standard: "veritas"` and `standard_refs[].ref` pointing at the Veritas artifact. If the artifact is outside the workflow directory, also add `external_evidence`.
 
