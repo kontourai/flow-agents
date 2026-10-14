@@ -262,7 +262,7 @@ A kit can declare optional `review` metadata alongside (or without) `execution`:
 ```
 
 The declared async producer accepts `{input, host, services}` and returns
-`{sessionPath, binding, apply}`. `sessionPath` is absolute; `binding` is Survey's
+`{sessionPath, binding, apply, presentation?}`. `sessionPath` is absolute; `binding` is Survey's
 producer-created `ReviewQueueBinding`; `apply()` returns a durable `{reference,
 summary?}` receipt. The host supplies frozen `services.survey.bindReviewQueue` and
 `services.survey.deriveReviewSessionApplyResultForSnapshot` from its own Survey
@@ -272,6 +272,17 @@ transitive dependency at the bootstrap root. Services cannot be supplied by JSON
 The producer owns current subject/basis validation, deadlines,
 identity resolution and idempotent domain application under its own lock. A local
 actor string is not authenticated human approval.
+
+The optional `presentation` uses Survey's exported `ReviewQueuePresentation`
+(`@kontourai/survey/review-workbench`). It provides a queue `title` and `context`,
+and item hints keyed by the original item name: `title`, `kind`
+(`acknowledgment` or `choice`) and `candidateLabels` keyed by original candidate
+ID. The producer can explain why review is needed, label an artifact **Mark
+reviewed**, and name decision candidates **Approve**, **Request changes** or
+**Decline** without changing canonical item values, events or queue binding.
+Flow Agents passes these display hints directly to Survey's console. They do not
+supply workflow authority, waive findings or resume execution. Request JSON cannot
+configure host-level presentation; the installed producer owns these hints.
 
 The request must be a regular non-symlink JSON file at most 1 MiB.
 The public schema is `schemas/kit-review-request.schema.json`.

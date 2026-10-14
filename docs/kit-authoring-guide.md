@@ -604,3 +604,9 @@ across AI-DLC and governance kits while preserving their domain decisions. See
 [the review producer contract](flow-kit-repository-contract.md#native-pending-action-review)
 for request shape, host authority and stale-source rejection. No kit-specific
 binary is required to present and apply this review.
+
+The producer can supply optional Survey `ReviewQueuePresentation` hints for a
+clear review title, reason for waiting, artifact acknowledgments and named decision
+actions. Hints are display-only and stay separate from the original queue binding
+and producer admission. Submitting a review records the producer result; kits own
+the subsequent execution handoff.

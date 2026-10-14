@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import type {bindReviewQueue,deriveReviewSessionApplyResultForSnapshot,ReviewQueueBinding} from '@kontourai/survey/review-workbench';
+import type {bindReviewQueue,deriveReviewSessionApplyResultForSnapshot,ReviewQueueBinding,ReviewQueuePresentation} from '@kontourai/survey/review-workbench';
 import {verifyInstalledKitEntry} from './kit-execution.js';
 
 const loadedKitHashes=new Map<string,string>();
@@ -17,6 +17,8 @@ async function loadReviewServices():Promise<KitReviewServices> {
 export interface PreparedKitReview {
  sessionPath:string;
  binding:ReviewQueueBinding;
+ /** Producer-owned display hints; they do not change the queue binding or admission. */
+ presentation?:ReviewQueuePresentation;
  apply:()=>Promise<{reference:string;summary?:string}>;
 }
 export function parseKitReview(manifest:Record<string,unknown>):KitReviewDescriptor|null {
@@ -30,7 +32,7 @@ export async function serveSurveyReview(options:PreparedKitReview&{port?:number}
  if(!path.isAbsolute(options.sessionPath)||typeof options.apply!=='function')throw new Error('Review requires an absolute sessionPath and trusted application callback');
  if(options.port!==undefined&&(!Number.isInteger(options.port)||options.port<0||options.port>65535))throw new Error('Invalid review port');
  const {startReviewConsoleServer}=await import('@kontourai/survey/review-console');
- return startReviewConsoleServer({sessionPath:options.sessionPath,port:options.port,producerApply:{binding:options.binding,apply:async()=>{
+ return startReviewConsoleServer({sessionPath:options.sessionPath,port:options.port,presentation:options.presentation,producerApply:{binding:options.binding,apply:async()=>{
   const result=await options.apply();
   return {reference:result.reference,summary:result.summary??'Review applied by the kit producer'};
  }}});

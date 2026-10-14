@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { ContinuationAdapterTimeoutError } from "../continuation-driver.js";
 import type { ContinuationBarrier, ContinuationTurnRequest, ContinuationTurnResult } from "../continuation-driver.js";
@@ -85,6 +85,9 @@ function spawnAdapter(
   options: ContinuationAdapterOptions,
 ): Promise<ContinuationTurnResult> {
   return new Promise((resolve, reject) => {
+    // Refuse admission before creating a worker on hosts without the observer
+    // needed to bind POSIX termination escalation to the original group.
+    if (process.platform !== "win32") processGroupMembers(process.pid);
     const child = spawn(command.argv[0]!, command.argv.slice(1), {
       cwd: options.cwd,
       env: adapterEnvironment(options),
@@ -97,14 +100,24 @@ function spawnAdapter(
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let settled = false;
-    let forcedKill: NodeJS.Timeout | undefined;
+    let termination: Promise<void> | undefined;
+    const terminate = () => termination ??= terminateOwnedProcessGroup(child.pid);
+    const finish = async (error?: Error, result?: ContinuationTurnResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try {
+        if (error || !isValidWaitResult(result!)) await terminate();
+        if (error) reject(error);
+        else resolve(result!);
+      } catch (cleanupError) { reject(cleanupError); }
+    };
     let terminationError: Error | undefined;
     const maxBytes = 4 * 1024 * 1024;
     const timeout = setTimeout(() => {
       if (settled) return;
       terminationError = new ContinuationAdapterTimeoutError(options.timeoutMs);
-      terminateProcessGroup(child.pid, "SIGTERM");
-      forcedKill = setTimeout(() => terminateProcessGroup(child.pid, "SIGKILL"), 250);
+      void terminate().catch((error: Error) => { void finish(error); });
     }, options.timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -113,8 +126,7 @@ function spawnAdapter(
         if (!terminationError) {
           terminationError = new Error("continuation adapter stdout exceeded 4 MiB");
           clearTimeout(timeout);
-          terminateProcessGroup(child.pid, "SIGTERM");
-          forcedKill = setTimeout(() => terminateProcessGroup(child.pid, "SIGKILL"), 250);
+          void terminate().catch((error: Error) => { void finish(error); });
         }
         return;
       }
@@ -124,46 +136,25 @@ function spawnAdapter(
       stderrBytes += chunk.length;
       if (stderrBytes <= maxBytes) stderr.push(chunk);
     });
-    child.on("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (forcedKill) clearTimeout(forcedKill);
-      reject(error);
-    });
+    child.on("error", (error) => { void finish(error); });
     child.on("close", (code, signal) => {
       if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      if (forcedKill) clearTimeout(forcedKill);
-      if (terminationError) {
-        reject(terminationError);
-        return;
-      }
+      if (terminationError) { void finish(terminationError); return; }
       const stderrText = Buffer.concat(stderr).toString("utf8").trim();
       if (code !== 0) {
-        scheduleProcessGroupTermination(child.pid);
-        reject(new Error(`continuation adapter exited ${code ?? signal ?? "unknown"}${stderrText ? `: ${stderrText}` : ""}`));
+        void finish(new Error(`continuation adapter exited ${code ?? signal ?? "unknown"}${stderrText ? `: ${stderrText}` : ""}`));
         return;
       }
       const output = Buffer.concat(stdout).toString("utf8").trim();
       try {
         const result = JSON.parse(output) as ContinuationTurnResult;
-        if (!isValidWaitResult(result)) scheduleProcessGroupTermination(child.pid);
-        resolve(result);
+        void finish(undefined, result);
       } catch {
-        scheduleProcessGroupTermination(child.pid);
-        reject(new Error("continuation adapter must emit exactly one JSON result on stdout"));
+        void finish(new Error("continuation adapter must emit exactly one JSON result on stdout"));
       }
     });
     child.stdin.on("error", (error) => {
-      if ((error as NodeJS.ErrnoException).code !== "EPIPE" && !settled) {
-        settled = true;
-        clearTimeout(timeout);
-        if (forcedKill) clearTimeout(forcedKill);
-        scheduleProcessGroupTermination(child.pid);
-        reject(error);
-      }
+      if ((error as NodeJS.ErrnoException).code !== "EPIPE") void finish(error);
     });
     child.stdin.end(`${JSON.stringify(request)}\n`);
   });
@@ -248,10 +239,32 @@ function isValidWaitResult(result: ContinuationTurnResult): boolean {
   return result.barrier.kind === "deadline" && typeof result.barrier.at === "string" && Number.isFinite(Date.parse(result.barrier.at));
 }
 
-function scheduleProcessGroupTermination(pid: number | undefined): void {
+// A POSIX group can outlive its leader. Retain the escalation until completion,
+// and bind it to members observed before TERM so a recycled group ID is not killed.
+async function terminateOwnedProcessGroup(pid: number | undefined): Promise<void> {
+  if (!pid) return;
+  if (process.platform === "win32") { terminateProcessGroup(pid, "SIGTERM"); return; }
+  const members = processGroupMembers(pid);
+  if (members.size === 0) return;
   terminateProcessGroup(pid, "SIGTERM");
-  const forcedKill = setTimeout(() => terminateProcessGroup(pid, "SIGKILL"), 250);
-  forcedKill.unref();
+  await new Promise<void>((resolve) => setTimeout(resolve, 250));
+  const current = processGroupMembers(pid);
+  if ([...members].some(([member, identity]) => current.get(member) === identity)) {
+    terminateProcessGroup(pid, "SIGKILL");
+  }
+}
+
+function processGroupMembers(group: number): Map<number, string> {
+  const output = execFileSync("/bin/ps", ["-eo", "pid=,pgid=,lstart="], { encoding: "utf8", timeout: 5_000, maxBuffer: 4 * 1024 * 1024 });
+  const members = new Map<number, string>();
+  let observedSelf = false;
+  for (const line of output.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
+    if (match && Number(match[1]) === process.pid) observedSelf = true;
+    if (match && Number(match[2]) === group) members.set(Number(match[1]), match[3]!);
+  }
+  if (!observedSelf) throw new Error("continuation adapter identity observer could not identify the current process");
+  return members;
 }
 
 function regularFileExists(file: string): boolean {

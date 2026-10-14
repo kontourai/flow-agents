@@ -2126,33 +2126,74 @@ test("adapter integrity hashes raw file bytes", async (t) => {
   );
 });
 
-test("adapter timeout terminates its process group", { skip: process.platform === "win32" }, async (t) => {
-  const root = makeFixtureDir("continuation-timeout-");
+test("adapter refuses POSIX worker admission when the identity observer is unavailable", { skip: process.platform === "win32" }, async (t) => {
+  const root = makeFixtureDir("continuation-observer-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const command = path.join(root, "command.json");
+  fs.writeFileSync(command, JSON.stringify({ argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"] }));
+  const childProcess = require("node:child_process");
+  const originalObserver = childProcess.execFileSync;
+  const originalSpawn = childProcess.spawn;
+  let admitted = false;
+  childProcess.execFileSync = () => { throw Object.assign(new Error("identity observer unavailable"), { code: "ENOENT" }); };
+  childProcess.spawn = () => { admitted = true; throw new Error("worker must not spawn"); };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(executeContinuationAdapter(command, {
+      schema_version: "1.0", run_id: "observer", definition_id: "builder.build",
+      current_step: "execute", iteration: 1, max_turns: 3, next_action: null,
+    }, { cwd: root, timeoutMs: 50 }), /identity observer unavailable/);
+    assert.equal(admitted, false);
+  } finally {
+    childProcess.execFileSync = originalObserver;
+    childProcess.spawn = originalSpawn;
+    syncBuiltinESMExports();
+  }
+});
+
+test("adapter timeout retains escalation after leader exit and kills a ready SIGTERM-ignoring descendant", { skip: process.platform === "win32" }, async (t) => {
+  const root = makeFixtureDir("continuation-timeout-");
   const adapter = path.join(root, "adapter.mjs");
   const command = path.join(root, "command.json");
-  const marker = path.join(root, "orphaned-child-ran");
+  const ready = path.join(root, "child-ready.json");
+  let descendant;
+  t.after(() => {
+    if (descendant) { try { process.kill(descendant, "SIGKILL"); } catch {} }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const childSource = `
+    const fs = require("node:fs");
+    process.on("SIGTERM", () => {});
+    fs.writeFileSync(${JSON.stringify(ready)}, JSON.stringify({ pid: process.pid }));
+    setInterval(() => {}, 1000);
+  `;
   fs.writeFileSync(adapter, `
     import { spawn } from "node:child_process";
-    spawn(process.execPath, ["-e", ${JSON.stringify(`setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran"), 300)`) }], { stdio: "ignore" });
+    spawn(process.execPath, ["-e", ${JSON.stringify(childSource)}], { stdio: "ignore" });
     setInterval(() => {}, 1000);
   `);
   fs.writeFileSync(command, JSON.stringify({ argv: [process.execPath, adapter] }));
-
-  await assert.rejects(
-    executeContinuationAdapter(command, {
-      schema_version: "1.0",
-      run_id: "run-251",
-      definition_id: "builder.build",
-      current_step: "execute",
-      iteration: 1,
-      max_turns: 3,
-      next_action: null,
-    }, { cwd: root, timeoutMs: 50 }),
-    (error) => error instanceof ContinuationAdapterTimeoutError && /timed out after 50ms/.test(error.message),
-  );
-  await new Promise((resolve) => setTimeout(resolve, 400));
-  assert.equal(fs.existsSync(marker), false);
+  const execution = executeContinuationAdapter(command, {
+    schema_version: "1.0", run_id: "run-251", definition_id: "builder.build",
+    current_step: "execute", iteration: 1, max_turns: 3, next_action: null,
+  }, { cwd: root, timeoutMs: 50 });
+  // Hold only the test's event loop until the real descendant installs its handler.
+  // This keeps the production 50 ms deadline and avoids relying on startup speed.
+  execFileSync(process.execPath, ["-e", `
+    const fs = require("node:fs");
+    const deadline = Date.now() + 5000;
+    while (!fs.existsSync(${JSON.stringify(ready)})) {
+      if (Date.now() >= deadline) throw new Error("descendant readiness not observed");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  `], { timeout: 6000 });
+  descendant = JSON.parse(fs.readFileSync(ready, "utf8")).pid;
+  assert.doesNotThrow(() => process.kill(descendant, 0), "the owned descendant was ready and alive");
+  await assert.rejects(execution,
+    (error) => error instanceof ContinuationAdapterTimeoutError && /timed out after 50ms/.test(error.message));
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.throws(() => process.kill(descendant, 0), /ESRCH/, "SIGKILL must survive the leader close event");
+  descendant = undefined;
 });
 
 test("adapter stderr with timeout-like text remains an adapter_error", async (t) => {

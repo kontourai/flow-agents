@@ -19,7 +19,7 @@ or an engine-specific agent framework.
 | Protected Veritas Standards need approval | Veritas owns the authority and attestation contract. A local review record alone does not supply a human approval artifact. |
 
 For example, the [AI-DLC Kit guide](https://kontourai.github.io/aidlc-kit/docs/using-the-kit.html)
-describes its optional requirements review command. The kit validates its sealed
+describes its optional local artifact review command. The kit validates its sealed
 checkpoint and current artifacts before recording its canonical decision. Its
 review UI does not itself run a model or advance Flow.
 
@@ -39,6 +39,14 @@ kits need no separate bootstrap Survey dependency for this transport. Standalone
 installed bundles include the same published server and original browser assets,
 with license and digest records, and work without `node_modules`.
 
+A producer may return Survey's optional `ReviewQueuePresentation` alongside its
+session and binding. Queue context can show the reason for waiting and open
+findings before the documents; item hints distinguish artifact acknowledgments
+from action choices and give candidates readable action labels. These are
+producer-owned display hints. They do not change reviewed values, event replay,
+source admission or workflow continuation. Review requests cannot supply host
+presentation or trusted capabilities.
+
 The producer supplies the original queue binding and applies the persisted decision
 under its domain lock. The host creates no model worker and advances no Flow gate.
 Stopping the console closes its own browser streams, while preserving unrelated
@@ -52,7 +60,7 @@ because the host supports review.
 
 ## Provision Survey independently
 
-The examples use the published Survey 8.1.1 transport package and require Node
+The examples use the published Survey 8.2.0 transport package and require Node
 22 or later. The standalone commands are optional transports for producer-created sessions;
 installing them does not grant workflow authority. Native kit review already owns
 its Survey runtime.
@@ -62,7 +70,7 @@ lifecycle. Do not point the commands at a caller-created approval document.
 For a producer-created session at an absolute path:
 
 ```sh
-npx --yes --package=@kontourai/survey@8.1.1 survey-review-console \
+npx --yes --package=@kontourai/survey@8.2.0 survey-review-console \
   --session /absolute/path/review-session.json --port 4243
 ```
 
@@ -72,7 +80,7 @@ arguments do not configure a workflow application callback.
 An MCP-capable host can launch the same session through stdio:
 
 ```sh
-npx --yes --package=@kontourai/survey@8.1.1 survey-review-mcp \
+npx --yes --package=@kontourai/survey@8.2.0 survey-review-mcp \
   --session /absolute/path/review-session.json
 ```
 

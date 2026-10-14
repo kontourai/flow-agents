@@ -27,8 +27,8 @@ importers:
         specifier: 5.0.0
         version: 5.0.0
       '@kontourai/survey':
-        specifier: 8.1.1
-        version: 8.1.1(typescript@7.0.2)
+        specifier: 8.2.0
+        version: 8.2.0(typescript@7.0.2)
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
@@ -41,7 +41,7 @@ importers:
         version: 0.19.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@6.42.0(ws@8.21.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
       '@kontourai/veritas':
         specifier: 1.11.2
-        version: 1.11.2(@kontourai/survey@8.1.1(typescript@7.0.2))(zod@4.4.3)
+        version: 1.11.2(@kontourai/survey@8.2.0(typescript@7.0.2))(zod@4.4.3)
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
@@ -1117,8 +1117,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/survey@8.1.1':
-    resolution: {integrity: sha512-TwIfUeauyNZ88L+aE3zfDsw9UtCY5fTKlADtdBwhtV43ViFD6QwTd9vWl2KCPywbMpXB1LW6Wwq9C4Cg8LwFsA==}
+  '@kontourai/survey@8.2.0':
+    resolution: {integrity: sha512-7bDjdLKxR38POHumHzQXRS7nu6Ftu0nbwpCsnkEvOYL/xd8i8np94x+V3ftsd8tt4ZvNjbhdlf1tjZzFu8QfVQ==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -5396,7 +5396,7 @@ snapshots:
       - kerberos
       - supports-color
 
-  '@kontourai/survey@8.1.1(typescript@7.0.2)':
+  '@kontourai/survey@8.2.0(typescript@7.0.2)':
     dependencies:
       '@kontourai/surface': 2.17.0
       '@modelcontextprotocol/server': 2.0.0
@@ -5433,7 +5433,7 @@ snapshots:
       - canvas
       - playwright
 
-  '@kontourai/veritas@1.11.2(@kontourai/survey@8.1.1(typescript@7.0.2))(zod@4.4.3)':
+  '@kontourai/veritas@1.11.2(@kontourai/survey@8.2.0(typescript@7.0.2))(zod@4.4.3)':
     dependencies:
       '@kontourai/plumb': 0.2.0
       '@kontourai/surface': 2.17.0
@@ -5444,7 +5444,7 @@ snapshots:
       hachure: 0.15.0
       picomatch: 4.0.7
     optionalDependencies:
-      '@kontourai/survey': 8.1.1(typescript@7.0.2)
+      '@kontourai/survey': 8.2.0(typescript@7.0.2)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - kerberos
