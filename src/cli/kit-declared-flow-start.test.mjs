@@ -57,11 +57,15 @@ function fixtureFlow(id, steps) {
   };
 }
 
+function fixtureEnv(overrides = {}) {
+  return { ...process.env, CODEX_SESSION_ID: "kit-declared-flow-test", FLOW_AGENTS_FLOW_DEFS_DIR: undefined, ...overrides };
+}
+
 function runStart(args, cwd, env = {}) {
   return spawnSync(process.execPath, [CLI, "workflow", "start", ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, CODEX_SESSION_ID: "kit-declared-flow-test", FLOW_AGENTS_FLOW_DEFS_DIR: undefined, ...env },
+    env: fixtureEnv(env),
   });
 }
 
@@ -573,7 +577,7 @@ function runCli(cli, args, cwd, env = {}) {
   return spawnSync(process.execPath, [cli, ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, CODEX_SESSION_ID: "kit-declared-flow-test", FLOW_AGENTS_FLOW_DEFS_DIR: undefined, ...env },
+    env: fixtureEnv(env),
   });
 }
 
@@ -762,7 +766,7 @@ test("the library start without a flowId uses the kit-declared default and refus
     const startWithoutFlowId = () => spawnSync(process.execPath, ["--input-type=module", "-e", `
       const m = await import(${JSON.stringify(pkg.module("builder-flow-runtime.js"))});
       try { await m.startBuilderFlowSession({ sessionDir: ${JSON.stringify(sessionDir)} }); console.log("STARTED"); }
-      catch (error) { console.error(error.message); process.exit(3); }`], { cwd: project, encoding: "utf8" });
+      catch (error) { console.error(error.message); process.exit(3); }`], { cwd: project, encoding: "utf8", env: fixtureEnv() });
 
     const refused = startWithoutFlowId();
     assert.equal(refused.status, 3, `start without a declared default must refuse: ${refused.stdout}${refused.stderr}`);
