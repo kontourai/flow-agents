@@ -680,6 +680,7 @@ test("bash 3.2: the bundle install.sh with CONSOLE_URL set and no Console flag e
   const dest = path.join(makeFixtureDir("telemetry-pin-bash3-bundle-dest-"), "ws");
   const result = spawnSync("/bin/bash", [path.join(repoRoot, "dist", "base", "install.sh"), dest], { env: { HOME: home, PATH: bash3Path(), CONSOLE_URL: GLOBAL_URL }, encoding: "utf8" });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.doesNotMatch(result.stderr, /unbound variable/);
   assert.match(fs.readFileSync(installedConf(dest), "utf8"), /^console_telemetry_url=http:\/\/127\.0\.0\.1:9$/m);
 });
 
@@ -690,6 +691,9 @@ test("bash 3.2: init (project and codex --global) with CONSOLE_URL set and no Co
     const dest = path.join(makeFixtureDir("telemetry-pin-bash3-init-dest-"), "ws");
     const result = spawnSync(process.execPath, [cli, "init", ...args, "--dest", dest, "--yes"], { cwd: home, env, encoding: "utf8" });
     assert.equal(result.status, 0, `${args.join(" ")}: ${result.stdout}\n${result.stderr}`);
+    // install-codex-home.sh has an EXIT trap, so under bash 3.2 an unbound-variable abort still
+    // exits 0: the stderr and the written conf are what show it stopped early.
+    assert.doesNotMatch(result.stderr, /unbound variable/, args.join(" "));
     assert.match(fs.readFileSync(installedConf(dest), "utf8"), /^console_telemetry_url=http:\/\/127\.0\.0\.1:9$/m, args.join(" "));
   }
 });
@@ -703,5 +707,6 @@ test("bash 3.2: the root install.sh with CONSOLE_URL set and no Console flag exi
   const dest = path.join(makeFixtureDir("telemetry-pin-bash3-root-dest-"), "ws");
   const result = spawnSync("/bin/bash", [path.join(src, "install.sh"), dest], { env: { HOME: home, PATH: bash3Path(), CONSOLE_URL: GLOBAL_URL }, encoding: "utf8" });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.doesNotMatch(result.stderr, /unbound variable/);
   assert.match(fs.readFileSync(installedConf(dest), "utf8"), /^console_telemetry_url=http:\/\/127\.0\.0\.1:9$/m);
 });
