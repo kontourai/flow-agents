@@ -5404,19 +5404,20 @@ test("a non-Builder kit's tests gate enforces verified-tests trust on its own cl
   initGitWorktreeFixture(session.projectRoot);
   const proofGate = gatePolicyKitGate("proof-gate");
 
-  // Positive control: a distinct reviewer's current clean critique, criteria and command-backed
-  // checks satisfy the kit's proof gate.
-  const trusted = atelierProofBundle(session);
-  const attached = await builderFlowRuntime.bundleGateEvidence(trusted.bundle, proofGate, trusted.state, SUBJECT, session.projectRoot, session.sessionDir, [], {});
-  assert.ok(attached, "the complete proof evidence attaches");
-  assert.deepEqual([...attached.expectationIds].sort(), ["acceptance-criteria", "clean-critique", "tests-evidence"]);
-
-  // The same bundle reviewed by the implementation actor is refused, exactly as at Builder's verify-gate.
-  const selfReviewed = atelierProofBundle(session, { reviewer: "implementation-actor" });
-  await assert.rejects(
-    builderFlowRuntime.bundleGateEvidence(selfReviewed.bundle, proofGate, selfReviewed.state, SUBJECT, session.projectRoot, session.sessionDir, [], {}),
-    (error) => error instanceof BuilderBuildRunInputError && error.field === "evidence.critique.reviewer",
-  );
+  for (const required of [true, false]) {
+    const gate = structuredClone(proofGate);
+    gate.expects.find((expectation) => expectation.id === "tests-evidence").required = required;
+    const trusted = atelierProofBundle(session);
+    const attached = await builderFlowRuntime.bundleGateEvidence(trusted.bundle, gate, trusted.state, SUBJECT, session.projectRoot, session.sessionDir, [], {});
+    assert.ok(attached, "complete proof evidence attaches for required and optional tests roles");
+    assert.deepEqual([...attached.expectationIds].sort(), ["acceptance-criteria", "clean-critique", "tests-evidence"]);
+    const selfReviewed = atelierProofBundle(session, { reviewer: "implementation-actor" });
+    await assert.rejects(
+      builderFlowRuntime.bundleGateEvidence(selfReviewed.bundle, gate, selfReviewed.state, SUBJECT, session.projectRoot, session.sessionDir, [], {}),
+      (error) => error instanceof BuilderBuildRunInputError && error.field === "evidence.critique.reviewer",
+      `submitted passing tests evidence still requires independent review when required=${required}`,
+    );
+  }
 });
 
 test("a non-Builder kit's passing tests claim is command-backed by its declared claim type", async () => {

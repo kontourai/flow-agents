@@ -1666,9 +1666,9 @@ export function gateAdvancementFreshnessSatisfied(
 // kit's names; the gate ids and claim types come from the declaring flow definition.
 
 /** Expectation id the engine reads as Work Item selection (see flowSelectsWorkItem). */
-export const WORK_SELECTION_EXPECTATION_ID = "selected-work";
+const WORK_SELECTION_EXPECTATION_ID = "selected-work";
 /** Expectation id the engine reads as command-backed test evidence subject to verified-tests trust. */
-export const TESTS_EVIDENCE_EXPECTATION_ID = "tests-evidence";
+const TESTS_EVIDENCE_EXPECTATION_ID = "tests-evidence";
 
 /**
  * Claim types this gate declares for the expectation playing `role`. Every matching expectation
