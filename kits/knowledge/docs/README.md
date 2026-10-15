@@ -579,7 +579,8 @@ node /path/to/knowledge/ingest/cli.js \
   --flow-bin /path/to/node_modules/.bin/flow
 ```
 
-The driver runs `flow init`, `flow start`, then attaches and evaluates each gate
+The driver initializes a fresh Flow workspace with `flow init`, runs `flow start`,
+then attaches and evaluates each gate
 with `flow evaluate --exit-code`. Evaluation advances the canonical run; Flow
 has no separate `advance` CLI command. A missing capture-gate artifact returns a
 nonzero exit and leaves the run at capture, before any store creation. Blank
@@ -587,11 +588,17 @@ source likewise produces no capture claim. Classification preserves the old
 runner's category/title heuristics and raw record provenance. Routing defaults
 to `queue-for-compile`, or records the operator's non-empty `meta.routing`.
 Routing records a decision; it does not execute compilation or delete a record.
+An initialized workspace keeps its Flow config, README and sample definition;
+the driver never re-runs init there. A partial layout with authored init targets
+is refused before pilot artifacts are written. Classification readback must
+match the canonical id returned by create as well as content and provenance.
 
 The driver writes operation observations and Surface bundles under
 `<workspace>/.kontourai/knowledge/ingest/<run-id>/`. `trace.jsonl` retains each
-Flow command's arguments, exit code, stdout and stderr. Flow owns its run,
-artifact copies, integrity checks, gate evaluations and cursor. Claim status is
+Flow command's arguments, exit code, stdout and stderr. The kit refuses symlink components in its artifact path, creates new files
+without following leaf symlinks, and checks its run directory custody before
+each command and write. Flow owns its run, artifact copies, integrity checks,
+gate evaluations and cursor. Claim status is
 `verified` for these local operations: non-empty input capture, stored raw
 classification readback, and a recorded routing decision. This does **not**
 verify the truth of the source text, constitute independent review, or establish

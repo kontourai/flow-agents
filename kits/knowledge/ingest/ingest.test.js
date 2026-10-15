@@ -67,3 +67,63 @@ for (const [name, text, meta, expectedStep] of [
     assert.deepEqual(await store.listByType("raw"), []);
   });
 }
+
+test("initialized Flow workspace keeps authored scaffolds during ingest", async (t) => {
+  const { pilot, workspace, status } = fixture(t, "existing-workspace");
+  execFileSync(process.execPath, [flowCli, "init", "--cwd", workspace]);
+  const readme = path.join(workspace, ".flow", "README.md");
+  const sample = path.join(workspace, ".flow", "definitions", "agent-dev-flow.json");
+  fs.writeFileSync(readme, "Authored workspace process notes\n");
+  const sampleText = '{"id":"user.authored.flow","version":"1.0","steps":[{"id":"user","next":null}],"gates":{}}\n';
+  fs.writeFileSync(sample, sampleText);
+  const config = fs.readFileSync(path.join(workspace, ".flow", "config.json"));
+  const result = await pilot.capture(rawText);
+  assert.equal(status().current_step, "done");
+  assert.equal(fs.readFileSync(readme, "utf8"), "Authored workspace process notes\n");
+  assert.equal(fs.readFileSync(sample, "utf8"), sampleText);
+  assert.deepEqual(fs.readFileSync(path.join(workspace, ".flow", "config.json")), config);
+  assert.equal(result.trace.some((entry) => entry.args[0] === "init"), false);
+});
+
+for (const relative of ["README.md", "definitions/agent-dev-flow.json"]) {
+  test(`partial Flow workspace refuses authored ${relative} before pilot writes`, async (t) => {
+    const { pilot, workspace, store } = fixture(t, "partial-workspace");
+    const file = path.join(workspace, ".flow", relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "Authored content\n");
+    await assert.rejects(pilot.capture(rawText), /FLOW_INIT_COLLISION/);
+    assert.equal(fs.readFileSync(file, "utf8"), "Authored content\n");
+    assert.equal(fs.existsSync(path.join(workspace, ".kontourai")), false);
+    assert.equal(fs.existsSync(path.join(workspace, ".flow", "config.json")), false);
+    assert.deepEqual(await store.listByType("raw"), []);
+  });
+}
+
+test("classification refuses an adapter identity mismatch before its claim or routing", async (t) => {
+  const { pilot, store, status } = fixture(t, "wrong-record-id");
+  let actualId;
+  pilot.store = {
+    create: async (input) => { actualId = await store.create(input); return "wrong-record-id"; },
+    get: async () => store.get(actualId),
+  };
+  await assert.rejects(pilot.capture(rawText), /store readback does not match/);
+  assert.equal(status().current_step, "classify");
+  assert.equal(fs.existsSync(path.join(pilot.artifactRoot, "classification.trust.json")), false);
+  assert.equal(fs.existsSync(path.join(pilot.artifactRoot, "routing.json")), false);
+  assert.equal((await store.listByType("raw"))[0].id, actualId);
+});
+
+for (const relative of [".kontourai", ".kontourai/knowledge", ".kontourai/knowledge/ingest", ".kontourai/knowledge/ingest/artifact-symlink"]) {
+  test(`artifact symlink at ${relative} refuses before writing outside the workspace`, async (t) => {
+    const { pilot, workspace, store } = fixture(t, "artifact-symlink");
+    const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-outside-")));
+    t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+    const target = path.join(workspace, relative);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.symlinkSync(outside, target);
+    await assert.rejects(pilot.capture(rawText), /UNSAFE_INGEST_PATH/);
+    assert.deepEqual(fs.readdirSync(outside), []);
+    assert.equal(fs.existsSync(path.join(workspace, ".flow")), false);
+    assert.deepEqual(await store.listByType("raw"), []);
+  });
+}

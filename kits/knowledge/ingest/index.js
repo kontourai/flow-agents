@@ -11,8 +11,22 @@ const execute = promisify(execFile);
 const definition = fileURLToPath(new URL("../flows/ingest.flow.json", import.meta.url));
 const producer = "knowledge.ingest";
 
-function writeJson(file, value) {
-  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
+function writeFileNoFollow(file, text, flags) {
+  const descriptor = fs.openSync(file, flags | fs.constants.O_NOFOLLOW, 0o600);
+  try { fs.writeFileSync(descriptor, text); } finally { fs.closeSync(descriptor); }
+}
+
+function inspectDirectories(root, relative) {
+  let current = root;
+  for (const component of relative.split(path.sep)) {
+    current = path.join(current, component);
+    const stat = fs.lstatSync(current, { throwIfNoEntry: false });
+    if (!stat) return null;
+    if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync(current) !== current) {
+      throw new Error(`UNSAFE_INGEST_PATH: expected an owned non-symlink directory: ${current}`);
+    }
+  }
+  return fs.lstatSync(current);
 }
 
 /** One-shot ingest pilot. Flow owns all gate evaluation and cursor changes. */
@@ -30,7 +44,25 @@ export class KnowledgeIngestFlow {
     this.trace = [];
   }
 
+  assertArtifactCustody() {
+    const stat = inspectDirectories(this.workspace, path.relative(this.workspace, this.artifactRoot));
+    if (!stat || stat.dev !== this.artifactIdentity.dev || stat.ino !== this.artifactIdentity.ino) {
+      throw new Error("UNSAFE_INGEST_PATH: ingest artifact directory custody changed");
+    }
+    const trace = fs.lstatSync(path.join(this.artifactRoot, "trace.jsonl"));
+    if (!trace.isFile() || trace.isSymbolicLink()) throw new Error("UNSAFE_INGEST_PATH: trace must remain a regular file");
+  }
+
+  writeJson(name, value) {
+    this.assertArtifactCustody();
+    const file = path.join(this.artifactRoot, name);
+    const text = `${JSON.stringify(value, null, 2)}\n`;
+    writeFileNoFollow(file, text, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
+    return { file, digest: createHash("sha256").update(text).digest("hex") };
+  }
+
   async command(args, { evaluation = false } = {}) {
+    this.assertArtifactCustody();
     const [binary, ...prefix] = this.flowCommand;
     const argv = [...prefix, ...args, "--cwd", this.workspace];
     let result;
@@ -42,7 +74,8 @@ export class KnowledgeIngestFlow {
     }
     const entry = { args, exitCode: result.code, stdout: result.stdout || "", stderr: result.stderr || "" };
     this.trace.push(entry);
-    fs.appendFileSync(path.join(this.artifactRoot, "trace.jsonl"), `${JSON.stringify(entry)}\n`);
+    this.assertArtifactCustody();
+    writeFileNoFollow(path.join(this.artifactRoot, "trace.jsonl"), `${JSON.stringify(entry)}\n`, fs.constants.O_WRONLY | fs.constants.O_APPEND);
     if (result.code !== 0) {
       const error = new Error(`Flow ${args[0]} failed: ${entry.stderr || entry.stdout || result.message}`);
       error.code = evaluation && result.code === 1 ? "FLOW_GATE_BLOCKED" : "FLOW_CLI_FAILURE";
@@ -53,10 +86,39 @@ export class KnowledgeIngestFlow {
   }
 
   async start() {
-    fs.mkdirSync(path.dirname(this.artifactRoot), { recursive: true });
+    fs.mkdirSync(this.workspace, { recursive: true, mode: 0o700 });
+    const rootStat = fs.lstatSync(this.workspace);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("UNSAFE_INGEST_PATH: workspace must be a real directory");
+    this.workspace = fs.realpathSync(this.workspace);
+    this.artifactRoot = path.join(this.workspace, ".kontourai", "knowledge", "ingest", this.runId);
+    inspectDirectories(this.workspace, path.relative(this.workspace, this.artifactRoot));
+    inspectDirectories(this.workspace, path.join(".kontourai", "flow", "runs"));
+    inspectDirectories(this.workspace, ".flow");
+    const config = fs.lstatSync(path.join(this.workspace, ".flow", "config.json"), { throwIfNoEntry: false });
+    if (config && (!config.isFile() || config.isSymbolicLink())) throw new Error("UNSAFE_INGEST_PATH: Flow config must be a regular file");
+    const initialize = !config;
+    if (initialize) {
+      inspectDirectories(this.workspace, path.join(".flow", "definitions"));
+      // Flow 5.2 init overwrites these scaffolds. Refuse partial authored layouts first.
+      for (const relative of ["README.md", "config.json", path.join("definitions", "agent-dev-flow.json")]) {
+        if (fs.lstatSync(path.join(this.workspace, ".flow", relative), { throwIfNoEntry: false })) {
+          throw new Error(`FLOW_INIT_COLLISION: existing Flow scaffold would be overwritten: ${relative}`);
+        }
+      }
+    }
+    let relative = "";
+    for (const component of [".kontourai", "knowledge", "ingest"]) {
+      relative = path.join(relative, component);
+      inspectDirectories(this.workspace, relative);
+      try { fs.mkdirSync(path.join(this.workspace, relative), { mode: 0o700 }); }
+      catch (error) { if (error.code !== "EEXIST") throw error; }
+      inspectDirectories(this.workspace, relative);
+    }
     // A partially executed run is retained for inspection, never retried as a fresh ingest.
-    fs.mkdirSync(this.artifactRoot);
-    await this.command(["init"]);
+    fs.mkdirSync(this.artifactRoot, { mode: 0o700 });
+    this.artifactIdentity = inspectDirectories(this.workspace, path.relative(this.workspace, this.artifactRoot));
+    writeFileNoFollow(path.join(this.artifactRoot, "trace.jsonl"), "", fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
+    if (initialize) await this.command(["init"]);
     await this.command(["start", definition, "--run-id", this.runId]);
   }
 
@@ -66,9 +128,7 @@ export class KnowledgeIngestFlow {
 
   async recordClaim(stage, subjectType, value) {
     const now = new Date().toISOString();
-    const sourceFile = path.join(this.artifactRoot, `${stage}.json`);
-    writeJson(sourceFile, value);
-    const digest = createHash("sha256").update(fs.readFileSync(sourceFile)).digest("hex");
+    const { file: sourceFile, digest } = this.writeJson(`${stage}.json`, value);
     const claimId = `${this.runId}:${stage}`;
     const builder = new TrustBundleBuilder({ source: `${producer}:${this.runId}:${stage}` });
     builder.addVerifiedClaim({
@@ -93,8 +153,7 @@ export class KnowledgeIngestFlow {
         createdAt: now, verifiedAt: now, notes: "Operation verification only; source content is not independently verified.",
       },
     });
-    const bundleFile = path.join(this.artifactRoot, `${stage}.trust.json`);
-    writeJson(bundleFile, builder.build());
+    const { file: bundleFile } = this.writeJson(`${stage}.trust.json`, builder.build());
     await this.command(["attach-evidence", this.runId, "--gate", stage === "classification" ? "classify-gate" : stage === "routing" ? "route-gate" : "capture-gate", "--file", bundleFile, "--kind", "trust.bundle", "--producer", producer]);
   }
 
@@ -124,7 +183,7 @@ export class KnowledgeIngestFlow {
     };
     const id = await this.store.create(input);
     const record = await this.store.get(id);
-    if (!record || record.type !== "raw" || record.category !== category || record.body !== rawText
+    if (typeof id !== "string" || !id.trim() || id !== id.trim() || !record || record.id !== id || record.type !== "raw" || record.category !== category || record.body !== rawText
       || record.title !== input.title || !isDeepStrictEqual(record.tags, input.tags)
       || !isDeepStrictEqual(record.provenance, input.provenance)) {
       throw new Error("classify: store readback does not match the captured raw record");
