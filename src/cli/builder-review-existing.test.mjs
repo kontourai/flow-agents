@@ -555,7 +555,7 @@ test("a completed run records the existing change truthfully and publishes at th
     else process.env.FLOW_AGENTS_ACTOR = previousActor;
   }
   assert.equal(exitCode, 1, `merge-change must refuse a review-existing run: ${errors.join("\n")}`);
-  assert.match(errors.join("\n"), /merge-change: builder\.review-existing runs do not publish a change; merge-change is not supported for them yet/);
+  assert.match(errors.join("\n"), /merge-change: builder\.review-existing runs do not publish a change; merge-change is not supported for them\. To merge a reviewed existing change through merge-change, run builder\.deliver-existing at its head instead/);
   assert.doesNotMatch(errors.join("\n"), /ENOENT|publish-change\.result\.json/);
   assert.deepEqual(calls, [], "merge-change must refuse before authorization or any provider mutation");
   assert.equal(fs.existsSync(path.join(fx.sessionDir, "merge-change.result.json")), false);
