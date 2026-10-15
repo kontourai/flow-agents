@@ -67,7 +67,7 @@ node - "$PROBE_ROOT/probe.mjs" "$ROOT" "$PROBE_ROOT/runtime" <<'NODE'
 const { spawnSync } = require("node:child_process");
 const [probe, repo, root] = process.argv.slice(2);
 const result = spawnSync(process.execPath, [probe, repo, root], {
-  encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL",
+  encoding: "utf8", timeout: 30_000, killSignal: "SIGKILL", windowsHide: true,
   env: { ...process.env, XDG_STATE_HOME: `${root}/state` },
 });
 process.stdout.write(result.stdout ?? "");
