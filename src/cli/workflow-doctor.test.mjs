@@ -111,6 +111,35 @@ test("doctor supports a current run on any flow the CLI can bind, and refuses on
     withCurrentRun(project, { definition_id: "nokit.ghost", definition_version: "1.0" });
     const unsupported = doctor(project);
     assert.ok(unsupported.warnings.includes("Current run uses unsupported Flow definition nokit.ghost; recover or migrate before mutation."), unsupported.warnings.join("\n"));
+
+    // A project-owned declaration is a binding source even when the package ships no such kit.
+    writeJson(path.join(project, "kits", "localprobe", "kit.json"), {
+      id: "localprobe", flows: [{ id: "localprobe.check", path: "flows/check.flow.json" }],
+    });
+    writeJson(path.join(project, "kits", "localprobe", "flows", "check.flow.json"), {
+      id: "localprobe.check", version: "2.0", steps: [{ id: "done", next: null }],
+    });
+    withCurrentRun(project, { definition_id: "localprobe.check", definition_version: "2.0" });
+    const local = doctor(project);
+    assert.equal(local.definition.id, "localprobe.check");
+    assert.deepEqual(local.warnings.filter((warning) => warning.startsWith("Current run")), []);
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("doctor checks copied inactive packaged kits without activating them", () => {
+  const project = makeInstall("doctor-inactive-", []);
+  try {
+    fs.cpSync(path.join(repoRoot, "kits", "knowledge"), path.join(project, "kits", "knowledge"), { recursive: true });
+    const manifest = path.join(project, "kits", "knowledge", "kit.json");
+    writeJson(manifest, { ...JSON.parse(fs.readFileSync(manifest, "utf8")), description: "project drift" });
+    const report = doctor(project);
+    assert.deepEqual(report.installed.active_kit_ids, []);
+    assert.deepEqual(report.kits.map((kit) => kit.id), ["knowledge"]);
+    assert.ok(report.warnings.some((warning) => warning.startsWith("Installed Knowledge Kit content differs")), report.warnings.join("\n"));
+    assert.ok(!report.warnings.some((warning) => warning.startsWith("Activated ")), report.warnings.join("\n"));
+    assert.ok(!report.remediation.includes("'--activate-kit'"), report.remediation);
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
   }

@@ -123,8 +123,16 @@ function completeKitManifest(kitId, flowName, expectations = ["probe-readiness",
 /** A project tree containing `kits/<kitId>/` for each supplied kit. */
 function makeProject(prefix, kits) {
   const project = fs.realpathSync(makeFixtureDir(prefix));
-  spawnSync("git", ["init", "-q", "."], { cwd: project });
-  spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
+  for (const args of [
+    ["init", "-q", "."],
+    ["config", "--local", "core.hooksPath", ".git/hooks"],
+    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"],
+  ]) {
+    const result = spawnSync("git", args, { cwd: project, env, encoding: "utf8" });
+    if (result.error) throw result.error;
+    assert.equal(result.status, 0, `Fixture Git ${args[0]} failed: ${result.stderr}`);
+  }
   for (const [kitId, { manifest, flows }] of Object.entries(kits)) {
     writeJson(path.join(project, "kits", kitId, "kit.json"), manifest);
     for (const [flowName, definition] of Object.entries(flows)) {
@@ -520,9 +528,9 @@ test("every door enforces admission: the sidecar REFUSES a flow with no canonica
  * builder kit uses for `pr-open` (an operation step with no skills, one result artifact, and a
  * `publish-change` operation binding). Nothing here refers to the builder kit.
  */
-function operationKitManifest(kitId) {
+function operationKitManifest(kitId, withCritique = false) {
   const flowId = `${kitId}.ship`;
-  return {
+  const manifest = {
     schema_version: "1.0",
     id: kitId,
     name: `${kitId} kit`,
@@ -539,10 +547,23 @@ function operationKitManifest(kitId) {
       artifact_bindings: [{ artifact: "publish-change.result.json", expectation_ids: ["change-published"] }],
     }],
   };
+  if (withCritique) {
+    const review = completeKitManifest(kitId, "ship", ["review-proof"]);
+    review.skill_roles[0].step_ids = ["publish"];
+    manifest.skills = review.skills;
+    manifest.skill_roles = review.skill_roles;
+    const action = manifest.flow_step_actions[0];
+    action.skills = review.flow_step_actions[0].skills;
+    action.expectation_ids.push("review-proof");
+    action.artifacts.push("<slug>--probe.md");
+    action.expectation_bindings.push({ expectation_id: "review-proof", interface: "workflow.critique" });
+    action.artifact_bindings.push({ artifact: "<slug>--probe.md", expectation_ids: ["review-proof"] });
+  }
+  return manifest;
 }
 
-function operationFlow(id) {
-  return {
+function operationFlow(id, withCritique = false) {
+  const definition = {
     id,
     version: "1.0",
     steps: [{ id: "publish", next: "closeout" }, { id: "closeout", next: null }],
@@ -562,6 +583,11 @@ function operationFlow(id) {
       },
     },
   };
+  if (withCritique) definition.gates["publish-gate"].expects.push({
+    id: "review-proof", kind: "trust.bundle", required: true, description: "fixture critique",
+    bundle_claim: { claimType: "fixture.review-proof", subjectType: "flow-step", accepted_statuses: ["verified"] },
+  });
+  return definition;
 }
 
 /** Every regular file under `root` with its bytes, for proving a refusal mutated nothing. */
@@ -613,5 +639,23 @@ test("workflow evidence refuses an operation-bound expectation declared by a non
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
     fs.rmSync(markerDir, { recursive: true, force: true });
+  }
+});
+
+test("verification reseal refuses a non-Builder operation before requesting authority", async () => {
+  const project = makeProject("kit-operation-reseal-", {
+    opkit: { manifest: operationKitManifest("opkit", true), flows: { ship: operationFlow("opkit.ship", true) } },
+  });
+  try {
+    const session = await startKitFlowSession(project, "opkit.ship", "acme/widgets#62", "acme-widgets-62");
+    const result = spawnSync(process.execPath, [
+      CLI, "workflow", "reseal-verification-evidence-request", "--session-dir", session.sessionDir,
+      "--expectation", "change-published", "--status", "pass", "--summary", "locally authored publication",
+    ], { cwd: project, encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: ACTOR } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr + result.stdout, /verification evidence reseal cannot satisfy operation-bound expectation change-published/);
+    assert.equal(result.stdout.trim(), "", "refusal must not emit an authority signing request");
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
   }
 });

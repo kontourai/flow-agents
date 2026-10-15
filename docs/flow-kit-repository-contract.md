@@ -12,7 +12,7 @@ Use this command before adding a kit to a catalog or sharing it with another mai
 npm run validate:source -- --kit path/to/local-kit
 ```
 
-The full source-tree command validates the built-in Kit Catalog and Builder Kit through the same repository contract:
+The full source-tree command validates every kit listed in `kits/catalog.json` through the same repository contract. An unreadable or empty catalog, or an entry without a path, fails validation:
 
 ```bash
 npm run validate:source --

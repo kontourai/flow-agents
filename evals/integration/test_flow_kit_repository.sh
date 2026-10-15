@@ -125,6 +125,22 @@ else
   sed -n '1,120p' "$catalog_output"
 fi
 
+for catalog_case in empty malformed pathless; do
+  case "$catalog_case" in
+    empty) printf '{"kits":[]}\n' >"$CATALOG_ROOT/kits/catalog.json"; expected='\.kits must be a non-empty list' ;;
+    malformed) printf '{broken\n' >"$CATALOG_ROOT/kits/catalog.json"; expected='kits/catalog\.json could not be read' ;;
+    pathless) printf '{"kits":[{"id":"example-kit"}]}\n' >"$CATALOG_ROOT/kits/catalog.json"; expected='kits\[0\] must declare a path' ;;
+  esac
+  if (cd "$CATALOG_ROOT" && flow_agents_node "$ROOT/scripts/validate-source-tree.js") >"$catalog_output" 2>&1; then
+    fail "source-tree validation accepted a $catalog_case catalog"
+  elif rg -q "$expected" "$catalog_output"; then
+    pass "source-tree validation refuses a $catalog_case catalog with its reason"
+  else
+    fail "source-tree validation failed a $catalog_case catalog for an unrelated reason"
+    sed -n '1,120p' "$catalog_output"
+  fi
+done
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "Flow Kit repository fixture checks passed."
