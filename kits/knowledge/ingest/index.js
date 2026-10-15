@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify, isDeepStrictEqual } from "node:util";
-import { createHash } from "node:crypto";
+import { requireOwnedArtifactPublisher, openOwnedDirectory, publishOwnedArtifact } from "../adapters/shared/owned-artifacts.js";
 import { TrustBundleBuilder } from "@kontourai/surface";
 import { inferCategory, inferTitle } from "../adapters/flow-runner/classification.js";
 
@@ -11,10 +11,6 @@ const execute = promisify(execFile);
 const definition = fileURLToPath(new URL("../flows/ingest.flow.json", import.meta.url));
 const producer = "knowledge.ingest";
 
-function writeFileNoFollow(file, text, flags) {
-  const descriptor = fs.openSync(file, flags | fs.constants.O_NOFOLLOW, 0o600);
-  try { fs.writeFileSync(descriptor, text); } finally { fs.closeSync(descriptor); }
-}
 
 function inspectDirectories(root, relative) {
   let current = root;
@@ -31,7 +27,7 @@ function inspectDirectories(root, relative) {
 
 /** One-shot ingest pilot. Flow owns all gate evaluation and cursor changes. */
 export class KnowledgeIngestFlow {
-  constructor({ store, workspace, runId, flowCommand = ["flow"], agent = "knowledge-flow-runner" }) {
+  constructor({ store, workspace, runId, flowCommand = ["flow"], pythonCommand = ["python3"], agent = "knowledge-flow-runner" }) {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(runId || "")) {
       throw new Error("ingest requires a safe, unique runId");
     }
@@ -39,14 +35,24 @@ export class KnowledgeIngestFlow {
     this.workspace = path.resolve(workspace);
     this.runId = runId;
     this.flowCommand = flowCommand;
+    this.pythonCommand = pythonCommand;
     this.agent = agent;
     this.artifactRoot = path.join(this.workspace, ".kontourai", "knowledge", "ingest", runId);
     this.trace = [];
   }
 
+  assertWorkspaceCustody() {
+    const root = fs.lstatSync(this.workspace);
+    const heldRoot = fs.fstatSync(this.workspaceFd);
+    if (root.isSymbolicLink() || !root.isDirectory() || root.dev !== heldRoot.dev || root.ino !== heldRoot.ino) {
+      throw new Error("UNSAFE_INGEST_PATH: workspace root custody changed");
+    }
+  }
+
   assertArtifactCustody() {
+    this.assertWorkspaceCustody();
     const stat = inspectDirectories(this.workspace, path.relative(this.workspace, this.artifactRoot));
-    if (!stat || stat.dev !== this.artifactIdentity.dev || stat.ino !== this.artifactIdentity.ino) {
+    if (!stat || stat.dev !== fs.fstatSync(this.artifactFd).dev || stat.ino !== fs.fstatSync(this.artifactFd).ino) {
       throw new Error("UNSAFE_INGEST_PATH: ingest artifact directory custody changed");
     }
     const trace = fs.lstatSync(path.join(this.artifactRoot, "trace.jsonl"));
@@ -57,8 +63,9 @@ export class KnowledgeIngestFlow {
     this.assertArtifactCustody();
     const file = path.join(this.artifactRoot, name);
     const text = `${JSON.stringify(value, null, 2)}\n`;
-    writeFileNoFollow(file, text, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
-    return { file, digest: createHash("sha256").update(text).digest("hex") };
+    const { digest } = publishOwnedArtifact(this.artifactFd, name, text, { pythonCommand: this.pythonCommand });
+    this.assertArtifactCustody();
+    return { file, digest };
   }
 
   async command(args, { evaluation = false } = {}) {
@@ -75,7 +82,8 @@ export class KnowledgeIngestFlow {
     const entry = { args, exitCode: result.code, stdout: result.stdout || "", stderr: result.stderr || "" };
     this.trace.push(entry);
     this.assertArtifactCustody();
-    writeFileNoFollow(path.join(this.artifactRoot, "trace.jsonl"), `${JSON.stringify(entry)}\n`, fs.constants.O_WRONLY | fs.constants.O_APPEND);
+    publishOwnedArtifact(this.artifactFd, "trace.jsonl", `${JSON.stringify(entry)}\n`, { append: true, pythonCommand: this.pythonCommand });
+    this.assertArtifactCustody();
     if (result.code !== 0) {
       const error = new Error(`Flow ${args[0]} failed: ${entry.stderr || entry.stdout || result.message}`);
       error.code = evaluation && result.code === 1 ? "FLOW_GATE_BLOCKED" : "FLOW_CLI_FAILURE";
@@ -86,10 +94,12 @@ export class KnowledgeIngestFlow {
   }
 
   async start() {
+    requireOwnedArtifactPublisher(this.pythonCommand);
     fs.mkdirSync(this.workspace, { recursive: true, mode: 0o700 });
     const rootStat = fs.lstatSync(this.workspace);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("UNSAFE_INGEST_PATH: workspace must be a real directory");
     this.workspace = fs.realpathSync(this.workspace);
+    this.workspaceFd = openOwnedDirectory(this.workspace);
     this.artifactRoot = path.join(this.workspace, ".kontourai", "knowledge", "ingest", this.runId);
     inspectDirectories(this.workspace, path.relative(this.workspace, this.artifactRoot));
     inspectDirectories(this.workspace, path.join(".kontourai", "flow", "runs"));
@@ -110,14 +120,16 @@ export class KnowledgeIngestFlow {
     for (const component of [".kontourai", "knowledge", "ingest"]) {
       relative = path.join(relative, component);
       inspectDirectories(this.workspace, relative);
+      this.assertWorkspaceCustody();
       try { fs.mkdirSync(path.join(this.workspace, relative), { mode: 0o700 }); }
       catch (error) { if (error.code !== "EEXIST") throw error; }
       inspectDirectories(this.workspace, relative);
     }
     // A partially executed run is retained for inspection, never retried as a fresh ingest.
+    this.assertWorkspaceCustody();
     fs.mkdirSync(this.artifactRoot, { mode: 0o700 });
-    this.artifactIdentity = inspectDirectories(this.workspace, path.relative(this.workspace, this.artifactRoot));
-    writeFileNoFollow(path.join(this.artifactRoot, "trace.jsonl"), "", fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL);
+    this.artifactFd = openOwnedDirectory(this.artifactRoot);
+    publishOwnedArtifact(this.artifactFd, "trace.jsonl", "", { pythonCommand: this.pythonCommand });
     if (initialize) await this.command(["init"]);
     await this.command(["start", definition, "--run-id", this.runId]);
   }
@@ -157,7 +169,18 @@ export class KnowledgeIngestFlow {
     await this.command(["attach-evidence", this.runId, "--gate", stage === "classification" ? "classify-gate" : stage === "routing" ? "route-gate" : "capture-gate", "--file", bundleFile, "--kind", "trust.bundle", "--producer", producer]);
   }
 
+  close() {
+    for (const key of ["artifactFd", "workspaceFd"]) {
+      if (this[key] !== undefined) { fs.closeSync(this[key]); this[key] = undefined; }
+    }
+  }
+
   async capture(rawText, meta = {}) {
+    try { return await this.captureRun(rawText, meta); }
+    finally { this.close(); }
+  }
+
+  async captureRun(rawText, meta) {
     await this.start();
     if (typeof rawText !== "string" || !rawText.trim()) {
       const error = new Error("capture: rawText must be a non-empty string");

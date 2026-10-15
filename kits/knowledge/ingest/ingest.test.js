@@ -5,6 +5,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { KnowledgeIngestFlow } from "./index.js";
 import { DefaultKnowledgeStore } from "../adapters/default-store/index.js";
 
@@ -17,6 +19,7 @@ function fixture(t, runId) {
   t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
   const store = new DefaultKnowledgeStore({ storeRoot: path.join(workspace, "store") });
   const pilot = new KnowledgeIngestFlow({ store, workspace, runId, flowCommand });
+  t.after(() => pilot.close());
   const status = () => JSON.parse(execFileSync(process.execPath, [flowCli, "status", runId, "--format", "json", "--cwd", workspace], { encoding: "utf8" }));
   return { workspace, store, pilot, status };
 }
@@ -127,3 +130,63 @@ for (const relative of [".kontourai", ".kontourai/knowledge", ".kontourai/knowle
     assert.deepEqual(await store.listByType("raw"), []);
   });
 }
+
+test("a replaced workspace root cannot inherit operation verification from its moved artifacts", async (t) => {
+  const { pilot, workspace, store } = fixture(t, "workspace-replaced");
+  const parked = `${workspace}-parked`;
+  t.after(() => fs.rmSync(parked, { recursive: true, force: true }));
+  pilot.store = {
+    create: async (input) => {
+      fs.renameSync(workspace, parked);
+      fs.mkdirSync(workspace);
+      fs.renameSync(path.join(parked, ".kontourai"), path.join(workspace, ".kontourai"));
+      fs.renameSync(path.join(parked, "store"), path.join(workspace, "store"));
+      return store.create(input);
+    },
+    get: (id) => store.get(id),
+  };
+  await assert.rejects(pilot.capture(rawText), /workspace root custody changed/);
+  assert.equal(fs.existsSync(path.join(pilot.artifactRoot, "classification.trust.json")), false);
+  assert.equal(fs.existsSync(path.join(pilot.artifactRoot, "routing.json")), false);
+  assert.equal(fs.existsSync(path.join(parked, ".flow", "config.json")), true);
+});
+
+test("missing descriptor publisher refuses before any pilot or store publication", async (t) => {
+  const { pilot, workspace, store } = fixture(t, "missing-publisher");
+  pilot.pythonCommand = ["/does-not-exist/python3"];
+  await assert.rejects(pilot.capture(rawText), /INGEST_PREREQUISITE/);
+  assert.equal(fs.existsSync(path.join(workspace, ".kontourai")), false);
+  assert.equal(fs.existsSync(path.join(workspace, ".flow")), false);
+  assert.deepEqual(await store.listByType("raw"), []);
+});
+
+test("descriptor publication stays inside its held directory during a restored parent swap", async (t) => {
+  const { pilot, workspace, status } = fixture(t, "publication-swap");
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-publish-outside-")));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(outside, "ingest", pilot.runId), { recursive: true });
+  const parent = path.join(workspace, ".kontourai", "knowledge");
+  const parked = `${parent}-parked`;
+  const spawn = childProcess.spawnSync;
+  let swapped = false;
+  childProcess.spawnSync = (binary, args, options) => {
+    if (args?.at(-2) !== "capture.json") return spawn(binary, args, options);
+    swapped = true;
+    fs.renameSync(parent, parked);
+    fs.symlinkSync(outside, parent);
+    try { return spawn(binary, args, options); }
+    finally { fs.unlinkSync(parent); fs.renameSync(parked, parent); }
+  };
+  syncBuiltinESMExports();
+  try {
+    const result = await pilot.capture(rawText);
+    assert.equal(swapped, true, "fault reached the actual publisher spawn boundary");
+    assert.equal(status().current_step, "done");
+    assert.equal(result.record.body, rawText);
+    assert.equal(fs.existsSync(path.join(outside, "ingest", pilot.runId, "capture.json")), false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(pilot.artifactRoot, "capture.json"))).rawText, rawText);
+  } finally {
+    childProcess.spawnSync = spawn;
+    syncBuiltinESMExports();
+  }
+});

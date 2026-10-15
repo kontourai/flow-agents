@@ -155,6 +155,11 @@
   ],
   "assets": [
     {
+      "id": "knowledge.owned-artifact-publisher",
+      "path": "adapters/shared/owned-artifacts.js",
+      "description": "POSIX Python 3 standard-library descriptor-relative publisher shared by ingest JSON and trace artifacts; runtime support is checked before writes."
+    },
+    {
       "id": "knowledge.ingest-flow-cli",
       "path": "ingest/cli.js",
       "description": "One-shot opt-in ingest CLI; requires an installed public Flow CLI and Surface package."

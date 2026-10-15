@@ -563,11 +563,16 @@ The opt-in `knowledge.ingest-flow-pilot` adapter (`ingest/index.js`) runs only
 flows. This pilot does not replace those flows or the live harness integrations.
 
 Install the public `@kontourai/flow` CLI and `@kontourai/surface` in the consuming
-Node project. This distribution qualifies Flow 5.2.0 and Surface 5.0.0. The kit
+Node project. The opt-in pilot also requires POSIX Python 3 whose standard
+library supports descriptor-relative `os.open`, `os.stat` and `os.unlink`, plus
+`O_NOFOLLOW`. The publisher checks this prerequisite before creating pilot
+artifacts; the CLI checks it before constructing its store. Unsupported
+platforms or a missing interpreter refuse, with the legacy runner still
+available. This distribution qualifies Flow 5.2.0 and Surface 5.0.0. The kit
 invokes Flow as a subprocess and passes recorded artifacts; it imports no Flow
 engine library. A `KnowledgeIngestFlow` instance accepts a store, workspace,
 unique run id and optionally a `flowCommand` argument array for a particular
-installed CLI.
+installed CLI, and `pythonCommand` for a particular Python 3 interpreter.
 
 For the command line, create a JSON input with `rawText` and optional `meta`
 (`category`, `title`, `tags`, `agent`, `session_id`, `note`, `routing`):
@@ -576,7 +581,7 @@ For the command line, create a JSON input with `rawText` and optional `meta`
 node /path/to/knowledge/ingest/cli.js \
   --input capture.json --workspace /path/to/workspace \
   --store-root /path/to/store --run-id ingest-001 \
-  --flow-bin /path/to/node_modules/.bin/flow
+  --flow-bin /path/to/node_modules/.bin/flow --python-bin /path/to/python3
 ```
 
 The driver initializes a fresh Flow workspace with `flow init`, runs `flow start`,
@@ -595,9 +600,15 @@ match the canonical id returned by create as well as content and provenance.
 
 The driver writes operation observations and Surface bundles under
 `<workspace>/.kontourai/knowledge/ingest/<run-id>/`. `trace.jsonl` retains each
-Flow command's arguments, exit code, stdout and stderr. The kit refuses symlink components in its artifact path, creates new files
-without following leaf symlinks, and checks its run directory custody before
-each command and write. Flow owns its run, artifact copies, integrity checks,
+Flow command's arguments, exit code, stdout and stderr. The kit refuses symlink components and binds both workspace and artifact
+root identities. One shared publisher receives a held directory descriptor
+through child stdio and invokes fixed Python code with data-only arguments and
+stdin. JSON and trace writes open children relative to that descriptor, with
+no-follow/exclusive creation or no-follow append. Operation evidence uses the
+actual persisted readback digest; intended in-memory text alone cannot qualify
+a missing file. Root custody is checked before each command and write. The
+public `start`/`evaluate` diagnostic path retains its descriptors until callers
+invoke `close()`; the one-shot `capture` path closes them on success or failure. Flow owns its run, artifact copies, integrity checks,
 gate evaluations and cursor. Claim status is
 `verified` for these local operations: non-empty input capture, stored raw
 classification readback, and a recorded routing decision. This does **not**

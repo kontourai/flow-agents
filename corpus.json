@@ -148,7 +148,8 @@
       "covers": [
         "kits/knowledge/ingest/**",
         "kits/knowledge/adapters/flow-runner/classification.js",
-        "kits/knowledge/flows/ingest.flow.json"
+        "kits/knowledge/flows/ingest.flow.json",
+        "kits/knowledge/adapters/shared/owned-artifacts.js"
       ]
     },
     {
