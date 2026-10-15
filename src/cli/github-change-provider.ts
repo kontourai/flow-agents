@@ -742,25 +742,66 @@ async function observeExactChange(request: ChangeProviderRequest, number: number
   return buildChangeProviderResult({ request, providerRecord: record, adapter: ADAPTER_ID, providerActor: finalCapability.provider_actor, observedAt: dependencies.now() });
 }
 
+/** The adopt listing is bounded: more open matches than this is refused, never truncated. */
+const ADOPT_LIST_LIMIT = 100;
+
+type GithubAdoptListRecord = Readonly<{ number: number; id: string; baseRefName: string; headRefName: string; headRefOid: string; state: string; sameRepository: boolean }>;
+
+/**
+ * #1415 slice 2: the open pull requests for the request's exact head and base refs whose head
+ * branch lives in the configured repository. `gh pr list --head <branch>` matches the branch NAME
+ * across forks, and closed or merged pull requests on a reused branch are history, so neither may
+ * count toward the ambiguity check. Title and body are not requested: adoption never reads them.
+ */
+async function listOpenSameRepositoryChanges(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies): Promise<GithubAdoptListRecord[]> {
+  const output = await invoke(dependencies, [
+    "pr", "list",
+    "--repo", repoSlug(request),
+    "--state", "open",
+    "--head", request.head_ref,
+    "--base", request.base_ref,
+    "--limit", String(ADOPT_LIST_LIMIT + 1),
+    "--json", "id,number,state,baseRefName,headRefName,headRefOid,isCrossRepository,headRepositoryOwner",
+  ]);
+  const value = parseProviderJson(output, "provider list output");
+  if (!Array.isArray(value)) malformed("provider list output must be an array");
+  if (value.length > ADOPT_LIST_LIMIT) {
+    throw new ChangeProviderError("ambiguous_provider_change", `more than ${ADOPT_LIST_LIMIT} open pull requests match the pinned head and base refs; refusing to adopt from a truncated listing`);
+  }
+  return value.map((entry, index) => {
+    const record = plainObject(entry, `provider list entry ${index}`);
+    const owner = record.headRepositoryOwner === null ? null : plainObject(record.headRepositoryOwner, `provider list entry ${index} head repository owner`);
+    const ownerLogin = owner === null ? null : providerString(owner.login, `provider list entry ${index} head repository owner login`, 255);
+    const crossRepository = providerBoolean(record.isCrossRepository, `provider list entry ${index} cross-repository flag`);
+    return Object.freeze({
+      id: providerString(record.id, `provider list entry ${index} id`, 1_024),
+      number: providerPositiveInteger(record.number, `provider list entry ${index} number`),
+      state: providerString(record.state, `provider list entry ${index} state`, 16),
+      baseRefName: providerRef(record.baseRefName, `provider list entry ${index} base ref`),
+      headRefName: providerRef(record.headRefName, `provider list entry ${index} head ref`),
+      headRefOid: providerSha(record.headRefOid, `provider list entry ${index} head SHA`),
+      sameRepository: !crossRepository && ownerLogin !== null && ownerLogin.toLowerCase() === request.repository.owner.toLowerCase(),
+    });
+  }).filter((record) => record.state.toUpperCase() === "OPEN" && record.sameRepository
+    && record.baseRefName === request.base_ref && record.headRefName === request.head_ref);
+}
+
 /**
  * #1415 slice 2: adopt the one open, same-repository pull request that already exists for the
  * request's exact head and base refs at its exact head SHA. It never runs `pr create` and never
- * reads or compares the pull request's title, body, or draft flag. Every refusal is a fixed
- * message; provider output never reaches it.
+ * compares or sets the pull request's title, body, or draft flag. Closed or merged pull requests on
+ * the same branch, and fork pull requests from a same-named branch, are ignored. Every refusal is a
+ * fixed message; provider output never reaches it.
  */
 async function adoptExistingGithubChange(request: ChangeProviderRequest, dependencies: GithubExecutionDependencies, providerActor: string): Promise<ChangeProviderResult> {
-  const listed = await listMatchingChanges(request, dependencies);
-  const sameRefs = listed.filter((record) => record.baseRefName === request.base_ref && record.headRefName === request.head_ref);
-  if (sameRefs.length === 0) {
-    throw new ChangeProviderError("provider_observation_mismatch", "no pull request exists for the pinned head and base refs; an existing-change run adopts a pull request and never opens one");
+  const open = await listOpenSameRepositoryChanges(request, dependencies);
+  if (open.length === 0) {
+    throw new ChangeProviderError("provider_observation_mismatch", "no open same-repository pull request exists for the pinned head and base refs; an existing-change run adopts an open pull request and never opens one");
   }
-  if (sameRefs.length > 1) {
-    throw new ChangeProviderError("ambiguous_provider_change", "more than one pull request exists for the pinned head and base refs; an existing-change run adopts exactly one");
+  if (open.length > 1) {
+    throw new ChangeProviderError("ambiguous_provider_change", "more than one open same-repository pull request exists for the pinned head and base refs; an existing-change run adopts exactly one");
   }
-  const listedChange = sameRefs[0]!;
-  if (listedChange.state.toLowerCase() !== "open") {
-    throw new ChangeProviderError("provider_observation_mismatch", "the pull request for the pinned head ref is closed or merged; an existing-change run adopts only an open pull request");
-  }
+  const listedChange = open[0]!;
   if (listedChange.headRefOid.toLowerCase() !== request.head_sha) {
     throw new ChangeProviderError("provider_observation_mismatch", "the pull request head has moved off the pinned source head");
   }

@@ -238,12 +238,12 @@ function fakeAdoptGithub(fx, { list, record, onList } = {}) {
   const calls = [];
   const prRecord = {
     node_id: `PR_existing_${fx.number}`, number: fx.number, html_url: fx.prUrl, state: "open", merged: false,
-    // Neither is anything this run set; adoption must not read them.
+    // Neither is anything this run set; adoption must not compare or set them.
     title: "A title this run never set", body: "A body this run never set", draft: false,
     base: { ref: "main", repo: { full_name: REPO } },
     head: { ref: fx.branch, sha: fx.head, repo: { full_name: REPO } },
   };
-  const listed = { id: prRecord.node_id, number: fx.number, state: "OPEN", baseRefName: "main", headRefName: fx.branch, headRefOid: fx.head, title: prRecord.title, body: prRecord.body, isDraft: false };
+  const listed = { id: prRecord.node_id, number: fx.number, state: "OPEN", baseRefName: "main", headRefName: fx.branch, headRefOid: fx.head, isCrossRepository: false, headRepositoryOwner: { id: "O_acme", login: "acme" } };
   return {
     calls,
     creates: () => calls.filter((argv) => argv[0] === "pr" && argv[1] === "create"),
@@ -476,16 +476,17 @@ test("publish-change for a pinned run takes no title, body, or draft flag", asyn
 
 test("adoption refuses when there is no pull request, and never opens one", async () => {
   const github = fakeAdoptGithub(fx, { list: [] });
-  await assert.rejects(adopt(fx, github), /no pull request exists for the pinned head and base refs; an existing-change run adopts a pull request and never opens one/);
+  await assert.rejects(adopt(fx, github), /no open same-repository pull request exists for the pinned head and base refs; an existing-change run adopts an open pull request and never opens one/);
   assertNotAdopted(fx, github, "no pull request");
 });
 
 test("adoption refuses a duplicate, closed, merged, moved, or fork pull request", async () => {
-  const listed = (overrides) => [{ id: `PR_existing_${fx.number}`, number: fx.number, state: "OPEN", baseRefName: "main", headRefName: fx.branch, headRefOid: fx.head, title: "t", body: "b", isDraft: false, ...overrides }];
+  const listed = (overrides) => [{ id: `PR_existing_${fx.number}`, number: fx.number, state: "OPEN", baseRefName: "main", headRefName: fx.branch, headRefOid: fx.head, isCrossRepository: false, headRepositoryOwner: { login: "acme" }, ...overrides }];
   for (const [label, options, pattern] of [
-    ["duplicate", { list: [...listed(), ...listed({ id: "PR_other", number: fx.number + 100 })] }, /more than one pull request exists/],
-    ["closed", { list: listed({ state: "CLOSED" }) }, /closed or merged; an existing-change run adopts only an open pull request/],
-    ["merged", { list: listed({ state: "MERGED" }) }, /closed or merged/],
+    ["duplicate", { list: [...listed(), ...listed({ id: "PR_other", number: fx.number + 100 })] }, /more than one open same-repository pull request exists/],
+    ["closed", { list: listed({ state: "CLOSED" }) }, /no open same-repository pull request exists/],
+    ["merged", { list: listed({ state: "MERGED" }) }, /no open same-repository pull request exists/],
+    ["only a fork PR from a same-named branch", { list: listed({ isCrossRepository: true, headRepositoryOwner: { login: "attacker" } }) }, /no open same-repository pull request exists/],
     ["provider head moved", { list: listed({ headRefOid: fx.base }) }, /the pull request head has moved off the pinned source head/],
     ["fork", { record: (record) => ({ ...record, head: { ...record.head, repo: { full_name: "attacker/widgets" } } }) }, /adopts only a same-repository pull request/],
     ["merged since listing", { record: (record) => ({ ...record, state: "closed", merged: true }) }, /an adopted change must be open/],
