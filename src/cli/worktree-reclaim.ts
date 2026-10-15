@@ -5,7 +5,7 @@ import type { ChangeProviderSettings } from "./public-contracts.js";
 import { resolveEffectiveChangeProviderSettings } from "./effective-change-provider-settings.js";
 import { observeGithubMergedChange, type GithubMergedChangeObservation } from "./github-change-provider.js";
 import { execTrustedGitSync } from "../lib/trusted-git.js";
-import { validateRunStateConsistency } from "@kontourai/flow";
+import { expectationsForGate, loadFlowConfig, validateRunStateConsistency, type FlowDefinition } from "@kontourai/flow";
 
 const MAX_PROVIDER_RESULT_BYTES = 65_536;
 const MAX_FLOW_RUN_FILE_BYTES = 4 * 1024 * 1024;
@@ -71,7 +71,7 @@ export async function reclaimBuilderWorktree(
   const dirty = String(execTrustedGitSync(worktree, ["status", "--porcelain=v1", "--untracked-files=all"])).trim();
   if (dirty) throw new Error("builder-run reclaim refuses a dirty worktree");
 
-  assertLearningComplete(sessionDir);
+  await assertLearningComplete(sessionDir);
   const published = readPublishedChange(sessionDir);
   const headSha = String(execTrustedGitSync(worktree, ["rev-parse", "--verify", "HEAD^{commit}"])).trim().toLowerCase();
   const branch = String(execTrustedGitSync(worktree, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
@@ -122,8 +122,8 @@ export async function reclaimBuilderWorktree(
 
 type LearningClaimSelector = Readonly<{ claimType: string; acceptedStatuses: readonly string[] }>;
 
-function assertLearningComplete(sessionDir: string): void {
-  const selectors = terminalGateLearningSelectors(sessionDir);
+async function assertLearningComplete(sessionDir: string): Promise<void> {
+  const selectors = await terminalGateLearningSelectors(sessionDir);
   const file = path.join(sessionDir, "trust.bundle");
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   let root: Record<string, unknown>;
@@ -145,7 +145,8 @@ function assertLearningComplete(sessionDir: string): void {
 
 /**
  * The learning evidence reclaim requires, taken from the run's own effective Flow definition: the
- * required trust-bundle claims of the gate on its terminal step (the step whose `next` is null).
+ * required trust-bundle claims of the gate on its terminal step (the step whose `next` is null),
+ * after Flow applies the project configuration's expectation overrides.
  *
  * This was the literal pair `builder.learn.decisions` / `builder.learn.evidence` with the statuses
  * verified/trusted/accepted, which is exactly what Builder's composed `learn-gate` declares
@@ -156,7 +157,7 @@ function assertLearningComplete(sessionDir: string): void {
  * Fails closed: a missing or inconsistent run, an ambiguous terminal step, or a terminal gate that
  * declares no required trust-bundle claim refuses reclaim rather than skipping the learning check.
  */
-function terminalGateLearningSelectors(sessionDir: string): LearningClaimSelector[] {
+async function terminalGateLearningSelectors(sessionDir: string): Promise<LearningClaimSelector[]> {
   const artifactRoot = path.dirname(sessionDir);
   const kontouraiRoot = path.dirname(artifactRoot);
   if (path.basename(artifactRoot) !== "flow-agents" || path.basename(kontouraiRoot) !== ".kontourai") {
@@ -164,32 +165,25 @@ function terminalGateLearningSelectors(sessionDir: string): LearningClaimSelecto
   }
   const runId = path.basename(sessionDir);
   const runDir = path.join(kontouraiRoot, "flow", "runs", runId);
-  let definition: Record<string, unknown>;
+  let definition: FlowDefinition;
   try {
     const startDefinition = record(JSON.parse(readBoundedRegularFile(path.join(runDir, "definition.json"), MAX_FLOW_RUN_FILE_BYTES)), "Flow start definition");
     const state = record(JSON.parse(readBoundedRegularFile(path.join(runDir, "state.json"), MAX_FLOW_RUN_FILE_BYTES)), "Flow state");
-    definition = record(validateRunStateConsistency(startDefinition, state, { runId }).definition, "Flow effective definition");
+    definition = validateRunStateConsistency(startDefinition, state, { runId }).definition;
   } catch {
     throw new Error("builder-run reclaim requires the session's canonical Flow run definition to identify its learning evidence");
   }
-  const steps = Array.isArray(definition.steps) ? definition.steps : [];
-  const terminal = steps.filter((step) => step !== null && typeof step === "object" && !Array.isArray(step)
-    && (step as Record<string, unknown>).next === null);
-  const terminalStep = terminal.length === 1 ? (terminal[0] as Record<string, unknown>).id : undefined;
-  const gates = definition.gates && typeof definition.gates === "object" && !Array.isArray(definition.gates)
-    ? Object.values(definition.gates as Record<string, unknown>) : [];
+  const terminal = definition.steps.filter((step) => step.next === null);
+  const terminalStep = terminal.length === 1 ? terminal[0].id : undefined;
+  const config = await loadFlowConfig(path.dirname(kontouraiRoot));
   const selectors: LearningClaimSelector[] = [];
-  for (const gate of gates) {
-    if (typeof terminalStep !== "string" || !gate || typeof gate !== "object" || Array.isArray(gate)) continue;
-    if ((gate as Record<string, unknown>).step !== terminalStep) continue;
-    const expects = (gate as Record<string, unknown>).expects;
-    for (const expectation of Array.isArray(expects) ? expects : []) {
-      if (!expectation || typeof expectation !== "object" || Array.isArray(expectation)) continue;
-      const entry = expectation as Record<string, unknown>;
-      const selector = entry.bundle_claim;
-      if (entry.required !== true || !selector || typeof selector !== "object" || Array.isArray(selector)) continue;
-      const claimType = (selector as Record<string, unknown>).claimType;
-      const statuses = (selector as Record<string, unknown>).accepted_statuses;
+  for (const [gateId, gate] of Object.entries(definition.gates ?? {})) {
+    if (terminalStep === undefined || gate.step !== terminalStep) continue;
+    for (const expectation of expectationsForGate({ ...gate, id: gateId }, config)) {
+      const selector = expectation.bundle_claim;
+      if (!expectation.required || expectation.kind !== "trust.bundle" || !selector) continue;
+      const claimType = selector.claimType;
+      const statuses = selector.accepted_statuses;
       if (typeof claimType !== "string" || claimType.length === 0) continue;
       selectors.push(Object.freeze({
         claimType,

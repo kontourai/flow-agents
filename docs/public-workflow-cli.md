@@ -984,6 +984,12 @@ flow_agents merge-change execute \
 
 The protected lifecycle coordinator validates and consumes this signed, single-use authorization under the session subject lock immediately before provider mutation. It binds the exact run, definition identity/digest and Flow state, repository/PR, terminal head, strategy, assignment actor, publication-time expected provider actor, issued action digest, nonce, request time, and expiry. Repeating the same operation after a crash can return only its exact durable replay; it cannot authorize a different head, strategy, provider, PR, actor, or request. A read-only `merge-change validate-terminal-delivery --session-dir <session> --head-ref <ref>` diagnoses the local terminal-delivery binding without calling a provider.
 
+The evidence-refresh gate is the single gate in the run's effective definition that
+sets `requires_current_verification: true`; its kit may choose the gate identifier.
+Zero or several declaring gates refuse the signing request. The existing bounded
+refresh routes to `verify` and post-amendment `verify-gate` provenance remain required
+by both the unprivileged CLI and the protected coordinator.
+
 #### Target-branch policy precondition
 
 Automated merge requires the target branch to enforce a no-bypass pull-request approval policy (required_pull_request_reviews with required_approving_review_count >= 1, plus enforce_admins). `merge-change request` observes this precondition against the configured provider **before** it mints an unsigned authorization and refuses when the target branch does not satisfy it, naming the actual condition (approval policy absent, zero required approvals, or `enforce_admins` disabled) rather than a type error. When the provider cannot be reached the request reports `merge_policy_precondition.status: "unverified"` with the reason instead of passing silently; `merge-change execute` re-checks the same policy against the provider immediately before mutation. Ruleset-only configurations that do not expose an equivalent no-bypass policy remain deliberately unsupported rather than guessed.

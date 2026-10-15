@@ -833,8 +833,14 @@ terminal workflow outcome, supports exact receipt replay through the original
 session identity after the move, and retains the canonical Flow run. None of these
 operations deletes a branch or worktree; cleanup requires the separate
 provider-aware `builder-run reclaim` action. Reclaim is valid only after accepted
-Builder learning evidence and a fresh authenticated merged observation for the
-exact worktree head. It refuses primary checkouts, dirty or unregistered
+the learning claim types and accepted statuses declared by the run's terminal gate,
+and a fresh authenticated merged observation for the exact worktree head. Reclaim
+reads the session's canonical Flow start definition and state, validates authorized
+amendments with Flow, and uses Flow's effective expectations after project overrides.
+A missing or inconsistent run, multiple terminal steps, or a terminal gate with no
+required trust-bundle learning claim refuses reclaim. Builder's closing gate still
+selects `builder.learn.decisions` and `builder.learn.evidence`, accepting its declared
+`verified`, `trusted`, and `accepted` statuses. It refuses primary checkouts, dirty or unregistered
 worktrees, stale/mismatched provider identity, and unmerged changes; it uses
 non-forced `git worktree remove`, retains the branch, prunes worktree metadata,
 and writes a content-free receipt outside the removed worktree. Learning review

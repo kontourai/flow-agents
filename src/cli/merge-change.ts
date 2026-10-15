@@ -321,11 +321,11 @@ export function evidenceRefreshRoutesSatisfied(gate: Record<string, unknown>): b
  * This was the composed gate-id literal `builder.publish-learn:merge-ready-ci-gate`, which refused
  * every flow whose kit spells that gate differently. The lifecycle-authority coordinator already
  * derives the same gate from the same declaration (`freshnessTurnstileGateEntry`, #1336); this is
- * the unprivileged side's copy of that rule, kept in step with it by a conformance test because the
- * coordinator is a separate authority boundary that src/ does not import. Null unless exactly one
- * gate declares it, so an ambiguous definition refuses rather than picks.
+ * the unprivileged side's copy of that uniqueness rule. The coordinator remains a separate
+ * authority boundary that src/ does not import. Null unless exactly one gate declares it, so an
+ * ambiguous definition refuses rather than picks.
  */
-export function freshnessTurnstileGate(definition: Record<string, unknown>): { id: string; gate: Record<string, unknown> } | null {
+function freshnessTurnstileGate(definition: Record<string, unknown>): { id: string; gate: Record<string, unknown> } | null {
   const gates = definition.gates;
   if (!gates || typeof gates !== "object" || Array.isArray(gates)) return null;
   const matches = Object.entries(gates as Record<string, unknown>).filter(([, gate]) =>
@@ -334,8 +334,8 @@ export function freshnessTurnstileGate(definition: Record<string, unknown>): { i
   return matches.length === 1 ? { id: matches[0][0], gate: matches[0][1] as Record<string, unknown> } : null;
 }
 
-/** Exported for tests: the evidence-refresh control merge-change applies to a completed run. */
-export function assertEvidenceRefreshControl(inspected: Pick<Awaited<ReturnType<typeof inspectBuilderFlowSession>>, "run">, definitions: Pick<CanonicalRunDefinitions, "effectiveDefinition">): void {
+/** Evidence-refresh control required before preparing a merge authorization. */
+function assertEvidenceRefreshControl(inspected: Pick<Awaited<ReturnType<typeof inspectBuilderFlowSession>>, "run">, definitions: Pick<CanonicalRunDefinitions, "effectiveDefinition">): void {
   const manifestFile = path.join(inspected.run.dir, "evidence", "manifest.json");
   const definition = definitions.effectiveDefinition;
   record(definition.gates, "canonical Flow definition gates");

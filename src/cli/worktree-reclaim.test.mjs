@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { startRun } from "@kontourai/flow";
+import { defaultFlowConfig, startRun } from "@kontourai/flow";
 import { reclaimBuilderWorktree } from "../../build/src/cli/worktree-reclaim.js";
 import { resolveEffectiveFlowDefinition } from "../../build/src/lib/flow-resolver.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
@@ -150,6 +150,33 @@ test("reclaim requires the learning claims a non-Builder kit's closing gate decl
   }
 });
 
+test("reclaim enforces required closeout expectations from Flow project overrides", async () => {
+  const definition = acmeDeliveryDefinition();
+  const closing = definition.gates["acme.closeout:closing-gate"];
+  const extra = { ...structuredClone(closing.expects[0]), id: "project-retention", required: false,
+    bundle_claim: { claimType: "acme.closeout.retention", accepted_statuses: ["verified"] } };
+  closing.expects.push(extra);
+  const config = { ...defaultFlowConfig(), gate_overrides: {
+    "acme.closeout:closing-gate": { expectations: { "project-retention": { required: true } } },
+  } };
+  const ordinaryClaims = [
+    { claimType: "acme.closeout.notes", status: "verified" },
+    { claimType: "acme.closeout.retro", status: "verified" },
+  ];
+  const missing = await makeFixture({ definition, flowConfig: config, claims: ordinaryClaims });
+  try {
+    await assert.rejects(reclaimBuilderWorktree(missing.sessionDir, { observeMergedChange: async () => { throw new Error("should not observe"); } }),
+      /requires only accepted current acme\.closeout\.retention learning evidence/);
+    assert.equal(fs.existsSync(missing.worktree), true);
+  } finally { fs.rmSync(missing.root, { recursive: true, force: true }); }
+  const complete = await makeFixture({ definition, flowConfig: config, claims: [...ordinaryClaims, { claimType: "acme.closeout.retention", status: "verified" }] });
+  try {
+    const receipt = await reclaimBuilderWorktree(complete.sessionDir, { observeMergedChange: merged });
+    assert.equal(receipt.outcome, "reclaimed");
+    assert.equal(fs.existsSync(complete.worktree), false);
+  } finally { fs.rmSync(complete.root, { recursive: true, force: true }); }
+});
+
 test("reclaim refuses when the run's definition cannot name its learning evidence", async () => {
   // A closing gate with no required trust-bundle claim gives reclaim nothing to check: refuse.
   const definition = acmeDeliveryDefinition();
@@ -203,7 +230,7 @@ function builderBuildDefinition() {
   return definition;
 }
 
-async function makeFixture({ definition = builderBuildDefinition(), claims } = {}) {
+async function makeFixture({ definition = builderBuildDefinition(), claims, flowConfig } = {}) {
   const root = makeFixtureDir("flow-agents-reclaim-");
   const primary = path.join(root, "repo");
   const worktree = path.join(root, "repo-worktrees", "feature");
@@ -226,6 +253,10 @@ async function makeFixture({ definition = builderBuildDefinition(), claims } = {
       },
     },
   }));
+  if (flowConfig) {
+    fs.mkdirSync(path.join(primary, ".flow"), { recursive: true });
+    fs.writeFileSync(path.join(primary, ".flow", "config.json"), JSON.stringify(flowConfig));
+  }
   fs.writeFileSync(path.join(primary, "base.txt"), "base\n");
   git(primary, "add", ".");
   git(primary, "commit", "-m", "base");
