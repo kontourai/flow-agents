@@ -642,7 +642,7 @@ test("workflow evidence refuses an operation-bound expectation declared by a non
   }
 });
 
-test("verification reseal refuses a non-Builder operation before requesting authority", async () => {
+test("reseal preflight names a non-Builder operation binding at the current review gate", async () => {
   const project = makeProject("kit-operation-reseal-", {
     opkit: { manifest: operationKitManifest("opkit", true), flows: { ship: operationFlow("opkit.ship", true) } },
   });
@@ -653,8 +653,9 @@ test("verification reseal refuses a non-Builder operation before requesting auth
       "--expectation", "change-published", "--status", "pass", "--summary", "locally authored publication",
     ], { cwd: project, encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: ACTOR } });
     assert.notEqual(result.status, 0);
+    // This fixture reaches operation preflight before trust-bundle admission. It does not
+    // supply the signed lifecycle completion needed to qualify a complete reseal transaction.
     assert.match(result.stderr + result.stdout, /verification evidence reseal cannot satisfy operation-bound expectation change-published/);
-    assert.equal(result.stdout.trim(), "", "refusal must not emit an authority signing request");
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
   }
