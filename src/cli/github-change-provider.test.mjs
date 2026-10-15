@@ -343,6 +343,7 @@ test("adoptExisting ignores closed or merged history and fork pull requests from
     ["an earlier merged PR on the same branch", [adoptListRecord({ id: "PR_old", number: 500, state: "MERGED", headRefOid: STALE_SHA }), adoptListRecord()]],
     ["a fork PR from a same-named branch", [forkListRecord(), adoptListRecord()]],
     ["a fork PR whose head repository was deleted", [forkListRecord({ headRepositoryOwner: null }), adoptListRecord()]],
+    ["exactly the listing bound of 100 rows", [...Array.from({ length: 99 }, (_, index) => forkListRecord({ id: `PR_fork_${index}`, number: 700 + index })), adoptListRecord()]],
   ]) {
     const fake = fakeExecutor([...prefix(), listed, sameRepoRecord(), ...finalPrefix()]);
     const result = await provider(fake).adoptExisting(request());
