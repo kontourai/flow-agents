@@ -193,6 +193,10 @@ equivalent flags (`src/cli/init.ts:385-408`); when a raw token value (rather tha
 `--console-token-file` through (`src/cli/init.ts:390-398`), so a bearer token never sits in argv or an
 unprotected file even transiently.
 
+These flags apply to project installs and to `--global` installs other than `claude-code` and
+`opencode`, which refuse them without writing anything; see
+[scripts/README.md](../../scripts/README.md#telemetry) for the operator config those runtimes read.
+
 Interactive `flow-agents init` (run without `--yes`/`--headless`) offers a third way to reach this same
 mechanism: a guided "Connect to Kontour Console? [Hosted/Local/Self-hosted/Skip]" prompt that collects
 the token and tenant inline, then ends the install by auto-running the same reachability/token/tenant
