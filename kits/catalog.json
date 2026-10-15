@@ -17,7 +17,7 @@
       "id": "release-evidence",
       "name": "Release Evidence Kit",
       "path": "kits/release-evidence",
-      "description": "Minimal flows-only kit for proving agentless gate evaluation over surface claims in CI. One gate expects a trusted release.evidence claim."
+      "description": "Minimal flows-only kit for proving agentless gate evaluation over Surface trust bundles in CI. One gate expects a verified release.evidence claim."
     }
   ]
 }
