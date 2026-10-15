@@ -370,8 +370,14 @@ export function installedBuilderGateActionAuthority(definitionId: string, curren
       expectation_ids: [...binding.expectation_ids],
     }));
   const operation = action.operations[0];
-  const operationContracts = operationContractsForProject(packageRoot, definitionPinsSourceHead(definition));
-  const protocol = operation ? PUBLIC_OPERATION_CONTRACTS[operation as keyof typeof PUBLIC_OPERATION_CONTRACTS] : undefined;
+  const adoptsExistingChange = definitionPinsSourceHead(definition);
+  const operationContracts = operationContractsForProject(packageRoot, adoptsExistingChange);
+  // Availability here is the installed (unconfigured) contract, as before; a source-pinned
+  // definition names the adopt-only capability, matching its operation mutation's protocol.
+  const installedProtocol = operation ? PUBLIC_OPERATION_CONTRACTS[operation as keyof typeof PUBLIC_OPERATION_CONTRACTS] : undefined;
+  const protocol = installedProtocol && adoptsExistingChange && installedProtocol.operation === PUBLISH_CHANGE_OPERATION
+    ? adoptExistingChangeOperationProtocol(installedProtocol)
+    : installedProtocol;
   const actionEnvelope: GateActionEnvelope["action"] = {
     skills: action.skills.map((skill) => skillIdentity(kit, kitBinding, packageVersion, skill)),
     operations: [...action.operations],
