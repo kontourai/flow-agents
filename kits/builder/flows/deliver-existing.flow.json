@@ -1,0 +1,128 @@
+{
+  "id": "builder.deliver-existing",
+  "version": "1.0",
+  "description": "EXISTING-CHANGE DELIVERY: no implementation step; the head is pinned at start. Reviews, verifies, and delivers a change that already exists as an open same-repository pull request at an exact Git commit, without claiming that this run implemented it. workflow start requires --source-head <40-hex commit> equal to the clean checkout HEAD; the commit is persisted in the run and every gate re-checks it, so a new head needs a new run. There is no execute step and no in-run repair: a failing claim routes back to verify (at most three route-backs; a fourth failing visit blocks), and a code fix is a new head that needs a new run. pr-open adopts the existing pull request through publish-change execute, an authenticated provider observation at the pinned head; it never opens one. merge-ready-ci records CI readiness at the pinned head (provisional delivery is refused) and learn records learning. After completion, workflow publish-delivery seals the checkpoint at the pinned head, its delivery files are pushed to the pull request branch as exactly one delivery-only commit, and merge-change merges that terminal head.",
+  "source_binding": {
+    "head": "pinned-at-start"
+  },
+  "phase_map": {
+    "pickup": "pull-work",
+    "verification": "verify",
+    "evidence": "verify",
+    "release": "pr-open",
+    "learning": "learn"
+  },
+  "steps": [
+    { "id": "pull-work", "next": "existing-change" },
+    { "id": "existing-change", "next": "verify" },
+    { "id": "verify", "next": "pr-open" },
+    { "id": "pr-open", "next": "merge-ready-ci", "uses_flow": "builder.publish-existing" },
+    { "id": "merge-ready-ci", "next": "learn", "uses_flow": "builder.publish-existing" },
+    { "id": "learn", "next": "done", "uses_flow": "builder.publish-existing" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "pull-work-gate": {
+      "step": "pull-work",
+      "expects": [
+        {
+          "id": "selected-work",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A ready work item is selected with scope and acceptance context.",
+          "bundle_claim": {
+            "claimType": "builder.pull-work.selected",
+            "subjectType": "work-item",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ]
+    },
+    "existing-change-gate": {
+      "step": "existing-change",
+      "expects": [
+        {
+          "id": "pre-existing-implementation",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The change under review already existed before this run: its provider record (for example the pull request URL), base, exact head commit, and changed files are recorded in <slug>--existing-change.md. This run makes no implementation claim.",
+          "bundle_claim": {
+            "claimType": "builder.existing-change.pre-existing-implementation",
+            "subjectType": "change",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ]
+    },
+    "verify-gate": {
+      "step": "verify",
+      "on_route_back": {
+        "missing_evidence": "verify",
+        "default": "verify"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
+      "expects": [
+        {
+          "id": "clean-critique",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A distinct reviewer recorded a current clean critique of the delivered change.",
+          "bundle_claim": {
+            "claimType": "workflow.critique.review",
+            "subjectType": "workflow-critique",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        },
+        {
+          "id": "acceptance-criteria",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The selected Work Item acceptance criteria have verified evidence.",
+          "bundle_claim": {
+            "claimType": "workflow.acceptance.criterion",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        },
+        {
+          "id": "tests-evidence",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Relevant tests or checks have evidence tied to the implemented change.",
+          "bundle_claim": {
+            "claimType": "builder.verify.tests",
+            "subjectType": "flow-step",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        },
+        {
+          "id": "policy-compliance",
+          "kind": "trust.bundle",
+          "required": false,
+          "description": "Policy compliance evidence is attached when policy gates apply.",
+          "explore_hint": "Use as advisory evidence for scope, security, privacy, release, or repository policy checks.",
+          "bundle_claim": {
+            "claimType": "builder.verify.policy-compliance",
+            "subjectType": "artifact",
+            "accepted_statuses": [
+              "verified"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

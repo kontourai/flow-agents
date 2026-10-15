@@ -561,6 +561,18 @@ test("builder.build and builder.shape pass flow validation and keep their byte-s
     assert.match(review.stderr, /workflow start requires --work-item <provider-ref>/);
     assert.ok(!review.stderr.includes("is not a flow declared"), `builder.review-existing must be startable: ${review.stderr}`);
     assert.ok(!review.stderr.includes("cannot bind it"), `builder.review-existing must be startable: ${review.stderr}`);
+
+    // #1415 slice 2: so does the existing-change delivery, whose closeout composes
+    // builder.publish-existing rather than builder.publish-learn.
+    const deliver = runStart(["--flow", "builder.deliver-existing"], dir);
+    assert.notEqual(deliver.status, 0);
+    assert.match(deliver.stderr, /workflow start requires --work-item <provider-ref>/);
+    assert.ok(!deliver.stderr.includes("is not a flow declared"), `builder.deliver-existing must be startable: ${deliver.stderr}`);
+    assert.ok(!deliver.stderr.includes("cannot bind it"), `builder.deliver-existing must be startable: ${deliver.stderr}`);
+    // The composed child is not a runnable flow on its own, exactly like builder.publish-learn.
+    const child = runStart(["--flow", "builder.publish-existing"], dir);
+    assert.notEqual(child.status, 0);
+    assert.match(child.stderr, /workflow start --flow builder\.publish-existing does not conform to the Flow definition contract/, "the child flow must be refused before the input contract");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

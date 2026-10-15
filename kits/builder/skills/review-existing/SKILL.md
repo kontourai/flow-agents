@@ -1,13 +1,14 @@
 ---
 name: "review-existing"
-description: "Record an existing exact-head change as pre-existing implementation for a builder.review-existing run; no implementation claim."
+description: "Record an existing exact-head change as pre-existing implementation for a builder.review-existing or builder.deliver-existing run; no implementation claim."
 ---
 
 # Review Existing
 
 ## Role
 
-This is a Builder step skill for the `builder.review-existing` flow.
+This is a Builder step skill for the `builder.review-existing` and
+`builder.deliver-existing` flows.
 
 It records that the change under review already existed before the run: an
 open pull request or any other change at one exact Git commit. It produces the
@@ -15,18 +16,22 @@ open pull request or any other change at one exact Git commit. It produces the
 expectation. It never implements, repairs, or edits source. The run has no
 `execute` step, so it makes no implementation claim.
 
-Use `builder.build` for new work. Use this flow only when the implementation
-already exists and the remaining work is independent review and verification of
-that exact head.
+Use `builder.build` for new work. Use these flows only when the implementation
+already exists. `builder.review-existing` stops after independent review and
+verification of that exact head. `builder.deliver-existing` continues: it
+adopts the change's open pull request, records CI readiness and learning at the
+same head, and lets `merge-change` merge it (see Deliver And Merge below).
 
 ## Binding
 
 | Context | Binding | Flow expectations |
 | --- | --- | --- |
-| Active existing-change run | `builder.review-existing` at `existing-change` | `pre-existing-implementation` |
+| Active existing-change run | `builder.review-existing` or `builder.deliver-existing` at `existing-change` | `pre-existing-implementation` |
 | Standalone invocation | No Flow binding | No workflow mutation. |
 
-The flow's steps are `pull-work`, `existing-change`, `verify`, and `done`.
+The `builder.review-existing` steps are `pull-work`, `existing-change`,
+`verify`, and `done`; `builder.deliver-existing` adds `pr-open`,
+`merge-ready-ci`, and `learn` after `verify`.
 `pull-work` produces `selected-work` as in `builder.build`. At `verify`,
 `review-work` produces `clean-critique` and `verify-work` produces
 `acceptance-criteria`, `tests-evidence`, and applicable `policy-compliance`
@@ -64,6 +69,8 @@ flow-agents workflow start --flow builder.review-existing \
   --source-head <40-hex commit>
 ```
 
+(`--flow builder.deliver-existing` to deliver and merge the change.)
+
 `--source-head` must be the full lowercase commit SHA of the checked-out HEAD.
 The run persists it and re-checks it at every gate. A missing or malformed
 head, a head that is not HEAD, or a dirty tree is refused before any session
@@ -73,7 +80,8 @@ artifact is written.
 
 Write `<session-dir>/<slug>--existing-change.md` with:
 
-- the provider record of the change (for example the pull request URL);
+- the provider record of the change (for example the pull request URL; in a
+  `builder.deliver-existing` run, the URL of the pull request it will adopt);
 - the base ref and base commit;
 - the exact head commit, equal to `--source-head`;
 - the changed files, taken from the diff between base and head.
@@ -93,6 +101,10 @@ flow-agents workflow evidence --session-dir <session-dir> \
 The writer stamps the claim with the captured Git snapshot, so the head is
 observed rather than supplied by the caller. A claim recorded in a dirty tree
 or at another commit cannot satisfy the gate.
+
+In a `builder.deliver-existing` run, give exactly one `provider` evidence ref:
+the pull request's URL. `pr-open` adopts a pull request only when its URL is
+the one this claim names.
 
 ## Verify
 
@@ -124,6 +136,47 @@ Item and archiving keeps its canonical record, so restarting
 the same Work Item resumes the old run. Resuming with a different
 `--source-head` is refused, including for a completed run.
 
+## Deliver And Merge (`builder.deliver-existing`)
+
+After `verify`, a `builder.deliver-existing` run delivers the same head. Every
+gate still re-checks the pinned head, so stay on it until the run completes.
+
+1. `pr-open`: adopt the change's open pull request. Have a local branch with
+   the pull request's head branch name pointing at the pinned head, then run:
+
+   ```bash
+   flow-agents publish-change execute --session-dir <session-dir> \
+     --head-ref <pull-request-branch> --base-ref <base-branch>
+   ```
+
+   It takes no `--title`, `--body`, or `--draft`: the pull request is adopted,
+   never opened, and its title and body are never set or compared. It refuses
+   unless the provider shows exactly one open pull request for that head and
+   base, from a branch in the same repository, at the pinned head, and that
+   pull request is the one the `pre-existing-implementation` claim names.
+   `HEAD` must be the pinned head in a clean worktree.
+2. At `merge-ready-ci`, produce `ci-merge-readiness` with `release-readiness`;
+   at `learn`, produce `decision-evidence` and `learning-evidence` with
+   `learning-review`, exactly as for a `builder.build` run. Those skills'
+   binding tables name only `builder.build`; in this run they apply to its
+   composed `builder.publish-existing` steps. Record CI readiness for the
+   pinned head. Provisional delivery is refused for this flow, because a
+   provisional delivery commit would move the pull request head off the pin.
+3. After the run completes at `learn`, run `flow-agents workflow publish-delivery`
+   (see below). Its checkpoint commit is the pinned head. Commit exactly
+   `delivery/<slug>/` as one commit on the pull request branch and push it
+   (`git add -f delivery/<slug>` when `delivery/` is in the local exclude file).
+   That needs push rights to the pull request's branch in the same
+   repository, and it starts one more CI round on the new head.
+4. `flow-agents merge-change request` and `merge-change execute` merge that
+   terminal head: the pinned head plus exactly the one delivery-only commit.
+   They refuse if the pull request's head moved, if the checkpoint was sealed
+   at another commit, or if the terminal commit carries any other change.
+
+If a second session adopts the same pull request and pushes its own delivery
+commit, the pull request head moves and the first session's merge refuses.
+Nothing detects the second adoption earlier.
+
 ## Consumers And Gaps
 
 - `flow-agents workflow publish-delivery` accepts a completed run; its
@@ -140,13 +193,21 @@ the same Work Item resumes the old run. Resuming with a different
   makes the next pinned start in the same checkout refuse until `delivery/` is
   in the local exclude file (`git rev-parse --git-path info/exclude`) or the
   output is removed.
-- `merge-change` refuses these runs by name: the flow binds no step to the
-  publish-change operation. Merge through the provider's own controls.
+- `merge-change` refuses `builder.review-existing` runs by name: that flow
+  binds no step to the publish-change operation. Merge through the provider's
+  own controls, or use `builder.deliver-existing`.
 - That the reviewer is not the change's author on the provider (for example
   the GitHub pull request author) is `NOT_VERIFIED`. The runtime enforces only
-  that the reviewer differs from the assignment holder.
-- That `--source-head` is the change's actual head on the provider is
-  `NOT_VERIFIED`; nothing compares it with the pull request. The provider URL,
-  base, and head in `<slug>--existing-change.md` are written by the caller and
-  are `NOT_VERIFIED`.
+  that the reviewer differs from the assignment holder. For a
+  `builder.deliver-existing` merge, the provider's approval policy applies
+  (an approving review is required and GitHub forbids approving your own pull
+  request); whether an approval given before the delivery commit still counts
+  for the terminal head depends on the repository's dismiss-stale-reviews
+  setting.
+- In a `builder.review-existing` run, that `--source-head` is the change's
+  actual head on the provider is `NOT_VERIFIED`; nothing compares it with the
+  pull request. A `builder.deliver-existing` run checks it when `pr-open`
+  adopts the pull request, not at start. The base and changed files in
+  `<slug>--existing-change.md` are written by the caller and are
+  `NOT_VERIFIED`.
 - `acceptance.json` is not anchored to a planning step in this flow.
