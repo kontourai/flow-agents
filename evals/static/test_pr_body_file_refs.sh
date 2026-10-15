@@ -379,6 +379,93 @@ else
   fail "a traversal candidate touched the filesystem"
 fi
 
+# --- 9. generated release sections have a bounded historical oracle ----------------
+git -C "$REPO" checkout -q -b release-history "$BASE_SHA"
+printf 'old\n' > "$REPO/src/cli/outside-release.ts"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "older history"
+git -C "$REPO" rm -q src/cli/outside-release.ts
+printf '{"version":"1.0.0"}\n' > "$REPO/package.json"
+printf '{".":"1.0.0"}\n' > "$REPO/.release-please-manifest.json"
+printf '# Changelog\n\n## 1.0.0\n' > "$REPO/CHANGELOG.md"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "prior release"
+git -C "$REPO" tag v1.0.0
+RELEASE_TAG="$(git -C "$REPO" rev-parse v1.0.0)"
+printf 'introduced\n' > "$REPO/src/cli/released-deletion.ts"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "introduce release path"
+git -C "$REPO" rm -q src/cli/released-deletion.ts
+git -C "$REPO" commit -qm "remove release path"
+RELEASE_BASE="$(git -C "$REPO" rev-parse HEAD)"
+RELEASE_SECTION='## [2.0.0](https://github.com/kontourai/flow-agents/compare/v1.0.0...v2.0.0) (2026-10-14)
+
+Removed `src/cli/released-deletion.ts`.'
+printf '# Changelog\n\n%s\n\n## 1.0.0\n' "$RELEASE_SECTION" > "$REPO/CHANGELOG.md"
+printf '{"version":"2.0.0"}\n' > "$REPO/package.json"
+printf '{".":"2.0.0"}\n' > "$REPO/.release-please-manifest.json"
+git -C "$REPO" add -A && git -C "$REPO" commit -qm "release metadata"
+RELEASE_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+RELEASE_REF="release-please--branches--main--components--flow-agents"
+run_release_check() {
+  local body="$1" author="${2-kontourai-releases[bot]}" branch="${3-$RELEASE_REF}"
+  if LAST_OUTPUT="$(cd "$REPO" && PR_BODY="$body" PR_HEAD_SHA="$RELEASE_HEAD" PR_BASE_SHA="$RELEASE_BASE" PR_AUTHOR="$author" PR_HEAD_REF="$branch" node "$VALIDATOR" 2>&1)"; then
+    LAST_STATUS=0
+  else
+    LAST_STATUS=$?
+  fi
+}
+run_release_check "$RELEASE_SECTION"
+[[ "$LAST_STATUS" -eq 0 ]] && pass "generated release admits a path introduced and deleted within its tagged range" || fail "valid historical release rejected: $LAST_OUTPUT"
+for identity in a-human ''; do
+  run_release_check "$RELEASE_SECTION" "$identity"
+  [[ "$LAST_STATUS" -ne 0 ]] && pass "historical range is unavailable without trusted author ($identity)" || fail "untrusted author admitted"
+done
+for branch in ordinary-branch ''; do
+  run_release_check "$RELEASE_SECTION" 'kontourai-releases[bot]' "$branch"
+  [[ "$LAST_STATUS" -ne 0 ]] && pass "historical range is unavailable without release branch ($branch)" || fail "untrusted branch admitted"
+done
+run_release_check "$RELEASE_SECTION
+
+Verified src/cli/released-deletion.ts today."
+[[ "$LAST_STATUS" -ne 0 ]] && pass "ordinary claim outside generated section cannot borrow release history" || fail "ordinary claim borrowed release history"
+for missing in src/cli/outside-release.ts "$FABRICATED_PATH"; do
+  # Even exact generated text cannot borrow an older release or sibling branch.
+  altered="${RELEASE_SECTION/released-deletion.ts/${missing##*/}}"
+  printf '# Changelog\n\n%s\n\n## 1.0.0\n' "$altered" > "$REPO/CHANGELOG.md"
+  git -C "$REPO" add CHANGELOG.md && git -C "$REPO" commit -qm "mutated generated section"
+  RELEASE_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+  run_release_check "$altered"
+  [[ "$LAST_STATUS" -ne 0 && "$LAST_OUTPUT" == *"$missing"* ]] && pass "generated section refuses out-of-range path $missing" || fail "out-of-range path admitted"
+done
+run_release_check "$RELEASE_SECTION"
+[[ "$LAST_STATUS" -ne 0 ]] && pass "body section must match tracked release changelog" || fail "unmatched body accepted"
+# The same release identity cannot smuggle additional source changes into this lane.
+printf '# Changelog\n\n%s\n\n## 1.0.0\n' "$RELEASE_SECTION" > "$REPO/CHANGELOG.md"
+git -C "$REPO" add CHANGELOG.md && git -C "$REPO" commit -qm "restore valid section"
+printf 'extra\n' > "$REPO/src/cli/extra-release-change.ts"
+git -C "$REPO" add src/cli/extra-release-change.ts && git -C "$REPO" commit -qm "extra source change"
+RELEASE_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+# Use the matching current section so the extra diff is the rejecting condition.
+run_release_check "$RELEASE_SECTION"
+[[ "$LAST_STATUS" -ne 0 ]] && pass "release metadata oracle rejects extra source changes" || fail "extra source change admitted"
+git -C "$REPO" rm -q src/cli/extra-release-change.ts && git -C "$REPO" commit -qm "remove extra source change"
+git -C "$REPO" tag -f v1.0.0 "$SIBLING_SHA" >/dev/null
+RELEASE_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+run_release_check "$RELEASE_SECTION"
+[[ "$LAST_STATUS" -ne 0 ]] && pass "previous release tag must be an ancestor of base" || fail "unrelated tag admitted"
+git -C "$REPO" tag -f v1.0.0 "$RELEASE_TAG" >/dev/null
+printf '{"version":"3.0.0"}\n' > "$REPO/package.json"
+git -C "$REPO" add package.json && git -C "$REPO" commit -qm "inconsistent release version"
+RELEASE_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+run_release_check "$RELEASE_SECTION"
+[[ "$LAST_STATUS" -ne 0 ]] && pass "package and release manifest versions must agree" || fail "inconsistent release version admitted"
+printf '{"version":"2.0.0"}\n' > "$REPO/package.json"
+git -C "$REPO" add package.json && git -C "$REPO" commit -qm "restore release version"
+git -C "$REPO" tag -d v1.0.0 >/dev/null
+# Matching metadata isolates missing tag behavior.
+RELEASE_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+run_release_check "$RELEASE_SECTION"
+[[ "$LAST_STATUS" -ne 0 ]] && pass "missing release tag fails closed" || fail "missing release tag admitted"
+git -C "$REPO" checkout -q pr-head
+
 # --- 9. CI wiring -------------------------------------------------------------------
 source_and_static="$(sed -n '/^  source-and-static:/,/^  workflow-contracts:/p' "$WORKFLOW")"
 
