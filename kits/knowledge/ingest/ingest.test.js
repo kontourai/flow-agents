@@ -180,7 +180,7 @@ test("descriptor publication stays inside its held directory during a restored p
   };
   childProcess.spawnSync = (binary, args, options) => args?.at(-2) === "capture.json"
     ? duringSwap(() => spawn(binary, args, options)) : spawn(binary, args, options);
-  nativeFs.openSync = (file, ...args) => String(file) === path.join(pilot.artifactRoot, "capture.json")
+  nativeFs.openSync = (file, ...args) => !swapped && String(file) === path.join(pilot.artifactRoot, "capture.json")
     ? duringSwap(() => open(file, ...args)) : open(file, ...args);
   syncBuiltinESMExports();
   try {
