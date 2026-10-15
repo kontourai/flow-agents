@@ -1,6 +1,6 @@
 {
   "id": "knowledge.ingest",
-  "version": "1.0",
+  "version": "1.1",
   "steps": [
     { "id": "capture", "next": "classify" },
     { "id": "classify", "next": "route" },
@@ -19,7 +19,7 @@
           "bundle_claim": {
             "claimType": "knowledge.ingest.capture",
             "subjectType": "artifact",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified"]
           }
         }
       ]
@@ -35,7 +35,7 @@
           "bundle_claim": {
             "claimType": "knowledge.ingest.classification",
             "subjectType": "artifact",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified"]
           }
         }
       ]
@@ -51,7 +51,7 @@
           "bundle_claim": {
             "claimType": "knowledge.ingest.routing",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified"]
           }
         }
       ]

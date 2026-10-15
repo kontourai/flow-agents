@@ -554,3 +554,70 @@ docker rm -f kg-neo4j
 ## Schema authority and vendoring
 
 `schemas/knowledge/` is the canonical source for every Knowledge schema. The matching `schemas/knowledge/` directory inside this Kit is an exact install payload, not an independently maintained contract. Update both in the same change; `src/cli/kit-knowledge-vendoring-portability.test.mjs` enforces byte-for-byte parity before the Kit is installed.
+
+## Flow CLI ingest pilot
+
+The opt-in `knowledge.ingest-flow-pilot` adapter (`ingest/index.js`) runs only
+`knowledge.ingest` through the public Flow CLI. The existing
+`KnowledgeFlowRunner` remains available, including compile, promote and other
+flows. This pilot does not replace those flows or the live harness integrations.
+
+Install the public `@kontourai/flow` CLI and `@kontourai/surface` in the consuming
+Node project. The opt-in pilot also requires POSIX Python 3 whose standard
+library supports descriptor-relative `os.open`, `os.stat` and `os.unlink`, plus
+`O_NOFOLLOW`. The publisher checks this prerequisite before creating pilot
+artifacts; the CLI checks it before constructing its store. Unsupported
+platforms or a missing interpreter refuse, with the legacy runner still
+available. This distribution qualifies Flow 5.2.0 and Surface 5.0.0. The kit
+invokes Flow as a subprocess and passes recorded artifacts; it imports no Flow
+engine library. A `KnowledgeIngestFlow` instance accepts a store, workspace,
+unique run id and optionally a `flowCommand` argument array for a particular
+installed CLI, and `pythonCommand` for a particular Python 3 interpreter.
+
+For the command line, create a JSON input with `rawText` and optional `meta`
+(`category`, `title`, `tags`, `agent`, `session_id`, `note`, `routing`):
+
+```bash
+node /path/to/knowledge/ingest/cli.js \
+  --input capture.json --workspace /path/to/workspace \
+  --store-root /path/to/store --run-id ingest-001 \
+  --flow-bin /path/to/node_modules/.bin/flow --python-bin /path/to/python3
+```
+
+The driver initializes a fresh Flow workspace with `flow init`, runs `flow start`,
+then attaches and evaluates each gate
+with `flow evaluate --exit-code`. Evaluation advances the canonical run; Flow
+has no separate `advance` CLI command. A missing capture-gate artifact returns a
+nonzero exit and leaves the run at capture, before any store creation. Blank
+source likewise produces no capture claim. Classification preserves the old
+runner's category/title heuristics and raw record provenance. Routing defaults
+to `queue-for-compile`, or records the operator's non-empty `meta.routing`.
+Routing records a decision; it does not execute compilation or delete a record.
+An initialized workspace keeps its Flow config, README and sample definition;
+the driver never re-runs init there. A partial layout with authored init targets
+is refused before pilot artifacts are written. Classification readback must
+match the canonical id returned by create as well as content and provenance.
+
+The driver writes operation observations and Surface bundles under
+`<workspace>/.kontourai/knowledge/ingest/<run-id>/`. `trace.jsonl` retains each
+Flow command's arguments, exit code, stdout and stderr. The kit refuses symlink components and binds both workspace and artifact
+root identities. One shared publisher receives a held directory descriptor
+through child stdio and invokes fixed Python code with data-only arguments and
+stdin. JSON and trace writes open children relative to that descriptor, with
+no-follow/exclusive creation or no-follow append. Operation evidence uses the
+actual persisted readback digest; intended in-memory text alone cannot qualify
+a missing file. Root custody is checked before each command and write. The
+public `start`/`evaluate` diagnostic path retains its descriptors until callers
+invoke `close()`; the one-shot `capture` path closes them on success or failure. Flow owns its run, artifact copies, integrity checks,
+gate evaluations and cursor. Claim status is
+`verified` for these local operations: non-empty input capture, stored raw
+classification readback, and a recorded routing decision. This does **not**
+verify the truth of the source text, constitute independent review, or establish
+host/provider acceptance. Ingest definition version 1.1 uses Surface's current
+`verified` operation status instead of legacy `trusted`/`accepted` report labels.
+
+This is a one-shot pilot. A failed run retains its artifacts for inspection, and
+reusing its id is refused. If failure occurs after raw creation, the raw record
+remains; a rerun with a new id can create another capture. There is no automatic
+retry, rollback or resumption. Use a fresh workspace for experiments and inspect
+both the kit trace and `flow status <run-id> --format json --cwd <workspace>`.
