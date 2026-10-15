@@ -1081,6 +1081,12 @@ runtime readiness. Incompatible or
 missing installed components produce a nonzero exit and an exact, version-pinned `init` command
 that preserves the recorded runtime and active Kits.
 
+Without a current run, doctor reports the kit-declared default selected by the same rule as
+`workflow start` without `--flow`. If that selection refuses (for example, no default, competing
+defaults, or an unreadable kit tree), doctor emits a warning and reports a null definition;
+startup refuses before creating a session. A current run retains its recorded definition and
+does not consult startup defaults for this diagnostic.
+
 The package may use lower-level writer modules internally. They are not a
 supported consumer or skill surface. Consumer guidance and Builder skills use
 `flow-agents workflow` exclusively.

@@ -51,8 +51,6 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-/** The flow `workflow start` binds when no --flow is given; doctor reports it when no run is current. */
-const DEFAULT_START_FLOW_ID = "builder.build";
 const PUBLIC_VERBS = ["start", "status", "evidence-request", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "execute-sealed-workload-request", "execute-sealed-workload", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 const PROVISIONAL_DELIVERY_RECORD = "provisional-delivery.json";
 const PROVISIONAL_DELIVERY_TRANSACTION = ".provisional-delivery.transaction.json";
@@ -3619,9 +3617,14 @@ function doctor(argv: string[]): number {
   if (!resolvedFlowVersion || !flowVersionCompatible(resolvedFlowVersion, expectedFlowRange)) {
     warnings.push(`Resolved Flow runtime ${resolvedFlowVersion ?? "missing"} does not satisfy ${expectedFlowRange || "the package contract"}. Reinstall Flow Agents ${cliVersion}.`);
   }
-  // Without a current run, report the definition a bare `workflow start` would bind.
-  const defaultBinding = resolveKitFlowBinding(DEFAULT_START_FLOW_ID, kitFlowSourceRoots(packageRoot));
-  const defaultDefinition = defaultBinding ? readOptionalJson(defaultBinding.definitionPath) : null;
+  // Only a missing current definition consults startup defaults. A refusal is a diagnostic
+  // warning here; start uses the same selector and refuses before creating a session.
+  let defaultDefinition: JsonRecord | null = null;
+  if (!currentRun?.definition_id) {
+    const resolution = resolveDefaultFlow(projectRoot, "workflow doctor");
+    if (resolution.refusal !== undefined) warnings.push(resolution.refusal);
+    else defaultDefinition = admittedFlowDefinition(resolution.flow, projectRoot);
+  }
   const kitReports = kits.map((kit) => ({
     id: kit.packageKit.id ?? null,
     resolved_schema_version: kit.packageKit.schema_version ?? null,

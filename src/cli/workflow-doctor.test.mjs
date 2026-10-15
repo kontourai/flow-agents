@@ -15,6 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+import { fixtureKit, makeFixturePackage, makeFixtureProject } from "./fixture-kit-package.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const cli = path.join(repoRoot, "build", "src", "cli.js");
@@ -39,9 +40,9 @@ function withCurrentRun(project, flowRun) {
   writeJson(path.join(artifactRoot, "doctor-run", "state.json"), { schema_version: "1.0", task_slug: "doctor-run", flow_run: flowRun });
 }
 
-function doctor(project) {
+function doctor(project, executingCli = cli) {
   const result = spawnSync(process.execPath, [
-    cli, "workflow", "doctor", "--project-root", project,
+    executingCli, "workflow", "doctor", "--project-root", project,
     "--artifact-root", path.join(project, ".kontourai", "flow-agents"), "--json",
   ], { cwd: project, encoding: "utf8" });
   assert.ok(result.status === 0 || result.status === 2, `doctor crashed (${result.status}): ${result.stderr}`);
@@ -84,6 +85,115 @@ test("doctor checks an active non-Builder kit's declared definitions and reports
     assert.ok(drifted.remediation.includes("'--activate-kit' 'knowledge'"), drifted.remediation);
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("doctor and workflow start select the same non-Builder packaged or project default", () => {
+  for (const fromProject of [false, true]) {
+    const pkg = makeFixturePackage("doctor-default-package-", {
+      acme: fixtureKit("acme", fromProject ? {} : { defaultFlow: "acme.survey" }),
+    });
+    const project = makeFixtureProject("doctor-default-project-", {
+      zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }),
+    });
+    try {
+      const expected = fromProject ? "zeta.survey" : "acme.survey";
+      const report = doctor(project, pkg.cli);
+      assert.deepEqual(report.definition, { id: expected, version: "1.0" });
+      assert.deepEqual(report.warnings.filter((warning) => warning.startsWith("workflow doctor:")), []);
+      const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+      const started = spawnSync(process.execPath, [
+        pkg.cli, "workflow", "start", "--task-slug", "default-survey", "--artifact-root", artifactRoot,
+      ], { cwd: project, encoding: "utf8" });
+      assert.equal(started.status, 0, started.stderr + started.stdout);
+      const state = JSON.parse(fs.readFileSync(path.join(artifactRoot, "default-survey", "state.json"), "utf8"));
+      assert.equal(state.flow_run.definition_id, report.definition.id);
+      assert.equal(state.flow_run.definition_version, report.definition.version);
+    } finally {
+      fs.rmSync(project, { recursive: true, force: true });
+      fs.rmSync(pkg.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("doctor warns with no default definition when startup default selection refuses", () => {
+  const cases = [
+    { name: "absent", kits: { acme: fixtureKit("acme") }, reason: /no installed kit declares a default_flow/ },
+    { name: "ambiguous", kits: {
+      acme: fixtureKit("acme", { defaultFlow: "acme.survey" }),
+      zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }),
+    }, reason: /2 kits .* each declare a default_flow/ },
+    ...["not-directory", ...(process.platform === "win32" ? [] : ["unreadable"])].map((name) => ({
+      name, kits: {}, reason: /kit source tree .* must be a readable directory/,
+    })),
+  ];
+  for (const entry of cases) {
+    const pkg = makeFixturePackage(`doctor-default-${entry.name}-`, entry.kits);
+    const project = makeFixtureProject("doctor-default-refused-", entry.name === "absent" || entry.name === "ambiguous" ? {} : {
+      zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }),
+    });
+    const tree = path.join(pkg.root, "kits");
+    try {
+      if (entry.name === "not-directory") { fs.rmSync(tree, { recursive: true }); fs.writeFileSync(tree, "not a directory\n"); }
+      if (entry.name === "unreadable") fs.chmodSync(tree, 0);
+      const report = doctor(project, pkg.cli);
+      assert.equal(report.ok, false);
+      assert.deepEqual(report.definition, { id: null, version: null }, entry.name);
+      const warning = report.warnings.find((value) => value.startsWith("workflow doctor:"));
+      assert.match(warning ?? "", entry.reason, entry.name);
+      const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+      const started = spawnSync(process.execPath, [
+        pkg.cli, "workflow", "start", "--task-slug", "refused-survey", "--artifact-root", artifactRoot,
+      ], { cwd: project, encoding: "utf8" });
+      assert.notEqual(started.status, 0, entry.name);
+      assert.match(started.stderr + started.stdout, entry.reason, entry.name);
+      assert.equal(fs.existsSync(path.join(artifactRoot, "refused-survey")), false, entry.name);
+    } finally {
+      if (entry.name === "unreadable") fs.chmodSync(tree, 0o755);
+      fs.rmSync(project, { recursive: true, force: true });
+      fs.rmSync(pkg.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("doctor retains a current declared source without consulting broken startup defaults", () => {
+  const pkg = makeFixturePackage("doctor-current-defaults-", {
+    acme: fixtureKit("acme", { defaultFlow: "acme.survey" }),
+    zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }),
+  });
+  const project = makeFixtureProject("doctor-current-preserved-", { localprobe: fixtureKit("localprobe") });
+  try {
+    withCurrentRun(project, { definition_id: "acme.survey", definition_version: "1.0" });
+    const report = doctor(project, pkg.cli);
+    assert.deepEqual(report.definition, { id: "acme.survey", version: "1.0" });
+    assert.deepEqual(report.warnings.filter((warning) => warning.startsWith("workflow doctor:")), []);
+
+    // An unrelated malformed manifest must not force default enumeration for a current flow.
+    fs.writeFileSync(path.join(pkg.root, "kits", "zeta", "kit.json"), "{ malformed\n");
+    const malformed = doctor(project, pkg.cli);
+    assert.deepEqual(malformed.definition, { id: "acme.survey", version: "1.0" });
+    assert.deepEqual(malformed.warnings.filter((warning) => warning.startsWith("workflow doctor:")), []);
+
+    // The current declaration remains readable in the project even with an unreadable package
+    // tree. This tests current-source lookup, not canonical run admission or installed readiness.
+    withCurrentRun(project, { definition_id: "localprobe.survey", definition_version: "1.0" });
+    const tree = path.join(pkg.root, "kits");
+    fs.rmSync(tree, { recursive: true });
+    fs.writeFileSync(tree, "not a directory\n");
+    const invalidTree = doctor(project, pkg.cli);
+    assert.deepEqual(invalidTree.definition, { id: "localprobe.survey", version: "1.0" });
+    assert.deepEqual(invalidTree.warnings.filter((warning) => warning.startsWith("workflow doctor:")), []);
+    if (process.platform !== "win32") {
+      fs.rmSync(tree); fs.mkdirSync(tree); fs.chmodSync(tree, 0);
+      try {
+        const unreadable = doctor(project, pkg.cli);
+        assert.deepEqual(unreadable.definition, { id: "localprobe.survey", version: "1.0" });
+        assert.deepEqual(unreadable.warnings.filter((warning) => warning.startsWith("workflow doctor:")), []);
+      } finally { fs.chmodSync(tree, 0o755); }
+    }
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+    fs.rmSync(pkg.root, { recursive: true, force: true });
   }
 });
 
