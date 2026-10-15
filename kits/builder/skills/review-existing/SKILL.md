@@ -155,8 +155,8 @@ gate still re-checks the pinned head, so stay on it until the run completes.
    base, from a branch in the same repository, at the pinned head, and that
    pull request is the one the `pre-existing-implementation` claim names.
    `HEAD` must be the pinned head in a clean worktree.
-2. `merge-ready-ci`: produce `ci-merge-readiness` with `release-readiness` and
-   `learn`: produce `decision-evidence` and `learning-evidence` with
+2. At `merge-ready-ci`, produce `ci-merge-readiness` with `release-readiness`;
+   at `learn`, produce `decision-evidence` and `learning-evidence` with
    `learning-review`, exactly as for a `builder.build` run. Those skills'
    binding tables name only `builder.build`; in this run they apply to its
    composed `builder.publish-existing` steps. Record CI readiness for the
