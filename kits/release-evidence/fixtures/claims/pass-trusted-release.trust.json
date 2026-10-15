@@ -1,22 +1,60 @@
 {
-  "schema_version": "0.1",
-  "artifact_type": "trust-report",
-  "subject": "ci/release-evidence-gate",
-  "producer": "ci/release-evidence-probe",
-  "status": "trusted",
-  "issued_at": "2026-06-12T00:00:00.000Z",
-  "authority_traces": [
-    "github:main"
-  ],
+  "schemaVersion": 5,
+  "source": "ci/release-evidence-probe",
   "claims": [
     {
-      "type": "release.evidence",
-      "subject": "ci/release-evidence-gate",
-      "status": "trusted",
-      "issued_at": "2026-06-12T00:00:00.000Z"
+      "id": "claim.release.evidence.verified",
+      "subjectType": "flow-step",
+      "subjectId": "release-evidence.gate-check",
+      "facet": "release.readiness",
+      "claimType": "release.evidence",
+      "fieldOrBehavior": "releaseEvidence",
+      "value": "release evidence collected",
+      "createdAt": "2026-06-12T00:00:00.000Z",
+      "updatedAt": "2026-06-12T00:00:00.000Z",
+      "impactLevel": "high",
+      "currentIntegrityRef": "commit:release-evidence-fixture",
+      "verificationPolicyId": "policy.release.evidence"
     }
   ],
-  "integrity": {
-    "verified": true
-  }
+  "evidence": [
+    {
+      "id": "evidence.release.evidence.ci",
+      "claimId": "claim.release.evidence.verified",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "ci:release-evidence-probe",
+      "excerptOrSummary": "Release evidence probe passed.",
+      "observedAt": "2026-06-12T00:00:00.000Z",
+      "collectedBy": "ci/release-evidence-probe",
+      "integrityRef": "commit:release-evidence-fixture"
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy.release.evidence",
+      "claimType": "release.evidence",
+      "requiredEvidence": ["test_output"],
+      "requiredMethods": ["validation"],
+      "requiresCorroboration": false,
+      "acceptanceCriteria": ["the release evidence probe passes for the affected commit"],
+      "reviewAuthority": "repo policy",
+      "validityRule": { "kind": "commit" },
+      "stalenessTriggers": ["a new commit touches the release surface"],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "event.release.evidence.verified",
+      "claimId": "claim.release.evidence.verified",
+      "status": "verified",
+      "actor": "ci/release-evidence-probe",
+      "method": "release evidence probe",
+      "evidenceIds": ["evidence.release.evidence.ci"],
+      "createdAt": "2026-06-12T00:00:00.000Z",
+      "verifiedAt": "2026-06-12T00:00:00.000Z"
+    }
+  ]
 }

@@ -1,175 +1,54 @@
 name: Kit Gates Demo (Agentless)
 
-# Proves that Flow Kit gates can be evaluated over claim files in CI with no
-# agent in the loop. The workflow runs:
-#   flow validate-definition   — validates the Flow Definition in the kit
-#   flow validate-kit          — validates kit.json container (requires
-#                                @kontourai/flow >= 0.1.21; merged in source
-#                                PR #67 but not yet in the published package
-#                                as of 0.1.20 — step is continue-on-error)
-#   flow start                 — creates a Flow run
-#   flow attach-evidence --trust-artifact — attaches a claim file to the gate
-#   flow evaluate --exit-code  — evaluates gate; exits 1 when gate does not pass
+# Proves that Flow Kit gates can be evaluated over trust-bundle evidence in CI
+# with no agent in the loop, using the Release Evidence kit. The Flow CLI is the
+# one this package depends on (pnpm install --frozen-lockfile), so the demo
+# follows the package's Flow pin instead of a separate, drifting one.
 #
-# Two jobs exercise one passing and one failing claim fixture:
-#   pass-case: trusted claim → evaluate exits 0 → job succeeds
-#   fail-case: rejected claim → evaluate exits 1 → workflow asserts the
-#              failure is detected (non-zero exit) rather than silently ignored
+# scripts/ci/release-evidence-gate-demo.sh runs validate-definition, kit
+# validate, start, attach-evidence --kind trust.bundle and evaluate --exit-code
+# for a verified claim (must pass) and a rejected claim (must be refused, with
+# a "rejected" claim diagnostic).
 #
-# Triggered on: workflow_dispatch or PR touching kits/release-evidence/** or
-# this workflow file.
+# Triggered on: workflow_dispatch, or a PR touching kits, the engine, the
+# dependency manifests, the demo script or this workflow.
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "kits/release-evidence/**"
+      - "kits/**"
+      - "src/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "scripts/ci/release-evidence-gate-demo.sh"
       - ".github/workflows/kit-gates-demo.yml"
 
 permissions:
   contents: read
 
 jobs:
-  pass-case:
-    name: Gate pass — trusted release.evidence claim
+  release-evidence-gate-demo:
+    name: Release Evidence gate — verified passes, rejected is refused
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "24"
 
-      - name: Install Flow CLI
-        # Mirrors the FLOW_CLI_ROOT install pattern used in ci.yml.
-        run: |
-          mkdir -p .flow-cli
-          cd .flow-cli
-          printf '{"name":"flow-cli-host","private":true}\n' > package.json
-          # Pinned to ~1.3.0: gate evidence uses the Hachure trust.bundle format
-          # (kontourai/flow#84). flow-agents migrated surface.claim -> trust.bundle.
-          npm install --no-save @kontourai/flow@~1.3.0
-        env:
-          FLOW_CLI_ROOT: ${{ github.workspace }}/.flow-cli/node_modules/@kontourai/flow
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Validate Flow Definition (available in published CLI)
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            validate-definition \
-            kits/release-evidence/flows/release-evidence.flow.json \
-            --json
-
-      - name: Validate kit container (requires @kontourai/flow >= next release after 0.1.20)
-        # validate-kit is merged in kontourai/flow source (PR #67) but not yet
-        # validate-kit ships in @kontourai/flow >= 0.2.0 (published 2026-06-12).
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            validate-kit kits/release-evidence
-
-      - name: Init Flow workspace and start run
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js init
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            start kits/release-evidence/flows/release-evidence.flow.json \
-            --run-id gate-pass-demo
-
-      - name: Attach trusted release.evidence claim
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            attach-evidence gate-pass-demo \
-            --gate release-evidence-gate \
-            --file kits/release-evidence/fixtures/claims/pass-trusted-release.trust.json \
-            --trust-artifact
-
-      - name: Evaluate gate — trusted claim must produce pass and exit 0
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            evaluate gate-pass-demo --exit-code
-
-      - name: Show run status
-        if: always()
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            status gate-pass-demo --format summary
-
-  fail-case:
-    name: Gate fail — rejected claim (failure MUST be detected)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "24"
-
-      - name: Install Flow CLI
-        run: |
-          mkdir -p .flow-cli
-          cd .flow-cli
-          printf '{"name":"flow-cli-host","private":true}\n' > package.json
-          # Pinned to ~1.3.0: gate evidence uses the Hachure trust.bundle format
-          # (kontourai/flow#84). flow-agents migrated surface.claim -> trust.bundle.
-          npm install --no-save @kontourai/flow@~1.3.0
-        env:
-          FLOW_CLI_ROOT: ${{ github.workspace }}/.flow-cli/node_modules/@kontourai/flow
-
-      - name: Validate Flow Definition
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            validate-definition \
-            kits/release-evidence/flows/release-evidence.flow.json \
-            --json
-
-      - name: Validate kit container (requires @kontourai/flow >= next release after 0.1.20)
-        continue-on-error: true
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            validate-kit kits/release-evidence
-
-      - name: Init Flow workspace and start run
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js init
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            start kits/release-evidence/flows/release-evidence.flow.json \
-            --run-id gate-fail-demo
-
-      - name: Attach rejected release.evidence claim
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            attach-evidence gate-fail-demo \
-            --gate release-evidence-gate \
-            --file kits/release-evidence/fixtures/claims/fail-rejected-release.trust.json \
-            --trust-artifact
-
-      - name: Evaluate gate — rejected claim must produce non-pass and exit 1
-        # --exit-code makes the CLI exit 1 when the gate does not pass.
-        # continue-on-error: true captures the outcome without failing the job here.
-        id: evaluate_fail
-        continue-on-error: true
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            evaluate gate-fail-demo --exit-code
-
-      - name: Assert failure was detected (gate must NOT pass a rejected claim)
-        # If evaluate exited 0 (outcome == success), the gate incorrectly
-        # accepted a rejected claim — false negative in gate evaluation.
-        run: |
-          if [ "${{ steps.evaluate_fail.outcome }}" = "success" ]; then
-            echo "ERROR: gate passed a rejected claim — false negative in gate evaluation"
-            exit 1
-          fi
-          echo "PASS: gate correctly did not pass the rejected claim (outcome=${{ steps.evaluate_fail.outcome }})"
-
-      - name: Show run status
-        if: always()
-        run: |
-          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
-            status gate-fail-demo --format summary
+      - name: Run the agentless gate demo
+        run: bash scripts/ci/release-evidence-gate-demo.sh
