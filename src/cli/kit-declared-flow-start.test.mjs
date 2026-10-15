@@ -692,6 +692,17 @@ test("default_flow resolution fails closed: competing, absent, and malformed dec
     assert.notEqual(malformed.result.status, 0);
     assert.ok(malformed.result.stderr.includes(`the default_flow declaration is malformed in ${path.join(malformed.pkg.root, "kits", "acme", "kit.json")} (default_flow "zeta.survey" must name a flow of this kit (acme.<flow>))`), malformed.result.stderr);
 
+    const corrupt = makeFixturePackage("kit-default-corrupt-pkg-", {
+      acme: fixtureKit("acme", { defaultFlow: "acme.survey" }),
+      zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }),
+    });
+    packages.push(corrupt.root);
+    fs.writeFileSync(path.join(corrupt.root, "kits", "acme", "kit.json"), "{broken");
+    const corruptResult = runCli(corrupt.cli, ["workflow", "start", "--artifact-root", artifactRoot, "--task-slug", "survey-refused"], project);
+    assert.notEqual(corruptResult.status, 0);
+    assert.match(corruptResult.stderr, /kit\.json must be a readable JSON object before choosing a default flow/);
+    assert.ok(!fs.existsSync(path.join(artifactRoot, "survey-refused")), "an unreadable kit must not silently transfer the default to another kit");
+
     // A well-formed default whose flow has no canonical run is refused with the adapter's reason.
     const unbound = fixtureKit("acme", { defaultFlow: "acme.survey" });
     unbound.manifest.flow_step_actions = unbound.manifest.flow_step_actions.filter((action) => action.flow_id !== "acme.survey");

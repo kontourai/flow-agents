@@ -1490,6 +1490,21 @@ test("provider pickup starts the kit-declared default flow and refuses a default
     const deliverArgv = JSON.parse(deliver.stdout).pickup.operations.start_workflow.argv;
     assert.deepEqual(deliverArgv.slice(5, 9), ["--flow", "acme.deliver", "--work-item", "example/product#45"]);
 
+    const malformedFlow = fixtureKit("acme", { defaultFlow: "acme.deliver" });
+    malformedFlow.flows.deliver.steps[0].id = "select space";
+    malformedFlow.flows.deliver.gates["select-gate"].step = "select space";
+    malformedFlow.flows.deliver.gates["select-gate"].on_route_back.missing_evidence = "select space";
+    malformedFlow.flows.deliver.phase_map.select = "select space";
+    malformedFlow.manifest.flow_step_actions.find((action) => action.flow_id === "acme.deliver").step_id = "select space";
+    malformedFlow.manifest.skill_roles.find((role) => role.flow_id === "acme.deliver").step_ids = ["select space"];
+    const invalidPkg = makeFixturePackage("pickup-invalid-default-pkg-", { acme: malformedFlow });
+    packages.push(invalidPkg.root);
+    const invalidRepo = pickupRepo();
+    const invalid = spawnSync(process.execPath, [invalidPkg.cli, ...pickupArgs(invalidRepo, "example/product#47")], { encoding: "utf8", env });
+    assert.equal(invalid.status, 2, `${invalid.stdout}\n${invalid.stderr}`);
+    assert.match(invalid.stderr, /identifier contract/);
+    assert.equal(fs.existsSync(path.join(invalidRepo, ".kontourai", "flow-agents", "example-product-47")), false);
+
     // A default that selects no Work Item cannot start from a provider Work Item: refused before
     // any pickup artifact is written, rather than emitting a command start would refuse.
     const surveyPkg = makeFixturePackage("pickup-default-pkg-", { acme: fixtureKit("acme", { defaultFlow: "acme.survey" }) });

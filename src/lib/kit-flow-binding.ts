@@ -545,8 +545,9 @@ export interface KitDefaultFlowDeclaration {
 }
 
 /**
- * Every kit under `sourceRoot` that declares `default_flow`, well-formed or not, from the same
- * two kit trees the run binding reads: tracked `kits/<id>/` and integrity-checked installed kits.
+ * Default declarations from the same two kit trees the run binding reads: tracked `kits/<id>/`
+ * and integrity-checked installed kits. An unreadable manifest also refuses selection, since its
+ * default declaration cannot be classified safely.
  *
  * A MALFORMED declaration is returned, not skipped: a kit that tried to declare a default and got
  * it wrong must make the default unresolvable rather than let another kit's answer win silently.
@@ -558,7 +559,14 @@ export function kitDefaultFlowDeclarations(sourceRoot: string): KitDefaultFlowDe
   const consider = (kitsRoot: string, kitId: string): void => {
     const manifestPath = path.join(kitsRoot, kitId, "kit.json");
     const manifest = readJsonObject(manifestPath);
-    if (!manifest || manifest[KIT_DEFAULT_FLOW_FIELD] === undefined) return;
+    if (!manifest) {
+      try { fs.lstatSync(manifestPath); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      }
+      found.push({ kitId, sourceRoot: root, manifestPath, flowId: null, issue: "kit.json must be a readable JSON object before choosing a default flow" });
+      return;
+    }
+    if (manifest[KIT_DEFAULT_FLOW_FIELD] === undefined) return;
     const issue = manifest["id"] !== undefined && manifest["id"] !== kitId
       ? `kit.json id ${JSON.stringify(manifest["id"])} disagrees with its directory ${JSON.stringify(kitId)}`
       : kitDefaultFlowIssue(manifest, kitId);

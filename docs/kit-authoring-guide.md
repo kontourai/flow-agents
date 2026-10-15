@@ -384,10 +384,12 @@ fail-closed:
 - Kits in the executing package are consulted first, then the project's kits. The first of those
   roots holding any `default_flow` decides, so a project kit can supply a default where the package
   declares none but cannot replace a packaged default.
-- No declaration, a malformed one, or more than one kit declaring a default at the deciding root
-  is refused with a message naming the kits involved; pass `--flow` instead.
-- The declared flow must have a canonical run (its kit binds a producer for every gate
-  expectation); otherwise the refusal quotes the missing binding.
+- No declaration, a malformed declaration or unreadable kit manifest, or more than one kit
+  declaring a default at the deciding root is refused with a message naming the kits involved;
+  pass `--flow` instead.
+- The declared flow must pass the same admission contract as an explicit `--flow`, including
+  resolver-compatible identifiers and a canonical run (its kit binds a producer for every gate
+  expectation); otherwise selection refuses before pickup or session artifacts are written.
 
 A provider pickup additionally refuses a default flow that declares no `selected-work`
 expectation, because it starts the picked-up provider Work Item.

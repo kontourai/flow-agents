@@ -129,8 +129,16 @@ export function writeKit(root, kitId, { manifest, flows }) {
 /** A git-initialized project directory with one empty commit, optionally carrying kits. */
 export function makeFixtureProject(prefix, kits = {}) {
   const project = fs.realpathSync(makeFixtureDir(prefix));
-  spawnSync("git", ["init", "-q", "."], { cwd: project });
-  spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: project });
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
+  for (const args of [
+    ["init", "-q", "."],
+    ["config", "--local", "core.hooksPath", ".git/hooks"],
+    ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"],
+  ]) {
+    const result = spawnSync("git", args, { cwd: project, env, encoding: "utf8" });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error(`Fixture Git ${args[0]} failed: ${result.stderr}`);
+  }
   for (const [kitId, kit] of Object.entries(kits)) writeKit(project, kitId, kit);
   return project;
 }

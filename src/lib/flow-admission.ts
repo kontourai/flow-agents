@@ -170,6 +170,8 @@ export function resolveDefaultFlow(repoRoot: string, surface: string, selector =
     if (runRefusal) {
       return { refusal: `${surface}: no ${selector} was given and ${only!.manifestPath} declares ${KIT_DEFAULT_FLOW_FIELD} ${flow}, which the canonical run runtime cannot bind: ${runRefusal}; ${passFlow}` };
     }
+    const admissionRefusal = flowAdmissionRefusal(flow, repoRoot, surface);
+    if (admissionRefusal) return { refusal: `${admissionRefusal}; ${passFlow}` };
     return { flow, kitId: only!.kitId };
   }
   return { refusal: `${surface}: no ${selector} was given and no installed kit declares a ${KIT_DEFAULT_FLOW_FIELD}; ${passFlow}` };
