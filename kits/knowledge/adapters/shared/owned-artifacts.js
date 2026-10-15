@@ -1,12 +1,12 @@
 import * as fs from "node:fs";
 import { spawnSync } from "node:child_process";
 
-const supportProbe = "import os; assert os.name == 'posix' and all(fn in os.supports_dir_fd for fn in (os.open, os.stat, os.unlink)) and hasattr(os, 'O_NOFOLLOW')";
+const supportProbe = "import os,sys; sys.exit(0 if os.name == 'posix' and all(fn in os.supports_dir_fd for fn in (os.open, os.stat, os.unlink)) and hasattr(os, 'O_NOFOLLOW') else 'descriptor-relative POSIX file operations are unavailable')";
 const publisher = `
 import os, sys, hashlib, json, stat
 name, mode = sys.argv[1:]
-assert name and name not in ('.', '..') and '/' not in name and '\\\\' not in name
-assert stat.S_ISDIR(os.fstat(3).st_mode)
+if not name or name in ('.', '..') or '/' in name or '\\\\' in name: raise ValueError('unsafe artifact filename')
+if not stat.S_ISDIR(os.fstat(3).st_mode): raise ValueError('artifact parent is not a directory')
 content = sys.stdin.buffer.read()
 flags = os.O_NOFOLLOW | os.O_WRONLY
 flags |= os.O_APPEND if mode == 'append' else os.O_CREAT | os.O_EXCL
