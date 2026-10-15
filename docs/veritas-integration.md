@@ -46,7 +46,7 @@ make Veritas a dependency of Flow Agents.
 Veritas emits the canonical gate artifact directly:
 
 ```bash
-veritas readiness --format trust-bundle > .veritas/readiness/trust.bundle.json
+npx --no @kontourai/veritas readiness --format trust-bundle > .veritas/readiness/trust.bundle.json
 ```
 
 The Veritas Governance Kit's readiness flow expects a verified
