@@ -117,6 +117,12 @@ declares no flow-agents dependency) and here by [`scripts/check-layer-boundary.m
 [Engine / Surface Seam](https://github.com/kontourai/veritas/blob/main/docs/architecture/engine-surface-seam.md)
 for the canonical engine-vs-kit capability inventory maintained with that external kit.
 
+The Knowledge ingest pilot applies this seam to Flow itself: kit-owned input,
+store readback and routing claim producers pass Surface bundles to the published
+`flow` CLI. Flow evaluates and advances its own canonical run. The pilot adds no
+private gate evaluator; the existing Knowledge runner serves the remaining
+flows. See [Knowledge Kit](knowledge-kit.md#opt-in-flow-ingest-pilot).
+
 ## Related docs
 
 - [Flow Kit Authoring Guide](kit-authoring-guide.md)

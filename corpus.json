@@ -144,7 +144,12 @@
     },
     {
       "source": "docs/knowledge-kit.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        "kits/knowledge/ingest/**",
+        "kits/knowledge/adapters/flow-runner/classification.js",
+        "kits/knowledge/flows/ingest.flow.json"
+      ]
     },
     {
       "source": "docs/codex-pr-review-adoption.md",

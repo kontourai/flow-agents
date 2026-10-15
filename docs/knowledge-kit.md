@@ -63,6 +63,20 @@ removing it from the active working set.
 
 **Live-proven** — keyless operation validated via a Strands agent + local ollama acceptance harness. The vector similarity detector is validated against `nomic-embed-text` with documented threshold guidance.
 
+## Opt-in Flow ingest pilot
+
+The Knowledge Kit also ships `ingest/cli.js` and the
+`knowledge.ingest-flow-pilot` adapter. This pilot delegates ingest gate evaluation
+and advancement to the installed public Flow CLI, while the kit produces
+capture, classification and routing operation claims. Missing capture evidence
+holds the run before any store write. Source text and provenance stay in the raw
+record; these operation claims do not independently verify source content.
+
+See the [kit pilot instructions](../kits/knowledge/docs/README.md#flow-cli-ingest-pilot)
+for prerequisites, commands, retained traces and failure recovery limits.
+`KnowledgeFlowRunner`, the other flows and existing live integrations remain
+available. Compile/promote migration and host acceptance are separate work.
+
 ## Quick reference
 
 ```bash

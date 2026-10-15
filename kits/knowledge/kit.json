@@ -93,6 +93,11 @@
   ],
   "adapters": [
     {
+      "id": "knowledge.ingest-flow-pilot",
+      "path": "ingest/index.js",
+      "description": "Opt-in ingest driver over the public Flow CLI. Capture, classification and routing operation claims advance the canonical Flow run; no private gate evaluator."
+    },
+    {
       "id": "knowledge.default-store",
       "path": "adapters/default-store/index.js",
       "description": "Default store adapter: markdown files + YAML frontmatter + wikilinks + JSON graph index."
@@ -148,7 +153,19 @@
       "description": "Deterministic Context Check adapter for issue #1131: runContextCheck({repoRoot, input, proposalDir}) validates complete revision-bound input/result schemas, verifies raw Git revision identity while clearing inherited Git overrides and disabling replace/graft semantics, distinguishes neutral affected reconciliation from Surface trust, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory."
     }
   ],
+  "assets": [
+    {
+      "id": "knowledge.ingest-flow-cli",
+      "path": "ingest/cli.js",
+      "description": "One-shot opt-in ingest CLI; requires an installed public Flow CLI and Surface package."
+    }
+  ],
   "evals": [
+    {
+      "id": "knowledge.ingest-flow-pilot-suite",
+      "path": "ingest/ingest.test.js",
+      "description": "Real published Flow CLI ingest, persisted source/provenance/routing and missing capture evidence holds."
+    },
     {
       "id": "knowledge.contract-suite",
       "path": "evals/contract-suite/suite.test.js",
