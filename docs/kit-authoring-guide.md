@@ -377,6 +377,9 @@ Note that the hook resolves the repository root through git's **shared** common-
 }
 ```
 
+A library session already bound to a canonical run keeps its persisted flow when `flowId` is
+omitted. The default applies when neither the caller nor that session names a flow.
+
 The value must name a flow of the same kit that the kit lists in its own `flows[]`; validation
 refuses anything else. The engine names no default of its own, and it resolves the declaration
 fail-closed:
