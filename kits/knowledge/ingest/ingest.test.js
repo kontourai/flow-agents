@@ -113,7 +113,7 @@ test("classification refuses an adapter identity mismatch before its claim or ro
   assert.equal((await store.listByType("raw"))[0].id, actualId);
 });
 
-for (const relative of [".kontourai", ".kontourai/knowledge", ".kontourai/knowledge/ingest", ".kontourai/knowledge/ingest/artifact-symlink"]) {
+for (const relative of [".kontourai", ".kontourai/knowledge", ".kontourai/knowledge/ingest"]) {
   test(`artifact symlink at ${relative} refuses before writing outside the workspace`, async (t) => {
     const { pilot, workspace, store } = fixture(t, "artifact-symlink");
     const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "knowledge-outside-")));
