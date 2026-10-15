@@ -130,6 +130,11 @@ prompt. Their telemetry reads the user-global
 the refusal prints this command with your flags. That file applies to every
 Flow Agents install for the user that has no `.kontourai/telemetry-console.conf`
 of its own. `--global` installs for the other runtimes apply the flags.
+The same `init --global` installs also do not apply the Console environment
+variables `install-console-config.sh` reads (`FLOW_AGENTS_TELEMETRY_SINK(S)`,
+`FLOW_AGENTS_CONSOLE_*`, `CONSOLE_TELEMETRY_*`, `CONSOLE_URL`,
+`CONSOLE_TENANT_ID`); init warns on stderr naming the ones that are set and
+points to the operator conf, since that script reads them when you write it.
 
 Selecting only `local-files`, with no `--console-*` flag and no Console URL in
 the installer's environment, writes no Console settings. At runtime the
