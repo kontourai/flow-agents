@@ -533,6 +533,8 @@ export {
   CHANGE_PROVIDER_CAPABILITIES,
   PUBLISH_CHANGE_OPERATION,
   PUBLISH_CHANGE_OPERATION_PROTOCOL,
+  ADOPT_EXISTING_CHANGE_PARAMETERS,
+  adoptExistingChangeOperationProtocol,
   publishChangeOperationProtocol,
   resolveChangeProviderSupport,
 } from "./cli/public-contracts.js";

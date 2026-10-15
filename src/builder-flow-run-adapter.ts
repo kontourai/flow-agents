@@ -259,7 +259,7 @@ export class BuilderBuildRunInputError extends Error {
   readonly field: string;
 
   constructor(field: string, reason: string) {
-    super(`invalid Builder build run input for ${field}: ${reason}`);
+    super(`invalid Builder flow run input for ${field}: ${reason}`);
     this.name = "BuilderBuildRunInputError";
     this.field = field;
   }
@@ -798,3 +798,15 @@ function moduleDirectory(): string {
   return path.dirname(fileURLToPath(import.meta.url));
 }
 
+// #1415: the definition-declared source-head pin. Re-exported by builder-flow-runtime.ts.
+const SOURCE_HEAD_PINNED_AT_START = "pinned-at-start";
+
+/** True when `definition` declares the start-pinned source head. Any other declared shape is refused. */
+export function definitionPinsSourceHead(definition: unknown): boolean {
+  if (!isRecord(definition) || !Object.prototype.hasOwnProperty.call(definition, "source_binding")) return false;
+  const binding = definition.source_binding;
+  if (!isRecord(binding) || Object.keys(binding).length !== 1 || binding.head !== SOURCE_HEAD_PINNED_AT_START) {
+    throw new BuilderBuildRunInputError("definition.source_binding", `must be exactly {"head":"${SOURCE_HEAD_PINNED_AT_START}"}`);
+  }
+  return true;
+}

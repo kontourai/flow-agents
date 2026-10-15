@@ -57,6 +57,12 @@ export interface ChangeProvider {
   readonly kind: ChangeProviderSettings["kind"];
   checkCapability(): Promise<ChangeProviderCapability>;
   createOrRecover(request: ChangeProviderRequest): Promise<ChangeProviderResult>;
+  /**
+   * #1415 slice 2: observe the one open pull request that already exists for the request's exact
+   * refs and head, and never create one. It does not read or compare the request's title, body, or
+   * draft flag: an adopted pull request's metadata is not the adopting run's to set.
+   */
+  adoptExisting(request: ChangeProviderRequest): Promise<ChangeProviderResult>;
 }
 
 export type ChangeProviderErrorCode =
@@ -150,7 +156,7 @@ export function assertRequestMatchesProvider(request: ChangeProviderRequest, pro
   }
 }
 
-export function buildChangeProviderResult(input: {
+type ChangeProviderResultInput = {
   request: ChangeProviderRequest;
   providerRecord: {
     id: unknown; number: unknown; url: unknown; state: unknown; baseRefName: unknown; headRefName: unknown; headRefOid: unknown;
@@ -159,7 +165,38 @@ export function buildChangeProviderResult(input: {
   adapter: "github-gh-cli";
   providerActor: unknown;
   observedAt: string;
+};
+
+export function buildChangeProviderResult(input: ChangeProviderResultInput): ChangeProviderResult {
+  const { request, providerRecord } = input;
+  const observed = observedChangeReference(input);
+  const title = boundedProviderString(providerRecord.title, "provider record title", MAX_TITLE_BYTES);
+  const body = boundedProviderString(providerRecord.body, "provider record body", MAX_BODY_BYTES, true);
+  const isDraft = providerRecord.isDraft;
+  if (title !== request.intent.title || body !== request.intent.body || typeof isDraft !== "boolean" || isDraft !== Boolean(request.intent.draft)) {
+    throw new ChangeProviderError("provider_observation_mismatch", "provider observation does not match the canonical change intent");
+  }
+  return changeProviderResult(input, observed);
+}
+
+/**
+ * #1415 slice 2: the result for an ADOPTED change. It binds the same refs, head, and repository as
+ * buildChangeProviderResult but never reads the record's title, body, or draft flag, and accepts
+ * only an open change.
+ */
+export function buildAdoptedChangeProviderResult(input: Omit<ChangeProviderResultInput, "providerRecord"> & {
+  providerRecord: Omit<ChangeProviderResultInput["providerRecord"], "title" | "body" | "isDraft">;
 }): ChangeProviderResult {
+  const observed = observedChangeReference({ ...input, providerRecord: { ...input.providerRecord, title: undefined, body: undefined, isDraft: undefined } });
+  if (observed.state !== "open") {
+    throw new ChangeProviderError("provider_observation_mismatch", "an adopted change must be open");
+  }
+  return changeProviderResult(input, observed);
+}
+
+type ObservedChangeReference = { recordId: string; number: number; url: string; state: "open" | "merged"; baseRef: string; headRef: string; headSha: string; observedAt: string };
+
+function observedChangeReference(input: ChangeProviderResultInput): ObservedChangeReference {
   const { request, providerRecord } = input;
   const recordId = boundedProviderString(providerRecord.id, "provider record id", MAX_RECORD_ID_BYTES);
   const number = positiveInteger(providerRecord.number, "provider record number");
@@ -171,26 +208,25 @@ export function buildChangeProviderResult(input: {
   if ((state !== "open" && state !== "merged") || baseRef !== request.base_ref || headRef !== request.head_ref || headSha !== request.head_sha) {
     throw new ChangeProviderError("provider_observation_mismatch", "provider observation does not match the canonical request");
   }
-  const title = boundedProviderString(providerRecord.title, "provider record title", MAX_TITLE_BYTES);
-  const body = boundedProviderString(providerRecord.body, "provider record body", MAX_BODY_BYTES, true);
-  const isDraft = providerRecord.isDraft;
-  if (title !== request.intent.title || body !== request.intent.body || typeof isDraft !== "boolean" || isDraft !== Boolean(request.intent.draft)) {
-    throw new ChangeProviderError("provider_observation_mismatch", "provider observation does not match the canonical change intent");
-  }
   const observedAt = boundedProviderString(input.observedAt, "provider observation time", 64);
   if (!Number.isFinite(Date.parse(observedAt))) {
     throw new ChangeProviderError("provider_observation_mismatch", "provider observation time is invalid");
   }
+  return { recordId, number, url, state: state as "open" | "merged", baseRef, headRef, headSha, observedAt };
+}
+
+function changeProviderResult(input: Pick<ChangeProviderResultInput, "request" | "adapter" | "providerActor">, observed: ObservedChangeReference): ChangeProviderResult {
+  const { request } = input;
   return immutable({
     schema_version: CHANGE_PROVIDER_RESULT_SCHEMA_VERSION,
     operation: "publish-change" as const,
     binding: immutable({ ...request.binding, gate_ids: immutable([...request.binding.gate_ids]) }),
     provider: immutable({ kind: "github" as const, configuration_id: request.provider.configuration_id, adapter: input.adapter }),
     repository: immutable({ ...request.repository }),
-    change_ref: immutable({ provider_record_id: recordId, number, url, state: state as "open" | "merged", base_ref: baseRef, head_ref: headRef, head_sha: headSha }),
+    change_ref: immutable({ provider_record_id: observed.recordId, number: observed.number, url: observed.url, state: observed.state, base_ref: observed.baseRef, head_ref: observed.headRef, head_sha: observed.headSha }),
     assignment_actor: request.assignment_actor,
     provider_actor: boundedProviderString(input.providerActor, "authenticated provider actor", MAX_ACTOR_BYTES),
-    observed_at: observedAt,
+    observed_at: observed.observedAt,
   });
 }
 

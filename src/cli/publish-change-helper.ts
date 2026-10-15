@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { validateTrustBundle } from "@kontourai/surface";
 import { parseArgs, flagString } from "../lib/args.js";
 import { readJson } from "../lib/fs.js";
-import { executePublishChangeOperation, type CompletePublishChangeOperationResult } from "../builder-flow-runtime.js";
+import { executePublishChangeOperation, publishChangeSessionAdoptsExistingChange, type CompletePublishChangeOperationResult } from "../builder-flow-runtime.js";
 import { assertTrustedGitAncestor, execTrustedGitSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { observedCommandsBindExactWorkspaceSnapshot } from "./workflow-sidecar.js";
@@ -260,8 +260,17 @@ function reconcile(argv: string[]): number {
 
 const EXECUTE_FLAGS = new Set(["session-dir", "title", "body", "head-ref", "base-ref", "draft"]);
 
-function execute(argv: string[]): Promise<number> {
-  return executeConfiguredChange(argv).then(
+/**
+ * In-process seam, like merge-change's `main(argv, deps)`: tests inject the operation so the CLI's
+ * flag handling (including the adopt path for a source-pinned run) runs against a fake provider.
+ * Production always uses executePublishChangeOperation.
+ */
+export type PublishChangeHelperDependencies = {
+  executeOperation?: typeof executePublishChangeOperation;
+};
+
+function execute(argv: string[], dependencies: PublishChangeHelperDependencies): Promise<number> {
+  return executeConfiguredChange(argv, dependencies.executeOperation ?? executePublishChangeOperation).then(
     (result) => {
       console.log(JSON.stringify({
         operation: "publish-change",
@@ -281,7 +290,7 @@ function execute(argv: string[]): Promise<number> {
   );
 }
 
-async function executeConfiguredChange(argv: string[]): Promise<CompletePublishChangeOperationResult> {
+async function executeConfiguredChange(argv: string[], executeOperation: typeof executePublishChangeOperation): Promise<CompletePublishChangeOperationResult> {
   const args = parseArgs(argv);
   if (args.positionals.length !== 0) throw new Error("publish-change execute accepts only named flags");
   for (const key of Object.keys(args.flags)) {
@@ -289,14 +298,26 @@ async function executeConfiguredChange(argv: string[]): Promise<CompletePublishC
     if (Array.isArray(args.flags[key])) throw new Error(`publish-change execute accepts --${key} at most once`);
   }
   const sessionDir = requiredString(args.flags, "session-dir");
+  const projectRoot = projectRootForSession(sessionDir);
+  // #1415 slice 2: a run pinned to a source head adopts its existing pull request and never opens
+  // one, so it takes no title, body, or draft flag. The operation re-derives this from the run.
+  if (await publishChangeSessionAdoptsExistingChange(sessionDir)) {
+    const supplied = ["title", "body", "draft"].filter((name) => args.flags[name] !== undefined);
+    if (supplied.length > 0) {
+      throw new Error(`publish-change execute adopts the existing pull request for this session's pinned run and never opens one, so it does not accept ${supplied.map((name) => `--${name}`).join(", ")}; pass only --session-dir, --head-ref, and --base-ref`);
+    }
+    const headRef = requiredGitRef(requiredString(args.flags, "head-ref"), "head-ref");
+    const baseRef = requiredGitRef(requiredString(args.flags, "base-ref"), "base-ref");
+    const headSha = resolveImmutableHeadSha(projectRoot, headRef);
+    return await executeOperation({ sessionDir, intent: { base_ref: baseRef, head_ref: headRef, head_sha: headSha } });
+  }
   const title = requiredString(args.flags, "title");
   const body = requiredString(args.flags, "body", true);
   const headRef = requiredGitRef(requiredString(args.flags, "head-ref"), "head-ref");
   const baseRef = requiredGitRef(requiredString(args.flags, "base-ref"), "base-ref");
   if (args.flags.draft !== undefined && args.flags.draft !== true) throw new Error("publish-change execute --draft is a flag and takes no value");
-  const projectRoot = projectRootForSession(sessionDir);
   const headSha = resolveImmutableHeadSha(projectRoot, headRef);
-  return await executePublishChangeOperation({
+  return await executeOperation({
     sessionDir,
     intent: { title, body, base_ref: baseRef, head_ref: headRef, head_sha: headSha, ...(args.flags.draft === true ? { draft: true } : {}) },
   });
@@ -336,7 +357,7 @@ function resolveImmutableHeadSha(projectRoot: string, headRef: string): string {
 }
 
 const PUBLISH_CHANGE_USAGE: Record<string, string> = {
-  execute: "usage: publish-change execute --session-dir <dir> --title <text> --head-ref <ref> --base-ref <ref> [--body <text>] [--draft]",
+  execute: "usage: publish-change execute --session-dir <dir> --title <text> --head-ref <ref> --base-ref <ref> [--body <text>] [--draft]\n       publish-change execute --session-dir <dir> --head-ref <ref> --base-ref <ref>   (a run pinned to a source head: adopts the existing pull request)",
   render: "usage: publish-change render --input-json <path|-> [--body-out <path>]",
   "validate-closing-refs": "usage: publish-change validate-closing-refs --input-json <path|->",
   "evaluate-provider-checks": "usage: publish-change evaluate-provider-checks --change-files-json <path|-> [--provider-checks-json <path>]",
@@ -352,7 +373,7 @@ function printPublishChangeUsage(): void {
   console.log("Run `publish-change <command> --help` for command-specific flags.");
 }
 
-export function main(argv = process.argv.slice(2)): number | Promise<number> {
+export function main(argv = process.argv.slice(2), dependencies: PublishChangeHelperDependencies = {}): number | Promise<number> {
   try {
     const [command, ...rest] = argv;
     if (command === "--help" || command === "-h") {
@@ -363,7 +384,7 @@ export function main(argv = process.argv.slice(2)): number | Promise<number> {
       console.log(PUBLISH_CHANGE_USAGE[command]);
       return 0;
     }
-    if (command === "execute") return execute(rest);
+    if (command === "execute") return execute(rest, dependencies);
     if (command === "render") return render(rest);
     if (command === "validate-closing-refs") return validateClosingRefs(rest);
     if (command === "evaluate-provider-checks") return evaluateProviderChecks(rest);

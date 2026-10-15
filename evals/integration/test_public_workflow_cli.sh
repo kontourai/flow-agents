@@ -861,4 +861,30 @@ node -e 'const r=JSON.parse(process.argv[1]);if(r.definition_id!=="builder.revie
 node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(s.params?.source_head!==process.argv[2])process.exit(1)' "$REVIEW_CONSUMER/.kontourai/flow/runs/acme-widgets-301/state.json" "$REVIEW_HEAD" || fail "packed builder.review-existing did not persist the pinned source head"
 pass "packed builder.review-existing requires and persists the exact clean source head"
 
+# #1415 slice 2: the packed install ships builder.deliver-existing with the same start pin, and its
+# publish-change adopts rather than opens, so the packed CLI refuses a title before any provider
+# call. The full route is exercised in src/cli/builder-deliver-existing.test.mjs.
+mkdir -p "$REVIEW_ROOT/acme-widgets-302"
+printf 'Selected Work Item: acme/widgets#302\n' > "$REVIEW_ROOT/acme-widgets-302/acme-widgets-302--pull-work.md"
+run_deliver_start() {
+  (cd "$REVIEW_CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$FLOW_AGENTS_BIN" workflow start \
+    --artifact-root "$REVIEW_ROOT" --flow builder.deliver-existing --work-item acme/widgets#302 --assignment-provider local-file "$@")
+}
+set +e
+DELIVER_UNPINNED="$(run_deliver_start 2>&1)"
+DELIVER_UNPINNED_RC=$?
+set -e
+[[ "$DELIVER_UNPINNED_RC" -ne 0 && "$DELIVER_UNPINNED" == *"pins the reviewed commit at start"* && ! -e "$REVIEW_ROOT/acme-widgets-302/state.json" ]] || fail "packed start admitted builder.deliver-existing without a pinned source head or mutated before refusing"
+run_deliver_start --source-head "$REVIEW_HEAD" >/dev/null
+DELIVER_STATUS="$(cd "$REVIEW_CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$FLOW_AGENTS_BIN" workflow status --session-dir "$REVIEW_ROOT/acme-widgets-302" --json)"
+node -e 'const r=JSON.parse(process.argv[1]);if(r.definition_id!=="builder.deliver-existing"||r.current_step!=="existing-change")process.exit(1)' "$DELIVER_STATUS" || fail "packed builder.deliver-existing did not start at existing-change"
+node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));if(s.params?.source_head!==process.argv[2])process.exit(1)' "$REVIEW_CONSUMER/.kontourai/flow/runs/acme-widgets-302/state.json" "$REVIEW_HEAD" || fail "packed builder.deliver-existing did not persist the pinned source head"
+set +e
+DELIVER_TITLE="$(cd "$REVIEW_CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$FLOW_AGENTS_BIN" publish-change execute \
+  --session-dir "$REVIEW_ROOT/acme-widgets-302" --title 'Not this run to set' --head-ref HEAD --base-ref main 2>&1)"
+DELIVER_TITLE_RC=$?
+set -e
+[[ "$DELIVER_TITLE_RC" -ne 0 && "$DELIVER_TITLE" == *"adopts the existing pull request for this session's pinned run and never opens one, so it does not accept --title"* ]] || fail "packed publish-change accepted a title for a builder.deliver-existing run"
+pass "packed builder.deliver-existing pins its source head and its publish-change refuses a title"
+
 printf 'public workflow CLI integration passed\n'

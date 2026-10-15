@@ -1,0 +1,119 @@
+{
+  "id": "builder.publish-existing",
+  "version": "1.0",
+  "description": "Delivery closeout for an existing change: adopt its open pull request at the pinned source head, confirm merge readiness from provider/CI evidence, and record learning feedback. Same gates as builder.publish-learn except that merge-ready-ci has no implementation_defect route: the composing flow has no implementation step, so a claim requesting that route is refused and every route-back returns to verify.",
+  "steps": [
+    { "id": "pr-open", "next": "merge-ready-ci" },
+    { "id": "merge-ready-ci", "next": "learn" },
+    { "id": "learn", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "exports": [
+    "builder.pr-open.pull-request",
+    "builder.merge-ready-ci.readiness",
+    "builder.learn.decisions",
+    "builder.learn.evidence"
+  ],
+  "gates": {
+    "pr-open-gate": {
+      "step": "pr-open",
+      "on_route_back": {
+        "missing_evidence": "verify",
+        "default": "verify"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
+      "expects": [
+        {
+          "id": "pull-request-opened",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "An existing pull request is adopted by an authenticated provider observation at the pinned source head. This route never opens a pull request.",
+          "bundle_claim": {
+            "claimType": "builder.pr-open.pull-request",
+            "subjectType": "pull-request",
+            "accepted_statuses": [
+              "verified",
+              "trusted",
+              "accepted"
+            ]
+          }
+        }
+      ]
+    },
+    "merge-ready-ci-gate": {
+      "step": "merge-ready-ci",
+      "requires_current_verification": true,
+      "on_route_back": {
+        "missing_evidence": "verify",
+        "default": "verify"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
+      "expects": [
+        {
+          "id": "ci-merge-readiness",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "CI and review status support a merge-ready decision.",
+          "bundle_claim": {
+            "claimType": "builder.merge-ready-ci.readiness",
+            "subjectType": "pull-request",
+            "accepted_statuses": [
+              "verified",
+              "trusted",
+              "accepted"
+            ]
+          }
+        }
+      ]
+    },
+    "learn-gate": {
+      "step": "learn",
+      "on_route_back": {
+        "missing_evidence": "verify",
+        "default": "verify"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
+      "expects": [
+        {
+          "id": "decision-evidence",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Durable decision evidence from the build is recorded.",
+          "bundle_claim": {
+            "claimType": "builder.learn.decisions",
+            "subjectType": "decision",
+            "accepted_statuses": [
+              "verified",
+              "trusted",
+              "accepted"
+            ]
+          }
+        },
+        {
+          "id": "learning-evidence",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Learning evidence from delivery is recorded for future work.",
+          "bundle_claim": {
+            "claimType": "builder.learn.evidence",
+            "subjectType": "release",
+            "accepted_statuses": [
+              "verified",
+              "trusted",
+              "accepted"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
