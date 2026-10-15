@@ -19,6 +19,15 @@ Options:
                           automatic kit-economics relay (default-on once a
                           Console telemetry sink is configured; see
                           lib/config.sh).
+
+When CONF is the telemetry.conf beside this script (the installed one) and
+--telemetry-sink names only local-files, with no Console URL, endpoint, token
+or tenant, the script records telemetry_sink_pin=local-files there. A pinned
+install ignores the operator Console configs
+(<workspace>/.kontourai/telemetry-console.conf and the user-global
+telemetry-console.conf in .flow-agents under the home directory); an explicit
+TELEMETRY_CONFIG_FILE still wins. Selecting a Console sink later removes the pin. A sink taken only from
+FLOW_AGENTS_TELEMETRY_SINK(S) never pins.
 EOF
 }
 
@@ -99,6 +108,31 @@ set_config_key() {
   mv "$tmp" "$conf"
 }
 
+unset_config_key() {
+  local conf="$1"
+  local key="$2"
+  [[ -f "$conf" ]] || return 0
+  grep -q "^${key}=" "$conf" || return 0
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/flow-agents-telemetry-conf.XXXXXX")"
+  awk -v key="$key" 'BEGIN { prefix = key "=" } index($0, prefix) != 1 { print }' "$conf" >"$tmp"
+  mv "$tmp" "$conf"
+}
+
+# True when CONF is the telemetry.conf beside this script, the one lib/config.sh reads as the
+# installed default. The local-only pin means something only there; written into an operator
+# conf it would be inert, so it is never written anywhere else.
+is_installed_conf() {
+  local conf="$1" conf_dir
+  conf_dir="$(cd "$(dirname "$conf")" 2>/dev/null && pwd -P)" || return 1
+  [[ "$(basename "$conf")" == "telemetry.conf" && "$conf_dir" == "$(cd "$SCRIPT_DIR" && pwd -P)" ]]
+}
+
+# Spelled with ${HOME:-}, not as a home-relative literal: the bundle build rewrites those.
+user_global_console_conf() {
+  printf '%s/.flow-agents/telemetry-console.conf' "${HOME:-}"
+}
+
 main() {
   [[ $# -ge 1 ]] || { usage; exit 2; }
   local conf="$1"
@@ -110,6 +144,9 @@ main() {
   local console_token_file="${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-${CONSOLE_TELEMETRY_TOKEN_FILE:-}}"
   local console_tenant="${FLOW_AGENTS_CONSOLE_TENANT:-${CONSOLE_TENANT_ID:-}}"
   local no_economics_relay=0
+  # Set only by a --telemetry-sink argument: the local-only pin records an explicit choice,
+  # never a sink inherited from FLOW_AGENTS_TELEMETRY_SINK(S) or the local-files default.
+  local sink_flag_given=0
   telemetry_sinks=()
   if [[ -n "${FLOW_AGENTS_TELEMETRY_SINKS:-}" ]]; then
     append_sinks "$FLOW_AGENTS_TELEMETRY_SINKS"
@@ -122,6 +159,7 @@ main() {
       --telemetry-sink|--telemetry-sinks)
         [[ $# -ge 2 ]] || die "$1 requires a value"
         append_sinks "$2"
+        sink_flag_given=1
         shift 2
         ;;
       --console-url)
@@ -194,8 +232,17 @@ main() {
     echo "warning: install-console-config.sh: a Console telemetry sink was selected with no --console-tenant; records will be untenanted" >&2
   fi
 
-  if [[ -z "$console_url" && -z "$console_endpoint" && -z "$console_token" && -z "$console_tenant" \
-        && "$no_economics_relay" -eq 0 ]]; then
+  local has_console_values=0
+  if [[ -n "$console_url" || -n "$console_endpoint" || -n "$console_token" || -n "$console_tenant" ]]; then
+    has_console_values=1
+  fi
+  if [[ "$sink_flag_given" -eq 1 && "$console_sink_count" -eq 0 && "$has_console_values" -eq 0 ]] \
+      && is_installed_conf "$conf"; then
+    set_config_key "$conf" "telemetry_sink_pin" "local-files"
+    echo "Pinned telemetry to local files in $conf: operator Console configs (.kontourai/telemetry-console.conf, $(user_global_console_conf)) are ignored for this install"
+  fi
+
+  if [[ "$has_console_values" -eq 0 && "$no_economics_relay" -eq 0 ]]; then
     return 0
   fi
   if [[ -z "$console_url" && -z "$console_endpoint" && ( -n "$console_token" || -n "$console_tenant" ) ]]; then
@@ -209,6 +256,8 @@ main() {
 
   mkdir -p "$(dirname "$conf")"
   [[ -f "$conf" ]] || : >"$conf"
+  # A Console selection is the latest stated intent, so it lifts an earlier local-only pin.
+  [[ "$has_console_values" -eq 1 ]] && unset_config_key "$conf" "telemetry_sink_pin"
   set_config_key "$conf" "console_telemetry_url" "$console_url"
   set_config_key "$conf" "console_telemetry_endpoint_url" "$console_endpoint"
   set_config_key "$conf" "console_telemetry_token" "$console_token"

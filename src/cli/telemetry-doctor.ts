@@ -26,6 +26,13 @@ export type DoctorReport = {
     sessionDir: string;
     channels: Array<{ name: string; logFile?: string; endpointUrl?: string; active: boolean }>;
     activeSinks: string[];
+    /**
+     * The installed telemetry.conf carries `telemetry_sink_pin=local-files` (#1483) and no
+     * TELEMETRY_CONFIG_FILE overrides it, so the operator Console confs are not consulted.
+     */
+    localOnlyPinned: boolean;
+    /** Operator Console confs present on disk that the local-only pin causes resolution to skip. */
+    skippedConfigFiles: string[];
   };
   console: {
     sink: "local-only" | "console";
@@ -210,8 +217,32 @@ function isConfTrusted(file: string): boolean {
 }
 
 /**
+ * Whether `file` (an installed telemetry.conf) pins the install local-only: its last
+ * `telemetry_sink_pin` key is `local-files`. Mirrors config.sh's telemetry_conf_pinned_local_only
+ * and liveness-write.js's isPinnedLocalOnly.
+ */
+export function isPinnedLocalOnly(file: string): boolean {
+  if (!fs.existsSync(file)) return false;
+  let pinned = false;
+  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1 || trimmed.slice(0, eq).trim() !== "telemetry_sink_pin") continue;
+    pinned = trimmed.slice(eq + 1).trim() === "local-files";
+  }
+  return pinned;
+}
+
+/** Whether no TELEMETRY_CONFIG_FILE is set and the installed telemetry.conf is pinned local-only. */
+function localOnlyPinApplies(telemetryDir: string): boolean {
+  return !process.env.TELEMETRY_CONFIG_FILE && isPinnedLocalOnly(path.join(telemetryDir, "telemetry.conf"));
+}
+
+/**
  * Resolve the config file the bash runtime would actually load, in
- * scripts/telemetry/lib/config.sh's order: explicit TELEMETRY_CONFIG_FILE, a
+ * scripts/telemetry/lib/config.sh's order: explicit TELEMETRY_CONFIG_FILE, the
+ * shipped default when it is pinned local-only (#1483), a
  * trusted per-workspace .kontourai/telemetry-console.conf, a trusted
  * user-global ~/.flow-agents/telemetry-console.conf, then the shipped default.
  *
@@ -226,6 +257,7 @@ function isConfTrusted(file: string): boolean {
 export function resolveTelemetryConfigFile(dest: string, telemetryDir: string): string {
   const explicit = process.env.TELEMETRY_CONFIG_FILE;
   if (explicit) return path.resolve(explicit);
+  if (localOnlyPinApplies(telemetryDir)) return path.join(telemetryDir, "telemetry.conf");
   const localConf = path.join(dest, ".kontourai", "telemetry-console.conf");
   if (isConfTrusted(localConf)) return localConf;
   const globalConf = path.join(os.homedir(), ".flow-agents", "telemetry-console.conf");
@@ -268,7 +300,11 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
   const allowed = endpointAllowed(endpointUrl, allowNetwork);
   const timeoutMs = Number.parseInt(flagString(args.flags, "timeout-ms", "2000") ?? "2000", 10);
   const reachability = await checkConsoleReachability(endpointUrl, Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 2000, allowNetwork);
-  const warnings = reportWarnings(configFile, endpointUrl, allowed, allowNetwork, dest);
+  const localOnlyPinned = localOnlyPinApplies(telemetryDir);
+  const skippedConfigFiles = localOnlyPinned
+    ? [path.join(dest, ".kontourai", "telemetry-console.conf"), path.join(os.homedir(), ".flow-agents", "telemetry-console.conf")].filter((file) => fs.existsSync(file))
+    : [];
+  const warnings = reportWarnings(configFile, endpointUrl, allowed, allowNetwork, dest, localOnlyPinned);
   return {
     ok: enabled && (!endpointUrl || (allowed && reachability.ok !== false)),
     destination: dest,
@@ -280,6 +316,8 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
       sessionDir,
       channels: channelReports,
       activeSinks: activeSinks(enabled, channelReports, endpointUrl, allowed),
+      localOnlyPinned,
+      skippedConfigFiles,
     },
     console: {
       sink: endpointUrl ? "console" : "local-only",
@@ -300,7 +338,7 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
   };
 }
 
-function reportWarnings(configFile: string, endpointUrl: string, allowed: boolean, allowNetwork: boolean, dest: string): string[] {
+function reportWarnings(configFile: string, endpointUrl: string, allowed: boolean, allowNetwork: boolean, dest: string, localOnlyPinned: boolean): string[] {
   const warnings: string[] = [];
   // Only meaningful when the shipped default is the resolved file; a workspace
   // or user-global conf living elsewhere is the normal, supported case.
@@ -309,6 +347,9 @@ function reportWarnings(configFile: string, endpointUrl: string, allowed: boolea
   if (endpointUrl && !allowed) warnings.push(allowNetwork ? "Console endpoint is malformed or contains credentials" : "Console endpoint is not allowed without --allow-network; local http(s) endpoints and the known hosted Console host are allowed by default");
   // Mirrors config.sh's local-before-global precedence for the warning only
   // (see isConfTrusted's doc comment for the accepted config-resolution-parity gap).
+  // A pinned install never reads either conf, so whether one is trusted does not matter (config.sh
+  // does not warn about them either).
+  if (localOnlyPinned) return warnings;
   const localConf = path.join(dest, ".kontourai", "telemetry-console.conf");
   const globalConf = path.join(os.homedir(), ".flow-agents", "telemetry-console.conf");
   if (fs.existsSync(localConf) && !isConfTrusted(localConf)) {
@@ -322,6 +363,10 @@ function reportWarnings(configFile: string, endpointUrl: string, allowed: boolea
 function printText(report: DoctorReport): void {
   console.log(`Telemetry doctor for ${report.destination}`);
   console.log(`Config: ${report.telemetry.configFile} (${report.telemetry.configExists ? "found" : "missing"})`);
+  if (report.telemetry.localOnlyPinned) {
+    console.log("Pinned local-only: telemetry_sink_pin=local-files in the installed telemetry.conf; operator Console configs are not read (TELEMETRY_CONFIG_FILE still overrides)");
+    for (const file of report.telemetry.skippedConfigFiles) console.log(`Skipped by the pin: ${file}`);
+  }
   console.log(`Telemetry enabled: ${report.telemetry.enabled}`);
   console.log(`Local telemetry dir: ${report.telemetry.dataDir}`);
   console.log(`Active sinks: ${report.telemetry.activeSinks.length ? report.telemetry.activeSinks.join(", ") : "none"}`);

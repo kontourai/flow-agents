@@ -35,6 +35,9 @@ const relayEnabledCache = new Map();
  *   2. per-workspace override: <workspace-root>/.kontourai/telemetry-console.conf
  *   3. user-global durable override: ~/.flow-agents/telemetry-console.conf
  *   4. the shipped default: scripts/telemetry/telemetry.conf (relative to this file)
+ * Local-only pin (#1483): when no TELEMETRY_CONFIG_FILE is set and slot 4 carries
+ * `telemetry_sink_pin=local-files` (written by an explicit `--telemetry-sink local-files` install),
+ * slots 2 and 3 are skipped and slot 4 is the answer, exactly as config.sh does.
  * Slot 4's path is <this file>/../../telemetry/telemetry.conf; the workspace root for slot 2 is
  * three levels up from scripts/hooks/lib. This resolver is only the SPAWN pre-gate — it is
  * intentionally lenient (no mode-600 trust gate). relay.sh re-sources config.sh, which applies the
@@ -53,11 +56,17 @@ const relayEnabledCache = new Map();
  * @returns {string|null}  first readable conf path, or null
  */
 function resolveConsoleConfPath(env) {
+  const installedConf = path.join(__dirname, '..', '..', 'telemetry', 'telemetry.conf');
+  const pinned = !env.TELEMETRY_CONFIG_FILE && isPinnedLocalOnly(installedConf);
   const candidates = [
     env.TELEMETRY_CONFIG_FILE,
-    path.join(__dirname, '..', '..', '..', '.kontourai', 'telemetry-console.conf'),
-    path.join(os.homedir(), '.flow-agents', 'telemetry-console.conf'),
-    path.join(__dirname, '..', '..', 'telemetry', 'telemetry.conf'),
+    ...(pinned
+      ? []
+      : [
+          path.join(__dirname, '..', '..', '..', '.kontourai', 'telemetry-console.conf'),
+          path.join(os.homedir(), '.flow-agents', 'telemetry-console.conf'),
+        ]),
+    installedConf,
   ];
   for (const c of candidates) {
     try {
@@ -67,6 +76,28 @@ function resolveConsoleConfPath(env) {
     }
   }
   return null;
+}
+
+/**
+ * Whether the installed telemetry.conf pins this install local-only: its last
+ * `telemetry_sink_pin` key has the value `local-files` (config.sh's telemetry_conf_pinned_local_only).
+ * An unreadable file is not a pin.
+ * @returns {boolean}
+ */
+function isPinnedLocalOnly(file) {
+  let pinned = false;
+  try {
+    for (const raw of fs.readFileSync(file, 'utf8').split('\n')) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq < 0 || line.slice(0, eq).trim() !== 'telemetry_sink_pin') continue;
+      pinned = line.slice(eq + 1).trim() === 'local-files';
+    }
+  } catch {
+    return false;
+  }
+  return pinned;
 }
 
 /**
@@ -170,4 +201,4 @@ function appendLivenessEvent(root, evt) {
   relayLivenessEvent(evt); // then optionally mirror to the Console — best-effort, detached, off by default
 }
 
-module.exports = { livenessStreamFile, appendLivenessEvent, resolveLivenessRelayEnabled };
+module.exports = { livenessStreamFile, appendLivenessEvent, resolveLivenessRelayEnabled, resolveConsoleConfPath };

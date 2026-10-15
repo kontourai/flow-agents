@@ -53,10 +53,39 @@ telemetry_conf_warn_untrusted() {
 # into every packaged dist bundle, so it must never carry owner credentials.
 # A candidate that exists but fails the trust gate falls through silently
 # (telemetry stays fail-open).
+#
+# Local-only pin (#1483): an install run with an explicit `--telemetry-sink
+# local-files` records `telemetry_sink_pin=local-files` in the installed
+# telemetry.conf (install-console-config.sh). A pinned install skips BOTH
+# auto-discovered operator confs (2) and (3) and reads the installed
+# telemetry.conf; only an explicit TELEMETRY_CONFIG_FILE (1) still wins. The
+# same rule is mirrored by scripts/hooks/lib/liveness-write.js and
+# src/cli/telemetry-doctor.ts; src/cli/telemetry-local-pin.test.mjs runs all of
+# them against one fixture.
 TELEMETRY_LOCAL_CONFIG_FILE="${TELEMETRY_WORKSPACE_ROOT}/.kontourai/telemetry-console.conf"
 TELEMETRY_GLOBAL_CONFIG_FILE="${HOME:-}/.flow-agents/telemetry-console.conf"
+TELEMETRY_INSTALLED_CONFIG_FILE="${TELEMETRY_DIR}/telemetry.conf"
+
+# True when the installed telemetry.conf carries telemetry_sink_pin=local-files.
+# The last occurrence of the key wins, like the config loop below.
+telemetry_conf_pinned_local_only() {
+  local file="$1" key value pinned=1
+  [[ -f "$file" ]] || return 1
+  while IFS='=' read -r key value || [[ -n "$key" ]]; do
+    key=$(echo "$key" | tr -d '[:space:]')
+    [[ "$key" == "telemetry_sink_pin" ]] || continue
+    value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ "$value" == "local-files" ]]; then pinned=0; else pinned=1; fi
+  done < "$file"
+  return "$pinned"
+}
+
+TELEMETRY_LOCAL_ONLY_PINNED=0
 if [[ -n "${TELEMETRY_CONFIG_FILE:-}" ]]; then
   :
+elif telemetry_conf_pinned_local_only "$TELEMETRY_INSTALLED_CONFIG_FILE"; then
+  TELEMETRY_LOCAL_ONLY_PINNED=1
+  TELEMETRY_CONFIG_FILE="$TELEMETRY_INSTALLED_CONFIG_FILE"
 elif telemetry_conf_trusted "$TELEMETRY_LOCAL_CONFIG_FILE"; then
   TELEMETRY_CONFIG_FILE="$TELEMETRY_LOCAL_CONFIG_FILE"
 else
@@ -65,7 +94,7 @@ else
     TELEMETRY_CONFIG_FILE="$TELEMETRY_GLOBAL_CONFIG_FILE"
   else
     [[ -n "${HOME:-}" ]] && telemetry_conf_warn_untrusted "$TELEMETRY_GLOBAL_CONFIG_FILE"
-    TELEMETRY_CONFIG_FILE="${TELEMETRY_DIR}/telemetry.conf"
+    TELEMETRY_CONFIG_FILE="$TELEMETRY_INSTALLED_CONFIG_FILE"
   fi
 fi
 

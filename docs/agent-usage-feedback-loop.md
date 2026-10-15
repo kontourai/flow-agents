@@ -195,6 +195,9 @@ fall back to their logical product root such as `product:flow-agents:.kontourai/
 Packaged setup modes are:
 
 - `local-files`: default local JSONL telemetry only; no Console URL or token.
+  Selecting it explicitly (`--telemetry-sink local-files`) also pins the
+  install local-only, so an operator Console config on the machine does not
+  apply to it; see "Owner machine mirror" below.
 - `local-kontour-console`: mirror to a separately running local Console, using
   `http://127.0.0.1:3737` unless `FLOW_AGENTS_LOCAL_KONTOUR_CONSOLE_URL` is set.
 - `kontour-hosted-console`: mirror to Kontour's hosted Console default URL.
@@ -235,8 +238,28 @@ PR, or any other supply-chain path, none of which can produce a 600-mode
 file. A conf that fails that check is treated as if it were absent (fail
 open) and resolution falls through to the next tier.
 
+Both auto-discovered paths are skipped for an install pinned local-only. An
+install run with an explicit `--telemetry-sink local-files` (the flag typed on
+`flow-agents init` or the bundle's `install.sh`) records
+`telemetry_sink_pin=local-files` in its installed
+`scripts/telemetry/telemetry.conf`, and every reader of the Console config
+(`lib/config.sh` and the hooks and relays that source it, the liveness relay
+pre-gate, board sync, and `telemetry-doctor`) then reads that file instead,
+even when a trusted workspace or user-global conf exists. An install without
+the flag records no pin, so the operator conf keeps applying to it. The local-files
+default, the interactive wizard's Skip answer, and a sink taken only from
+`FLOW_AGENTS_TELEMETRY_SINK(S)` do not pin. Re-running `init` replaces an
+installed `telemetry.conf` that nobody edited with the bundle's copy and applies
+only that run's sink, so re-running it without `--telemetry-sink local-files`,
+or with a Console sink, removes the pin. Deleting the `telemetry_sink_pin` line
+removes it too. `init
+--global` for `claude-code` and `opencode` cannot record a pin, because those
+hooks run from the package's own `scripts/telemetry`; init warns when the flag
+is given there. Console environment variables such as `CONSOLE_TELEMETRY_URL`
+are not affected by the pin.
+
 The explicit `TELEMETRY_CONFIG_FILE` env var still overrides both
-auto-discovered paths and always wins. Wiring it from a login-shell profile
+auto-discovered paths and the local-only pin, and always wins. Wiring it from a login-shell profile
 (for example `~/.profile` on `bash -l` setups) remains available for exotic
 setups that need a config path outside both conventional locations, but is
 no longer required for the common case.

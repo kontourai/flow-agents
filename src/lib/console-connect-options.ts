@@ -245,6 +245,12 @@ export type PostInstallSummaryInput = {
   resolvedConfigScope?: ResolvedConfigScope;
   tokenSource?: ConsoleValueProvenance;
   tenantSource?: ConsoleValueProvenance;
+  /**
+   * The local-only pin (#1483): whether this run asked for it (a typed `--telemetry-sink
+   * local-files`), and the installed telemetry.conf that records it, read back after the install
+   * (absent when the file carries no pin). Never inferred from the request alone.
+   */
+  localOnlyPin?: { requested: boolean; recordedIn?: string };
   nextSteps: string[];
 };
 
@@ -299,6 +305,11 @@ export function buildPostInstallSummaryLines(input: PostInstallSummaryInput): st
       ? `  ${scope === "destination" ? "✓" : "!"} Telemetry config resolved from: ${input.resolvedConfigFile}${SCOPE_NOTE[scope]}`
       : "  - Telemetry config resolved from: no telemetry config file found",
   );
+  if (input.localOnlyPin?.recordedIn) {
+    lines.push(`  ✓ Telemetry pinned local-only in ${input.localOnlyPin.recordedIn}: operator Console configs are not read (TELEMETRY_CONFIG_FILE still overrides)`);
+  } else if (input.localOnlyPin?.requested) {
+    lines.push("  ! Telemetry local-only pin: requested with --telemetry-sink local-files but NOT recorded (the installed telemetry.conf was not updated), so operator Console configs still apply");
+  }
   lines.push(`  ${consoleStatusLine(input.consoleStatus)}`);
   lines.push(valueLine("Console token", input.tokenSource));
   lines.push(valueLine("Console tenant", input.tenantSource));

@@ -33,7 +33,7 @@ import {
   type KitScope,
 } from "../lib/kit-registry.js";
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
-import { buildReport } from "./telemetry-doctor.js";
+import { buildReport, isPinnedLocalOnly } from "./telemetry-doctor.js";
 import { bootstrapProviders, type ProviderScope } from "./provider-bootstrap.js";
 import { createOpenCodeAdapter, type InstallationReceipt, type PortableAsset } from "@kontourai/conduit";
 
@@ -50,6 +50,14 @@ type InitOptions = {
   consoleTokenValue?: string;
   consoleTenant?: string;
   telemetrySinks: TelemetrySink[];
+  /**
+   * The caller typed `--telemetry-sink local-files` (and no other sink), which pins the install
+   * local-only (#1483): the installer records `telemetry_sink_pin=local-files` in the installed
+   * telemetry.conf and every runtime reader then skips the operator Console confs. False for the
+   * local-files default and for the interactive wizard's Skip answer, neither of which is a
+   * stated choice of local-only telemetry.
+   */
+  localOnlyPinRequested?: boolean;
   activateKits: boolean;
   activeKitIds?: string[];
   // Informational only -- never read by installBundle()/install-console-config.sh
@@ -166,6 +174,11 @@ Options:
                           (hooks merged, not overwritten).
                         pi: NOT_VERIFIED (no documented global dir); warns and falls back to workspace default.
   --telemetry-sink local-files|local-kontour-console|kontour-hosted-console|user-hosted-console
+                        Typing local-files (alone) pins the install local-only: its
+                          telemetry ignores the operator Console configs
+                          (.kontourai/telemetry-console.conf, ~/.flow-agents/telemetry-console.conf).
+                          Omitting the flag keeps them in effect. Not pinnable with
+                          --global for claude-code and opencode.
   --console-url URL
   --console-endpoint URL
   --console-token-file PATH
@@ -476,6 +489,23 @@ function telemetrySinksFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): 
   return telemetrySinksFromValues(telemetrySinkFlagValues(flags));
 }
 
+/** Whether the typed sink flags name local-files and nothing else (#1483). */
+function localOnlyPinRequestedByFlags(flags: ReturnType<typeof parseArgs>["flags"]): boolean {
+  const values = telemetrySinkFlagValues(flags);
+  return namesOnlyLocalFiles(values) && values.flatMap((value) => value.split(",")).some((sink) => sink.trim() === "local-files");
+}
+
+/**
+ * The sinks to pass to the installer as `--telemetry-sink`. install-console-config.sh records
+ * the local-only pin for a typed local-files sink, so the local-files default (and the wizard's
+ * Skip) is not forwarded: it would otherwise be indistinguishable there from a stated choice.
+ * Leaving it out changes nothing else, because local-files writes no Console settings.
+ */
+export function installerTelemetrySinks(options: Pick<InitOptions, "telemetrySinks" | "localOnlyPinRequested">): TelemetrySink[] {
+  if (!options.localOnlyPinRequested && options.telemetrySinks.every((sink) => sink === "local-files")) return [];
+  return options.telemetrySinks;
+}
+
 function needsConsoleCredentials(sinks: TelemetrySink[]): boolean {
   return sinks.some((sink) => sink !== "local-files");
 }
@@ -489,7 +519,9 @@ function needsConsoleCredentials(sinks: TelemetrySink[]): boolean {
  */
 const GLOBAL_INSTALL_APPLIES_CONSOLE_FLAGS: Record<Runtime, boolean> = {
   // Hook merge plus skills/agents sync only. The hooks run from the package root, so they read
-  // its shipped telemetry.conf or an operator conf, never a per-install one.
+  // its shipped telemetry.conf or an operator conf, never a per-install one. That is also why a
+  // `--telemetry-sink local-files` here records no local-only pin (#1483): there is no
+  // per-install telemetry.conf to record it in.
   "claude-code": false,
   // Config merge plus runtime-asset sync; no Console configuration step.
   opencode: false,
@@ -571,7 +603,7 @@ function refuseUnappliedConsoleFlags(runtime: Runtime, isGlobal: boolean, argv: 
     `${flagNames.join(", ")} ${flagNames.length > 1 ? "are" : "is"} not applied by \`init --global\` for ${runtime}, so nothing was installed.\n` +
     `To send this runtime's global telemetry to a Console, write the operator Console config, then re-run init without these flags:\n` +
     `  bash ${[script, operatorConf, ...consoleArgs].map(shellQuote).join(" ")}\n` +
-    `That file also applies to every other Flow Agents install for this user that has no .kontourai/telemetry-console.conf of its own.\n` +
+    `That file also applies to every other Flow Agents install for this user, except one with its own .kontourai/telemetry-console.conf and one installed with --telemetry-sink local-files, which pins it local-only.\n` +
     `To configure only one project instead, run init for that project without --global.`,
   );
 }
@@ -613,6 +645,20 @@ function warnUnappliedConsoleEnv(runtime: Runtime, isGlobal: boolean, env: NodeJ
   console.warn(
     `flow-agents init: warning: ${set.join(", ")} ${set.length > 1 ? "are" : "is"} set in the environment, but \`init --global\` for ${runtime} does not write Console settings, so this install does not apply ${set.length > 1 ? "them" : "it"}.\n` +
     `To send this runtime's global telemetry to a Console, write the operator Console config ${operatorConf} with ${script}, which reads the same variables.`,
+  );
+}
+
+/**
+ * A `--telemetry-sink local-files` that this runtime's `--global` install accepts but cannot pin
+ * (#1483). Accepted rather than refused, because the install still keeps local files; the warning
+ * says what does not happen, so nothing claims a pin that was never written.
+ */
+function warnUnappliedLocalOnlyPin(runtime: Runtime, isGlobal: boolean, flags: ReturnType<typeof parseArgs>["flags"]): void {
+  if (!isGlobal || GLOBAL_INSTALL_APPLIES_CONSOLE_FLAGS[runtime] || !localOnlyPinRequestedByFlags(flags)) return;
+  const operatorConf = path.join(os.homedir(), ".flow-agents", "telemetry-console.conf");
+  console.warn(
+    `flow-agents init: warning: --telemetry-sink local-files does not pin \`init --global\` for ${runtime} local-only: these hooks run from the package's own scripts/telemetry, so there is no per-install telemetry.conf to record the pin in.\n` +
+    `If ${operatorConf} exists and is trusted, this runtime's telemetry still goes to its Console. To keep it local, remove that file, or set TELEMETRY_CONFIG_FILE in the environment that launches the agent host.`,
   );
 }
 
@@ -710,6 +756,7 @@ export function globalDest(runtime: Runtime): string {
 
 type ConsoleConnectGatherResult = {
   telemetrySinks: TelemetrySink[];
+  localOnlyPinRequested: boolean;
   consoleUrl: string | undefined;
   consoleTokenValue: string | undefined;
   consoleTenant: string | undefined;
@@ -747,7 +794,7 @@ async function gatherConsoleConnectOptions(
     const consoleUrl = consoleUrlFlag ?? (needsUserHostedUrl ? await rl.question("User-hosted Console URL: ") : undefined);
     const consoleTokenValue = consoleTokenFile ? undefined : (needsConsoleCredentials(telemetrySinks) ? await questionHidden("Console telemetry token (blank to skip): ") : undefined);
     const consoleTenant = consoleTenantFlag ?? (needsConsoleCredentials(telemetrySinks) ? await rl.question("Console tenant ID (blank to skip): ") : undefined);
-    return { telemetrySinks, consoleUrl, consoleTokenValue, consoleTenant };
+    return { telemetrySinks, localOnlyPinRequested: localOnlyPinRequestedByFlags(args.flags), consoleUrl, consoleTokenValue, consoleTenant };
   }
 
   const askWithFlagOverrides = async (prompt: string): Promise<string> => {
@@ -769,6 +816,10 @@ async function gatherConsoleConnectOptions(
   for (const warning of wizardResult.warnings) console.warn(`flow-agents init: ${warning}`);
   return {
     telemetrySinks: wizardResult.telemetrySinks,
+    // The wizard's Skip answer means "do not connect a Console here", not "keep this workspace
+    // local-only": a user whose machine-wide operator config already connects them would answer
+    // Skip too. Only a typed --telemetry-sink local-files pins (#1483).
+    localOnlyPinRequested: false,
     consoleUrl: consoleUrlFlag ?? wizardResult.consoleUrl,
     consoleTokenValue: consoleTokenFile ? undefined : wizardResult.consoleTokenValue,
     consoleTenant: consoleTenantFlag ?? wizardResult.consoleTenant,
@@ -792,6 +843,7 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
     // Refuse before the first prompt that follows, so the user is not asked anything first.
     refuseUnappliedConsoleFlags(runtime, isGlobal, argv, args.flags);
     warnUnappliedConsoleEnv(runtime, isGlobal);
+    warnUnappliedLocalOnlyPin(runtime, isGlobal, args.flags);
     const destBase = isGlobal ? globalDest(runtime) : defaultDest(runtime);
     const destDefault = flagString(args.flags, "dest", destBase) ?? destBase;
     const destAnswer = flagString(args.flags, "dest") ?? await rl.question(`Install destination [${destDefault}]: `);
@@ -807,9 +859,9 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
     }
     const consoleEndpoint = consoleFlag(args.flags, "endpoint");
     const consoleTokenFile = consoleFlag(args.flags, "tokenFile");
-    const { telemetrySinks, consoleUrl, consoleTokenValue, consoleTenant } = consoleFlagsApply
+    const { telemetrySinks, localOnlyPinRequested, consoleUrl, consoleTokenValue, consoleTenant } = consoleFlagsApply
       ? await gatherConsoleConnectOptions(rl, args, consoleTokenFile)
-      : { telemetrySinks: telemetrySinksFromFlags(args.flags), consoleUrl: undefined, consoleTokenValue: undefined, consoleTenant: undefined };
+      : { telemetrySinks: telemetrySinksFromFlags(args.flags), localOnlyPinRequested: false, consoleUrl: undefined, consoleTokenValue: undefined, consoleTenant: undefined };
 
     const activeKitIds = selectedKitIdsFromFlags(args.flags);
     if (!activeKitIds.length && !flagBool(args.flags, "activate-kits") && !flagList(args.flags, "activate-kit").length) {
@@ -851,6 +903,7 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
       consoleTokenValue: consoleTokenValue?.trim() || undefined,
       consoleTenant: consoleTenant?.trim() || undefined,
       telemetrySinks,
+      localOnlyPinRequested,
       activateKits: activeKitIds.length > 0,
       activeKitIds,
       configureProviders,
@@ -872,6 +925,8 @@ function headlessOptions(argv: string[]): InitOptions {
   const isGlobal = flagBool(args.flags, "global");
   refuseUnappliedConsoleFlags(runtime, isGlobal, argv, args.flags);
   warnUnappliedConsoleEnv(runtime, isGlobal);
+  warnUnappliedLocalOnlyPin(runtime, isGlobal, args.flags);
+  const consoleFlagsApply = !isGlobal || GLOBAL_INSTALL_APPLIES_CONSOLE_FLAGS[runtime];
   const destBase = isGlobal ? globalDest(runtime) : defaultDest(runtime);
   return {
     runtime,
@@ -882,6 +937,7 @@ function headlessOptions(argv: string[]): InitOptions {
     consoleTokenFile: consoleFlag(args.flags, "tokenFile"),
     consoleTenant: consoleFlag(args.flags, "tenant"),
     telemetrySinks: telemetrySinksFromFlags(args.flags),
+    localOnlyPinRequested: consoleFlagsApply && localOnlyPinRequestedByFlags(args.flags),
     activateKits: selectedKitIdsFromFlags(args.flags).length > 0,
     activeKitIds: selectedKitIdsFromFlags(args.flags),
     configureProviders: flagBool(args.flags, "configure-providers"),
@@ -1306,7 +1362,7 @@ async function installOpencodeGlobalAssets(dest: string, bundle: string, runtime
 export const PERMISSIVE_WORKSPACE_MANAGED_KEYS: readonly string[] = ["permissions", "skipDangerousModePermissionPrompt"];
 
 export function installBundleArgs(
-  options: Pick<InitOptions, "dest" | "telemetrySinks" | "consoleUrl" | "consoleEndpoint" | "consoleTenant" | "permissiveWorkspace"> & { runtime?: Runtime },
+  options: Pick<InitOptions, "dest" | "telemetrySinks" | "localOnlyPinRequested" | "consoleUrl" | "consoleEndpoint" | "consoleTenant" | "permissiveWorkspace"> & { runtime?: Runtime },
   preservedRelPaths: string[],
 ): string[] {
   const args = ["install.sh", options.dest];
@@ -1317,7 +1373,7 @@ export function installBundleArgs(
     for (const key of PERMISSIVE_WORKSPACE_MANAGED_KEYS) args.push("--omit-managed-key", key);
   }
   for (const rel of preservedRelPaths) args.push("--exclude-path", rel);
-  for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
+  for (const sink of installerTelemetrySinks(options)) args.push("--telemetry-sink", sink);
   if (options.consoleUrl) args.push("--console-url", options.consoleUrl);
   if (options.consoleEndpoint) args.push("--console-endpoint", options.consoleEndpoint);
   if (options.consoleTenant) args.push("--console-tenant", options.consoleTenant);
@@ -1487,6 +1543,12 @@ async function printPostInstallSummary(options: InitOptions): Promise<void> {
   if (resolvedConfigScope !== "destination" && resolvedConfigScope !== "absent") {
     nextSteps.push(`The Console lines above describe ${resolvedConfigFile}, which this install did not write; run \`flow-agents telemetry-doctor --dest ${options.dest}\` to re-check at any time.`);
   }
+  // Read back, not assumed: a preserved (not bundle-owned) telemetry.conf is never rewritten.
+  const installedConf = path.join(options.dest, "scripts", "telemetry", "telemetry.conf");
+  const pinRecorded = isPinnedLocalOnly(installedConf);
+  if (!pinRecorded && (resolvedConfigScope === "workspace" || resolvedConfigScope === "user-global") && options.telemetrySinks.every((sink) => sink === "local-files")) {
+    nextSteps.push(`To keep this install local-only despite ${resolvedConfigFile}, re-run init with \`--telemetry-sink local-files\`, which pins it.`);
+  }
   nextSteps.push("Re-run `flow-agents init` anytime to reconfigure runtime, destination, or Console connection.");
   const summaryLines = buildPostInstallSummaryLines({
     runtime: options.runtime,
@@ -1498,6 +1560,7 @@ async function printPostInstallSummary(options: InitOptions): Promise<void> {
     resolvedConfigScope,
     tokenSource,
     tenantSource,
+    localOnlyPin: { requested: Boolean(options.localOnlyPinRequested), recordedIn: pinRecorded ? installedConf : undefined },
     nextSteps,
   });
   for (const line of summaryLines) console.log(line);
@@ -1781,7 +1844,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         return 1;
       }
       const scriptArgs: string[] = [options.dest];
-      for (const sink of options.telemetrySinks) scriptArgs.push("--telemetry-sink", sink);
+      for (const sink of installerTelemetrySinks(options)) scriptArgs.push("--telemetry-sink", sink);
       if (options.consoleUrl) scriptArgs.push("--console-url", options.consoleUrl);
       if (options.consoleEndpoint) scriptArgs.push("--console-endpoint", options.consoleEndpoint);
       if (options.consoleTokenFile) scriptArgs.push("--console-token-file", options.consoleTokenFile);

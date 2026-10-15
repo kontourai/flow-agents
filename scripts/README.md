@@ -128,8 +128,12 @@ prompt. Their telemetry reads the user-global
 `~/.flow-agents/telemetry-console.conf` described below. Write it with
 `bash scripts/telemetry/install-console-config.sh ~/.flow-agents/telemetry-console.conf --telemetry-sink ... --console-url ...`;
 the refusal prints this command with your flags. That file applies to every
-Flow Agents install for the user that has no `.kontourai/telemetry-console.conf`
-of its own. `--global` installs for the other runtimes apply the flags.
+Flow Agents install for the user, except one with its own
+`.kontourai/telemetry-console.conf` and one pinned local-only (below).
+`--global` installs for the other runtimes apply the flags. A
+`--telemetry-sink local-files` given to `init --global` for `claude-code` or
+`opencode` is accepted, but it records no local-only pin, since those hooks
+run from the package's own `scripts/telemetry`; init prints a warning saying so.
 The same `init --global` installs also do not apply the Console environment
 variables `install-console-config.sh` reads (`FLOW_AGENTS_TELEMETRY_SINK(S)`,
 `FLOW_AGENTS_CONSOLE_*`, `CONSOLE_TELEMETRY_*`, `CONSOLE_URL`,
@@ -137,9 +141,13 @@ variables `install-console-config.sh` reads (`FLOW_AGENTS_TELEMETRY_SINK(S)`,
 points to the operator conf, since that script reads them when you write it.
 
 Selecting only `local-files`, with no `--console-*` flag and no Console URL in
-the installer's environment, writes no Console settings. At runtime the
+the installer's environment, writes no Console settings. When `local-files` is
+typed as `--telemetry-sink` (not merely left as the default), the installer
+also records `telemetry_sink_pin=local-files` in the installed
+`telemetry.conf`, which pins the install local-only. At runtime the
 telemetry scripts read exactly one config file: `TELEMETRY_CONFIG_FILE` if
-set; otherwise a trusted `.kontourai/telemetry-console.conf` in the directory
+set; otherwise, for a pinned install, the installed `telemetry.conf`;
+otherwise a trusted `.kontourai/telemetry-console.conf` in the directory
 that contains the `scripts/telemetry/` the hooks run from (the install
 destination for project and Codex installs); otherwise a trusted
 `~/.flow-agents/telemetry-console.conf`; otherwise the installed
@@ -152,10 +160,18 @@ economics and liveness relays turn on unless that file sets
 already sets `FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY` or
 `FLOW_AGENTS_CONSOLE_LIVENESS_RELAY`, for example to `0`), and receipt relay
 and board sync use the same Console. To keep one install from sending
-telemetry to a Console on a machine with a user-global Console config, launch
+telemetry to a Console on a machine with a user-global Console config, install
+it with an explicit `--telemetry-sink local-files`. The liveness relay
+pre-gate and `telemetry-doctor` follow the same order, and the doctor reports
+`localOnlyPinned` and the operator confs the pin skipped. Re-running `init`
+without `--telemetry-sink local-files`, or with a Console sink, removes the pin
+(an unedited installed `telemetry.conf` is reset to the bundle's copy on every
+re-run), and so does deleting the `telemetry_sink_pin` line.
+Environment variables still apply to a pinned install, so launch the agent host
+with no `CONSOLE_*` or `FLOW_AGENTS_CONSOLE_*` variables set. For an install
+that cannot be pinned (`init --global` for `claude-code` or `opencode`), launch
 the agent host with `TELEMETRY_CONFIG_FILE` pointing at a file with no Console
-keys, such as the installed `scripts/telemetry/telemetry.conf`, and with no
-`CONSOLE_*` or `FLOW_AGENTS_CONSOLE_*` variables set.
+keys.
 
 Run `flow-agents telemetry-doctor --dest PATH --json --headless` to inspect an
 installed telemetry configuration. It reports active sinks, local JSONL paths,
