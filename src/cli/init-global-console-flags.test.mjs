@@ -337,7 +337,13 @@ function runInitInteractive(args, { home, cwd }, answers) {
 
 test("interactive init --global opencode refuses a Console flag before any prompt", { skip: python3 ? false : "python3 with the pty module is not available" }, () => {
   const dirs = freshHome("interactive-refuse");
-  const run = runInitInteractive(["--runtime", "opencode", "--global", "--console-url", URL], dirs, [["Install destination", ""]]);
+  // Every later prompt is answered so a regression fails on the assertions, not the timeout.
+  const run = runInitInteractive(["--runtime", "opencode", "--global", "--console-url", URL], dirs, [
+    ["Install destination \\[[^\\]]*\\]: ", ""],
+    ["Connect to Kontour Console\\?[^\\n]*: ", "Skip"],
+    ["Activate kits by id[^\\n]*: ", ""],
+    ["Configure GitHub backlog[^\\n]*: ", "n"],
+  ]);
   assert.equal(run.status, 2, run.output);
   assert.ok(run.output.includes("--console-url is not applied by `init --global` for opencode, so nothing was installed."), run.output);
   assert.doesNotMatch(run.output, /Install destination/);
