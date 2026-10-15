@@ -26,15 +26,15 @@ when only that informational appendix changes.
 | Context | Binding | Flow expectations |
 | --- | --- | --- |
 | Active Builder run | `builder.build` at `verify` | `acceptance-criteria` and `tests-evidence`; `policy-compliance` only when applicable. `review-work` separately produces `clean-critique`. |
-| Active existing-change run | `builder.review-existing` at `verify` | The same expectations, observed in a clean worktree at the run's pinned source head. That run has no `<slug>--plan-work.md`; cite `<slug>--existing-change.md` in evidence refs instead. |
+| Active existing-change run | `builder.review-existing` or `builder.deliver-existing` at `verify` | The same expectations, observed in a clean worktree at the run's pinned source head. That run has no `<slug>--plan-work.md`; cite `<slug>--existing-change.md` in evidence refs instead. |
 | Standalone invocation | No Flow binding | No workflow mutation. |
 
 For an active run, verify the binding first:
 
 The steering hook injects the run state at session start and re-injects it whenever it changes; if a steering state block appears anywhere in your context and you have not recorded evidence or a critique since it appeared, it is current. Run `flow-agents workflow status --session-dir <session-dir> --json` only after such a write or when no steering state block appears in your context at all; the write itself refuses an unbound, stale, or wrong-step binding either way.
 
-Only a matching active `builder.build` or `builder.review-existing` run at
-`verify` may receive workflow evidence. Otherwise, return the verification report and unresolved gaps without
+Only a matching active `builder.build`, `builder.review-existing`, or
+`builder.deliver-existing` run at `verify` may receive workflow evidence. Otherwise, return the verification report and unresolved gaps without
 calling `workflow evidence`.
 
 ## Model Routing

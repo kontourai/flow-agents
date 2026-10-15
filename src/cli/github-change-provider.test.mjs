@@ -285,3 +285,96 @@ test("merged-change closeout observation refuses an open or actor-mismatched pro
     (error) => assertCode(error, "provider_observation_mismatch"),
   );
 });
+
+// ─── #1415 slice 2: adoptExisting ────────────────────────────────────────────────────────────
+// An existing-change run adopts the one open, same-repository pull request at its exact head. It
+// never runs `pr create` and never compares or sets the pull request's title, body, or draft flag.
+
+function sameRepoRecord(overrides = {}) {
+  return providerRecord({ ...overrides, head: { repo: { full_name: "kontourai/flow-agents" }, ...(overrides.head ?? {}) } });
+}
+
+/** One `gh pr list --json` row for the adopt listing: no title or body, plus the head repository identity. */
+function adoptListRecord(overrides = {}) {
+  return { id: "PR_kwDOexample", number: 610, state: "OPEN", baseRefName: "main", headRefName: "agent/change-provider-604-v2", headRefOid: SHA, isCrossRepository: false, headRepositoryOwner: { id: "O_kontourai", login: "kontourai" }, ...overrides };
+}
+
+function forkListRecord(overrides = {}) {
+  return adoptListRecord({ id: "PR_fork", number: 700, isCrossRepository: true, headRepositoryOwner: { id: "O_attacker", login: "attacker" }, headRefOid: STALE_SHA, ...overrides });
+}
+
+function createCalls(fake) {
+  return fake.calls.filter((call) => call.argv[0] === "pr" && call.argv[1] === "create");
+}
+
+function listCall(fake) {
+  return fake.calls.find((call) => call.argv[0] === "pr" && call.argv[1] === "list").argv;
+}
+
+test("adoptExisting observes the one open same-repository PR at the exact head without creating one or comparing its intent", async () => {
+  // Title, body, and draft flag all differ from the request, and the body is not even a string: an
+  // adopted pull request's metadata is not the adopting run's, so none of it may be compared.
+  const fake = fakeExecutor([
+    ...prefix(),
+    [adoptListRecord()],
+    sameRepoRecord({ title: "Someone else's title", body: 42, draft: true }),
+    ...finalPrefix(),
+  ]);
+  const result = await provider(fake).adoptExisting(request());
+  assert.equal(result.change_ref.state, "open");
+  assert.equal(result.change_ref.number, 610);
+  assert.equal(result.change_ref.head_sha, SHA);
+  assert.equal(result.change_ref.url, "https://github.com/kontourai/flow-agents/pull/610");
+  assert.equal(result.provider_actor, "briananderson1222");
+  assert.deepEqual(fake.calls.map((call) => call.argv.slice(0, 2)), [["auth", "token"], ["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"], ["pr", "list"], ["api", "repos/kontourai/flow-agents/pulls/610"], ["auth", "status"], ["api", "user"], ["api", "repos/kontourai/flow-agents"]]);
+  assert.deepEqual(createCalls(fake), [], "adoption never opens a pull request");
+  assert.equal(fake.calls.some((call) => call.argv.includes("--title") || call.argv.includes("--body")), false);
+  // The listing asks only for open pull requests, one more than the bound, with the head repository
+  // identity and without title or body.
+  const argv = listCall(fake);
+  assert.equal(argv[argv.indexOf("--state") + 1], "open");
+  assert.equal(argv[argv.indexOf("--limit") + 1], "101");
+  assert.deepEqual(argv[argv.indexOf("--json") + 1].split(",").sort(), ["baseRefName", "headRefName", "headRefOid", "headRepositoryOwner", "id", "isCrossRepository", "number", "state"]);
+});
+
+test("adoptExisting ignores closed or merged history and fork pull requests from a same-named branch", async () => {
+  for (const [label, listed] of [
+    ["an earlier closed PR on the same branch", [adoptListRecord({ id: "PR_old", number: 500, state: "CLOSED", headRefOid: STALE_SHA }), adoptListRecord()]],
+    ["an earlier merged PR on the same branch", [adoptListRecord({ id: "PR_old", number: 500, state: "MERGED", headRefOid: STALE_SHA }), adoptListRecord()]],
+    ["a fork PR from a same-named branch", [forkListRecord(), adoptListRecord()]],
+    ["a fork PR whose head repository was deleted", [forkListRecord({ headRepositoryOwner: null }), adoptListRecord()]],
+    ["exactly the listing bound of 100 rows", [...Array.from({ length: 99 }, (_, index) => forkListRecord({ id: `PR_fork_${index}`, number: 700 + index })), adoptListRecord()]],
+  ]) {
+    const fake = fakeExecutor([...prefix(), listed, sameRepoRecord(), ...finalPrefix()]);
+    const result = await provider(fake).adoptExisting(request());
+    assert.equal(result.change_ref.number, 610, label);
+    assert.deepEqual(createCalls(fake), [], `${label}: adoption never opens a pull request`);
+  }
+});
+
+test("adoptExisting refuses a missing, duplicate, closed, merged, moved, fork, or over-bound pull request and never creates one", async () => {
+  for (const [label, outputs, code, message] of [
+    ["no pull request", [...prefix(), []], "provider_observation_mismatch", /no open same-repository pull request exists for the pinned head and base refs; an existing-change run adopts an open pull request and never opens one/],
+    ["two open same-repository pull requests", [...prefix(), [adoptListRecord(), adoptListRecord({ id: "PR_second", number: 611 })]], "ambiguous_provider_change", /more than one open same-repository pull request exists/],
+    ["only a closed pull request", [...prefix(), [adoptListRecord({ state: "CLOSED" })]], "provider_observation_mismatch", /no open same-repository pull request exists/],
+    ["only a merged pull request", [...prefix(), [adoptListRecord({ state: "MERGED" })]], "provider_observation_mismatch", /no open same-repository pull request exists/],
+    ["only a fork pull request", [...prefix(), [forkListRecord({ headRefOid: SHA })]], "provider_observation_mismatch", /no open same-repository pull request exists/],
+    ["more than the listing bound", [...prefix(), Array.from({ length: 101 }, (_, index) => forkListRecord({ id: `PR_fork_${index}`, number: 700 + index }))], "ambiguous_provider_change", /more than 100 open pull requests match the pinned head and base refs; refusing to adopt from a truncated listing/],
+    ["head moved", [...prefix(), [adoptListRecord({ headRefOid: STALE_SHA })]], "provider_observation_mismatch", /head has moved off the pinned source head/],
+    ["fork per the authoritative record", [...prefix(), [adoptListRecord()], sameRepoRecord({ head: { repo: { full_name: "attacker/flow-agents" } } })], "provider_observation_mismatch", /not in the configured repository; an existing-change run adopts only a same-repository pull request/],
+    ["fork with deleted head repository", [...prefix(), [adoptListRecord()], providerRecord({ head: { repo: null } })], "malformed_provider_output", /head repository/],
+    ["missing cross-repository flag", [...prefix(), [adoptListRecord({ isCrossRepository: undefined })]], "malformed_provider_output", /cross-repository flag/],
+    ["merged since listing", [...prefix(), [adoptListRecord()], sameRepoRecord({ state: "CLOSED", merged: true }), ...finalPrefix()], "provider_observation_mismatch", /adopted change must be open/],
+    ["closed since listing", [...prefix(), [adoptListRecord()], sameRepoRecord({ state: "CLOSED" }), ...finalPrefix()], "provider_observation_mismatch", /does not match the canonical request/],
+    ["head moved since listing", [...prefix(), [adoptListRecord()], sameRepoRecord({ head: { sha: STALE_SHA } }), ...finalPrefix()], "provider_observation_mismatch", /does not match the canonical request/],
+    ["actor changed", [...prefix(), [adoptListRecord()], sameRepoRecord(), ...finalPrefix("different-user")], "provider_observation_mismatch", /actor changed/],
+  ]) {
+    const fake = fakeExecutor(outputs);
+    await assert.rejects(() => provider(fake).adoptExisting(request()), (error) => {
+      assertCode(error, code);
+      assert.match(error.message, message, label);
+      return true;
+    });
+    assert.deepEqual(createCalls(fake), [], `${label}: adoption never opens a pull request`);
+  }
+});

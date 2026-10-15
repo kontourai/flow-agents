@@ -338,6 +338,9 @@ the envelope projects the exact executable argv `flow-agents publish-change exec
 --session-dir <session-dir>` plus typed title/body/base/head/draft parameters. When it
 is absent or incompatible, the envelope remains `external_capability_required` with an
 `external_verification_required` wait state and no executable completion claim.
+For a definition that pins its source head (`source_binding`), the operation adopts the
+existing pull request instead of opening one: the envelope binds `change.observe` and
+projects only the session-dir, head-ref, and base-ref parameters.
 
 The public command derives repository, immutable head SHA, assignment actor, provider
 configuration identity, run identity, and gate-visit identity under the Flow subject lock.

@@ -544,7 +544,9 @@ export const PUBLISH_CHANGE_OPERATION_PROTOCOL = {
   },
 } as const;
 
-export type PublishChangeOperationProtocol = typeof PUBLISH_CHANGE_OPERATION_PROTOCOL | ReturnType<typeof configuredPublishChangeOperationProtocol> | ReturnType<typeof unsupportedPublishChangeOperationProtocol>;
+type OpenChangeOperationProtocol = typeof PUBLISH_CHANGE_OPERATION_PROTOCOL | ReturnType<typeof configuredPublishChangeOperationProtocol> | ReturnType<typeof unsupportedPublishChangeOperationProtocol>;
+export type PublishChangeOperationProtocol = OpenChangeOperationProtocol
+  | (Omit<OpenChangeOperationProtocol, "capability" | "parameters"> & { capability: "change.observe"; parameters: typeof ADOPT_EXISTING_CHANGE_PARAMETERS });
 
 function configuredPublishChangeOperationProtocol(provider: ChangeProviderSettings) {
   return {
@@ -565,6 +567,26 @@ function unsupportedPublishChangeOperationProtocol(reason: string) {
     ...PUBLISH_CHANGE_OPERATION_PROTOCOL,
     availability: { ...PUBLISH_CHANGE_OPERATION_PROTOCOL.availability, configuration_status: "unsupported", reason },
   } as const;
+}
+
+/**
+ * #1415 slice 2: the caller-facing variant for a run whose definition pins its source head
+ * (`source_binding`). Such a run adopts its existing pull request through an authenticated
+ * observation and never opens one, so the caller passes no title, body, or draft flag, and the
+ * provider capability exercised is change.observe. Additive: PUBLISH_CHANGE_OPERATION_PROTOCOL and
+ * its request/result shapes are unchanged (the issued request carries a fixed adoption intent).
+ */
+export const ADOPT_EXISTING_CHANGE_PARAMETERS = [
+  { name: "session_dir", flag: "--session-dir", required: true, type: "string", max_length: 4_096 },
+  { name: "head_ref", flag: "--head-ref", required: true, type: "string", max_length: 255 },
+  { name: "base_ref", flag: "--base-ref", required: true, type: "string", max_length: 255 },
+] as const;
+
+export function adoptExistingChangeOperationProtocol<T extends { capability: string; parameters: readonly unknown[] }>(protocol: T): Omit<T, "capability" | "parameters"> & {
+  capability: "change.observe";
+  parameters: typeof ADOPT_EXISTING_CHANGE_PARAMETERS;
+} {
+  return { ...structuredClone(protocol), capability: "change.observe", parameters: structuredClone(ADOPT_EXISTING_CHANGE_PARAMETERS) };
 }
 
 export function publishChangeOperationProtocol(changeProvider?: unknown): PublishChangeOperationProtocol {
