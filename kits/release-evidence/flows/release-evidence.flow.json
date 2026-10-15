@@ -15,8 +15,8 @@
           "id": "release-claim-present",
           "kind": "trust.bundle",
           "required": true,
-          "description": "A trusted release.evidence claim must be attached before this gate can pass.",
-          "explore_hint": "Attach a trust-report JSON file with claim type release.evidence and status trusted.",
+          "description": "A verified release.evidence claim must be attached before this gate can pass.",
+          "explore_hint": "Attach a Hachure trust bundle whose release.evidence claim derives verified status.",
           "bundle_claim": {
             "claimType": "release.evidence",
             "accepted_statuses": [

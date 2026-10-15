@@ -15,3 +15,12 @@ Each file is a Hachure trust bundle (`schemaVersion`, `source`, `claims`, `evide
 `policies`, `events`). The demo attaches it with
 `flow attach-evidence --kind trust.bundle`; Flow validates it against the Hachure
 schema and derives each claim's status with Surface before gate evaluation.
+
+Run the demo locally after installing the repository's pinned dependencies:
+
+```bash
+bash scripts/ci/release-evidence-gate-demo.sh
+```
+
+The bundle fields are fixed demonstration data. Real release evidence must be
+emitted for the candidate being released.

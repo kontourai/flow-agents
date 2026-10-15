@@ -32,7 +32,7 @@ workdir="$(mktemp -d)"
 trap 'rm -rf "${workdir}"' EXIT
 cd "${workdir}"
 
-echo "Flow CLI $(node -p "require('${repo_root}/node_modules/@kontourai/flow/package.json').version")"
+echo "Flow CLI $(node -p 'require(process.argv[1]).version' "${repo_root}/node_modules/@kontourai/flow/package.json")"
 flow validate-definition "${definition}" --json
 flow kit validate "${kit_dir}"
 flow init
