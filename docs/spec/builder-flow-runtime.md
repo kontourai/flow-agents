@@ -832,9 +832,9 @@ cancellation nonce cannot be replayed. Archive accepts only completed or cancele
 terminal workflow outcome, supports exact receipt replay through the original
 session identity after the move, and retains the canonical Flow run. None of these
 operations deletes a branch or worktree; cleanup requires the separate
-provider-aware `builder-run reclaim` action. Reclaim is valid only after accepted
-the learning claim types and accepted statuses declared by the run's terminal gate,
-and a fresh authenticated merged observation for the exact worktree head. Reclaim
+provider-aware `builder-run reclaim` action. Reclaim requires accepted learning
+claims with the types and statuses declared by the run's terminal gate, plus a
+fresh authenticated merged observation for the exact worktree head. Reclaim
 reads the session's canonical Flow start definition and state, validates authorized
 amendments with Flow, and uses Flow's effective expectations after project overrides.
 A missing or inconsistent run, multiple terminal steps, or a terminal gate with no
