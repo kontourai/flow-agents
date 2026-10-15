@@ -124,6 +124,22 @@ test("project init (no --global) applies the Console flags to the installed tele
   assert.match(conf, /^console_telemetry_url=https:\/\/console\.example\.test$/m);
 });
 
+// Both aliases of a Console field given at once: the first-listed alias wins, as the separate
+// flagString(a) ?? flagString(b) reads did before CONSOLE_FLAGS replaced them.
+test("project init: --console-endpoint beats --console-endpoint-url and --console-tenant beats --console-tenant-id", () => {
+  const dirs = freshHome("project-alias-precedence");
+  const dest = path.join(makeFixtureDir("init-global-console-alias-dest-"), "dest");
+  const result = runInit([
+    "--runtime", "claude-code", "--dest", dest, "--telemetry-sink", "user-hosted-console", "--console-url", URL,
+    "--console-endpoint-url", "https://b.example/e", "--console-endpoint", "https://a.example/e",
+    "--console-tenant-id", "Y", "--console-tenant", "X",
+  ], dirs);
+  assert.equal(result.status, 0, result.output);
+  const conf = fs.readFileSync(path.join(dest, "scripts", "telemetry", "telemetry.conf"), "utf8");
+  assert.match(conf, /^console_telemetry_endpoint_url=https:\/\/a\.example\/e$/m);
+  assert.match(conf, /^console_tenant_id=X$/m);
+});
+
 test("the refusal and positive-control lists cover every runtime init accepts", () => {
   const dirs = freshHome("runtime-list");
   const result = runInit(["--runtime", "not-a-runtime"], dirs);
