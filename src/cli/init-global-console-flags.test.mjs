@@ -125,14 +125,15 @@ test("project init (no --global) applies the Console flags to the installed tele
 });
 
 // Both aliases of a Console field given at once: the first-listed alias wins, as the separate
-// flagString(a) ?? flagString(b) reads did before CONSOLE_FLAGS replaced them.
+// flagString(a) ?? flagString(b) reads did before CONSOLE_FLAGS replaced them. The primary alias
+// comes last for the endpoint and first for the tenant, so neither argv order can pass by itself.
 test("project init: --console-endpoint beats --console-endpoint-url and --console-tenant beats --console-tenant-id", () => {
   const dirs = freshHome("project-alias-precedence");
   const dest = path.join(makeFixtureDir("init-global-console-alias-dest-"), "dest");
   const result = runInit([
     "--runtime", "claude-code", "--dest", dest, "--telemetry-sink", "user-hosted-console", "--console-url", URL,
     "--console-endpoint-url", "https://b.example/e", "--console-endpoint", "https://a.example/e",
-    "--console-tenant-id", "Y", "--console-tenant", "X",
+    "--console-tenant", "X", "--console-tenant-id", "Y",
   ], dirs);
   assert.equal(result.status, 0, result.output);
   const conf = fs.readFileSync(path.join(dest, "scripts", "telemetry", "telemetry.conf"), "utf8");
