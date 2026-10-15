@@ -259,7 +259,7 @@ export class BuilderBuildRunInputError extends Error {
   readonly field: string;
 
   constructor(field: string, reason: string) {
-    super(`invalid Builder build run input for ${field}: ${reason}`);
+    super(`invalid Builder flow run input for ${field}: ${reason}`);
     this.name = "BuilderBuildRunInputError";
     this.field = field;
   }

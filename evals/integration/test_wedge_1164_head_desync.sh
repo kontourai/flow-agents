@@ -3,7 +3,7 @@
 # must not make the next public writer permanently unrecoverable.
 #
 # Before #1170, the final command failed with:
-#   BuilderBuildRunInputError: invalid Builder build run input for
+#   BuilderBuildRunInputError: invalid Builder flow run input for
 #   evidence.claims.metadata.gate_claim.flow_run_head: must match the canonical
 #   Flow state authorized when the gate claim was recorded
 #

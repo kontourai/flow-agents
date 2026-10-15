@@ -259,7 +259,12 @@ async function currentAction(context: SessionContext, strategy: MergeChangeStrat
   // A flow whose kit binds no step to the publish-change operation never produces the result this
   // operation merges, so refuse it by name before reading provider settings or that result.
   if (!declaredFlowBindsOperation(inspected.run.definitionId, "publish-change", context.projectRoot)) {
-    throw new Error(`${inspected.run.definitionId} runs do not publish a change; merge-change is not supported for them yet. Merge through the provider's own controls.`);
+    // A run pinned to a pre-existing source head reviewed someone's existing change; the flow that
+    // delivers such a change (adopting its pull request) is the one merge-change supports.
+    const reviewedExistingChange = pinnedRunSourceHead(inspected.run.startDefinition, inspected.run.state) !== null;
+    throw new Error(`${inspected.run.definitionId} runs do not publish a change; merge-change is not supported for them. ${reviewedExistingChange
+      ? "To merge a reviewed existing change through merge-change, run builder.deliver-existing at its head instead: it adopts the existing pull request, gates CI readiness and learning, and is supported by merge-change. Otherwise merge"
+      : "Merge"} through the provider's own controls.`);
   }
   const actor = assertCurrentAssignment(context);
   const effective = resolveEffectiveChangeProviderSettings(context.projectRoot, path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"));
