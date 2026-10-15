@@ -1,0 +1,114 @@
+{
+  "id": "atelier.commission",
+  "version": "1.0",
+  "steps": [
+    { "id": "intake", "next": "outline" },
+    { "id": "outline", "next": "draft" },
+    { "id": "draft", "next": "proof" },
+    { "id": "proof", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "intake-gate": {
+      "step": "intake",
+      "expects": [
+        {
+          "id": "selected-work",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A commission is selected and assigned to the active actor.",
+          "bundle_claim": {
+            "claimType": "atelier.intake.commission",
+            "subjectType": "work-item",
+            "accepted_statuses": ["verified"]
+          }
+        }
+      ]
+    },
+    "outline-gate": {
+      "step": "outline",
+      "expects": [
+        {
+          "id": "commission-outline",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The commission outline names the deliverable and its constraints.",
+          "bundle_claim": {
+            "claimType": "atelier.outline.recorded",
+            "subjectType": "artifact",
+            "accepted_statuses": ["verified"]
+          }
+        }
+      ]
+    },
+    "draft-gate": {
+      "step": "draft",
+      "on_route_back": {
+        "outline_gap": "outline"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
+      "expects": [
+        {
+          "id": "draft-scope",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The draft records the files it changed and excludes unrelated work.",
+          "bundle_claim": {
+            "claimType": "atelier.draft.scope",
+            "subjectType": "change",
+            "accepted_statuses": ["verified"]
+          }
+        }
+      ]
+    },
+    "proof-gate": {
+      "step": "proof",
+      "on_route_back": {
+        "draft_defect": "draft",
+        "default": "proof"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
+      "expects": [
+        {
+          "id": "clean-critique",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A distinct reviewer recorded a current clean critique of the draft.",
+          "bundle_claim": {
+            "claimType": "workflow.critique.review",
+            "subjectType": "workflow-critique",
+            "accepted_statuses": ["verified"]
+          }
+        },
+        {
+          "id": "acceptance-criteria",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The commission acceptance criteria have verified evidence.",
+          "bundle_claim": {
+            "claimType": "workflow.acceptance.criterion",
+            "subjectType": "flow-step",
+            "accepted_statuses": ["verified"]
+          }
+        },
+        {
+          "id": "tests-evidence",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The proof's checks ran against the drafted change.",
+          "bundle_claim": {
+            "claimType": "atelier.proof.checks",
+            "subjectType": "flow-step",
+            "accepted_statuses": ["verified"]
+          }
+        }
+      ]
+    }
+  }
+}

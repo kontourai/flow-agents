@@ -666,3 +666,30 @@ test("existing route refusal strings stay byte-identical (consumer safety)", () 
   assert.doesNotThrow(() => assertExecuteFailureRouteBeforeMutation(definition, "execute", "pass", undefined));
   assert.doesNotThrow(() => assertExecuteFailureRouteBeforeMutation(definition, "verify", "fail", undefined));
 });
+
+test("the evidence writer derives the route-reason requirement from the declaring kit's gate, not Builder's execute step", () => {
+  // evals/fixtures/kit-gate-policies: a non-Builder kit whose draft-gate declares route-backs with
+  // no `default` route and whose proof-gate declares a `default` route.
+  const definition = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../evals/fixtures/kit-gate-policies/flows/commission.flow.json"), "utf8"));
+  assert.equal(definition.id, "atelier.commission");
+  assert.throws(
+    () => assertExecuteFailureRouteBeforeMutation(definition, "draft", "fail", undefined),
+    (error) => {
+      assert.equal(error.message, "workflow evidence --route-reason is required for failed draft evidence");
+      return true;
+    },
+  );
+  assert.throws(
+    () => assertExecuteFailureRouteBeforeMutation(definition, "draft", "fail", "plan_gap"),
+    (error) => {
+      assert.equal(error.message, "workflow evidence --route-reason plan_gap is not declared by the active draft gate");
+      return true;
+    },
+  );
+  assert.doesNotThrow(() => assertExecuteFailureRouteBeforeMutation(definition, "draft", "fail", "outline_gap"));
+  assert.doesNotThrow(() => assertExecuteFailureRouteBeforeMutation(definition, "draft", "pass", undefined));
+  // A default route gives a reason-less failure a declared destination, and a gate without a
+  // route map keeps it pending: neither requires a reason.
+  assert.doesNotThrow(() => assertExecuteFailureRouteBeforeMutation(definition, "proof", "fail", undefined));
+  assert.doesNotThrow(() => assertExecuteFailureRouteBeforeMutation(definition, "outline", "fail", undefined));
+});

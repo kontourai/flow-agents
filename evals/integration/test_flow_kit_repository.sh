@@ -85,6 +85,63 @@ else
 fi
 
 echo ""
+echo "=== Catalog Kit Default Validation Check ==="
+# Without --kit the validator checks every kit the catalog lists, not one kit by name. This
+# tree has no kits/builder at all, so a validator that still defaulted to one hardcoded kit
+# fails the first case, and one that checked only the first catalog entry passes the second.
+CATALOG_ROOT="$TMP_DIR/catalog-root"
+mkdir -p "$CATALOG_ROOT/kits"
+cp -R "$ROOT/evals/fixtures/flow-kit-repository/valid-local-kit" "$CATALOG_ROOT/kits/example-kit"
+printf '{"schema_version":"1.0","kits":[{"id":"example-kit","name":"Example Kit","path":"kits/example-kit"}]}\n' >"$CATALOG_ROOT/kits/catalog.json"
+catalog_output="$TMP_DIR/catalog-default.out"
+if (cd "$CATALOG_ROOT" && flow_agents_node "$ROOT/scripts/validate-source-tree.js") >"$catalog_output" 2>&1 \
+  && rg -q 'Source tree validation passed' "$catalog_output"; then
+  pass "source-tree validation without --kit validates the catalog's kits"
+else
+  fail "source-tree validation without --kit did not validate the catalog's own kit"
+  sed -n '1,120p' "$catalog_output"
+fi
+
+cp -R "$ROOT/evals/fixtures/flow-kit-repository/invalid-name" "$CATALOG_ROOT/kits/broken-kit"
+printf '{"schema_version":"1.0","kits":[{"id":"example-kit","name":"Example Kit","path":"kits/example-kit"},{"id":"broken-kit","name":"Broken Kit","path":"kits/broken-kit"}]}\n' >"$CATALOG_ROOT/kits/catalog.json"
+if (cd "$CATALOG_ROOT" && flow_agents_node "$ROOT/scripts/validate-source-tree.js") >"$catalog_output" 2>&1; then
+  fail "source-tree validation without --kit passed a catalog listing an invalid kit"
+  sed -n '1,120p' "$catalog_output"
+elif rg -q '\.name must be a non-empty string' "$catalog_output"; then
+  pass "source-tree validation without --kit fails on any invalid catalog kit"
+else
+  fail "source-tree validation without --kit failed without naming the invalid catalog kit"
+  sed -n '1,120p' "$catalog_output"
+fi
+
+rm "$CATALOG_ROOT/kits/catalog.json"
+if (cd "$CATALOG_ROOT" && flow_agents_node "$ROOT/scripts/validate-source-tree.js") >"$catalog_output" 2>&1; then
+  fail "source-tree validation without --kit passed with no kit catalog"
+  sed -n '1,120p' "$catalog_output"
+elif rg -q 'kits/catalog\.json could not be read' "$catalog_output"; then
+  pass "source-tree validation without --kit refuses a missing kit catalog"
+else
+  fail "source-tree validation without --kit failed a missing catalog without naming it"
+  sed -n '1,120p' "$catalog_output"
+fi
+
+for catalog_case in empty malformed pathless; do
+  case "$catalog_case" in
+    empty) printf '{"kits":[]}\n' >"$CATALOG_ROOT/kits/catalog.json"; expected='\.kits must be a non-empty list' ;;
+    malformed) printf '{broken\n' >"$CATALOG_ROOT/kits/catalog.json"; expected='kits/catalog\.json could not be read' ;;
+    pathless) printf '{"kits":[{"id":"example-kit"}]}\n' >"$CATALOG_ROOT/kits/catalog.json"; expected='kits\[0\] must declare a path' ;;
+  esac
+  if (cd "$CATALOG_ROOT" && flow_agents_node "$ROOT/scripts/validate-source-tree.js") >"$catalog_output" 2>&1; then
+    fail "source-tree validation accepted a $catalog_case catalog"
+  elif rg -q "$expected" "$catalog_output"; then
+    pass "source-tree validation refuses a $catalog_case catalog with its reason"
+  else
+    fail "source-tree validation failed a $catalog_case catalog for an unrelated reason"
+    sed -n '1,120p' "$catalog_output"
+  fi
+done
+
+echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "Flow Kit repository fixture checks passed."
   exit 0
