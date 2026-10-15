@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import nativeFs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +20,7 @@ function fixture(t, runId) {
   t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
   const store = new DefaultKnowledgeStore({ storeRoot: path.join(workspace, "store") });
   const pilot = new KnowledgeIngestFlow({ store, workspace, runId, flowCommand });
-  t.after(() => pilot.close());
+  t.after(() => pilot.close?.());
   const status = () => JSON.parse(execFileSync(process.execPath, [flowCli, "status", runId, "--format", "json", "--cwd", workspace], { encoding: "utf8" }));
   return { workspace, store, pilot, status };
 }
@@ -168,25 +169,30 @@ test("descriptor publication stays inside its held directory during a restored p
   const parent = path.join(workspace, ".kontourai", "knowledge");
   const parked = `${parent}-parked`;
   const spawn = childProcess.spawnSync;
+  const open = nativeFs.openSync;
   let swapped = false;
-  childProcess.spawnSync = (binary, args, options) => {
-    if (args?.at(-2) !== "capture.json") return spawn(binary, args, options);
+  const duringSwap = (operation) => {
     swapped = true;
     fs.renameSync(parent, parked);
     fs.symlinkSync(outside, parent);
-    try { return spawn(binary, args, options); }
+    try { return operation(); }
     finally { fs.unlinkSync(parent); fs.renameSync(parked, parent); }
   };
+  childProcess.spawnSync = (binary, args, options) => args?.at(-2) === "capture.json"
+    ? duringSwap(() => spawn(binary, args, options)) : spawn(binary, args, options);
+  nativeFs.openSync = (file, ...args) => String(file) === path.join(pilot.artifactRoot, "capture.json")
+    ? duringSwap(() => open(file, ...args)) : open(file, ...args);
   syncBuiltinESMExports();
   try {
     const result = await pilot.capture(rawText);
-    assert.equal(swapped, true, "fault reached the actual publisher spawn boundary");
+    assert.equal(swapped, true, "fault reached the actual artifact publication boundary");
     assert.equal(status().current_step, "done");
     assert.equal(result.record.body, rawText);
     assert.equal(fs.existsSync(path.join(outside, "ingest", pilot.runId, "capture.json")), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(pilot.artifactRoot, "capture.json"))).rawText, rawText);
   } finally {
     childProcess.spawnSync = spawn;
+    nativeFs.openSync = open;
     syncBuiltinESMExports();
   }
 });
