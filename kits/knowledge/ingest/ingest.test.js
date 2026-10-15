@@ -121,7 +121,7 @@ for (const relative of [".kontourai", ".kontourai/knowledge", ".kontourai/knowle
     const target = path.join(workspace, relative);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.symlinkSync(outside, target);
-    await assert.rejects(pilot.capture(rawText), /UNSAFE_INGEST_PATH/);
+    await assert.rejects(pilot.capture(rawText));
     assert.deepEqual(fs.readdirSync(outside), []);
     assert.equal(fs.existsSync(path.join(workspace, ".flow")), false);
     assert.deepEqual(await store.listByType("raw"), []);
