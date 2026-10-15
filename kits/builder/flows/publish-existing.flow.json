@@ -1,7 +1,7 @@
 {
   "id": "builder.publish-existing",
   "version": "1.0",
-  "description": "Delivery closeout for an existing change: adopt its open pull request at the pinned source head, confirm merge readiness from provider/CI evidence, and record learning feedback. Same gates as builder.publish-learn except that merge-ready-ci has no implementation_defect route: the composing flow has no implementation step, so a defect blocks the run instead of routing to one.",
+  "description": "Delivery closeout for an existing change: adopt its open pull request at the pinned source head, confirm merge readiness from provider/CI evidence, and record learning feedback. Same gates as builder.publish-learn except that merge-ready-ci has no implementation_defect route: the composing flow has no implementation step, so a claim requesting that route is refused and every route-back returns to verify.",
   "steps": [
     { "id": "pr-open", "next": "merge-ready-ci" },
     { "id": "merge-ready-ci", "next": "learn" },
