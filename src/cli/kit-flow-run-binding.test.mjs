@@ -512,3 +512,106 @@ test("every door enforces admission: the sidecar REFUSES a flow with no canonica
     fs.rmSync(project, { recursive: true, force: true });
   }
 });
+
+// ─── Operation-bound expectations are refused for EVERY declaring kit ────────────────────────
+
+/**
+ * A kit whose only gate expectation is bound to an external `operation`, mirroring the shape the
+ * builder kit uses for `pr-open` (an operation step with no skills, one result artifact, and a
+ * `publish-change` operation binding). Nothing here refers to the builder kit.
+ */
+function operationKitManifest(kitId) {
+  const flowId = `${kitId}.ship`;
+  return {
+    schema_version: "1.0",
+    id: kitId,
+    name: `${kitId} kit`,
+    flows: [{ id: flowId, path: "flows/ship.flow.json", description: "fixture operation flow" }],
+    flow_step_actions: [{
+      flow_id: flowId,
+      step_id: "publish",
+      skills: [],
+      operations: ["publish-change"],
+      implementation_allowed: false,
+      expectation_ids: ["change-published"],
+      artifacts: ["publish-change.result.json"],
+      expectation_bindings: [{ expectation_id: "change-published", interface: "operation", operation: "publish-change" }],
+      artifact_bindings: [{ artifact: "publish-change.result.json", expectation_ids: ["change-published"] }],
+    }],
+  };
+}
+
+function operationFlow(id) {
+  return {
+    id,
+    version: "1.0",
+    steps: [{ id: "publish", next: "closeout" }, { id: "closeout", next: null }],
+    phase_map: { publish: "publish", closeout: "closeout" },
+    gates: {
+      "publish-gate": {
+        step: "publish",
+        on_route_back: { missing_evidence: "publish", default: "publish" },
+        route_back_policy: { max_attempts: 3, on_exceeded: "block" },
+        expects: [{
+          id: "change-published",
+          kind: "trust.bundle",
+          required: true,
+          description: "fixture change-published",
+          bundle_claim: { claimType: "fixture.change-published", subjectType: "change", accepted_statuses: ["verified"] },
+        }],
+      },
+    },
+  };
+}
+
+/** Every regular file under `root` with its bytes, for proving a refusal mutated nothing. */
+function snapshotFiles(root) {
+  const files = {};
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== ".git") walk(full); }
+      else if (entry.isFile()) files[path.relative(root, full)] = fs.readFileSync(full, "utf8");
+    }
+  };
+  walk(root);
+  return files;
+}
+
+test("workflow evidence refuses an operation-bound expectation declared by a non-builder kit", async () => {
+  // The verb's pre-mutation refusal used to read ONE packaged kit's manifest to learn which
+  // expectations are operation-bound. For any flow that kit does not declare it found nothing, so
+  // the verb went on to run the claim's evidence command before a later writer refused the
+  // claim. The binding now comes from the kit that DECLARES the run's flow.
+  const project = makeProject("kit-operation-", {
+    opkit: { manifest: operationKitManifest("opkit"), flows: { ship: operationFlow("opkit.ship") } },
+  });
+  const markerDir = fs.realpathSync(makeFixtureDir("kit-operation-marker-"));
+  try {
+    const session = await startKitFlowSession(project, "opkit.ship", "acme/widgets#61", "acme-widgets-61");
+    assert.equal(session.state.flow_run.current_step, "publish");
+    // The session and the Flow run both live under .kontourai; CLI transition telemetry, which
+    // every invocation appends, lives elsewhere and is not run state.
+    const runState = path.join(project, ".kontourai");
+    const before = snapshotFiles(runState);
+    const marker = path.join(markerDir, "ran");
+
+    const result = spawnSync(process.execPath, [
+      CLI, "workflow", "evidence", "--session-dir", session.sessionDir,
+      "--expectation", "change-published", "--status", "pass",
+      "--summary", "locally authored publication",
+      "--command", `node -e "require('node:fs').writeFileSync(process.argv[1], 'ran')" ${JSON.stringify(marker)}`,
+    ], { cwd: project, encoding: "utf8", env: { ...process.env, FLOW_AGENTS_ACTOR: ACTOR } });
+    const output = result.stderr + result.stdout;
+    assert.notEqual(result.status, 0, `an operation-bound expectation must be refused, got: ${output}`);
+    assert.equal(fs.existsSync(marker), false, "an operation-bound expectation's evidence command must never run");
+    assert.deepEqual(snapshotFiles(runState), before, "a refused operation-bound claim must not mutate the session or the Flow run");
+    // The PUBLIC verb's own refusal, which runs before recovery, locking, actor resolution and
+    // command execution. The sidecar's later record-gate-claim refusal is defence in depth; it
+    // fires only after the verb has already done that work.
+    assert.match(output, /workflow evidence cannot satisfy operation-bound expectation change-published; publish-change requires authenticated external ChangeProvider completion/);
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+    fs.rmSync(markerDir, { recursive: true, force: true });
+  }
+});

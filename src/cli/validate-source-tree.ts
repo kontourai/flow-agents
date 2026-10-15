@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseArgs } from "../lib/args.js";
 import { validateKitRepository } from "../flow-kit/validate.js";
@@ -15,9 +16,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     console.log("Flow Kit repository validation passed");
     return 0;
   }
+  // Without --kit, validate every kit the source tree's catalog lists. An unreadable or empty
+  // catalog, or an entry without a path, is a failure rather than a tree with nothing to check.
   const root = path.resolve(".");
-  const builder = path.join(root, "kits", "builder");
-  const errors = await validateKitRepository(builder);
+  const errors: string[] = [];
+  for (const kitDir of catalogKitDirs(root, errors)) errors.push(...await validateKitRepository(kitDir));
   if (errors.length) {
     console.log("Source tree validation failed:");
     for (const error of errors) console.log(` - ${error}`);
@@ -25,6 +28,29 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
   console.log("Source tree validation passed");
   return 0;
+}
+
+function catalogKitDirs(root: string, errors: string[]): string[] {
+  const catalogPath = path.join(root, "kits", "catalog.json");
+  let catalog: unknown;
+  try {
+    catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+  } catch (error) {
+    errors.push(`kits/catalog.json could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
+  const kits = (catalog as { kits?: unknown } | null)?.kits;
+  if (!Array.isArray(kits) || kits.length === 0) {
+    errors.push("kits/catalog.json: .kits must be a non-empty list");
+    return [];
+  }
+  const dirs: string[] = [];
+  kits.forEach((entry, index) => {
+    const kitPath = (entry as { path?: unknown } | null)?.path;
+    if (typeof kitPath !== "string" || !kitPath) errors.push(`kits/catalog.json: kits[${index}] must declare a path`);
+    else dirs.push(path.resolve(root, kitPath));
+  });
+  return dirs;
 }
 
 // Use process.exitCode (not process.exit) to allow stdout to be flushed before exit.
