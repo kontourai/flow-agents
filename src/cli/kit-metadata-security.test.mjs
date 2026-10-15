@@ -1130,3 +1130,25 @@ test("kit install surfaces the guardless-spawn warning non-blockingly for BOTH s
   assert.match(gitOut, /warning: .*agent_spawn_triggers\[0\] \('on-check-failure'\) spawns agent runs without complete guard config/);
   assert.match(gitOut, /installed git kit 'guardless-demo'/);
 });
+
+test("default_flow must name a flow the same kit declares, and is a recognized field", async () => {
+  // Builder's own declaration is valid and is not misreported as a third-party extension
+  // (test_kit_conformance_levels.sh pins Builder's derived `targets`).
+  assert.deepEqual(await validateKitRepository("kits/builder"), []);
+  const root = tempRoot("flow-agents-default-flow-");
+  const kit = path.join(root, "builder");
+  fs.cpSync("kits/builder", kit, { recursive: true });
+  const manifestFile = path.join(kit, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  assert.equal(manifest.default_flow, "builder.build");
+  const cases = [
+    [42, /: default_flow must be a flow id string$/m],
+    ["knowledge.ingest", /: default_flow "knowledge\.ingest" must name a flow of this kit \(builder\.<flow>\)$/m],
+    ["builder", /: default_flow "builder" must name a flow of this kit \(builder\.<flow>\)$/m],
+    ["builder.nope", /: default_flow "builder\.nope" is not declared in this kit's flows\[\]$/m],
+  ];
+  for (const [value, expected] of cases) {
+    writeJson(manifestFile, { ...manifest, default_flow: value });
+    assert.match((await validateKitRepository(kit)).join("\n"), expected, `default_flow ${JSON.stringify(value)} must be refused`);
+  }
+});
