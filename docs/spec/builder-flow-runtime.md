@@ -149,6 +149,20 @@ definition bounds that correction to three Flow-owned attempts and blocks on exh
 there is no default execute route. Status and sync are read-only/reprojection operations,
 not implicit backtracking or definition amendment.
 
+Three gate policies are derived from what the evaluated gate declares, never from
+Builder's gate ids or claim types, so any kit's flow that declares the same thing gets
+the same rule:
+
+- A failed claim at a gate that declares route-back reasons but no `default` route must
+  name its route reason, at synchronization and in `flow-agents workflow evidence`.
+  Builder's `execute-gate` is the only shipped gate of that shape.
+- A passing claim of the type a gate declares for its `tests-evidence` expectation is
+  command-backed and must satisfy verified-tests trust: a current clean critique by a
+  reviewer distinct from the implementation actor, complete verified acceptance criteria,
+  and clean observed command provenance.
+- Only the claim type a gate declares for its `selected-work` expectation may predate
+  the run's first visit boundary, by the 30-second acquisition allowance.
+
 A gate may declare `requires_current_verification: true` in its Flow Definition
 (the Builder Kit declares it on `merge-ready-ci-gate`). The evidence writer then
 refuses a **passing** claim for that gate's expectations while canonical review
