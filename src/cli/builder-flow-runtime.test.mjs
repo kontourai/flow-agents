@@ -8592,6 +8592,9 @@ test("publish-change reports an external capability gap and self-authored result
   }]);
   assert.equal(publish.operation, "publish-change");
   assert.equal(publish.protocol.capability, "change.create");
+  // builder.build opens its change: the caller supplies title and body (#1415 adopt-only parameters are for pinned definitions only).
+  assert.deepEqual(publish.protocol.parameters.map((parameter) => [parameter.name, parameter.required]),
+    [["session_dir", true], ["title", true], ["body", true], ["head_ref", true], ["base_ref", true], ["draft", false]]);
   assert.deepEqual(publish.protocol.result.required, ["schema_version", "operation", "binding", "provider", "repository", "change_ref", "assignment_actor", "provider_actor", "observed_at"]);
   assert.deepEqual(publish.protocol.result.properties.change_ref.required, ["provider_record_id", "number", "url", "state", "base_ref", "head_ref", "head_sha"]);
   assert.deepEqual(publish.protocol.result.url_protocols, ["https:"]);

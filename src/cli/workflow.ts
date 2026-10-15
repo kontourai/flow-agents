@@ -9,7 +9,7 @@ import { definitionDigest, expectationsForGate, flowRunHead, loadRun, openGates,
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
 import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
-import { assertSourceHeadStartable, currentGateVisit, gateRequiresFailureRouteReason, inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { assertSourceHeadStartable, currentGateVisit, gateRequiresFailureRouteReason, inspectBuilderFlowSession, pinnedRunSourceHead, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { declaredStepBindsInterface } from "../builder-gate-action-envelope.js";
 import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
@@ -454,6 +454,7 @@ export async function provisionalDeliveryAuthorizationRequest(sessionDir: string
     const caller = assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
     recoverProvisionalDeliveryTransaction(sessionDir, projectRoot, slug);
     const inspected = await inspectBuilderFlowSession({ sessionDir });
+    assertProvisionalDeliveryPermitted(inspected);
     // #1336: the declared property, not the flow's name — the run must be held at the gate that
     // refuses to advance without current verification, which is exactly what this authorization
     // unblocks. `assertDeliveryPublicationEligibility` asks the same question at publication.
@@ -520,7 +521,21 @@ function currentFreshnessTurnstileGate(inspected: Awaited<ReturnType<typeof insp
   return gates[0]!.requires_current_verification === true ? gates[0]! : null;
 }
 
+/**
+ * #1415 slice 2: a run pinned to a source head is verified, reviewed, and merged at exactly that
+ * commit, so nothing may be committed on top of it before CI readiness. Provisional delivery adds
+ * exactly such a commit, so it is refused; CI readiness is recorded at the pinned head instead, and
+ * the run's only delivery commit is the terminal one merge-change merges.
+ */
+function assertProvisionalDeliveryPermitted(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): void {
+  const sourceHead = pinnedRunSourceHead(inspected.run.startDefinition, inspected.run.state);
+  if (sourceHead !== null) {
+    throw new Error(`provisional delivery is refused for ${inspected.run.definitionId} runs: the run is pinned to source head ${sourceHead}, and a provisional delivery commit would move the pull request head off it. Record CI readiness at the pinned head; workflow publish-delivery runs once the run completes`);
+  }
+}
+
 function assertDeliveryPublicationEligibility(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, kind: DeliveryPublicationKind): void {
+  if (kind === "provisional") assertProvisionalDeliveryPermitted(inspected);
   // A run reaches "completed" only by PASSING the gate on a step whose `next` is null, so the
   // status is the derivation; the old step-name list was a restatement of it for one flow.
   const completed = inspected.run.state.status === "completed";
