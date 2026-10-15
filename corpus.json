@@ -192,7 +192,9 @@
       "source": "docs/public-workflow-cli.md",
       "section": "Reference",
       "covers": [
-        "kits/builder/flows/review-existing.flow.json"
+        "kits/builder/flows/review-existing.flow.json",
+        "kits/builder/flows/deliver-existing.flow.json",
+        "kits/builder/flows/publish-existing.flow.json"
       ]
     },
     {

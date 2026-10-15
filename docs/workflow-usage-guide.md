@@ -322,16 +322,24 @@ claiming a Builder implementation. It is not `builder.build-lean`: build-lean is
 variant of new-work delivery that still implements, while `builder.review-existing` implements
 nothing.
 
-| | New work (`builder.build`) | Existing change (`builder.review-existing`) |
-| --- | --- | --- |
-| Implementation | `plan-work` then `execute-plan` in the run | Already done before the run; `review-existing` records it as `pre-existing-implementation` |
-| Review and verification | `review-work` then `verify-work` at `verify` | The same skills and expectations at `verify` |
-| A failing check | Routes back to `execute` (or plan, design-probe, verify) | Routes back to `verify` only: at most three route-backs; a fourth failing visit blocks. A code fix needs a new run |
-| A new commit | Re-verify in the same run | Needs a new run |
+To also merge that existing change, start `builder.deliver-existing`: the same review and
+verification, then it adopts the change's open pull request (it never opens one), records CI
+readiness and learning at the same commit, and lets `merge-change` merge it.
 
-Start it with `--source-head` set to the checked-out commit in a clean worktree. The full
-contract, including what it refuses and what it does not verify, is in
-[Review and verify an existing change](public-workflow-cli.md#review-and-verify-an-existing-change).
+| | New work (`builder.build`) | Existing change, review only (`builder.review-existing`) | Existing change, delivered (`builder.deliver-existing`) |
+| --- | --- | --- | --- |
+| Implementation | `plan-work` then `execute-plan` in the run | Already done before the run; `review-existing` records it as `pre-existing-implementation` | The same as `builder.review-existing` |
+| Review and verification | `review-work` then `verify-work` at `verify` | The same skills and expectations at `verify` | The same skills and expectations at `verify` |
+| A failing check | Routes back to `execute` (or plan, design-probe, verify) | Routes back to `verify` only: at most three route-backs; a fourth failing visit blocks. A code fix needs a new run | Routes back to `verify` only, at every gate. A code fix needs a new run |
+| A new commit | Re-verify in the same run | Needs a new run | Needs a new run |
+| Pull request | `publish-change` opens or recovers it | None | `publish-change` adopts the existing one, with no title or body |
+| CI readiness and learning | `release-readiness`, then `learning-review` | None | `release-readiness`, then `learning-review`, at the pinned commit; no provisional delivery |
+| Merge | `merge-change` | Through the provider's own controls | `merge-change`, of the pinned commit plus one delivery-only commit |
+
+Start either with `--source-head` set to the checked-out commit in a clean worktree. The full
+contracts, including what they refuse and what they do not verify, are in
+[Review and verify an existing change](public-workflow-cli.md#review-and-verify-an-existing-change)
+and [Review, verify, and merge an existing change](public-workflow-cli.md#review-verify-and-merge-an-existing-change).
 
 ## 6. Build Trust With Evidence Gate
 

@@ -71,6 +71,36 @@ for (const [label, text] of [['kit.json flows[] description', reviewDeclaration.
   if (!/EXISTING-CHANGE REVIEW/.test(text || '') || !/no implementation step/i.test(text || '')) throw new Error(`builder.review-existing ${label} must name itself as an existing-change review with no implementation step`);
 }
 
+// ─── #1415 slice 2 existing-change delivery: review-existing's gates plus an adopting closeout ─
+const deliverFlow = JSON.parse(fs.readFileSync(path.join(root, 'kits/builder/flows/deliver-existing.flow.json'), 'utf8'));
+const publishLearnFlow = JSON.parse(fs.readFileSync(path.join(root, 'kits/builder/flows/publish-learn.flow.json'), 'utf8'));
+const publishExistingFlow = JSON.parse(fs.readFileSync(path.join(root, 'kits/builder/flows/publish-existing.flow.json'), 'utf8'));
+if (deliverFlow.id !== 'builder.deliver-existing') throw new Error('deliver-existing.flow.json must declare id builder.deliver-existing');
+if (JSON.stringify(deliverFlow.source_binding) !== JSON.stringify({ head: 'pinned-at-start' })) throw new Error('builder.deliver-existing must pin its source head at start');
+if (JSON.stringify(deliverFlow.steps) !== JSON.stringify([
+  { id: 'pull-work', next: 'existing-change' }, { id: 'existing-change', next: 'verify' }, { id: 'verify', next: 'pr-open' },
+  { id: 'pr-open', next: 'merge-ready-ci', uses_flow: 'builder.publish-existing' }, { id: 'merge-ready-ci', next: 'learn', uses_flow: 'builder.publish-existing' },
+  { id: 'learn', next: 'done', uses_flow: 'builder.publish-existing' }, { id: 'done', next: null },
+])) throw new Error('builder.deliver-existing must declare pull-work, existing-change, verify, then pr-open, merge-ready-ci, and learn through builder.publish-existing');
+if (JSON.stringify(deliverFlow.gates) !== JSON.stringify(reviewFlow.gates)) throw new Error('builder.deliver-existing gates must be identical to builder.review-existing');
+if (publishExistingFlow.id !== 'builder.publish-existing') throw new Error('publish-existing.flow.json must declare id builder.publish-existing');
+const withoutImplementationDefect = structuredClone(publishLearnFlow.gates);
+delete withoutImplementationDefect['merge-ready-ci-gate'].on_route_back.implementation_defect;
+if (JSON.stringify(publishExistingFlow.gates) !== JSON.stringify(withoutImplementationDefect)) {
+  // Expectation descriptions may say "adopted"; everything that binds evidence must match.
+  const strip = (gates) => JSON.stringify(Object.fromEntries(Object.entries(gates).map(([id, gate]) => [id, { ...gate, expects: gate.expects.map(({ description: _d, ...rest }) => rest) }])));
+  if (strip(publishExistingFlow.gates) !== strip(withoutImplementationDefect)) throw new Error('builder.publish-existing gates must be builder.publish-learn gates without the implementation_defect route');
+}
+if (JSON.stringify(publishExistingFlow.steps) !== JSON.stringify(publishLearnFlow.steps) || JSON.stringify(publishExistingFlow.exports) !== JSON.stringify(publishLearnFlow.exports)) throw new Error('builder.publish-existing must keep builder.publish-learn steps and exports');
+for (const [id, file] of [['builder.deliver-existing', 'flows/deliver-existing.flow.json'], ['builder.publish-existing', 'flows/publish-existing.flow.json']]) {
+  const declaration = (kit.flows || []).find((entry) => entry.id === id);
+  if (!declaration || declaration.path !== file) throw new Error(`kit.json must declare ${id} at ${file}`);
+}
+const deliverDeclaration = (kit.flows || []).find((entry) => entry.id === 'builder.deliver-existing');
+for (const [label, text] of [['kit.json flows[] description', deliverDeclaration.description], ['flow definition description', deliverFlow.description]]) {
+  if (!/EXISTING-CHANGE DELIVERY/.test(text || '') || !/no implementation step/i.test(text || '') || !/never opens/i.test(text || '')) throw new Error(`builder.deliver-existing ${label} must name itself as an existing-change delivery with no implementation step that never opens a pull request`);
+}
+
 const expected = {
   'builder-shape': ['entrypoint', 'builder.shape', []],
   deliver: ['entrypoint', 'builder.build', []],
@@ -154,6 +184,15 @@ const expectedActions = {
   'builder.review-existing/existing-change': { skills: ['review-existing'], expectation_ids: ['pre-existing-implementation'] },
   'builder.review-existing/verify': { skills: ['review-work', 'verify-work'], expectation_ids: ['clean-critique', 'acceptance-criteria', 'tests-evidence', 'policy-compliance'] },
   'builder.review-existing/done': { skills: [], expectation_ids: [] },
+  // #1415 slice 2 existing-change delivery: review-existing's producers, then the same closeout
+  // producers as builder.build. pr-open is the publish-change operation, which adopts here.
+  'builder.deliver-existing/pull-work': { skills: ['pull-work'], expectation_ids: ['selected-work'] },
+  'builder.deliver-existing/existing-change': { skills: ['review-existing'], expectation_ids: ['pre-existing-implementation'] },
+  'builder.deliver-existing/verify': { skills: ['review-work', 'verify-work'], expectation_ids: ['clean-critique', 'acceptance-criteria', 'tests-evidence', 'policy-compliance'] },
+  'builder.deliver-existing/pr-open': { skills: [], operations: ['publish-change'], expectation_ids: ['pull-request-opened'] },
+  'builder.deliver-existing/merge-ready-ci': { skills: ['release-readiness'], expectation_ids: ['ci-merge-readiness'] },
+  'builder.deliver-existing/learn': { skills: ['learning-review'], expectation_ids: ['decision-evidence', 'learning-evidence'] },
+  'builder.deliver-existing/done': { skills: [], expectation_ids: [] },
 };
 
 const failures = [];
@@ -241,9 +280,9 @@ for (const [key, expectedAction] of Object.entries(expectedActions)) {
     failures.push(`${key}: operations differ from the canonical producer matrix`);
   }
 }
-if ((kit.flow_step_actions || []).length !== Object.keys(expectedActions).length) failures.push('flow_step_actions must declare every builder.build, builder.build-lean, builder.review-existing and builder.shape step exactly once');
+if ((kit.flow_step_actions || []).length !== Object.keys(expectedActions).length) failures.push('flow_step_actions must declare every builder.build, builder.build-lean, builder.review-existing, builder.deliver-existing and builder.shape step exactly once');
 const implementationRows = (kit.flow_step_actions || []).filter((entry) => entry.implementation_allowed).map((entry) => `${entry.flow_id}/${entry.step_id}`);
-if (JSON.stringify(implementationRows) !== JSON.stringify(['builder.build/execute', 'builder.build-lean/execute'])) failures.push('only builder.build and builder.build-lean execute may allow implementation; builder.review-existing must allow none');
+if (JSON.stringify(implementationRows) !== JSON.stringify(['builder.build/execute', 'builder.build-lean/execute'])) failures.push('only builder.build and builder.build-lean execute may allow implementation; builder.review-existing and builder.deliver-existing must allow none');
 const publishAction = (kit.flow_step_actions || []).find((entry) => entry.flow_id === 'builder.build' && entry.step_id === 'pr-open');
 if (!publishAction || JSON.stringify(publishAction.operations) !== JSON.stringify(['publish-change']) || JSON.stringify(publishAction.expectation_ids) !== JSON.stringify(['pull-request-opened'])) failures.push('publish-change must explicitly own pull-request-opened');
 
