@@ -170,6 +170,10 @@ Options:
   --console-endpoint URL
   --console-token-file PATH
   --console-tenant ID
+                        Refused with --global for claude-code and opencode, which do not
+                          write Console settings (a local-files sink alone is accepted); use
+                          an operator ~/.flow-agents/telemetry-console.conf written by
+                          scripts/telemetry/install-console-config.sh instead.
   --activate-kits
   --activate-kit KIT_ID   Activate one catalog kit by id. Repeat for multiple kits.
   --configure-providers   Configure backlog, assignment, and change providers together.
@@ -440,12 +444,176 @@ function telemetrySinksFromValues(values: string[]): TelemetrySink[] {
   return sinks.length ? Array.from(new Set(sinks)) : ["local-files"];
 }
 
+/**
+ * Every telemetry-sink and `--console-*` flag init reads, by field, aliases in precedence order.
+ * The one list both the option readers and the `--global` refusal use, so a Console flag added
+ * here is refused where it is not applied, and one not added here is not read at all (#1484).
+ */
+const CONSOLE_FLAGS = {
+  sinks: ["telemetry-sink", "telemetry-sinks"],
+  url: ["console-url"],
+  endpoint: ["console-endpoint", "console-endpoint-url"],
+  tokenFile: ["console-token-file"],
+  tenant: ["console-tenant", "console-tenant-id"],
+} as const;
+
+const CONSOLE_FLAG_KEYS: readonly string[] = Object.values(CONSOLE_FLAGS).flat();
+
+/** The first alias of a Console field the caller set, as flagString reads it. */
+function consoleFlag(flags: ReturnType<typeof parseArgs>["flags"], field: Exclude<keyof typeof CONSOLE_FLAGS, "sinks">): string | undefined {
+  for (const key of CONSOLE_FLAGS[field]) {
+    const value = flagString(flags, key);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function telemetrySinkFlagValues(flags: ReturnType<typeof parseArgs>["flags"]): string[] {
+  return CONSOLE_FLAGS.sinks.flatMap((key) => flagList(flags, key));
+}
+
 function telemetrySinksFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): TelemetrySink[] {
-  return telemetrySinksFromValues(flagList(flags, "telemetry-sink").concat(flagList(flags, "telemetry-sinks")));
+  return telemetrySinksFromValues(telemetrySinkFlagValues(flags));
 }
 
 function needsConsoleCredentials(sinks: TelemetrySink[]): boolean {
   return sinks.some((sink) => sink !== "local-files");
+}
+
+/**
+ * Whether main()'s `--global` path for each runtime applies the telemetry-sink and `--console-*`
+ * flags (kontourai/flow-agents#1484). A full Record, so a new runtime does not compile until
+ * someone decides. `false` marks a `--global` branch that returns before installBundle() and
+ * never runs install-console-config.sh; init refuses Console flags there instead of accepting
+ * and dropping them.
+ */
+const GLOBAL_INSTALL_APPLIES_CONSOLE_FLAGS: Record<Runtime, boolean> = {
+  // Hook merge plus skills/agents sync only. The hooks run from the package root, so they read
+  // its shipped telemetry.conf or an operator conf, never a per-install one.
+  "claude-code": false,
+  // Config merge plus runtime-asset sync; no Console configuration step.
+  opencode: false,
+  // install-codex-home.sh forwards the flags to install-console-config.sh.
+  codex: true,
+  // No dedicated --global branch: these fall through to the bundle install (installBundleArgs).
+  base: true,
+  kiro: true,
+  pi: true,
+};
+
+/**
+ * The Console flags the caller actually typed, as argv pairs. Reads the raw parse, so the
+ * local-files default that telemetrySinksFromValues() fills in never counts. A sink flag naming
+ * only local-files is left out: it writes no Console settings on any install path, so it means
+ * the same thing for a `--global` install as for a project install.
+ */
+function explicitConsoleFlagArgs(flags: ReturnType<typeof parseArgs>["flags"]): string[] {
+  const args: string[] = [];
+  for (const key of CONSOLE_FLAG_KEYS) {
+    if (flags[key] === undefined) continue;
+    const values = flagList(flags, key);
+    if ((CONSOLE_FLAGS.sinks as readonly string[]).includes(key) && namesOnlyLocalFiles(values)) continue;
+    // The printed command must name the file the caller meant, not one relative to wherever it
+    // is later run.
+    const printed = (CONSOLE_FLAGS.tokenFile as readonly string[]).includes(key) ? values.map((value) => path.resolve(value)) : values;
+    for (const value of printed) args.push(`--${key}`, value);
+  }
+  return args;
+}
+
+function namesOnlyLocalFiles(values: string[]): boolean {
+  return values.flatMap((value) => value.split(",")).every((sink) => sink.trim() === "" || sink.trim() === "local-files");
+}
+
+/**
+ * The Console flags typed with no value: `--console-url` last or followed by another `--flag`,
+ * or `--console-url=`. Read from argv, because parseArgs turns a repeated valueless flag into
+ * the string "true", which is indistinguishable there from a typed `true`.
+ */
+function valuelessConsoleFlags(argv: string[]): string[] {
+  const missing: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (!arg.startsWith("--")) continue;
+    const eq = arg.indexOf("=");
+    const key = arg.slice(2, eq === -1 ? undefined : eq);
+    if (!CONSOLE_FLAG_KEYS.includes(key)) continue;
+    const next = argv[index + 1];
+    const value = eq !== -1 ? arg.slice(eq + 1) : next !== undefined && !next.startsWith("--") ? next : undefined;
+    if (eq === -1 && value !== undefined) index += 1;
+    if (value === undefined || value.trim() === "") missing.push(`--${key}`);
+  }
+  return [...new Set(missing)];
+}
+
+function shellQuote(value: string): string {
+  // A value starting with `=` is quoted: zsh expands `=word` at the start of a word to a command path.
+  return /^[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./:@%+=,-]*$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Refuse, before anything is written, Console flags that this runtime's `--global` install would
+ * silently drop. Names the operator conf that lib/config.sh does read for these installs.
+ */
+function refuseUnappliedConsoleFlags(runtime: Runtime, isGlobal: boolean, argv: string[], flags: ReturnType<typeof parseArgs>["flags"]): void {
+  if (!isGlobal || GLOBAL_INSTALL_APPLIES_CONSOLE_FLAGS[runtime]) return;
+  // The usual "unknown telemetry sink" error wins over a refusal whose command would also fail.
+  telemetrySinksFromFlags(flags);
+  // No command can be suggested for a flag with no value; install-console-config.sh's wording.
+  const valueless = valuelessConsoleFlags(argv);
+  if (valueless.length > 0) throw new Error(`${valueless[0]} requires a value`);
+  const consoleArgs = explicitConsoleFlagArgs(flags);
+  if (consoleArgs.length === 0) return;
+  const flagNames = [...new Set(consoleArgs.filter((arg) => arg.startsWith("--")))];
+  const script = path.join(root, "scripts", "telemetry", "install-console-config.sh");
+  const operatorConf = path.join(os.homedir(), ".flow-agents", "telemetry-console.conf");
+  throw new Error(
+    `${flagNames.join(", ")} ${flagNames.length > 1 ? "are" : "is"} not applied by \`init --global\` for ${runtime}, so nothing was installed.\n` +
+    `To send this runtime's global telemetry to a Console, write the operator Console config, then re-run init without these flags:\n` +
+    `  bash ${[script, operatorConf, ...consoleArgs].map(shellQuote).join(" ")}\n` +
+    `That file also applies to every other Flow Agents install for this user that has no .kontourai/telemetry-console.conf of its own.\n` +
+    `To configure only one project instead, run init for that project without --global.`,
+  );
+}
+
+/**
+ * The environment variables install-console-config.sh reads Console settings from, in
+ * scripts/telemetry/install-console-config.sh main(). A project install forwards init's
+ * environment to it, so these apply there; a `--global` install that never runs it drops them.
+ */
+const CONSOLE_ENV_VARS = [
+  "FLOW_AGENTS_TELEMETRY_SINKS",
+  "FLOW_AGENTS_TELEMETRY_SINK",
+  "FLOW_AGENTS_CONSOLE_URL",
+  "CONSOLE_TELEMETRY_URL",
+  "CONSOLE_URL",
+  "FLOW_AGENTS_CONSOLE_ENDPOINT_URL",
+  "CONSOLE_TELEMETRY_ENDPOINT_URL",
+  "FLOW_AGENTS_CONSOLE_TOKEN_FILE",
+  "CONSOLE_TELEMETRY_TOKEN_FILE",
+  "FLOW_AGENTS_CONSOLE_TENANT",
+  "CONSOLE_TENANT_ID",
+];
+
+/**
+ * Warn, without refusing, about Console environment variables this runtime's `--global` install
+ * does not apply. Unlike a typed flag, these may be set in the shell for another reason.
+ */
+function warnUnappliedConsoleEnv(runtime: Runtime, isGlobal: boolean, env: NodeJS.ProcessEnv = process.env): void {
+  if (!isGlobal || GLOBAL_INSTALL_APPLIES_CONSOLE_FLAGS[runtime]) return;
+  const set = CONSOLE_ENV_VARS.filter((name) => {
+    const value = env[name];
+    if (value === undefined || value === "") return false;
+    // A local-files sink writes no Console settings on any install path.
+    return !(name.startsWith("FLOW_AGENTS_TELEMETRY_SINK") && namesOnlyLocalFiles([value]));
+  });
+  if (set.length === 0) return;
+  const script = path.join(root, "scripts", "telemetry", "install-console-config.sh");
+  const operatorConf = path.join(os.homedir(), ".flow-agents", "telemetry-console.conf");
+  console.warn(
+    `flow-agents init: warning: ${set.join(", ")} ${set.length > 1 ? "are" : "is"} set in the environment, but \`init --global\` for ${runtime} does not write Console settings, so this install does not apply ${set.length > 1 ? "them" : "it"}.\n` +
+    `To send this runtime's global telemetry to a Console, write the operator Console config ${operatorConf} with ${script}, which reads the same variables.`,
+  );
 }
 
 const DEFAULT_HOSTED_CONSOLE_URL = "https://console.kontourai.io";
@@ -569,9 +737,9 @@ async function gatherConsoleConnectOptions(
   args: ReturnType<typeof parseArgs>,
   consoleTokenFile: string | undefined,
 ): Promise<ConsoleConnectGatherResult> {
-  const sinkFlagsGiven = flagList(args.flags, "telemetry-sink").length > 0 || flagList(args.flags, "telemetry-sinks").length > 0;
-  const consoleUrlFlag = flagString(args.flags, "console-url");
-  const consoleTenantFlag = flagString(args.flags, "console-tenant") ?? flagString(args.flags, "console-tenant-id");
+  const sinkFlagsGiven = telemetrySinkFlagValues(args.flags).length > 0;
+  const consoleUrlFlag = consoleFlag(args.flags, "url");
+  const consoleTenantFlag = consoleFlag(args.flags, "tenant");
 
   if (sinkFlagsGiven) {
     const telemetrySinks = telemetrySinksFromFlags(args.flags);
@@ -621,6 +789,9 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
     // detector actually matched a signal (not merely defaulted to "base").
     const runtimeAutoDetected = !explicitRuntimeFlag && !runtimeAnswerTrimmed && detectedRuntimeSignal() === runtime;
     const isGlobal = flagBool(args.flags, "global");
+    // Refuse before the first prompt that follows, so the user is not asked anything first.
+    refuseUnappliedConsoleFlags(runtime, isGlobal, argv, args.flags);
+    warnUnappliedConsoleEnv(runtime, isGlobal);
     const destBase = isGlobal ? globalDest(runtime) : defaultDest(runtime);
     const destDefault = flagString(args.flags, "dest", destBase) ?? destBase;
     const destAnswer = flagString(args.flags, "dest") ?? await rl.question(`Install destination [${destDefault}]: `);
@@ -628,9 +799,17 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
     // Guided "Connect to Kontour Console?" wizard (Hosted/Local/Self-hosted/Skip)
     // replaces the old hidden sink-keyword prompt -- see gatherConsoleConnectOptions
     // for the flag-override / sink-flags-given branching.
-    const consoleEndpoint = flagString(args.flags, "console-endpoint") ?? flagString(args.flags, "console-endpoint-url");
-    const consoleTokenFile = flagString(args.flags, "console-token-file");
-    const { telemetrySinks, consoleUrl, consoleTokenValue, consoleTenant } = await gatherConsoleConnectOptions(rl, args, consoleTokenFile);
+    // A --global install that cannot apply Console settings skips the Console wizard, whose
+    // answers it would otherwise drop (#1484).
+    const consoleFlagsApply = !isGlobal || GLOBAL_INSTALL_APPLIES_CONSOLE_FLAGS[runtime];
+    if (!consoleFlagsApply) {
+      console.log(`Skipping Console setup: \`init --global\` for ${runtime} does not configure a Console. Its telemetry reads ${path.join(os.homedir(), ".flow-agents", "telemetry-console.conf")} when present; write that file with ${path.join(root, "scripts", "telemetry", "install-console-config.sh")}.`);
+    }
+    const consoleEndpoint = consoleFlag(args.flags, "endpoint");
+    const consoleTokenFile = consoleFlag(args.flags, "tokenFile");
+    const { telemetrySinks, consoleUrl, consoleTokenValue, consoleTenant } = consoleFlagsApply
+      ? await gatherConsoleConnectOptions(rl, args, consoleTokenFile)
+      : { telemetrySinks: telemetrySinksFromFlags(args.flags), consoleUrl: undefined, consoleTokenValue: undefined, consoleTenant: undefined };
 
     const activeKitIds = selectedKitIdsFromFlags(args.flags);
     if (!activeKitIds.length && !flagBool(args.flags, "activate-kits") && !flagList(args.flags, "activate-kit").length) {
@@ -691,15 +870,17 @@ function headlessOptions(argv: string[]): InitOptions {
   const args = parseArgs(argv);
   const runtime = normalizeRuntime(flagString(args.flags, "runtime")) ?? detectDefaultRuntime();
   const isGlobal = flagBool(args.flags, "global");
+  refuseUnappliedConsoleFlags(runtime, isGlobal, argv, args.flags);
+  warnUnappliedConsoleEnv(runtime, isGlobal);
   const destBase = isGlobal ? globalDest(runtime) : defaultDest(runtime);
   return {
     runtime,
     global: isGlobal,
     dest: path.resolve(flagString(args.flags, "dest", destBase) ?? destBase),
-    consoleUrl: flagString(args.flags, "console-url"),
-    consoleEndpoint: flagString(args.flags, "console-endpoint") ?? flagString(args.flags, "console-endpoint-url"),
-    consoleTokenFile: flagString(args.flags, "console-token-file"),
-    consoleTenant: flagString(args.flags, "console-tenant") ?? flagString(args.flags, "console-tenant-id"),
+    consoleUrl: consoleFlag(args.flags, "url"),
+    consoleEndpoint: consoleFlag(args.flags, "endpoint"),
+    consoleTokenFile: consoleFlag(args.flags, "tokenFile"),
+    consoleTenant: consoleFlag(args.flags, "tenant"),
     telemetrySinks: telemetrySinksFromFlags(args.flags),
     activateKits: selectedKitIdsFromFlags(args.flags).length > 0,
     activeKitIds: selectedKitIdsFromFlags(args.flags),
