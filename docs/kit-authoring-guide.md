@@ -140,7 +140,7 @@ npm run validate:source -- --kit path/to/my-kit
 
 This runs the same repository contract validation used by `install-local`. A validation failure exits nonzero with a diagnostic. Fix errors and re-run until it passes cleanly.
 
-The full source-tree validation (no `--kit` flag) additionally validates the built-in catalog and Builder Kit:
+The full source-tree validation (no `--kit` flag) validates every kit listed by the built-in catalog. An unreadable or empty catalog, or an entry without a path, fails validation:
 
 ```bash
 npm run validate:source --
