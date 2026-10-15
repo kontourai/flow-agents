@@ -32,6 +32,7 @@
       "description": "Reusable delivery closeout extension for publish, provider/CI merge readiness, and learning feedback gates."
     }
   ],
+  "default_flow": "builder.build",
   "dependencies": [
     {
       "kit_id": "knowledge",

@@ -41,8 +41,8 @@ import {
   type IssuedPublishChangeAction,
   type PublishChangeIntent,
 } from "./publish-change-operation-authority.js";
+import { resolveDefaultFlow } from "./lib/flow-admission.js";
 import {
-  BUILDER_BUILD_FLOW_ID,
   type BuilderFlowId,
   BuilderBuildRunInputError,
   actionableOpenGates,
@@ -470,7 +470,7 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
   return await withSubjectLockAsync(context.artifactRoot, context.slug, async () => {
     const sidecarSnapshot = readSidecarSnapshot(context);
     const subject = workflowSubject(sidecarSnapshot.state);
-    const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state, context.projectRoot) ?? BUILDER_BUILD_FLOW_ID;
+    const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state, context.projectRoot) ?? defaultSessionFlowId(context.projectRoot);
     let run: BuilderFlowRunResult;
     try {
       run = await loadBuilderFlowRun({
@@ -1578,6 +1578,17 @@ function workflowSubject(state: AnyRecord): string {
     throw new BuilderBuildRunInputError("state.work_item_refs", "must contain exactly one selected Work Item for builder.build");
   }
   return refs[0]!;
+}
+
+/**
+ * The flow a session starts when neither the caller nor the session names one: the flow a kit
+ * declares as its kit.json `default_flow`. Refuses, naming why, rather than falling back to any
+ * flow when no single runnable default is declared.
+ */
+function defaultSessionFlowId(projectRoot: string): BuilderFlowId {
+  const resolution = resolveDefaultFlow(projectRoot, "startBuilderFlowSession", "flowId");
+  if (resolution.refusal !== undefined) throw new BuilderBuildRunInputError("flowId", resolution.refusal);
+  return resolution.flow;
 }
 
 /**
