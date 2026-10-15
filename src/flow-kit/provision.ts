@@ -255,6 +255,7 @@ function mergeHooksJson(
         if (typeof command !== "string" || protectedCommands.has(command)) return true;
         if (ownedBefore(group, handler)) return false;
         if (supersededHere.has(command)) {
+          previousHandlers.push({ event, command, group: groupFields(group), handler: handler as Record<string, unknown> });
           superseded.push({ event, command });
           return false;
         }
@@ -378,14 +379,8 @@ function otherKitHookCommands(targetRoot: string, kitId: string): (target: strin
       if (!name.endsWith(".json") || name === `${kitId}.json`) continue;
       const manifestPath = path.join(directory, name);
       assertSafeDestination(targetRoot, manifestPath);
-      const label = `provision manifest '${name}'`;
-      const record = readProvisionManifest(manifestPath, label);
-      if (record.hook_handlers === undefined) continue;
-      if (!Array.isArray(record.hook_handlers)) throw new Error(`${label} has malformed hook_handlers: ${manifestPath}`);
-      for (const entry of record.hook_handlers) {
-        if (!isPlainObject(entry) || ["target", "event", "command"].some((key) => typeof entry[key] !== "string")) {
-          throw new Error(`${label} has malformed hook_handlers: ${manifestPath}`);
-        }
+      const { recorded } = previousHookHandlers(manifestPath, name.slice(0, -5), targetRoot);
+      for (const entry of recorded) {
         const key = JSON.stringify([entry.target, entry.event]);
         const commands = byKey.get(key) ?? new Set<string>();
         commands.add(entry.command as string);
@@ -550,7 +545,7 @@ export async function provisionKit(
       ...previousHooks.manifest,
       provisioned_at: new Date().toISOString(),
       hook_handlers: [...pending.values()],
-      superseded_handlers: supersededHandlers,
+      superseded_handlers: previousHooks.superseded,
     });
   }
   const conduitReceipts: InstallationReceipt[] = [];

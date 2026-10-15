@@ -215,7 +215,9 @@ that is already identical to the current declaration stays in place.
   handlers together, and it narrows the record once every write succeeds. If a
   later write fails or the process stops, the next provisioning still recognises
   whichever handlers reached the host file as the kit's. Legacy handlers adopted
-  from the existing file are also recorded before writing their replacements.
+  from the existing file, including commands selected by `supersedes`, are also
+  recorded before writing their replacements. The `superseded_handlers` audit
+  trail is updated only after provisioning completes.
 - A manifest written before `hook_handlers` existed proves only that the kit
   provisioned the target. Re-provisioning adopts the handlers that sit in a
   group with the same fields as one the kit declares now and carry a command

@@ -276,6 +276,27 @@ test("hooks-json refuses to guess ownership from an unreadable provision manifes
   }
 });
 
+test("hooks-json refuses another kit's malformed or misnamed manifest before writing", async () => {
+  const repo = makeFixtureDir("kit-hook-other-manifest-");
+  const kit = hookKit("fixture", ".codex/hooks.json", "codex", "v1");
+  const installed = await provisionKit(kit, repo);
+  const hooksPath = path.join(repo, ".codex/hooks.json");
+  const beforeHooks = fs.readFileSync(hooksPath, "utf8");
+  const beforeManifest = fs.readFileSync(installed.manifest_path, "utf8");
+  const otherPath = path.join(path.dirname(installed.manifest_path), "other.json");
+  setHookCommand(kit, "v2");
+  for (const [content, pattern] of [
+    ["{broken", /is unreadable/],
+    [JSON.stringify({ kit_id: "different-name", hook_handlers: [] }), /does not describe kit 'other'/],
+    [JSON.stringify({ kit_id: "other", hook_handlers: [{ target: ".codex/hooks.json", event: "PreToolUse", command: "v1" }] }), /malformed hook_handlers/],
+  ]) {
+    fs.writeFileSync(otherPath, content);
+    await assert.rejects(() => provisionKit(kit, repo), pattern);
+    assert.equal(fs.readFileSync(hooksPath, "utf8"), beforeHooks);
+    assert.equal(fs.readFileSync(installed.manifest_path, "utf8"), beforeManifest);
+  }
+});
+
 const readHooks = (repo, target = ".codex/hooks.json") => JSON.parse(fs.readFileSync(path.join(repo, target), "utf8"));
 const matcherCommands = (config, event = "PreToolUse") => (config.hooks[event] ?? []).flatMap((group) => group.hooks.map((hook) => `${group.matcher}:${hook.command}`));
 
@@ -340,13 +361,14 @@ test("hooks-json leaves user handlers that reuse the kit's command with other ma
   assert.equal(after.hooks.PreToolUse[1].hooks[0].timeout, 90);
 });
 
-for (const [legacy, boundary] of [[false, "after"], [true, "before"]]) {
-  test(`hooks-json recovers ${legacy ? "legacy" : "recorded"} ownership after a crash ${boundary} the hook rename`, async () => {
+for (const [legacy, boundary, supersedes] of [[false, "after", false], [true, "before", false], [true, "before", true]]) {
+  test(`hooks-json recovers ${legacy ? (supersedes ? "legacy superseded" : "legacy") : "recorded"} ownership after a crash ${boundary} the hook rename`, async () => {
     const repo = makeFixtureDir("kit-hook-crash-");
     const kit = hookKit("fixture", ".codex/hooks.json", "codex", "v1");
     const first = await provisionKit(kit, repo);
     if (legacy) stripHookProvenance(first.manifest_path);
-    setHookCommand(kit, legacy ? "v1" : "v2", { timeout: 60 });
+    setHookCommand(kit, legacy && !supersedes ? "v1" : "v2", { timeout: 60 });
+    if (supersedes) declareSupersedes(kit, ["v1"]);
     const child = spawnSync(process.execPath, ["--input-type=module", "--eval", `
       import fs from "node:fs";
       import path from "node:path";
@@ -366,10 +388,16 @@ for (const [legacy, boundary] of [[false, "after"], [true, "before"]]) {
     assert.equal(child.signal, "SIGKILL", child.stderr);
     assert.deepEqual(matcherCommands(readHooks(repo)), [legacy ? "apply_patch:v1" : "apply_patch:v2"]);
     const records = JSON.parse(fs.readFileSync(first.manifest_path, "utf8")).hook_handlers;
-    assert.deepEqual(records.map((handler) => handler.handler.timeout), [30, 60]);
+    if (supersedes) {
+      assert.deepEqual(JSON.parse(fs.readFileSync(first.manifest_path, "utf8")).superseded_handlers, []);
+      const manifest = JSON.parse(fs.readFileSync(path.join(kit, "kit.json"), "utf8"));
+      delete manifest.provisions[0].supersedes;
+      fs.writeFileSync(path.join(kit, "kit.json"), JSON.stringify(manifest));
+    }
     setHookCommand(kit, "v3");
     await provisionKit(kit, repo);
     assert.deepEqual(matcherCommands(readHooks(repo)), ["apply_patch:v3"]);
+    assert.deepEqual(records.map((handler) => handler.handler.timeout).sort((a, b) => a - b), [30, 60]);
   });
 }
 
