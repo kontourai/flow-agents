@@ -6,7 +6,7 @@ import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
-import { amendRunDefinition, definitionDigest, definitionIdentity, flowRunHead, loadRun, startRun } from "@kontourai/flow";
+import { amendRunDefinition, definitionDigest, definitionIdentity, evaluateRun, flowRunHead, loadRun, startRun } from "@kontourai/flow";
 import { main as mergeChangeMain } from "../../build/src/cli/merge-change.js";
 import { issueMergeChangeAction } from "../../build/src/merge-change-operation-authority.js";
 import { issuePublishChangeAction } from "../../build/src/publish-change-operation-authority.js";
@@ -335,6 +335,99 @@ test("evidence-refresh route predicate accepts the SHIPPED builder definition an
   assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "execute" }, route_back_policy: { max_attempts: 3, on_exceeded: "block" } }), false);
   assert.equal(evidenceRefreshRoutesSatisfied({ on_route_back: { missing_evidence: "verify", default: "verify" }, route_back_policy: { max_attempts: 3, on_exceeded: "warn" } }), false);
   assert.equal(evidenceRefreshRoutesSatisfied({}), false);
+});
+
+function acmeDeliveryDefinition() {
+  return {
+    id: "acme.deliver", version: "1.0",
+    steps: [{ id: "verify", next: "done" }, { id: "done", next: null }],
+    gates: {
+      "acme-freshness": {
+        step: "verify", requires_current_verification: true,
+        on_route_back: { missing_evidence: "verify", default: "verify" },
+        route_back_policy: { max_attempts: 3, on_exceeded: "block" },
+        expects: [{ id: "refresh", kind: "trust.bundle", required: false, description: "Optional fixture claim; this test exercises authorization gate selection.", bundle_claim: { claimType: "acme.release.ready", accepted_statuses: ["verified"] } }],
+      },
+      "closeout-gate": {
+        step: "done", expects: [{ id: "closeout", kind: "trust.bundle", required: false, description: "Optional fixture closeout.", bundle_claim: { claimType: "acme.closeout", accepted_statuses: ["verified"] } }],
+      },
+    },
+  };
+}
+
+async function evidenceRefreshRequest(definition) {
+  const root = makeFixtureDir("flow-agents-merge-refresh-");
+  const slug = "freshness-request";
+  const sessionDir = path.join(root, ".kontourai", "flow-agents", slug);
+  const kitDir = path.join(root, "kits", "acme");
+  fs.mkdirSync(path.join(kitDir, "flows"), { recursive: true });
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const definitionFile = path.join(kitDir, "flows", "deliver.flow.json");
+  fs.writeFileSync(definitionFile, JSON.stringify(definition));
+  fs.writeFileSync(path.join(kitDir, "kit.json"), JSON.stringify({
+    schema_version: "1.0", id: "acme", name: "Acme delivery fixture",
+    flows: [{ id: definition.id, path: "flows/deliver.flow.json" }],
+    flow_step_actions: [
+      { flow_id: definition.id, step_id: "verify", skills: ["review"], expectation_ids: ["refresh"], artifacts: [], implementation_allowed: false, expectation_bindings: [{ expectation_id: "refresh", interface: "workflow.evidence" }], artifact_bindings: [] },
+      { flow_id: definition.id, step_id: "done", skills: ["review"], expectation_ids: ["closeout"], artifacts: [], implementation_allowed: false, expectation_bindings: [{ expectation_id: "closeout", interface: "workflow.evidence" }], artifact_bindings: [] },
+    ],
+    skill_roles: [{ skill_id: "acme.review", step_ids: ["verify", "done"], expectation_ids: ["refresh", "closeout"], artifacts: [] }],
+  }));
+  const subject = "local:work-item/freshness-request";
+  fs.writeFileSync(path.join(sessionDir, "state.json"), JSON.stringify({
+    schema_version: "1.0", task_slug: slug, status: "delivered", phase: "release",
+    work_item_refs: [subject], next_action: { status: "done", summary: "Fixture." },
+  }));
+  try {
+    await startRun(definitionFile, { cwd: root, runId: slug, params: { subject } });
+    for (let remaining = 3; remaining > 0; remaining--) {
+      if ((await loadRun(slug, root)).state.status === "completed") break;
+      await evaluateRun(slug, { cwd: root });
+    }
+    assert.equal((await loadRun(slug, root)).state.status, "completed", "the published Flow runtime must complete the fixture");
+    const issued = issueMergeChangeAction({
+      binding: { ...binding, run_id: slug, definition_id: definition.id, definition_version: definition.version, gate_ids: ["closeout-gate"] },
+      provider, assignment_actor: "codex:fixture:Kontour", expected_provider_actor: "fixture",
+      intent: { strategy: "squash", change_number: 1000, base_ref: "main", head_ref: "fixture", terminal_head_sha: SHA },
+    });
+    const output = path.join(root, "unsigned.json");
+    const errors = [];
+    const originalError = console.error;
+    const originalLog = console.log;
+    console.error = (...values) => errors.push(values.join(" "));
+    console.log = () => {};
+    let status;
+    try {
+      status = await mergeChangeMain(["request", "--session-dir", sessionDir, "--strategy", "squash", "--out", output], {
+        provider,
+        currentAction: async () => issued,
+        preflightProvider: async () => ({ status: "satisfied", base_ref: "main" }),
+      });
+    } finally { console.error = originalError; console.log = originalLog; }
+    return { status, errors: errors.join("\n"), authorization: fs.existsSync(output) ? JSON.parse(fs.readFileSync(output, "utf8")) : null };
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+}
+
+test("public merge-change request derives a non-Builder freshness gate and refuses ambiguous or unrefreshable declarations", async () => {
+  const accepted = await evidenceRefreshRequest(acmeDeliveryDefinition());
+  assert.equal(accepted.status, 0, accepted.errors);
+  assert.ok(accepted.authorization, "the request must write an unsigned authorization after its real gate check");
+  const weakened = acmeDeliveryDefinition();
+  delete weakened.gates["acme-freshness"].on_route_back.default;
+  const noGate = acmeDeliveryDefinition();
+  delete noGate.gates["acme-freshness"].requires_current_verification;
+  const twoGates = acmeDeliveryDefinition();
+  twoGates.gates["closeout-gate"].requires_current_verification = true;
+  for (const [definition, reason] of [
+    [weakened, /semantically adopt merge-ready-ci evidence refresh/],
+    [noGate, /exactly one gate declaring requires_current_verification/],
+    [twoGates, /exactly one gate declaring requires_current_verification/],
+  ]) {
+    const refused = await evidenceRefreshRequest(definition);
+    assert.equal(refused.status, 1, refused.errors);
+    assert.match(refused.errors, reason);
+    assert.equal(refused.authorization, null, "refused policy must not produce signing material");
+  }
 });
 
 test("#1415 slice 2: merge-change finds the merge-ready-ci gate by its declared property, agreeing with the coordinator", async () => {

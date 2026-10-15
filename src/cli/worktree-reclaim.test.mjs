@@ -5,11 +5,13 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
+import { defaultFlowConfig, startRun } from "@kontourai/flow";
 import { reclaimBuilderWorktree } from "../../build/src/cli/worktree-reclaim.js";
+import { resolveEffectiveFlowDefinition } from "../../build/src/lib/flow-resolver.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 test("reclaim removes only the clean merged linked worktree, retains its branch, and persists a receipt", async () => {
-  const fixture = makeFixture();
+  const fixture = await makeFixture();
   try {
     const receipt = await reclaimBuilderWorktree(fixture.sessionDir, {
       observeMergedChange: async ({ expected }) => ({
@@ -37,8 +39,8 @@ test("reclaim removes only the clean merged linked worktree, retains its branch,
   }
 });
 
-test("reclaim can finish when the invoking process starts inside the worktree being removed", () => {
-  const fixture = makeFixture();
+test("reclaim can finish when the invoking process starts inside the worktree being removed", async () => {
+  const fixture = await makeFixture();
   try {
     const moduleUrl = pathToFileURL(path.resolve("build/src/cli/worktree-reclaim.js")).href;
     const script = `
@@ -65,7 +67,7 @@ test("reclaim can finish when the invoking process starts inside the worktree be
 });
 
 test("reclaim refuses dirty worktrees before provider observation", async () => {
-  const fixture = makeFixture();
+  const fixture = await makeFixture();
   let observations = 0;
   try {
     fs.writeFileSync(path.join(fixture.worktree, "dirty.txt"), "not committed\n");
@@ -86,7 +88,7 @@ test("reclaim refuses dirty worktrees before provider observation", async () => 
 });
 
 test("reclaim refuses before accepted learning evidence", async () => {
-  const fixture = makeFixture();
+  const fixture = await makeFixture();
   try {
     fs.writeFileSync(path.join(fixture.sessionDir, "trust.bundle"), JSON.stringify({ schemaVersion: 5, claims: [] }));
     await assert.rejects(
@@ -99,7 +101,136 @@ test("reclaim refuses before accepted learning evidence", async () => {
   }
 });
 
-function makeFixture() {
+const merged = async ({ expected }) => ({
+  state: "merged", mergeSha: "c".repeat(40), headSha: expected.headSha, headRef: expected.headRef,
+  baseRef: expected.baseRef, providerActor: expected.providerActor, observedAt: "2026-07-23T23:00:00.000Z",
+});
+
+test("reclaim requires the learning claims a non-Builder kit's closing gate declares, not Builder's", async () => {
+  // Accepted: the kit's own closeout claims, with no builder.learn.* claim anywhere.
+  const accepted = await makeFixture({
+    definition: acmeDeliveryDefinition(),
+    claims: [
+      { claimType: "acme.closeout.notes", status: "verified" },
+      { claimType: "acme.closeout.retro", status: "verified" },
+    ],
+  });
+  try {
+    const receipt = await reclaimBuilderWorktree(accepted.sessionDir, { observeMergedChange: merged });
+    assert.equal(receipt.outcome, "reclaimed");
+  } finally {
+    fs.rmSync(accepted.root, { recursive: true, force: true });
+  }
+  // Refused: Builder's learning claims do not satisfy another kit's closing gate.
+  const builderClaims = await makeFixture({ definition: acmeDeliveryDefinition() });
+  try {
+    await assert.rejects(
+      reclaimBuilderWorktree(builderClaims.sessionDir, { observeMergedChange: async () => { throw new Error("should not observe"); } }),
+      /requires only accepted current acme\.closeout\.notes learning evidence/,
+    );
+    assert.equal(fs.existsSync(builderClaims.worktree), true);
+  } finally {
+    fs.rmSync(builderClaims.root, { recursive: true, force: true });
+  }
+  // Refused: the kit declares only "verified", so a "trusted" claim Builder would accept is not enough.
+  const trusted = await makeFixture({
+    definition: acmeDeliveryDefinition(),
+    claims: [
+      { claimType: "acme.closeout.notes", status: "trusted" },
+      { claimType: "acme.closeout.retro", status: "verified" },
+    ],
+  });
+  try {
+    await assert.rejects(
+      reclaimBuilderWorktree(trusted.sessionDir, { observeMergedChange: async () => { throw new Error("should not observe"); } }),
+      /requires only accepted current acme\.closeout\.notes learning evidence/,
+    );
+  } finally {
+    fs.rmSync(trusted.root, { recursive: true, force: true });
+  }
+});
+
+test("reclaim enforces required closeout expectations from Flow project overrides", async () => {
+  const definition = acmeDeliveryDefinition();
+  const closing = definition.gates["acme.closeout:closing-gate"];
+  const extra = { ...structuredClone(closing.expects[0]), id: "project-retention", required: false,
+    bundle_claim: { claimType: "acme.closeout.retention", accepted_statuses: ["verified"] } };
+  closing.expects.push(extra);
+  const config = { ...defaultFlowConfig(), gate_overrides: {
+    "acme.closeout:closing-gate": { expectations: { "project-retention": { required: true } } },
+  } };
+  const ordinaryClaims = [
+    { claimType: "acme.closeout.notes", status: "verified" },
+    { claimType: "acme.closeout.retro", status: "verified" },
+  ];
+  const missing = await makeFixture({ definition, flowConfig: config, claims: ordinaryClaims });
+  try {
+    await assert.rejects(reclaimBuilderWorktree(missing.sessionDir, { observeMergedChange: async () => { throw new Error("should not observe"); } }),
+      /requires only accepted current acme\.closeout\.retention learning evidence/);
+    assert.equal(fs.existsSync(missing.worktree), true);
+  } finally { fs.rmSync(missing.root, { recursive: true, force: true }); }
+  const complete = await makeFixture({ definition, flowConfig: config, claims: [...ordinaryClaims, { claimType: "acme.closeout.retention", status: "verified" }] });
+  try {
+    const receipt = await reclaimBuilderWorktree(complete.sessionDir, { observeMergedChange: merged });
+    assert.equal(receipt.outcome, "reclaimed");
+    assert.equal(fs.existsSync(complete.worktree), false);
+  } finally { fs.rmSync(complete.root, { recursive: true, force: true }); }
+});
+
+test("reclaim refuses when the run's definition cannot name its learning evidence", async () => {
+  // A closing gate with no required trust-bundle claim gives reclaim nothing to check: refuse.
+  const definition = acmeDeliveryDefinition();
+  definition.gates["acme.closeout:closing-gate"].expects = definition.gates["acme.closeout:closing-gate"].expects
+    .map((expectation) => ({ ...expectation, required: false }));
+  const undeclared = await makeFixture({ definition });
+  try {
+    await assert.rejects(
+      reclaimBuilderWorktree(undeclared.sessionDir, { observeMergedChange: async () => { throw new Error("should not observe"); } }),
+      /terminal gate to declare required learning evidence; acme\.deliver declares none/,
+    );
+  } finally {
+    fs.rmSync(undeclared.root, { recursive: true, force: true });
+  }
+  // No canonical run beside the session: refuse rather than skip the learning check.
+  const missing = await makeFixture();
+  try {
+    fs.rmSync(path.join(missing.worktree, ".kontourai", "flow"), { recursive: true, force: true });
+    await assert.rejects(
+      reclaimBuilderWorktree(missing.sessionDir, { observeMergedChange: async () => { throw new Error("should not observe"); } }),
+      /requires the session's canonical Flow run definition/,
+    );
+  } finally {
+    fs.rmSync(missing.root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A non-Builder delivery flow in the real composed-definition shape: Builder's own resolved
+ * builder.build definition with the flow id and the closing gate's claim types renamed, as a kit
+ * that ships its own closeout gate would declare them.
+ */
+function acmeDeliveryDefinition() {
+  const definition = structuredClone(builderBuildDefinition());
+  definition.id = "acme.deliver";
+  const terminal = definition.steps.find((step) => step.next === null);
+  const [closingGateId] = Object.entries(definition.gates).find(([, gate]) => gate.step === terminal.id);
+  const closing = definition.gates[closingGateId];
+  delete definition.gates[closingGateId];
+  closing.expects = closing.expects.map((expectation, index) => ({
+    ...expectation,
+    bundle_claim: { ...expectation.bundle_claim, claimType: ["acme.closeout.notes", "acme.closeout.retro"][index], accepted_statuses: ["verified"] },
+  }));
+  definition.gates["acme.closeout:closing-gate"] = closing;
+  return definition;
+}
+
+function builderBuildDefinition() {
+  const definition = resolveEffectiveFlowDefinition("builder.build", process.cwd(), { allowOverride: false });
+  assert.ok(definition, "the fixture requires the packaged Builder definition");
+  return definition;
+}
+
+async function makeFixture({ definition = builderBuildDefinition(), claims, flowConfig } = {}) {
   const root = makeFixtureDir("flow-agents-reclaim-");
   const primary = path.join(root, "repo");
   const worktree = path.join(root, "repo-worktrees", "feature");
@@ -122,6 +253,10 @@ function makeFixture() {
       },
     },
   }));
+  if (flowConfig) {
+    fs.mkdirSync(path.join(primary, ".flow"), { recursive: true });
+    fs.writeFileSync(path.join(primary, ".flow", "config.json"), JSON.stringify(flowConfig));
+  }
   fs.writeFileSync(path.join(primary, "base.txt"), "base\n");
   git(primary, "add", ".");
   git(primary, "commit", "-m", "base");
@@ -135,11 +270,16 @@ function makeFixture() {
   fs.mkdirSync(sessionDir, { recursive: true });
   fs.writeFileSync(path.join(sessionDir, "trust.bundle"), JSON.stringify({
     schemaVersion: 5,
-    claims: [
+    claims: claims ?? [
       { claimType: "builder.learn.decisions", status: "verified" },
       { claimType: "builder.learn.evidence", status: "verified" },
     ],
   }));
+  // The canonical Flow run the session belongs to: reclaim reads its learning requirement from the
+  // run's effective definition, so the fixture starts a real run rather than hand-writing state.
+  const definitionFile = path.join(worktree, ".kontourai", `${definition.id}.start.json`);
+  fs.writeFileSync(definitionFile, JSON.stringify(definition));
+  await startRun(definitionFile, { cwd: worktree, runId: "fixture", params: { subject: "acme/example#42" } });
   fs.writeFileSync(path.join(sessionDir, "publish-change.result.json"), JSON.stringify({
     schema_version: "1.0",
     operation: "publish-change",
