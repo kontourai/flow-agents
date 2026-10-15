@@ -429,6 +429,279 @@ test("a typed local-files sink over a user-edited telemetry.conf reports the pin
   const result = runInit(["--runtime", "base", "--dest", dest, "--telemetry-sink", "local-files"], home);
   assert.equal(result.status, 0, result.output);
   assert.doesNotMatch(fs.readFileSync(installedConf(dest), "utf8"), /telemetry_sink_pin/);
-  assert.match(result.output, /! Telemetry local-only pin: requested with --telemetry-sink local-files but NOT recorded/);
+  assert.match(result.output, /! Telemetry local-only pin: requested with --telemetry-sink local-files but NOT recorded: \S+telemetry\.conf was edited after it was installed, so init preserved it unchanged/);
   assert.doesNotMatch(result.output, /✓ Telemetry pinned local-only/);
+  assert.doesNotMatch(result.output, /re-run init with `--telemetry-sink local-files`/);
+});
+
+// --- a pinned telemetry.conf names no network destination (review round 1) ----------------------
+//
+// The installed telemetry.conf can be repository-supplied (mode 644), and the pin makes it outrank
+// a trusted operator conf. So for a pinned install it may not supply a Console URL, credentials, a
+// relay opt-in, a pricing URL, or a non-loopback channel endpoint.
+const HOSTILE = "https://attacker.example";
+
+function withInstalledConf(dest, edit, fn) {
+  const file = installedConf(dest);
+  const original = fs.readFileSync(file, "utf8");
+  fs.writeFileSync(file, edit(original));
+  try {
+    return fn(file);
+  } finally {
+    fs.writeFileSync(file, original);
+  }
+}
+
+function readShellVars(dest, env, names) {
+  const script = `source "$1"; ${names.map((name) => `printf '%s\\n' "\${${name}:-}"`).join("; ")}`;
+  const result = spawnSync("/bin/bash", ["-c", script, "_", path.join(dest, "scripts", "telemetry", "lib", "config.sh")], { env: { PATH: SHELL_PATH, ...env }, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return Object.fromEntries(result.stdout.split("\n").slice(0, names.length).map((value, index) => [names[index], value]));
+}
+
+const HOSTILE_KEYS = [
+  `console_telemetry_url=${HOSTILE}`,
+  `console_url=${HOSTILE}`,
+  `console_telemetry_endpoint_url=${HOSTILE}/api/telemetry/records`,
+  "console_telemetry_token=stolen-token",
+  "console_tenant_id=hostile-tenant",
+  "console_economics_relay=1",
+  "console_liveness_relay=1",
+  `console_economics_endpoint_url=${HOSTILE}/records`,
+  `console_liveness_endpoint_url=${HOSTILE}/records`,
+  `console_pricing_url=${HOSTILE}/pricing`,
+  `pricing_url=${HOSTILE}/pricing`,
+  `channel.analytics.endpoint_url=${HOSTILE}/events`,
+].join("\n");
+
+test("pinned conf carrying a Console URL and credentials over a trusted operator conf: nothing resolves", () => {
+  const { home } = homeWithGlobalConf("hostile");
+  withInstalledConf(pinned.dest, (text) => `${text}${HOSTILE_KEYS}\n`, () => {
+    const vars = readShellVars(pinned.dest, { HOME: home }, [
+      "TELEMETRY_CONFIG_FILE", "CONSOLE_TELEMETRY_URL", "CONSOLE_TELEMETRY_ENDPOINT_URL", "CONSOLE_TELEMETRY_TOKEN", "CONSOLE_TENANT_ID",
+      "FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY", "FLOW_AGENTS_CONSOLE_LIVENESS_RELAY", "FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL",
+      "FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL", "TELEMETRY_PRICING_URL", "TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL", "TELEMETRY_CHANNEL_FULL_ENDPOINT_URL",
+    ]);
+    assert.equal(real(vars.TELEMETRY_CONFIG_FILE), real(installedConf(pinned.dest)));
+    for (const name of ["CONSOLE_TELEMETRY_URL", "CONSOLE_TELEMETRY_ENDPOINT_URL", "CONSOLE_TELEMETRY_TOKEN", "CONSOLE_TENANT_ID", "FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY", "FLOW_AGENTS_CONSOLE_LIVENESS_RELAY", "FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL", "FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL", "TELEMETRY_PRICING_URL", "TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL"]) {
+      assert.equal(vars[name], "", `config.sh ${name}`);
+    }
+    // The shipped loopback channel is on-machine and keeps working.
+    assert.equal(vars.TELEMETRY_CHANNEL_FULL_ENDPOINT_URL, "http://localhost:3141/v1/agent-events");
+    assert.equal(readLivenessWrite(pinned.dest, { HOME: home }).enabled, false, "liveness pre-gate");
+    const doctor = JSON.parse(spawnSync(process.execPath, [cli, "telemetry-doctor", "--dest", pinned.dest, "--json", "--headless", "--timeout-ms", "300"], { env: { PATH: NODE_PATH, HOME: home }, encoding: "utf8" }).stdout);
+    assert.equal(doctor.console.sink, "local-only");
+    assert.equal(doctor.console.url, undefined);
+    assert.equal(doctor.console.tokenConfigured, false);
+    assert.equal(doctor.console.tenantConfigured, false);
+    assert.equal(doctor.telemetry.channels.find((channel) => channel.name === "analytics")?.endpointUrl, undefined);
+    assert.equal(boardSyncPassedGate(pinned.dest, { HOME: home }), false, "board sync gate");
+  });
+});
+
+test("pinned conf: a non-loopback or disguised channel endpoint is dropped, a loopback one kept", () => {
+  const home = makeFixtureDir("telemetry-pin-channel-home-");
+  for (const [url, kept] of [
+    ["http://127.0.0.1:3141/v1/agent-events", true],
+    ["http://[::1]:3141/x", true],
+    ["http://localhost:3141@attacker.example/x", false],
+    ["http://localhost.attacker.example/x", false],
+    [`${HOSTILE}/x`, false],
+  ]) {
+    withInstalledConf(pinned.dest, (text) => `${text}channel.full.endpoint_url=${url}\n`, () => {
+      const vars = readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_CHANNEL_FULL_ENDPOINT_URL"]);
+      // The shipped line still precedes this one, so a dropped URL leaves the shipped loopback default.
+      assert.equal(vars.TELEMETRY_CHANNEL_FULL_ENDPOINT_URL, kept ? url : "http://localhost:3141/v1/agent-events", url);
+      const doctor = readDoctorReport(pinned.dest, { HOME: home });
+      assert.equal(doctor.telemetry.channels.find((channel) => channel.name === "full")?.endpointUrl, kept ? new URL(url).toString() : "http://localhost:3141/v1/agent-events", `doctor ${url}`);
+    });
+  }
+});
+
+test("pinned conf: a relay opt-out still applies when the environment supplies a Console URL", () => {
+  const home = makeFixtureDir("telemetry-pin-optout-home-");
+  withInstalledConf(pinned.dest, (text) => `${text}console_economics_relay=0\nconsole_liveness_relay=0\n`, () => {
+    const env = { HOME: home, CONSOLE_TELEMETRY_URL: EXPLICIT_URL };
+    const vars = readShellVars(pinned.dest, env, ["CONSOLE_TELEMETRY_URL", "FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY", "FLOW_AGENTS_CONSOLE_LIVENESS_RELAY"]);
+    assert.deepEqual(vars, { CONSOLE_TELEMETRY_URL: EXPLICIT_URL, FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY: "0", FLOW_AGENTS_CONSOLE_LIVENESS_RELAY: "0" });
+    assert.equal(readLivenessWrite(pinned.dest, env).enabled, false);
+  });
+});
+
+function readDoctorReport(dest, env) {
+  const result = spawnSync(process.execPath, [cli, "telemetry-doctor", "--dest", dest, "--json", "--headless", "--timeout-ms", "300"], { env: { PATH: NODE_PATH, ...env }, encoding: "utf8" });
+  return JSON.parse(result.stdout);
+}
+
+// --- a pinned install that still sends to a Console says so -------------------------------------
+
+test("doctor: pinned + a Console URL in the environment warns and names the variable", () => {
+  const home = makeFixtureDir("telemetry-pin-envurl-home-");
+  const report = readDoctorReport(pinned.dest, { HOME: home, CONSOLE_TELEMETRY_URL: EXPLICIT_URL });
+  assert.equal(report.console.sink, "console");
+  assert.equal(report.console.endpointSource, "environment variable CONSOLE_TELEMETRY_URL");
+  assert.ok(report.warnings.some((warning) => /pinned local-only .* but a Console endpoint still resolves from environment variable CONSOLE_TELEMETRY_URL/.test(warning)), JSON.stringify(report.warnings));
+});
+
+test("doctor: pinned + TELEMETRY_CONFIG_FILE with a Console URL warns and names the file", () => {
+  const home = makeFixtureDir("telemetry-pin-explicit-warn-home-");
+  const explicit = path.join(makeFixtureDir("telemetry-pin-explicit-warn-"), "explicit.conf");
+  writeConf(explicit, EXPLICIT_URL, "explicit-token");
+  const report = readDoctorReport(pinned.dest, { HOME: home, TELEMETRY_CONFIG_FILE: explicit });
+  assert.equal(report.telemetry.pinRecorded, true);
+  assert.equal(report.console.endpointSource, `TELEMETRY_CONFIG_FILE (${explicit})`);
+  assert.ok(report.warnings.some((warning) => warning.includes(`still resolves from TELEMETRY_CONFIG_FILE (${explicit})`)), JSON.stringify(report.warnings));
+});
+
+test("doctor: a pinned install with no Console source draws no pin warning", () => {
+  const home = makeFixtureDir("telemetry-pin-nowarn-home-");
+  assert.deepEqual(readDoctorReport(pinned.dest, { HOME: home }).warnings, []);
+});
+
+test("init summary: pinned with TELEMETRY_CONFIG_FILE carrying a Console URL says the install is NOT local-only", () => {
+  const home = makeFixtureDir("telemetry-pin-summary-explicit-home-");
+  const explicit = path.join(makeFixtureDir("telemetry-pin-summary-explicit-"), "explicit.conf");
+  writeConf(explicit, EXPLICIT_URL, "explicit-token");
+  const dest = path.join(makeFixtureDir("telemetry-pin-summary-explicit-dest-"), "ws");
+  const result = runInit(["--runtime", "base", "--dest", dest, "--telemetry-sink", "local-files"], home, { TELEMETRY_CONFIG_FILE: explicit });
+  assert.equal(result.status, 0, result.output);
+  assert.match(fs.readFileSync(installedConf(dest), "utf8"), PIN_LINE);
+  assert.match(result.output, new RegExp(`! Telemetry pinned local-only in \\S+, but a Console endpoint still resolves from TELEMETRY_CONFIG_FILE \\(${explicit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\), so this install is NOT local-only`));
+  assert.doesNotMatch(result.output, /✓ Telemetry pinned local-only/);
+});
+
+// --- a typed local-files sink that Console settings blocked names them --------------------------
+
+for (const [label, args, env, named] of [
+  ["environment", [], { CONSOLE_URL: GLOBAL_URL }, "CONSOLE_URL in the install environment"],
+  ["flag", ["--console-url", GLOBAL_URL], {}, "--console-url"],
+]) {
+  test(`init summary: a typed local-files sink blocked by a Console ${label} value names it and gives no circular advice`, () => {
+    const { home } = homeWithGlobalConf(`blocked-${label}`);
+    const dest = path.join(makeFixtureDir(`telemetry-pin-blocked-${label}-dest-`), "ws");
+    const result = runInit(["--runtime", "base", "--dest", dest, "--telemetry-sink", "local-files", ...args], home, env);
+    assert.equal(result.status, 0, result.output);
+    const conf = fs.readFileSync(installedConf(dest), "utf8");
+    assert.doesNotMatch(conf, /telemetry_sink_pin/);
+    assert.match(conf, /^console_telemetry_url=http:\/\/127\.0\.0\.1:9$/m);
+    assert.match(result.output, new RegExp(`NOT recorded: Console settings were also supplied \\(${named.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\), and the pin is written only when none are`));
+    assert.doesNotMatch(result.output, /was not updated|was edited after it was installed/);
+    assert.doesNotMatch(result.output, /re-run init with `--telemetry-sink local-files`/);
+  });
+}
+
+// --- one pin grammar for every reader and the remover ---------------------------------------------
+
+const PIN_VARIANTS = [
+  ["canonical", (text) => `${text}telemetry_sink_pin=local-files\n`, true],
+  ["CRLF", (text) => `${text}telemetry_sink_pin=local-files\r\n`, true],
+  ["no trailing newline", (text) => `${text}telemetry_sink_pin=local-files`, true],
+  ["leading space", (text) => `${text} telemetry_sink_pin=local-files\n`, false],
+  ["space before =", (text) => `${text}telemetry_sink_pin =local-files\n`, false],
+  ["space inside the key", (text) => `${text}telemetry _sink_pin=local-files\n`, false],
+  ["NBSP before the value", (text) => `${text}telemetry_sink_pin=\u00a0local-files\n`, false],
+  ["trailing space", (text) => `${text}telemetry_sink_pin=local-files \n`, false],
+  ["UTF-8 BOM", (text) => `\ufefftelemetry_sink_pin=local-files\n${text}`, false],
+  ["commented", (text) => `${text}# telemetry_sink_pin=local-files\n`, false],
+  ["other value", (text) => `${text}telemetry_sink_pin=local-file\n`, false],
+];
+
+function stripPin(text) {
+  return text.split("\n").filter((line) => line !== "telemetry_sink_pin=local-files").join("\n");
+}
+
+test("every reader applies the same pin grammar: the exact line, with only a trailing CR allowed", () => {
+  const { home, file: globalConf } = homeWithGlobalConf("grammar");
+  for (const [label, variant, expected] of PIN_VARIANTS) {
+    withInstalledConf(pinned.dest, (text) => variant(stripPin(text)), () => {
+      const want = real(expected ? installedConf(pinned.dest) : globalConf);
+      assert.equal(real(readConfigSh(pinned.dest, { HOME: home }).file), want, `config.sh: ${label}`);
+      assert.equal(real(readLivenessWrite(pinned.dest, { HOME: home }).file), want, `liveness-write.js: ${label}`);
+      const doctor = readDoctorReport(pinned.dest, { HOME: home });
+      assert.equal(real(doctor.telemetry.configFile), want, `telemetry-doctor: ${label}`);
+      assert.equal(doctor.telemetry.pinRecorded, expected, `telemetry-doctor pinRecorded: ${label}`);
+    });
+  }
+});
+
+test("the installer's pin remover removes exactly what the readers read as a pin", () => {
+  for (const [label, variant, expected] of PIN_VARIANTS) {
+    const { ws, conf, script } = telemetryCopy(`remover-${label.replace(/\W+/g, "-")}`);
+    const before = variant(fs.readFileSync(conf, "utf8"));
+    fs.writeFileSync(conf, before);
+    const result = runInstaller(script, [conf, "--telemetry-sink", "local-kontour-console", "--console-tenant", "t1"]);
+    assert.equal(result.status, 0, `${label}: ${result.output}`);
+    const after = fs.readFileSync(conf, "utf8");
+    const lines = after.split("\n");
+    assert.equal(lines.some((line) => line === "telemetry_sink_pin=local-files" || line === "telemetry_sink_pin=local-files\r"), false, `${label}: a pin survived`);
+    if (!expected) {
+      // What no reader treats as a pin is not the remover's to touch.
+      const variantLine = before.split("\n").find((line) => line.includes("_pin") || line.includes("sink_pin"));
+      assert.ok(lines.includes(variantLine), `${label}: the non-pin line was removed`);
+    }
+    fs.rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+// --- never pin the Flow Agents package's own telemetry.conf ---------------------------------------
+
+test("install-console-config.sh never pins the telemetry.conf of the Flow Agents package itself", () => {
+  for (const [name, expectPin] of [["@kontourai/flow-agents", false], ["some-consumer-repo", true]]) {
+    const { ws, conf, script } = telemetryCopy(`package-${expectPin ? "consumer" : "self"}`);
+    fs.writeFileSync(path.join(ws, "package.json"), `${JSON.stringify({ name, version: "1.0.0" })}\n`);
+    const result = runInstaller(script, [conf, "--telemetry-sink", "local-files"], { PATH: NODE_PATH });
+    assert.equal(result.status, 0, result.output);
+    assert.equal(PIN_LINE.test(fs.readFileSync(conf, "utf8")), expectPin, `${name}: ${result.output}`);
+    if (!expectPin) assert.match(result.stderr, /not pinning .* it belongs to the Flow Agents package itself/);
+  }
+});
+
+// --- the generated installers run under macOS /bin/bash 3.2 with no Console flag ------------------
+//
+// Bash before 4.4 treats "${empty[@]}" as unbound under `set -u`. A Console variable in the
+// environment with no Console flag reaches install-console-config.sh with an empty argument array.
+const bash3 = (() => {
+  if (!fs.existsSync("/bin/bash")) return false;
+  const version = spawnSync("/bin/bash", ["-c", "echo ${BASH_VERSINFO[0]}"], { encoding: "utf8" }).stdout.trim();
+  return version === "3";
+})();
+const BASH3_SKIP = bash3 ? false : "/bin/bash is not bash 3.x here, so the bash-3.2 empty-array failure cannot be reproduced";
+
+function bash3Path() {
+  // `bash` resolves to /bin/bash 3.2 for init's spawnSync("bash", ...) children.
+  const dir = makeFixtureDir("telemetry-pin-bash3-bin-");
+  fs.symlinkSync("/bin/bash", path.join(dir, "bash"));
+  fs.symlinkSync(process.execPath, path.join(dir, "node"));
+  return `${dir}:/usr/bin:/bin:/usr/sbin:/sbin`;
+}
+
+test("bash 3.2: the bundle install.sh with CONSOLE_URL set and no Console flag exits 0", { skip: BASH3_SKIP }, () => {
+  const home = makeFixtureDir("telemetry-pin-bash3-bundle-home-");
+  const dest = path.join(makeFixtureDir("telemetry-pin-bash3-bundle-dest-"), "ws");
+  const result = spawnSync("/bin/bash", [path.join(repoRoot, "dist", "base", "install.sh"), dest], { env: { HOME: home, PATH: bash3Path(), CONSOLE_URL: GLOBAL_URL }, encoding: "utf8" });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(fs.readFileSync(installedConf(dest), "utf8"), /^console_telemetry_url=http:\/\/127\.0\.0\.1:9$/m);
+});
+
+test("bash 3.2: init (project and codex --global) with CONSOLE_URL set and no Console flag exits 0", { skip: BASH3_SKIP }, () => {
+  const home = makeFixtureDir("telemetry-pin-bash3-init-home-");
+  const env = { HOME: home, PATH: bash3Path(), XDG_CONFIG_HOME: path.join(home, ".config"), CONSOLE_URL: GLOBAL_URL };
+  for (const args of [["--runtime", "base"], ["--runtime", "codex", "--global"]]) {
+    const dest = path.join(makeFixtureDir("telemetry-pin-bash3-init-dest-"), "ws");
+    const result = spawnSync(process.execPath, [cli, "init", ...args, "--dest", dest, "--yes"], { cwd: home, env, encoding: "utf8" });
+    assert.equal(result.status, 0, `${args.join(" ")}: ${result.stdout}\n${result.stderr}`);
+    assert.match(fs.readFileSync(installedConf(dest), "utf8"), /^console_telemetry_url=http:\/\/127\.0\.0\.1:9$/m, args.join(" "));
+  }
+});
+
+test("bash 3.2: the root install.sh with CONSOLE_URL set and no Console flag exits 0", { skip: BASH3_SKIP }, () => {
+  // A minimal source tree: the root installer rsyncs its own directory, so copy only what it runs.
+  const src = makeFixtureDir("telemetry-pin-bash3-root-src-");
+  fs.copyFileSync(path.join(repoRoot, "install.sh"), path.join(src, "install.sh"));
+  fs.cpSync(path.join(repoRoot, "scripts", "telemetry"), path.join(src, "scripts", "telemetry"), { recursive: true });
+  const home = makeFixtureDir("telemetry-pin-bash3-root-home-");
+  const dest = path.join(makeFixtureDir("telemetry-pin-bash3-root-dest-"), "ws");
+  const result = spawnSync("/bin/bash", [path.join(src, "install.sh"), dest], { env: { HOME: home, PATH: bash3Path(), CONSOLE_URL: GLOBAL_URL }, encoding: "utf8" });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(fs.readFileSync(installedConf(dest), "utf8"), /^console_telemetry_url=http:\/\/127\.0\.0\.1:9$/m);
 });

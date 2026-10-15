@@ -1509,7 +1509,41 @@ export function classifyResolvedTelemetryConfig(configFile: string, dest: string
   return "explicit";
 }
 
-async function printPostInstallSummary(options: InitOptions): Promise<void> {
+/**
+ * What install-console-config.sh saw besides the typed local-files sink that made it write Console
+ * settings instead of the local-only pin (#1483): Console flags, and the Console environment
+ * variables it reads. Named for the summary, so the cure is "remove these", not "re-run with
+ * --telemetry-sink local-files" again.
+ */
+export function localOnlyPinBlockers(options: Pick<InitOptions, "consoleUrl" | "consoleEndpoint" | "consoleTenant" | "consoleTokenFile" | "consoleTokenValue">, env: NodeJS.ProcessEnv = process.env): string[] {
+  const blockers: string[] = [];
+  if (options.consoleUrl) blockers.push("--console-url");
+  if (options.consoleEndpoint) blockers.push("--console-endpoint");
+  if (options.consoleTokenFile || options.consoleTokenValue) blockers.push("--console-token-file");
+  if (options.consoleTenant) blockers.push("--console-tenant");
+  // install-console-config.sh reads FLOW_AGENTS_TELEMETRY_SINK only when ..._SINKS is unset.
+  const sinkVar = env.FLOW_AGENTS_TELEMETRY_SINKS ? "FLOW_AGENTS_TELEMETRY_SINKS" : "FLOW_AGENTS_TELEMETRY_SINK";
+  for (const name of CONSOLE_ENV_VARS) {
+    const value = env[name];
+    if (value === undefined || value === "") continue;
+    if (name.startsWith("FLOW_AGENTS_TELEMETRY_SINK") && (name !== sinkVar || namesOnlyLocalFiles([value]))) continue;
+    blockers.push(`${name} in the install environment`);
+  }
+  return blockers;
+}
+
+function localOnlyPinNotRecordedReason(options: InitOptions, installedConf: string, telemetryConfPreserved: boolean): string {
+  const blockers = localOnlyPinBlockers(options);
+  if (blockers.length > 0) {
+    return `Console settings were also supplied (${blockers.join(", ")}), and the pin is written only when none are. Remove those flags and unset those variables, then re-run init`;
+  }
+  if (telemetryConfPreserved) {
+    return `${installedConf} was edited after it was installed, so init preserved it unchanged. Add the line telemetry_sink_pin=local-files to it, or re-run init with --force to replace it (which discards the edits)`;
+  }
+  return `${installedConf} does not contain the line telemetry_sink_pin=local-files`;
+}
+
+async function printPostInstallSummary(options: InitOptions, telemetryConfPreserved = false): Promise<void> {
   let doctorConsole: {
     sink: "local-only" | "console";
     reachability: { checked: boolean; ok: boolean | null; error?: string; statusCode?: number };
@@ -1518,9 +1552,11 @@ async function printPostInstallSummary(options: InitOptions): Promise<void> {
   let tenantSource: "environment" | "config-file" | "absent" = "absent";
   let resolvedConfigFile: string | undefined;
   let resolvedConfigScope: "destination" | "workspace" | "user-global" | "explicit" | "absent" = "absent";
+  let endpointSource: string | undefined;
   try {
     const report = await buildReport(["--dest", options.dest]);
     doctorConsole = report.console;
+    endpointSource = report.console.endpointSource;
     tokenSource = report.console.tokenSource;
     tenantSource = report.console.tenantSource;
     resolvedConfigFile = report.telemetry.configFile;
@@ -1546,7 +1582,8 @@ async function printPostInstallSummary(options: InitOptions): Promise<void> {
   // Read back, not assumed: a preserved (not bundle-owned) telemetry.conf is never rewritten.
   const installedConf = path.join(options.dest, "scripts", "telemetry", "telemetry.conf");
   const pinRecorded = isPinnedLocalOnly(installedConf);
-  if (!pinRecorded && (resolvedConfigScope === "workspace" || resolvedConfigScope === "user-global") && options.telemetrySinks.every((sink) => sink === "local-files")) {
+  // Not when the flag was already typed: the pin line says why it was not recorded instead.
+  if (!pinRecorded && !options.localOnlyPinRequested && (resolvedConfigScope === "workspace" || resolvedConfigScope === "user-global") && options.telemetrySinks.every((sink) => sink === "local-files")) {
     nextSteps.push(`To keep this install local-only despite ${resolvedConfigFile}, re-run init with \`--telemetry-sink local-files\`, which pins it.`);
   }
   nextSteps.push("Re-run `flow-agents init` anytime to reconfigure runtime, destination, or Console connection.");
@@ -1560,7 +1597,13 @@ async function printPostInstallSummary(options: InitOptions): Promise<void> {
     resolvedConfigScope,
     tokenSource,
     tenantSource,
-    localOnlyPin: { requested: Boolean(options.localOnlyPinRequested), recordedIn: pinRecorded ? installedConf : undefined },
+    localOnlyPin: {
+      requested: Boolean(options.localOnlyPinRequested),
+      recordedIn: pinRecorded ? installedConf : undefined,
+      // An environment variable or TELEMETRY_CONFIG_FILE still beats a recorded pin.
+      overriddenBy: pinRecorded && doctorConsole.sink === "console" ? endpointSource ?? "the environment" : undefined,
+      notRecordedReason: !pinRecorded && options.localOnlyPinRequested ? localOnlyPinNotRecordedReason(options, installedConf, telemetryConfPreserved) : undefined,
+    },
     nextSteps,
   });
   for (const line of summaryLines) console.log(line);
@@ -1885,8 +1928,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       reportStaleOwned: true,
       refuseSymlinkParents: true,
     };
+    let telemetryConfPreserved = false;
     const guardedExit = withBundleReadLock<number | null>(() => {
     const plan = computeInstallPlan(planParams);
+    telemetryConfPreserved = plan.preserved.includes("scripts/telemetry/telemetry.conf");
     if (dryRun) {
       for (const line of formatDryRunLines(plan, options.runtime, options.dest)) console.log(line);
       if (rebuilt) console.log(`Note: rebuilt the ${options.runtime} bundle in the package dist/ to compute this plan (outside the destination).`);
@@ -1970,7 +2015,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or
     // interactiveOptions() -- never changes `activated`'s exit code.
-    await printPostInstallSummary(options);
+    await printPostInstallSummary(options, telemetryConfPreserved);
     return activated === 0 ? configureWorkflowProviders(options) : activated;
   } catch (error) {
     console.error(`flow-agents init: ${(error as Error).message}`);

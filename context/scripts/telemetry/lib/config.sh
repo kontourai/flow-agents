@@ -62,22 +62,50 @@ telemetry_conf_warn_untrusted() {
 # same rule is mirrored by scripts/hooks/lib/liveness-write.js and
 # src/cli/telemetry-doctor.ts; src/cli/telemetry-local-pin.test.mjs runs all of
 # them against one fixture.
+#
+# The pin is one exact line, `telemetry_sink_pin=local-files`, optionally
+# followed by a CR; nothing else (no whitespace, BOM or other value) counts.
+#
+# The installed telemetry.conf is not trust-gated (it can be mode 644 and come
+# from a repository or tarball), so once the pin has made it outrank the
+# operator confs it must not name a network destination either. For a pinned
+# install the config loop below ignores every console_* key except a console_*_relay
+# opt-out (0/false/no/off), ignores pricing_url, and keeps a channel.*.endpoint_url
+# only when it is a loopback URL (http://127.0.0.1, http://localhost or
+# http://[::1], optional port, optional path), so the shipped localhost channel
+# still works. Environment variables are not filtered: they are the operator's
+# explicit runtime override.
 TELEMETRY_LOCAL_CONFIG_FILE="${TELEMETRY_WORKSPACE_ROOT}/.kontourai/telemetry-console.conf"
 TELEMETRY_GLOBAL_CONFIG_FILE="${HOME:-}/.flow-agents/telemetry-console.conf"
 TELEMETRY_INSTALLED_CONFIG_FILE="${TELEMETRY_DIR}/telemetry.conf"
 
-# True when the installed telemetry.conf carries telemetry_sink_pin=local-files.
-# The last occurrence of the key wins, like the config loop below.
+# True when the installed telemetry.conf has the exact pin line.
 telemetry_conf_pinned_local_only() {
-  local file="$1" key value pinned=1
+  local file="$1" line
   [[ -f "$file" ]] || return 1
-  while IFS='=' read -r key value || [[ -n "$key" ]]; do
-    key=$(echo "$key" | tr -d '[:space:]')
-    [[ "$key" == "telemetry_sink_pin" ]] || continue
-    value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    if [[ "$value" == "local-files" ]]; then pinned=0; else pinned=1; fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == "telemetry_sink_pin=local-files" || "$line" == $'telemetry_sink_pin=local-files\r' ]] && return 0
   done < "$file"
-  return "$pinned"
+  return 1
+}
+
+TELEMETRY_LOOPBACK_URL_RE='^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[^[:space:]"\\]*)?$'
+
+# Whether a pinned install may take KEY=VALUE from its installed telemetry.conf
+# (see the pin note above).
+telemetry_pinned_key_allowed() {
+  local key="$1" value="$2"
+  case "$key" in
+    console_economics_relay|console_liveness_relay)
+      case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+        0|false|no|off) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    console_*|pricing_url) return 1 ;;
+    channel.*.endpoint_url) [[ "$value" =~ $TELEMETRY_LOOPBACK_URL_RE ]] ;;
+    *) return 0 ;;
+  esac
 }
 
 TELEMETRY_LOCAL_ONLY_PINNED=0
@@ -156,6 +184,9 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
     key=$(echo "$key" | tr -d '[:space:]')
     value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]] && ! telemetry_pinned_key_allowed "$key" "$value"; then
+      continue
+    fi
     
     # Handle channel-specific config
     if [[ "$key" =~ ^channel\.([^.]+)\.(.+)$ ]]; then

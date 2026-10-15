@@ -108,15 +108,15 @@ set_config_key() {
   mv "$tmp" "$conf"
 }
 
-unset_config_key() {
+# Remove every pin line, using the readers' grammar exactly: the line
+# `telemetry_sink_pin=local-files`, optionally followed by a CR, and nothing else.
+remove_local_only_pin() {
   local conf="$1"
-  local key="$2"
   [[ -f "$conf" ]] || return 0
-  grep -q "^${key}=" "$conf" || return 0
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/flow-agents-telemetry-conf.XXXXXX")"
-  awk -v key="$key" 'BEGIN { prefix = key "=" } index($0, prefix) != 1 { print }' "$conf" >"$tmp"
-  mv "$tmp" "$conf"
+  awk '$0 != "telemetry_sink_pin=local-files" && $0 != "telemetry_sink_pin=local-files\r" { print }' "$conf" >"$tmp"
+  if cmp -s "$tmp" "$conf"; then rm -f "$tmp"; else mv "$tmp" "$conf"; fi
 }
 
 # True when CONF is the telemetry.conf beside this script, the one lib/config.sh reads as the
@@ -129,6 +129,18 @@ is_installed_conf() {
 }
 
 # Spelled with ${HOME:-}, not as a home-relative literal: the bundle build rewrites those.
+# True when this script runs from the Flow Agents package itself (a source checkout, or the
+# installed npm package whose scripts/ the `--global` claude-code and opencode hooks run from):
+# its root package.json is named @kontourai/flow-agents. Its telemetry.conf is shared by every
+# such install (and tracked, in a checkout), so it is never pinned. Without node the name cannot
+# be read and the check passes.
+is_flow_agents_package() {
+  local package_json="$SCRIPT_DIR/../../package.json"
+  [[ -f "$package_json" ]] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  node -e 'try { process.exit(require(process.argv[1]).name === "@kontourai/flow-agents" ? 0 : 1) } catch { process.exit(1) }' "$package_json"
+}
+
 user_global_console_conf() {
   printf '%s/.flow-agents/telemetry-console.conf' "${HOME:-}"
 }
@@ -238,8 +250,12 @@ main() {
   fi
   if [[ "$sink_flag_given" -eq 1 && "$console_sink_count" -eq 0 && "$has_console_values" -eq 0 ]] \
       && is_installed_conf "$conf"; then
-    set_config_key "$conf" "telemetry_sink_pin" "local-files"
-    echo "Pinned telemetry to local files in $conf: operator Console configs (.kontourai/telemetry-console.conf, $(user_global_console_conf)) are ignored for this install"
+    if is_flow_agents_package; then
+      echo "install-console-config.sh: not pinning $conf local-only: it belongs to the Flow Agents package itself, not to one install" >&2
+    else
+      set_config_key "$conf" "telemetry_sink_pin" "local-files"
+      echo "Pinned telemetry to local files in $conf: operator Console configs (.kontourai/telemetry-console.conf, $(user_global_console_conf)) are ignored for this install"
+    fi
   fi
 
   if [[ "$has_console_values" -eq 0 && "$no_economics_relay" -eq 0 ]]; then
@@ -257,7 +273,7 @@ main() {
   mkdir -p "$(dirname "$conf")"
   [[ -f "$conf" ]] || : >"$conf"
   # A Console selection is the latest stated intent, so it lifts an earlier local-only pin.
-  [[ "$has_console_values" -eq 1 ]] && unset_config_key "$conf" "telemetry_sink_pin"
+  [[ "$has_console_values" -eq 1 ]] && remove_local_only_pin "$conf"
   set_config_key "$conf" "console_telemetry_url" "$console_url"
   set_config_key "$conf" "console_telemetry_endpoint_url" "$console_endpoint"
   set_config_key "$conf" "console_telemetry_token" "$console_token"

@@ -163,12 +163,19 @@ and board sync use the same Console. To keep one install from sending
 telemetry to a Console on a machine with a user-global Console config, install
 it with an explicit `--telemetry-sink local-files`. The liveness relay
 pre-gate and `telemetry-doctor` follow the same order, and the doctor reports
-`localOnlyPinned` and the operator confs the pin skipped. Re-running `init`
-without `--telemetry-sink local-files`, or with a Console sink, removes the pin
-(an unedited installed `telemetry.conf` is reset to the bundle's copy on every
-re-run), and so does deleting the `telemetry_sink_pin` line.
+`localOnlyPinned` and the operator confs the pin skipped. A pinned
+`telemetry.conf` supplies no Console URL, token or tenant and no non-loopback
+channel endpoint (see "Owner machine mirror" in
+[`docs/agent-usage-feedback-loop.md`](../docs/agent-usage-feedback-loop.md)).
+Re-running `init` without `--telemetry-sink local-files`, or with a Console
+sink, removes the pin, because an unedited installed `telemetry.conf` is reset
+to the bundle's copy on every re-run. A `telemetry.conf` edited after install is
+preserved with its pin, and the re-run applies no sink to it. Deleting the
+`telemetry_sink_pin` line also removes the pin.
 Environment variables still apply to a pinned install, so launch the agent host
-with no `CONSOLE_*` or `FLOW_AGENTS_CONSOLE_*` variables set. For an install
+with no `CONSOLE_*` or `FLOW_AGENTS_CONSOLE_*` variables set; the doctor warns
+and names the source when one of them, or `TELEMETRY_CONFIG_FILE`, still
+resolves a Console endpoint. For an install
 that cannot be pinned (`init --global` for `claude-code` or `opencode`), launch
 the agent host with `TELEMETRY_CONFIG_FILE` pointing at a file with no Console
 keys.

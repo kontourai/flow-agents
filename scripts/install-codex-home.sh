@@ -415,7 +415,7 @@ for profile_path in "$DEST"/*.config.toml; do
   [[ -f "$profile_path" ]] || continue
   profile_file="$(basename "$profile_path")"
   keep_generated=0
-  for generated_file in "${generated_profile_files[@]}"; do
+  for generated_file in ${generated_profile_files[@]+"${generated_profile_files[@]}"}; do
     if [[ "$profile_file" == "$generated_file" ]]; then
       keep_generated=1
       break
@@ -464,7 +464,7 @@ if command -v node >/dev/null 2>&1 && [[ -f "$FA_MANAGED_HOOKS" ]]; then
 fi
 
 if [[ ${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "${FLOW_AGENTS_CONSOLE_URL:-}" || -n "${CONSOLE_TELEMETRY_URL:-}" || -n "${CONSOLE_URL:-}" || -n "${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then
-  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "${CONSOLE_CONFIG_ARGS[@]}"
+  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" ${CONSOLE_CONFIG_ARGS[@]+"${CONSOLE_CONFIG_ARGS[@]}"}
 fi
 
 echo "Installed Flow Agents into Codex home at $DEST"

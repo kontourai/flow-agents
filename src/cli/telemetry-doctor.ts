@@ -31,6 +31,11 @@ export type DoctorReport = {
      * TELEMETRY_CONFIG_FILE overrides it, so the operator Console confs are not consulted.
      */
     localOnlyPinned: boolean;
+    /**
+     * The installed telemetry.conf carries the pin line, whether or not it applies right now
+     * (TELEMETRY_CONFIG_FILE overrides it).
+     */
+    pinRecorded: boolean;
     /** Operator Console confs present on disk that the local-only pin causes resolution to skip. */
     skippedConfigFiles: string[];
   };
@@ -59,6 +64,12 @@ export type DoctorReport = {
     tokenSource: ConsoleValueSource;
     tenantSource: ConsoleValueSource;
     urlSource: ConsoleValueSource;
+    /**
+     * Where the resolved Console endpoint comes from, named for a person: an environment
+     * variable, `TELEMETRY_CONFIG_FILE (<path>)`, or the resolved config file. Absent when no
+     * endpoint resolves.
+     */
+    endpointSource?: string;
     reachability: Reachability;
   };
   warnings: string[];
@@ -88,7 +99,7 @@ Options:
 `);
 }
 
-function readConfig(file: string): Config {
+function readConfig(file: string, keep: (key: string, value: string) => boolean = () => true): Config {
   if (!fs.existsSync(file)) return {};
   const config: Config = {};
   for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
@@ -98,7 +109,8 @@ function readConfig(file: string): Config {
     if (eq === -1) continue;
     const key = trimmed.slice(0, eq).trim();
     const value = trimmed.slice(eq + 1).trim();
-    if (key) config[key] = value;
+    // Filtered per line, as config.sh's loop does, so a dropped later line never hides an earlier kept one.
+    if (key && keep(key, value)) config[key] = value;
   }
   return config;
 }
@@ -216,22 +228,34 @@ function isConfTrusted(file: string): boolean {
   }
 }
 
+const PIN_LINE = "telemetry_sink_pin=local-files";
+
 /**
- * Whether `file` (an installed telemetry.conf) pins the install local-only: its last
- * `telemetry_sink_pin` key is `local-files`. Mirrors config.sh's telemetry_conf_pinned_local_only
- * and liveness-write.js's isPinnedLocalOnly.
+ * Whether `file` (an installed telemetry.conf) pins the install local-only: it has a line that is
+ * exactly `telemetry_sink_pin=local-files`, optionally followed by a CR. Mirrors config.sh's
+ * telemetry_conf_pinned_local_only and liveness-write.js's isPinnedLocalOnly.
  */
 export function isPinnedLocalOnly(file: string): boolean {
   if (!fs.existsSync(file)) return false;
-  let pinned = false;
-  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1 || trimmed.slice(0, eq).trim() !== "telemetry_sink_pin") continue;
-    pinned = trimmed.slice(eq + 1).trim() === "local-files";
-  }
-  return pinned;
+  return fs.readFileSync(file, "utf8").split("\n").some((line) => line === PIN_LINE || line === `${PIN_LINE}\r`);
+}
+
+const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(\/[^\s"\\]*)?$/;
+
+/**
+ * The installed telemetry.conf is not trust-gated, so a pinned install takes no network destination
+ * from it: no console_* key except a relay opt-out, no pricing_url, and a channel endpoint only when
+ * it is loopback. Mirrors config.sh's telemetry_pinned_key_allowed.
+ */
+function pinnedKeyAllowed(key: string, value: string): boolean {
+  if (key === "console_economics_relay" || key === "console_liveness_relay") return ["0", "false", "no", "off"].includes(value.toLowerCase());
+  if (key.startsWith("console_") || key === "pricing_url") return false;
+  if (/^channel\..+\.endpoint_url$/.test(key)) return LOOPBACK_URL.test(value);
+  return true;
+}
+
+function firstSet(...candidates: Array<[string, string | undefined]>): string | undefined {
+  return candidates.find(([, value]) => value !== undefined && value !== "")?.[0];
 }
 
 /** Whether no TELEMETRY_CONFIG_FILE is set and the installed telemetry.conf is pinned local-only. */
@@ -283,7 +307,9 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
   const dest = path.resolve(flagString(args.flags, "dest", process.cwd()) ?? process.cwd());
   const telemetryDir = path.join(dest, "scripts", "telemetry");
   const configFile = resolveTelemetryConfigFile(dest, telemetryDir);
-  const config = readConfig(configFile);
+  const localOnlyPinned = localOnlyPinApplies(telemetryDir);
+  const pinRecorded = isPinnedLocalOnly(path.join(telemetryDir, "telemetry.conf"));
+  const config = localOnlyPinned ? readConfig(configFile, pinnedKeyAllowed) : readConfig(configFile);
   const enabled = configValue(config, "TELEMETRY_ENABLED", "enabled", "true") !== "false";
   const dataDir = telemetryDataDir(dest);
   const sessionDir = path.resolve(configValue(config, "TELEMETRY_SESSION_DIR", "telemetry_session_dir", path.join(dataDir, "sessions")));
@@ -297,14 +323,27 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
   const consoleUrl = process.env.CONSOLE_TELEMETRY_URL ?? process.env.CONSOLE_URL ?? config.console_telemetry_url ?? config.console_url ?? "";
   const explicitEndpoint = process.env.CONSOLE_TELEMETRY_ENDPOINT_URL ?? config.console_telemetry_endpoint_url ?? "";
   const endpointUrl = deriveConsoleEndpoint(consoleUrl, explicitEndpoint);
+  // Same order as consoleUrl/explicitEndpoint above: an endpoint beats a URL, the environment beats the file.
+  const fileLabel = process.env.TELEMETRY_CONFIG_FILE ? `TELEMETRY_CONFIG_FILE (${configFile})` : configFile;
+  const endpointSource = !endpointUrl
+    ? undefined
+    : firstSet(
+        ["environment variable CONSOLE_TELEMETRY_ENDPOINT_URL", process.env.CONSOLE_TELEMETRY_ENDPOINT_URL],
+        [fileLabel, explicitEndpoint ? config.console_telemetry_endpoint_url : undefined],
+        ["environment variable CONSOLE_TELEMETRY_URL", process.env.CONSOLE_TELEMETRY_URL],
+        ["environment variable CONSOLE_URL", process.env.CONSOLE_URL],
+        [fileLabel, config.console_telemetry_url ?? config.console_url],
+      );
   const allowed = endpointAllowed(endpointUrl, allowNetwork);
   const timeoutMs = Number.parseInt(flagString(args.flags, "timeout-ms", "2000") ?? "2000", 10);
   const reachability = await checkConsoleReachability(endpointUrl, Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 2000, allowNetwork);
-  const localOnlyPinned = localOnlyPinApplies(telemetryDir);
   const skippedConfigFiles = localOnlyPinned
     ? [path.join(dest, ".kontourai", "telemetry-console.conf"), path.join(os.homedir(), ".flow-agents", "telemetry-console.conf")].filter((file) => fs.existsSync(file))
     : [];
   const warnings = reportWarnings(configFile, endpointUrl, allowed, allowNetwork, dest, localOnlyPinned);
+  if (pinRecorded && endpointUrl) {
+    warnings.push(`This install is pinned local-only (${PIN_LINE} in ${path.join(telemetryDir, "telemetry.conf")}), but a Console endpoint still resolves from ${endpointSource ?? "the environment"}, so telemetry is sent to ${safeReportUrl(endpointUrl)}. Unset it to keep this install local-only.`);
+  }
   return {
     ok: enabled && (!endpointUrl || (allowed && reachability.ok !== false)),
     destination: dest,
@@ -317,6 +356,7 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
       channels: channelReports,
       activeSinks: activeSinks(enabled, channelReports, endpointUrl, allowed),
       localOnlyPinned,
+      pinRecorded,
       skippedConfigFiles,
     },
     console: {
@@ -332,6 +372,7 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
         process.env.CONSOLE_TELEMETRY_URL ?? process.env.CONSOLE_URL ?? process.env.CONSOLE_TELEMETRY_ENDPOINT_URL,
         config.console_telemetry_url ?? config.console_url ?? config.console_telemetry_endpoint_url,
       ),
+      ...(endpointSource ? { endpointSource } : {}),
       reachability,
     },
     warnings,

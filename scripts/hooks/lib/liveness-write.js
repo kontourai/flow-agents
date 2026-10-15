@@ -37,7 +37,9 @@ const relayEnabledCache = new Map();
  *   4. the shipped default: scripts/telemetry/telemetry.conf (relative to this file)
  * Local-only pin (#1483): when no TELEMETRY_CONFIG_FILE is set and slot 4 carries
  * `telemetry_sink_pin=local-files` (written by an explicit `--telemetry-sink local-files` install),
- * slots 2 and 3 are skipped and slot 4 is the answer, exactly as config.sh does.
+ * slots 2 and 3 are skipped and slot 4 is the answer, exactly as config.sh does. The pinned slot 4
+ * is not trust-gated, so it supplies no Console URL here, and its console_liveness_relay key counts
+ * only as an opt-out (resolveLivenessRelayEnabled), matching config.sh's pinned key filter.
  * Slot 4's path is <this file>/../../telemetry/telemetry.conf; the workspace root for slot 2 is
  * three levels up from scripts/hooks/lib. This resolver is only the SPAWN pre-gate — it is
  * intentionally lenient (no mode-600 trust gate). relay.sh re-sources config.sh, which applies the
@@ -56,6 +58,11 @@ const relayEnabledCache = new Map();
  * @returns {string|null}  first readable conf path, or null
  */
 function resolveConsoleConfPath(env) {
+  return resolveConsoleConf(env).file;
+}
+
+/** @returns {{ file: string|null, pinned: boolean }} the resolved conf and whether the pin chose it */
+function resolveConsoleConf(env) {
   const installedConf = path.join(__dirname, '..', '..', 'telemetry', 'telemetry.conf');
   const pinned = !env.TELEMETRY_CONFIG_FILE && isPinnedLocalOnly(installedConf);
   const candidates = [
@@ -70,34 +77,28 @@ function resolveConsoleConfPath(env) {
   ];
   for (const c of candidates) {
     try {
-      if (c && fs.existsSync(c) && fs.statSync(c).isFile()) return c;
+      if (c && fs.existsSync(c) && fs.statSync(c).isFile()) return { file: c, pinned: pinned && c === installedConf };
     } catch {
       /* keep scanning */
     }
   }
-  return null;
+  return { file: null, pinned: false };
 }
 
+const PIN_LINE = 'telemetry_sink_pin=local-files';
+
 /**
- * Whether the installed telemetry.conf pins this install local-only: its last
- * `telemetry_sink_pin` key has the value `local-files` (config.sh's telemetry_conf_pinned_local_only).
- * An unreadable file is not a pin.
+ * Whether the installed telemetry.conf pins this install local-only: it has a line that is exactly
+ * `telemetry_sink_pin=local-files`, optionally followed by a CR (config.sh's
+ * telemetry_conf_pinned_local_only). An unreadable file is not a pin.
  * @returns {boolean}
  */
 function isPinnedLocalOnly(file) {
-  let pinned = false;
   try {
-    for (const raw of fs.readFileSync(file, 'utf8').split('\n')) {
-      const line = raw.trim();
-      if (!line || line.startsWith('#')) continue;
-      const eq = line.indexOf('=');
-      if (eq < 0 || line.slice(0, eq).trim() !== 'telemetry_sink_pin') continue;
-      pinned = line.slice(eq + 1).trim() === 'local-files';
-    }
+    return fs.readFileSync(file, 'utf8').split('\n').some((line) => line === PIN_LINE || line === `${PIN_LINE}\r`);
   } catch {
     return false;
   }
-  return pinned;
 }
 
 /**
@@ -118,7 +119,7 @@ function resolveLivenessRelayEnabled(env) {
   try {
     let explicit = null;
     let hasConsoleUrl = false;
-    const confPath = resolveConsoleConfPath(env);
+    const { file: confPath, pinned } = resolveConsoleConf(env);
     if (confPath) {
       for (const raw of fs.readFileSync(confPath, 'utf8').split('\n')) {
         const line = raw.trim();
@@ -128,9 +129,10 @@ function resolveLivenessRelayEnabled(env) {
         const key = line.slice(0, eq).trim();
         const value = line.slice(eq + 1).trim().toLowerCase();
         if (key === 'console_liveness_relay') {
-          if (TRUTHY.has(value)) explicit = true;
+          // A pinned conf may only opt out (config.sh's telemetry_pinned_key_allowed).
+          if (TRUTHY.has(value) && !pinned) explicit = true;
           else if (FALSY.has(value)) explicit = false;
-        } else if (key === 'console_telemetry_url' || key === 'console_url' || key === 'console_telemetry_endpoint_url') {
+        } else if (!pinned && (key === 'console_telemetry_url' || key === 'console_url' || key === 'console_telemetry_endpoint_url')) {
           if (value) hasConsoleUrl = true;
         }
       }

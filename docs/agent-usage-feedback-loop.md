@@ -248,15 +248,38 @@ pre-gate, board sync, and `telemetry-doctor`) then reads that file instead,
 even when a trusted workspace or user-global conf exists. An install without
 the flag records no pin, so the operator conf keeps applying to it. The local-files
 default, the interactive wizard's Skip answer, and a sink taken only from
-`FLOW_AGENTS_TELEMETRY_SINK(S)` do not pin. Re-running `init` replaces an
-installed `telemetry.conf` that nobody edited with the bundle's copy and applies
-only that run's sink, so re-running it without `--telemetry-sink local-files`,
-or with a Console sink, removes the pin. Deleting the `telemetry_sink_pin` line
-removes it too. `init
---global` for `claude-code` and `opencode` cannot record a pin, because those
-hooks run from the package's own `scripts/telemetry`; init warns when the flag
-is given there. Console environment variables such as `CONSOLE_TELEMETRY_URL`
-are not affected by the pin.
+`FLOW_AGENTS_TELEMETRY_SINK(S)` do not pin, and neither does a typed
+`local-files` sink when Console settings are supplied with it (a `--console-*`
+flag, or a Console variable such as `CONSOLE_URL` in the installer's
+environment); init's summary names what blocked the pin.
+
+The pin is the exact line `telemetry_sink_pin=local-files` (a trailing CR is
+allowed); a line with spaces, a different value or a byte-order mark is not a
+pin. Because the installed `telemetry.conf` is not trust-gated (it can be
+mode 644 and come from a repository or tarball), a pinned install takes no
+network destination from it: every `console_*` key is ignored except a
+`console_economics_relay` or `console_liveness_relay` opt-out (`0`, `false`,
+`no`, `off`), `pricing_url` is ignored, and a `channel.*.endpoint_url` is kept
+only when it is a loopback URL (`http://127.0.0.1`, `http://localhost` or
+`http://[::1]`, with an optional port and path), so the shipped localhost
+channel keeps working.
+
+Re-running `init` replaces an installed `telemetry.conf` that nobody edited
+with the bundle's copy and applies only that run's sink, so re-running it
+without `--telemetry-sink local-files`, or with a Console sink, removes the
+pin. A `telemetry.conf` edited after install is preserved instead: init leaves
+it, and its pin, unchanged and applies no sink to it (pass `--force` to replace
+it). Deleting the `telemetry_sink_pin` line removes the pin. `init --global`
+for `claude-code` and `opencode` cannot record a pin, because those hooks run
+from the package's own `scripts/telemetry`; init warns when the flag is given
+there, and the installer never pins the Flow Agents package's own
+`telemetry.conf`.
+
+Console environment variables such as `CONSOLE_TELEMETRY_URL` are not affected
+by the pin: they are an explicit runtime override. When one of them, or
+`TELEMETRY_CONFIG_FILE`, still sends a pinned install's telemetry to a Console,
+`telemetry-doctor` warns and names the source, and init's summary says the
+install is not local-only.
 
 The explicit `TELEMETRY_CONFIG_FILE` env var still overrides both
 auto-discovered paths and the local-only pin, and always wins. Wiring it from a login-shell profile
