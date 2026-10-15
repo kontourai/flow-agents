@@ -1,5 +1,34 @@
 # Changelog
 
+## [9.1.0](https://github.com/kontourai/flow-agents/compare/v9.0.0...v9.1.0) (2026-10-15)
+
+
+### Features
+
+* **builder:** review, verify, and merge an existing change with builder.deliver-existing ([#1504](https://github.com/kontourai/flow-agents/issues/1504)) ([0373d9f](https://github.com/kontourai/flow-agents/commit/0373d9fd3fd5e0a37575524bd809f3466f665b16))
+* **knowledge:** pilot ingest through the public Flow CLI ([#1497](https://github.com/kontourai/flow-agents/issues/1497)) ([d185a75](https://github.com/kontourai/flow-agents/commit/d185a7597c1f9d4452c3d89a8485a2e4ce2b486e))
+
+
+### Fixes
+
+* **ci:** repair the Release Evidence kit demo ([#1493](https://github.com/kontourai/flow-agents/issues/1493)) ([b811664](https://github.com/kontourai/flow-agents/commit/b811664b6d708b5d701a81166f80b5773b2f1662))
+* **init:** refuse Console flags that init --global drops for claude-code and opencode ([#1502](https://github.com/kontourai/flow-agents/issues/1502)) ([f475e9d](https://github.com/kontourai/flow-agents/commit/f475e9d6afb98fe5e651eb0dfe5fc942f6f489b9))
+* **kit:** preserve hook ownership across reinstalls and crashes ([#1494](https://github.com/kontourai/flow-agents/issues/1494)) ([e62fedf](https://github.com/kontourai/flow-agents/commit/e62fedfea6ab9d53865902fe7bb66f7465c798b0))
+
+
+### Documentation
+
+* **kits:** corpus-store is a building-block library ([#1492](https://github.com/kontourai/flow-agents/issues/1492)) ([791d489](https://github.com/kontourai/flow-agents/commit/791d48963d6621de88581af38ca490c69e2ee01e))
+* use the scoped npx spelling for shell-facing veritas commands ([#1491](https://github.com/kontourai/flow-agents/issues/1491)) ([f0d5de0](https://github.com/kontourai/flow-agents/commit/f0d5de01c687276b4a18f3a8988e2e4f596ae2ab))
+
+
+### Refactoring
+
+* **kits:** derive manifest reads and doctor reports from declarations ([#1500](https://github.com/kontourai/flow-agents/issues/1500)) ([422c9d8](https://github.com/kontourai/flow-agents/commit/422c9d892cd1e893e5d370f6785d06f9c0d52161))
+* **runtime:** derive gate policies from kit declarations ([#1498](https://github.com/kontourai/flow-agents/issues/1498)) ([3e7f1a7](https://github.com/kontourai/flow-agents/commit/3e7f1a72aa20bdbab1809e6fcd286f8c4cd8d4de))
+* **workflow:** derive startup defaults from kit declarations ([#1499](https://github.com/kontourai/flow-agents/issues/1499)) ([517f71b](https://github.com/kontourai/flow-agents/commit/517f71b807b472ea1bb1465c3833daa588d490f4))
+* **worktree:** derive reclaim learning claims from terminal gate ([#1495](https://github.com/kontourai/flow-agents/issues/1495)) ([fab5f21](https://github.com/kontourai/flow-agents/commit/fab5f21c7668b990fd692f377c882472e261c9c3))
+
 ## [9.0.0](https://github.com/kontourai/flow-agents/compare/v8.1.2...v9.0.0) (2026-10-14)
 
 
