@@ -3238,10 +3238,14 @@ async function ensureSession(p: ReturnType<typeof parseArgs>, allowCanonicalFlow
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
     const phaseMap = entry.flowId ? resolvePhaseMap(entry.flowId, findRepoRootFromDir(dir)) : null;
     const initialPhase = Object.entries(phaseMap ?? {}).find(([, step]) => step === entry.firstStep)?.[0];
+    // The pinned start command is emitted only for a flow that SELECTS A WORK ITEM (or whose
+    // definition cannot be classified, which fails closed to the same), so it always carries
+    // --work-item; a local-Work-Item flow gets the bare-string next action below instead. It used
+    // to omit --work-item for one flow name, which that condition already kept from being emitted.
     const startCommand = pinnedFlowAgentsCommand(flowAgentsPackageVersion(), [
       "workflow", "start",
       "--flow", entry.flowId,
-      ...(entry.flowId === "builder.shape" ? [] : ["--work-item", workItem.ref]),
+      "--work-item", workItem.ref,
       ...(workItem.ref === `local:${slug}` ? ["--task-slug", slug] : []),
       "--assignment-provider", opt(p, "assignment-provider", "local-file"),
       ...(selectedWorkEvidence?.providerEvidenceFile ? ["--effective-state-json", selectedWorkEvidence.providerEvidenceFile] : []),

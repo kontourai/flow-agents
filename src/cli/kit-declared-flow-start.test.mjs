@@ -26,6 +26,7 @@ import { declaredKitFlowIds, flowDefinitionResolverContractIssues, resolveEffect
 import { canonicalRunFlowIds, canonicalRunFlowRefusal } from "../../build/src/builder-flow-run-adapter.js";
 import * as adapterExports from "../../build/src/builder-flow-run-adapter.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+import { fixtureKit, makeFixturePackage, makeFixtureProject } from "./fixture-kit-package.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -56,11 +57,15 @@ function fixtureFlow(id, steps) {
   };
 }
 
+function fixtureEnv(overrides = {}) {
+  return { ...process.env, CODEX_SESSION_ID: "kit-declared-flow-test", FLOW_AGENTS_FLOW_DEFS_DIR: undefined, ...overrides };
+}
+
 function runStart(args, cwd, env = {}) {
   return spawnSync(process.execPath, [CLI, "workflow", "start", ...args], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, CODEX_SESSION_ID: "kit-declared-flow-test", FLOW_AGENTS_FLOW_DEFS_DIR: undefined, ...env },
+    env: fixtureEnv(env),
   });
 }
 
@@ -570,5 +575,224 @@ test("builder.build and builder.shape pass flow validation and keep their byte-s
     assert.match(child.stderr, /workflow start --flow builder\.publish-existing does not conform to the Flow definition contract/, "the child flow must be refused before the input contract");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ─── Kit-declared start contract and default flow (9-2b) ─────────────────────────────────────
+//
+// Whether `workflow start` takes a provider Work Item or creates a local one is a property of the
+// flow's DECLARATION (does any gate expect `selected-work`?), and which flow runs when no --flow is
+// given is the kit's `default_flow`. Both used to be Builder literals in the CLI. These drive the
+// real CLI against kits that are not Builder, so re-introducing either literal fails them.
+
+function runCli(cli, args, cwd, env = {}) {
+  return spawnSync(process.execPath, [cli, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: fixtureEnv(env),
+  });
+}
+
+function readState(artifactRoot, slug) {
+  return JSON.parse(fs.readFileSync(path.join(artifactRoot, slug, "state.json"), "utf8"));
+}
+
+test("a non-Builder flow that selects no Work Item starts from a local Work Item, exactly as builder.shape does", () => {
+  const project = makeFixtureProject("kit-local-start-", { acme: fixtureKit("acme") });
+  const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+  try {
+    const noSlug = runStart(["--artifact-root", artifactRoot, "--flow", "acme.survey"], project);
+    assert.notEqual(noSlug.status, 0);
+    assert.ok(noSlug.stderr.includes("workflow start --flow acme.survey requires an explicit safe --task-slug"), noSlug.stderr);
+    assert.ok(!noSlug.stderr.includes("requires --work-item"), `a local-Work-Item flow must not demand a provider ref: ${noSlug.stderr}`);
+
+    const withRef = runStart(["--artifact-root", artifactRoot, "--flow", "acme.survey", "--task-slug", "survey-one", "--work-item", "acme/widgets#7"], project);
+    assert.notEqual(withRef.status, 0);
+    assert.ok(withRef.stderr.includes("workflow start --flow acme.survey creates a local Work Item; omit --work-item"), withRef.stderr);
+
+    // Two issues at once: the report stays scoped to the local contract, as shape's does.
+    const both = runStart(["--artifact-root", artifactRoot, "--flow", "acme.survey", "--work-item", "acme/widgets#7"], project);
+    assert.notEqual(both.status, 0);
+    assert.match(both.stderr, /workflow start: 2 missing or invalid input\(s\)/);
+    assert.ok(!both.stderr.includes("assignment-provider status"), `local-flow issues must not render the provider chain: ${both.stderr}`);
+
+    const started = runStart(["--artifact-root", artifactRoot, "--flow", "acme.survey", "--task-slug", "survey-one", "--summary", "Survey the widgets area."], project);
+    assert.equal(started.status, 0, `start failed: ${started.stderr}`);
+    const state = readState(artifactRoot, "survey-one");
+    assert.equal(state.flow_run?.definition_id, "acme.survey", "the canonical run is the kit's own flow");
+    const workItem = JSON.parse(fs.readFileSync(path.join(artifactRoot, "survey-one", "work-item.json"), "utf8"));
+    assert.equal(workItem.source_provider?.kind, "local", "the run's Work Item is the local one start created");
+
+    // The local session keeps its flow: retrying its local Work Item under the kit's other flow is
+    // refused with the local-session explanation, chosen from the definition the run pinned.
+    const retry = runStart(["--artifact-root", artifactRoot, "--flow", "acme.deliver", "--work-item", "local:survey-one", "--task-slug", "survey-one"], project);
+    assert.notEqual(retry.status, 0);
+    assert.ok(retry.stderr.includes("workflow start cannot resume acme.survey as acme.deliver; local shape sessions are not build retries."), retry.stderr);
+
+    // Contrast inside the SAME kit: its Work-Item-driven flow keeps the provider contract, so the
+    // difference is the declaration, not the kit.
+    const deliver = runStart(["--artifact-root", artifactRoot, "--flow", "acme.deliver"], project);
+    assert.notEqual(deliver.status, 0);
+    assert.match(deliver.stderr, /workflow start requires --work-item <provider-ref>/);
+    const deliverSlug = runStart(["--artifact-root", artifactRoot, "--flow", "acme.deliver", "--work-item", "acme/widgets#8", "--task-slug", "acme-widgets-8", "--assignment-provider", "local-file"], project);
+    assert.notEqual(deliverSlug.status, 0);
+    assert.ok(deliverSlug.stderr.includes("--task-slug is reserved for an existing local Work Item retry"), deliverSlug.stderr);
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("without --flow, start runs the default_flow its kit declares (no Builder kit present)", () => {
+  // The fixture package ships ONLY the acme kit, so Builder's declaration is absent from every
+  // root. A project kit declaring its own default must not shadow the packaged one.
+  const pkg = makeFixturePackage("kit-default-pkg-", { acme: fixtureKit("acme", { defaultFlow: "acme.survey" }) });
+  const project = makeFixtureProject("kit-default-project-", { zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }) });
+  const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+  try {
+    const started = runCli(pkg.cli, ["workflow", "start", "--artifact-root", artifactRoot, "--task-slug", "survey-default", "--summary", "Survey by default."], project);
+    assert.equal(started.status, 0, `start without --flow failed: ${started.stderr}`);
+    assert.equal(readState(artifactRoot, "survey-default").flow_run?.definition_id, "acme.survey");
+
+    // The project kit's flow is still startable by name: its default only lost precedence.
+    const named = runCli(pkg.cli, ["workflow", "start", "--artifact-root", artifactRoot, "--flow", "zeta.survey", "--task-slug", "survey-named", "--summary", "Survey by name."], project);
+    assert.equal(named.status, 0, `named project-kit start failed: ${named.stderr}`);
+    assert.equal(readState(artifactRoot, "survey-named").flow_run?.definition_id, "zeta.survey");
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+    fs.rmSync(pkg.root, { recursive: true, force: true });
+  }
+});
+
+test("a project kit's default_flow cannot shadow the packaged default", () => {
+  // Against the real package: Builder declares `default_flow`, so a project kit's declaration is
+  // never consulted and start applies the packaged default's (provider Work Item) contract.
+  const project = makeFixtureProject("kit-default-shadow-", { acme: fixtureKit("acme", { defaultFlow: "acme.survey" }) });
+  try {
+    const result = runStart(["--artifact-root", path.join(project, ".kontourai", "flow-agents"), "--task-slug", "survey-shadow"], project);
+    assert.notEqual(result.status, 0);
+    assert.ok(!result.stderr.includes("acme.survey"), `the project default must not be chosen: ${result.stderr}`);
+    assert.ok(result.stderr.includes("--task-slug is reserved for an existing local Work Item retry")
+      || result.stderr.includes("workflow start requires --work-item <provider-ref>"), result.stderr);
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("default_flow resolution fails closed: competing, absent, and malformed declarations are refused", () => {
+  const project = makeFixtureProject("kit-default-refuse-");
+  const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+  const packages = [];
+  const startWithoutFlow = (kits) => {
+    const pkg = makeFixturePackage("kit-default-refuse-pkg-", kits);
+    packages.push(pkg.root);
+    return { pkg, result: runCli(pkg.cli, ["workflow", "start", "--artifact-root", artifactRoot, "--task-slug", "survey-refused"], project) };
+  };
+  try {
+    const competing = startWithoutFlow({
+      acme: fixtureKit("acme", { defaultFlow: "acme.survey" }),
+      zeta: fixtureKit("zeta", { defaultFlow: "zeta.deliver" }),
+    });
+    assert.notEqual(competing.result.status, 0);
+    assert.ok(competing.result.stderr.includes(`workflow start: no --flow was given and 2 kits under ${competing.pkg.root} each declare a default_flow (acme: acme.survey, zeta: zeta.deliver); pass --flow <kit>.<flow> to choose a flow`), competing.result.stderr);
+
+    const absent = startWithoutFlow({ acme: fixtureKit("acme") });
+    assert.notEqual(absent.result.status, 0);
+    assert.ok(absent.result.stderr.includes("workflow start: no --flow was given and no installed kit declares a default_flow; pass --flow <kit>.<flow> to choose a flow"), absent.result.stderr);
+
+    // A kit may only default to a flow it declares itself. A malformed declaration is refused, not
+    // skipped: skipping would let the other kit's default win silently.
+    const malformed = startWithoutFlow({
+      acme: fixtureKit("acme", { defaultFlow: "zeta.survey" }),
+      zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }),
+    });
+    assert.notEqual(malformed.result.status, 0);
+    assert.ok(malformed.result.stderr.includes(`the default_flow declaration is malformed in ${path.join(malformed.pkg.root, "kits", "acme", "kit.json")} (default_flow "zeta.survey" must name a flow of this kit (acme.<flow>))`), malformed.result.stderr);
+
+    const forgedKit = fixtureKit("acme", { defaultFlow: "zeta.survey" });
+    forgedKit.manifest.flows.push({ id: "zeta.survey", path: "flows/survey.flow.json" });
+    const forged = startWithoutFlow({ acme: forgedKit, zeta: fixtureKit("zeta") });
+    assert.notEqual(forged.result.status, 0);
+    assert.match(forged.result.stderr, /must name a flow of this kit \(acme\.<flow>\)/);
+    assert.ok(!fs.existsSync(path.join(artifactRoot, "survey-refused")), "a forged flows list must not let one kit choose another kit's default");
+
+    const corrupt = makeFixturePackage("kit-default-corrupt-pkg-", {
+      acme: fixtureKit("acme", { defaultFlow: "acme.survey" }),
+      zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }),
+    });
+    packages.push(corrupt.root);
+    fs.writeFileSync(path.join(corrupt.root, "kits", "acme", "kit.json"), "{broken");
+    const corruptResult = runCli(corrupt.cli, ["workflow", "start", "--artifact-root", artifactRoot, "--task-slug", "survey-refused"], project);
+    assert.notEqual(corruptResult.status, 0);
+    assert.match(corruptResult.stderr, /kit\.json must be a readable JSON object before choosing a default flow/);
+    assert.ok(!fs.existsSync(path.join(artifactRoot, "survey-refused")), "an unreadable kit must not silently transfer the default to another kit");
+
+    // A well-formed default whose flow has no canonical run is refused with the adapter's reason.
+    const unbound = fixtureKit("acme", { defaultFlow: "acme.survey" });
+    unbound.manifest.flow_step_actions = unbound.manifest.flow_step_actions.filter((action) => action.flow_id !== "acme.survey");
+    const unrunnable = startWithoutFlow({ acme: unbound });
+    assert.notEqual(unrunnable.result.status, 0);
+    assert.ok(unrunnable.result.stderr.includes(`workflow start: no --flow was given and ${path.join(unrunnable.pkg.root, "kits", "acme", "kit.json")} declares default_flow acme.survey, which the canonical run runtime cannot bind: `), unrunnable.result.stderr);
+    assert.ok(unrunnable.result.stderr.includes("declares no flow_step_actions binding"), unrunnable.result.stderr);
+
+    // Nothing was started by any refusal.
+    assert.ok(!fs.existsSync(path.join(artifactRoot, "survey-refused")), "a refused default creates no session");
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+    for (const root of packages) fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an unreadable packaged kit tree cannot transfer default selection to a project kit", () => {
+  const project = makeFixtureProject("kit-default-tree-project-", { zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }) });
+  const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+  const packages = [];
+  try {
+    for (const mode of ["not-directory", ...(process.platform === "win32" ? [] : ["unreadable"])]) {
+      const pkg = makeFixturePackage("kit-default-tree-pkg-", { acme: fixtureKit("acme", { defaultFlow: "acme.survey" }) });
+      packages.push(pkg.root);
+      const tree = path.join(pkg.root, "kits");
+      if (mode === "not-directory") { fs.rmSync(tree, { recursive: true }); fs.writeFileSync(tree, "invalid kit tree"); }
+      else fs.chmodSync(tree, 0o000);
+      try {
+        const result = runCli(pkg.cli, ["workflow", "start", "--artifact-root", artifactRoot, "--task-slug", "tree-refused"], project);
+        assert.notEqual(result.status, 0, `${mode}: ${result.stdout} ${result.stderr}`);
+        assert.match(result.stderr, /kit source tree .* must be a readable directory before choosing a default flow/);
+        assert.ok(!fs.existsSync(path.join(artifactRoot, "tree-refused")), "an unreadable package tree must not silently select the valid project default");
+      } finally { if (mode === "unreadable") fs.chmodSync(tree, 0o755); }
+    }
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+    for (const root of packages) fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the library start without a flowId uses the kit-declared default and refuses when none is declared", () => {
+  // startBuilderFlowSession is exported API; its default used to be a Builder constant.
+  const project = makeFixtureProject("kit-default-runtime-");
+  const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+  const pkg = makeFixturePackage("kit-default-runtime-pkg-", { acme: fixtureKit("acme") });
+  try {
+    const ensure = runCli(pkg.sidecar, ["ensure-session", "--artifact-root", artifactRoot, "--task-slug", "runtime-default", "--source-request", "runtime default", "--summary", "runtime default"], project);
+    assert.equal(ensure.status, 0, `ensure-session failed: ${ensure.stderr}`);
+    const sessionDir = path.join(artifactRoot, "runtime-default");
+    const startWithoutFlowId = () => spawnSync(process.execPath, ["--input-type=module", "-e", `
+      const m = await import(${JSON.stringify(pkg.module("builder-flow-runtime.js"))});
+      try { await m.startBuilderFlowSession({ sessionDir: ${JSON.stringify(sessionDir)} }); console.log("STARTED"); }
+      catch (error) { console.error(error.message); process.exit(3); }`], { cwd: project, encoding: "utf8", env: fixtureEnv() });
+
+    const refused = startWithoutFlowId();
+    assert.equal(refused.status, 3, `start without a declared default must refuse: ${refused.stdout}${refused.stderr}`);
+    assert.ok(refused.stderr.includes("invalid Builder flow run input for flowId: startBuilderFlowSession: no flowId was given and no installed kit declares a default_flow; pass flowId <kit>.<flow> to choose a flow"), refused.stderr);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(sessionDir, "state.json"), "utf8")).flow_run, undefined, "a refused start binds no run");
+
+    // Once the packaged kit declares a default, the same call starts that flow.
+    const manifestFile = path.join(pkg.root, "kits", "acme", "kit.json");
+    fs.writeFileSync(manifestFile, `${JSON.stringify({ ...JSON.parse(fs.readFileSync(manifestFile, "utf8")), default_flow: "acme.survey" }, null, 2)}\n`);
+    const started = startWithoutFlowId();
+    assert.equal(started.status, 0, `start with a declared default failed: ${started.stderr}`);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(sessionDir, "state.json"), "utf8")).flow_run?.definition_id, "acme.survey");
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+    fs.rmSync(pkg.root, { recursive: true, force: true });
   }
 });
