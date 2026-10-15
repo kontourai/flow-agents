@@ -46,8 +46,8 @@
  */
 import { validateDefinition } from "@kontourai/flow";
 import { canonicalRunFlowRefusal, canonicalRunSourceRoots } from "../builder-flow-run-adapter.js";
-import { resolveKitFlowBinding } from "./kit-flow-binding.js";
-import { declaredFlowStepIds, declaredKitFlows, flowDefinitionResolverContractIssues, resolveEffectiveFlowDefinition } from "./flow-resolver.js";
+import { canonicalKitFlowSourceRoots, KIT_DEFAULT_FLOW_FIELD, kitDefaultFlowDeclarations, resolveKitFlowBinding } from "./kit-flow-binding.js";
+import { declaredFlowStepIds, declaredKitFlows, flowDefinitionResolverContractIssues, resolveEffectiveFlowDefinition, type DeclaredKitFlow } from "./flow-resolver.js";
 
 /**
  * The refusal for admitting `flow` on `surface`, or null when the flow may be admitted.
@@ -66,10 +66,7 @@ export function flowAdmissionRefusal(flow: string, repoRoot: string, surface: st
     return `${surface} ${JSON.stringify(flow)} is not a flow declared by the installed kits; declared flows: ${ids.length > 0 ? ids.join(", ") : "<none>"}`;
   }
 
-  // Resolve the definition FROM THE DECLARING ROOT, and honor the defs-dir override only for a
-  // declaration that came from it. A manifest-declared flow is read from its kit tree even when
-  // an override is set: otherwise an env var silently redirects the bytes admission judges.
-  const definition = resolveEffectiveFlowDefinition(flow, declaration.sourceRoot, { allowOverride: declaration.via === "override" });
+  const definition = declaredFlowDefinition(declaration);
   if (!definition) {
     return `${surface} ${flow} is declared by an installed kit but does not resolve to a conforming flow composition`;
   }
@@ -115,4 +112,70 @@ export function flowAdmissionRefusal(flow: string, repoRoot: string, surface: st
     return `${surface} ${flow} is declared under ${declaration.sourceRoot} (${declaration.via}) but the canonical run would pin the copy under ${binding.sourceRoot} (${binding.flowRelativePath}); admission and the run must judge the same bytes, so a declaration in one tree may not authorize a definition in another`;
   }
   return null;
+}
+
+/**
+ * The effective definition of `flow` as admission judges it: composed FROM THE DECLARING ROOT
+ * (the first declaration in root order), or null when no installed kit declares `flow` or it does
+ * not compose. Callers that branch on what the admitted flow declares read it here, so they judge
+ * the same bytes admission validated rather than whatever `<repoRoot>/kits` happens to hold.
+ */
+export function admittedFlowDefinition(flow: string, repoRoot: string): Record<string, unknown> | null {
+  const declaration = declaredKitFlows(repoRoot).find((candidate) => candidate.flowId === flow);
+  return declaration ? declaredFlowDefinition(declaration) : null;
+}
+
+function declaredFlowDefinition(declaration: DeclaredKitFlow): Record<string, unknown> | null {
+  // Resolve the definition FROM THE DECLARING ROOT, and honor the defs-dir override only for a
+  // declaration that came from it. A manifest-declared flow is read from its kit tree even when
+  // an override is set: otherwise an env var silently redirects the bytes admission judges.
+  return resolveEffectiveFlowDefinition(declaration.flowId, declaration.sourceRoot, { allowOverride: declaration.via === "override" });
+}
+
+/** The flow a caller gets when it names none, or the refusal saying why there is no such flow. */
+export type DefaultFlowResolution = { flow: string; kitId: string; refusal?: undefined } | { flow?: undefined; refusal: string };
+
+/**
+ * The flow to start when the caller passes no `--flow`: the one flow a kit declares as its
+ * `default_flow` in kit.json. Core names no default of its own.
+ *
+ * Roots are walked in `canonicalKitFlowSourceRoots` order, PACKAGED FIRST, and the first root
+ * holding any declaration decides. A project kit can therefore supply a default where the package
+ * declares none, but can never shadow a packaged default, the same add-but-never-shadow rule the
+ * flow binding follows.
+ *
+ * FAILS CLOSED, naming what is wrong, rather than falling back to any flow:
+ *   - no kit declares a default: refuse, telling the caller to pass `--flow`;
+ *   - a declaration at the deciding root is malformed: refuse naming the kit and the defect;
+ *   - more than one kit at the deciding root declares one: refuse naming every one of them;
+ *   - the declared flow has no canonical run: refuse with the run adapter's own reason.
+ * `surface` begins every refusal so a reader can see which door refused them; `selector` is the
+ * input that door takes a flow through (`--flow` on the CLI).
+ */
+export function resolveDefaultFlow(repoRoot: string, surface: string, selector = "--flow"): DefaultFlowResolution {
+  const passFlow = `pass ${selector} <kit>.<flow> to choose a flow`;
+  for (const sourceRoot of canonicalKitFlowSourceRoots(repoRoot)) {
+    let declarations: ReturnType<typeof kitDefaultFlowDeclarations>;
+    try { declarations = kitDefaultFlowDeclarations(sourceRoot); } catch (error) {
+      return { refusal: `${surface}: no ${selector} was given and default flow selection cannot inspect ${sourceRoot}: ${error instanceof Error ? error.message : String(error)}; ${passFlow}` };
+    }
+    if (declarations.length === 0) continue;
+    const malformed = declarations.filter((candidate) => candidate.issue !== null);
+    if (malformed.length > 0) {
+      return { refusal: `${surface}: no ${selector} was given and the ${KIT_DEFAULT_FLOW_FIELD} declaration is malformed in ${malformed.map((candidate) => `${candidate.manifestPath} (${candidate.issue})`).join("; ")}; ${passFlow}` };
+    }
+    if (declarations.length > 1) {
+      return { refusal: `${surface}: no ${selector} was given and ${declarations.length} kits under ${sourceRoot} each declare a ${KIT_DEFAULT_FLOW_FIELD} (${declarations.map((candidate) => `${candidate.kitId}: ${candidate.flowId}`).join(", ")}); ${passFlow}` };
+    }
+    const [only] = declarations;
+    const flow = only!.flowId!;
+    const runRefusal = canonicalRunFlowRefusal(flow, repoRoot);
+    if (runRefusal) {
+      return { refusal: `${surface}: no ${selector} was given and ${only!.manifestPath} declares ${KIT_DEFAULT_FLOW_FIELD} ${flow}, which the canonical run runtime cannot bind: ${runRefusal}; ${passFlow}` };
+    }
+    const admissionRefusal = flowAdmissionRefusal(flow, repoRoot, surface);
+    if (admissionRefusal) return { refusal: `${admissionRefusal}; ${passFlow}` };
+    return { flow, kitId: only!.kitId };
+  }
+  return { refusal: `${surface}: no ${selector} was given and no installed kit declares a ${KIT_DEFAULT_FLOW_FIELD}; ${passFlow}` };
 }

@@ -36,7 +36,7 @@ import {
 import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 import { assertFlowRunRecoveryFenceOpen, withFlowRunRecoveryFenceReadAsync } from "../flow-recovery-fence.js";
 import { canonicalGateProjection } from "../canonical-gate-projection.js";
-import { flowAdmissionRefusal } from "../lib/flow-admission.js";
+import { admittedFlowDefinition, flowAdmissionRefusal, resolveDefaultFlow } from "../lib/flow-admission.js";
 import { flowSelectsWorkItem, resolveEffectiveFlowDefinition } from "../lib/flow-resolver.js";
 import {
   createContinuationEvidenceCheckpointWriter,
@@ -1393,22 +1393,24 @@ function loadContinuationTurnAuthority(): {
  * complete-looking template that is incomplete would recreate the defect this exists to fix.
  */
 function collectStartContractIssues(input: {
-  flow: string; workItem: string | undefined; taskSlug: string | undefined;
+  flow: string; selectsWorkItem: boolean; workItem: string | undefined; taskSlug: string | undefined;
   assignmentProvider: string | undefined; effectiveStateJson: string | undefined;
 }): string[] {
   const issues: string[] = [];
-  const { flow, workItem, taskSlug, assignmentProvider, effectiveStateJson } = input;
-  if (flow === "builder.shape") {
-    if (!taskSlug || !isSafeSlug(taskSlug)) issues.push("workflow start --flow builder.shape requires an explicit safe --task-slug");
-    if (workItem) issues.push("workflow start --flow builder.shape creates a local Work Item; omit --work-item");
+  const { flow, selectsWorkItem, workItem, taskSlug, assignmentProvider, effectiveStateJson } = input;
+  // A flow that selects no Work Item (declares no `selected-work` expectation) creates a local
+  // one named by --task-slug; this is a property of the flow's declaration, not of its name.
+  if (!selectsWorkItem) {
+    if (!taskSlug || !isSafeSlug(taskSlug)) issues.push(`workflow start --flow ${flow} requires an explicit safe --task-slug`);
+    if (workItem) issues.push(`workflow start --flow ${flow} creates a local Work Item; omit --work-item`);
     // NO early return: the provider-combination checks below applied to shape before this
     // collector existed, and skipping them silently ACCEPTED previously-refused invocations
     // (review round 1, HIGH: shape + --assignment-provider github without effective state
     // passed preflight and downstream treated the ownership guard as "not evaluated" —
     // a fail-open widening, exactly the class a preflight must never introduce).
   }
-  if (flow !== "builder.shape" && !workItem) issues.push("workflow start requires --work-item <provider-ref>");
-  if (flow !== "builder.shape" && workItem && !workItem.startsWith("local:")) {
+  if (selectsWorkItem && !workItem) issues.push("workflow start requires --work-item <provider-ref>");
+  if (selectsWorkItem && workItem && !workItem.startsWith("local:")) {
     // An unparseable reference must be a NUMBERED issue, not silently downgraded to template
     // placeholders (round-2 review: owner/repo#0 reported only the provider issues while the
     // actually-broken input went unmentioned).
@@ -1487,23 +1489,35 @@ function assertKitDeclaredFlow(flow: string, repoRoot: string): void {
   if (refusal) throw new Error(refusal);
 }
 
+function defaultStartFlow(repoRoot: string): string {
+  const resolution = resolveDefaultFlow(repoRoot, "workflow start");
+  if (resolution.refusal !== undefined) throw new Error(resolution.refusal);
+  return resolution.flow;
+}
+
 async function start(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
   assertOnlyFlags(parsed.flags, verbSpecOptions("start"), "workflow start");
-  const flow = flagString(parsed.flags, "flow", "builder.build")!;
   const workItem = flagString(parsed.flags, "work-item");
   const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
-  assertKitDeclaredFlow(flow, findRepoRootFromDir(artifactRoot));
+  const repoRoot = findRepoRootFromDir(artifactRoot);
+  // No --flow means the flow a kit declares as its `default_flow`; core names none of its own.
+  const flow = flagString(parsed.flags, "flow") ?? defaultStartFlow(repoRoot);
+  assertKitDeclaredFlow(flow, repoRoot);
+  // #1341: whether the flow SELECTS A WORK ITEM decides the whole input contract below. Judged on
+  // the definition admission just validated; fails closed (an unclassifiable definition keeps the
+  // stricter provider-backed contract).
+  const selectsWorkItem = flowSelectsWorkItem(admittedFlowDefinition(flow, repoRoot));
   const taskSlug = flagString(parsed.flags, "task-slug");
-  const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
+  const assignmentProvider = flagString(parsed.flags, "assignment-provider", !selectsWorkItem || workItem?.startsWith("local:") ? "local-file" : undefined);
   const effectiveStateJson = flagString(parsed.flags, "effective-state-json");
-  const contractIssues = collectStartContractIssues({ flow, workItem, taskSlug, assignmentProvider, effectiveStateJson });
+  const contractIssues = collectStartContractIssues({ flow, selectsWorkItem, workItem, taskSlug, assignmentProvider, effectiveStateJson });
   if (contractIssues.length === 1) throw new Error(contractIssues[0]);
   if (contractIssues.length > 1) {
-    // The provider chain template only makes sense for the provider-backed build flow; rendering
-    // it under shape-flow issues would hand the caller a recipe for a different contract (caught
-    // by this slice's own test before it shipped).
-    throw new Error(flow === "builder.shape"
+    // The provider chain template only makes sense for a provider-backed flow; rendering it under
+    // local-Work-Item issues would hand the caller a recipe for a different contract (caught by
+    // this slice's own test before it shipped).
+    throw new Error(!selectsWorkItem
       ? [`workflow start: ${contractIssues.length} missing or invalid input(s):`, ...contractIssues.map((issue, index) => `  [${index + 1}] ${issue}`)].join("\n")
       : startContractReport(contractIssues, workItem));
   }
@@ -1517,7 +1531,7 @@ async function start(argv: string[]): Promise<number> {
     if (localRecord.id !== taskSlug || (localRecord.source_provider as JsonRecord | undefined)?.kind !== "local") {
       throw new Error("local Work Item retry does not match the existing session binding");
     }
-  } else if (taskSlug && flow !== "builder.shape") {
+  } else if (taskSlug && selectsWorkItem) {
     throw new Error("--task-slug is reserved for an existing local Work Item retry");
   }
   // #1415: a flow whose definition pins the reviewed commit refuses a missing, malformed,
@@ -1536,7 +1550,9 @@ async function start(argv: string[]): Promise<number> {
       const existing = await loadBuilderFlowRun({ cwd: path.dirname(path.dirname(artifactRoot)), runId: existingSlug });
       if (existing.definitionId !== flow) {
         // The run id is the Work Item slug, so a Work Item keeps the flow its run started with.
-        throw new Error(existing.definitionId === "builder.shape"
+        // The local-session explanation applies when the EXISTING run is a local-Work-Item flow,
+        // judged on the definition that run pinned rather than on its name.
+        throw new Error(!flowSelectsWorkItem(existing.startDefinition)
           ? `workflow start cannot resume ${existing.definitionId} as ${flow}; local shape sessions are not build retries. Create or claim a provider Work Item for the ${flow} handoff.`
           : `workflow start cannot resume ${existing.definitionId} as ${flow}; this Work Item's run was started as ${existing.definitionId} and keeps that flow. Create or claim a different provider Work Item for ${flow}.`);
       }
@@ -1548,7 +1564,7 @@ async function start(argv: string[]): Promise<number> {
   // name. Gating on the literal meant the ablation's treatment arm could start without the
   // `--pull-work.md` report the control demands — a difference in start-time strictness that would
   // have been read as an effect of gate removal. Fails closed on an unresolvable definition.
-  if (flow && flowSelectsWorkItem(resolveEffectiveFlowDefinition(flow, findRepoRootFromDir(artifactRoot))) && workItem && !workItem.startsWith("local:")) {
+  if (selectsWorkItem && workItem && !workItem.startsWith("local:")) {
     const slug = workItemSlug(workItem);
     const report = path.join(artifactRoot, slug, `${slug}--pull-work.md`);
     try {

@@ -42,6 +42,7 @@
       "description": "Delivery closeout extension for an existing change: adopt its open pull request at the pinned head, provider/CI merge readiness, and learning feedback gates. builder.publish-learn without the implementation_defect route."
     }
   ],
+  "default_flow": "builder.build",
   "dependencies": [
     {
       "kit_id": "knowledge",
