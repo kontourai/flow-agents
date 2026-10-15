@@ -5,9 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { fileURLToPath } from "node:url";
 
 import { bootstrapProviders, detectGitHubRepo, setProviderBootstrapTestHooksForTest } from "../../build/src/cli/provider-bootstrap.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+import { fixtureKit, makeFixturePackage } from "./fixture-kit-package.mjs";
 
 function repoFixture(owner = "example", name = "product") {
   const root = makeFixtureDir("provider-bootstrap-repo-");
@@ -1456,4 +1458,48 @@ test("universal bundles do not contain Flow Agents dogfood provider bindings", (
   const installed = spawnSync("bash", [path.join(bundleRoot, "kiro", "install.sh"), dest], { encoding: "utf8" });
   assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`);
   assert.equal(fs.readFileSync(consumerSettings, "utf8"), consumerBytes);
+});
+
+test("provider pickup starts the kit-declared default flow and refuses a default that selects no Work Item", () => {
+  const pickupArgs = (repo, ref) => [
+    "provider-bootstrap", "--scope", "project", "--repo-path", repo, "--provider-project", "7",
+    "--work-item", ref, "--provider-login", "provider-login", "--provider-branch", "agent/provider-pickup", "--json",
+  ];
+  const pickupRepo = () => {
+    const repo = repoFixture();
+    execFileSync("git", ["-C", repo, "checkout", "-q", "-b", "agent/provider-pickup"]);
+    return repo;
+  };
+  const env = { ...process.env, FLOW_AGENTS_ACTOR: "pickup-runtime-actor" };
+  const packages = [];
+  try {
+    // The real package: Builder declares default_flow builder.build, so the emitted command is
+    // byte-identical to the literal it replaced.
+    const builderRepo = pickupRepo();
+    const builder = spawnSync(process.execPath, [fileURLToPath(new URL("../../build/src/cli.js", import.meta.url)), ...pickupArgs(builderRepo, "example/product#44")], { encoding: "utf8", env });
+    assert.equal(builder.status, 0, builder.stderr);
+    const builderArgv = JSON.parse(builder.stdout).pickup.operations.start_workflow.argv;
+    assert.deepEqual(builderArgv.slice(0, 7), ["flow-agents", "workflow", "start", "--artifact-root", path.join(builderRepo, ".kontourai", "flow-agents"), "--flow", "builder.build"]);
+
+    // A package shipping only a non-Builder kit: the pickup starts THAT kit's declared default.
+    const deliverPkg = makeFixturePackage("pickup-default-pkg-", { acme: fixtureKit("acme", { defaultFlow: "acme.deliver" }) });
+    packages.push(deliverPkg.root);
+    const deliverRepo = pickupRepo();
+    const deliver = spawnSync(process.execPath, [deliverPkg.cli, ...pickupArgs(deliverRepo, "example/product#45")], { encoding: "utf8", env });
+    assert.equal(deliver.status, 0, deliver.stderr);
+    const deliverArgv = JSON.parse(deliver.stdout).pickup.operations.start_workflow.argv;
+    assert.deepEqual(deliverArgv.slice(5, 9), ["--flow", "acme.deliver", "--work-item", "example/product#45"]);
+
+    // A default that selects no Work Item cannot start from a provider Work Item: refused before
+    // any pickup artifact is written, rather than emitting a command start would refuse.
+    const surveyPkg = makeFixturePackage("pickup-default-pkg-", { acme: fixtureKit("acme", { defaultFlow: "acme.survey" }) });
+    packages.push(surveyPkg.root);
+    const surveyRepo = pickupRepo();
+    const survey = spawnSync(process.execPath, [surveyPkg.cli, ...pickupArgs(surveyRepo, "example/product#46")], { encoding: "utf8", env });
+    assert.equal(survey.status, 2, survey.stdout);
+    assert.ok(survey.stderr.includes("provider pickup: the default flow acme.survey declared by kit acme selects no Work Item"), survey.stderr);
+    assert.equal(fs.existsSync(path.join(surveyRepo, ".kontourai", "flow-agents", "example-product-46")), false);
+  } finally {
+    for (const root of packages) fs.rmSync(root, { recursive: true, force: true });
+  }
 });

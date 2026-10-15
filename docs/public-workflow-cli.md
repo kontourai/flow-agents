@@ -62,6 +62,10 @@ recovery boundary until a transactionally recoverable branch-reconciliation prot
 A direct local request can resume an existing bound session, but the public CLI does not invent a
 provider or create an unresolvable local binding.
 
+Omitting `--flow` starts the flow a kit declares as its `default_flow` (`builder.build` for the
+Builder kit). When no kit declares one, or more than one kit does, `start` refuses and asks for
+`--flow`; see [Default flow](kit-authoring-guide.md#default-flow).
+
 ## Approved cross-repository rollouts
 
 An approved portfolio or retrofit initiative does not authorize a retroactive Builder run. Before

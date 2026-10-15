@@ -500,6 +500,84 @@ export function declaredKitFlowBindings(sourceRoots: readonly string[]): KitFlow
   return bindings;
 }
 
+// ─── Default flow declarations ──────────────────────────────────────────────────────────────
+
+/**
+ * The optional top-level kit.json field naming the flow `workflow start` runs when the caller
+ * passes no `--flow`. A kit-owned declaration, so the engine names no flow of its own.
+ */
+export const KIT_DEFAULT_FLOW_FIELD = "default_flow";
+
+/**
+ * Why `manifest`'s `default_flow` is malformed for the kit `kitId`, or null when it is well-formed
+ * or absent. THE one shape rule, shared by the static kit validator and runtime resolution so the
+ * two cannot disagree about what a well-formed declaration is.
+ *
+ * Well-formed means: a string naming a flow id namespaced to the declaring kit, which that same
+ * kit lists in its own `flows[]`. A kit may only default to a flow it declares itself; naming
+ * another kit's flow would let one kit choose what every other kit's users start.
+ */
+export function kitDefaultFlowIssue(manifest: Record<string, unknown>, kitId: string): string | null {
+  const declared = manifest[KIT_DEFAULT_FLOW_FIELD];
+  if (declared === undefined) return null;
+  if (typeof declared !== "string") return `${KIT_DEFAULT_FLOW_FIELD} must be a flow id string`;
+  const parts = kitFlowIdParts(declared);
+  if (!parts || parts.kitId !== kitId) {
+    return `${KIT_DEFAULT_FLOW_FIELD} ${JSON.stringify(declared)} must name a flow of this kit (${kitId}.<flow>)`;
+  }
+  const flows = Array.isArray(manifest["flows"]) ? manifest["flows"] as unknown[] : [];
+  if (!flows.some((entry) => isRecord(entry) && entry["id"] === declared)) {
+    return `${KIT_DEFAULT_FLOW_FIELD} ${JSON.stringify(declared)} is not declared in this kit's flows[]`;
+  }
+  return null;
+}
+
+/** One kit's `default_flow` declaration, bound to the root and kit that made it. */
+export interface KitDefaultFlowDeclaration {
+  kitId: string;
+  /** Canonical root whose kit tree carries the declaration (a `canonicalKitFlowSourceRoots` entry). */
+  sourceRoot: string;
+  manifestPath: string;
+  /** The declared value; a string only when `issue` is null. */
+  flowId: string | null;
+  /** Why the declaration is malformed, or null when it is well-formed. */
+  issue: string | null;
+}
+
+/**
+ * Every kit under `sourceRoot` that declares `default_flow`, well-formed or not, from the same
+ * two kit trees the run binding reads: tracked `kits/<id>/` and integrity-checked installed kits.
+ *
+ * A MALFORMED declaration is returned, not skipped: a kit that tried to declare a default and got
+ * it wrong must make the default unresolvable rather than let another kit's answer win silently.
+ */
+export function kitDefaultFlowDeclarations(sourceRoot: string): KitDefaultFlowDeclaration[] {
+  const root = canonicalPathOrNull(sourceRoot);
+  if (!root) return [];
+  const found: KitDefaultFlowDeclaration[] = [];
+  const consider = (kitsRoot: string, kitId: string): void => {
+    const manifestPath = path.join(kitsRoot, kitId, "kit.json");
+    const manifest = readJsonObject(manifestPath);
+    if (!manifest || manifest[KIT_DEFAULT_FLOW_FIELD] === undefined) return;
+    const issue = manifest["id"] !== undefined && manifest["id"] !== kitId
+      ? `kit.json id ${JSON.stringify(manifest["id"])} disagrees with its directory ${JSON.stringify(kitId)}`
+      : kitDefaultFlowIssue(manifest, kitId);
+    found.push({ kitId, sourceRoot: root, manifestPath, flowId: issue ? null : manifest[KIT_DEFAULT_FLOW_FIELD] as string, issue });
+  };
+  const kitsRoot = canonicalKitsRoot(root);
+  if (kitsRoot) {
+    for (const entry of listDirents(kitsRoot)) {
+      if (entry.isDirectory() && SLUG_RE.test(entry.name)) consider(kitsRoot, entry.name);
+    }
+  }
+  const installedRoot = path.join(root, "kits", "local", "repositories");
+  for (const entry of readInstalledKitEntries(root)) {
+    if (observeInstalledKitIntegrity(entry, root).state !== "installed") continue;
+    consider(installedRoot, entry["id"] as string);
+  }
+  return found;
+}
+
 // ─── Local helpers ───────────────────────────────────────────────────────────────────────────
 
 function canonicalPathOrNull(candidate: string): string | null {
