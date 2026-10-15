@@ -573,10 +573,20 @@ export function kitDefaultFlowDeclarations(sourceRoot: string): KitDefaultFlowDe
     found.push({ kitId, sourceRoot: root, manifestPath, flowId: issue ? null : manifest[KIT_DEFAULT_FLOW_FIELD] as string, issue });
   };
   const kitsRoot = canonicalKitsRoot(root);
-  if (kitsRoot) {
-    for (const entry of listDirents(kitsRoot)) {
-      if (entry.isDirectory() && SLUG_RE.test(entry.name)) consider(kitsRoot, entry.name);
+  const kitTree = path.join(root, KITS_DIR);
+  if (!kitsRoot) {
+    try { fs.lstatSync(kitTree); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return found;
     }
+    throw new Error(`kit source tree ${kitTree} must be a readable directory before choosing a default flow`);
+  }
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(kitsRoot, { withFileTypes: true }); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") entries = [];
+    else throw new Error(`kit source tree ${kitTree} must be a readable directory before choosing a default flow`);
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory() && SLUG_RE.test(entry.name)) consider(kitsRoot, entry.name);
   }
   const installedRoot = path.join(root, "kits", "local", "repositories");
   for (const entry of readInstalledKitEntries(root)) {

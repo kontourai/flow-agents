@@ -692,6 +692,13 @@ test("default_flow resolution fails closed: competing, absent, and malformed dec
     assert.notEqual(malformed.result.status, 0);
     assert.ok(malformed.result.stderr.includes(`the default_flow declaration is malformed in ${path.join(malformed.pkg.root, "kits", "acme", "kit.json")} (default_flow "zeta.survey" must name a flow of this kit (acme.<flow>))`), malformed.result.stderr);
 
+    const forgedKit = fixtureKit("acme", { defaultFlow: "zeta.survey" });
+    forgedKit.manifest.flows.push({ id: "zeta.survey", path: "flows/survey.flow.json" });
+    const forged = startWithoutFlow({ acme: forgedKit, zeta: fixtureKit("zeta") });
+    assert.notEqual(forged.result.status, 0);
+    assert.match(forged.result.stderr, /must name a flow of this kit \(acme\.<flow>\)/);
+    assert.ok(!fs.existsSync(path.join(artifactRoot, "survey-refused")), "a forged flows list must not let one kit choose another kit's default");
+
     const corrupt = makeFixturePackage("kit-default-corrupt-pkg-", {
       acme: fixtureKit("acme", { defaultFlow: "acme.survey" }),
       zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }),
@@ -713,6 +720,30 @@ test("default_flow resolution fails closed: competing, absent, and malformed dec
 
     // Nothing was started by any refusal.
     assert.ok(!fs.existsSync(path.join(artifactRoot, "survey-refused")), "a refused default creates no session");
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+    for (const root of packages) fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an unreadable packaged kit tree cannot transfer default selection to a project kit", () => {
+  const project = makeFixtureProject("kit-default-tree-project-", { zeta: fixtureKit("zeta", { defaultFlow: "zeta.survey" }) });
+  const artifactRoot = path.join(project, ".kontourai", "flow-agents");
+  const packages = [];
+  try {
+    for (const mode of ["not-directory", ...(process.platform === "win32" ? [] : ["unreadable"])]) {
+      const pkg = makeFixturePackage("kit-default-tree-pkg-", { acme: fixtureKit("acme", { defaultFlow: "acme.survey" }) });
+      packages.push(pkg.root);
+      const tree = path.join(pkg.root, "kits");
+      if (mode === "not-directory") { fs.rmSync(tree, { recursive: true }); fs.writeFileSync(tree, "invalid kit tree"); }
+      else fs.chmodSync(tree, 0o000);
+      try {
+        const result = runCli(pkg.cli, ["workflow", "start", "--artifact-root", artifactRoot, "--task-slug", "tree-refused"], project);
+        assert.notEqual(result.status, 0, `${mode}: ${result.stdout} ${result.stderr}`);
+        assert.match(result.stderr, /kit source tree .* must be a readable directory before choosing a default flow/);
+        assert.ok(!fs.existsSync(path.join(artifactRoot, "tree-refused")), "an unreadable package tree must not silently select the valid project default");
+      } finally { if (mode === "unreadable") fs.chmodSync(tree, 0o755); }
+    }
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
     for (const root of packages) fs.rmSync(root, { recursive: true, force: true });

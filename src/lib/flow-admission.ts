@@ -155,7 +155,10 @@ export type DefaultFlowResolution = { flow: string; kitId: string; refusal?: und
 export function resolveDefaultFlow(repoRoot: string, surface: string, selector = "--flow"): DefaultFlowResolution {
   const passFlow = `pass ${selector} <kit>.<flow> to choose a flow`;
   for (const sourceRoot of canonicalKitFlowSourceRoots(repoRoot)) {
-    const declarations = kitDefaultFlowDeclarations(sourceRoot);
+    let declarations: ReturnType<typeof kitDefaultFlowDeclarations>;
+    try { declarations = kitDefaultFlowDeclarations(sourceRoot); } catch (error) {
+      return { refusal: `${surface}: no ${selector} was given and default flow selection cannot inspect ${sourceRoot}: ${error instanceof Error ? error.message : String(error)}; ${passFlow}` };
+    }
     if (declarations.length === 0) continue;
     const malformed = declarations.filter((candidate) => candidate.issue !== null);
     if (malformed.length > 0) {
