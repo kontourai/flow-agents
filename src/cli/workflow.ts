@@ -24,7 +24,8 @@ import { publicJsonFlagShapes, WORKFLOW_CRITIQUE_PARAMETERS, WORKFLOW_EVIDENCE_P
 import { builderRunActionFlags, main as builderRun } from "./builder-run.js";
 import { assertAppendOnlyCritiqueHistory, critiqueHistoryProjectionSummary, critiqueResolutionEdgeProjectionSummary, normalizeCritiqueChainRecords, selectUniqueHistoricalLedgerPrefix } from "./critique-resolution.js";
 import { appendWriterTransactionAbort, assertCurrentVerifiedWorkspaceEvidence, createWriterTransactionAbortCapability, currentWorkflowSessionDir, declaredVerificationChecks, hasDeclaredVerificationChecks, findRepoRootFromDir, isMeaningfulTestCommand, mainFromPublicWorkflow, preflightGateClaimEvidence, publishDelivery, routeBackDisclosureLines, sealTrustCheckpoint, type TrustBundleWriterTarget, type TrustCheckpointSealResult, type WriterTransactionAbortCapability, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
-import { kitFlowSourceRoots, resolveKitFlowBinding } from "../lib/kit-flow-binding.js";
+import { hasRegisteredInstalledKit, kitFlowSourceRoots, kitManifestFlowDeclarations, resolveKitFlowBinding } from "../lib/kit-flow-binding.js";
+import { catalogKitIds } from "../lib/kit-registry.js";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 import {
   buildUnsignedHostWorkflowAuthority,
@@ -1919,7 +1920,7 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   // The scorer cannot attribute a shared expectation id without knowing the flow, and
   // this is where the flow is actually known.
   noteActiveFlow(inspected.run.definitionId);
-  const operation = builderOperationForExpectation(inspected.run.definitionId, expectation);
+  const operation = declaredOperationForExpectation(inspected.run.definitionId, expectation, projectRoot, "workflow evidence");
   if (operation) {
     throw new Error(`workflow evidence cannot satisfy operation-bound expectation ${expectation}; ${operation} requires authenticated external ChangeProvider completion`);
   }
@@ -2160,7 +2161,7 @@ async function resealVerificationEvidenceRequest(sessionDir: string, argv: strin
     if (typeof targetBundleClaim?.claimType !== "string" || typeof targetBundleClaim.subjectType !== "string") {
       throw new Error("verification evidence reseal target must declare canonical gate-claim metadata");
     }
-    const operation = builderOperationForExpectation(repaired.run.definitionId, expectation);
+    const operation = declaredOperationForExpectation(repaired.run.definitionId, expectation, projectRoot, "verification evidence reseal");
     if (operation) throw new Error(`verification evidence reseal cannot satisfy operation-bound expectation ${expectation}`);
     assertExecuteFailureRouteBeforeMutation(repaired.run.definition as JsonRecord, repaired.run.state.current_step, requestedStatus, flagString(parsed.flags, "route-reason"));
     assertRunnableEvidenceCommands(commands, repaired.projectRoot, expectation === "tests-evidence" && requestedStatus === "pass");
@@ -3003,14 +3004,23 @@ export function assertExecuteFailureRouteBeforeMutation(
   }
 }
 
-function builderOperationForExpectation(flowId: string, expectationId: string): string | null {
-  const kit = readJsonFile(path.join(PACKAGE_ROOT, "kits", "builder", "kit.json"), "Builder kit metadata");
-  const parsed = parseKitFlowStepActions(kit, "kits/builder/kit.json");
-  if (parsed.errors.length) throw new Error(`Builder kit metadata is invalid: ${parsed.errors.join("; ")}`);
+/**
+ * The external operation the DECLARING kit binds `expectationId` to in `flowId`, or null when the
+ * kit binds it to a local interface. Resolved through the same kit binding the run adapter pinned,
+ * so a flow of any kit (packaged or project-local) gets the same pre-mutation refusal.
+ *
+ * Fails closed: a flow whose declaring kit cannot be resolved, or whose step-action metadata is
+ * invalid, throws rather than answering "not operation-bound".
+ */
+function declaredOperationForExpectation(flowId: string, expectationId: string, projectRoot: string, verb: string): string | null {
+  const binding = resolveKitFlowBinding(flowId, kitFlowSourceRoots(PACKAGE_ROOT, projectRoot));
+  if (!binding) throw new Error(`${verb} cannot resolve the declaring kit's expectation bindings for ${flowId}`);
+  const parsed = parseKitFlowStepActions(binding.manifest, binding.manifestPath);
+  if (parsed.errors.length) throw new Error(`${binding.kitId} kit metadata is invalid: ${parsed.errors.join("; ")}`);
   for (const action of parsed.entries) {
     if (action.flow_id !== flowId) continue;
-    const binding = action.expectation_bindings.find((candidate) => candidate.expectation_id === expectationId);
-    if (binding?.interface === "operation") return binding.operation ?? "the declared external operation";
+    const expectationBinding = action.expectation_bindings.find((candidate) => candidate.expectation_id === expectationId);
+    if (expectationBinding?.interface === "operation") return expectationBinding.operation ?? "the declared external operation";
   }
   return null;
 }
@@ -3456,6 +3466,92 @@ function resolveSessionDir(flags: ReturnType<typeof parseArgs>["flags"]): string
   return validateCanonicalSessionDir(candidate);
 }
 
+/** One packaged flow definition doctor compares against the project's installed copy. */
+interface DoctorDefinition {
+  id: string;
+  packageFile: string;
+  installedFile: string;
+  packageDefinition: JsonRecord | null;
+  installedDefinition: JsonRecord | null;
+}
+
+/** One kit doctor checks: its packaged manifest, the project's installed copy, and its flows. */
+interface DoctorKit {
+  id: string;
+  /** The packaged manifest's display name, used verbatim in warnings ("Builder Kit"). */
+  name: string;
+  /** Activated by the install record; only an activated kit's absence is a warning. */
+  active: boolean;
+  packageKitFile: string;
+  packageKit: JsonRecord;
+  installedKitFile: string;
+  installedKit: JsonRecord | null;
+  definitions: DoctorDefinition[];
+}
+
+const DOCTOR_KIT_ID_RE = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * The kits doctor checks: every ACTIVE kit, then every other kit the executing package's catalog
+ * ships whose copy is present in the project (installed bytes that drift from the CLI's are
+ * reported whether or not the kit is active). Each kit's definitions are the flows its PACKAGED
+ * kit.json `flows[]` declares, through the same declaration predicate the run binding uses.
+ *
+ * Doctor compares installed bytes with packaged bytes, so a kit the package does not ship has
+ * nothing to be compared with: an active installed local kit is left to the kit verbs, and an
+ * active id that is neither shipped nor installed is a problem, never a silent skip.
+ */
+function doctorCheckedKits(activeKitIds: string[], packageRoot: string, projectRoot: string): { kits: DoctorKit[]; problems: string[] } {
+  const kits: DoctorKit[] = [];
+  const problems: string[] = [];
+  const packageKitsRoot = path.join(packageRoot, "kits");
+  const presentCatalogIds = catalogKitIds(packageRoot)
+    .filter((id) => !activeKitIds.includes(id) && DOCTOR_KIT_ID_RE.test(id) && fs.existsSync(path.join(projectRoot, "kits", id, "kit.json")));
+  for (const [id, active] of [...activeKitIds.map((id) => [id, true] as const), ...presentCatalogIds.map((id) => [id, false] as const)]) {
+    if (!DOCTOR_KIT_ID_RE.test(id)) {
+      problems.push(`Activated kit id ${JSON.stringify(id)} is not a valid kit id.`);
+      continue;
+    }
+    const packageKitFile = path.join(packageKitsRoot, id, "kit.json");
+    const packageKit = readOptionalJson(packageKitFile);
+    if (!packageKit) {
+      if (active && !hasRegisteredInstalledKit(projectRoot, id)) problems.push(`Activated kit ${id} is neither shipped by Flow Agents ${CLI_VERSION} nor an installed local kit.`);
+      continue;
+    }
+    const installedKitFile = path.join(projectRoot, "kits", id, "kit.json");
+    const definitions = (kitManifestFlowDeclarations(packageKitsRoot, id) ?? []).map((declaration) => {
+      const packageFile = path.join(packageKitsRoot, id, declaration.relativePath);
+      const installedFile = path.join(projectRoot, "kits", id, declaration.relativePath);
+      return { id: declaration.flowId, packageFile, installedFile, packageDefinition: readOptionalJson(packageFile), installedDefinition: readOptionalJson(installedFile) };
+    });
+    kits.push({
+      id,
+      name: typeof packageKit.name === "string" && packageKit.name ? packageKit.name : `${id} kit`,
+      active,
+      packageKitFile,
+      packageKit,
+      installedKitFile,
+      installedKit: readOptionalJson(installedKitFile),
+      definitions,
+    });
+  }
+  return { kits, problems };
+}
+
+/**
+ * Whether the installed copy of a declared definition is valid. A packaged definition that does
+ * not validate on its own (a composition fragment, e.g. one reused through `uses_flow`) gives
+ * standalone validation of the installed copy nothing to mean, so that copy is judged by byte
+ * identity with the packaged one instead.
+ */
+function doctorInstalledDefinitionValidity(definition: DoctorDefinition): { valid: boolean; error: string | null } {
+  if (!definition.installedDefinition) return { valid: false, error: null };
+  const standalone = !definition.packageDefinition || validateFlowDefinition(definition.id, definition.packageDefinition) === null;
+  if (!standalone) return { valid: fileSha256(definition.installedFile) === fileSha256(definition.packageFile), error: null };
+  const error = validateFlowDefinition(definition.id, definition.installedDefinition);
+  return { valid: error === null, error };
+}
+
 function doctor(argv: string[]): number {
   const parsed = parseArgs(argv);
   const projectRoot = path.resolve(flagString(parsed.flags, "project-root", process.cwd())!);
@@ -3466,21 +3562,15 @@ function doctor(argv: string[]): number {
   const installFile = path.join(projectRoot, ".flow-agents", "install.json");
   const install = readOptionalJson(installFile);
   const state = readCurrentState(artifactRoot);
-  const packageKit = readOptionalJson(path.join(packageRoot, "kits", "builder", "kit.json"));
-  const installedKitFile = path.join(projectRoot, "kits", "builder", "kit.json");
-  const installedKit = readOptionalJson(installedKitFile);
-  const definitions = [
-    { id: "builder.build", file: "build.flow.json" },
-    { id: "builder.shape", file: "shape.flow.json" },
-  ].map(({ id, file }) => {
-    const packageFile = path.join(packageRoot, "kits", "builder", "flows", file);
-    const installedFile = path.join(projectRoot, "kits", "builder", "flows", file);
-    return { id, packageFile, installedFile, packageDefinition: readOptionalJson(packageFile), installedDefinition: readOptionalJson(installedFile) };
-  });
   const resolvedFlowPackage = readOptionalJson(resolveDependencyPackageJson("@kontourai/flow"));
   const installedVersion = typeof install?.version === "string" ? install.version : null;
   const staleInstall = installedVersion !== null && installedVersion !== cliVersion;
-  const activeKitIds = Array.isArray(install?.active_kit_ids) ? install.active_kit_ids.map(String) : (installedKit ? ["builder"] : []);
+  // An install record that lists its active kits is the authority. Without one, doctor keeps its
+  // behaviour from before kits were recorded: a project carrying the Builder kit tree is checked
+  // as a Builder install, and anything else as an install with no active kits.
+  const activeKitIds = Array.isArray(install?.active_kit_ids)
+    ? install.active_kit_ids.map(String)
+    : (fs.existsSync(path.join(projectRoot, "kits", "builder", "kit.json")) ? ["builder"] : []);
   const runtime = typeof install?.runtime === "string" ? install.runtime : "base";
   // #1288: never recommend the bare (destructive) init command -- the remedy previews with
   // --dry-run first; the dry-run output itself explains how to apply (and when --force is needed).
@@ -3488,42 +3578,51 @@ function doctor(argv: string[]): number {
   const localDependencyFile = path.join(projectRoot, "node_modules", "@kontourai", "flow-agents", "package.json");
   const localDependency = readOptionalJson(localDependencyFile);
   const installIntegrity = verifyInstalledAssets(projectRoot, packageRoot, runtime);
+  const { kits, problems: kitProblems } = doctorCheckedKits(activeKitIds, packageRoot, projectRoot);
+  const definitions = kits.flatMap((kit) => kit.definitions);
   const warnings: string[] = [];
   if (!install) warnings.push(`No installed hook/bundle version found at ${installFile}. Run: ${remediation}`);
   else if (staleInstall) warnings.push(`Installed hook/writer version ${installedVersion} is incompatible with CLI ${cliVersion}. Run: ${remediation}`);
   if (!installIntegrity.ok) warnings.push(`Installed hook/writer assets failed integrity verification: ${installIntegrity.problems.join("; ")}. Run: ${remediation}`);
   if (localDependency?.version && localDependency.version !== cliVersion) warnings.push(`Repository-local Flow Agents ${String(localDependency.version)} differs from executing CLI ${cliVersion}; keep automation explicitly versioned.`);
-  if (activeKitIds.includes("builder") && !installedKit) warnings.push(`Activated Builder Kit is missing at ${installedKitFile}. Run: ${remediation}`);
-  for (const definition of definitions) {
-    if (activeKitIds.includes("builder") && !definition.installedDefinition) {
-      warnings.push(`Activated ${definition.id} definition is missing at ${definition.installedFile}. Run: ${remediation}`);
-      continue;
+  for (const problem of kitProblems) warnings.push(`${problem} Run: ${remediation}`);
+  for (const kit of kits) {
+    if (kit.active && !kit.installedKit) warnings.push(`Activated ${kit.name} is missing at ${kit.installedKitFile}. Run: ${remediation}`);
+    for (const definition of kit.definitions) {
+      if (kit.active && !definition.installedDefinition) {
+        warnings.push(`Activated ${definition.id} definition is missing at ${definition.installedFile}. Run: ${remediation}`);
+        continue;
+      }
+      if (!definition.installedDefinition) continue;
+      const validity = doctorInstalledDefinitionValidity(definition);
+      if (validity.error) warnings.push(`Installed ${definition.id} definition is invalid: ${validity.error}. Run: ${remediation}`);
+      if (definition.installedDefinition.id !== definition.packageDefinition?.id) {
+        warnings.push(`Installed ${definition.id} definition id ${String(definition.installedDefinition.id)} differs from CLI definition ${String(definition.packageDefinition?.id)}. Run: ${remediation}`);
+      }
+      if (definition.installedDefinition.version !== definition.packageDefinition?.version) {
+        warnings.push(`Installed ${definition.id} version ${String(definition.installedDefinition.version)} differs from CLI version ${String(definition.packageDefinition?.version)}. Run: ${remediation}`);
+      } else if (fileSha256(definition.installedFile) !== fileSha256(definition.packageFile)) {
+        warnings.push(`Installed ${definition.id} content differs from Flow Agents ${cliVersion}. Run: ${remediation}`);
+      }
     }
-    if (!definition.installedDefinition) continue;
-    const validationError = validateFlowDefinition(definition.id, definition.installedDefinition);
-    if (validationError) warnings.push(`Installed ${definition.id} definition is invalid: ${validationError}. Run: ${remediation}`);
-    if (definition.installedDefinition.id !== definition.packageDefinition?.id) {
-      warnings.push(`Installed ${definition.id} definition id ${String(definition.installedDefinition.id)} differs from CLI definition ${String(definition.packageDefinition?.id)}. Run: ${remediation}`);
+    if (kit.installedKit && kit.installedKit.schema_version !== kit.packageKit.schema_version) {
+      warnings.push(`Installed ${kit.name} schema ${String(kit.installedKit.schema_version)} differs from CLI schema ${String(kit.packageKit.schema_version)}. Run: ${remediation}`);
     }
-    if (definition.installedDefinition.version !== definition.packageDefinition?.version) {
-      warnings.push(`Installed ${definition.id} version ${String(definition.installedDefinition.version)} differs from CLI version ${String(definition.packageDefinition?.version)}. Run: ${remediation}`);
-    } else if (fileSha256(definition.installedFile) !== fileSha256(definition.packageFile)) {
-      warnings.push(`Installed ${definition.id} content differs from Flow Agents ${cliVersion}. Run: ${remediation}`);
+    if (kit.installedKit && fileSha256(kit.installedKitFile) !== fileSha256(kit.packageKitFile)) {
+      warnings.push(`Installed ${kit.name} content differs from Flow Agents ${cliVersion}. Run: ${remediation}`);
     }
   }
-  if (installedKit && installedKit.schema_version !== packageKit?.schema_version) {
-    warnings.push(`Installed Builder Kit schema ${String(installedKit.schema_version)} differs from CLI schema ${String(packageKit?.schema_version)}. Run: ${remediation}`);
-  }
-  if (installedKit && fileSha256(installedKitFile) !== fileSha256(path.join(packageRoot, "kits", "builder", "kit.json"))) {
-    warnings.push(`Installed Builder Kit content differs from Flow Agents ${cliVersion}. Run: ${remediation}`);
-  }
+  // Locate the current run's declared source, packaged first, then the project's kits. This
+  // source/version diagnostic does not establish composed-flow admission or producer bindings.
+  const sourceRoots = kitFlowSourceRoots(packageRoot, projectRoot);
   const currentRun = state?.flow_run && typeof state.flow_run === "object" ? state.flow_run as JsonRecord : null;
-  const currentDefinition = definitions.find((definition) => definition.id === currentRun?.definition_id);
+  const currentBinding = currentRun?.definition_id ? resolveKitFlowBinding(String(currentRun.definition_id), sourceRoots) : null;
+  const currentDefinition = currentBinding ? readOptionalJson(currentBinding.definitionPath) : null;
   if (currentRun?.definition_id && !currentDefinition) {
     warnings.push(`Current run uses unsupported Flow definition ${String(currentRun.definition_id)}; recover or migrate before mutation.`);
-  } else if (currentRun && currentDefinition && currentRun.definition_version !== currentDefinition.packageDefinition?.version
+  } else if (currentRun && currentBinding && currentDefinition && currentRun.definition_version !== currentDefinition.version
     && typeof currentRun.definition_digest !== "string") {
-    warnings.push(`Current run uses ${currentDefinition.id}@${String(currentRun.definition_version)} while CLI resolves ${currentDefinition.id}@${String(currentDefinition.packageDefinition?.version)}; recover or migrate before mutation.`);
+    warnings.push(`Current run uses ${currentBinding.flowId}@${String(currentRun.definition_version)} while CLI resolves ${currentBinding.flowId}@${String(currentDefinition.version)}; recover or migrate before mutation.`);
   }
   if (state && state.schema_version !== "1.0") warnings.push(`Artifact schema ${String(state.schema_version)} is unsupported; recreate or migrate the session with CLI ${cliVersion}.`);
   const trustBundleSchema = readCurrentTrustBundleSchema(artifactRoot);
@@ -3533,6 +3632,22 @@ function doctor(argv: string[]): number {
   if (!resolvedFlowVersion || !flowVersionCompatible(resolvedFlowVersion, expectedFlowRange)) {
     warnings.push(`Resolved Flow runtime ${resolvedFlowVersion ?? "missing"} does not satisfy ${expectedFlowRange || "the package contract"}. Reinstall Flow Agents ${cliVersion}.`);
   }
+  // Only a missing current definition consults startup defaults. A refusal is a diagnostic
+  // warning here; start uses the same selector and refuses before creating a session.
+  let defaultDefinition: JsonRecord | null = null;
+  if (!currentRun?.definition_id) {
+    const resolution = resolveDefaultFlow(projectRoot, "workflow doctor");
+    if (resolution.refusal !== undefined) warnings.push(resolution.refusal);
+    else defaultDefinition = admittedFlowDefinition(resolution.flow, projectRoot);
+  }
+  const kitReports = kits.map((kit) => ({
+    id: kit.packageKit.id ?? null,
+    resolved_schema_version: kit.packageKit.schema_version ?? null,
+    installed_schema_version: kit.installedKit?.schema_version ?? null,
+    resolved_content_sha256: fileSha256(kit.packageKitFile),
+    installed_content_sha256: kit.installedKit ? fileSha256(kit.installedKitFile) : null,
+    source: kit.installedKit ? kit.installedKitFile : kit.packageKitFile,
+  }));
   const report = {
     ok: warnings.length === 0,
     project_root: projectRoot,
@@ -3550,21 +3665,16 @@ function doctor(argv: string[]): number {
       runtime: install?.runtime ?? null,
       active_kit_ids: activeKitIds,
     },
-    kit: {
-      id: packageKit?.id ?? null,
-      resolved_schema_version: packageKit?.schema_version ?? null,
-      installed_schema_version: installedKit?.schema_version ?? null,
-      resolved_content_sha256: fileSha256(path.join(packageRoot, "kits", "builder", "kit.json")),
-      installed_content_sha256: installedKit ? fileSha256(installedKitFile) : null,
-      source: installedKit ? installedKitFile : path.join(packageRoot, "kits", "builder", "kit.json"),
-    },
+    // `kit` is the first checked kit, kept for single-kit consumers; `kits` lists every one.
+    kit: kitReports[0] ?? { id: null, resolved_schema_version: null, installed_schema_version: null, resolved_content_sha256: null, installed_content_sha256: null, source: null },
+    kits: kitReports,
     flow_runtime: { package_version: resolvedFlowVersion, expected_range: expectedFlowRange, compatible: resolvedFlowVersion ? flowVersionCompatible(resolvedFlowVersion, expectedFlowRange) : false },
-    definition: { id: currentRun?.definition_id ?? definitions[0]!.packageDefinition?.id ?? null, version: currentRun?.definition_version ?? definitions[0]!.packageDefinition?.version ?? null },
+    definition: { id: currentRun?.definition_id ?? defaultDefinition?.id ?? null, version: currentRun?.definition_version ?? defaultDefinition?.version ?? null },
     definitions: definitions.map((definition) => ({
       id: definition.id,
       resolved_version: definition.packageDefinition?.version ?? null,
       installed_version: definition.installedDefinition?.version ?? null,
-      installed_valid: definition.installedDefinition ? validateFlowDefinition(definition.id, definition.installedDefinition) === null : false,
+      installed_valid: doctorInstalledDefinitionValidity(definition).valid,
     })),
     artifact: {
       state_schema_version: state?.schema_version ?? null,
@@ -3578,7 +3688,7 @@ function doctor(argv: string[]): number {
   else {
     console.log(`Flow Agents CLI: ${cliVersion}`);
     console.log(`Installed hooks/writer: ${installedVersion ?? "missing"}`);
-    console.log(`Builder Kit schema: installed=${String(installedKit?.schema_version ?? "missing")} resolved=${String(packageKit?.schema_version ?? "missing")}`);
+    for (const kit of kits) console.log(`${kit.name} schema: installed=${String(kit.installedKit?.schema_version ?? "missing")} resolved=${String(kit.packageKit.schema_version ?? "missing")}`);
     console.log(`Flow: ${String(report.definition.id ?? "none")}@${String(report.definition.version ?? "unknown")}`);
     console.log(`Artifact schema: state=${String(report.artifact.state_schema_version ?? "none")} trust=${String(report.artifact.trust_bundle_schema_version ?? "none")}`);
     for (const warning of warnings) console.log(`WARNING: ${warning}`);
