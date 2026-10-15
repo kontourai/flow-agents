@@ -21,7 +21,7 @@ const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-a
 const stopGoalFit = require("../../scripts/hooks/stop-goal-fit.js");
 const authorityActorStruct = { runtime: "test", session_id: "authority", host: "localhost", human: null };
 
-function snapshot(step, status = "active") {
+function snapshot(step, status = "active", definitionId = "builder.build") {
   const disposition = status === "completed" || status === "canceled"
     ? "done"
     : status === "failed"
@@ -31,7 +31,7 @@ function snapshot(step, status = "active") {
         : "continue";
   return {
     run_id: "run-251",
-    definition_id: "builder.build",
+    definition_id: definitionId,
     definition_version: "1.4",
     definition_digest: TEST_DEFINITION_DIGEST,
     status,
@@ -43,9 +43,10 @@ function snapshot(step, status = "active") {
   };
 }
 
-function envelopeSnapshot(step, { evidence = [], artifacts = [], implementationAllowed, status = "active" } = {}) {
-  const value = snapshot(step, status);
+function envelopeSnapshot(step, { evidence = [], artifacts = [], implementationAllowed, status = "active", definitionId } = {}) {
+  const value = snapshot(step, status, definitionId);
   const authority = installedBuilderGateActionAuthority(value.definition_id, step, value.run_id);
+  value.definition_version = authority.definition_version;
   const requirements = authority.requirements.map((requirement) => ({ ...requirement, status: "unresolved" }));
   const unresolvedRequired = requirements.filter((requirement) => requirement.required).map((requirement) => requirement.id);
   const unresolvedRequiredSet = new Set(unresolvedRequired);
@@ -324,6 +325,21 @@ test("gate-action envelope pins executable workflow interfaces and package ident
     status: "waiting", operation: "publish-change", capability: "change.create", completion: "external_verification_required",
   };
   assert.throws(() => validateSnapshot(configuredOperation), /configured operation cannot report an external capability gap/);
+});
+
+// The installed authority's external capability names the same capability as the operation
+// mutation it projects: change.observe for a source-pinned definition, change.create otherwise.
+test("installed authority names the adopt-only capability for a source-pinned pr-open", () => {
+  for (const [definitionId, capability] of [["builder.deliver-existing", "change.observe"], ["builder.build", "change.create"]]) {
+    const authority = installedBuilderGateActionAuthority(definitionId, "pr-open", "run-251");
+    const publishChange = authority.mutations.find((entry) => entry.interface === "operation" && entry.operation === "publish-change");
+    assert.equal(publishChange.protocol.capability, capability, definitionId);
+    assert.equal(authority.external_capability?.capability, capability, definitionId);
+  }
+  // This checkout configures a ChangeProvider, so a valid pr-open envelope reports no capability gap.
+  const adopting = envelopeSnapshot("pr-open", { definitionId: "builder.deliver-existing" });
+  delete adopting.gate_action_envelope.stop_condition.external_capability;
+  assert.doesNotThrow(() => validateSnapshot(adopting));
 });
 
 test("gate-action envelope rejects a stale gate visit after canonical progress changes", () => {

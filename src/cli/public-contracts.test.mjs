@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  ADOPT_EXISTING_CHANGE_PARAMETERS,
   PUBLISH_CHANGE_OPERATION_PROTOCOL,
+  adoptExistingChangeOperationProtocol,
   publishChangeOperationProtocol,
   resolveChangeProviderSupport,
 } from "../../build/src/cli/public-contracts.js";
@@ -33,4 +35,18 @@ test("publish-change availability is truthful for configured and unavailable Cha
   assert.equal(unavailable.availability.status, "external_capability_required");
   assert.equal(unavailable.availability.executable_by_flow_agents, false);
   assert.deepEqual(resolveChangeProviderSupport({ ...provider, token: "forbidden" }), { status: "unsupported", reason: "change_provider_repository_is_invalid" });
+});
+
+test("the adopt-only publish-change variant is additive: the open-change contract keeps title and body", () => {
+  assert.deepEqual(PUBLISH_CHANGE_OPERATION_PROTOCOL.parameters.map((parameter) => parameter.name), ["session_dir", "title", "body", "head_ref", "base_ref", "draft"]);
+  assert.equal(PUBLISH_CHANGE_OPERATION_PROTOCOL.capability, "change.create");
+  const configured = publishChangeOperationProtocol(provider);
+  const adopt = adoptExistingChangeOperationProtocol(configured);
+  assert.equal(adopt.capability, "change.observe");
+  assert.deepEqual(adopt.parameters, ADOPT_EXISTING_CHANGE_PARAMETERS);
+  assert.deepEqual(adopt.parameters.map((parameter) => parameter.flag), ["--session-dir", "--head-ref", "--base-ref"]);
+  assert.deepEqual(adopt.availability, configured.availability);
+  assert.deepEqual(adopt.request, configured.request);
+  assert.deepEqual(adopt.result, configured.result);
+  assert.equal(configured.capability, "change.create", "the input protocol is not mutated");
 });

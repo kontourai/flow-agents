@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { parseArgs, flagString } from "../lib/args.js";
 import { atomicWriteFile } from "../lib/fs.js";
 import { execTrustedGitSync, resolveTrustedLocalGitCommit } from "../lib/trusted-git.js";
-import { inspectBuilderFlowSession, publishChangeAuthorityRef } from "../builder-flow-runtime.js";
+import { inspectBuilderFlowSession, pinnedRunSourceHead, publishChangeAuthorityRef } from "../builder-flow-runtime.js";
 import { declaredFlowBindsOperation } from "../builder-gate-action-envelope.js";
 import { validateRunStateConsistency } from "@kontourai/flow";
 import { readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLockAsync } from "./assignment-provider.js";
@@ -104,7 +104,7 @@ function assertCheckpointCompanionIntegrity(bundle: unknown, checkpoint: Buffer,
  * companions are byte-identical and the sole post-checkpoint changes are that
  * exact owned companion set. This intentionally has no tree-equivalence path.
  */
-async function assertExactTerminalDelivery(context: SessionContext, terminalHead: string): Promise<void> {
+async function assertExactTerminalDelivery(context: SessionContext, terminalHead: string): Promise<string> {
   assertCleanWorktree(context.projectRoot);
   const checkedOut = git(context.projectRoot, ["rev-parse", "HEAD"]).toString("utf8").trim().toLowerCase();
   if (checkedOut !== terminalHead) throw new Error("merge-change requires the terminal source branch checked out at its exact head");
@@ -149,6 +149,7 @@ async function assertExactTerminalDelivery(context: SessionContext, terminalHead
   } catch {
     throw new Error("merge-change requires an ancestor-bound delivery-only terminal commit; squash/post-merge follow-ups and source drift are refused. Run flow-agents workflow publish-delivery, then refresh the exact-head provider checks before retrying.");
   }
+  return checkpoint.commit_sha.toLowerCase();
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -258,7 +259,12 @@ async function currentAction(context: SessionContext, strategy: MergeChangeStrat
   // A flow whose kit binds no step to the publish-change operation never produces the result this
   // operation merges, so refuse it by name before reading provider settings or that result.
   if (!declaredFlowBindsOperation(inspected.run.definitionId, "publish-change", context.projectRoot)) {
-    throw new Error(`${inspected.run.definitionId} runs do not publish a change; merge-change is not supported for them yet. Merge through the provider's own controls.`);
+    // A run pinned to a pre-existing source head reviewed someone's existing change; the flow that
+    // delivers such a change (adopting its pull request) is the one merge-change supports.
+    const reviewedExistingChange = pinnedRunSourceHead(inspected.run.startDefinition, inspected.run.state) !== null;
+    throw new Error(`${inspected.run.definitionId} runs do not publish a change; merge-change is not supported for them. ${reviewedExistingChange
+      ? "To merge a reviewed existing change through merge-change, run builder.deliver-existing at its head instead: it adopts the existing pull request, gates CI readiness and learning, and is supported by merge-change. Otherwise merge"
+      : "Merge"} through the provider's own controls.`);
   }
   const actor = assertCurrentAssignment(context);
   const effective = resolveEffectiveChangeProviderSettings(context.projectRoot, path.join(context.projectRoot, "context", "settings", "change-provider-settings.json"));
@@ -267,9 +273,28 @@ async function currentAction(context: SessionContext, strategy: MergeChangeStrat
   const published = readAuthenticatedPublishResult(context, inspected, effective.provider as ChangeProviderSettings, definitions.startDefinition as { id: string; version: string });
   const change = published.change_ref;
   const terminalHead = resolveTrustedLocalGitCommit(context.projectRoot, change.head_ref);
-  await assertExactTerminalDelivery(context, terminalHead);
+  const checkpointCommit = await assertExactTerminalDelivery(context, terminalHead);
+  assertPinnedSourceHeadDelivery(inspected, change.head_sha, checkpointCommit);
   assertEvidenceRefreshControl(inspected, definitions);
   return issueMergeChangeAction({ binding: published.binding, provider: effective.provider as ChangeProviderSettings, assignment_actor: actor, expected_provider_actor: published.provider_actor, intent: { strategy, change_number: change.number, base_ref: change.base_ref, head_ref: change.head_ref, terminal_head_sha: terminalHead } });
+}
+
+/**
+ * #1415 slice 2: a run pinned to a source head reviewed exactly that commit, so it may merge only
+ * that commit plus its own delivery-only commit. assertExactTerminalDelivery already proves the
+ * terminal head is the checkpoint commit plus exactly this session's delivery files; this proves the
+ * checkpoint and the adopted pull request's head are both the pinned head. Unpinned runs are
+ * unaffected: their published head may legitimately precede a provisional delivery commit.
+ */
+function assertPinnedSourceHeadDelivery(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, publishedHead: string, checkpointCommit: string): void {
+  const sourceHead = pinnedRunSourceHead(inspected.run.startDefinition, inspected.run.state);
+  if (sourceHead === null) return;
+  if (publishedHead.toLowerCase() !== sourceHead) {
+    throw new Error(`merge-change requires this ${inspected.run.definitionId} run's adopted pull request to have been observed at its pinned source head ${sourceHead}; publish-change observed ${publishedHead}`);
+  }
+  if (checkpointCommit !== sourceHead) {
+    throw new Error(`merge-change requires this ${inspected.run.definitionId} run's delivery checkpoint to be sealed at its pinned source head ${sourceHead}; it was sealed at ${checkpointCommit}. Run flow-agents workflow publish-delivery with the pinned head checked out, commit only delivery/<slug>/, then refresh the exact-head provider checks before retrying`);
+  }
 }
 
 function validateCanonicalRunDefinitions(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>): CanonicalRunDefinitions {
@@ -314,11 +339,27 @@ export function evidenceRefreshRoutesSatisfied(gate: Record<string, unknown>): b
     && isDeepStrictEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" });
 }
 
+/**
+ * #1415 slice 2: the merge-ready-ci gate, found by its declared property rather than by the composed
+ * id `builder.publish-learn:merge-ready-ci-gate`, which named only the child flow builder.build
+ * composes. The lifecycle coordinator (freshnessTurnstileGateEntry) and workflow.ts
+ * (currentFreshnessTurnstileGate) already ask the same question. Exactly one gate must declare it,
+ * so an ambiguous definition refuses rather than picks.
+ */
+export function freshnessTurnstileGate(definition: Record<string, unknown>): Record<string, unknown> {
+  const gates = record(definition.gates, "canonical Flow definition gates");
+  const matches = Object.values(gates).filter((gate) => gate !== null && typeof gate === "object" && !Array.isArray(gate)
+    && (gate as Record<string, unknown>).requires_current_verification === true);
+  if (matches.length !== 1) {
+    throw new Error(`merge-change requires exactly one gate declaring requires_current_verification in the completed run's definition; found ${matches.length}`);
+  }
+  return record(matches[0], "canonical merge-ready-ci gate");
+}
+
 function assertEvidenceRefreshControl(inspected: Awaited<ReturnType<typeof inspectBuilderFlowSession>>, definitions: CanonicalRunDefinitions): void {
   const manifestFile = path.join(inspected.run.dir, "evidence", "manifest.json");
   const definition = definitions.effectiveDefinition;
-  const gates = record(definition.gates, "canonical Flow definition gates");
-  const gate = record(gates["builder.publish-learn:merge-ready-ci-gate"], "canonical merge-ready-ci gate");
+  const gate = freshnessTurnstileGate(definition);
   if (!evidenceRefreshRoutesSatisfied(gate)) {
     throw new Error("merge-change requires the completed run to semantically adopt merge-ready-ci evidence refresh (missing_evidence/default -> verify with bounded block policy)");
   }
