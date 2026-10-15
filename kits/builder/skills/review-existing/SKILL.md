@@ -164,7 +164,8 @@ gate still re-checks the pinned head, so stay on it until the run completes.
    provisional delivery commit would move the pull request head off the pin.
 3. After the run completes at `learn`, run `flow-agents workflow publish-delivery`
    (see below). Its checkpoint commit is the pinned head. Commit exactly
-   `delivery/<slug>/` as one commit on the pull request branch and push it.
+   `delivery/<slug>/` as one commit on the pull request branch and push it
+   (`git add -f delivery/<slug>` when `delivery/` is in the local exclude file).
    That needs push rights to the pull request's branch in the same
    repository, and it starts one more CI round on the new head.
 4. `flow-agents merge-change request` and `merge-change execute` merge that

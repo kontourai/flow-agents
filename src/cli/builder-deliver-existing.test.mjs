@@ -177,7 +177,7 @@ function releaseRef(fx) {
   const file = path.join(fx.sessionDir, "release.json");
   fs.writeFileSync(file, `${JSON.stringify({
     schema_version: "1.0", task_slug: fx.slug, decision: "merge", updated_at: new Date().toISOString(), scope: "existing change",
-    evidence_ref: `${fx.slug}--existing-change.md`, gates: [{ name: "ci", status: "pass", summary: "Required checks pass at the pinned head." }],
+    evidence_ref: `${fx.slug}--existing-change.md`, gates: [{ name: "merge", status: "pass", summary: "Required checks pass at the pinned head." }],
     rollback_plan: { status: "not_required", summary: "Revert the merge.", owner: "holder" }, observability_plan: { status: "not_required", summary: "None." },
     post_deploy_checks: [], docs: { status: "not_needed", summary: "None." },
   }, null, 2)}\n`);
