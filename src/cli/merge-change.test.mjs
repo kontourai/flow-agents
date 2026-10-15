@@ -367,6 +367,86 @@ test("#1415 slice 2: merge-change finds the merge-ready-ci gate by its declared 
   assert.throws(() => freshnessTurnstileGate(ambiguous), /found 2/);
 });
 
+/**
+ * A completed canonical run of `flowId` (the packaged definition, unamended) with a sidecar session
+ * and a held assignment: enough for `merge-change request` to reach its evidence-refresh control on
+ * the real run once the terminal-delivery half is supplied through the existing `currentAction` seam.
+ */
+async function completedBuildRunFixture(flowId) {
+  const root = makeFixtureDir("flow-agents-merge-turnstile-request-");
+  const slug = `turnstile-${flowId.replace(/[^a-z]+/g, "-")}`;
+  const artifactRoot = path.join(root, ".kontourai", "flow-agents");
+  const sessionDir = path.join(artifactRoot, slug);
+  const subject = "kontourai/flow-agents#1001";
+  const run = (args) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+  run(["init", "-b", "main"]);
+  run(["config", "user.email", "fixture@example.test"]);
+  run(["config", "user.name", "Merge Fixture"]);
+  run(["remote", "add", "origin", "https://github.com/kontourai/flow-agents.git"]);
+  fs.writeFileSync(path.join(root, ".gitignore"), ".kontourai/\n");
+  run(["add", "."]);
+  run(["commit", "-m", "fixture"]);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, "state.json"), JSON.stringify({
+    schema_version: "1.0", task_slug: slug, status: "delivered", phase: "release", updated_at: "2026-07-27T12:00:00.000Z",
+    work_item_refs: [subject], next_action: { status: "done", summary: "Fixture." },
+  }));
+  const definition = resolveEffectiveFlowDefinition(flowId, process.cwd(), { allowOverride: false });
+  assert.ok(definition, `the fixture requires the packaged ${flowId} definition`);
+  const definitionFile = path.join(root, ".kontourai", `${flowId}.start.json`);
+  fs.writeFileSync(definitionFile, JSON.stringify(definition));
+  await startRun(definitionFile, { cwd: root, runId: slug, params: { subject } });
+  const stateFile = path.join(root, ".kontourai", "flow", "runs", slug, "state.json");
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  state.status = "completed";
+  state.current_step = "learn";
+  fs.writeFileSync(stateFile, JSON.stringify(state));
+  const actor = resolveCurrentAssignmentActor();
+  performLocalClaim(artifactRoot, slug, actor.actor, { ttlSeconds: 1_800, actorKey: actor.actorKey, branch: "main", artifactDir: slug, workItemRef: subject, reason: "fixture" });
+  return { root, slug, sessionDir, definitionVersion: definition.version, out: path.join(root, "unsigned.json") };
+}
+
+test("#1415 slice 2: merge-change request on a completed builder.build / build-lean run passes the evidence-refresh control by the gate's property", async () => {
+  // The request's own gate lookup (assertEvidenceRefreshControl, re-run in prepareAuthorizationRequest
+  // on the real canonical run) is the seam: terminal delivery is supplied by the currentAction seam,
+  // as the #1318 preflight tests do, so this reaches the lookup the property change touched.
+  for (const flowId of ["builder.build", "builder.build-lean"]) {
+    const fixture = await completedBuildRunFixture(flowId);
+    const errors = [];
+    const logs = [];
+    const originalError = console.error;
+    const originalLog = console.log;
+    console.error = (...values) => errors.push(values.join(" "));
+    console.log = (...values) => logs.push(values.join(" "));
+    let status;
+    try {
+      status = await mergeChangeMain(["request", "--session-dir", fixture.sessionDir, "--strategy", "squash", "--out", fixture.out], {
+        provider,
+        currentAction: async () => issueMergeChangeAction({
+          binding: { ...binding, run_id: fixture.slug, definition_id: flowId, definition_version: fixture.definitionVersion },
+          provider,
+          assignment_actor: resolveCurrentAssignmentActor().actorKey,
+          expected_provider_actor: "fixture",
+          intent: { strategy: "squash", change_number: 1001, base_ref: "main", head_ref: "fixture", terminal_head_sha: SHA },
+        }),
+        preflightProvider: async () => ({ status: "satisfied", base_ref: "main" }),
+      });
+    } finally {
+      console.error = originalError;
+      console.log = originalLog;
+    }
+    try {
+      assert.equal(status, 0, `${flowId}: ${errors.join("\n")}`);
+      const unsigned = JSON.parse(JSON.parse(logs.join("\n")).signing_payload);
+      assert.equal(unsigned.flow_definition_id, flowId);
+      assert.equal(unsigned.run_id, fixture.slug);
+      assert.equal(fs.existsSync(fixture.out), true, `${flowId}: the unsigned authorization is written`);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("start-definition provenance derives when the stamp is absent and refuses a mismatched stamp (#1307)", async () => {
   // @kontourai/flow has never written state.definition_digest (absent in every measured run
   // state; zero references in the flow dist). Demanding it failed EVERY unamended run — the
