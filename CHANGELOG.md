@@ -1,5 +1,35 @@
 # Changelog
 
+## [9.0.0](https://github.com/kontourai/flow-agents/compare/v8.1.2...v9.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **decisions:** the published path `@kontourai/flow-agents/schemas/decision-record.schema.json` is removed. The schema is now owned by Corpus (`schemas/decision-record.schema.json` in kontourai/corpus, available from the pinned tarball https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 until @kontourai/corpus is published on npm).
+
+### Features
+
+* **builder:** add builder.review-existing to review an existing exact-head change ([#1489](https://github.com/kontourai/flow-agents/issues/1489)) ([57b272d](https://github.com/kontourai/flow-agents/commit/57b272d68011e3660384673e5d4961a0179089e0))
+* clarify native reviews and retain continuation process custody ([#1481](https://github.com/kontourai/flow-agents/issues/1481)) ([737c1b1](https://github.com/kontourai/flow-agents/commit/737c1b15957e902d7064e53b36eada93ae12b9e9))
+
+
+### Fixes
+
+* **ci:** validate release paths against the tagged change range ([#1490](https://github.com/kontourai/flow-agents/issues/1490)) ([d2ebd63](https://github.com/kontourai/flow-agents/commit/d2ebd6349c485d51b328a6eb2888ede08fd82b7b))
+
+
+### Documentation
+
+* clarify runtime completion checks and defaults ([62cd45f](https://github.com/kontourai/flow-agents/commit/62cd45f43954c47202040908fd6ba257f252d368))
+* clarify runtime completion checks and defaults ([#1482](https://github.com/kontourai/flow-agents/issues/1482)) ([7dd64ae](https://github.com/kontourai/flow-agents/commit/7dd64ae3001e2086445c0d7ec4adb1c6aa59ee03))
+* declare product purpose and verified building blocks ([#1479](https://github.com/kontourai/flow-agents/issues/1479)) ([2c7b53f](https://github.com/kontourai/flow-agents/commit/2c7b53f9ed19035562805d78cb93b5369143aacf))
+* state that operator Console config overrides the installed telemetry sink ([#1485](https://github.com/kontourai/flow-agents/issues/1485)) ([3e699f7](https://github.com/kontourai/flow-agents/commit/3e699f7fcb2bd8baa4c7767665663423a9036161))
+
+
+### Maintenance
+
+* **decisions:** check decision records with Corpus ([#1488](https://github.com/kontourai/flow-agents/issues/1488)) ([e6891b3](https://github.com/kontourai/flow-agents/commit/e6891b3275c4153c8ed2ff67758b3c9bef81f747))
+
 ## [8.1.2](https://github.com/kontourai/flow-agents/compare/v8.1.1...v8.1.2) (2026-10-13)
 
 
