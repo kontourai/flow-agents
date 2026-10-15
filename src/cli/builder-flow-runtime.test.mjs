@@ -8,7 +8,7 @@ import childProcess, { execFileSync, spawn, spawnSync } from "node:child_process
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { pathToFileURL } from "node:url";
 
-import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, cancelRun, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, loadRun, pauseRun, resumeRun, runDir, withRunMutationLock } from "@kontourai/flow";
+import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, amendRunDefinition, cancelRun, defaultFlowConfig, definitionDigest, definitionIdentity, flowConfigPath, flowRunHead, loadRun, pauseRun, resumeRun, runDir, validateDefinition, withRunMutationLock } from "@kontourai/flow";
 import {
   archiveBuilderFlowSession,
   ClassifiedWriteError,
@@ -5280,6 +5280,159 @@ test("non-passing observed tests remain auditable without clean revision provena
 
   const result = await writeAndSync(session, [failed]);
   assert.equal(result.run.state.current_step, "execute", "the failed observation routes back instead of being rejected as unrecordable provenance");
+});
+
+// ─── Gate policies follow the declaring kit, not Builder's names ────────────────────────────
+//
+// evals/fixtures/kit-gate-policies is a non-Builder kit ("atelier") with its own gate ids and
+// claim types. It declares the same three things Builder does: a `selected-work` expectation, a
+// route-back map with no `default` (draft-gate), and a `tests-evidence` expectation (proof-gate).
+// These drive the real bundleGateEvidence seam with that kit's validated gates, so each fails if
+// the engine goes back to recognising only Builder's gate ids or claim types.
+const GATE_POLICY_KIT = path.resolve(import.meta.dirname, "../../evals/fixtures/kit-gate-policies");
+
+function gatePolicyKitGate(gateId) {
+  const kit = JSON.parse(fs.readFileSync(path.join(GATE_POLICY_KIT, "kit.json"), "utf8"));
+  assert.equal(kit.id, "atelier", "the fixture is a non-Builder kit");
+  const declared = kit.flows.find((flow) => flow.id === "atelier.commission");
+  const definition = validateDefinition(JSON.parse(fs.readFileSync(path.join(GATE_POLICY_KIT, declared.path), "utf8")));
+  assert.ok(definition.gates[gateId], `fixture declares ${gateId}`);
+  return { id: gateId, ...definition.gates[gateId] };
+}
+
+function gatePolicyState(step, updatedAt) {
+  return { current_step: step, updated_at: updatedAt, transitions: [], subject: SUBJECT };
+}
+
+function gatePolicyCheckClaim({ expectation, claimType, subjectType, state, value = "pass", createdAt = new Date().toISOString(), routeReason }) {
+  return {
+    id: `gate-policy.${expectation}.${value}`,
+    claimType,
+    subjectType,
+    value,
+    status: value === "pass" ? "verified" : "disputed",
+    createdAt,
+    metadata: {
+      origin: "check",
+      check_kind: "external",
+      workflow_subject_ref: SUBJECT,
+      gate_claim: {
+        expectation_id: expectation,
+        claim_type: claimType,
+        subject_type: subjectType,
+        step_id: state.current_step,
+        flow_run_head: flowRunHead(state),
+        ...(routeReason ? { route_reason: routeReason } : {}),
+      },
+    },
+  };
+}
+
+// Restamp a Builder-runtime fixture entry onto the atelier proof step: same producer shapes, the
+// kit's own claim type and step.
+function asAtelierProofEntry(entry, state) {
+  const gateClaim = entry.claim.metadata.gate_claim;
+  if (gateClaim) {
+    gateClaim.step_id = "proof";
+    gateClaim.flow_run_head = flowRunHead(state);
+    if (gateClaim.expectation_id === "tests-evidence") gateClaim.claim_type = "atelier.proof.checks";
+  }
+  if (entry.claim.claimType === "builder.verify.tests") entry.claim.claimType = "atelier.proof.checks";
+  return entry;
+}
+
+function atelierProofBundle(session, { reviewer } = {}) {
+  const state = gatePolicyState("proof", new Date(Date.now() - 1_000).toISOString());
+  const tests = asAtelierProofEntry(passingTestsClaim(session), state);
+  const [critique, criterion] = verifiedTestsPrerequisites(session).map((entry) => asAtelierProofEntry(entry, state));
+  if (reviewer) {
+    critique.claim.metadata.reviewer = reviewer;
+    restampCritiqueClaim(critique);
+  }
+  const entries = [tests, critique, criterion];
+  return { state, bundle: { claims: entries.map((entry) => entry.claim), evidence: entries.map((entry) => entry.evidence) } };
+}
+
+test("a non-Builder kit's declared work-selection claim gets the initial-visit skew allowance; another gate's claim does not", async () => {
+  const session = makeSession("gate-policy-skew");
+  const enteredAt = Date.now();
+  const predating = new Date(enteredAt - 10_000).toISOString();
+  const after = new Date(enteredAt + 1).toISOString();
+
+  const intakeState = gatePolicyState("intake", new Date(enteredAt).toISOString());
+  const selection = gatePolicyCheckClaim({ expectation: "selected-work", claimType: "atelier.intake.commission", subjectType: "work-item", state: intakeState, createdAt: predating });
+  const attached = await builderFlowRuntime.bundleGateEvidence({ claims: [selection], evidence: [] }, gatePolicyKitGate("intake-gate"), intakeState, SUBJECT, session.projectRoot, session.sessionDir, [], {});
+  assert.ok(attached, "selection evidence written just before the run's first visit boundary is current for the kit's own selection claim type");
+  assert.deepEqual(attached.expectationIds, ["selected-work"]);
+
+  const outlineState = gatePolicyState("outline", new Date(enteredAt).toISOString());
+  const predatingOutline = gatePolicyCheckClaim({ expectation: "commission-outline", claimType: "atelier.outline.recorded", subjectType: "artifact", state: outlineState, createdAt: predating });
+  assert.equal(
+    await builderFlowRuntime.bundleGateEvidence({ claims: [predatingOutline], evidence: [] }, gatePolicyKitGate("outline-gate"), outlineState, SUBJECT, session.projectRoot, session.sessionDir, [], {}),
+    null,
+    "the allowance is not widened to a gate that declares no work-selection expectation",
+  );
+  // Discriminating control: the identical outline claim inside the visit window attaches, so the
+  // null above came from the window, not from fixture malformation.
+  const currentOutline = gatePolicyCheckClaim({ expectation: "commission-outline", claimType: "atelier.outline.recorded", subjectType: "artifact", state: outlineState, createdAt: after });
+  assert.ok(await builderFlowRuntime.bundleGateEvidence({ claims: [currentOutline], evidence: [] }, gatePolicyKitGate("outline-gate"), outlineState, SUBJECT, session.projectRoot, session.sessionDir, [], {}));
+});
+
+test("a non-Builder kit's gate with route-backs and no default route refuses reason-less failed evidence", async () => {
+  const session = makeSession("gate-policy-route-reason");
+  const draftState = gatePolicyState("draft", new Date(Date.now() - 1_000).toISOString());
+  const reasonless = gatePolicyCheckClaim({ expectation: "draft-scope", claimType: "atelier.draft.scope", subjectType: "change", state: draftState, value: "fail" });
+  await assert.rejects(
+    builderFlowRuntime.bundleGateEvidence({ claims: [reasonless], evidence: [] }, gatePolicyKitGate("draft-gate"), draftState, SUBJECT, session.projectRoot, session.sessionDir, [], {}),
+    (error) => error instanceof BuilderBuildRunInputError
+      && error.field === "evidence.claims.metadata.gate_claim.route_reason"
+      && /is required for failed current-gate evidence/.test(error.message),
+  );
+  const routed = gatePolicyCheckClaim({ expectation: "draft-scope", claimType: "atelier.draft.scope", subjectType: "change", state: draftState, value: "fail", routeReason: "outline_gap" });
+  const evidence = await builderFlowRuntime.bundleGateEvidence({ claims: [routed], evidence: [] }, gatePolicyKitGate("draft-gate"), draftState, SUBJECT, session.projectRoot, session.sessionDir, [], {});
+  assert.equal(evidence.failed, true);
+  assert.equal(evidence.routeReason, "outline_gap");
+
+  // Control: proof-gate declares a `default` route, so the same reason-less failure stays pending.
+  const proofState = gatePolicyState("proof", new Date(Date.now() - 1_000).toISOString());
+  const pending = gatePolicyCheckClaim({ expectation: "tests-evidence", claimType: "atelier.proof.checks", subjectType: "flow-step", state: proofState, value: "fail" });
+  assert.equal(await builderFlowRuntime.bundleGateEvidence({ claims: [pending], evidence: [] }, gatePolicyKitGate("proof-gate"), proofState, SUBJECT, session.projectRoot, session.sessionDir, [], {}), null);
+});
+
+test("a non-Builder kit's tests gate enforces verified-tests trust on its own claim type", async () => {
+  const session = makeSession("gate-policy-tests-trust");
+  initGitWorktreeFixture(session.projectRoot);
+  const proofGate = gatePolicyKitGate("proof-gate");
+
+  for (const required of [true, false]) {
+    const gate = structuredClone(proofGate);
+    gate.expects.find((expectation) => expectation.id === "tests-evidence").required = required;
+    const trusted = atelierProofBundle(session);
+    const attached = await builderFlowRuntime.bundleGateEvidence(trusted.bundle, gate, trusted.state, SUBJECT, session.projectRoot, session.sessionDir, [], {});
+    assert.ok(attached, "complete proof evidence attaches for required and optional tests roles");
+    assert.deepEqual([...attached.expectationIds].sort(), ["acceptance-criteria", "clean-critique", "tests-evidence"]);
+    const selfReviewed = atelierProofBundle(session, { reviewer: "implementation-actor" });
+    await assert.rejects(
+      builderFlowRuntime.bundleGateEvidence(selfReviewed.bundle, gate, selfReviewed.state, SUBJECT, session.projectRoot, session.sessionDir, [], {}),
+      (error) => error instanceof BuilderBuildRunInputError && error.field === "evidence.critique.reviewer",
+      `submitted passing tests evidence still requires independent review when required=${required}`,
+    );
+  }
+});
+
+test("a non-Builder kit's passing tests claim is command-backed by its declared claim type", async () => {
+  const session = makeSession("gate-policy-tests-provenance");
+  initGitWorktreeFixture(session.projectRoot);
+  const state = gatePolicyState("proof", new Date(Date.now() - 1_000).toISOString());
+  // No observation array, command ref or linked execution: only the declared tests role makes it
+  // command-backed, so a matching Flow head must not let it skip observation provenance.
+  const bare = gatePolicyCheckClaim({ expectation: "tests-evidence", claimType: "atelier.proof.checks", subjectType: "flow-step", state });
+  await assert.rejects(
+    builderFlowRuntime.bundleGateEvidence({ claims: [bare], evidence: [] }, gatePolicyKitGate("proof-gate"), state, SUBJECT, session.projectRoot, session.sessionDir, [], {}),
+    (error) => error instanceof BuilderBuildRunInputError
+      && error.field === "evidence.claims.metadata.verification_workspace_snapshot"
+      && /cannot contribute to a passing gate without its clean Git-worktree observation snapshot/.test(error.message),
+  );
 });
 
 // A critique's own review binding lives at review_target.workspace_snapshot rather than
