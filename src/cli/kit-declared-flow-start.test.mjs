@@ -782,7 +782,7 @@ test("the library start without a flowId uses the kit-declared default and refus
 
     const refused = startWithoutFlowId();
     assert.equal(refused.status, 3, `start without a declared default must refuse: ${refused.stdout}${refused.stderr}`);
-    assert.ok(refused.stderr.includes("invalid Builder build run input for flowId: startBuilderFlowSession: no flowId was given and no installed kit declares a default_flow; pass flowId <kit>.<flow> to choose a flow"), refused.stderr);
+    assert.ok(refused.stderr.includes("invalid Builder flow run input for flowId: startBuilderFlowSession: no flowId was given and no installed kit declares a default_flow; pass flowId <kit>.<flow> to choose a flow"), refused.stderr);
     assert.equal(JSON.parse(fs.readFileSync(path.join(sessionDir, "state.json"), "utf8")).flow_run, undefined, "a refused start binds no run");
 
     // Once the packaged kit declares a default, the same call starts that flow.
