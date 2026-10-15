@@ -43,12 +43,22 @@ export interface KitProvisionEntry {
   host?: "codex" | "claude-code" | "opencode" | "kiro" | "pi";
   kind?: "skill" | "agent" | "hook" | "prompt" | "command" | "context";
   merge?: "hooks-json";
+  /**
+   * hooks-json only: exact commands this kit shipped in earlier versions. Re-provisioning
+   * removes handlers with these commands from the declared target, in the events the
+   * provision declares, so an install made before handler provenance can still migrate.
+   */
+  supersedes?: string[];
 }
 
 // Consumer-repo-relative directory (posix, lowercase) where the engine writes its own
 // per-kit provision manifest. Reserved: a provision may not target inside it. Shared with
 // provision.ts so the reservation and the actual manifest write stay in agreement.
 export const PROVISION_MANIFEST_DIR = ".kontourai/flow-agents/provisions";
+
+/** Bounds on a hooks-json provision's `supersedes` list; larger declarations are refused. */
+export const MAX_SUPERSEDED_COMMANDS = 32;
+export const MAX_SUPERSEDED_COMMAND_LENGTH = 4096;
 
 export interface KitWorkflowTriggerEntry {
   id: string;
@@ -802,6 +812,20 @@ function validateExtensionAssets(kitDir: string, manifestPath: string, manifest:
       }
       if (record.merge === "hooks-json" && (record.kind !== "hook" || record.host === undefined)) {
         errors.push(`${manifestPath}: provisions[${index}].hooks-json merge requires an explicit host hook asset`);
+      }
+      if (record.supersedes !== undefined) {
+        const supersedes = record.supersedes;
+        if (record.merge !== "hooks-json") {
+          errors.push(`${manifestPath}: provisions[${index}].supersedes requires merge: hooks-json`);
+        } else if (
+          !Array.isArray(supersedes)
+          || supersedes.length === 0
+          || supersedes.length > MAX_SUPERSEDED_COMMANDS
+          || supersedes.some((command) => typeof command !== "string" || command.trim().length === 0 || command.length > MAX_SUPERSEDED_COMMAND_LENGTH)
+          || new Set(supersedes).size !== supersedes.length
+        ) {
+          errors.push(`${manifestPath}: provisions[${index}].supersedes must be 1-${MAX_SUPERSEDED_COMMANDS} unique non-blank command strings of at most ${MAX_SUPERSEDED_COMMAND_LENGTH} characters`);
+        }
       }
       const target = record.target;
       if (typeof target !== "string" || target.trim().length === 0) {
