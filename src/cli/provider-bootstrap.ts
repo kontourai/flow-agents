@@ -9,6 +9,8 @@ import { isDeepStrictEqual } from "node:util";
 import { flagBool, flagString, parseArgs } from "../lib/args.js";
 import { validateSchemaValue, type Issue } from "../lib/mini-json-schema.js";
 import { githubWorkItemIdentity } from "../lib/work-item-identity.js";
+import { admittedFlowDefinition, resolveDefaultFlow } from "../lib/flow-admission.js";
+import { flowSelectsWorkItem } from "../lib/flow-resolver.js";
 import { renderGithubClaim, resolveCurrentAssignmentActor, type AssignmentRenderResult } from "./assignment-provider.js";
 
 export type ProviderScope = "project" | "global";
@@ -36,6 +38,8 @@ type ProviderPickupPreflight = {
   actor: ReturnType<typeof resolveCurrentAssignmentActor>;
   login?: string;
   requestedArtifactRoot: string;
+  /** The kit-declared default flow the emitted start command names. */
+  flow: string;
 };
 
 export type ProviderPickupPlan = {
@@ -198,6 +202,7 @@ function preflightProviderPickup(options: ProviderBootstrapOptions, repo: Repo):
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error("provider pickup artifact root must stay inside the repository");
   }
+  const flow = providerPickupFlow(repository);
   let cursor = repository;
   for (const segment of relative.split(path.sep).filter(Boolean)) {
     cursor = path.join(cursor, segment);
@@ -209,7 +214,21 @@ function preflightProviderPickup(options: ProviderBootstrapOptions, repo: Repo):
     const stat = fs.lstatSync(sessionDir);
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("provider pickup session target must be a regular directory");
   }
-  return { identity, branch, actor, login: options.providerLogin, requestedArtifactRoot };
+  return { identity, branch, actor, login: options.providerLogin, requestedArtifactRoot, flow };
+}
+
+/**
+ * The flow a provider pickup starts: the kit-declared `default_flow`. Resolved before anything is
+ * claimed or written, and refused unless that flow SELECTS A WORK ITEM — the emitted start command
+ * passes the picked-up provider reference as --work-item, which a local-Work-Item flow refuses.
+ */
+function providerPickupFlow(repository: string): string {
+  const resolution = resolveDefaultFlow(repository, "provider pickup");
+  if (resolution.refusal !== undefined) throw new Error(resolution.refusal);
+  if (!flowSelectsWorkItem(admittedFlowDefinition(resolution.flow, repository))) {
+    throw new Error(`provider pickup: the default flow ${resolution.flow} declared by kit ${resolution.kitId} selects no Work Item, so it cannot start from provider Work Item; pick up the work with a flow that declares a selected-work expectation`);
+  }
+  return resolution.flow;
 }
 
 function completeProviderPickupPreflight(options: ProviderBootstrapOptions, preflight: ProviderPickupPreflight | null): ProviderPickupPreflight | null {
@@ -314,7 +333,7 @@ function providerPickupPlan(repo: Repo, preflight: ProviderPickupPreflight): Pre
         argv: [
           flowAgents, "workflow", "start",
           "--artifact-root", artifactRoot,
-          "--flow", "builder.build",
+          "--flow", preflight.flow,
           "--work-item", identity.ref,
           "--assignment-provider", "github",
           "--effective-state-json", artifacts.effective_state_file,

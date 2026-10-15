@@ -54,7 +54,7 @@ Required fields:
 | `name` | Non-empty display name |
 | `flows` | Non-empty list; each entry must have `id` and `path` |
 
-Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`, `dependencies` (cross-kit dependency declarations; see [Cross-kit dependencies](#cross-kit-dependencies)), `workflow_triggers` (structured workflow steering keyed by engine trigger names such as `implementation-work-detected`), `hook_influence_expectations` (kit-owned required hook-influence fixture expectations), `agent_spawn_triggers` (perimeter trigger surfaces that spawn agent runs plus their dedup/cooldown/cap/concurrency guard config; validation warns when a spawning surface lacks complete guards — see `context/contracts/trigger-guards.md`), `observability_contribution` (an optional host-neutral read descriptor; see [Kit observability contribution contract](kit-observability-contribution-contract.md)), and `first_party` (legacy catalog/marketplace metadata; no runtime privilege). Optional asset fields list relative asset paths or objects with `id`, `path`, and optional `description`. `skills` and `docs` assets are activated by both adapters alongside flows. `adapters`, `evals`, and `assets` appear in diagnostics as `skipped_assets` (see the Activate section for the full per-adapter table).
+Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`, `dependencies` (cross-kit dependency declarations; see [Cross-kit dependencies](#cross-kit-dependencies)), `workflow_triggers` (structured workflow steering keyed by engine trigger names such as `implementation-work-detected`), `hook_influence_expectations` (kit-owned required hook-influence fixture expectations), `agent_spawn_triggers` (perimeter trigger surfaces that spawn agent runs plus their dedup/cooldown/cap/concurrency guard config; validation warns when a spawning surface lacks complete guards — see `context/contracts/trigger-guards.md`), `observability_contribution` (an optional host-neutral read descriptor; see [Kit observability contribution contract](kit-observability-contribution-contract.md)), `default_flow` (the flow `workflow start` runs when no `--flow` is given; see [Default flow](#default-flow)), and `first_party` (legacy catalog/marketplace metadata; no runtime privilege). Optional asset fields list relative asset paths or objects with `id`, `path`, and optional `description`. `skills` and `docs` assets are activated by both adapters alongside flows. `adapters`, `evals`, and `assets` appear in diagnostics as `skipped_assets` (see the Activate section for the full per-adapter table).
 
 ## Minimal flow file
 
@@ -363,6 +363,40 @@ Which registry to use:
 A repository-root kit that declares `workflow_triggers` without a `flows` list is valid for routing purposes: Flow Definitions resolve through the installed package's packaged-flow fallback (`src/lib/flow-resolver.ts`) when the repository does not vendor its own under `kits/<kit-id>/flows/`. Vendor the flow files only when the repository needs to pin them.
 
 Note that the hook resolves the repository root through git's **shared** common-dir root, so a manifest added on a branch in a linked worktree does not take effect for sessions elsewhere until it reaches the branch the primary checkout has open.
+
+### Default flow
+
+`workflow start` without `--flow`, a provider pickup's emitted start command, and the library's
+`startBuilderFlowSession` without a `flowId` start the flow a kit declares as `default_flow`:
+
+```json
+{
+  "id": "builder",
+  "flows": [{ "id": "builder.build", "path": "flows/build.flow.json" }],
+  "default_flow": "builder.build"
+}
+```
+
+A library session already bound to a canonical run keeps its persisted flow when `flowId` is
+omitted. The default applies when neither the caller nor that session names a flow.
+
+The value must name a flow of the same kit that the kit lists in its own `flows[]`; validation
+refuses anything else. The engine names no default of its own, and it resolves the declaration
+fail-closed:
+
+- Kits in the executing package are consulted first, then the project's kits. The first of those
+  roots holding any `default_flow` decides, so a project kit can supply a default where the package
+  declares none but cannot replace a packaged default.
+- No declaration, a malformed declaration, an unreadable kit manifest or source tree, or more
+  than one kit declaring a default at the deciding root is refused with a message naming the
+  affected source; pass `--flow` instead. An absent tree differs from an unreadable existing one:
+  an unreadable packaged tree cannot silently transfer default selection to the project.
+- The declared flow must pass the same admission contract as an explicit `--flow`, including
+  resolver-compatible identifiers and a canonical run (its kit binds a producer for every gate
+  expectation); otherwise selection refuses before pickup or session artifacts are written.
+
+A provider pickup additionally refuses a default flow that declares no `selected-work`
+expectation, because it starts the picked-up provider Work Item.
 
 ### When a kit "is" a Flow Agents Kit
 

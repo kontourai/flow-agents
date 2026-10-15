@@ -6,6 +6,7 @@ import { readJson } from "../lib/fs.js";
 import { parseKitFlowStepActions, workflowTriggerIdentifier } from "./action-metadata.js";
 import { validateActionRepositoryMetadata } from "./action-repository-validation.js";
 import { loadKitObservabilityContribution } from "../kit-observability-contract.js";
+import { KIT_DEFAULT_FLOW_FIELD, kitDefaultFlowIssue } from "../lib/kit-flow-binding.js";
 export { isObservableBuilderArtifactRef, isSafeBuilderArtifactRef, parseKitFlowStepActions, skillRoleFlowIds } from "./action-metadata.js";
 export type { KitFlowStepActionEntry, KitFlowStepArtifactBinding, KitFlowStepExpectationBinding } from "./action-metadata.js";
 
@@ -25,7 +26,8 @@ const AGENT_EXTENSION_CLASSES = new Set(["skills", "docs", "adapters", "evals", 
 // agent_spawn_triggers declares perimeter trigger surfaces that spawn agent runs plus
 // their guard config (context/contracts/trigger-guards.md), and first_party is legacy
 // catalog/marketplace metadata. It does not grant runtime capability or steering privilege.
-const KNOWN_METADATA_FIELDS = new Set(["dependencies", "workflow_triggers", "hook_influence_expectations", "flow_step_actions", "skill_roles", "first_party", "agent_spawn_triggers", "observability_contribution", "execution", "review"]);
+// default_flow names the kit flow `workflow start` runs when no --flow is given.
+const KNOWN_METADATA_FIELDS = new Set(["dependencies", "workflow_triggers", "hook_influence_expectations", "flow_step_actions", "skill_roles", "first_party", "agent_spawn_triggers", "observability_contribution", "execution", "review", KIT_DEFAULT_FLOW_FIELD]);
 
 export interface KitDependencyEntry {
   kit_id: string;
@@ -870,6 +872,10 @@ function validateAgentMetadata(kitDir: string, manifestPath: string, manifest: R
   try{const execution=parseKitExecution(manifest);if(execution&&!fs.existsSync(path.join(kitDir,execution.module)))errors.push(`${manifestPath}: execution module is missing`);}catch(error){errors.push(`${manifestPath}: ${(error as Error).message}`);}
   const depResult = parseKitDependencies(manifest, manifestPath);
   for (const err of depResult.errors) errors.push(err);
+  // Shape and same-kit ownership only. Whether the flow can actually RUN depends on the roots it is
+  // installed under, so resolution (`resolveDefaultFlow`) refuses an unrunnable default at use.
+  const defaultFlowIssue = kitDefaultFlowIssue(manifest, typeof manifest.id === "string" ? manifest.id : "");
+  if (defaultFlowIssue) errors.push(`${manifestPath}: ${defaultFlowIssue}`);
   const workflowTriggerResult = parseKitWorkflowTriggers(manifest, manifestPath);
   for (const err of workflowTriggerResult.errors) errors.push(err);
   const hookExpectationResult = parseKitHookInfluenceExpectations(manifest, manifestPath);
