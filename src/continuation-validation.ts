@@ -72,7 +72,7 @@ function validateGateActionEnvelope(value: GateActionEnvelope, snapshot: Continu
       throw new Error("continuation snapshot gate-action skill binding is malformed");
     }
   }
-  const mutationInterfaces = validateMutations(value, sessionArgument, packageIdentity);
+  const mutationInterfaces = validateMutations(value, sessionArgument, packageIdentity, authority);
   if (!isDeepStrictEqual(
     value.public_interfaces.mutations.filter((mutation) => mutation.interface !== "operation"),
     authority.mutations.filter((mutation) => mutation.interface !== "operation"),
@@ -169,6 +169,7 @@ function validateMutations(
   value: GateActionEnvelope,
   sessionArgument: string,
   packageIdentity: { name: "@kontourai/flow-agents"; version: string },
+  authority: ReturnType<typeof installedBuilderGateActionAuthority>,
 ): Set<string> {
   const expectationIds: string[] = [];
   const interfaces = new Set<string>();
@@ -191,7 +192,11 @@ function validateMutations(
         throw new Error("continuation snapshot gate-action critique mutation is not canonical");
       }
     } else if (mutation.interface === "operation") {
-      const expected = PUBLIC_OPERATION_CONTRACTS[mutation.operation as keyof typeof PUBLIC_OPERATION_CONTRACTS];
+      // The installed authority derives the protocol from the flow definition (a source-pinned
+      // definition advertises the adopt-only publish-change parameters); availability is compared
+      // separately by canonicalOperationProtocol.
+      const installed = authority.mutations.find((candidate) => candidate.interface === "operation" && candidate.operation === mutation.operation);
+      const expected = installed?.interface === "operation" && PUBLIC_OPERATION_CONTRACTS[mutation.operation as keyof typeof PUBLIC_OPERATION_CONTRACTS] ? installed.protocol : undefined;
       if (!hasExactKeys(mutation, ["expectation_id", "interface", "operation", "protocol", "binding", "completion"])
         || !expected || !value.action.operations.includes(mutation.operation) || !canonicalOperationProtocol(mutation.protocol, expected)
         || !validOperationBinding(mutation.binding, value.flow)

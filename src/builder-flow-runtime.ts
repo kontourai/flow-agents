@@ -46,6 +46,7 @@ import {
   type BuilderFlowId,
   BuilderBuildRunInputError,
   actionableOpenGates,
+  definitionPinsSourceHead,
   evaluateBuilderFlowRun,
   isCanonicalRunFlowId,
   loadBoundBuilderFlowDefinition,
@@ -1979,17 +1980,9 @@ export async function bundleGateEvidence(
 // evaluation re-proves it. The rule lives here, in the shared runtime, because `workflow start`
 // is not the only door that starts a run.
 
-const SOURCE_HEAD_PINNED_AT_START = "pinned-at-start";
-
-/** True when `definition` declares the start-pinned source head. Any other declared shape is refused. */
-export function definitionPinsSourceHead(definition: unknown): boolean {
-  if (!isRecord(definition) || !Object.prototype.hasOwnProperty.call(definition, "source_binding")) return false;
-  const binding = definition.source_binding;
-  if (!isRecord(binding) || Object.keys(binding).length !== 1 || binding.head !== SOURCE_HEAD_PINNED_AT_START) {
-    throw new BuilderBuildRunInputError("definition.source_binding", `must be exactly {"head":"${SOURCE_HEAD_PINNED_AT_START}"}`);
-  }
-  return true;
-}
+// definitionPinsSourceHead lives in builder-flow-run-adapter.ts so the gate-action envelope can
+// derive adopt-only publish-change parameters from the same rule without an import cycle.
+export { definitionPinsSourceHead };
 
 /**
  * Start precondition for a pinned flow: `sourceHead` is a full lowercase commit SHA, equals the

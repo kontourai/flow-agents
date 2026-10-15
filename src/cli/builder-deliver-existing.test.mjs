@@ -28,6 +28,9 @@ import { declaredFlowBindsOperation } from "../../build/src/builder-gate-action-
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { executeMergeChangeProvider } from "../../build/src/cli/merge-change-provider.js";
 import { main as mergeChangeMain } from "../../build/src/cli/merge-change.js";
+import { syncBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
+import { validateSnapshot } from "../../build/src/continuation-validation.js";
+import { PUBLISH_CHANGE_OPERATION_PROTOCOL } from "../../build/src/cli/public-contracts.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -425,6 +428,34 @@ test("a run reaches pr-open at the pinned head; the assignment holder cannot cri
   assertOk(critique(fx), "independent critique");
   assertOk(testsEvidence(fx), "tests-evidence");
   assert.equal(runState(fx).current_step, "pr-open");
+});
+
+test("at pr-open the next action advertises adopt-only publish-change parameters, derived from the definition's pin", () => {
+  const status = workflow(fx, ["status", "--session-dir", fx.sessionDir, "--json"]);
+  assertOk(status, "status");
+  const nextAction = JSON.parse(status.stdout).next_action;
+  assert.deepEqual(nextAction.operations, ["publish-change"]);
+  const publish = nextAction.evidence_submission.mutations.find((entry) => entry.interface === "operation" && entry.operation === "publish-change");
+  assert.ok(publish, "the publish-change operation is bound at pr-open");
+  assert.equal(publish.protocol.capability, "change.observe", "adoption observes an existing pull request; it never creates one");
+  assert.deepEqual(publish.protocol.parameters.map((parameter) => [parameter.flag, parameter.required]),
+    [["--session-dir", true], ["--head-ref", true], ["--base-ref", true]]);
+  assert.equal(publish.protocol.availability.status, "configured");
+});
+
+test("a continuation snapshot at pr-open must carry the adopt-only protocol the installed definition derives", async () => {
+  const { gateActionEnvelope: envelope } = await withActor(HOLDER, () => syncBuilderFlowSession({ sessionDir: fx.sessionDir }));
+  const snapshot = (gateActionEnvelope) => ({
+    run_id: envelope.flow.run_id, definition_id: envelope.flow.definition_id, definition_version: envelope.flow.definition_version,
+    definition_digest: envelope.flow.definition_digest, status: envelope.flow.status, current_step: envelope.flow.current_step,
+    disposition: "continue", next_action: null, gate_action_envelope: gateActionEnvelope,
+  });
+  validateSnapshot(snapshot(envelope));
+  // An envelope advertising the open-change parameters (title/body, change.create) for this pinned run is not canonical.
+  const opening = structuredClone(envelope);
+  const mutation = opening.public_interfaces.mutations.find((entry) => entry.interface === "operation");
+  mutation.protocol = { ...structuredClone(PUBLISH_CHANGE_OPERATION_PROTOCOL), availability: mutation.protocol.availability };
+  assert.throws(() => validateSnapshot(snapshot(opening)), /operation mutation is not canonical|does not match installed Builder authority/);
 });
 
 test("publish-change for a pinned run takes no title, body, or draft flag", async () => {
