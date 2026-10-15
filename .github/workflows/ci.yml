@@ -245,6 +245,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check fixture-retirement-audit-integration
 
+      - name: Kit gate policies integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check kit-gate-policies-integration
+
       - name: Reviewed grounding reference integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check reviewed-grounding-reference-integration
