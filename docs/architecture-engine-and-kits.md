@@ -111,6 +111,10 @@ dependency direction is one-way up the stack (open trust format → building-blo
 products), and no layer reaches sideways into a peer. A product engine (e.g. `@kontourai/veritas`)
 never depends on the platform, and a **kit consumes an engine only through its CLI + recorded
 artifacts, never as an npm library import** — the whole point of the manifest/catalog model above.
+That rule covers product engines, not building-block libraries: `@kontourai/corpus-store` is a
+building-block library, so the Knowledge Kit's store adapters may consume its published API
+directly, as its Surface adapter already imports `@kontourai/surface`. Adapter migrations still
+require published-package conformance and consumer evidence.
 Both edges are now enforced executably: veritas-side by `check-no-flow-agents-dep.mjs` (the engine
 declares no flow-agents dependency) and here by [`scripts/check-layer-boundary.mjs`](../scripts/check-layer-boundary.mjs)
 (no kit imports the veritas engine as a library). See veritas's
