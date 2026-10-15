@@ -1,5 +1,5 @@
 // `workflow doctor` checks the kits an install actually activates, and judges a current run by
-// whether the CLI can bind its flow — not by membership in one kit's hardcoded definition list.
+// whether its declared source resolves, rather than one kit's hardcoded definition list.
 //
 // Doctor used to read only the Builder kit and only two of its flows. A non-Builder kit's drift
 // went unreported, and a current run on any other flow (including Builder's own build-lean,
@@ -87,10 +87,11 @@ test("doctor checks an active non-Builder kit's declared definitions and reports
   }
 });
 
-test("doctor supports a current run on any flow the CLI can bind, and refuses one it cannot", () => {
+test("doctor locates the current run's declared source and reports missing sources or version skew", () => {
   const project = makeInstall("doctor-current-", ["builder", "knowledge"]);
   try {
-    // Builder flows other than build/shape, and a non-Builder kit's flow, are all bindable.
+    // Source lookup covers Builder flows beyond build/shape and a non-Builder flow. This does
+    // not claim that the flow supplies the producer bindings required for runtime admission.
     for (const [flowId, kitId, flowName] of [
       ["builder.build-lean", "builder", "build-lean"],
       ["builder.review-existing", "builder", "review-existing"],

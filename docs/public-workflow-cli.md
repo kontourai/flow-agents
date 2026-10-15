@@ -1070,8 +1070,10 @@ flow_agents workflow doctor --json
 The report distinguishes the executing CLI from a repository-local dependency and reports the
 workflow/writer contract, installed hook and writer package, active Kits, the content and declared
 Flow definitions of each active Kit (and of any other packaged Kit copied into the project; `kit`
-reports the first and `kits` all of them), whether the CLI can bind the current run's Flow
-definition, workflow-state schema, and trust-bundle schema. Incompatible or
+reports the first and `kits` all of them), the current run's declared Flow source and version,
+workflow-state schema, and trust-bundle schema. The current-run source lookup checks declaration
+ownership and path agreement; it does not verify composed-flow admission, producer bindings, or
+runtime readiness. Incompatible or
 missing installed components produce a nonzero exit and an exact, version-pinned `init` command
 that preserves the recorded runtime and active Kits.
 

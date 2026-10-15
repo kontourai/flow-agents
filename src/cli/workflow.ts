@@ -3583,8 +3583,8 @@ function doctor(argv: string[]): number {
       warnings.push(`Installed ${kit.name} content differs from Flow Agents ${cliVersion}. Run: ${remediation}`);
     }
   }
-  // The current run is supported exactly when the CLI can bind its flow the way the run runtime
-  // does (packaged first, then the project's kits), whichever kit declares it.
+  // Locate the current run's declared source, packaged first, then the project's kits. This
+  // source/version diagnostic does not establish composed-flow admission or producer bindings.
   const sourceRoots = kitFlowSourceRoots(packageRoot, projectRoot);
   const currentRun = state?.flow_run && typeof state.flow_run === "object" ? state.flow_run as JsonRecord : null;
   const currentBinding = currentRun?.definition_id ? resolveKitFlowBinding(String(currentRun.definition_id), sourceRoots) : null;
