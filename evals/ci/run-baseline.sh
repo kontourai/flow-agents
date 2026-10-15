@@ -32,7 +32,7 @@ CHECKS=(
   "Transition log unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/transition-log.test.mjs"
   "Gate scorecard unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/gate-scorecard.test.mjs"
   "Run pulse unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/run-pulse.test.mjs"
-  "Knowledge integration suites|node --test kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js"
+  "Knowledge integration suites|node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
   "Transcript usage dedupe integration|bash evals/integration/test_transcript_usage_dedupe.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
