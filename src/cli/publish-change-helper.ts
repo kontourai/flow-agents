@@ -260,8 +260,17 @@ function reconcile(argv: string[]): number {
 
 const EXECUTE_FLAGS = new Set(["session-dir", "title", "body", "head-ref", "base-ref", "draft"]);
 
-function execute(argv: string[]): Promise<number> {
-  return executeConfiguredChange(argv).then(
+/**
+ * In-process seam, like merge-change's `main(argv, deps)`: tests inject the operation so the CLI's
+ * flag handling (including the adopt path for a source-pinned run) runs against a fake provider.
+ * Production always uses executePublishChangeOperation.
+ */
+export type PublishChangeHelperDependencies = {
+  executeOperation?: typeof executePublishChangeOperation;
+};
+
+function execute(argv: string[], dependencies: PublishChangeHelperDependencies): Promise<number> {
+  return executeConfiguredChange(argv, dependencies.executeOperation ?? executePublishChangeOperation).then(
     (result) => {
       console.log(JSON.stringify({
         operation: "publish-change",
@@ -281,7 +290,7 @@ function execute(argv: string[]): Promise<number> {
   );
 }
 
-async function executeConfiguredChange(argv: string[]): Promise<CompletePublishChangeOperationResult> {
+async function executeConfiguredChange(argv: string[], executeOperation: typeof executePublishChangeOperation): Promise<CompletePublishChangeOperationResult> {
   const args = parseArgs(argv);
   if (args.positionals.length !== 0) throw new Error("publish-change execute accepts only named flags");
   for (const key of Object.keys(args.flags)) {
@@ -300,7 +309,7 @@ async function executeConfiguredChange(argv: string[]): Promise<CompletePublishC
     const headRef = requiredGitRef(requiredString(args.flags, "head-ref"), "head-ref");
     const baseRef = requiredGitRef(requiredString(args.flags, "base-ref"), "base-ref");
     const headSha = resolveImmutableHeadSha(projectRoot, headRef);
-    return await executePublishChangeOperation({ sessionDir, intent: { base_ref: baseRef, head_ref: headRef, head_sha: headSha } });
+    return await executeOperation({ sessionDir, intent: { base_ref: baseRef, head_ref: headRef, head_sha: headSha } });
   }
   const title = requiredString(args.flags, "title");
   const body = requiredString(args.flags, "body", true);
@@ -308,7 +317,7 @@ async function executeConfiguredChange(argv: string[]): Promise<CompletePublishC
   const baseRef = requiredGitRef(requiredString(args.flags, "base-ref"), "base-ref");
   if (args.flags.draft !== undefined && args.flags.draft !== true) throw new Error("publish-change execute --draft is a flag and takes no value");
   const headSha = resolveImmutableHeadSha(projectRoot, headRef);
-  return await executePublishChangeOperation({
+  return await executeOperation({
     sessionDir,
     intent: { title, body, base_ref: baseRef, head_ref: headRef, head_sha: headSha, ...(args.flags.draft === true ? { draft: true } : {}) },
   });
@@ -364,7 +373,7 @@ function printPublishChangeUsage(): void {
   console.log("Run `publish-change <command> --help` for command-specific flags.");
 }
 
-export function main(argv = process.argv.slice(2)): number | Promise<number> {
+export function main(argv = process.argv.slice(2), dependencies: PublishChangeHelperDependencies = {}): number | Promise<number> {
   try {
     const [command, ...rest] = argv;
     if (command === "--help" || command === "-h") {
@@ -375,7 +384,7 @@ export function main(argv = process.argv.slice(2)): number | Promise<number> {
       console.log(PUBLISH_CHANGE_USAGE[command]);
       return 0;
     }
-    if (command === "execute") return execute(rest);
+    if (command === "execute") return execute(rest, dependencies);
     if (command === "render") return render(rest);
     if (command === "validate-closing-refs") return validateClosingRefs(rest);
     if (command === "evaluate-provider-checks") return evaluateProviderChecks(rest);

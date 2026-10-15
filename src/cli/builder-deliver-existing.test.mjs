@@ -28,6 +28,7 @@ import { declaredFlowBindsOperation } from "../../build/src/builder-gate-action-
 import { createGithubChangeProvider } from "../../build/src/cli/github-change-provider.js";
 import { executeMergeChangeProvider } from "../../build/src/cli/merge-change-provider.js";
 import { main as mergeChangeMain } from "../../build/src/cli/merge-change.js";
+import { main as publishChangeMain } from "../../build/src/cli/publish-change-helper.js";
 import { syncBuilderFlowSession } from "../../build/src/builder-flow-runtime.js";
 import { validateSnapshot } from "../../build/src/continuation-validation.js";
 import { PUBLISH_CHANGE_OPERATION_PROTOCOL } from "../../build/src/cli/public-contracts.js";
@@ -557,8 +558,28 @@ test("adoption refuses a pull request other than the one the pre-existing claim 
 });
 
 test("adoption of the named open pull request advances pr-open at the pinned head, with a clean snapshot", async () => {
+  // Through the CLI's own flag handling (`publish-change execute` with only --session-dir,
+  // --head-ref, --base-ref); only the operation is injected so the provider is the fake.
   const github = fakeAdoptGithub(fx);
-  const result = await adopt(fx, github);
+  const operationInputs = [];
+  let result = null;
+  const cli = await withActor(HOLDER, () => captureConsole(() => publishChangeMain(
+    ["execute", "--session-dir", fx.sessionDir, "--head-ref", fx.branch, "--base-ref", "main"],
+    {
+      executeOperation: async (input) => {
+        operationInputs.push(structuredClone(input));
+        result = await runtimeSeam.executePublishChangeOperationWithProvider(input,
+          (settings, configurationId) => createGithubChangeProvider(settings, configurationId, { executor: github.executor, executable: "gh", now: () => new Date().toISOString() }));
+        return result;
+      },
+    },
+  )));
+  assert.equal(cli.status, 0, cli.err);
+  assert.deepEqual(operationInputs, [{ sessionDir: fx.sessionDir, intent: { base_ref: "main", head_ref: fx.branch, head_sha: fx.head } }],
+    "the CLI resolves --head-ref to the pinned head and passes no title, body, or draft");
+  const printed = JSON.parse(cli.out);
+  assert.equal(printed.change_ref.url, fx.prUrl);
+  assert.equal(printed.current_step, "merge-ready-ci");
   assert.deepEqual(github.creates(), [], "adoption never opens a pull request");
   assert.equal(github.calls.some((argv) => argv.includes("--title") || argv.includes("--body")), false);
   assert.equal(result.observation.change_ref.head_sha, fx.head);
