@@ -12,7 +12,7 @@ import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveB
 import { assertSourceHeadStartable, currentGateVisit, gateRequiresFailureRouteReason, inspectBuilderFlowSession, pinnedRunSourceHead, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { declaredStepBindsInterface } from "../builder-gate-action-envelope.js";
 import { buildUnsignedCritiqueResolutionAuthorization, buildUnsignedCritiqueResolutionHistoryRepairAuthorization, buildUnsignedExactCurrentCompletionRecoveryAuthorization, buildUnsignedProvisionalDeliveryAuthorization, buildUnsignedVerificationEvidenceResealAuthorization, critiqueResolutionHistoryBridgeDigest, type CritiqueResolutionHistoryRepairBridgeBindings } from "../builder-lifecycle-authority.js";
-import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
+import { flowAgentsPackageMetadata, flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { captureReviewWorkspaceSnapshot } from "../lib/review-workspace-snapshot.js";
 import { execTrustedGitSync } from "../lib/trusted-git.js";
@@ -49,7 +49,7 @@ type JsonRecord = Record<string, unknown>;
 export const WORKFLOW_CONTRACT_VERSION = "1.0";
 const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
-const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
+const PACKAGE_METADATA = flowAgentsPackageMetadata();
 const CLI_VERSION = flowAgentsPackageVersion();
 const PUBLIC_VERBS = ["start", "status", "evidence-request", "evidence", "reseal-verification-evidence-request", "reseal-verification-evidence", "recover-exact-current-completion-request", "recover-exact-current-completion", "critique", "resolve-critique-request", "resolve-critique", "repair-critique-resolution-history-request", "repair-critique-resolution-history", "drive", "publish-provisional-delivery-request", "publish-provisional-delivery", "publish-delivery", "execute-sealed-workload-request", "execute-sealed-workload", "pause", "resume", "release", "cancel", "archive", "reclaim", "doctor"] as const;
 const PROVISIONAL_DELIVERY_RECORD = "provisional-delivery.json";
@@ -4248,6 +4248,8 @@ function flowVersionCompatible(version: string, range: string): boolean {
 }
 
 function resolveDependencyPackageJson(packageName: string): string {
+  const bundled = path.join(PACKAGE_ROOT, "build/src/vendor", packageName.replace("@kontourai/", ""), "package.json");
+  if (fs.existsSync(bundled)) return bundled;
   let candidate = path.dirname(REQUIRE.resolve(packageName));
   for (let depth = 0; depth < 8; depth += 1) {
     const metadata = path.join(candidate, "package.json");

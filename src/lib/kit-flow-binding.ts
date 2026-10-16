@@ -143,7 +143,9 @@ export function kitFlowSourceRoots(packageRoot: string | null, projectRoot?: str
 export function packagedKitRoot(startDir: string = path.dirname(fileURLToPath(import.meta.url))): string | null {
   let dir = startDir;
   for (;;) {
-    if (fs.existsSync(path.join(dir, "package.json")) && fs.existsSync(path.join(dir, KITS_DIR))) return dir;
+    const metadata = fs.existsSync(path.join(dir, "package.json"))
+      || (fs.existsSync(path.join(dir, "build/runtime-imports.json")) && fs.existsSync(path.join(dir, "build/package.json")));
+    if (metadata && fs.existsSync(path.join(dir, KITS_DIR))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
