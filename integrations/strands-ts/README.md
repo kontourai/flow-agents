@@ -1,6 +1,6 @@
 # @kontourai/flow-agents-strands
 
-**Native-import TypeScript adapter for AWS Strands Agents.**
+**Preview — native-import TypeScript adapter for AWS Strands Agents.**
 
 This is the first native-import consumer of the Flow Agents policy engine contract. It wires Flow Agents telemetry and native config-protection directly into Strands Agents TypeScript SDK hook callbacks — with no subprocess overhead for the critical hot path (config-protection on `BeforeToolCallEvent`). Workflow steering, quality-gate, and stop-goal-fit checks are exercised by the conformance shim only, not by the production `FlowAgentsHooks` callbacks.
 

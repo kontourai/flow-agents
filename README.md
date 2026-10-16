@@ -2,9 +2,9 @@
 
 # Kontour Flow Agents
 
-**A portable process-discipline layer for agentic work — canonical policies, evidence, and telemetry that compile to whatever hook surface a host exposes.**
+**Give your coding agent a repeatable path from a request to a change you can inspect.**
 
-In plain terms: it keeps your coding agent honest — tracking what it did, checking its work at each step, and refusing to call a job done until the evidence backs it up. (New to the terms below? See the [glossary](CONTEXT.md#glossary).)
+Ask it to plan a change, carry out the work, run checks, and collect review findings. Flow Agents records progress, evidence and next actions so you can inspect the result or resume the work. Start with a [local note capture](docs/getting-started.md#save-your-first-note), or opt into the Builder workflow for software delivery. Completion blocking depends on the host and configuration; installed files alone do not establish enforcement.
 
 [![npm version](https://img.shields.io/npm/v/%40kontourai%2Fflow-agents)](https://www.npmjs.com/package/@kontourai/flow-agents)
 [![CI](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml)
@@ -18,11 +18,19 @@ In plain terms: it keeps your coding agent honest — tracking what it did, chec
 
 ---
 
-Agents are powerful and forgetful. They plan well, then drift. They skip verification when context gets crowded. They call partial work done, and after a compaction nobody — including the agent — can say where the work actually stands.
+Flow Agents installs reusable procedures and runtime hooks into the agent tools
+you already use. You receive local workflow records, check results and explicit
+gaps to inspect. It does not establish that a claim is true merely because an
+agent recorded it, or that a review was independent merely because it names a
+reviewer.
 
-Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition interpretation, gates, runtime and harness adapters, SDK/evidence/trust primitives, and kit validation. **Kits** are swappable solutions on top: built-in examples such as Builder, Knowledge, and Release Evidence, plus external products such as the Veritas Governance Kit and any third-party repository with a root `kit.json`. [Kontour Flow](https://kontourai.github.io/flow/) owns the gate semantics underneath; Flow Agents compiles those policies to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next.
-
-**You ask for outcomes. The system supplies the path, the state, the checks, and the proof.**
+The **engine** handles runtime adapters, kit activation, continuation and evidence
+mechanics using [Kontour Flow](https://kontourai.github.io/flow/) for process and
+gate semantics. **Kits** supply the procedures: Builder for delivery, Knowledge
+for capture and curation, and other installed kits for their own domains. The
+same kit can run across hosts, with the [completion-check limits](docs/getting-started.md#completion-checks-by-runtime)
+of each host. See [Engine and Kits](docs/architecture-engine-and-kits.md) for the
+architecture.
 
 ## What you get
 
@@ -31,12 +39,14 @@ Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition in
 - **Resumable workflow state** — schema-validated sidecars under `.kontourai/flow-agents/` record acceptance criteria, evidence, critique, handoff, and learning, so any session can resume from recorded state instead of chat memory.
 - **Four canonical policies** — workflow steering (phase reminders at each turn), quality gate (per-file checks after edits), stop-goal-fit (evidence check before the agent stops), and config protection (veto writes to linter/formatter configs). Each policy class has a canonical script under `scripts/hooks/` and compiles to the host's native hook format.
 - **Evidence over confidence** — important work ends with tests, browser checks, CI results, review findings, governance reports, or an explicit `NOT_VERIFIED` gap. Optional [Veritas](docs/veritas-integration.md) integration attaches repo-governance evidence without making it mandatory.
-- **Tamper-evident "done"** — the local runtime gate is advisory and best-effort; the repository's own required CI checks, re-run on the exact pull request head, remain the authoritative boundary, and `merge-change` waits on them. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
+- **Repository checks remain separate** — the local runtime gate is advisory and best-effort; the repository's own required CI checks, re-run on the exact pull request head, remain the authoritative boundary, and `merge-change` waits on them. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
 - **Engine plus opt-in kits** — `kits/catalog.json` lists discoverable kits, each `kit.json` declares its flows and assets, and bring-your-own-kit follows the same validation and activation path. See [Engine and Kits](docs/architecture-engine-and-kits.md).
 - **Evals that keep the bundle honest** — dozens of integration scripts and a full static-suite layer (`bash evals/run.sh`) validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
 - **A runnable reviewed-grounding example** — the [credential-free reference workflow](evals/reference/reviewed-grounding-workflow/README.md) acquires a source, performs exact provenance-bearing extraction, routes semantic changes through review, and refuses action until evidence and source-currency requirements are satisfied. A provider adapter can be supplied for optional live execution.
 
-## Flow Agents as a process-discipline layer
+<a id="flow-agents-as-a-process-discipline-layer"></a>
+
+## Runtime policies
 
 The four canonical policy classes are defined in the [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) using a runtime-neutral vocabulary. Adapters translate them to whatever hook surface a host exposes:
 
@@ -52,6 +62,9 @@ The spec defines three conformance levels: **L0** (telemetry only), **L1** (stee
 ## Runtime and support matrix
 
 L2 means all four policy classes with blocking; L1 means steering and stop-goal-fit warning only (no quality gate or blocking config protection). The [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) defines the levels and names every hook-surface gap explicitly.
+
+These tiers describe supported wiring, not evidence that a particular host loaded
+its hooks or selected blocking mode. See the [mode defaults and limits](docs/getting-started.md#completion-checks-by-runtime).
 
 **Full support — L2 (all four policies, blocking)**
 
@@ -72,8 +85,8 @@ L2 means all four policy classes with blocking; L1 means steering and stop-goal-
 
 | Tier | Runtime | Ships | Tested |
 | --- | --- | --- | --- |
-| Official framework adapter | AWS Strands (Python) | `integrations/strands/` — `flow-agents-strands` PyPI package | 76 unit tests (no Strands SDK required) — spike/preview, see [integrations/strands/README.md](integrations/strands/README.md) |
-| Official framework adapter | AWS Strands (TypeScript) | `integrations/strands-ts/` — `@kontourai/flow-agents-strands` native-import package | shipped telemetry + native config-protection hot path; workflow-steering/quality-gate/stop-goal-fit are conformance-shim-only — preview, see [integrations/strands-ts/README.md](integrations/strands-ts/README.md) |
+| Preview framework adapter | AWS Strands (Python) | `integrations/strands/` — `flow-agents-strands` PyPI package | 76 unit tests (no Strands SDK required) — spike/preview, see [integrations/strands/README.md](integrations/strands/README.md) |
+| Preview framework adapter | AWS Strands (TypeScript) | `integrations/strands-ts/` — `@kontourai/flow-agents-strands` native-import package | shipped telemetry + native config-protection hot path; workflow-steering/quality-gate/stop-goal-fit are conformance-shim-only — preview, see [integrations/strands-ts/README.md](integrations/strands-ts/README.md) |
 | Conformance-certified | Community / third-party | Self-certify using the conformance kit | Conformance kit in development; not yet shipped |
 
 ## Install
@@ -137,7 +150,7 @@ After installing, ask the agent for the workflow you want — in plain language.
 
 ### Builder Kit quick start
 
-After activating the Builder Kit, your agent gets two gated flows: `builder.shape` turns a raw idea into slices and executable work items; `builder.build` takes a selected work item through design probe, planning, execution, verification, PR readiness, merge readiness, and learning.
+After activating Builder, start with `builder.shape` to turn an idea into work items, or `builder.build` for a selected work item. These are the starter pair; the [complete catalog](docs/getting-started.md#2-what-the-builder-kit-gives-you) also includes existing-change review/delivery, closeout extensions, and an experiment-only ablation.
 
 Shape an idea:
 
@@ -154,9 +167,9 @@ Use deliver for the issue you just filed. Pull it, probe the design, plan it,
 implement it, verify it, and stop if any evidence is missing.
 ```
 
-Each step has an evidence gate. The agent either presents the expected evidence and advances, or blocks and explains what is missing — it does not produce a confident summary and proceed on partial work. Non-durable session state is written to `.kontourai/flow-agents/<slug>/` and survives context loss or compaction.
+Flow evaluates evidence expectations when a transition is requested; a missing expectation can block advancement or route back. Whether the host can prevent the turn from ending depends on its loaded hooks and mode. Local session records under `.kontourai/flow-agents/<slug>/` preserve evidence and handoff state across context loss; keep durable run/evidence records when cleaning caches.
 
-For a full walkthrough — what each gate checks, what you observe, and how to invoke individual skills — read the [Builder Kit Quick Start](docs/getting-started.md).
+For the local first task, optional Builder walkthrough and runtime limits, read [Getting Started](docs/getting-started.md).
 
 For bugs:
 
@@ -176,7 +189,7 @@ A Flow Kit bundles a workflow AND its opinionated output shape into a single val
 
 **Builder Kit** — ships with `builder.shape` (shape a problem into slices and fileable work items), `builder.build` (pull ready work through design probing, planning, execution, verification, PR readiness, merge readiness, and learning), and `builder.publish-learn` (publish, provider/CI merge readiness, and learning feedback gates).
 
-**Knowledge Kit** — a Flow Kit for durable, gated knowledge storage. It ships a store contract with four record types (`raw`, `compiled`, `concept`, `snapshot`), five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. All mutations require provenance; nothing is silently overwritten or deleted. Ships with an extensive automated test suite.
+**Knowledge Kit** — a Flow Kit for durable, gated knowledge storage. It ships a store contract with five record types (`raw`, `compiled`, `concept`, `snapshot`, `person`), five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. Mutations require process provenance and operation-specific evidence. Source ids are optional at the adapter boundary; provenance and links retain supplied context rather than validating truth. Supersede/retire retain history. Ships with an extensive automated test suite.
 
 The output-shape story is the core reason kits matter. The Knowledge Kit store contract is representation-neutral: two adapters ship today. The **default adapter** stores records as flat markdown files with YAML frontmatter and a JSON graph index. The **Obsidian adapter** renders the same workflow into the shape a human already thinks in — one canonical note per record, category→folder hierarchy, configurable frontmatter dimensions (e.g. territory/customer/initiative as filterable fields), living overview notes with sources nested below, and superseded records moved to an `archive/` folder rather than deleted. Same flows, same mutation gates, different rendering layer. (The Obsidian adapter is shipped; layout/dimensions refinements and person/entity card support are in development.)
 

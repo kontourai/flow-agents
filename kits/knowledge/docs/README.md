@@ -39,6 +39,12 @@ See [`store-contract.md`](store-contract.md) for the full specification. Quick r
 | `compiled` | Normalized, editor-reviewed distillations of raw records. |
 | `concept` | Named ideas or principles that other records reference. |
 | `snapshot` | Bounded decision summary for a topic (Addendum A). |
+| `person` | Entity card with links to mentions (Addendum C). |
+
+Both bundled adapters admit all five types. `provenance.agent` is required;
+`source_ids`, `session_id` and `note` are optional creation provenance. A compiled
+label or source link does not establish that review happened or content is true.
+See the [canonical envelope and adapter differences](store-contract.md#1-record-types).
 
 **Record status lifecycle**
 
@@ -122,7 +128,7 @@ All tests pass and exit 0. Any failure indicates a contract regression or an ada
 
 | AC | Requirement | Evidence |
 |---|---|---|
-| AC1 | Contract doc exists; mutation ops enumerate evidence fields. | [`docs/store-contract.md`](store-contract.md) — §6 covers all six ops with required-field tables. |
+| AC1 | Contract doc exists; mutation ops enumerate evidence fields. | [`docs/store-contract.md`](store-contract.md) — §6 plus Addenda A/B cover eight mutations; §8 consolidates the interface. |
 | AC2 | Default adapter passes contract suite (command evidence). | Run `node --test kits/knowledge/evals/contract-suite/suite.test.js` — exit 0, all tests pass. |
 | AC3 | Record round-trips raw → stored → queried with category + links intact. | Suite §2 "create: round-trip raw → stored → queried" tests this directly. |
 
@@ -172,7 +178,10 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 - `get(idOrHandle)` → `Promise<Record | null>` (exact id, slug alias, or unambiguous id prefix — Addendum H)
 - `getLinks(idOrHandle)` → `Promise<{ forward: Link[], reverse: Link[] }>`
 - `listByCategory(category, options?)` → `Promise<Record[]>`
-- `listByType(type)` → `Promise<Record[]>`
+- `listByType(type, options?)` → `Promise<Record[]>`
+- `supersede(newId, supersededIds, evidence)` → `Promise<void>`
+- `retire(id, targetStatus, evidence)` → `Promise<void>`
+- `reindex()` → derived graph-index recovery report
 
 ---
 
@@ -182,8 +191,7 @@ The kit ships these flows:
 
 **`knowledge.store-contract`** — gates on three evidence claims before a store implementation
 is accepted: contract-suite pass, provenance-enforcement pass, and round-trip integrity pass.
-S2 will add pipeline flows for raw ingestion, compilation, and concept management; this flow
-and adapter infrastructure remain the foundation.
+The pipeline flows below build on this adapter infrastructure.
 
 ### Living Context: standalone Context Check
 

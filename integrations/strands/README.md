@@ -2,10 +2,12 @@
 
 **SPIKE — Framework Adapter Proof of Concept**
 
-This package proves the thesis: Flow Agents' process-discipline layer
-(telemetry events + workflow steering + policy gates) can compile to a
-**framework adapter** hook surface — here, AWS Strands Agents — not just
-coding-agent harnesses.
+This preview explores a **framework adapter** for AWS Strands Agents. It emits
+telemetry and calls the canonical config-protection policy through a subprocess,
+with a Python fallback. The package's unit tests can run without the Strands SDK;
+they do not qualify a live Strands application or full blocking workflow support.
+Use the coding-agent runtime table in the [root README](../../README.md#runtime-and-support-matrix)
+for the supported host paths.
 
 ---
 
