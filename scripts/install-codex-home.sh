@@ -4,7 +4,24 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FA_BUNDLE_SNAPSHOT_ROOT="$(mktemp -d /tmp/fa-codex-bundle-snapshot.XXXXXX)"
-trap 'rm -rf "$FA_BUNDLE_SNAPSHOT_ROOT"' EXIT
+FA_OWNED_OVERLAY=""
+FA_SKILLS_OVERLAY=""
+FA_USER_HOOKS_STASH=""
+# Set only by the last line and by --help. bash 3.2 runs an EXIT trap with $? = 0 after a `set -u`
+# abort on an empty array (`"${arr[@]}"`), so a trap that ends in a successful command turned that
+# abort into exit 0. A run that never reached its end therefore exits 1, whatever $? says; any
+# other non-zero status is kept.
+FA_INSTALL_FINISHED=0
+fa_exit_trap() {
+  local status=$?
+  rm -rf "$FA_BUNDLE_SNAPSHOT_ROOT"
+  [[ -z "$FA_OWNED_OVERLAY" ]] || rm -rf "$FA_OWNED_OVERLAY"
+  [[ -z "$FA_SKILLS_OVERLAY" ]] || rm -rf "$FA_SKILLS_OVERLAY"
+  [[ -z "${FA_USER_HOOKS_STASH:-}" ]] || rm -f "$FA_USER_HOOKS_STASH"
+  if [[ "$status" -eq 0 && "$FA_INSTALL_FINISHED" -ne 1 ]]; then status=1; fi
+  exit "$status"
+}
+trap fa_exit_trap EXIT
 
 validate_shipped_bundle() {
   if node - "$ROOT_DIR" "$FA_BUNDLE_SNAPSHOT_ROOT/codex" <<'NODE'
@@ -151,6 +168,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       usage
+      FA_INSTALL_FINISHED=1
       exit 0
       ;;
     -*)
@@ -277,13 +295,6 @@ FA_USER_HOOKS_STASH=""
 # it removes only unchanged files from its prior manifest and refuses collisions.
 FA_OWNED_OVERLAY="$(mktemp -d /tmp/fa-codex-overlay.XXXXXX)"
 FA_SKILLS_OVERLAY="$(mktemp -d /tmp/fa-codex-skills-overlay.XXXXXX)"
-cleanup_install_temps() {
-  rm -rf "$FA_BUNDLE_SNAPSHOT_ROOT"
-  rm -rf "$FA_OWNED_OVERLAY"
-  rm -rf "$FA_SKILLS_OVERLAY"
-  [[ -z "${FA_USER_HOOKS_STASH:-}" ]] || rm -f "$FA_USER_HOOKS_STASH"
-}
-trap cleanup_install_temps EXIT
 
 for managed_dir in \
   .flow-agents \
@@ -473,3 +484,4 @@ if [[ "${#profile_names[@]}" -gt 0 ]]; then
   echo "Profiles: ${profile_names[*]}"
 fi
 echo "Use: codex --profile builder"
+FA_INSTALL_FINISHED=1

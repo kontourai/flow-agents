@@ -36,6 +36,8 @@ export type DoctorReport = {
      * (TELEMETRY_CONFIG_FILE overrides it).
      */
     pinRecorded: boolean;
+    /** For a recorded pin: each destination still contacted, what it is, and where it resolves from. */
+    pinOverrides: Array<{ what: string; source: string; url: string }>;
     /** Operator Console confs present on disk that the local-only pin causes resolution to skip. */
     skippedConfigFiles: string[];
   };
@@ -78,10 +80,10 @@ export type DoctorReport = {
 /** Provenance of a resolved Console value. "absent" means nothing set it anywhere. */
 export type ConsoleValueSource = "environment" | "config-file" | "absent";
 
-function valueSource(envValue: string | undefined, configValue: string | undefined): ConsoleValueSource {
-  if (envValue !== undefined && envValue !== "") return "environment";
-  if (configValue !== undefined && configValue !== "") return "config-file";
-  return "absent";
+function resolvedSource(vars: Map<string, { value: string; envName?: string }>, name: string): ConsoleValueSource {
+  const entry = vars.get(name);
+  if (!entry?.value) return "absent";
+  return entry.envName ? "environment" : "config-file";
 }
 
 const defaultChannels = "full";
@@ -99,7 +101,7 @@ Options:
 `);
 }
 
-function readConfig(file: string, keep: (key: string, value: string) => boolean = () => true): Config {
+function readConfig(file: string): Config {
   if (!fs.existsSync(file)) return {};
   const config: Config = {};
   for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
@@ -109,23 +111,86 @@ function readConfig(file: string, keep: (key: string, value: string) => boolean 
     if (eq === -1) continue;
     const key = trimmed.slice(0, eq).trim();
     const value = trimmed.slice(eq + 1).trim();
-    // Filtered per line, as config.sh's loop does, so a dropped later line never hides an earlier kept one.
-    if (key && keep(key, value)) config[key] = value;
+    if (key) config[key] = value;
   }
   return config;
 }
 
-function configValue(config: Config, envName: string, key: string, fallback = ""): string {
-  return process.env[envName] ?? config[key] ?? fallback;
-}
+/** A value lib/config.sh resolved, and where it came from. */
+type Resolved = { value: string; envName?: string };
 
-function channelEnvName(channel: string, key: string): string {
-  return `TELEMETRY_CHANNEL_${channel.toUpperCase()}_${key.toUpperCase()}`;
-}
+const ASCII_SPACE = /[ \t\n\r\f\v]/g;
+const ASCII_TRIM = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
 
-function channelConfigValue(config: Config, channel: string, key: string, fallback = ""): string {
-  const envName = channelEnvName(channel, key);
-  return process.env[envName] ?? config[`channel.${channel}.${key}`] ?? fallback;
+/** config.sh's standard keys, mapped to the variable each one sets. Matched exactly, as its `case` does. */
+const CONF_KEY_VARS: Readonly<Record<string, string>> = {
+  enabled: "TELEMETRY_ENABLED",
+  channels: "TELEMETRY_CHANNELS",
+  console_url: "CONSOLE_TELEMETRY_URL",
+  console_telemetry_url: "CONSOLE_TELEMETRY_URL",
+  console_telemetry_endpoint_url: "CONSOLE_TELEMETRY_ENDPOINT_URL",
+  console_telemetry_token: "CONSOLE_TELEMETRY_TOKEN",
+  console_tenant_id: "CONSOLE_TENANT_ID",
+  console_pricing_url: "TELEMETRY_PRICING_URL",
+  pricing_url: "TELEMETRY_PRICING_URL",
+};
+
+/**
+ * The variables lib/config.sh ends up with, resolved the way it resolves them (#1483 review):
+ *   - environment defaults first, with `${VAR:-}` semantics, so an empty variable is unset and
+ *     CONSOLE_URL / CONSOLE_AUTH_TOKEN / FLOW_AGENTS_PRICING_URL are fallbacks;
+ *   - then the config file, line by line, each matching key overriding the environment;
+ *   - lines read the way `while IFS='=' read -r key value` reads them: a final line with no newline
+ *     is skipped, a remainder with one '=' and only at its end loses it, the key loses all ASCII
+ *     whitespace and the value is trimmed;
+ *   - channel.<name>.<key> becomes TELEMETRY_CHANNEL_<NAME>_<KEY> when both parts are
+ *     [A-Za-z0-9_]+;
+ *   - for a pinned install, the same filter as config.sh: standard keys through pinnedKeyAllowed,
+ *     channel settings by the derived variable name.
+ */
+function resolveLikeConfigSh(file: string, pinned: boolean, env: NodeJS.ProcessEnv = process.env): Map<string, Resolved> {
+  const vars = new Map<string, Resolved>();
+  const fromEnv = (name: string, ...names: string[]) => {
+    for (const envName of names) {
+      const value = env[envName];
+      if (value) {
+        vars.set(name, { value, envName });
+        return;
+      }
+    }
+  };
+  fromEnv("TELEMETRY_ENABLED", "TELEMETRY_ENABLED");
+  fromEnv("TELEMETRY_CHANNELS", "TELEMETRY_CHANNELS");
+  fromEnv("CONSOLE_TELEMETRY_URL", "CONSOLE_TELEMETRY_URL", "CONSOLE_URL");
+  fromEnv("CONSOLE_TELEMETRY_ENDPOINT_URL", "CONSOLE_TELEMETRY_ENDPOINT_URL");
+  fromEnv("CONSOLE_TELEMETRY_TOKEN", "CONSOLE_TELEMETRY_TOKEN", "CONSOLE_AUTH_TOKEN");
+  fromEnv("CONSOLE_TENANT_ID", "CONSOLE_TENANT_ID");
+  fromEnv("TELEMETRY_PRICING_URL", "TELEMETRY_PRICING_URL", "FLOW_AGENTS_PRICING_URL");
+  for (const name of Object.keys(env)) if (name.startsWith("TELEMETRY_CHANNEL_")) fromEnv(name, name);
+  if (!fs.existsSync(file)) return vars;
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  lines.pop(); // the text after the last newline: `read` never returns it
+  for (const line of lines) {
+    const eq = line.indexOf("=");
+    const rawKey = eq === -1 ? line : line.slice(0, eq);
+    if (!rawKey || /^[ \t\n\r\f\v]*#/.test(rawKey)) continue;
+    let rest = eq === -1 ? "" : line.slice(eq + 1);
+    if (rest.indexOf("=") === rest.length - 1 && rest.length > 0) rest = rest.slice(0, -1);
+    const key = rawKey.replace(ASCII_SPACE, "");
+    const value = rest.replace(ASCII_TRIM, "");
+    const channel = /^channel\.([^.]+)\.(.+)$/.exec(key);
+    if (channel) {
+      if (!/^[A-Za-z0-9_]+$/.test(channel[1]) || !/^[A-Za-z0-9_]+$/.test(channel[2])) continue;
+      const name = `TELEMETRY_CHANNEL_${channel[1].toUpperCase()}_${channel[2].toUpperCase()}`;
+      if (pinned && name.endsWith("_ENDPOINT_URL") && !LOOPBACK_URL.test(value)) continue;
+      vars.set(name, { value });
+      continue;
+    }
+    if (pinned && !pinnedKeyAllowed(key, value)) continue;
+    const name = CONF_KEY_VARS[key];
+    if (name) vars.set(name, { value });
+  }
+  return vars;
 }
 
 function telemetryDataDir(dest: string): string {
@@ -244,18 +309,13 @@ const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(\
 
 /**
  * The installed telemetry.conf is not trust-gated, so a pinned install takes no network destination
- * from it: no console_* key except a relay opt-out, no pricing_url, and a channel endpoint only when
- * it is loopback. Mirrors config.sh's telemetry_pinned_key_allowed.
+ * from it: no console_* key except a relay opt-out and no pricing_url (config.sh's
+ * telemetry_pinned_key_allowed). Channel endpoints are filtered by their derived variable name in
+ * resolveLikeConfigSh.
  */
 function pinnedKeyAllowed(key: string, value: string): boolean {
   if (key === "console_economics_relay" || key === "console_liveness_relay") return ["0", "false", "no", "off"].includes(value.toLowerCase());
-  if (key.startsWith("console_") || key === "pricing_url") return false;
-  if (/^channel\..+\.endpoint_url$/.test(key)) return LOOPBACK_URL.test(value);
-  return true;
-}
-
-function firstSet(...candidates: Array<[string, string | undefined]>): string | undefined {
-  return candidates.find(([, value]) => value !== undefined && value !== "")?.[0];
+  return !(key.startsWith("console_") || key === "pricing_url");
 }
 
 /** Whether no TELEMETRY_CONFIG_FILE is set and the installed telemetry.conf is pinned local-only. */
@@ -309,31 +369,44 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
   const configFile = resolveTelemetryConfigFile(dest, telemetryDir);
   const localOnlyPinned = localOnlyPinApplies(telemetryDir);
   const pinRecorded = isPinnedLocalOnly(path.join(telemetryDir, "telemetry.conf"));
-  const config = localOnlyPinned ? readConfig(configFile, pinnedKeyAllowed) : readConfig(configFile);
-  const enabled = configValue(config, "TELEMETRY_ENABLED", "enabled", "true") !== "false";
+  const config = readConfig(configFile);
+  const vars = resolveLikeConfigSh(configFile, localOnlyPinned);
+  const resolved = (name: string, fallback = ""): string => vars.get(name)?.value ?? fallback;
+  const fileLabel = process.env.TELEMETRY_CONFIG_FILE ? `TELEMETRY_CONFIG_FILE (${configFile})` : configFile;
+  const sourceOf = (name: string): string | undefined => {
+    const entry = vars.get(name);
+    if (!entry?.value) return undefined;
+    return entry.envName ? `environment variable ${entry.envName}` : fileLabel;
+  };
+  const enabled = resolved("TELEMETRY_ENABLED", "true") !== "false";
   const dataDir = telemetryDataDir(dest);
-  const sessionDir = path.resolve(configValue(config, "TELEMETRY_SESSION_DIR", "telemetry_session_dir", path.join(dataDir, "sessions")));
-  const channels = configValue(config, "TELEMETRY_CHANNELS", "channels", defaultChannels).split(",").map((channel) => channel.trim()).filter(Boolean);
+  const sessionDir = path.resolve(process.env.TELEMETRY_SESSION_DIR ?? config.telemetry_session_dir ?? path.join(dataDir, "sessions"));
+  const channels = resolved("TELEMETRY_CHANNELS", defaultChannels).split(",").map((channel) => channel.replace(ASCII_SPACE, "")).filter(Boolean);
+  const channelVar = (name: string, key: string) => `TELEMETRY_CHANNEL_${name.toUpperCase()}_${key}`;
   const channelReports = channels.map((name) => {
     const defaultLog = name === "full" ? path.join(dataDir, "full.jsonl") : name === "analytics" ? path.join(dataDir, "analytics.jsonl") : "";
-    const logFile = channelConfigValue(config, name, "log_file", defaultLog);
-    const endpointUrl = channelConfigValue(config, name, "endpoint_url");
+    const logFile = resolved(channelVar(name, "LOG_FILE"), defaultLog);
+    const endpointUrl = resolved(channelVar(name, "ENDPOINT_URL"));
     return { name, logFile: logFile ? path.resolve(dest, logFile) : undefined, endpointUrl: safeReportUrl(endpointUrl), active: enabled };
   });
-  const consoleUrl = process.env.CONSOLE_TELEMETRY_URL ?? process.env.CONSOLE_URL ?? config.console_telemetry_url ?? config.console_url ?? "";
-  const explicitEndpoint = process.env.CONSOLE_TELEMETRY_ENDPOINT_URL ?? config.console_telemetry_endpoint_url ?? "";
+  const consoleUrl = resolved("CONSOLE_TELEMETRY_URL");
+  const explicitEndpoint = resolved("CONSOLE_TELEMETRY_ENDPOINT_URL");
   const endpointUrl = deriveConsoleEndpoint(consoleUrl, explicitEndpoint);
-  // Same order as consoleUrl/explicitEndpoint above: an endpoint beats a URL, the environment beats the file.
-  const fileLabel = process.env.TELEMETRY_CONFIG_FILE ? `TELEMETRY_CONFIG_FILE (${configFile})` : configFile;
-  const endpointSource = !endpointUrl
-    ? undefined
-    : firstSet(
-        ["environment variable CONSOLE_TELEMETRY_ENDPOINT_URL", process.env.CONSOLE_TELEMETRY_ENDPOINT_URL],
-        [fileLabel, explicitEndpoint ? config.console_telemetry_endpoint_url : undefined],
-        ["environment variable CONSOLE_TELEMETRY_URL", process.env.CONSOLE_TELEMETRY_URL],
-        ["environment variable CONSOLE_URL", process.env.CONSOLE_URL],
-        [fileLabel, config.console_telemetry_url ?? config.console_url],
-      );
+  const endpointSource = !endpointUrl ? undefined : sourceOf(explicitEndpoint ? "CONSOLE_TELEMETRY_ENDPOINT_URL" : "CONSOLE_TELEMETRY_URL");
+  // What still leaves the machine from a pinned install, and why (#1483 review): the pin filters only
+  // the installed telemetry.conf, never the environment or TELEMETRY_CONFIG_FILE.
+  const pinOverrides: Array<{ what: string; source: string; url: string }> = [];
+  if (pinRecorded) {
+    if (endpointUrl) pinOverrides.push({ what: "a Console endpoint", source: endpointSource ?? "the environment", url: endpointUrl });
+    if (enabled) {
+      for (const name of channels) {
+        const url = resolved(channelVar(name, "ENDPOINT_URL"));
+        if (url && !LOOPBACK_URL.test(url)) pinOverrides.push({ what: `the ${name} channel endpoint`, source: sourceOf(channelVar(name, "ENDPOINT_URL")) ?? "the environment", url });
+      }
+    }
+    const pricingUrl = resolved("TELEMETRY_PRICING_URL");
+    if (pricingUrl) pinOverrides.push({ what: "a pricing URL", source: sourceOf("TELEMETRY_PRICING_URL") ?? "the environment", url: pricingUrl });
+  }
   const allowed = endpointAllowed(endpointUrl, allowNetwork);
   const timeoutMs = Number.parseInt(flagString(args.flags, "timeout-ms", "2000") ?? "2000", 10);
   const reachability = await checkConsoleReachability(endpointUrl, Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 2000, allowNetwork);
@@ -341,8 +414,8 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
     ? [path.join(dest, ".kontourai", "telemetry-console.conf"), path.join(os.homedir(), ".flow-agents", "telemetry-console.conf")].filter((file) => fs.existsSync(file))
     : [];
   const warnings = reportWarnings(configFile, endpointUrl, allowed, allowNetwork, dest, localOnlyPinned);
-  if (pinRecorded && endpointUrl) {
-    warnings.push(`This install is pinned local-only (${PIN_LINE} in ${path.join(telemetryDir, "telemetry.conf")}), but a Console endpoint still resolves from ${endpointSource ?? "the environment"}, so telemetry is sent to ${safeReportUrl(endpointUrl)}. Unset it to keep this install local-only.`);
+  for (const override of pinOverrides) {
+    warnings.push(`This install is pinned local-only (${PIN_LINE} in ${path.join(telemetryDir, "telemetry.conf")}), but ${override.what} still resolves from ${override.source}, so it is contacted at ${safeReportUrl(override.url)}. Unset it to keep this install local-only.`);
   }
   return {
     ok: enabled && (!endpointUrl || (allowed && reachability.ok !== false)),
@@ -357,6 +430,7 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
       activeSinks: activeSinks(enabled, channelReports, endpointUrl, allowed),
       localOnlyPinned,
       pinRecorded,
+      pinOverrides: pinOverrides.map((override) => ({ ...override, url: safeReportUrl(override.url) ?? "" })),
       skippedConfigFiles,
     },
     console: {
@@ -364,14 +438,11 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
       url: safeReportUrl(consoleUrl),
       endpointUrl: safeReportUrl(endpointUrl),
       endpointAllowed: allowed,
-      tokenConfigured: Boolean(process.env.CONSOLE_TELEMETRY_TOKEN ?? process.env.CONSOLE_AUTH_TOKEN ?? config.console_telemetry_token),
-      tenantConfigured: Boolean(process.env.CONSOLE_TENANT_ID ?? config.console_tenant_id),
-      tokenSource: valueSource(process.env.CONSOLE_TELEMETRY_TOKEN ?? process.env.CONSOLE_AUTH_TOKEN, config.console_telemetry_token),
-      tenantSource: valueSource(process.env.CONSOLE_TENANT_ID, config.console_tenant_id),
-      urlSource: valueSource(
-        process.env.CONSOLE_TELEMETRY_URL ?? process.env.CONSOLE_URL ?? process.env.CONSOLE_TELEMETRY_ENDPOINT_URL,
-        config.console_telemetry_url ?? config.console_url ?? config.console_telemetry_endpoint_url,
-      ),
+      tokenConfigured: Boolean(resolved("CONSOLE_TELEMETRY_TOKEN")),
+      tenantConfigured: Boolean(resolved("CONSOLE_TENANT_ID")),
+      tokenSource: resolvedSource(vars, "CONSOLE_TELEMETRY_TOKEN"),
+      tenantSource: resolvedSource(vars, "CONSOLE_TENANT_ID"),
+      urlSource: resolvedSource(vars, explicitEndpoint ? "CONSOLE_TELEMETRY_ENDPOINT_URL" : "CONSOLE_TELEMETRY_URL"),
       ...(endpointSource ? { endpointSource } : {}),
       reachability,
     },

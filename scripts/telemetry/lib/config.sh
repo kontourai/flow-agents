@@ -70,10 +70,15 @@ telemetry_conf_warn_untrusted() {
 # from a repository or tarball), so once the pin has made it outrank the
 # operator confs it must not name a network destination either. For a pinned
 # install the config loop below ignores every console_* key except a console_*_relay
-# opt-out (0/false/no/off), ignores pricing_url, and keeps a channel.*.endpoint_url
-# only when it is a loopback URL (http://127.0.0.1, http://localhost or
-# http://[::1], optional port, optional path), so the shipped localhost channel
-# still works. Environment variables are not filtered: they are the operator's
+# opt-out (0/false/no/off), ignores pricing_url, and keeps a channel setting that
+# becomes a TELEMETRY_CHANNEL_*_ENDPOINT_URL only when its value is a loopback URL
+# (http://127.0.0.1, http://localhost or http://[::1], optional port, optional
+# path), so the shipped localhost channel still works. The channel check runs on
+# the variable name the loop derives (channel and key uppercased, joined by _),
+# because channel.full.Endpoint_Url and channel.analytics_endpoint.url both
+# become an *_ENDPOINT_URL. The standard keys are matched exactly and
+# case-sensitively by the loop, so the console_* glob covers every spelling it
+# applies. Environment variables are not filtered: they are the operator's
 # explicit runtime override.
 TELEMETRY_LOCAL_CONFIG_FILE="${TELEMETRY_WORKSPACE_ROOT}/.kontourai/telemetry-console.conf"
 TELEMETRY_GLOBAL_CONFIG_FILE="${HOME:-}/.flow-agents/telemetry-console.conf"
@@ -91,8 +96,8 @@ telemetry_conf_pinned_local_only() {
 
 TELEMETRY_LOOPBACK_URL_RE='^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[^[:space:]"\\]*)?$'
 
-# Whether a pinned install may take KEY=VALUE from its installed telemetry.conf
-# (see the pin note above).
+# Whether a pinned install may take the standard (non-channel) KEY=VALUE from its
+# installed telemetry.conf (see the pin note above).
 telemetry_pinned_key_allowed() {
   local key="$1" value="$2"
   case "$key" in
@@ -103,9 +108,15 @@ telemetry_pinned_key_allowed() {
       esac
       ;;
     console_*|pricing_url) return 1 ;;
-    channel.*.endpoint_url) [[ "$value" =~ $TELEMETRY_LOOPBACK_URL_RE ]] ;;
     *) return 0 ;;
   esac
+}
+
+# Whether a pinned install may set the channel variable VAR_NAME to VALUE.
+telemetry_pinned_channel_var_allowed() {
+  local var_name="$1" value="$2"
+  [[ "$var_name" == *_ENDPOINT_URL ]] || return 0
+  [[ "$value" =~ $TELEMETRY_LOOPBACK_URL_RE ]]
 }
 
 TELEMETRY_LOCAL_ONLY_PINNED=0
@@ -184,9 +195,6 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
     [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
     key=$(echo "$key" | tr -d '[:space:]')
     value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]] && ! telemetry_pinned_key_allowed "$key" "$value"; then
-      continue
-    fi
     
     # Handle channel-specific config
     if [[ "$key" =~ ^channel\.([^.]+)\.(.+)$ ]]; then
@@ -194,9 +202,15 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
       channel_key="${BASH_REMATCH[2]}"
       if [[ "$channel_name" =~ ^[A-Za-z0-9_]+$ && "$channel_key" =~ ^[A-Za-z0-9_]+$ ]]; then
         var_name="TELEMETRY_CHANNEL_$(echo "$channel_name" | tr '[:lower:]' '[:upper:]')_$(echo "$channel_key" | tr '[:lower:]' '[:upper:]')"
+        if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]] && ! telemetry_pinned_channel_var_allowed "$var_name" "$value"; then
+          continue
+        fi
         printf -v "$var_name" '%s' "$value"
       fi
     else
+      if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]] && ! telemetry_pinned_key_allowed "$key" "$value"; then
+        continue
+      fi
       # Standard config
       case "$key" in
         enabled) TELEMETRY_ENABLED="$value" ;;

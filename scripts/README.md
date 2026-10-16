@@ -173,9 +173,13 @@ to the bundle's copy on every re-run. A `telemetry.conf` edited after install is
 preserved with its pin, and the re-run applies no sink to it. Deleting the
 `telemetry_sink_pin` line also removes the pin.
 Environment variables still apply to a pinned install, so launch the agent host
-with no `CONSOLE_*` or `FLOW_AGENTS_CONSOLE_*` variables set; the doctor warns
-and names the source when one of them, or `TELEMETRY_CONFIG_FILE`, still
-resolves a Console endpoint. For an install
+with none of these set: `CONSOLE_*`, `FLOW_AGENTS_CONSOLE_*`,
+`TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL`, `TELEMETRY_PRICING_URL` and
+`FLOW_AGENTS_PRICING_URL`. The doctor warns, naming the source, for each
+Console endpoint, non-loopback channel endpoint or pricing URL that one of them,
+or `TELEMETRY_CONFIG_FILE`, still resolves. The value the doctor reports is the
+one `lib/config.sh` uses: an empty variable counts as unset, and a key in the
+resolved config file overrides the environment. For an install
 that cannot be pinned (`init --global` for `claude-code` or `opencode`), launch
 the agent host with `TELEMETRY_CONFIG_FILE` pointing at a file with no Console
 keys.

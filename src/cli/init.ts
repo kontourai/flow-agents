@@ -1552,11 +1552,11 @@ async function printPostInstallSummary(options: InitOptions, telemetryConfPreser
   let tenantSource: "environment" | "config-file" | "absent" = "absent";
   let resolvedConfigFile: string | undefined;
   let resolvedConfigScope: "destination" | "workspace" | "user-global" | "explicit" | "absent" = "absent";
-  let endpointSource: string | undefined;
+  let pinOverrides: Array<{ what: string; source: string }> = [];
   try {
     const report = await buildReport(["--dest", options.dest]);
     doctorConsole = report.console;
-    endpointSource = report.console.endpointSource;
+    pinOverrides = report.telemetry.pinOverrides;
     tokenSource = report.console.tokenSource;
     tenantSource = report.console.tenantSource;
     resolvedConfigFile = report.telemetry.configFile;
@@ -1601,7 +1601,7 @@ async function printPostInstallSummary(options: InitOptions, telemetryConfPreser
       requested: Boolean(options.localOnlyPinRequested),
       recordedIn: pinRecorded ? installedConf : undefined,
       // An environment variable or TELEMETRY_CONFIG_FILE still beats a recorded pin.
-      overriddenBy: pinRecorded && doctorConsole.sink === "console" ? endpointSource ?? "the environment" : undefined,
+      overriddenBy: pinRecorded && pinOverrides.length > 0 ? pinOverrides.map((override) => `${override.what} still resolves from ${override.source}`).join("; ") : undefined,
       notRecordedReason: !pinRecorded && options.localOnlyPinRequested ? localOnlyPinNotRecordedReason(options, installedConf, telemetryConfPreserved) : undefined,
     },
     nextSteps,

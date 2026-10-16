@@ -21,7 +21,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import http from "node:http";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -652,7 +653,7 @@ test("install-console-config.sh never pins the telemetry.conf of the Flow Agents
     const result = runInstaller(script, [conf, "--telemetry-sink", "local-files"], { PATH: NODE_PATH });
     assert.equal(result.status, 0, result.output);
     assert.equal(PIN_LINE.test(fs.readFileSync(conf, "utf8")), expectPin, `${name}: ${result.output}`);
-    if (!expectPin) assert.match(result.stderr, /not pinning .* it belongs to the Flow Agents package itself/);
+    if (!expectPin) assert.match(result.stderr, /not pinning .* local-only: it is the Flow Agents package's own telemetry\.conf/);
   }
 });
 
@@ -709,4 +710,186 @@ test("bash 3.2: the root install.sh with CONSOLE_URL set and no Console flag exi
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.doesNotMatch(result.stderr, /unbound variable/);
   assert.match(fs.readFileSync(installedConf(dest), "utf8"), /^console_telemetry_url=http:\/\/127\.0\.0\.1:9$/m);
+});
+
+// --- review round 2: filter what the parser derives, not how the key is spelled -----------------
+//
+// config.sh turns channel.<name>.<key> into TELEMETRY_CHANNEL_<NAME>_<KEY> (uppercased), so a
+// filter on the raw key missed channel.full.Endpoint_Url and channel.analytics_endpoint.url, and
+// transport_emit POSTed to both. These run the real transport against a local listener reached
+// through http://0.0.0.0:<port>, which the loopback grammar does not accept, so a POST that
+// arrives is one the pin failed to stop.
+async function emitAndCountPosts(dest, env) {
+  const hits = [];
+  const server = http.createServer((request, response) => {
+    hits.push(request.url);
+    response.end("ok");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  try {
+    const script = 'source "$1/scripts/telemetry/lib/config.sh"; source "$1/scripts/telemetry/lib/transport.sh"; transport_emit "{\\"event\\":\\"pin-probe\\"}"; wait';
+    const child = spawn("/bin/bash", ["-c", script.replaceAll("PORT", String(port)), "_", dest], { env: { PATH: SHELL_PATH, ...env(port) }, stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const status = await new Promise((resolve) => child.on("close", resolve));
+    assert.equal(status, 0, stderr);
+    return hits;
+  } finally {
+    server.close();
+  }
+}
+
+const BYPASS_SPELLINGS = [
+  ["channel.full.Endpoint_Url", "/full-mixed-case"],
+  ["channel.analytics_endpoint.url", "/analytics-split"],
+];
+
+function bypassLines(port) {
+  return BYPASS_SPELLINGS.map(([key, urlPath]) => `${key}=http://0.0.0.0:${port}${urlPath}`).join("\n");
+}
+
+test("pinned: channel endpoints spelled to slip past a raw-key filter are dropped and never POSTed", async () => {
+  const home = makeFixtureDir("telemetry-pin-bypass-home-");
+  let port;
+  const env = (listenPort) => {
+    port = listenPort;
+    fs.writeFileSync(installedConf(pinned.dest), `${original}${bypassLines(listenPort)}\n`);
+    return { HOME: home };
+  };
+  const original = fs.readFileSync(installedConf(pinned.dest), "utf8");
+  try {
+    const hits = await emitAndCountPosts(pinned.dest, env);
+    assert.deepEqual(hits, [], `POSTs reached the listener on port ${port}`);
+    const vars = readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_CHANNEL_FULL_ENDPOINT_URL", "TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL"]);
+    assert.deepEqual(vars, { TELEMETRY_CHANNEL_FULL_ENDPOINT_URL: "http://localhost:3141/v1/agent-events", TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL: "" });
+    const doctor = readDoctorReport(pinned.dest, { HOME: home });
+    const endpoints = Object.fromEntries(doctor.telemetry.channels.map((channel) => [channel.name, channel.endpointUrl]));
+    assert.deepEqual(endpoints, { full: "http://localhost:3141/v1/agent-events", analytics: undefined }, "telemetry-doctor channel endpoints");
+    assert.deepEqual(doctor.telemetry.pinOverrides, []);
+  } finally {
+    fs.writeFileSync(installedConf(pinned.dest), original);
+  }
+});
+
+test("unpinned control: the same spellings do reach the transport (the probe can see a POST)", async () => {
+  const home = makeFixtureDir("telemetry-pin-bypass-control-home-");
+  const original = fs.readFileSync(installedConf(unpinned.dest), "utf8");
+  try {
+    const hits = await emitAndCountPosts(unpinned.dest, (port) => {
+      fs.writeFileSync(installedConf(unpinned.dest), `${original}${bypassLines(port)}\n`);
+      return { HOME: home };
+    });
+    assert.deepEqual(hits.sort(), BYPASS_SPELLINGS.map(([, urlPath]) => urlPath).sort());
+    // The doctor reads the same two settings the transport used.
+    const doctor = readDoctorReport(unpinned.dest, { HOME: home });
+    for (const channel of doctor.telemetry.channels) assert.match(channel.endpointUrl ?? "", /^http:\/\/0\.0\.0\.0:\d+\//, channel.name);
+  } finally {
+    fs.writeFileSync(installedConf(unpinned.dest), original);
+  }
+});
+
+test("Console keys spelled in another case are ignored by the parser, pinned or not", () => {
+  const home = makeFixtureDir("telemetry-pin-case-home-");
+  const lines = `Console_Url=${HOSTILE}\nCONSOLE_URL=${HOSTILE}\nconsole_URL=${HOSTILE}\nConsole_Telemetry_Token=stolen\nCONSOLE_TELEMETRY_ENDPOINT_URL=${HOSTILE}/x\n`;
+  for (const dest of [pinned.dest, unpinned.dest]) {
+    withInstalledConf(dest, (text) => `${text}${lines}`, () => {
+      const vars = readShellVars(dest, { HOME: home }, ["CONSOLE_TELEMETRY_URL", "CONSOLE_TELEMETRY_ENDPOINT_URL", "CONSOLE_TELEMETRY_TOKEN"]);
+      assert.deepEqual(vars, { CONSOLE_TELEMETRY_URL: "", CONSOLE_TELEMETRY_ENDPOINT_URL: "", CONSOLE_TELEMETRY_TOKEN: "" }, dest);
+      const doctor = readDoctorReport(dest, { HOME: home });
+      assert.equal(doctor.console.sink, "local-only", dest);
+      assert.equal(readLivenessWrite(dest, { HOME: home }).enabled, false, dest);
+    });
+  }
+});
+
+// --- the doctor resolves values the way config.sh does ------------------------------------------
+
+test("doctor: an empty CONSOLE_TELEMETRY_URL is unset, as in config.sh, so CONSOLE_URL applies and is named", () => {
+  const home = makeFixtureDir("telemetry-pin-empty-env-home-");
+  const env = { HOME: home, CONSOLE_TELEMETRY_URL: "", CONSOLE_URL: "http://127.0.0.1:7002" };
+  assert.equal(readShellVars(pinned.dest, env, ["CONSOLE_TELEMETRY_URL"]).CONSOLE_TELEMETRY_URL, "http://127.0.0.1:7002");
+  const report = readDoctorReport(pinned.dest, env);
+  assert.equal(report.console.url, "http://127.0.0.1:7002/");
+  assert.equal(report.console.endpointSource, "environment variable CONSOLE_URL");
+  assert.ok(report.warnings.some((warning) => warning.includes("a Console endpoint still resolves from environment variable CONSOLE_URL")), JSON.stringify(report.warnings));
+});
+
+test("doctor: TELEMETRY_CONFIG_FILE's Console URL beats an environment URL, as in config.sh, and is attributed to the file", () => {
+  const home = makeFixtureDir("telemetry-pin-precedence-home-");
+  const explicit = path.join(makeFixtureDir("telemetry-pin-precedence-"), "explicit.conf");
+  writeConf(explicit, "http://127.0.0.1:7001", "explicit-token");
+  const env = { HOME: home, TELEMETRY_CONFIG_FILE: explicit, CONSOLE_TELEMETRY_URL: "http://127.0.0.1:7003" };
+  assert.equal(readShellVars(pinned.dest, env, ["CONSOLE_TELEMETRY_URL"]).CONSOLE_TELEMETRY_URL, "http://127.0.0.1:7001");
+  const report = readDoctorReport(pinned.dest, env);
+  assert.equal(report.console.url, "http://127.0.0.1:7001/");
+  assert.equal(report.console.endpointSource, `TELEMETRY_CONFIG_FILE (${explicit})`);
+  assert.equal(report.console.tokenSource, "config-file");
+});
+
+test("doctor: an environment channel endpoint or pricing URL on a pinned install is warned about and named", () => {
+  const home = makeFixtureDir("telemetry-pin-env-channel-home-");
+  const env = { HOME: home, TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL: "https://evil.example/x", TELEMETRY_CHANNEL_FULL_ENDPOINT_URL: "https://evil.example/full", TELEMETRY_PRICING_URL: "https://evil.example/pricing" };
+  const vars = readShellVars(pinned.dest, env, ["TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL", "TELEMETRY_CHANNEL_FULL_ENDPOINT_URL", "TELEMETRY_PRICING_URL"]);
+  // The installed conf sets the full channel's (loopback) endpoint itself, which beats the environment.
+  assert.deepEqual(vars, { TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL: "https://evil.example/x", TELEMETRY_CHANNEL_FULL_ENDPOINT_URL: "http://localhost:3141/v1/agent-events", TELEMETRY_PRICING_URL: "https://evil.example/pricing" });
+  const report = readDoctorReport(pinned.dest, env);
+  assert.deepEqual(report.telemetry.pinOverrides.map((override) => [override.what, override.source]), [
+    ["the analytics channel endpoint", "environment variable TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL"],
+    ["a pricing URL", "environment variable TELEMETRY_PRICING_URL"],
+  ]);
+  assert.equal(report.warnings.filter((warning) => warning.includes("still resolves from environment variable")).length, 2, JSON.stringify(report.warnings));
+});
+
+// --- the root install.sh pins its destination, never its own checkout ---------------------------
+
+test("root install.sh --telemetry-sink local-files pins a destination copied from a package checkout, not the checkout", () => {
+  const src = makeFixtureDir("telemetry-pin-root-src-");
+  fs.copyFileSync(path.join(repoRoot, "install.sh"), path.join(src, "install.sh"));
+  fs.cpSync(path.join(repoRoot, "scripts", "telemetry"), path.join(src, "scripts", "telemetry"), { recursive: true });
+  fs.copyFileSync(path.join(repoRoot, "package.json"), path.join(src, "package.json"));
+  const home = makeFixtureDir("telemetry-pin-root-home-");
+  const env = { HOME: home, PATH: NODE_PATH };
+  const dest = path.join(makeFixtureDir("telemetry-pin-root-dest-"), "ws");
+  const installed = spawnSync("/bin/bash", [path.join(src, "install.sh"), dest, "--telemetry-sink", "local-files"], { env, encoding: "utf8" });
+  assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dest, "package.json"), "utf8")).name, "@kontourai/flow-agents", "the destination carries the package.json the guard reads");
+  assert.match(fs.readFileSync(installedConf(dest), "utf8"), PIN_LINE);
+  // Installing a checkout onto itself must still leave its tracked telemetry.conf alone.
+  const before = fs.readFileSync(path.join(src, "scripts", "telemetry", "telemetry.conf"), "utf8");
+  const self = spawnSync("/bin/bash", [path.join(src, "install.sh"), src, "--telemetry-sink", "local-files"], { env, encoding: "utf8" });
+  assert.equal(self.status, 0, `${self.stdout}\n${self.stderr}`);
+  assert.equal(fs.readFileSync(path.join(src, "scripts", "telemetry", "telemetry.conf"), "utf8"), before);
+  assert.match(self.stderr, /not pinning .* it is the Flow Agents package's own telemetry\.conf/);
+});
+
+// --- install-codex-home.sh keeps a failure's exit status ----------------------------------------
+//
+// Before the fix its EXIT trap ended in a successful command, and bash 3.2 hands the trap $? = 0
+// after a `set -u` abort on an empty array, so the abort exited 0. The probe below inserts such an
+// abort right after the script arms its trap.
+function codexHomeCopy(edit) {
+  const dir = makeFixtureDir("telemetry-pin-codex-trap-");
+  const file = path.join(dir, "install-codex-home.sh");
+  fs.writeFileSync(file, edit(fs.readFileSync(path.join(repoRoot, "scripts", "install-codex-home.sh"), "utf8")));
+  return { dir, file };
+}
+
+test("bash 3.2: install-codex-home.sh exits non-zero when a set -u abort stops it", { skip: BASH3_SKIP }, () => {
+  const { dir, file } = codexHomeCopy((text) => {
+    const trapLine = /^trap .* EXIT$/m.exec(text);
+    assert.ok(trapLine, "install-codex-home.sh arms an EXIT trap");
+    const at = trapLine.index + trapLine[0].length;
+    return `${text.slice(0, at)}\nFA_PROBE_EMPTY=()\n: "\${FA_PROBE_EMPTY[@]}"${text.slice(at)}`;
+  });
+  const result = spawnSync("/bin/bash", [file, path.join(dir, "codex-home")], { env: { HOME: dir, PATH: SHELL_PATH }, encoding: "utf8" });
+  assert.match(result.stderr, /FA_PROBE_EMPTY\[@\]: unbound variable/);
+  assert.notEqual(result.status, 0, "an aborted install must not exit 0");
+});
+
+test("install-codex-home.sh still exits 0 for --help and 2 for an unknown option", () => {
+  const help = spawnSync("/bin/bash", [path.join(repoRoot, "scripts", "install-codex-home.sh"), "--help"], { env: { HOME: makeFixtureDir("telemetry-pin-codex-help-"), PATH: NODE_PATH }, encoding: "utf8" });
+  assert.equal(help.status, 0, help.stderr);
+  const unknown = spawnSync("/bin/bash", [path.join(repoRoot, "scripts", "install-codex-home.sh"), "--no-such-option"], { env: { HOME: makeFixtureDir("telemetry-pin-codex-unknown-"), PATH: NODE_PATH }, encoding: "utf8" });
+  assert.equal(unknown.status, 2, unknown.stderr);
 });

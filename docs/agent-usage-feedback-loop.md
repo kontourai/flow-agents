@@ -259,10 +259,16 @@ pin. Because the installed `telemetry.conf` is not trust-gated (it can be
 mode 644 and come from a repository or tarball), a pinned install takes no
 network destination from it: every `console_*` key is ignored except a
 `console_economics_relay` or `console_liveness_relay` opt-out (`0`, `false`,
-`no`, `off`), `pricing_url` is ignored, and a `channel.*.endpoint_url` is kept
-only when it is a loopback URL (`http://127.0.0.1`, `http://localhost` or
-`http://[::1]`, with an optional port and path), so the shipped localhost
-channel keeps working.
+`no`, `off`), `pricing_url` is ignored, and a channel setting that becomes a
+channel endpoint is kept only when its value is a loopback URL
+(`http://127.0.0.1`, `http://localhost` or `http://[::1]`, with an optional
+port and path), so the shipped localhost channel keeps working. The channel
+check applies to the variable the setting becomes, not to how the key is
+spelled: `config.sh` uppercases `channel.<name>.<key>` into
+`TELEMETRY_CHANNEL_<NAME>_<KEY>`, so `channel.full.Endpoint_Url` and
+`channel.analytics_endpoint.url` are channel endpoints too. Standard keys are
+matched exactly, so a spelling such as `Console_Url` or `CONSOLE_URL` in the
+file is ignored by every install.
 
 Re-running `init` replaces an installed `telemetry.conf` that nobody edited
 with the bundle's copy and applies only that run's sink, so re-running it
@@ -272,14 +278,21 @@ it, and its pin, unchanged and applies no sink to it (pass `--force` to replace
 it). Deleting the `telemetry_sink_pin` line removes the pin. `init --global`
 for `claude-code` and `opencode` cannot record a pin, because those hooks run
 from the package's own `scripts/telemetry`; init warns when the flag is given
-there, and the installer never pins the Flow Agents package's own
-`telemetry.conf`.
+there. Run directly, `install-console-config.sh` does not pin the Flow Agents
+package's own `telemetry.conf` (a source checkout or the installed npm
+package). The root `install.sh` copies that package into its destination and
+tells the script so, so `bash install.sh /path/to/workspace --telemetry-sink
+local-files` from a clone does pin the destination.
 
-Console environment variables such as `CONSOLE_TELEMETRY_URL` are not affected
-by the pin: they are an explicit runtime override. When one of them, or
-`TELEMETRY_CONFIG_FILE`, still sends a pinned install's telemetry to a Console,
-`telemetry-doctor` warns and names the source, and init's summary says the
-install is not local-only.
+Environment variables are not affected by the pin: they are an explicit
+runtime override. That covers the Console variables (`CONSOLE_TELEMETRY_URL`,
+`CONSOLE_URL`, `CONSOLE_TELEMETRY_ENDPOINT_URL`), a channel endpoint
+(`TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL`, unless the installed
+`telemetry.conf` sets that channel's endpoint itself, as it does for `full`)
+and a pricing URL (`TELEMETRY_PRICING_URL`, `FLOW_AGENTS_PRICING_URL`). When
+one of them, or `TELEMETRY_CONFIG_FILE`, still sends a pinned install's data
+off the machine, `telemetry-doctor` warns once per destination and names its
+source, and init's summary says the install is not local-only.
 
 The explicit `TELEMETRY_CONFIG_FILE` env var still overrides both
 auto-discovered paths and the local-only pin, and always wins. Wiring it from a login-shell profile

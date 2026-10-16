@@ -126,7 +126,8 @@ function resolveLivenessRelayEnabled(env) {
         if (!line || line.startsWith('#')) continue;
         const eq = line.indexOf('=');
         if (eq < 0) continue;
-        const key = line.slice(0, eq).trim();
+        // config.sh deletes every whitespace character from a key, so `console _url` is console_url there.
+        const key = line.slice(0, eq).replace(/[ \t\n\r\f\v]/g, '');
         const value = line.slice(eq + 1).trim().toLowerCase();
         if (key === 'console_liveness_relay') {
           // A pinned conf may only opt out (config.sh's telemetry_pinned_key_allowed).
