@@ -179,6 +179,8 @@ validators. Dependency upgrades that change these packaging seams fail the build
 
 The shared kit-root resolver recognizes that same owned runtime metadata and marker,
 so installed kit declarations and canonical run binding find the same tree.
+Gate-action envelopes select that owned metadata through the same accessor while
+retaining their bounded, stable regular-file reader.
 Installed package metadata comes from the owned `build/package.json`, so commands
 do not need a user project's `package.json`. Build tools load esbuild only when
 building; installed command execution needs no compiler, npm install, or cache.

@@ -6,10 +6,14 @@ export function flowAgentsPackageRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 }
 
-export function flowAgentsPackageMetadata(root = flowAgentsPackageRoot()): Record<string, unknown> {
+export function flowAgentsPackageMetadataRelativePath(root = flowAgentsPackageRoot()): string {
   // Standalone homes own metadata under build/, without claiming a user package.json.
-  const bundled = path.join(root, "build/package.json");
-  return JSON.parse(fs.readFileSync(fs.existsSync(path.join(root, "build/runtime-imports.json")) && fs.existsSync(bundled) ? bundled : path.join(root, "package.json"), "utf8"));
+  return fs.existsSync(path.join(root, "build/runtime-imports.json")) && fs.existsSync(path.join(root, "build/package.json"))
+    ? "build/package.json" : "package.json";
+}
+
+export function flowAgentsPackageMetadata(root = flowAgentsPackageRoot()): Record<string, unknown> {
+  return JSON.parse(fs.readFileSync(path.join(root, flowAgentsPackageMetadataRelativePath(root)), "utf8"));
 }
 
 export function flowAgentsPackageVersion(): string {
