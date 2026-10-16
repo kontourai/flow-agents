@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.1.1](https://github.com/kontourai/flow-agents/compare/v9.1.0...v9.1.1) (2026-10-16)
+
+
+### Fixes
+
+* **telemetry:** pin an explicit local-files install local-only ([#1516](https://github.com/kontourai/flow-agents/issues/1516)) ([f37e50a](https://github.com/kontourai/flow-agents/commit/f37e50a172f41059a36def4168165bcd1e19609d))
+
 ## [9.1.0](https://github.com/kontourai/flow-agents/compare/v9.0.0...v9.1.0) (2026-10-15)
 
 
