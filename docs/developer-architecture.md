@@ -195,6 +195,10 @@ building; installed command execution needs no compiler, npm install, or cache.
 The Codex installer verifies that exact inventory before writing, then the
 existing install manifest owns those files and their SHA-256 digests. Kit selection
 continues to come from explicit installation flags and kit declarations.
+Telemetry configuration is applied to the staging overlay before ownership
+preflight, so the manifest records the final local-only pin or Console settings.
+Repeated installs recognize those installer-written bytes; operator edits still
+fail ownership preflight before destination writes.
 
 `bash evals/integration/test_published_codex_install.sh` packs and installs an npm
 consumer, rejects corrupt bundles, removes that consumer and its cache, and runs

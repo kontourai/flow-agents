@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
+import crypto from "node:crypto";
 import net from "node:net";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
@@ -321,6 +322,39 @@ test("init --global codex with --telemetry-sink local-files pins the Codex home'
   assert.equal(result.status, 0, result.output);
   assert.match(fs.readFileSync(installedConf(dest), "utf8"), PIN_LINE);
   assert.doesNotMatch(result.stderr, /does not pin/);
+});
+
+test("global Codex records configured telemetry bytes and supports pinned reinstall without claiming operator edits", () => {
+  const home = makeFixtureDir("telemetry-pin-codex-reinstall-home-");
+  const dest = path.join(makeFixtureDir("telemetry-pin-codex-reinstall-dest-"), "codex-home");
+  const args = ["--runtime", "codex", "--global", "--dest", dest, "--telemetry-sink", "local-files"];
+  const ownedConf = () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(dest, ".flow-agents", "codex-install-manifest.json"), "utf8"));
+    return manifest.files.find((entry) => entry.path === "scripts/telemetry/telemetry.conf");
+  };
+  for (let install = 0; install < 2; install++) {
+    const result = runInit(args, home);
+    assert.equal(result.status, 0, result.output);
+    assert.match(fs.readFileSync(installedConf(dest), "utf8"), PIN_LINE);
+    assert.equal(ownedConf()?.sha256, crypto.createHash("sha256").update(fs.readFileSync(installedConf(dest))).digest("hex"));
+  }
+  // A subsequent explicit Console selection replaces the pin and is owned too.
+  const consoleArgs = ["--runtime", "codex", "--global", "--dest", dest, "--telemetry-sink", "user-hosted-console", "--console-url", GLOBAL_URL];
+  for (let install = 0; install < 2; install++) {
+    const result = runInit(consoleArgs, home);
+    assert.equal(result.status, 0, result.output);
+    assert.doesNotMatch(fs.readFileSync(installedConf(dest), "utf8"), PIN_LINE);
+    assert.equal(ownedConf()?.sha256, crypto.createHash("sha256").update(fs.readFileSync(installedConf(dest))).digest("hex"));
+  }
+  const manifestPath = path.join(dest, ".flow-agents", "codex-install-manifest.json");
+  const manifestBefore = fs.readFileSync(manifestPath);
+  fs.appendFileSync(installedConf(dest), "# operator edit\n");
+  const edited = fs.readFileSync(installedConf(dest));
+  const refused = runInit(args, home);
+  assert.notEqual(refused.status, 0, refused.output);
+  assert.match(refused.output, /refusing to overwrite modified Flow Agents file/);
+  assert.deepEqual(fs.readFileSync(installedConf(dest)), edited);
+  assert.deepEqual(fs.readFileSync(manifestPath), manifestBefore);
 });
 
 // --- interactive init -------------------------------------------------------------------------
