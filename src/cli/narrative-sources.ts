@@ -1,7 +1,7 @@
+import { flowAgentsPackageVersion } from "../lib/package-version.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import { atomicWriteFile, ensureSafeDirectory } from "../lib/fs.js";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
@@ -33,8 +33,7 @@ export const NARRATIVE_NAMESPACE_ROOT = path.join(".kontourai", "narrative");
 
 function packageVersion(): string {
   try {
-    const packageFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../package.json");
-    return String((JSON.parse(fs.readFileSync(packageFile, "utf8")) as { version?: unknown }).version ?? "unknown");
+    return flowAgentsPackageVersion();
   } catch { return "unknown"; }
 }
 
