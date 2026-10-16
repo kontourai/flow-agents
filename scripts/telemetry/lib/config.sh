@@ -82,21 +82,20 @@ telemetry_conf_warn_untrusted() {
 #   sync_include, sync_exclude        any value (agent-name glob patterns)
 #   console_economics_relay,
 #     console_liveness_relay          an opt-out only: 0, false, no or off
-#   pricing_file                      an ordinary absolute path (below)
 #   telemetry_sink_pin                the pin itself (sets nothing)
 #   channel settings, by the variable the loop derives
 #   (TELEMETRY_CHANNEL_<NAME>_<KEY>, channel and key uppercased):
-#     *_REDACT                        any value (redaction field list)
-#     *_LOG_FILE                      an ordinary absolute path (below)
+#     *_REDACT                        none, or a field list: [A-Za-z0-9_.,]
+#                                     (each field is spliced into a jq program)
 #     *_ENDPOINT_URL                  a loopback URL: http://127.0.0.1,
 #                                     http://localhost or http://[::1], optional
 #                                     port and path, so the shipped localhost
 #                                     channel still works
-# An ordinary absolute path starts with /, has no empty, . or .. component, no
-# trailing / and no control character, and is not under /dev or /proc (any
-# case): bash turns a write to /dev/tcp/HOST/PORT or /dev/udp/HOST/PORT into a
-# network connection. Relative paths are refused because a hook resolves them
-# against whatever directory the agent session happens to run in. Channel
+# No path is accepted at all: not pricing_file and not a channel *_LOG_FILE.
+# Each event is appended to the log file verbatim, so a log path the file
+# chooses is a write of attacker-influenced text anywhere the user can write
+# (a shell rc file, a git hook, /dev/tcp/HOST/PORT). Channels keep their
+# default log files under TELEMETRY_DATA_DIR and pricing its default. Channel
 # checks use the derived name because channel.full.Endpoint_Url and
 # channel.analytics_endpoint.url both become an *_ENDPOINT_URL; standard keys
 # are matched exactly, as the loop's case statement matches them. Environment
@@ -120,22 +119,6 @@ telemetry_conf_pinned_local_only() {
 
 TELEMETRY_LOOPBACK_URL_RE='^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[^[:space:]"\\]*)?$'
 
-# Whether VALUE is an ordinary absolute path (see the pin note above).
-telemetry_ordinary_path() {
-  local LC_ALL=C
-  local path="$1" lower
-  [[ "$path" == /?* ]] || return 1
-  [[ "$path" =~ [[:cntrl:]] ]] && return 1
-  case "$path" in
-    *//*|*/./*|*/../*|*/.|*/..|*/) return 1 ;;
-  esac
-  lower=$(printf '%s\n' "$path" | tr '[:upper:]' '[:lower:]')
-  case "$lower" in
-    /dev|/dev/*|/proc|/proc/*) return 1 ;;
-  esac
-  return 0
-}
-
 # Whether a pinned install may take the standard (non-channel) KEY=VALUE from its
 # installed telemetry.conf: the allowlist in the pin note above.
 telemetry_pinned_key_allowed() {
@@ -155,7 +138,6 @@ telemetry_pinned_key_allowed() {
         *) return 1 ;;
       esac
       ;;
-    pricing_file) telemetry_ordinary_path "$value" ;;
     telemetry_sink_pin) return 0 ;;
     *) return 1 ;;
   esac
@@ -167,8 +149,7 @@ telemetry_pinned_channel_var_allowed() {
   local var_name="$1" value="$2"
   case "$var_name" in
     *_ENDPOINT_URL) [[ "$value" =~ $TELEMETRY_LOOPBACK_URL_RE ]] ;;
-    *_LOG_FILE) telemetry_ordinary_path "$value" ;;
-    *_REDACT) return 0 ;;
+    *_REDACT) [[ "$value" == "none" || "$value" =~ ^[A-Za-z0-9_.,]*$ ]] ;;
     *) return 1 ;;
   esac
 }

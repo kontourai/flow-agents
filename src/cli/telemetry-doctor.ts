@@ -208,7 +208,7 @@ function resolveLikeConfigSh(file: string, pinned: boolean, env: NodeJS.ProcessE
       if (!/^[A-Za-z0-9_]+$/.test(channel[1]) || !/^[A-Za-z0-9_]+$/.test(channel[2])) continue;
       const name = `TELEMETRY_CHANNEL_${channel[1].toUpperCase()}_${channel[2].toUpperCase()}`;
       if (pinned && !pinnedChannelVarAllowed(name, value)) {
-        ignored.push({ key, reason: /_(ENDPOINT_URL|LOG_FILE|REDACT)$/.test(name) ? "value not allowed for a pinned install" : "not on the pinned allowlist" });
+        ignored.push({ key, reason: /_(ENDPOINT_URL|REDACT)$/.test(name) ? "value not allowed for a pinned install" : "not on the pinned allowlist" });
         continue;
       }
       vars.set(name, { value });
@@ -347,26 +347,19 @@ const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(\
 
 const asciiLower = (value: string) => value.replace(/[A-Z]/g, (char) => char.toLowerCase());
 
-/** config.sh's telemetry_ordinary_path: absolute, canonical-looking, no control character, not under /dev or /proc. */
-export function isOrdinaryPath(value: string): boolean {
-  if (!/^\/./s.test(value)) return false;
-  if (/[\x00-\x1f\x7f]/.test(value)) return false;
-  if (/\/\/|\/\.\/|\/\.\.\/|\/\.$|\/\.\.$|\/$/.test(value)) return false;
-  const lower = asciiLower(value);
-  return !(lower === "/dev" || lower.startsWith("/dev/") || lower === "/proc" || lower.startsWith("/proc/"));
-}
-
 const PINNED_STANDARD_KEYS: ReadonlySet<string> = new Set([
   "enabled", "enrich_system", "enrich_workspace", "enrich_auth", "usage_tracking", "notifications", "governance",
   "channels", "max_log_size_mb", "max_log_files", "governance_audit_max_size_mb", "governance_audit_max_files",
-  "notification_profile", "sync_include", "sync_exclude", "console_economics_relay", "console_liveness_relay", "pricing_file",
+  "notification_profile", "sync_include", "sync_exclude", "console_economics_relay", "console_liveness_relay",
   "telemetry_sink_pin",
 ]);
 
 /**
  * The allowlist a pinned install's installed telemetry.conf is held to (config.sh's
  * telemetry_pinned_key_allowed): only settings that are local by construction, each with a value
- * grammar. The file is not trust-gated, so everything else is dropped.
+ * grammar. The file is not trust-gated, so everything else is dropped -- including every path
+ * (pricing_file, a channel's *_LOG_FILE): each event is appended to a log file verbatim, so a chosen
+ * path is a write of attacker-influenced text into a shell rc file, a git hook or /dev/tcp.
  */
 function pinnedKeyAllowed(key: string, value: string): boolean {
   switch (key) {
@@ -379,17 +372,20 @@ function pinnedKeyAllowed(key: string, value: string): boolean {
     case "notification_profile": return /^[A-Za-z0-9_-]+$/.test(value);
     case "sync_include": case "sync_exclude": return true;
     case "console_economics_relay": case "console_liveness_relay": return ["0", "false", "no", "off"].includes(asciiLower(value));
-    case "pricing_file": return isOrdinaryPath(value);
     case "telemetry_sink_pin": return true;
     default: return false;
   }
 }
 
-/** config.sh's telemetry_pinned_channel_var_allowed, on the derived TELEMETRY_CHANNEL_<NAME>_<KEY>. */
+/**
+ * config.sh's telemetry_pinned_channel_var_allowed, on the derived TELEMETRY_CHANNEL_<NAME>_<KEY>.
+ * A redaction list is `none` or field names only, since redact.sh splices each field into a jq
+ * program (`jq ".$field = null"`).
+ */
 function pinnedChannelVarAllowed(name: string, value: string): boolean {
   if (name.endsWith("_ENDPOINT_URL")) return LOOPBACK_URL.test(value);
-  if (name.endsWith("_LOG_FILE")) return isOrdinaryPath(value);
-  return name.endsWith("_REDACT");
+  if (name.endsWith("_REDACT")) return value === "none" || /^[A-Za-z0-9_.,]*$/.test(value);
+  return false;
 }
 
 const RELAY_ON = new Set(["1", "true", "TRUE", "yes", "on"]);

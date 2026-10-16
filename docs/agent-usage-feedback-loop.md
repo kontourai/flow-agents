@@ -270,20 +270,19 @@ line:
 | `notification_profile` | letters, digits, `_` and `-` |
 | `sync_include`, `sync_exclude` | any (agent-name glob patterns) |
 | `console_economics_relay`, `console_liveness_relay` | an opt-out only: `0`, `false`, `no` or `off` |
-| `pricing_file` | an ordinary absolute path |
 | `telemetry_sink_pin` | the pin itself |
-| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_REDACT` | any (a redaction field list) |
-| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_LOG_FILE` | an ordinary absolute path |
+| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_REDACT` | `none`, or a field list: letters, digits, `_`, `.` and commas |
 | a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL` | a loopback URL: `http://127.0.0.1`, `http://localhost` or `http://[::1]`, with an optional port and path |
 
 The value grammars matter beyond networking: the numeric settings reach bash
 arithmetic, which runs a `$(...)` written inside the value, and channel names
-become parts of variable names. An ordinary absolute path starts with `/`,
-has no empty, `.` or `..` component, no trailing `/` and no control character,
-and is not under `/dev` or `/proc` in any letter case, because bash turns a
-write to `/dev/tcp/HOST/PORT` or `/dev/udp/HOST/PORT` into a network
-connection. Relative paths are refused, since a hook would resolve them
-against whatever directory the agent session runs in. Channel settings are
+become parts of variable names; each redaction field is spliced into a `jq`
+program. No path is accepted at all, neither `pricing_file` nor a channel's
+`log_file`: every event is appended to its log file verbatim, so a path chosen
+by the file would be a write of agent-influenced text into a shell startup
+file, a git hook, or `/dev/tcp/HOST/PORT`, which bash turns into a network
+connection. Channels keep their default log files under the telemetry data
+directory, and pricing keeps its default source. Channel settings are
 checked by the variable they become: `config.sh` uppercases
 `channel.<name>.<key>` into `TELEMETRY_CHANNEL_<NAME>_<KEY>`, so
 `channel.full.Endpoint_Url` and `channel.analytics_endpoint.url` are endpoints

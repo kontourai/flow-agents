@@ -168,8 +168,9 @@ installed `telemetry.conf` it ignored (`pinIgnored`). A pinned `telemetry.conf`
 may only set the allowlisted, local-by-construction settings listed under
 "Owner machine mirror" in
 [`docs/agent-usage-feedback-loop.md`](../docs/agent-usage-feedback-loop.md):
-no Console URL, token or tenant, no non-loopback channel endpoint, and no log
-path outside an ordinary absolute path.
+no Console URL, token or tenant, no non-loopback channel endpoint, and no
+path at all (`pricing_file` and channel `log_file` settings are ignored, so logs
+stay under the telemetry data directory).
 Re-running `init` without `--telemetry-sink local-files`, or with a Console
 sink, removes the pin, because an unedited installed `telemetry.conf` is reset
 to the bundle's copy on every re-run. A `telemetry.conf` edited after install is
