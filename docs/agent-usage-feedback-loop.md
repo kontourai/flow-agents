@@ -286,8 +286,9 @@ many requests from one event.
 
 The value grammars matter beyond networking: the numeric settings reach bash
 arithmetic, which runs a `$(...)` written inside the value, and channel names
-become parts of variable names; each redaction field is spliced into a `jq`
-program. No path is accepted at all, neither `pricing_file` nor a channel's
+become parts of variable names. Redaction uses field paths passed as data to
+`jq`, never executable programs. For pinned installs no path is accepted at
+all, neither `pricing_file` nor a channel's
 `log_file`: every event is appended to its log file verbatim, so a path chosen
 by the file would be a write of agent-influenced text into a shell startup
 file, a git hook, or `/dev/tcp/HOST/PORT`, which bash turns into a network
@@ -302,6 +303,31 @@ Standard keys are matched exactly, so a spelling such as `Console_Url` or
 `CONSOLE_URL` in the file is ignored by every install. Only ASCII whitespace
 is trimmed from keys and values, in `config.sh` (which runs `tr` and `sed`
 under `LC_ALL=C`), the liveness relay pre-gate and the doctor alike.
+
+Every config file read by the shell runtime, including unpinned installed,
+workspace, global and explicit files, also receives value validation before
+assignment. Invalid settings produce a warning naming the key and file,
+without printing credentials, and retain the prior environment value or
+default. Valid operator settings keep the resolution and override order above.
+Rotation settings accept one to nine ASCII digits, parsed as decimal even
+with leading zeros; expressions, signs, non-digits and overflow-sized values
+are rejected before bash arithmetic. Redaction accepts `none`, an empty list,
+or comma-separated dotted field paths with letters, digits and underscores
+(spaces are ignored).
+A missing or differently shaped field leaves the event intact.
+
+Unpinned `channel.<name>.log_file` settings must be absolute files beneath
+`TELEMETRY_DATA_DIR`. Traversal, symlink components below that directory,
+directories, devices and FIFOs are rejected. Effective default log and rotation
+paths are checked again before I/O; an unsafe destination emits a warning and
+returns failure without writing through it. Detached hooks check active files and existing rotation siblings in the
+foreground so destination warnings reach the caller without waiting for
+background processing or network requests. A failed channel does not
+prevent delivery to other safe channels or the Console sink. Existing custom directories
+must already exist; use ordinary files in the telemetry data directory.
+Rejected destinations keep the default local log, so ordinary events are
+retained. The local-only pin remains stricter and accepts no log path from
+its file. Explicit environment overrides remain operator-controlled.
 
 Re-running `init` replaces an installed `telemetry.conf` that nobody edited
 with the bundle's copy and applies only that run's sink, so re-running it

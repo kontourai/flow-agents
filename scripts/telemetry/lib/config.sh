@@ -86,7 +86,7 @@ telemetry_conf_warn_untrusted() {
 #   channel settings, by the variable the loop derives
 #   (TELEMETRY_CHANNEL_<NAME>_<KEY>, channel and key uppercased):
 #     *_REDACT                        none, or a field list: [A-Za-z0-9_.,]
-#                                     (each field is spliced into a jq program);
+#                                     (paths are passed to jq as data);
 #                                     local logs only: the Console list
 #                                     (CONSOLE_TELEMETRY_REDACT) is an exported
 #                                     value or the shipped list itself
@@ -123,6 +123,117 @@ telemetry_conf_pinned_local_only() {
 
 # No [ ] { } in the path: curl reads them as URL globs, so one event could fan out to many POSTs.
 TELEMETRY_LOOPBACK_URL_RE='^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[^][{}[:space:]"\\]*)?$'
+
+# Config files are data, regardless of provenance or local-only pin. Validate
+# before assignment; rejected settings retain the prior environment/default.
+TELEMETRY_REDACT_FIELDS_RE='^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*(,[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*)*$'
+telemetry_redact_fields_allowed() {
+  local LC_ALL=C
+  local fields="${1// /}"
+  [[ -z "$fields" || "$fields" == "none" || "$fields" =~ $TELEMETRY_REDACT_FIELDS_RE ]]
+}
+
+telemetry_log_file_allowed() {
+  local file="$1" root="${TELEMETRY_DATA_DIR%/}" rest part current
+  # Absolute, lexical containment plus no traversal or symlink components.
+  [[ "$root" == /* && "$file" == "$root/"* ]] || return 1
+  rest="${file#"$root/"}"
+  [[ -n "$rest" && "$rest" != */ && "$rest" != *$'\n'* && "$rest" != *$'\r'* ]] || return 1
+  current="$root"
+  [[ ! -L "$root" ]] || return 1
+  while [[ -n "$rest" ]]; do
+    part="${rest%%/*}"
+    [[ -n "$part" && "$part" != . && "$part" != .. ]] || return 1
+    current="$current/$part"
+    [[ ! -L "$current" ]] || return 1
+    [[ "$rest" == */* ]] || break
+    [[ -d "$current" ]] || return 1
+    rest="${rest#*/}"
+  done
+  [[ ! -e "$file" || -f "$file" ]]
+}
+
+# Check the effective destination immediately before I/O, including fallback
+# defaults. Paths outside the data directory can only be explicit environment
+# overrides; keep those supported, but never open a symlink or special file.
+telemetry_log_destination_safe() {
+  local file="$1"
+  if [[ "$file" == "${TELEMETRY_DATA_DIR%/}/"* ]]; then
+    telemetry_log_file_allowed "$file" && return 0
+  elif [[ -n "$file" && ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]]; then
+    return 0
+  fi
+  printf 'warning: telemetry: unsafe log destination %s; event or rotation was not written\n' "$file" >&2
+  return 1
+}
+
+# Check existing rotation siblings without looping over an untrusted retention
+# count. Foreground hook preflight keeps warnings visible without inheriting
+# the caller's stderr pipe into detached workers or network children.
+telemetry_log_rotation_destinations_safe() {
+  local file="$1" filename directory base extension candidate failed=0
+  telemetry_log_destination_safe "$file" || return 1
+  filename="${file##*/}"
+  directory="${file%/*}"
+  [[ "$file" == */* ]] || directory=.
+  base="${filename%.*}"
+  extension="${filename##*.}"
+  for candidate in "$directory/$base."*".$extension"; do
+    [[ -e "$candidate" || -L "$candidate" ]] || continue
+    telemetry_log_destination_safe "$candidate" || failed=1
+  done
+  return "$failed"
+}
+
+telemetry_log_destinations_preflight() {
+  local channel upper var file
+  local -a configured_channels
+  IFS=',' read -ra configured_channels <<< "$TELEMETRY_CHANNELS"
+  for channel in "${configured_channels[@]}"; do
+    channel="${channel// /}"
+    [[ -n "$channel" ]] || continue
+    upper=$(printf '%s' "$channel" | LC_ALL=C tr '[:lower:]' '[:upper:]')
+    var="TELEMETRY_CHANNEL_${upper}_LOG_FILE"
+    file="${!var}"
+    [[ -z "$file" ]] || telemetry_log_rotation_destinations_safe "$file"
+  done
+  return 0
+}
+
+telemetry_config_key_allowed() {
+  local LC_ALL=C
+  local key="$1" value="$2"
+  case "$key" in
+    max_log_size_mb|max_log_files|governance_audit_max_size_mb|governance_audit_max_files)
+      # Bound before arithmetic, including leading zeros; parse as decimal below.
+      [[ "$value" =~ ^[0-9]{1,9}$ ]] ;;
+    console_telemetry_redact) telemetry_redact_fields_allowed "$value" ;;
+    # Preserve URL data (including non-ASCII); each consumer owns its scheme
+    # allowlist and refusal diagnostics. Reject ASCII whitespace/quoting here.
+    console_url|console_telemetry_url|console_telemetry_endpoint_url|console_economics_endpoint_url|console_liveness_endpoint_url)
+      [[ ! "$value" =~ [[:space:]\"\\] ]] ;;
+    console_pricing_url|pricing_url)
+      [[ -z "$value" || "$value" =~ ^https?://[^[:space:]\"\\]+$ ]] ;;
+    console_telemetry_token|console_tenant_id|pricing_file) return 0 ;;
+    console_economics_relay|console_liveness_relay)
+      case "$(printf '%s\n' "$value" | LC_ALL=C tr '[:upper:]' '[:lower:]')" in 0|1|true|false|yes|no|on|off) return 0 ;; *) return 1 ;; esac ;;
+    *) telemetry_pinned_key_allowed "$key" "$value" ;;
+  esac
+}
+
+telemetry_config_channel_var_allowed() {
+  case "$1" in
+    *_LOG_FILE) telemetry_log_file_allowed "$2" ;;
+    *_REDACT) telemetry_redact_fields_allowed "$2" ;;
+    *_ENDPOINT_URL) local LC_ALL=C; [[ -z "$2" || "$2" =~ ^https?://[^[:space:]\"\\]+$ ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+telemetry_config_warn_invalid() {
+  # Name the key and file, never print a value that might carry credentials.
+  printf 'warning: config.sh: rejected invalid setting %s in %s; keeping prior default or environment value\n' "$1" "$TELEMETRY_CONFIG_FILE" >&2
+}
 
 # Whether a pinned install may take the standard (non-channel) KEY=VALUE from its
 # installed telemetry.conf: the allowlist in the pin note above.
@@ -235,7 +346,7 @@ TELEMETRY_PRICING_URL="${TELEMETRY_PRICING_URL:-${FLOW_AGENTS_PRICING_URL:-}}"
 
 # Load config file if it exists
 if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
-  while IFS='=' read -r key value; do
+  while IFS='=' read -r key value || [[ -n "$key" ]]; do
     [[ -z "$key" ]] && continue
     # ASCII whitespace only (LC_ALL=C), and printf, not echo, so a value of -n or -e survives.
     key=$(printf '%s\n' "$key" | LC_ALL=C tr -d '[:space:]')
@@ -252,12 +363,26 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
         if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]] && ! telemetry_pinned_channel_var_allowed "$var_name" "$value"; then
           continue
         fi
+        if ! telemetry_config_channel_var_allowed "$var_name" "$value"; then
+          telemetry_config_warn_invalid "$key"
+          continue
+        fi
         printf -v "$var_name" '%s' "$value"
+      else
+        telemetry_config_warn_invalid "$key"
       fi
     else
       if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]] && ! telemetry_pinned_key_allowed "$key" "$value"; then
         continue
       fi
+      if ! telemetry_config_key_allowed "$key" "$value"; then
+        telemetry_config_warn_invalid "$key"
+        continue
+      fi
+      case "$key" in
+        max_log_size_mb|max_log_files|governance_audit_max_size_mb|governance_audit_max_files)
+          value=$((10#$value)) ;;
+      esac
       # Standard config
       case "$key" in
         enabled) TELEMETRY_ENABLED="$value" ;;
