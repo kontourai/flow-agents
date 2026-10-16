@@ -185,7 +185,7 @@
       }
     },
     "verdict": { "enum": ["pass", "comment", "fail", "not_verified"] },
-    "not_verified_reason": { "enum": ["reviewer_withheld", "reviewer_unavailable"] },
+    "not_verified_reason": { "enum": ["reviewer_withheld", "reviewer_unavailable", "assessment_invalid"] },
     "summary": { "type": "string", "minLength": 1 },
     "coverage": { "$ref": "#/$defs/coverage" },
     "findings": { "$ref": "#/$defs/findings" },
