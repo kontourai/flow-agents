@@ -1562,7 +1562,7 @@ mkdir -p \
   "$CH6_ROOT/dist/codex/.agents/skills/deliver" \
   "$CH6_ROOT/dist/codex/build/src" \
   "$CH6_FAKE_BIN"
-cp "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$ROOT_DIR/scripts/install-merge.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
+cp "$ROOT_DIR/scripts/verify-runtime-imports.js" "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$ROOT_DIR/scripts/install-merge.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
 cp "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/install-merge.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/"
 cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/packaging/"
 cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/dist/codex/packaging/"
@@ -1577,6 +1577,20 @@ printf 'fixture\n' > "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/fixture.txt"
 mkdir -p "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_SKILLS/legacy-collision" "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_AGENTS"
 printf 'flow-agents-new-skill\n' > "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_SKILLS/legacy-collision/SKILL.md"
 printf 'name = "flow-agents-new-agent"\n' > "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_AGENTS/legacy-collision.toml"
+
+# The minimal shipped fixture must satisfy the same prebuilt import inventory
+# contract as the real bundle before overlap/ownership assertions can execute.
+node - "$CH6_ROOT/dist/codex" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const root = process.argv[2];
+const files = ['build/package.json', 'build/src/cli.js'].map(relative => ({
+  path: relative,
+  sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, relative))).digest('hex'),
+}));
+fs.writeFileSync(path.join(root, 'build/runtime-imports.json'), JSON.stringify({ schema_version: '1.0', files }));
+NODE
 
 for CH6_CASE in equal descendant ancestor; do
   case "$CH6_CASE" in
