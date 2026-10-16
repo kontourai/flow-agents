@@ -81,7 +81,8 @@
     },
     {
       "source": "docs/developer-architecture.md",
-      "section": "Concepts"
+      "section": "Concepts",
+      "covers": ["src/tools/build-universal-bundles.ts", "src/tools/common.ts", "src/lib/package-version.ts", "src/lib/kit-flow-binding.ts", "src/lib/flow-resolver.ts", "src/lib/kit-registry.ts", "src/builder-gate-action-envelope.ts", "src/cli/narrative-sources.ts", "scripts/install-codex-home.sh"]
     },
     {
       "source": "docs/workflow-artifact-lifecycle.md",
@@ -162,7 +163,8 @@
     },
     {
       "source": "docs/agent-usage-feedback-loop.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": ["scripts/telemetry/lib/config.sh", "scripts/telemetry/lib/redact.sh", "context/scripts/telemetry/lib/config.sh", "context/scripts/telemetry/lib/redact.sh", "scripts/telemetry/lib/transport.sh", "context/scripts/telemetry/lib/transport.sh", "scripts/hooks/lib/audit-transport.sh", "context/scripts/hooks/lib/audit-transport.sh", "scripts/telemetry/telemetry.sh", "context/scripts/telemetry/telemetry.sh", "scripts/hooks/governance-audit.sh", "context/scripts/hooks/governance-audit.sh"]
     },
     {
       "source": "docs/integrations/index.md",

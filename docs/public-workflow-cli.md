@@ -453,6 +453,34 @@ Before starting:
    worktree, as the examples below do (a worktree-relative path works). Without it, a verb looks
    the session up through the main checkout's store, does not find it, and refuses.
 
+5. Before pinning the head or requesting review, select verification commands from the
+   repository's [reconciliation manifest](#ci-reconciliation-of-command-evidence). Inspect each
+   selected command's actual runner and test arguments: its name or a passing unrelated check
+   does not prove coverage of the changed behavior. Cover every changed test and accepted
+   criterion, using multiple commands when necessary. For repositories using the baseline
+   registry, list the declared IDs, exact commands and required lanes with:
+
+   ```bash
+   bash evals/ci/run-baseline.sh --manifest-json | jq '.[] | {id, command, lanes}'
+   ```
+
+   In Flow Agents itself, `static-eval-suite` (`bash evals/run.sh static`) reaches
+   `evals/static/test_unit_helpers.sh`, which executes every `src/cli/*.test.mjs` file with
+   the unit-state preload. This establishes CI coverage, but the shell suite does not expose
+   a supported `tests-evidence` result protocol; declaration alone is insufficient for that claim.
+   The focused `telemetry-local-pin-unit-tests` entry runs
+   `node --test --import ./src/cli/unit-test-state.mjs src/cli/telemetry-local-pin.test.mjs`
+   in required `Source and Static` CI. Prepare its build and bundles first with
+   `npm run build:bundles --silent`. A suite entry admits only its exact command; it does not
+   admit an arbitrary focused subset.
+
+   If no declared command covers the change, stop setup before pinning: register a suitable
+   command in the owning manifest **and** wire it into required CI, then commit and review the
+   resulting head. For the baseline registry, update `CHECKS`, its `LANE_*` array and the CI
+   workflow step together; run `bash evals/static/test_ci_check_registration.sh` to check their
+   agreement. A valid tier 1/2 manifest ignores `TRUST_RECONCILE_COMMANDS`; it cannot extend
+   that manifest. Changing registration after pinning needs a new run at the new head.
+
 Then start with the head pinned. With a provider assignment:
 
 ```bash
@@ -531,6 +559,8 @@ A new head needs a new run under a new provider Work Item. The run is keyed by t
 archiving a run keeps its canonical record, so starting the same Work Item again resumes the old
 run and refuses the new head. This is deliberate friction in this release; there are no per-head
 runs within one Work Item.
+
+### CI reconciliation of command evidence
 
 `workflow publish-delivery` accepts a completed run and seals its checkpoint at the pinned head.
 It first checks the bundle against the repository's reconcile manifest, and refuses with "command

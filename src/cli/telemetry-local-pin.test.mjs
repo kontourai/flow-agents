@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
+import crypto from "node:crypto";
 import net from "node:net";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
@@ -323,6 +324,39 @@ test("init --global codex with --telemetry-sink local-files pins the Codex home'
   assert.doesNotMatch(result.stderr, /does not pin/);
 });
 
+test("global Codex records configured telemetry bytes and supports pinned reinstall without claiming operator edits", () => {
+  const home = makeFixtureDir("telemetry-pin-codex-reinstall-home-");
+  const dest = path.join(makeFixtureDir("telemetry-pin-codex-reinstall-dest-"), "codex-home");
+  const args = ["--runtime", "codex", "--global", "--dest", dest, "--telemetry-sink", "local-files"];
+  const ownedConf = () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(dest, ".flow-agents", "codex-install-manifest.json"), "utf8"));
+    return manifest.files.find((entry) => entry.path === "scripts/telemetry/telemetry.conf");
+  };
+  for (let install = 0; install < 2; install++) {
+    const result = runInit(args, home);
+    assert.equal(result.status, 0, result.output);
+    assert.match(fs.readFileSync(installedConf(dest), "utf8"), PIN_LINE);
+    assert.equal(ownedConf()?.sha256, crypto.createHash("sha256").update(fs.readFileSync(installedConf(dest))).digest("hex"));
+  }
+  // A subsequent explicit Console selection replaces the pin and is owned too.
+  const consoleArgs = ["--runtime", "codex", "--global", "--dest", dest, "--telemetry-sink", "user-hosted-console", "--console-url", GLOBAL_URL];
+  for (let install = 0; install < 2; install++) {
+    const result = runInit(consoleArgs, home);
+    assert.equal(result.status, 0, result.output);
+    assert.doesNotMatch(fs.readFileSync(installedConf(dest), "utf8"), PIN_LINE);
+    assert.equal(ownedConf()?.sha256, crypto.createHash("sha256").update(fs.readFileSync(installedConf(dest))).digest("hex"));
+  }
+  const manifestPath = path.join(dest, ".flow-agents", "codex-install-manifest.json");
+  const manifestBefore = fs.readFileSync(manifestPath);
+  fs.appendFileSync(installedConf(dest), "# operator edit\n");
+  const edited = fs.readFileSync(installedConf(dest));
+  const refused = runInit(args, home);
+  assert.notEqual(refused.status, 0, refused.output);
+  assert.match(refused.output, /refusing to overwrite modified Flow Agents file/);
+  assert.deepEqual(fs.readFileSync(installedConf(dest)), edited);
+  assert.deepEqual(fs.readFileSync(manifestPath), manifestBefore);
+});
+
 // --- interactive init -------------------------------------------------------------------------
 //
 // Interactive init only runs on a TTY (a piped stdin is treated as headless), so these drive it
@@ -532,7 +566,14 @@ test("pinned conf: a relay opt-out still applies when the environment supplies a
 
 function readDoctorReport(dest, env) {
   const result = spawnSync(process.execPath, [cli, "telemetry-doctor", "--dest", dest, "--json", "--headless", "--timeout-ms", "300"], { env: { PATH: NODE_PATH, ...env }, encoding: "utf8" });
-  return JSON.parse(result.stdout);
+  const diagnostics = JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message, stdout: result.stdout, stderr: result.stderr });
+  assert.ok(result.status === 0 || result.status === 1, `telemetry-doctor did not complete: ${diagnostics}`);
+  assert.ok(result.stdout.trim(), `telemetry-doctor returned no report: ${diagnostics}`);
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    assert.fail(`telemetry-doctor returned invalid JSON: ${diagnostics}; ${error.message}`);
+  }
 }
 
 // --- a pinned install that still sends to a Console says so -------------------------------------
@@ -926,7 +967,7 @@ async function emitAndCaptureSocket(dest, env) {
   }
 }
 
-for (const [label, fixture, expectEvent] of [["pinned: the listener receives nothing", () => pinned, false], ["unpinned control: the listener receives the event", () => unpinned, true]]) {
+for (const [label, fixture, expectEvent] of [["pinned: the listener receives nothing", () => pinned, false], ["unpinned: the listener receives nothing", () => unpinned, false]]) {
   test(`a channel log_file of /dev/tcp/HOST/PORT, ${label}`, async () => {
     const { dest } = fixture();
     const home = makeFixtureDir("telemetry-pin-devtcp-home-");
@@ -938,7 +979,7 @@ for (const [label, fixture, expectEvent] of [["pinned: the listener receives not
       });
       if (expectEvent) assert.match(received, /socket-probe/);
       else assert.equal(received, "", "an event reached the socket");
-      if (!expectEvent) {
+      if (dest === pinned.dest) {
         const doctor = readDoctorReport(dest, { HOME: home });
         assert.deepEqual(doctor.telemetry.pinIgnored, [{ key: "channel.full.log_file", reason: "not on the pinned allowlist" }]);
       }
@@ -1103,7 +1144,7 @@ function runPostToolUseHook(dest, env, toolResponse) {
   assert.equal(result.status, 0, result.stderr);
 }
 
-for (const [label, fixture, expectWritten] of [["pinned: the file is left unwritten", () => pinned, false], ["unpinned control: the hook appends to it", () => unpinned, true]]) {
+for (const [label, fixture, expectWritten] of [["pinned: the file is left unwritten", () => pinned, false], ["unpinned: the file is left unwritten", () => unpinned, false]]) {
   test(`a channel log_file naming $HOME/.zshrc, ${label}`, () => {
     const { dest } = fixture();
     const home = makeFixtureDir("telemetry-pin-zshrc-home-");
@@ -1122,7 +1163,7 @@ const JQ_PROGRAM = "x = env.CANARY_SECRET | .y";
 // Built at runtime so the secret scanner does not read the test canary as a credential.
 const JQ_CANARY = ["canary", "1483", "value"].join("-");
 
-for (const [label, fixture, expectLeak] of [["pinned: the redaction list is ignored and the secret stays out", () => pinned, false], ["unpinned control: the secret lands in the local log", () => unpinned, true]]) {
+for (const [label, fixture, expectLeak] of [["pinned: the redaction list is ignored and the secret stays out", () => pinned, false], ["unpinned: the secret stays out of the local log", () => unpinned, false]]) {
   test(`a channel redact value written as a jq program, ${label}`, () => {
     const { dest } = fixture();
     const home = makeFixtureDir("telemetry-pin-jq-home-");
@@ -1133,7 +1174,7 @@ for (const [label, fixture, expectLeak] of [["pinned: the redaction list is igno
       const written = fs.readFileSync(log, "utf8");
       assert.ok(written.length > 0, "the hook wrote no event");
       assert.equal(written.includes(JQ_CANARY), expectLeak, written.slice(0, 400));
-      if (!expectLeak) {
+      if (dest === pinned.dest) {
         assert.deepEqual(readDoctorReport(dest, { HOME: home }).telemetry.pinIgnored, [{ key: "channel.full.redact", reason: "value not allowed for a pinned install" }]);
       }
     });
