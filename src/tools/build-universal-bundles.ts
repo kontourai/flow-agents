@@ -1,19 +1,22 @@
 #!/usr/bin/env node
+import { flowAgentsPackageVersion } from "../lib/package-version.js";
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { buildSync } from "esbuild";
+// Keep build tooling outside the installed command import graph.
+const buildSync: typeof import("esbuild").buildSync = (options) => createRequire(import.meta.url)("esbuild").buildSync(options);
 import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
+import { relocatePackageAssets } from "./relocate-package-assets.js";
 import { CODEX_REASONING_EFFORTS, codexAgentRoutingErrors } from "./codex-agent-routing.js";
 import { DURABLE_FLOW_AGENTS_DIR, FLOW_AGENTS_RUNTIME_DIR } from "../lib/local-artifact-root.js";
 
 type Agent = Record<string, unknown> & { name: string; prompt: string };
 const dist = process.env.FLOW_AGENTS_DIST_DIR ? path.resolve(process.env.FLOW_AGENTS_DIST_DIR) : path.join(root, "dist");
 const manifest = loadJson<Record<string, any>>(path.join(root, "packaging/manifest.json"));
-const pkgVersion: string = (loadJson<Record<string, unknown>>(path.join(root, "package.json")) as Record<string, string>)["version"] ?? "0.0.0";
+const pkgVersion = flowAgentsPackageVersion();
 const runtimeTaskDir = FLOW_AGENTS_RUNTIME_DIR;
 const durableInstallRecordRel = `${DURABLE_FLOW_AGENTS_DIR}/install.json`;
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".sh", ".toml", ".txt", ".yaml", ".yml", ".ts"]);
@@ -690,6 +693,7 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
     name: "@kontourai/flow-agents",
     version: pkgVersion,
     type: "module",
+    dependencies: loadJson<{ dependencies: Record<string, string> }>(path.join(root, "package.json")).dependencies,
   }, null, 2)}\n`);
   const commonBuilt = path.join(root, "build/src/tools/common.js");
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
@@ -698,6 +702,7 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   writeBundledConduit(targetRoot);
   writeBundledDatum(targetRoot);
   writeBundledSurvey(targetRoot);
+  if (targetName === "codex") writeBundledRuntimeImports(targetRoot);
   // #620: ship the build-only capability-declarations JSON inside each bundle so an
   // installed economics-record emitter (and hooks) can read it at build/generated/
   // relative to the bundle root. It is generated unconditionally by `npm run build`
@@ -733,6 +738,11 @@ function installedPackageRoot(specifier: string, resolveFrom: string): string {
   try {
     return path.dirname(requireFrom.resolve(`${specifier}/package.json`));
   } catch {
+    // Import-only exports can refuse require.resolve despite being installed.
+    for (const search of requireFrom.resolve.paths(specifier) ?? []) {
+      const candidate = path.join(search, specifier);
+      if (fs.existsSync(path.join(candidate, "package.json"))) return fs.realpathSync(candidate);
+    }
     let directory = path.dirname(requireFrom.resolve(specifier));
     const { root: filesystemRoot } = path.parse(directory);
     while (!fs.existsSync(path.join(directory, "package.json")) && directory !== filesystemRoot) {
@@ -885,6 +895,175 @@ function writeBundledSurvey(targetRoot:string):void {
   writeText(reviewFile,rewritten);
  }
  writeText(path.join(vendorRoot,'survey.bundle.json'),JSON.stringify({schema_version:'1.0',entry_package:packageName,entry_version:metadata.version,bundles,assets,packages:[...packages.values()].sort((a,b)=>`${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`))},null,2)+'\n');
+}
+
+/** Finish Codex's standalone public import graph without shipping an npm tree.
+ * Keep module-relative data with Flow; staging changes only Node resolution,
+ * never Flow's validators or process semantics. */
+function writeBundledRuntimeImports(targetRoot: string): void {
+  const sourceRoot = path.join(targetRoot, "build/src");
+  copyTree(path.join(root, "integrations/codex-host"), path.join(targetRoot, "integrations/codex-host"), "codex", "<bundle-root>");
+  const engineHost = path.join(sourceRoot, "engine-host.js");
+  writeText(engineHost, readText(engineHost)
+    .replace('"@kontourai/flow-agents/workspace-revision"', '"../../integrations/codex-host/workspace-revision.mjs"')
+    .replace('"@kontourai/flow-agents/docker-worker"', '"../../integrations/codex-host/docker-worker.mjs"'));
+  const imports = new Map<string, string[]>();
+  const pattern = /\b(?:from\s*|import\(\s*)(["'])(@kontourai\/[^"']+)\1/g;
+  for (const file of walkFiles(sourceRoot)) {
+    if (!file.endsWith(".js") || file.includes(`${path.sep}vendor${path.sep}`) || file.includes(`${path.sep}tools${path.sep}`)) continue;
+    for (const match of readText(file).matchAll(pattern)) {
+      const files = imports.get(match[2]) ?? [];
+      if (!files.includes(file)) files.push(file);
+      imports.set(match[2], files);
+    }
+  }
+  for (const [specifier, files] of [...imports].sort(([a], [b]) => a.localeCompare(b))) {
+    const packageName = specifier.split("/").slice(0, 2).join("/");
+    const declared = loadJson<{ dependencies: Record<string, string> }>(path.join(root, "package.json")).dependencies[packageName];
+    const resolvedEntry = fileURLToPath(import.meta.resolve(specifier));
+    let packageRoot = path.dirname(resolvedEntry);
+    while (!fs.existsSync(path.join(packageRoot, "package.json"))) packageRoot = path.dirname(packageRoot);
+    const entryPackage = loadJson<{ name: string; version: string }>(path.join(packageRoot, "package.json"));
+    if (!declared || entryPackage.name !== packageName || entryPackage.version !== declared) {
+      throw new Error(`Standalone runtime dependency must match exact published version: ${specifier}`);
+    }
+    const bundleName = specifier.replace(/^@kontourai\//, "").replaceAll("/", "-");
+    const vendorFile = path.join(sourceRoot, "vendor", bundleName, "index.mjs");
+    const stage = path.join(targetRoot, "build/.runtime-source");
+    let entry = resolvedEntry;
+    try {
+      if (specifier === "@kontourai/flow") {
+        fs.cpSync(path.join(packageRoot, "dist"), path.join(stage, "dist"), { recursive: true });
+        fs.copyFileSync(path.join(packageRoot, "package.json"), path.join(stage, "package.json"));
+        for (const notice of fs.readdirSync(packageRoot).filter(name => /^(?:licen[sc]e|copying|notice)(?:[._-].*)?$/i.test(name))) fs.copyFileSync(path.join(packageRoot, notice), path.join(stage, notice));
+        const dependencies = loadJson<{ dependencies: Record<string, string> }>(path.join(packageRoot, "package.json")).dependencies;
+        for (const dependency of Object.keys(dependencies)) {
+          const destination = path.join(stage, "node_modules", dependency);
+          fs.mkdirSync(path.dirname(destination), { recursive: true });
+          fs.symlinkSync(installedPackageRoot(dependency, entry), destination, "dir");
+        }
+        // Expose literal CJS imports to esbuild. createRequire aliases otherwise
+        // escape static bundling and resolve from the user's installed home.
+        for (const relative of ["config/flow-config-validator.js", "runtime/flow-run-validator.js", "gates/trust-bundle-validator.js"]) {
+          const file = path.join(stage, "dist", relative);
+          let source = readText(file);
+          const declaration = /const (_?require) = createRequire\(import\.meta\.url\);/;
+          if (!declaration.test(source)) throw new Error(`Flow packaging seam changed: ${relative}`);
+          source = source.replace(declaration, "").replaceAll('_require(', 'require(');
+          if (relative.startsWith("gates/")) {
+            source = relocatePackageAssets(source, entry, path.dirname(vendorFile));
+          }
+          writeText(file, source);
+        }
+        fs.cpSync(path.join(packageRoot, "schemas"), path.join(path.dirname(vendorFile), "schemas"), { recursive: true });
+        writeText(path.join(path.dirname(vendorFile), "package.json"), readText(path.join(packageRoot, "package.json")));
+        entry = path.join(stage, path.relative(packageRoot, entry));
+      }
+      if (specifier === "@kontourai/relay/anthropic" || specifier === "@kontourai/relay/runtime-profile") {
+        // Relay intentionally hides its optional SDK import from TypeScript.
+        // Make this pinned published seam visible to the standalone bundler.
+        const source = readText(path.join(path.dirname(entry), "anthropic.js"));
+        const lookup = 'Function("m", "return import(m)")(moduleName)';
+        if (!source.includes(lookup)) throw new Error("Relay SDK import seam changed");
+        fs.cpSync(path.dirname(entry), stage, { recursive: true });
+        writeText(path.join(stage, "package.json"), readText(path.join(packageRoot, "package.json")));
+        for (const notice of fs.readdirSync(packageRoot).filter(name => /^(?:licen[sc]e|copying|notice)(?:[._-].*)?$/i.test(name))) fs.copyFileSync(path.join(packageRoot, notice), path.join(stage, notice));
+        entry = path.join(stage, path.basename(entry));
+        writeText(path.join(stage, "anthropic.js"), source.replace(lookup, 'import("@anthropic-ai/sdk")'));
+      }
+      const result = buildSync({
+        absWorkingDir: root, nodePaths: [path.join(root, "node_modules")], entryPoints: [entry], bundle: true,
+        platform: "node", format: "esm", target: "node22", mainFields: ["module", "main"],
+        minifyWhitespace: true, legalComments: "eof", write: false, metafile: true,
+        banner: { js: 'import { createRequire as runtimeCreateRequire } from "node:module"; const require = runtimeCreateRequire(import.meta.url);' },
+      });
+      const output = result.outputFiles?.[0];
+      if (!output || !result.metafile) throw new Error(`Standalone runtime produced no bundle: ${specifier}`);
+      writeText(vendorFile, output.text);
+      if (specifier === "@kontourai/surface") {
+        writeText(path.join(path.dirname(vendorFile), "package.json"), readText(path.join(packageRoot, "package.json")));
+        fs.copyFileSync(path.join(packageRoot, "dist/src/trust-panel/surface-trust-panel.js"), path.join(path.dirname(vendorFile), "trust-panel.js"));
+      }
+      // Retain original package license/notice files for every dependency whose
+      // code landed in the bundle, including pnpm-isolated public transitives.
+      const packaged = new Map<string, { name: string; version: string; license: unknown; notices: string[] }>();
+      for (const built of Object.values(result.metafile.outputs)) {
+        for (const [input, contribution] of Object.entries(built.inputs)) {
+          if (!contribution.bytesInOutput) continue;
+          let directory = path.dirname(path.resolve(root, input));
+          type PackageMetadata = { name?: string; version?: string; license?: unknown };
+          let metadata: PackageMetadata | null = null;
+          while (directory !== path.parse(directory).root) {
+            const file = path.join(directory, "package.json");
+            if (fs.existsSync(file)) {
+              const candidate = loadJson<PackageMetadata>(file);
+              if (candidate?.name && candidate.version) { metadata = candidate; break; }
+            }
+            directory = path.dirname(directory);
+          }
+          if (!metadata?.name || !metadata.version) throw new Error(`Bundled runtime input lacks package provenance: ${input}`);
+          const identity = `${metadata.name}@${metadata.version}`;
+          if (packaged.has(identity)) continue;
+          const notices = fs.readdirSync(directory).filter((file) => /^(?:licen[sc]e|copying|notice)(?:[._-].*)?$/i.test(file) && fs.statSync(path.join(directory, file)).isFile()).sort();
+          // Some published npm packages carry only an SPDX declaration. Preserve
+          // that original metadata rather than inventing a missing license file.
+          if (!notices.length && metadata.license) notices.push("package.json");
+          if (!notices.length) throw new Error(`Bundled runtime dependency lacks license metadata: ${identity}`);
+          const copied: string[] = [];
+          for (const notice of notices) {
+            const relative = `runtime.licenses/${encodeURIComponent(identity)}/${notice}`;
+            writeText(path.join(path.dirname(vendorFile), relative), readText(path.join(directory, notice)));
+            copied.push(relative);
+          }
+          packaged.set(identity, { name: metadata.name, version: metadata.version, license: metadata.license ?? null, notices: copied });
+        }
+      }
+      writeText(path.join(path.dirname(vendorFile), `${bundleName}.runtime.bundle.json`), `${JSON.stringify({
+        schema_version: "1.0", entry_package: packageName, entry_version: entryPackage.version,
+        bundle_digest: `sha256:${crypto.createHash("sha256").update(output.text).digest("hex")}`,
+        packages: [...packaged.values()].sort((first, second) => `${first.name}@${first.version}`.localeCompare(`${second.name}@${second.version}`)),
+      }, null, 2)}\n`);
+
+    } finally {
+      fs.rmSync(stage, { recursive: true, force: true });
+    }
+    for (const file of files) {
+      const relative = path.relative(path.dirname(file), vendorFile).replaceAll(path.sep, "/");
+      const local = relative.startsWith(".") ? relative : `./${relative}`;
+      const source = readText(file);
+      const rewritten = source.replace(pattern, (match, quote, imported) => imported === specifier ? match.replace(`${quote}${imported}${quote}`, JSON.stringify(local)) : match);
+      writeText(file, rewritten);
+    }
+  }
+  // Survey checks the version of its own resolved Surface, which can differ
+  // from Flow Agents' direct dependency. Preserve that exact metadata boundary.
+  const surveyEntry = fileURLToPath(import.meta.resolve("@kontourai/survey"));
+  const surveySurfaceRoot = installedPackageRoot("@kontourai/surface", surveyEntry);
+  for (const file of walkFiles(path.join(sourceRoot, "vendor"))) {
+    if (!file.endsWith(".mjs")) continue;
+    const source = readText(file);
+    const lookup = 'import.meta.resolve("@kontourai/surface")';
+    if (!source.includes(lookup)) continue;
+    const metadataDir = path.join(path.dirname(file), "resolved-survey-surface");
+    writeText(path.join(metadataDir, "package.json"), readText(path.join(surveySurfaceRoot, "package.json")));
+    writeText(file, source.replaceAll(lookup, 'new URL("./resolved-survey-surface/package.json", import.meta.url).href'));
+  }
+  for (const file of walkFiles(path.join(sourceRoot, "vendor"))) {
+    if (!file.endsWith(".bundle.json")) continue;
+    const provenance = loadJson<Record<string, any>>(file);
+    if (provenance.bundle_digest && fs.existsSync(path.join(path.dirname(file), "index.mjs"))) {
+      provenance.bundle_digest = `sha256:${crypto.createHash("sha256").update(fs.readFileSync(path.join(path.dirname(file), "index.mjs"))).digest("hex")}`;
+    }
+    for (const bundle of provenance.bundles ?? []) {
+      bundle.digest = `sha256:${crypto.createHash("sha256").update(fs.readFileSync(path.join(path.dirname(file), bundle.path))).digest("hex")}`;
+    }
+    writeText(file, JSON.stringify(provenance, null, 2) + "\n");
+  }
+  const files = [...walkFiles(sourceRoot), ...walkFiles(path.join(targetRoot, "integrations/codex-host")), path.join(targetRoot, "build/package.json")].map(file => ({
+    path: path.relative(targetRoot, file).replaceAll(path.sep, "/"),
+    sha256: crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"),
+  })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  writeText(path.join(targetRoot, "build/runtime-imports.json"), JSON.stringify({ schema_version: "1.0", files }, null, 2) + "\n");
 }
 
 function writeBundledFlowValidator(targetRoot: string): void {
