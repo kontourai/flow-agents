@@ -30,6 +30,13 @@ pass=0
 fail=0
 
 cleanup() {
+  if [[ "$fail" -gt 0 ]]; then
+    for diagnostic in "$TMPDIR_EVAL"/ch6-*.out "$TMPDIR_EVAL"/ch7-*.out; do
+      [[ -f "$diagnostic" ]] || continue
+      echo "--- Installer diagnostic: $(basename "$diagnostic") ---"
+      cat "$diagnostic"
+    done
+  fi
   rm -rf "$TMPDIR_EVAL"
 }
 trap cleanup EXIT
@@ -1562,7 +1569,7 @@ mkdir -p \
   "$CH6_ROOT/dist/codex/.agents/skills/deliver" \
   "$CH6_ROOT/dist/codex/build/src" \
   "$CH6_FAKE_BIN"
-cp "$ROOT_DIR/scripts/verify-runtime-imports.js" "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$ROOT_DIR/scripts/install-merge.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
+cp "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$ROOT_DIR/scripts/install-merge.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
 cp "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/install-merge.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/"
 cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/packaging/"
 cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/dist/codex/packaging/"
@@ -1578,19 +1585,51 @@ mkdir -p "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_SKILLS/legacy-collision" "$CH6
 printf 'flow-agents-new-skill\n' > "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_SKILLS/legacy-collision/SKILL.md"
 printf 'name = "flow-agents-new-agent"\n' > "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_AGENTS/legacy-collision.toml"
 
-# The minimal shipped fixture must satisfy the same prebuilt import inventory
-# contract as the real bundle before overlap/ownership assertions can execute.
+# This synthetic bundle tests ownership, not the real CLI. Give its two runtime
+# files an exact inventory so validation reaches the overlap/ownership checks.
 node - "$CH6_ROOT/dist/codex" <<'NODE'
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const root = process.argv[2];
 const files = ['build/package.json', 'build/src/cli.js'].map(relative => ({
   path: relative,
   sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, relative))).digest('hex'),
 }));
-fs.writeFileSync(path.join(root, 'build/runtime-imports.json'), JSON.stringify({ schema_version: '1.0', files }));
+fs.writeFileSync(path.join(root, 'build/runtime-imports.json'), JSON.stringify({ schema_version: '1.0', files }) + '\n');
 NODE
+
+# Keep inventory enforcement load-bearing: missing inventory, changed bytes, and
+# unlisted metadata must all refuse before creating a destination. Restore each
+# mutation byte-for-byte before the original CH6/CH7 behavioral assertions.
+cp "$CH6_ROOT/dist/codex/build/runtime-imports.json" "$TMPDIR_EVAL/ch6-inventory.original"
+cp "$CH6_ROOT/dist/codex/build/src/cli.js" "$TMPDIR_EVAL/ch6-cli.original"
+for CH6_INVALID in missing changed unlisted; do
+  case "$CH6_INVALID" in
+    missing) rm "$CH6_ROOT/dist/codex/build/runtime-imports.json"; CH6_ERROR='build/runtime-imports.json' ;;
+    changed) printf '// changed runtime\n' >> "$CH6_ROOT/dist/codex/build/src/cli.js"; CH6_ERROR='inventory is missing, changed, or corrupt' ;;
+    unlisted)
+      mkdir -p "$CH6_ROOT/dist/codex/build/src/metadata"
+      printf '{}\n' > "$CH6_ROOT/dist/codex/build/src/metadata/unlisted.json"
+      CH6_ERROR='inventory is missing, changed, or corrupt'
+      ;;
+  esac
+  CH6_INVALID_DEST="$TMPDIR_EVAL/ch6-invalid-$CH6_INVALID"
+  if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch6-home" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH6_INVALID_DEST" >"$TMPDIR_EVAL/ch6-inventory-$CH6_INVALID.out" 2>&1; then
+    _fail "CH6: installer accepted $CH6_INVALID runtime inventory"
+  elif grep -q 'shipped bundle validation failed' "$TMPDIR_EVAL/ch6-inventory-$CH6_INVALID.out" \
+    && grep -q "$CH6_ERROR" "$TMPDIR_EVAL/ch6-inventory-$CH6_INVALID.out" \
+    && [[ ! -e "$CH6_INVALID_DEST" ]]; then
+    _pass "CH6: $CH6_INVALID runtime inventory refuses before destination writes"
+  else
+    _fail "CH6: $CH6_INVALID runtime inventory did not refuse safely"
+  fi
+  cp "$TMPDIR_EVAL/ch6-inventory.original" "$CH6_ROOT/dist/codex/build/runtime-imports.json"
+  cp "$TMPDIR_EVAL/ch6-cli.original" "$CH6_ROOT/dist/codex/build/src/cli.js"
+  rm -rf "$CH6_ROOT/dist/codex/build/src/metadata"
+  cmp "$TMPDIR_EVAL/ch6-inventory.original" "$CH6_ROOT/dist/codex/build/runtime-imports.json"
+  cmp "$TMPDIR_EVAL/ch6-cli.original" "$CH6_ROOT/dist/codex/build/src/cli.js"
+done
 
 for CH6_CASE in equal descendant ancestor; do
   case "$CH6_CASE" in

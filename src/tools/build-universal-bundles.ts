@@ -9,6 +9,7 @@ import path from "node:path";
 // Keep build tooling outside the installed command import graph.
 const buildSync: typeof import("esbuild").buildSync = (options) => createRequire(import.meta.url)("esbuild").buildSync(options);
 import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
+import { relocatePackageAssets } from "./relocate-package-assets.js";
 import { CODEX_REASONING_EFFORTS, codexAgentRoutingErrors } from "./codex-agent-routing.js";
 import { DURABLE_FLOW_AGENTS_DIR, FLOW_AGENTS_RUNTIME_DIR } from "../lib/local-artifact-root.js";
 
@@ -950,17 +951,7 @@ function writeBundledRuntimeImports(targetRoot: string): void {
           if (!declaration.test(source)) throw new Error(`Flow packaging seam changed: ${relative}`);
           source = source.replace(declaration, "").replaceAll('_require(', 'require(');
           if (relative.startsWith("gates/")) {
-            const lookup = 'dirname(_require.resolve("hachure"))';
-            if (!source.includes(lookup)) throw new Error("Flow Hachure asset seam changed");
-            source = source.replace(lookup, 'fileURLToPath(new URL("./hachure/", import.meta.url))');
-            const hachureEntry = createRequire(entry).resolve("hachure");
-            const hachureRoot = installedPackageRoot("hachure", entry);
-            const hachureVendor = path.join(path.dirname(vendorFile), "hachure");
-            writeText(path.join(hachureVendor, "package.json"), readText(path.join(hachureRoot, "package.json")));
-            for (const notice of fs.readdirSync(hachureRoot).filter(name => /^(?:licen[sc]e|copying|notice)(?:[._-].*)?$/i.test(name))) {
-              writeText(path.join(hachureVendor, notice), readText(path.join(hachureRoot, notice)));
-            }
-            fs.cpSync(path.join(path.dirname(hachureEntry), "schemas"), path.join(path.dirname(vendorFile), "hachure/schemas"), { recursive: true });
+            source = relocatePackageAssets(source, entry, path.dirname(vendorFile));
           }
           writeText(file, source);
         }
