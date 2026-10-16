@@ -76,9 +76,9 @@ category-scoped **slug alias**, then an **unambiguous id prefix** (≥ 8 chars).
 
 | Handle | Example | Resolves to |
 |---|---|---|
-| Full id | `12cc5573-1c4f-4a0e-8b6e-9d2f0a5b7c31` | the record (unchanged exact-id behavior) |
-| Slug alias | `decision.strategy/2026-07-03-gtm-direction` | the record that carries that alias |
-| Short-id prefix (≥ 8 chars, unique) | `12cc5573` | the single record whose id starts with it |
+| Full id | `a1b2c3d4-1c4f-4a0e-8b6e-9d2f0a5b7c31` | the record (unchanged exact-id behavior) |
+| Slug alias | `decision.design/2026-01-01-api-shape` | the record that carries that alias |
+| Short-id prefix (≥ 8 chars, unique) | `a1b2c3d4` | the single record whose id starts with it |
 
 Aliases are caller-supplied via the optional `aliases: string[]` field on `create`/`update`,
 append-only, and stored in an id-keyed alias map (`alias-index.json`) so a prefix or slug **still

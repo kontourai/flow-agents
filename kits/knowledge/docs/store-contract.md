@@ -303,78 +303,81 @@ Mutation log entry appended to source record.
 
 ### 6.4 `propose`
 
-Record a proposed change to a concept record. The proposal does not modify the concept;
-it creates a link of kind `"proposes"` from the proposing record to the concept, and
-appends a mutation log entry with the proposal text.
+Record a proposed change to any existing record type. The original `conceptId`
+parameter name (shown below as `concept_id`) is retained for compatibility; it
+names the target record and does not restrict its type. Concept editing is one
+use; the retirement flow also proposes changes to other record types. The
+proposal leaves the target body unchanged, adds a `"proposes"` link from the
+proposing record to the target, and appends mutation history with the proposal text.
 
 **Required fields:**
 
 | Field | Location | Description |
 |---|---|---|
-| `concept_id` | argument | ID of the concept record to propose a change to. |
+| `concept_id` | argument | ID of the existing target record. |
 | `proposer_id` | argument | ID of the record making the proposal. |
 | `proposal` | evidence | Non-empty string describing the proposed change. |
 | `agent` | evidence | Agent submitting the proposal. |
 
 **Rejection conditions:**
-- `concept_id` does not exist or is not of type `"concept"`.
+- `concept_id` does not exist.
 - `proposer_id` does not exist.
 - `proposal` string is empty or missing.
 - Missing `agent` in evidence.
 
 **Post-conditions:** A link of kind `"proposes"` from `proposer_id` to `concept_id` is recorded
-in both the record and the graph index. Mutation log entry appended to concept record.
+in both the record and the graph index. Mutation log entry appended to the target record.
 
 ### 6.5 `apply`
 
-Apply a pending proposal: update the concept body with the proposed change and mark the
-proposal as applied.
+Apply a pending proposal to any existing record type: replace its body and append
+an `apply` mutation entry. The `concept_id` parameter names the target record.
 
 **Required fields:**
 
 | Field | Location | Description |
 |---|---|---|
-| `concept_id` | argument | ID of the concept being updated. |
+| `concept_id` | argument | ID of the existing target record. |
 | `proposer_id` | argument | ID of the record whose proposal is being applied. |
-| `new_body` | evidence | The replacement body text for the concept. |
+| `new_body` | evidence | The replacement body text for the target record. |
 | `agent` | evidence | Agent applying the proposal. |
 | `rationale` | evidence | Non-empty string explaining why the proposal is accepted. |
 
 **Rejection conditions:**
-- `concept_id` does not exist or is not of type `"concept"`.
+- `concept_id` does not exist.
 - `proposer_id` does not exist.
 - No `"proposes"` link from `proposer_id` to `concept_id` exists.
 - `new_body` is missing or empty.
 - `rationale` is missing or empty.
 - Missing `agent` in evidence.
 
-**Post-conditions:** Concept `body` is replaced with `new_body`. `updated_at` refreshed.
+**Post-conditions:** Target `body` is replaced with `new_body`. `updated_at` refreshed.
 Mutation log entry (op=`"apply"`) appended. The `"proposes"` link MAY remain in the
 graph (it is a historical record); adapters SHOULD NOT silently delete it.
 
 ### 6.6 `reject`
 
 Reject a pending proposal: record that the proposal was reviewed and declined.
-The concept is not modified.
+The target body is not modified; all existing record types are accepted.
 
 **Required fields:**
 
 | Field | Location | Description |
 |---|---|---|
-| `concept_id` | argument | ID of the concept. |
+| `concept_id` | argument | ID of the existing target record. |
 | `proposer_id` | argument | ID of the proposing record. |
 | `agent` | evidence | Agent rejecting the proposal. |
 | `reason` | evidence | Non-empty string explaining the rejection. |
 
 **Rejection conditions:**
-- `concept_id` does not exist or is not of type `"concept"`.
+- `concept_id` does not exist.
 - `proposer_id` does not exist.
 - No `"proposes"` link from `proposer_id` to `concept_id` exists.
 - `reason` is missing or empty.
 - Missing `agent` in evidence.
 
-**Post-conditions:** Concept `body` is unchanged. `updated_at` is NOT changed (concept
-itself was not mutated). Mutation log entry (op=`"reject"`) appended to concept record.
+**Post-conditions:** Target `body` is unchanged. `updated_at` is NOT changed;
+a mutation log entry (op=`"reject"`) is appended to the target record.
 
 ---
 
@@ -1189,7 +1192,7 @@ judged, and `flags` lists the conflicting pairs. Gate telemetry is emitted at `c
 
 On-disk identity is a full `id` (§1.1) plus a file path (§9). Prose that cites a record — a
 curated doc, a commit message, an issue comment — cannot practically carry a full 36-char UUID, so
-the field partner cites **8-char short ids** (`12cc5573`, `f5df7b4c`) and would prefer
+the field partner cites **8-char short ids** (`a1b2c3d4`, `b2c3d4e5`) and would prefer
 **human-readable slugs**. Neither resolves against exact-id `get`, and a store restructure that
 re-files a record silently severs every inbound short-id/slug reference.
 
@@ -1226,7 +1229,7 @@ exact id or a slug). This keeps a stray short token from matching a large, surpr
 ### H.4 Slug Aliases
 
 - A slug is a lowercase, category-scoped, human-readable handle, e.g.
-  `decision.strategy/2026-07-03-gtm-direction`. It MUST match
+  `decision.design/2026-01-01-api-shape`. It MUST match
   `^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?$` (≤ 200 chars). Malformed slugs are rejected at
   `create`/`update` with `MISSING_EVIDENCE`.
 - Slugs are **caller-supplied** via the optional `aliases: string[]` field on `create` and
@@ -1249,8 +1252,8 @@ category or file path. Therefore:
 
 So a previously issued short-id prefix or slug MUST still resolve to the same record after a
 restructure. Note the slug is a **stable alias**, not a value recomputed from the current category:
-a slug minted under `decision.strategy/…` keeps resolving even after the record moves to
-`decision.gtm`.
+a slug minted under `decision.design/…` keeps resolving even after the record moves to
+`decision.design`.
 
 Like the graph index (§5.2), the alias map is a **derived cache** — each record's own `aliases`
 array is the source of truth, so an adapter that persists the map SHOULD rebuild it on `reindex()`.
@@ -1284,11 +1287,12 @@ suite (`evals/contract-suite/suite.test.js`, §15–§17) pass against it.
 
 The store's graph (§2, §5) and the hygiene audits (Addenda D–G) cover record→record links and
 survey **records**. Nothing resolves the references a human actually reads: the record ids that
-curated docs — `NOW.md`, `strategy/*.md`, a roadmap — cite **into** the store. A store restructure
+curated docs — `status.md`, `docs/*.md`, a roadmap — cite **into** the store. A store restructure
 that re-files or retires a record silently severs every inbound doc citation, and every existing
-gate still reports PASS. Field evidence (design partner `kontourai/ops`): `verify-ops` stayed green
-for weeks while `NOW.md` and `strategy/vision.md` cited unresolvable short-ids (`12cc5573`,
-`f5df7b4c`). This addendum makes that rot **fail closed**.
+gate still reports PASS. The motivating failure was a consumer's repository
+check remaining green while curated documents cited unresolvable short ids.
+This addendum adds a citation-resolution check; the marker limitations below
+remain explicit.
 
 The check is a **read-only** flow (`KnowledgeFlowRunner.checkInboundReferences`) in the style of the
 Addenda D–G audits: it mutates no record, appends no mutation-log entry, and forks no mutation path.
@@ -1304,7 +1308,7 @@ It resolves citations through the unchanged Addendum H identity path — it adds
 
 ### I.3 Citation Forms — the commit-SHA precision problem
 
-A bare 8-hex token is inherently ambiguous: `12cc5573` is equally a record short-id and an
+A bare 8-hex token is inherently ambiguous: `a1b2c3d4` is equally a record short-id and an
 abbreviated git commit SHA. Failing on every non-resolving 8-hex token would flag every SHA in prose
 (the gate cries wolf and gets muted); never failing on them re-opens the exact rot this closes. The
 check resolves the tension with **two tiers**:
@@ -1315,8 +1319,8 @@ currently resolve, and an unresolved one **FAILS** (fail closed):
 | Form | Example | Why it is SHA-safe |
 |---|---|---|
 | Full UUID (8-4-4-4-12 hex) | `aaaaaaaa-1111-4111-8111-111111111111` | The hyphenated shape never collides with a git SHA (40/abbrev hex, no hyphens) or prose. |
-| Marker + token | `rec:12cc5573`, `record:decision.strategy/gtm` | The marker is explicit intent; the token may be a short-id or slug. |
-| Wikilink | `[[decision.strategy/gtm]]` | The kit's own link syntax. |
+| Marker + token | `rec:a1b2c3d4`, `record:decision.design/api-shape` | The marker is explicit intent; the token may be a short-id or slug. |
+| Wikilink | `[[decision.design/api-shape]]` | The kit's own link syntax. |
 
 **Candidate bare short-ids** — a standalone ≥8-hex token with **no** citation form is included in
 the index **only when it already resolves** to a record. A non-resolving bare hex is indistinguishable
@@ -1327,7 +1331,7 @@ from a commit SHA, so it is **ignored** — never indexed, never failed.
 > **zero false positives on commit hashes**, at the cost of not catching bare-hex short-id rot until
 > the doc adopts a citation form. To get fail-closed protection for a short-id or slug, cite it in a
 > marker or wikilink form; full-UUID citations are protected with zero configuration. Migrating a
-> consuming repo's house style to a marker is an ops-repo change (a non-goal here).
+> consuming repo's house style to a marker is a consumer-owned change (a non-goal here).
 
 Every extracted token is resolved via `get(token)` (Addendum H: exact id → slug alias → unambiguous
 ≥8-char prefix). `null` → unresolved; an `AMBIGUOUS_ID` throw is caught and reported as an unresolved
@@ -1336,7 +1340,7 @@ citation with `reason: "ambiguous"` (fail closed — an ambiguous citation does 
 ### I.4 Fail-Closed Semantics
 
 The result's `ok` is `true` **iff** `unresolved` is empty — i.e. every definite citation resolved. A
-caller (e.g. ops `verify-ops`) treats `ok === false` as a gate failure. Each `unresolved` entry names
+consumer that uses this as a required check treats `ok === false` as a gate failure. Each `unresolved` entry names
 `doc`, `line`, `column`, `token`, `form`, and `reason` so the break is actionable. An empty scan with
 configured globs that cite nothing is a pass; an empty scan from **no** globs is the explicit opt-in
 no-op — neither is an "empty success" that masks an unresolved definite citation.
@@ -1349,17 +1353,17 @@ enumerate citers:
 ```json
 {
   "ok": true,
-  "scanned": ["NOW.md", "strategy/vision.md"],
+  "scanned": ["status.md", "docs/design.md"],
   "citations": [
-    { "doc": "NOW.md", "line": 3, "column": 17, "token": "aaaaaaaa-1111-4111-8111-111111111111",
+    { "doc": "status.md", "line": 3, "column": 17, "token": "aaaaaaaa-1111-4111-8111-111111111111",
       "form": "uuid", "resolved": true, "recordId": "aaaaaaaa-1111-4111-8111-111111111111" }
   ],
   "unresolved": [
-    { "doc": "NOW.md", "line": 5, "column": 9, "token": "deadbeef-0000-4000-8000-000000000000",
+    { "doc": "status.md", "line": 5, "column": 9, "token": "deadbeef-0000-4000-8000-000000000000",
       "form": "uuid", "reason": "not-found" }
   ],
-  "byDoc":    { "NOW.md": [ { "token": "…", "form": "uuid", "resolved": true, "recordId": "…", "line": 3, "column": 17 } ] },
-  "byRecord": { "aaaaaaaa-1111-4111-8111-111111111111": [ { "doc": "NOW.md", "line": 3, "column": 17, "token": "…", "form": "uuid" } ] }
+  "byDoc":    { "status.md": [ { "token": "…", "form": "uuid", "resolved": true, "recordId": "…", "line": 3, "column": 17 } ] },
+  "byRecord": { "aaaaaaaa-1111-4111-8111-111111111111": [ { "doc": "status.md", "line": 3, "column": 17, "token": "…", "form": "uuid" } ] }
 }
 ```
 
@@ -1386,8 +1390,8 @@ The store is strong at *filing* and, since Addendum D, at *auditing* staleness �
 entirely in the auditor's call: thresholds are supplied per invocation, so freshness intent lived in
 whoever remembered to pass the right options, not on the record. A record could not say "I go stale
 on 2026-09-01"; the only freshness mechanism for a long-lived store was a human remembering to run an
-audit with the right numbers (field evidence: the ops design partner's radar section carried a
-`prune monthly` *comment* as its sole freshness mechanism). Knowledge rots silently between audits.
+audit with the right numbers. A maintenance comment such as `prune monthly` carries
+no executable expiry; knowledge can become stale between audits.
 
 Meanwhile Kontour already owns a trust vocabulary for exactly this — **Hachure**: `expiresAt` /
 `ttlSeconds`, statuses `unknown / proposed / verified / stale / superseded`, and the "no silent rot"
@@ -1489,12 +1493,10 @@ discoverable via the reverse-link index (§5, `getLinks(id).reverse`). But nothi
 flagged the **docs** citing a superseded record — so a superseded decision could leave every citer
 silently pointing at dead or outdated authority.
 
-Field evidence (design partner `kontourai/ops`, knowledge record `0e439c57`): the 6/17 "sell the
-combination" decision became unresolvable after a store restructure and **four docs** (`NOW.md` ×2,
-`strategy/vision.md`, `strategy/2026-06-18-market-fork-decision.md`) cited it invisibly for weeks —
-the citers kept presenting a dead record as live authority. This addendum closes that loop: on a
-superseded/retired record it enumerates first-degree inbound citers from **both** indexes and emits a
-supersession-aware flag per citer.
+The motivating failure was a restructured decision store leaving several
+curated documents pointing at an unavailable or superseded record as live
+authority. This addendum enumerates first-degree inbound citers from **both**
+indexes and emits a supersession-aware flag per citer.
 
 This is a **read-only** enumeration in the hygiene-flow style (Addenda D–G): the existing gated
 `supersede` and `retire` ops are unchanged, and no new mutation path is forked. It does **not**
@@ -1601,9 +1603,9 @@ adapter conforming to Addenda A, B, H, and I satisfies it without new storage.
 The `knowledge.consolidate` flow (Addendum A) originally accepted only a **whole-body** input:
 the caller authored the *entire* updated snapshot body (`options.proposedBody`) and the runner
 replaced the snapshot with it. To add one decision, the caller had to re-read and re-emit every
-prior entry. Field evidence from the ops design partner (record `0e439c57`) showed this cost is
-high enough that real sessions **skip consolidation entirely** — the living decision snapshot
-silently stops living, defeating the flow.
+prior entry. Repeating that work can cause callers to skip consolidation and
+leave a decision snapshot stale. Append mode addresses that maintenance burden;
+it does not establish a measured time or cost saving.
 
 The snapshot already links its contributing compiled records with kind `"source"` and carries
 `provenance.source_ids` (Addendum A.3), so the body is *derivable from records*. Append mode uses

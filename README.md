@@ -61,7 +61,8 @@ The spec defines three conformance levels: **L0** (telemetry only), **L1** (stee
 
 ## Runtime and support matrix
 
-L2 means all four policy classes with blocking; L1 means steering and stop-goal-fit warning only (no quality gate or blocking config protection). The [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) defines the levels and names every hook-surface gap explicitly.
+L2 requires all four policy classes with blocking. L1 describes a lower conformance
+baseline; it does not mean an adapter ships no additional tool-level policies. The [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) defines the levels and names every hook-surface gap explicitly.
 
 These tiers describe supported wiring, not evidence that a particular host loaded
 its hooks or selected blocking mode. See the [mode defaults and limits](docs/getting-started.md#completion-checks-by-runtime).
@@ -74,12 +75,12 @@ its hooks or selected blocking mode. See the [mode defaults and limits](docs/get
 | Codex | install + hooks + bundle | full integration + static eval layer (`bash evals/run.sh`) — reference implementation |
 | Kiro | install + hooks + bundle | included in bundle assertions |
 
-**Partial support — L1 (steering + stop-goal-fit warning)**
+**Partial support — L1 (completion remains advisory)**
 
 | Runtime | Ships | Gap | Tested |
 | --- | --- | --- | --- |
-| opencode | `.opencode/agents/`, `.opencode/skills/`, `.opencode/plugins/flow-agents.js`, `opencode.json` | No prompt-submit hook; steering wired to `session.created` + `tool.execute.before` | included in bundle assertions |
-| pi | `.pi/extensions/flow-agents.ts`, `.pi/skills/`, `AGENTS.md` | No stop hook; stop-goal-fit unavailable | included in bundle assertions |
+| opencode | Agents, skills and plugin; session-start steering, tool-level config-protection refusal, post-tool quality/evidence callbacks | No prompt-submit hook; `session.idle` invokes stop-goal-fit but ignores its decision, so it cannot block completion. | included in bundle assertions |
+| pi | Extension, skills and `AGENTS.md`; agent-start steering, tool-call config-protection block, post-tool quality/evidence callbacks | No native Stop trigger; `session_shutdown` invokes stop-goal-fit but ignores its decision, so it cannot block completion. | included in bundle assertions |
 
 **Other**
 
@@ -191,7 +192,7 @@ A Flow Kit bundles a workflow AND its opinionated output shape into a single val
 
 **Knowledge Kit** — a Flow Kit for durable, gated knowledge storage. It ships a store contract with five record types (`raw`, `compiled`, `concept`, `snapshot`, `person`), five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. Mutations require process provenance and operation-specific evidence. Source ids are optional at the adapter boundary; provenance and links retain supplied context rather than validating truth. Supersede/retire retain history. Ships with an extensive automated test suite.
 
-The output-shape story is the core reason kits matter. The Knowledge Kit store contract is representation-neutral: two adapters ship today. The **default adapter** stores records as flat markdown files with YAML frontmatter and a JSON graph index. The **Obsidian adapter** renders the same workflow into the shape a human already thinks in — one canonical note per record, category→folder hierarchy, configurable frontmatter dimensions (e.g. territory/customer/initiative as filterable fields), living overview notes with sources nested below, and superseded records moved to an `archive/` folder rather than deleted. Same flows, same mutation gates, different rendering layer. (The Obsidian adapter is shipped; layout/dimensions refinements and person/entity card support are in development.)
+The output-shape story is the core reason kits matter. The Knowledge Kit store contract is representation-neutral: two adapters ship today. The **default adapter** stores records as flat markdown files with YAML frontmatter and a JSON graph index. The **Obsidian adapter** renders the same workflow into the shape a human already thinks in — one canonical note per record, category→folder hierarchy, configurable frontmatter dimensions (e.g. territory/customer/initiative as filterable fields), living overview notes with sources nested below, and superseded records moved to an `archive/` folder rather than deleted. Same flows, same mutation gates, different rendering layer. The Obsidian adapter ships person records, vault-global `people/` routing, and `Appears In` / `People` card sections; see the [current adapter contract](kits/knowledge/docs/store-contract.md#bundled-adapter-variations).
 
 The Knowledge Kit is also LIVE-proven: the default adapter passes the parameterized contract suite; keyless operation is validated via a Strands agent + local ollama acceptance harness; vector similarity clustering uses ollama embeddings (`nomic-embed-text`) with a pluggable detector interface.
 
