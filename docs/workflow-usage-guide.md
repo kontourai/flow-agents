@@ -858,6 +858,23 @@ Example prompt:
 Use learning-review. CI flakes and a missing rollback note slowed this down. Separate facts from interpretation, route follow-ups to backlog/evals/docs/skills/knowledge, and do not implement fixes.
 ```
 
+Route follow-up work through the configured `WorkItemProvider`, with
+`BoardProvider` for board, queue, or milestone placement. Discover the effective
+roles with `flow-agents effective-backlog-settings --repo-path <repo-path> --json`;
+this reads configuration, not proof that a work item was created. Record the
+provider-observed work-item reference and placement or placement gap. If discovery
+reports `ask_user`, configuration is missing, or creation/linkage is unobserved,
+record the gap and any interim destination in `learning.json`, keep the unrouted
+follow-up open, and preserve `NOT_VERIFIED` for unobserved provider outcomes.
+Ask the operator for the intended provider rather than assuming one.
+
+Use `knowledge-capture` for durable operating knowledge and the repository's
+current living decision registry for binding decisions or changed contracts.
+In Flow Agents, follow `context/contracts/decision-registry-contract.md` and
+update the subject record under `docs/decisions/`; do not add numbered ADRs.
+Write to the operator's agent instruction files only at their explicit request;
+such a write supplements learning and never substitutes for the work-item record.
+
 Learning review should resolve local WIP, not create a permanent local parking lot. Keep `learning.status: followup_required` only while a route still needs a decision. Once every route is completed, represented by a provider-backed issue, deferred with a concrete trigger, or rejected with a reason, record the learning as learned and advance the local workflow out of active state.
 
 At terminal closeout, `learning-review` must compare intended behavior to observed behavior before recording `learning.json`. Clean runs record a lightweight no-correction-needed entry with `correction.needed: false`, brief `correction.evidence`, and closed routing such as `target: "none"`; do not invent a lesson just to fill the record. Mismatches record `correction.needed: true` with `correction.type`, stable `correction.recurrence_key`, intended behavior, observed behavior, gap, and either a prevention route or an explicit `no_change_rationale`.
