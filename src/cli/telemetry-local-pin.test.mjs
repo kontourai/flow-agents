@@ -1147,3 +1147,85 @@ test("pinned: a redaction list of none or of field names is still accepted", () 
     });
   }
 });
+
+// --- review round 5: the Console keeps its redaction list; no URL globs ---------------------------
+//
+// A Console exported in the environment is allowed (and warned about) for a pinned install, so the
+// pinned conf must not be able to switch its redaction off through the analytics channel list,
+// which config.sh used as CONSOLE_TELEMETRY_REDACT's default.
+async function promptToConsole(dest, home, extraEnv = {}) {
+  const bodies = [];
+  const server = http.createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => { bodies.push({ url: request.url, body }); response.end("{}"); });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const env = { PATH: SHELL_PATH, HOME: home, FLOW_AGENTS_TELEMETRY_FOREGROUND: "true", CONSOLE_TELEMETRY_URL: `http://127.0.0.1:${server.address().port}`, ...extraEnv };
+    const input = JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: "pin-probe", prompt: "SECRET-PROMPT-1483" });
+    const child = spawn("/bin/bash", [path.join(dest, "scripts", "telemetry", "telemetry.sh"), "userPromptSubmit", "claude-code"], { env, stdio: ["pipe", "ignore", "ignore"] });
+    child.stdin.end(input);
+    await new Promise((resolve) => child.on("close", resolve));
+    for (let waited = 0; !bodies.some((entry) => entry.url === "/api/telemetry/records") && waited < 8000; waited += 100) await new Promise((resolve) => setTimeout(resolve, 100));
+    return { bodies: bodies.filter((entry) => entry.url === "/api/telemetry/records"), env };
+  } finally {
+    server.close();
+  }
+}
+
+for (const [label, fixture, expectSecret] of [["pinned: the Console POST stays redacted", () => pinned, false], ["unpinned control: the Console POST carries the prompt", () => unpinned, true]]) {
+  test(`channel.analytics.redact=none with a Console URL in the environment, ${label}`, async () => {
+    const { dest } = fixture();
+    const home = makeFixtureDir("telemetry-pin-console-redact-home-");
+    const original = fs.readFileSync(installedConf(dest), "utf8");
+    fs.writeFileSync(installedConf(dest), `${original}channel.analytics.redact=none\n`);
+    try {
+      const { bodies, env } = await promptToConsole(dest, home);
+      assert.equal(bodies.length > 0, true, "the Console received no telemetry POST");
+      assert.equal(bodies.some((entry) => entry.body.includes("SECRET-PROMPT-1483")), expectSecret, bodies.map((entry) => entry.body.slice(0, 300)).join("\n"));
+      // The doctor names the list config.sh uses.
+      const { HOME, CONSOLE_TELEMETRY_URL } = env;
+      const bashRedact = readShellVars(dest, { HOME, CONSOLE_TELEMETRY_URL }, ["CONSOLE_TELEMETRY_REDACT"]).CONSOLE_TELEMETRY_REDACT;
+      assert.equal(readDoctorReport(dest, { HOME, CONSOLE_TELEMETRY_URL }).console.redactFields, bashRedact);
+      assert.equal(bashRedact.includes("turn.prompt_text"), !expectSecret, bashRedact);
+    } finally {
+      fs.writeFileSync(installedConf(dest), original);
+    }
+  });
+}
+
+test("pinned: an exported CONSOLE_TELEMETRY_REDACT still decides the Console list, and the doctor agrees", () => {
+  const home = makeFixtureDir("telemetry-pin-console-redact-env-home-");
+  withInstalledConf(pinned.dest, (text) => `${text}channel.analytics.redact=none\n`, () => {
+    for (const env of [{ HOME: home, CONSOLE_TELEMETRY_REDACT: "turn.prompt_text" }, { HOME: home, CONSOLE_TELEMETRY_REDACT: "" }, { HOME: home, TELEMETRY_CHANNEL_ANALYTICS_REDACT: "tool.input" }]) {
+      const bashRedact = readShellVars(pinned.dest, env, ["CONSOLE_TELEMETRY_REDACT"]).CONSOLE_TELEMETRY_REDACT;
+      assert.equal(readDoctorReport(pinned.dest, env).console.redactFields, bashRedact, JSON.stringify(env));
+    }
+    assert.equal(readShellVars(pinned.dest, { HOME: home, CONSOLE_TELEMETRY_REDACT: "turn.prompt_text" }, ["CONSOLE_TELEMETRY_REDACT"]).CONSOLE_TELEMETRY_REDACT, "turn.prompt_text");
+  });
+});
+
+test("pinned: a loopback channel endpoint with [ ] { } in it is dropped by config.sh and the doctor", () => {
+  const home = makeFixtureDir("telemetry-pin-glob-home-");
+  for (const url of ["http://127.0.0.1:18472/[1-25]", "http://127.0.0.1:18472/x?q={a,b}", "http://localhost:3141/a]"]) {
+    withInstalledConf(pinned.dest, (text) => `${text}channel.full.endpoint_url=${url}\n`, () => {
+      assert.equal(readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_CHANNEL_FULL_ENDPOINT_URL"]).TELEMETRY_CHANNEL_FULL_ENDPOINT_URL, "http://localhost:3141/v1/agent-events", url);
+      assert.deepEqual(readDoctorReport(pinned.dest, { HOME: home }).telemetry.pinIgnored, [{ key: "channel.full.endpoint_url", reason: "value not allowed for a pinned install" }], url);
+    });
+  }
+});
+
+test("a channel endpoint URL is posted literally (curl -g): one event, one POST", async () => {
+  const home = makeFixtureDir("telemetry-pin-curl-g-home-");
+  const original = fs.readFileSync(installedConf(unpinned.dest), "utf8");
+  try {
+    const hits = await emitAndCountPosts(unpinned.dest, (port) => {
+      fs.writeFileSync(installedConf(unpinned.dest), `${original}channel.full.endpoint_url=http://127.0.0.1:${port}/[1-3]\n`);
+      return { HOME: home };
+    });
+    assert.equal(hits.length, 1, JSON.stringify(hits));
+  } finally {
+    fs.writeFileSync(installedConf(unpinned.dest), original);
+  }
+});

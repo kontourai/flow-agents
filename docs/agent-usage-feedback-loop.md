@@ -271,8 +271,18 @@ line:
 | `sync_include`, `sync_exclude` | any (agent-name glob patterns) |
 | `console_economics_relay`, `console_liveness_relay` | an opt-out only: `0`, `false`, `no` or `off` |
 | `telemetry_sink_pin` | the pin itself |
-| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_REDACT` | `none`, or a field list: letters, digits, `_`, `.` and commas |
-| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL` | a loopback URL: `http://127.0.0.1`, `http://localhost` or `http://[::1]`, with an optional port and path |
+| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_REDACT` | `none`, or a field list: letters, digits, `_`, `.` and commas. It applies to that channel's local log only. |
+| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL` | a loopback URL: `http://127.0.0.1`, `http://localhost` or `http://[::1]`, with an optional port and a path free of whitespace, `"`, `\`, `[`, `]`, `{` and `}` |
+
+A Console set in the environment still gets the shipped redaction list for a
+pinned install: `CONSOLE_TELEMETRY_REDACT` comes from the environment if it is
+exported there, and otherwise from the analytics list as the environment or
+the shipped default sets it, never from the installed `telemetry.conf` (which
+could otherwise send prompt and tool content unredacted with
+`channel.analytics.redact=none`). The doctor reports the list in use as
+`console.redactFields`. Channel endpoints are posted with `curl -g`, and the
+loopback grammar refuses `[ ] { }`, because curl otherwise expands those into
+many requests from one event.
 
 The value grammars matter beyond networking: the numeric settings reach bash
 arithmetic, which runs a `$(...)` written inside the value, and channel names

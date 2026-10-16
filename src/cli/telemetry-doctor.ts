@@ -74,6 +74,11 @@ export type DoctorReport = {
      * endpoint resolves.
      */
     endpointSource?: string;
+    /**
+     * The redaction field list config.sh applies to the Console POST (CONSOLE_TELEMETRY_REDACT). A
+     * pinned install never takes it from its installed telemetry.conf (#1483).
+     */
+    redactFields: string;
     reachability: Reachability;
   };
   warnings: string[];
@@ -133,6 +138,7 @@ const CONF_KEY_VARS: Readonly<Record<string, string>> = {
   console_telemetry_endpoint_url: "CONSOLE_TELEMETRY_ENDPOINT_URL",
   console_telemetry_token: "CONSOLE_TELEMETRY_TOKEN",
   console_tenant_id: "CONSOLE_TENANT_ID",
+  console_telemetry_redact: "CONSOLE_TELEMETRY_REDACT",
   console_pricing_url: "TELEMETRY_PRICING_URL",
   pricing_url: "TELEMETRY_PRICING_URL",
   pricing_file: "TELEMETRY_PRICING_FILE",
@@ -185,6 +191,7 @@ function resolveLikeConfigSh(file: string, pinned: boolean, env: NodeJS.ProcessE
   fromEnv("CONSOLE_TELEMETRY_ENDPOINT_URL", "CONSOLE_TELEMETRY_ENDPOINT_URL");
   fromEnv("CONSOLE_TELEMETRY_TOKEN", "CONSOLE_TELEMETRY_TOKEN", "CONSOLE_AUTH_TOKEN");
   fromEnv("CONSOLE_TENANT_ID", "CONSOLE_TENANT_ID");
+  fromEnv("CONSOLE_TELEMETRY_REDACT", "CONSOLE_TELEMETRY_REDACT");
   fromEnv("TELEMETRY_PRICING_URL", "TELEMETRY_PRICING_URL", "FLOW_AGENTS_PRICING_URL");
   fromEnv("TELEMETRY_PRICING_FILE", "TELEMETRY_PRICING_FILE", "FLOW_AGENTS_PRICING_FILE");
   // The relays read CONSOLE_URL again after config.sh, so a conf `console_url=` cannot hide it there.
@@ -343,7 +350,11 @@ export function isPinnedLocalOnly(file: string): boolean {
 }
 
 // ASCII whitespace only, as config.sh matches [[:space:]] under LC_ALL=C.
-const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(\/[^ \t\n\r\f\v"\\]*)?$/;
+// No [ ] { } in the path: curl reads them as URL globs (config.sh's TELEMETRY_LOOPBACK_URL_RE).
+const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(\/[^\][{} \t\n\r\f\v"\\]*)?$/;
+
+/** config.sh's shipped default for TELEMETRY_CHANNEL_ANALYTICS_REDACT. */
+const DEFAULT_ANALYTICS_REDACT = "tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input,hook.last_assistant_message,hook.transcript_path";
 
 const asciiLower = (value: string) => value.replace(/[A-Z]/g, (char) => char.toLowerCase());
 
@@ -563,6 +574,11 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
       tenantSource: resolvedSource(vars, "CONSOLE_TENANT_ID"),
       urlSource: resolvedSource(vars, explicitEndpoint ? "CONSOLE_TELEMETRY_ENDPOINT_URL" : "CONSOLE_TELEMETRY_URL"),
       ...(endpointSource ? { endpointSource } : {}),
+      // config.sh: an exported CONSOLE_TELEMETRY_REDACT, else (unpinned) a console_telemetry_redact
+      // line, else the analytics list -- for a pinned install the one set before the file is read.
+      redactFields: resolved("CONSOLE_TELEMETRY_REDACT") || (localOnlyPinned
+        ? process.env.TELEMETRY_CHANNEL_ANALYTICS_REDACT || DEFAULT_ANALYTICS_REDACT
+        : resolved("TELEMETRY_CHANNEL_ANALYTICS_REDACT", DEFAULT_ANALYTICS_REDACT)),
       reachability,
     },
     warnings,

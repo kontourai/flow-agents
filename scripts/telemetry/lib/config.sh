@@ -86,11 +86,15 @@ telemetry_conf_warn_untrusted() {
 #   channel settings, by the variable the loop derives
 #   (TELEMETRY_CHANNEL_<NAME>_<KEY>, channel and key uppercased):
 #     *_REDACT                        none, or a field list: [A-Za-z0-9_.,]
-#                                     (each field is spliced into a jq program)
+#                                     (each field is spliced into a jq program);
+#                                     local logs only: the Console list
+#                                     (CONSOLE_TELEMETRY_REDACT) stays the
+#                                     environment's or the shipped default
 #     *_ENDPOINT_URL                  a loopback URL: http://127.0.0.1,
 #                                     http://localhost or http://[::1], optional
-#                                     port and path, so the shipped localhost
-#                                     channel still works
+#                                     port and a path without [ ] { } (curl
+#                                     globs), so the shipped localhost channel
+#                                     still works
 # No path is accepted at all: not pricing_file and not a channel *_LOG_FILE.
 # Each event is appended to the log file verbatim, so a log path the file
 # chooses is a write of attacker-influenced text anywhere the user can write
@@ -117,7 +121,8 @@ telemetry_conf_pinned_local_only() {
   return 1
 }
 
-TELEMETRY_LOOPBACK_URL_RE='^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[^[:space:]"\\]*)?$'
+# No [ ] { } in the path: curl reads them as URL globs, so one event could fan out to many POSTs.
+TELEMETRY_LOOPBACK_URL_RE='^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[^][{}[:space:]"\\]*)?$'
 
 # Whether a pinned install may take the standard (non-channel) KEY=VALUE from its
 # installed telemetry.conf: the allowlist in the pin note above.
@@ -200,6 +205,11 @@ TELEMETRY_CHANNEL_FULL_REDACT="${TELEMETRY_CHANNEL_FULL_REDACT:-hook.raw_input,t
 TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE="${TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE:-${TELEMETRY_DATA_DIR}/analytics.jsonl}"
 TELEMETRY_CHANNEL_ANALYTICS_REDACT="${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input,hook.last_assistant_message,hook.transcript_path}"
 TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL="${TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL:-}"
+# Captured before the config file is read: the analytics list as the environment or the shipped
+# default sets it. A pinned install's Console redaction falls back to this, never to a list the
+# installed telemetry.conf chose (#1483): the pin keeps channel redaction conf-controlled because
+# channel logs stay local, but a Console set in the environment is not local.
+TELEMETRY_DEFAULT_CONSOLE_REDACT="$TELEMETRY_CHANNEL_ANALYTICS_REDACT"
 CONSOLE_TELEMETRY_URL="${CONSOLE_TELEMETRY_URL:-${CONSOLE_URL:-}}"
 CONSOLE_TELEMETRY_ENDPOINT_URL="${CONSOLE_TELEMETRY_ENDPOINT_URL:-}"
 CONSOLE_TELEMETRY_TOKEN="${CONSOLE_TELEMETRY_TOKEN:-${CONSOLE_AUTH_TOKEN:-}}"
@@ -302,7 +312,13 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
   done < "$TELEMETRY_CONFIG_FILE"
 fi
 
-CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT}}"
+if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]]; then
+  # An exported CONSOLE_TELEMETRY_REDACT still wins, as it does unpinned (the pinned allowlist drops
+  # a console_telemetry_redact line, so only the environment can have set it here).
+  CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_DEFAULT_CONSOLE_REDACT}}"
+else
+  CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT}}"
+fi
 
 # Economics relay default-on rule (#469, opt-out not silent-off): an explicit
 # console_economics_relay config key always wins. Otherwise, once a console telemetry sink is
