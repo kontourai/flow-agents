@@ -111,7 +111,7 @@ record's `links` array. The graph index (see §5) mirrors all links for efficien
 | `"example"` | concept → compiled | This compiled record exemplifies the concept. |
 | `"related"` | any → any | General semantic relation. |
 | `"refines"` | compiled → compiled | Later record refines or supersedes an earlier one. |
-| `"proposes"` | any → concept | Record proposes a change to the concept (used with `propose` mutation). |
+| `"proposes"` | any → any | Record proposes a change to an existing target (used with `propose` mutation). |
 
 Adapters MUST store and return link objects with at least `target_id` and `kind`. Unknown
 kinds MUST NOT be rejected — forward compatibility requires tolerating new kinds.
