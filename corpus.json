@@ -408,6 +408,18 @@
     {
       "source": "docs/fixture-ownership.md",
       "section": "Contribute"
+    },
+    {
+      "source": "docs/assignment-host-contract.md",
+      "section": "Contracts",
+      "covers": [
+        "src/assignment-contract.ts",
+        "src/assignment-github.ts",
+        "src/assignment-local-file.ts",
+        "src/lib/assignment-model.ts",
+        "src/lib/assignment-github.ts",
+        "src/lib/assignment-local-store.ts"
+      ]
     }
   ],
   "topics": [

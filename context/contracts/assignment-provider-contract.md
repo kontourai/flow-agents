@@ -231,6 +231,28 @@ asymmetry has no effect on the shipped path today, but a future direct-CLI calle
 local-file `claim` to fail the same way `render-claim` does when the actor can't be determined
 should pass `--actor-json` explicitly rather than relying on the auto-resolve fallback.
 
+## Published export (host products)
+
+The primitive this contract defines is published for host products (Station is the first) as three
+subpaths of `@kontourai/flow-agents`, so a host sees the same claims as Flow's CLI:
+
+| Subpath | Contents | I/O |
+| --- | --- | --- |
+| `./assignment-contract` | `AssignmentProvider`, the actor identity, the versioned claim-record type and codec, the `assignment ⋈ liveness` join, the takeover eligibility rules, and the `AssignmentLivenessSource` a host implements from its own runtime | none (pure) |
+| `./assignment-github` | The GitHub mapping: claim-comment render/parse and the `render*` argv builders (render, don't execute), including the `owner/repo#number` `work_item_ref` validation | none (pure) |
+| `./assignment-local-file` | `createLocalFileAssignmentProvider` and the locked local-file store the CLI uses | `fs` only |
+
+**Engine primitive vs Builder Kit policy.** Flow Agents is not the Builder Kit
+(`docs/architecture-engine-and-kits.md`). The export is the coordination primitive and the engine
+gives no kit special privilege. *When* to claim (`pull-work`), *when* to release (the Stop hook),
+and *how* a takeover resumes (`continue-work`, the verify-hold gate, `builder-lifecycle-authority`)
+are Builder policy and stay in the kit. Subject identity is any stable work identity string; only the
+GitHub provider validates an issue-shaped reference. Liveness stays host-specific: a host that stops
+heartbeating ages into `reclaimable` under the join.
+
+The CLI consumes the same modules (`src/lib/assignment-model.ts`, `assignment-github.ts`,
+`assignment-local-store.ts`), so the join, the codec, and the GitHub render exist once.
+
 ## Implementation Note
 
 `schemas/assignment-provider-settings.schema.json` is the settings schema companion to this
