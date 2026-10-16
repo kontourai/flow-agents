@@ -1,7 +1,8 @@
 /**
  * Local-file adapters that formally satisfy `provider-interfaces.ts`'s `AssignmentProvider`
- * (plus its `LocalAssignmentProviderExt` capability extension) and `WorkItemMutationProvider`
- * interfaces (#777 implementability proof), mirroring `github-change-provider.ts`'s
+ * (plus its `LocalAssignmentProviderExt` capability extension; the assignment adapter itself now
+ * lives in `src/lib/assignment-local-store.ts` so it can ship as its own subpath and is re-exported
+ * here unchanged) and `WorkItemMutationProvider` interfaces (#777 implementability proof), mirroring `github-change-provider.ts`'s
  * `createGithubChangeProvider(...): ChangeProvider` precedent: each factory below returns an
  * object literal annotated with the interface's return type, so `tsc` itself rejects a drifted
  * adapter shape — the type-level half of the proof. The behavioral half is
@@ -20,80 +21,10 @@
  *
  * @module
  */
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { readJson } from "../lib/fs.js";
-import type { AssignmentProvider, LocalAssignmentProviderExt, WorkItemMutationProvider } from "./provider-interfaces.js";
-import {
-  canonicalHolderActorKey,
-  performLocalClaim,
-  performLocalRelease,
-  performLocalSupersede,
-  readLocalAssignmentStatus,
-  type AssignmentClaimRecord,
-} from "./assignment-provider.js";
+import type { WorkItemMutationProvider } from "./provider-interfaces.js";
 import { applyLocalFileMutation } from "./work-item-mutation-provider.js";
 
-/**
- * Enumerate subject ids with an active (`status: "claimed"`) local-file assignment record,
- * optionally filtered to one actor's CANONICAL actor key. Mirrors `listCommand`'s local-file
- * branch in `assignment-provider.ts` for the directory-scan convention (same
- * `<artifactRoot>/assignment/*.json` layout, same `readJson` helper — that branch is
- * CLI-internal, not exported as a bare function, so this directory scan is the one piece of glue
- * this module cannot import outright). The actor-key COMPARISON itself, however, deliberately
- * does NOT mirror `listCommand`'s (`serializeActor(record.actor)`, unconditionally re-derived):
- * that comparison gives the wrong answer for an explicit-override actor whose stored `actor_key`
- * diverges from a re-serialization of its `actor` struct (assignment-provider-contract.md's
- * `actor_key` field doc). This function instead delegates to the exported
- * `canonicalHolderActorKey()` (`assignment-provider.ts`) — the SAME canonical-key rule
- * `computeEffectiveState` already uses for self-recognition — so this adapter's `list()` and the
- * rest of this repository's holder-identity comparisons can never diverge (#777 review finding 3).
- */
-function listLocalFileAssignments(artifactRoot: string, actorKey?: string): string[] {
-  const dir = path.join(artifactRoot, "assignment");
-  if (!fs.existsSync(dir)) return [];
-  const subjectIds: string[] = [];
-  for (const name of fs.readdirSync(dir).filter((entry) => entry.endsWith(".json")).sort()) {
-    const record = readJson(path.join(dir, name)) as AssignmentClaimRecord;
-    if (record.status !== "claimed") continue;
-    if (actorKey && canonicalHolderActorKey(record) !== actorKey) continue;
-    subjectIds.push(record.subject_id);
-  }
-  return subjectIds;
-}
-
-/**
- * `AssignmentProvider` (+ `LocalAssignmentProviderExt`) adapter over the local-file assignment
- * record store rooted at `artifactRoot` (the same
- * `<artifactRoot>/assignment/<sanitized-subject-id>.json` convention
- * assignment-provider-contract.md's "local-file mapping" section documents).
- *
- * The neutral `claim`/`release`/`supersede` methods delegate to the same
- * `performLocalClaim`/`performLocalRelease`/`performLocalSupersede` functions as their
- * `*Returning` extension counterparts, only discarding the return value to match
- * `AssignmentProvider`'s ADR-0021-faithful `void` surface (#777 review finding 1) — there is
- * exactly one write path per operation, never two independent implementations to keep in sync.
- * `status`/`list` have no `Returning` counterpart (the neutral interface already returns their
- * full value).
- */
-export function createLocalFileAssignmentProvider(artifactRoot: string): AssignmentProvider & LocalAssignmentProviderExt {
-  return {
-    claim: (subjectId, actor, meta) => {
-      performLocalClaim(artifactRoot, subjectId, actor, meta);
-    },
-    release: (subjectId, releasedBy, meta) => {
-      performLocalRelease(artifactRoot, subjectId, releasedBy, meta ?? {});
-    },
-    supersede: (subjectId, from, to, meta) => {
-      performLocalSupersede(artifactRoot, subjectId, from, to, meta ?? {});
-    },
-    status: (subjectId) => readLocalAssignmentStatus(artifactRoot, subjectId),
-    list: (actorKey) => listLocalFileAssignments(artifactRoot, actorKey),
-    claimReturning: (subjectId, actor, meta) => performLocalClaim(artifactRoot, subjectId, actor, meta),
-    releaseReturning: (subjectId, releasedBy, meta) => performLocalRelease(artifactRoot, subjectId, releasedBy, meta ?? {}),
-    supersedeReturning: (subjectId, from, to, meta) => performLocalSupersede(artifactRoot, subjectId, from, to, meta ?? {}),
-  } satisfies AssignmentProvider & LocalAssignmentProviderExt;
-}
+export { createLocalFileAssignmentProvider } from "../lib/assignment-local-store.js";
 
 /**
  * `WorkItemMutationProvider` adapter over a local-file backlog document at `file` (the
