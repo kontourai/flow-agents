@@ -28,6 +28,7 @@ CHECKS=(
   "Ablation arm parity unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/ablation-arm-parity.test.mjs"
   "Sealed execution authority unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/sealed-execution-authority.test.mjs"
   "Liveness fleet unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/liveness-fleet.test.mjs"
+  "Telemetry local pin unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/telemetry-local-pin.test.mjs"
   "Telemetry run binding unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/telemetry-run-binding.test.mjs"
   "Transition log unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/transition-log.test.mjs"
   "Gate scorecard unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/gate-scorecard.test.mjs"
@@ -165,6 +166,7 @@ CHECKS=(
 )
 
 LANE_SOURCE_AND_STATIC=(
+  "Telemetry local pin unit tests"
   "Telemetry run binding unit tests"
   "Content boundary"
   "Layer boundary"

@@ -1059,6 +1059,7 @@ main() {
 
 # Capture stdin before backgrounding (background subshell gets /dev/null)
 _stdin=$(cat)
+telemetry_log_destinations_preflight
 if [[ "${FLOW_AGENTS_TELEMETRY_FOREGROUND:-false}" == "true" ]]; then
   main "$@" "$_stdin"
 else

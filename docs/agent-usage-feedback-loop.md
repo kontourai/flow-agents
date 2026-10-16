@@ -195,6 +195,9 @@ fall back to their logical product root such as `product:flow-agents:.kontourai/
 Packaged setup modes are:
 
 - `local-files`: default local JSONL telemetry only; no Console URL or token.
+  Selecting it explicitly (`--telemetry-sink local-files`) also pins the
+  install local-only, so an operator Console config on the machine does not
+  apply to it; see "Owner machine mirror" below.
 - `local-kontour-console`: mirror to a separately running local Console, using
   `http://127.0.0.1:3737` unless `FLOW_AGENTS_LOCAL_KONTOUR_CONSOLE_URL` is set.
 - `kontour-hosted-console`: mirror to Kontour's hosted Console default URL.
@@ -235,8 +238,126 @@ PR, or any other supply-chain path, none of which can produce a 600-mode
 file. A conf that fails that check is treated as if it were absent (fail
 open) and resolution falls through to the next tier.
 
+Both auto-discovered paths are skipped for an install pinned local-only. An
+install run with an explicit `--telemetry-sink local-files` (the flag typed on
+`flow-agents init` or the bundle's `install.sh`) records
+`telemetry_sink_pin=local-files` in its installed
+`scripts/telemetry/telemetry.conf`, and every reader of the Console config
+(`lib/config.sh` and the hooks and relays that source it, the liveness relay
+pre-gate, board sync, and `telemetry-doctor`) then reads that file instead,
+even when a trusted workspace or user-global conf exists. An install without
+the flag records no pin, so the operator conf keeps applying to it. The local-files
+default, the interactive wizard's Skip answer, and a sink taken only from
+`FLOW_AGENTS_TELEMETRY_SINK(S)` do not pin, and neither does a typed
+`local-files` sink when Console settings are supplied with it (a `--console-*`
+flag, or a Console variable such as `CONSOLE_URL` in the installer's
+environment); init's summary names what blocked the pin.
+
+The pin is the exact line `telemetry_sink_pin=local-files` (a trailing CR is
+allowed); a line with spaces, a different value or a byte-order mark is not a
+pin. Because the installed `telemetry.conf` is not trust-gated (it can be
+mode 644 and come from a repository or tarball), a pinned install takes no
+network destination from it. Instead of filtering out what is known to be
+dangerous, `config.sh` holds that file to an allowlist of settings that are
+local by construction, each with a value grammar, and ignores every other
+line:
+
+| Setting | Allowed value |
+|---|---|
+| `enabled`, `enrich_system`, `enrich_workspace`, `enrich_auth`, `usage_tracking`, `notifications`, `governance` | `true` or `false` |
+| `channels` | channel names: letters, digits, `_`, commas and spaces |
+| `max_log_size_mb`, `max_log_files`, `governance_audit_max_size_mb`, `governance_audit_max_files` | digits only |
+| `notification_profile` | letters, digits, `_` and `-` |
+| `sync_include`, `sync_exclude` | any (agent-name glob patterns) |
+| `console_economics_relay`, `console_liveness_relay` | an opt-out only: `0`, `false`, `no` or `off` |
+| `telemetry_sink_pin` | the pin itself |
+| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_REDACT` | `none`, or a field list: letters, digits, `_`, `.` and commas. It applies to that channel's local log only. |
+| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL` | a loopback URL: `http://127.0.0.1`, `http://localhost` or `http://[::1]`, with an optional port and a path free of whitespace, `"`, `\`, `[`, `]`, `{` and `}` |
+
+A Console set in the environment still gets the shipped redaction list for a
+pinned install: `CONSOLE_TELEMETRY_REDACT` comes from the environment if it is
+exported there (and not empty), and otherwise is the shipped analytics list
+itself. Neither the installed `telemetry.conf` (for example
+`channel.analytics.redact=none`) nor an exported
+`TELEMETRY_CHANNEL_ANALYTICS_REDACT` can narrow it. The doctor reports the list in use as
+`console.redactFields`. Channel endpoints are posted with `curl -g`, and the
+loopback grammar refuses `[ ] { }`, because curl otherwise expands those into
+many requests from one event.
+
+The value grammars matter beyond networking: the numeric settings reach bash
+arithmetic, which runs a `$(...)` written inside the value, and channel names
+become parts of variable names. Redaction uses field paths passed as data to
+`jq`, never executable programs. For pinned installs no path is accepted at
+all, neither `pricing_file` nor a channel's
+`log_file`: every event is appended to its log file verbatim, so a path chosen
+by the file would be a write of agent-influenced text into a shell startup
+file, a git hook, or `/dev/tcp/HOST/PORT`, which bash turns into a network
+connection. Channels keep their default log files under the telemetry data
+directory, and pricing keeps its default source. Channel settings are
+checked by the variable they become: `config.sh` uppercases
+`channel.<name>.<key>` into `TELEMETRY_CHANNEL_<NAME>_<KEY>`, so
+`channel.full.Endpoint_Url` and `channel.analytics_endpoint.url` are endpoints
+too. The shipped `telemetry.conf` is entirely on the allowlist, and
+`telemetry-doctor` lists every line a pinned install ignores (`pinIgnored`).
+Standard keys are matched exactly, so a spelling such as `Console_Url` or
+`CONSOLE_URL` in the file is ignored by every install. Only ASCII whitespace
+is trimmed from keys and values, in `config.sh` (which runs `tr` and `sed`
+under `LC_ALL=C`), the liveness relay pre-gate and the doctor alike.
+
+Every config file read by the shell runtime, including unpinned installed,
+workspace, global and explicit files, also receives value validation before
+assignment. Invalid settings produce a warning naming the key and file,
+without printing credentials, and retain the prior environment value or
+default. Valid operator settings keep the resolution and override order above.
+Rotation settings accept one to nine ASCII digits, parsed as decimal even
+with leading zeros; expressions, signs, non-digits and overflow-sized values
+are rejected before bash arithmetic. Redaction accepts `none`, an empty list,
+or comma-separated dotted field paths with letters, digits and underscores
+(spaces are ignored).
+A missing or differently shaped field leaves the event intact.
+
+Unpinned `channel.<name>.log_file` settings must be absolute files beneath
+`TELEMETRY_DATA_DIR`. Traversal, symlink components below that directory,
+directories, devices and FIFOs are rejected. Effective default log and rotation
+paths are checked again before I/O; an unsafe destination emits a warning and
+returns failure without writing through it. Detached hooks check active files and existing rotation siblings in the
+foreground so destination warnings reach the caller without waiting for
+background processing or network requests. A failed channel does not
+prevent delivery to other safe channels or the Console sink. Existing custom directories
+must already exist; use ordinary files in the telemetry data directory.
+Rejected destinations keep the default local log, so ordinary events are
+retained. The local-only pin remains stricter and accepts no log path from
+its file. Explicit environment overrides remain operator-controlled.
+
+Re-running `init` replaces an installed `telemetry.conf` that nobody edited
+with the bundle's copy and applies only that run's sink, so re-running it
+without `--telemetry-sink local-files`, or with a Console sink, removes the
+pin. A `telemetry.conf` edited after install is preserved instead: init leaves
+it, and its pin, unchanged and applies no sink to it (pass `--force` to replace
+it). Deleting the `telemetry_sink_pin` line removes the pin. `init --global`
+for `claude-code` and `opencode` cannot record a pin, because those hooks run
+from the package's own `scripts/telemetry`; init warns when the flag is given
+there. Run directly, `install-console-config.sh` does not pin the Flow Agents
+package's own `telemetry.conf` (a source checkout or the installed npm
+package). The root `install.sh` copies that package into its destination and
+tells the script so, so `bash install.sh /path/to/workspace --telemetry-sink
+local-files` from a clone does pin the destination.
+
+Environment variables are not affected by the pin: they are an explicit
+runtime override. That covers the Console variables (`CONSOLE_TELEMETRY_URL`,
+`CONSOLE_URL`, `CONSOLE_TELEMETRY_ENDPOINT_URL`), a channel endpoint
+(`TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL`, unless the installed
+`telemetry.conf` sets that channel's endpoint itself, as it does for `full`),
+a channel log file (`TELEMETRY_CHANNEL_<NAME>_LOG_FILE`), a pricing URL (`TELEMETRY_PRICING_URL`, `FLOW_AGENTS_PRICING_URL`), and the
+economics and liveness relays (`FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY`,
+`FLOW_AGENTS_CONSOLE_LIVENESS_RELAY`, their `..._ENDPOINT_URL`, and
+`FLOW_AGENTS_CONSOLE_URL`). When
+one of them, or `TELEMETRY_CONFIG_FILE`, still sends a pinned install's data
+off the machine, `telemetry-doctor` warns once per destination and names its
+source, and init's summary says the install is not local-only.
+
 The explicit `TELEMETRY_CONFIG_FILE` env var still overrides both
-auto-discovered paths and always wins. Wiring it from a login-shell profile
+auto-discovered paths and the local-only pin, and always wins. Wiring it from a login-shell profile
 (for example `~/.profile` on `bash -l` setups) remains available for exotic
 setups that need a config path outside both conventional locations, but is
 no longer required for the common case.

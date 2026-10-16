@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { telemetryDataDir as defaultTelemetryDataDir } from "../lib/local-artifact-root.js";
+import { TELEMETRY_CHANNEL_ANALYTICS_REDACT_DEFAULT } from "../narrative/policy-filter.js";
 
 type Config = Record<string, string>;
 
@@ -26,6 +27,22 @@ export type DoctorReport = {
     sessionDir: string;
     channels: Array<{ name: string; logFile?: string; endpointUrl?: string; active: boolean }>;
     activeSinks: string[];
+    /**
+     * The installed telemetry.conf carries `telemetry_sink_pin=local-files` (#1483) and no
+     * TELEMETRY_CONFIG_FILE overrides it, so the operator Console confs are not consulted.
+     */
+    localOnlyPinned: boolean;
+    /**
+     * The installed telemetry.conf carries the pin line, whether or not it applies right now
+     * (TELEMETRY_CONFIG_FILE overrides it).
+     */
+    pinRecorded: boolean;
+    /** For a recorded pin: each destination still contacted, what it is, and where it resolves from. */
+    pinOverrides: Array<{ what: string; source: string; url: string }>;
+    /** For an applied pin: the installed telemetry.conf lines the allowlist ignored, and why. */
+    pinIgnored: PinIgnored[];
+    /** Operator Console confs present on disk that the local-only pin causes resolution to skip. */
+    skippedConfigFiles: string[];
   };
   console: {
     sink: "local-only" | "console";
@@ -52,6 +69,17 @@ export type DoctorReport = {
     tokenSource: ConsoleValueSource;
     tenantSource: ConsoleValueSource;
     urlSource: ConsoleValueSource;
+    /**
+     * Where the resolved Console endpoint comes from, named for a person: an environment
+     * variable, `TELEMETRY_CONFIG_FILE (<path>)`, or the resolved config file. Absent when no
+     * endpoint resolves.
+     */
+    endpointSource?: string;
+    /**
+     * The redaction field list config.sh applies to the Console POST (CONSOLE_TELEMETRY_REDACT). A
+     * pinned install never takes it from its installed telemetry.conf (#1483).
+     */
+    redactFields: string;
     reachability: Reachability;
   };
   warnings: string[];
@@ -60,10 +88,10 @@ export type DoctorReport = {
 /** Provenance of a resolved Console value. "absent" means nothing set it anywhere. */
 export type ConsoleValueSource = "environment" | "config-file" | "absent";
 
-function valueSource(envValue: string | undefined, configValue: string | undefined): ConsoleValueSource {
-  if (envValue !== undefined && envValue !== "") return "environment";
-  if (configValue !== undefined && configValue !== "") return "config-file";
-  return "absent";
+function resolvedSource(vars: Map<string, { value: string; envName?: string }>, name: string): ConsoleValueSource {
+  const entry = vars.get(name);
+  if (!entry?.value) return "absent";
+  return entry.envName ? "environment" : "config-file";
 }
 
 const defaultChannels = "full";
@@ -96,17 +124,118 @@ function readConfig(file: string): Config {
   return config;
 }
 
-function configValue(config: Config, envName: string, key: string, fallback = ""): string {
-  return process.env[envName] ?? config[key] ?? fallback;
-}
+/** A value lib/config.sh resolved, and where it came from. */
+type Resolved = { value: string; envName?: string };
 
-function channelEnvName(channel: string, key: string): string {
-  return `TELEMETRY_CHANNEL_${channel.toUpperCase()}_${key.toUpperCase()}`;
-}
+const ASCII_SPACE = /[ \t\n\r\f\v]/g;
+const ASCII_TRIM = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
 
-function channelConfigValue(config: Config, channel: string, key: string, fallback = ""): string {
-  const envName = channelEnvName(channel, key);
-  return process.env[envName] ?? config[`channel.${channel}.${key}`] ?? fallback;
+/** config.sh's standard keys, mapped to the variable each one sets. Matched exactly, as its `case` does. */
+const CONF_KEY_VARS: Readonly<Record<string, string>> = {
+  enabled: "TELEMETRY_ENABLED",
+  channels: "TELEMETRY_CHANNELS",
+  console_url: "CONSOLE_TELEMETRY_URL",
+  console_telemetry_url: "CONSOLE_TELEMETRY_URL",
+  console_telemetry_endpoint_url: "CONSOLE_TELEMETRY_ENDPOINT_URL",
+  console_telemetry_token: "CONSOLE_TELEMETRY_TOKEN",
+  console_tenant_id: "CONSOLE_TENANT_ID",
+  console_telemetry_redact: "CONSOLE_TELEMETRY_REDACT",
+  console_pricing_url: "TELEMETRY_PRICING_URL",
+  pricing_url: "TELEMETRY_PRICING_URL",
+  pricing_file: "TELEMETRY_PRICING_FILE",
+  console_economics_endpoint_url: "FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL",
+  console_liveness_endpoint_url: "FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL",
+};
+
+/** config.sh's relay keys: 1/true/yes/on become 1, 0/false/no/off become 0, anything else is kept. */
+const CONF_RELAY_KEYS: Readonly<Record<string, string>> = {
+  console_economics_relay: "RELAY_RAW:ECONOMICS",
+  console_liveness_relay: "RELAY_RAW:LIVENESS",
+};
+
+/** A pinned conf line the allowlist dropped, for the report. */
+export type PinIgnored = { key: string; reason: string };
+
+/**
+ * The variables this report needs, resolved the way lib/config.sh resolves them (#1483 review). It
+ * covers only those variables, and it trusts the file it is given: resolveTelemetryConfigFile has
+ * already applied config.sh's file choice and trust gate.
+ *
+ *   - environment defaults first, with `${VAR:-}` semantics, so an empty variable is unset and
+ *     CONSOLE_URL / CONSOLE_AUTH_TOKEN / FLOW_AGENTS_PRICING_URL are fallbacks;
+ *   - then the config file, line by line, each matching key overriding the environment;
+ *   - lines read the way `while IFS='=' read -r key value` reads them: a final line with no newline
+ *     is skipped, a remainder with one '=' and only at its end loses it, the key loses all ASCII
+ *     whitespace and the value is trimmed;
+ *   - channel.<name>.<key> becomes TELEMETRY_CHANNEL_<NAME>_<KEY> when both parts are
+ *     [A-Za-z0-9_]+;
+ *   - for a pinned install, the same allowlist as config.sh: standard keys through
+ *     pinnedKeyAllowed, channel settings by the derived variable name through
+ *     pinnedChannelVarAllowed. Every line it drops is listed in `ignored`.
+ * Whitespace is ASCII only throughout, as config.sh's tr/sed run under LC_ALL=C.
+ */
+function resolveLikeConfigSh(file: string, pinned: boolean, env: NodeJS.ProcessEnv = process.env): { vars: Map<string, Resolved>; ignored: PinIgnored[] } {
+  const vars = new Map<string, Resolved>();
+  const ignored: PinIgnored[] = [];
+  const fromEnv = (name: string, ...names: string[]) => {
+    for (const envName of names) {
+      const value = env[envName];
+      if (value) {
+        vars.set(name, { value, envName });
+        return;
+      }
+    }
+  };
+  fromEnv("TELEMETRY_ENABLED", "TELEMETRY_ENABLED");
+  fromEnv("TELEMETRY_CHANNELS", "TELEMETRY_CHANNELS");
+  fromEnv("CONSOLE_TELEMETRY_URL", "CONSOLE_TELEMETRY_URL", "CONSOLE_URL");
+  fromEnv("CONSOLE_TELEMETRY_ENDPOINT_URL", "CONSOLE_TELEMETRY_ENDPOINT_URL");
+  fromEnv("CONSOLE_TELEMETRY_TOKEN", "CONSOLE_TELEMETRY_TOKEN", "CONSOLE_AUTH_TOKEN");
+  fromEnv("CONSOLE_TENANT_ID", "CONSOLE_TENANT_ID");
+  fromEnv("CONSOLE_TELEMETRY_REDACT", "CONSOLE_TELEMETRY_REDACT");
+  fromEnv("TELEMETRY_PRICING_URL", "TELEMETRY_PRICING_URL", "FLOW_AGENTS_PRICING_URL");
+  fromEnv("TELEMETRY_PRICING_FILE", "TELEMETRY_PRICING_FILE", "FLOW_AGENTS_PRICING_FILE");
+  // The relays read CONSOLE_URL again after config.sh, so a conf `console_url=` cannot hide it there.
+  fromEnv("ENV:CONSOLE_URL", "CONSOLE_URL");
+  for (const name of ["FLOW_AGENTS_CONSOLE_URL", "FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY", "FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL", "FLOW_AGENTS_CONSOLE_LIVENESS_RELAY", "FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL"]) fromEnv(name, name);
+  for (const name of Object.keys(env)) if (name.startsWith("TELEMETRY_CHANNEL_")) fromEnv(name, name);
+  if (!fs.existsSync(file)) return { vars, ignored };
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  lines.pop(); // the text after the last newline: `read` never returns it
+  for (const line of lines) {
+    const eq = line.indexOf("=");
+    const rawKey = eq === -1 ? line : line.slice(0, eq);
+    if (!rawKey || /^[ \t\n\r\f\v]*#/.test(rawKey)) continue;
+    let rest = eq === -1 ? "" : line.slice(eq + 1);
+    if (rest.indexOf("=") === rest.length - 1 && rest.length > 0) rest = rest.slice(0, -1);
+    const key = rawKey.replace(ASCII_SPACE, "");
+    if (key.startsWith("#")) continue;
+    const value = rest.replace(ASCII_TRIM, "");
+    const channel = /^channel\.([^.]+)\.(.+)$/.exec(key);
+    if (channel) {
+      if (!/^[A-Za-z0-9_]+$/.test(channel[1]) || !/^[A-Za-z0-9_]+$/.test(channel[2])) continue;
+      const name = `TELEMETRY_CHANNEL_${channel[1].toUpperCase()}_${channel[2].toUpperCase()}`;
+      if (pinned && !pinnedChannelVarAllowed(name, value)) {
+        ignored.push({ key, reason: /_(ENDPOINT_URL|REDACT)$/.test(name) ? "value not allowed for a pinned install" : "not on the pinned allowlist" });
+        continue;
+      }
+      vars.set(name, { value });
+      continue;
+    }
+    if (pinned && !pinnedKeyAllowed(key, value)) {
+      ignored.push({ key, reason: PINNED_STANDARD_KEYS.has(key) ? "value not allowed for a pinned install" : "not on the pinned allowlist" });
+      continue;
+    }
+    const relay = CONF_RELAY_KEYS[key];
+    if (relay) {
+      const lower = value.toLowerCase();
+      vars.set(relay, { value: ["1", "true", "yes", "on"].includes(lower) ? "1" : ["0", "false", "no", "off"].includes(lower) ? "0" : value });
+      continue;
+    }
+    const name = CONF_KEY_VARS[key];
+    if (name) vars.set(name, { value });
+  }
+  return { vars, ignored };
 }
 
 function telemetryDataDir(dest: string): string {
@@ -209,9 +338,116 @@ function isConfTrusted(file: string): boolean {
   }
 }
 
+const PIN_LINE = "telemetry_sink_pin=local-files";
+
+/**
+ * Whether `file` (an installed telemetry.conf) pins the install local-only: it has a line that is
+ * exactly `telemetry_sink_pin=local-files`, optionally followed by a CR. Mirrors config.sh's
+ * telemetry_conf_pinned_local_only and liveness-write.js's isPinnedLocalOnly.
+ */
+export function isPinnedLocalOnly(file: string): boolean {
+  if (!fs.existsSync(file)) return false;
+  return fs.readFileSync(file, "utf8").split("\n").some((line) => line === PIN_LINE || line === `${PIN_LINE}\r`);
+}
+
+// ASCII whitespace only, as config.sh matches [[:space:]] under LC_ALL=C.
+// No [ ] { } in the path: curl reads them as URL globs (config.sh's TELEMETRY_LOOPBACK_URL_RE).
+const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(\/[^\][{} \t\n\r\f\v"\\]*)?$/;
+
+/** config.sh's TELEMETRY_SHIPPED_ANALYTICS_REDACT, from the TypeScript copy of the list. */
+const DEFAULT_ANALYTICS_REDACT = TELEMETRY_CHANNEL_ANALYTICS_REDACT_DEFAULT.join(",");
+
+const asciiLower = (value: string) => value.replace(/[A-Z]/g, (char) => char.toLowerCase());
+
+const PINNED_STANDARD_KEYS: ReadonlySet<string> = new Set([
+  "enabled", "enrich_system", "enrich_workspace", "enrich_auth", "usage_tracking", "notifications", "governance",
+  "channels", "max_log_size_mb", "max_log_files", "governance_audit_max_size_mb", "governance_audit_max_files",
+  "notification_profile", "sync_include", "sync_exclude", "console_economics_relay", "console_liveness_relay",
+  "telemetry_sink_pin",
+]);
+
+/**
+ * The allowlist a pinned install's installed telemetry.conf is held to (config.sh's
+ * telemetry_pinned_key_allowed): only settings that are local by construction, each with a value
+ * grammar. The file is not trust-gated, so everything else is dropped -- including every path
+ * (pricing_file, a channel's *_LOG_FILE): each event is appended to a log file verbatim, so a chosen
+ * path is a write of attacker-influenced text into a shell rc file, a git hook or /dev/tcp.
+ */
+function pinnedKeyAllowed(key: string, value: string): boolean {
+  switch (key) {
+    case "enabled": case "enrich_system": case "enrich_workspace": case "enrich_auth":
+    case "usage_tracking": case "notifications": case "governance":
+      return value === "true" || value === "false";
+    case "channels": return /^[A-Za-z0-9_, ]*$/.test(value);
+    case "max_log_size_mb": case "max_log_files": case "governance_audit_max_size_mb": case "governance_audit_max_files":
+      return /^[0-9]+$/.test(value);
+    case "notification_profile": return /^[A-Za-z0-9_-]+$/.test(value);
+    case "sync_include": case "sync_exclude": return true;
+    case "console_economics_relay": case "console_liveness_relay": return ["0", "false", "no", "off"].includes(asciiLower(value));
+    case "telemetry_sink_pin": return true;
+    default: return false;
+  }
+}
+
+/**
+ * config.sh's telemetry_pinned_channel_var_allowed, on the derived TELEMETRY_CHANNEL_<NAME>_<KEY>.
+ * A redaction list is `none` or field names only, since redact.sh splices each field into a jq
+ * program (`jq ".$field = null"`).
+ */
+function pinnedChannelVarAllowed(name: string, value: string): boolean {
+  if (name.endsWith("_ENDPOINT_URL")) return LOOPBACK_URL.test(value);
+  if (name.endsWith("_REDACT")) return value === "none" || /^[A-Za-z0-9_.,]*$/.test(value);
+  return false;
+}
+
+const RELAY_ON = new Set(["1", "true", "TRUE", "yes", "on"]);
+
+/**
+ * The economics and liveness relays a pinned install would still run, resolved as config.sh's
+ * default-on rules and economics-record.sh / liveness/relay.sh's endpoint lookup resolve them: an
+ * explicit conf key, else a pre-set environment value, else on once a Console URL or endpoint
+ * resolves; the endpoint is the relay's own *_ENDPOINT_URL, else FLOW_AGENTS_CONSOLE_URL or the
+ * resolved Console URL plus /records (economics also falls back to the Console endpoint's origin).
+ */
+function relayEndpoints(
+  vars: Map<string, Resolved>,
+  consoleUrl: string,
+  consoleEndpoint: string,
+  sourceOf: (name: string) => string | undefined,
+): Array<{ what: string; source: string; url: string }> {
+  const found: Array<{ what: string; source: string; url: string }> = [];
+  for (const [kind, label] of [["ECONOMICS", "economics"], ["LIVENESS", "liveness"]] as const) {
+    const raw = vars.get(`RELAY_RAW:${kind}`)?.value;
+    const decision = raw ? raw : vars.get(`FLOW_AGENTS_CONSOLE_${kind}_RELAY`)?.value || (consoleUrl || consoleEndpoint ? "1" : "");
+    if (!RELAY_ON.has(decision)) continue;
+    const endpointVar = `FLOW_AGENTS_CONSOLE_${kind}_ENDPOINT_URL`;
+    let url = vars.get(endpointVar)?.value ?? "";
+    let source = url ? sourceOf(endpointVar) : undefined;
+    if (!url) {
+      const baseVar = ["FLOW_AGENTS_CONSOLE_URL", "CONSOLE_TELEMETRY_URL", "ENV:CONSOLE_URL"].find((name) => vars.get(name)?.value);
+      let base = baseVar ? vars.get(baseVar)?.value ?? "" : "";
+      source = baseVar ? sourceOf(baseVar) : undefined;
+      if (!base && kind === "ECONOMICS" && consoleEndpoint) {
+        base = /^(https?:\/\/[^/]+)/.exec(consoleEndpoint)?.[1] ?? consoleEndpoint;
+        source = sourceOf("CONSOLE_TELEMETRY_ENDPOINT_URL");
+      }
+      if (!base) continue;
+      url = `${base.endsWith("/") ? base.slice(0, -1) : base}/records`;
+    }
+    found.push({ what: `the ${label} relay`, source: source ?? "the environment", url });
+  }
+  return found;
+}
+
+/** Whether no TELEMETRY_CONFIG_FILE is set and the installed telemetry.conf is pinned local-only. */
+function localOnlyPinApplies(telemetryDir: string): boolean {
+  return !process.env.TELEMETRY_CONFIG_FILE && isPinnedLocalOnly(path.join(telemetryDir, "telemetry.conf"));
+}
+
 /**
  * Resolve the config file the bash runtime would actually load, in
- * scripts/telemetry/lib/config.sh's order: explicit TELEMETRY_CONFIG_FILE, a
+ * scripts/telemetry/lib/config.sh's order: explicit TELEMETRY_CONFIG_FILE, the
+ * shipped default when it is pinned local-only (#1483), a
  * trusted per-workspace .kontourai/telemetry-console.conf, a trusted
  * user-global ~/.flow-agents/telemetry-console.conf, then the shipped default.
  *
@@ -226,6 +462,7 @@ function isConfTrusted(file: string): boolean {
 export function resolveTelemetryConfigFile(dest: string, telemetryDir: string): string {
   const explicit = process.env.TELEMETRY_CONFIG_FILE;
   if (explicit) return path.resolve(explicit);
+  if (localOnlyPinApplies(telemetryDir)) return path.join(telemetryDir, "telemetry.conf");
   const localConf = path.join(dest, ".kontourai", "telemetry-console.conf");
   if (isConfTrusted(localConf)) return localConf;
   const globalConf = path.join(os.homedir(), ".flow-agents", "telemetry-console.conf");
@@ -251,24 +488,65 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
   const dest = path.resolve(flagString(args.flags, "dest", process.cwd()) ?? process.cwd());
   const telemetryDir = path.join(dest, "scripts", "telemetry");
   const configFile = resolveTelemetryConfigFile(dest, telemetryDir);
+  const localOnlyPinned = localOnlyPinApplies(telemetryDir);
+  const pinRecorded = isPinnedLocalOnly(path.join(telemetryDir, "telemetry.conf"));
   const config = readConfig(configFile);
-  const enabled = configValue(config, "TELEMETRY_ENABLED", "enabled", "true") !== "false";
+  const { vars, ignored: pinIgnored } = resolveLikeConfigSh(configFile, localOnlyPinned);
+  const resolved = (name: string, fallback = ""): string => vars.get(name)?.value ?? fallback;
+  const fileLabel = process.env.TELEMETRY_CONFIG_FILE ? `TELEMETRY_CONFIG_FILE (${configFile})` : configFile;
+  const sourceOf = (name: string): string | undefined => {
+    const entry = vars.get(name);
+    if (!entry?.value) return undefined;
+    return entry.envName ? `environment variable ${entry.envName}` : fileLabel;
+  };
+  const enabled = resolved("TELEMETRY_ENABLED", "true") !== "false";
   const dataDir = telemetryDataDir(dest);
-  const sessionDir = path.resolve(configValue(config, "TELEMETRY_SESSION_DIR", "telemetry_session_dir", path.join(dataDir, "sessions")));
-  const channels = configValue(config, "TELEMETRY_CHANNELS", "channels", defaultChannels).split(",").map((channel) => channel.trim()).filter(Boolean);
+  const sessionDir = path.resolve(process.env.TELEMETRY_SESSION_DIR ?? config.telemetry_session_dir ?? path.join(dataDir, "sessions"));
+  const channels = resolved("TELEMETRY_CHANNELS", defaultChannels).split(",").map((channel) => channel.replace(ASCII_SPACE, "")).filter(Boolean);
+  const channelVar = (name: string, key: string) => `TELEMETRY_CHANNEL_${name.toUpperCase()}_${key}`;
   const channelReports = channels.map((name) => {
     const defaultLog = name === "full" ? path.join(dataDir, "full.jsonl") : name === "analytics" ? path.join(dataDir, "analytics.jsonl") : "";
-    const logFile = channelConfigValue(config, name, "log_file", defaultLog);
-    const endpointUrl = channelConfigValue(config, name, "endpoint_url");
+    const logFile = resolved(channelVar(name, "LOG_FILE"), defaultLog);
+    const endpointUrl = resolved(channelVar(name, "ENDPOINT_URL"));
     return { name, logFile: logFile ? path.resolve(dest, logFile) : undefined, endpointUrl: safeReportUrl(endpointUrl), active: enabled };
   });
-  const consoleUrl = process.env.CONSOLE_TELEMETRY_URL ?? process.env.CONSOLE_URL ?? config.console_telemetry_url ?? config.console_url ?? "";
-  const explicitEndpoint = process.env.CONSOLE_TELEMETRY_ENDPOINT_URL ?? config.console_telemetry_endpoint_url ?? "";
+  const consoleUrl = resolved("CONSOLE_TELEMETRY_URL");
+  const explicitEndpoint = resolved("CONSOLE_TELEMETRY_ENDPOINT_URL");
   const endpointUrl = deriveConsoleEndpoint(consoleUrl, explicitEndpoint);
+  const endpointSource = !endpointUrl ? undefined : sourceOf(explicitEndpoint ? "CONSOLE_TELEMETRY_ENDPOINT_URL" : "CONSOLE_TELEMETRY_URL");
+  // What still leaves the machine from a pinned install, and why (#1483 review): the pin filters only
+  // the installed telemetry.conf, never the environment or TELEMETRY_CONFIG_FILE.
+  const pinOverrides: Array<{ what: string; source: string; url: string }> = [];
+  if (pinRecorded) {
+    if (endpointUrl) pinOverrides.push({ what: "a Console endpoint", source: endpointSource ?? "the environment", url: endpointUrl });
+    if (enabled) {
+      for (const name of channels) {
+        const url = resolved(channelVar(name, "ENDPOINT_URL"));
+        if (url && !LOOPBACK_URL.test(url)) pinOverrides.push({ what: `the ${name} channel endpoint`, source: sourceOf(channelVar(name, "ENDPOINT_URL")) ?? "the environment", url });
+      }
+    }
+    const pricingUrl = resolved("TELEMETRY_PRICING_URL");
+    if (pricingUrl) pinOverrides.push({ what: "a pricing URL", source: sourceOf("TELEMETRY_PRICING_URL") ?? "the environment", url: pricingUrl });
+    if (enabled) {
+      // bash turns a write to /dev/tcp or /dev/udp into a connection (transport.sh's `>> "$log_file"`).
+      for (const name of channels) {
+        const logFile = resolved(channelVar(name, "LOG_FILE"));
+        if (/^\/dev\/(tcp|udp)\//.test(logFile)) pinOverrides.push({ what: `the ${name} channel log file`, source: sourceOf(channelVar(name, "LOG_FILE")) ?? "the environment", url: logFile });
+      }
+    }
+    for (const relay of relayEndpoints(vars, consoleUrl, explicitEndpoint, sourceOf)) pinOverrides.push(relay);
+  }
   const allowed = endpointAllowed(endpointUrl, allowNetwork);
   const timeoutMs = Number.parseInt(flagString(args.flags, "timeout-ms", "2000") ?? "2000", 10);
   const reachability = await checkConsoleReachability(endpointUrl, Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 2000, allowNetwork);
-  const warnings = reportWarnings(configFile, endpointUrl, allowed, allowNetwork, dest);
+  const skippedConfigFiles = localOnlyPinned
+    ? [path.join(dest, ".kontourai", "telemetry-console.conf"), path.join(os.homedir(), ".flow-agents", "telemetry-console.conf")].filter((file) => fs.existsSync(file))
+    : [];
+  const warnings = reportWarnings(configFile, endpointUrl, allowed, allowNetwork, dest, localOnlyPinned);
+  for (const override of pinOverrides) {
+    const where = override.url.startsWith("/") ? override.url : safeReportUrl(override.url);
+    warnings.push(`This install is pinned local-only (${PIN_LINE} in ${path.join(telemetryDir, "telemetry.conf")}), but ${override.what} still resolves from ${override.source}, so it is contacted at ${where}. Unset it to keep this install local-only.`);
+  }
   return {
     ok: enabled && (!endpointUrl || (allowed && reachability.ok !== false)),
     destination: dest,
@@ -280,27 +558,35 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
       sessionDir,
       channels: channelReports,
       activeSinks: activeSinks(enabled, channelReports, endpointUrl, allowed),
+      localOnlyPinned,
+      pinRecorded,
+      pinOverrides: pinOverrides.map((override) => ({ ...override, url: override.url.startsWith("/") ? override.url : safeReportUrl(override.url) ?? "" })),
+      pinIgnored,
+      skippedConfigFiles,
     },
     console: {
       sink: endpointUrl ? "console" : "local-only",
       url: safeReportUrl(consoleUrl),
       endpointUrl: safeReportUrl(endpointUrl),
       endpointAllowed: allowed,
-      tokenConfigured: Boolean(process.env.CONSOLE_TELEMETRY_TOKEN ?? process.env.CONSOLE_AUTH_TOKEN ?? config.console_telemetry_token),
-      tenantConfigured: Boolean(process.env.CONSOLE_TENANT_ID ?? config.console_tenant_id),
-      tokenSource: valueSource(process.env.CONSOLE_TELEMETRY_TOKEN ?? process.env.CONSOLE_AUTH_TOKEN, config.console_telemetry_token),
-      tenantSource: valueSource(process.env.CONSOLE_TENANT_ID, config.console_tenant_id),
-      urlSource: valueSource(
-        process.env.CONSOLE_TELEMETRY_URL ?? process.env.CONSOLE_URL ?? process.env.CONSOLE_TELEMETRY_ENDPOINT_URL,
-        config.console_telemetry_url ?? config.console_url ?? config.console_telemetry_endpoint_url,
-      ),
+      tokenConfigured: Boolean(resolved("CONSOLE_TELEMETRY_TOKEN")),
+      tenantConfigured: Boolean(resolved("CONSOLE_TENANT_ID")),
+      tokenSource: resolvedSource(vars, "CONSOLE_TELEMETRY_TOKEN"),
+      tenantSource: resolvedSource(vars, "CONSOLE_TENANT_ID"),
+      urlSource: resolvedSource(vars, explicitEndpoint ? "CONSOLE_TELEMETRY_ENDPOINT_URL" : "CONSOLE_TELEMETRY_URL"),
+      ...(endpointSource ? { endpointSource } : {}),
+      // config.sh: an exported CONSOLE_TELEMETRY_REDACT, else (unpinned) a console_telemetry_redact
+      // line, else the analytics list -- for a pinned install the shipped list itself.
+      redactFields: resolved("CONSOLE_TELEMETRY_REDACT") || (localOnlyPinned
+        ? DEFAULT_ANALYTICS_REDACT
+        : resolved("TELEMETRY_CHANNEL_ANALYTICS_REDACT", DEFAULT_ANALYTICS_REDACT)),
       reachability,
     },
     warnings,
   };
 }
 
-function reportWarnings(configFile: string, endpointUrl: string, allowed: boolean, allowNetwork: boolean, dest: string): string[] {
+function reportWarnings(configFile: string, endpointUrl: string, allowed: boolean, allowNetwork: boolean, dest: string, localOnlyPinned: boolean): string[] {
   const warnings: string[] = [];
   // Only meaningful when the shipped default is the resolved file; a workspace
   // or user-global conf living elsewhere is the normal, supported case.
@@ -309,6 +595,9 @@ function reportWarnings(configFile: string, endpointUrl: string, allowed: boolea
   if (endpointUrl && !allowed) warnings.push(allowNetwork ? "Console endpoint is malformed or contains credentials" : "Console endpoint is not allowed without --allow-network; local http(s) endpoints and the known hosted Console host are allowed by default");
   // Mirrors config.sh's local-before-global precedence for the warning only
   // (see isConfTrusted's doc comment for the accepted config-resolution-parity gap).
+  // A pinned install never reads either conf, so whether one is trusted does not matter (config.sh
+  // does not warn about them either).
+  if (localOnlyPinned) return warnings;
   const localConf = path.join(dest, ".kontourai", "telemetry-console.conf");
   const globalConf = path.join(os.homedir(), ".flow-agents", "telemetry-console.conf");
   if (fs.existsSync(localConf) && !isConfTrusted(localConf)) {
@@ -322,6 +611,11 @@ function reportWarnings(configFile: string, endpointUrl: string, allowed: boolea
 function printText(report: DoctorReport): void {
   console.log(`Telemetry doctor for ${report.destination}`);
   console.log(`Config: ${report.telemetry.configFile} (${report.telemetry.configExists ? "found" : "missing"})`);
+  if (report.telemetry.localOnlyPinned) {
+    console.log("Pinned local-only: telemetry_sink_pin=local-files in the installed telemetry.conf; operator Console configs are not read (TELEMETRY_CONFIG_FILE still overrides)");
+    for (const file of report.telemetry.skippedConfigFiles) console.log(`Skipped by the pin: ${file}`);
+    for (const line of report.telemetry.pinIgnored) console.log(`Ignored by the pin: ${line.key} (${line.reason})`);
+  }
   console.log(`Telemetry enabled: ${report.telemetry.enabled}`);
   console.log(`Local telemetry dir: ${report.telemetry.dataDir}`);
   console.log(`Active sinks: ${report.telemetry.activeSinks.length ? report.telemetry.activeSinks.join(", ") : "none"}`);
