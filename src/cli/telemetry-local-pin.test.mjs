@@ -994,10 +994,15 @@ test("pinned: anything off the allowlist is ignored by config.sh and reported by
     "pricing_file=relative.json",
   ];
   withInstalledConf(pinned.dest, (text) => `${text}${lines.join("\n")}\n`, () => {
-    const vars = readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_MAX_LOG_FILES", "TELEMETRY_CHANNELS", "TELEMETRY_ENABLED", "TELEMETRY_NOTIFICATION_PROFILE", "TELEMETRY_PRICING_FILE", "TELEMETRY_CHANNEL_FULL_UNKNOWN_KEY"]);
-    assert.deepEqual(vars, { TELEMETRY_MAX_LOG_FILES: "3", TELEMETRY_CHANNELS: "full,analytics", TELEMETRY_ENABLED: "true", TELEMETRY_NOTIFICATION_PROFILE: "standard", TELEMETRY_PRICING_FILE: "", TELEMETRY_CHANNEL_FULL_UNKNOWN_KEY: "" });
-    // Rotation does arithmetic on TELEMETRY_MAX_LOG_FILES: run it, then check nothing executed.
-    spawnSync("/bin/bash", ["-c", 'source "$1/scripts/telemetry/lib/config.sh"; source "$1/scripts/telemetry/lib/transport.sh"; transport_maybe_rotate; transport_emit "{}"; wait', "_", pinned.dest], { env: { PATH: SHELL_PATH, HOME: home }, encoding: "utf8" });
+    const vars = readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_MAX_LOG_FILES", "TELEMETRY_CHANNELS", "TELEMETRY_ENABLED", "TELEMETRY_NOTIFICATION_PROFILE", "TELEMETRY_PRICING_FILE", "TELEMETRY_CHANNEL_FULL_UNKNOWN_KEY", "CONSOLE_TELEMETRY_REDACT", "TELEMETRY_CHANNEL_ANALYTICS_REDACT"]);
+    const { CONSOLE_TELEMETRY_REDACT: consoleRedact, TELEMETRY_CHANNEL_ANALYTICS_REDACT: analyticsRedact, ...rest } = vars;
+    assert.deepEqual(rest, { TELEMETRY_MAX_LOG_FILES: "3", TELEMETRY_CHANNELS: "full,analytics", TELEMETRY_ENABLED: "true", TELEMETRY_NOTIFICATION_PROFILE: "standard", TELEMETRY_PRICING_FILE: "", TELEMETRY_CHANNEL_FULL_UNKNOWN_KEY: "" });
+    // console_telemetry_redact was dropped, so the Console redaction falls back to the analytics list.
+    assert.equal(consoleRedact, analyticsRedact);
+    // transport_emit expands each channel name indirectly, and rotation does arithmetic on
+    // TELEMETRY_MAX_LOG_FILES (done directly here, since rotation only runs on a full log).
+    const run = spawnSync("/bin/bash", ["-c", 'source "$1/scripts/telemetry/lib/config.sh"; source "$1/scripts/telemetry/lib/transport.sh"; transport_emit "{}"; : $(( TELEMETRY_MAX_LOG_FILES - 1 )); wait', "_", pinned.dest], { env: { PATH: SHELL_PATH, HOME: home }, encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
     assert.equal(fs.existsSync(marker), false, "a $(...) in a pinned value ran");
     const doctor = readDoctorReport(pinned.dest, { HOME: home });
     assert.deepEqual(doctor.telemetry.pinIgnored.map((entry) => entry.key), ["max_log_files", "channels", "enabled", "notification_profile", "console_telemetry_redact", "some_future_key", "channel.full.unknown_key", "pricing_file"]);
@@ -1081,4 +1086,10 @@ test("the liveness relay really POSTs where the doctor says it does (pinned + FL
   } finally {
     server.close();
   }
+});
+
+test("doctor: an environment channel log file under /dev/tcp on a pinned install is reported", () => {
+  const home = makeFixtureDir("telemetry-pin-env-devtcp-home-");
+  const report = readDoctorReport(pinned.dest, { HOME: home, TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE: "/dev/tcp/0.0.0.0/9" });
+  assert.deepEqual(report.telemetry.pinOverrides.map((entry) => [entry.what, entry.source, entry.url]), [["the analytics channel log file", "environment variable TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE", "/dev/tcp/0.0.0.0/9"]]);
 });
