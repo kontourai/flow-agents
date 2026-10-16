@@ -147,6 +147,15 @@ export function makeFixtureProject(prefix, kits = {}) {
  * A package root whose `kits/` holds exactly `kits` (no Builder kit), with its own copy of the
  * compiled CLI. Returns the root and the paths of its CLI entry points.
  */
+function copyPathState(file) {
+  try {
+    const stat = fs.lstatSync(file);
+    return { dev: stat.dev, ino: stat.ino, mode: stat.mode, size: stat.size, mtimeMs: stat.mtimeMs };
+  } catch (error) {
+    return { code: error.code };
+  }
+}
+
 export function makeFixturePackage(prefix, kits) {
   const root = fs.realpathSync(makeFixtureDir(prefix));
   for (const entry of fs.readdirSync(REPO_ROOT)) {
@@ -154,7 +163,21 @@ export function makeFixturePackage(prefix, kits) {
     fs.symlinkSync(path.join(REPO_ROOT, entry), path.join(root, entry));
   }
   fs.copyFileSync(path.join(REPO_ROOT, "package.json"), path.join(root, "package.json"));
-  fs.cpSync(path.join(REPO_ROOT, "build"), path.join(root, "build"), { recursive: true });
+  const source = path.join(REPO_ROOT, "build");
+  const destination = path.join(root, "build");
+  // Native cp errors can name the containing destination even when reading the source failed.
+  // Retain identities on both sides; never retry past a missing fixture or change the exception.
+  const paths = { source, sourceSrc: path.join(source, "src"), root, destination, destinationSrc: path.join(destination, "src") };
+  const snapshot = () => Object.fromEntries(Object.entries(paths).map(([name, file]) => [name, copyPathState(file)]));
+  const before = snapshot();
+  try {
+    fs.cpSync(source, destination, { recursive: true });
+  } catch (error) {
+    try {
+      error.fixtureCopy = { pid: process.pid, node: process.version, source, destination, before, after: snapshot() };
+    } catch { /* diagnostic failure must not displace the original copy failure */ }
+    throw error;
+  }
   fs.mkdirSync(path.join(root, "kits"));
   for (const [kitId, kit] of Object.entries(kits)) writeKit(root, kitId, kit);
   return {

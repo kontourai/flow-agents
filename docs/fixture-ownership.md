@@ -64,3 +64,15 @@ Generated eval output belongs under ignored result directories, not under
 fixture groups as kept when they have documented owners and live eval/script
 references. A nonzero retire-candidate count is not permission to delete by
 itself; it is a prompt to update or remove the owning eval and fixture together.
+
+## Packaged CLI fixture copy failures
+
+`src/cli/fixture-kit-package.mjs` copies the compiled CLI into an owned package
+fixture. A failed copy rethrows the original exception with `fixtureCopy`
+metadata: process/Node identity and before/after filesystem metadata for the
+source build, source `src`, fixture root, destination build, and destination
+`src`. It does not retry, read file contents, or turn setup failure into a
+contract-test result. Node's native copy path can name the containing destination
+directory for a source-file failure, so the exception path alone is not proof
+that cleanup removed the destination. Retain the complete failing test output;
+missing historical metadata leaves the historical cause unverified.
