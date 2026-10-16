@@ -566,7 +566,14 @@ test("pinned conf: a relay opt-out still applies when the environment supplies a
 
 function readDoctorReport(dest, env) {
   const result = spawnSync(process.execPath, [cli, "telemetry-doctor", "--dest", dest, "--json", "--headless", "--timeout-ms", "300"], { env: { PATH: NODE_PATH, ...env }, encoding: "utf8" });
-  return JSON.parse(result.stdout);
+  const diagnostics = JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message, stdout: result.stdout, stderr: result.stderr });
+  assert.ok(result.status === 0 || result.status === 1, `telemetry-doctor did not complete: ${diagnostics}`);
+  assert.ok(result.stdout.trim(), `telemetry-doctor returned no report: ${diagnostics}`);
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    assert.fail(`telemetry-doctor returned invalid JSON: ${diagnostics}; ${error.message}`);
+  }
 }
 
 // --- a pinned install that still sends to a Console says so -------------------------------------
