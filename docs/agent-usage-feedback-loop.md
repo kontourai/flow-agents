@@ -276,10 +276,10 @@ line:
 
 A Console set in the environment still gets the shipped redaction list for a
 pinned install: `CONSOLE_TELEMETRY_REDACT` comes from the environment if it is
-exported there, and otherwise from the analytics list as the environment or
-the shipped default sets it, never from the installed `telemetry.conf` (which
-could otherwise send prompt and tool content unredacted with
-`channel.analytics.redact=none`). The doctor reports the list in use as
+exported there (and not empty), and otherwise is the shipped analytics list
+itself. Neither the installed `telemetry.conf` (for example
+`channel.analytics.redact=none`) nor an exported
+`TELEMETRY_CHANNEL_ANALYTICS_REDACT` can narrow it. The doctor reports the list in use as
 `console.redactFields`. Channel endpoints are posted with `curl -g`, and the
 loopback grammar refuses `[ ] { }`, because curl otherwise expands those into
 many requests from one event.

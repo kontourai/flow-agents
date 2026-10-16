@@ -88,8 +88,8 @@ telemetry_conf_warn_untrusted() {
 #     *_REDACT                        none, or a field list: [A-Za-z0-9_.,]
 #                                     (each field is spliced into a jq program);
 #                                     local logs only: the Console list
-#                                     (CONSOLE_TELEMETRY_REDACT) stays the
-#                                     environment's or the shipped default
+#                                     (CONSOLE_TELEMETRY_REDACT) is an exported
+#                                     value or the shipped list itself
 #     *_ENDPOINT_URL                  a loopback URL: http://127.0.0.1,
 #                                     http://localhost or http://[::1], optional
 #                                     port and a path without [ ] { } (curl
@@ -203,13 +203,12 @@ TELEMETRY_GOVERNANCE_AUDIT_MAX_FILES="${TELEMETRY_GOVERNANCE_AUDIT_MAX_FILES:-5}
 TELEMETRY_CHANNEL_FULL_LOG_FILE="${TELEMETRY_CHANNEL_FULL_LOG_FILE:-${TELEMETRY_DATA_DIR}/full.jsonl}"
 TELEMETRY_CHANNEL_FULL_REDACT="${TELEMETRY_CHANNEL_FULL_REDACT:-hook.raw_input,turn.prompt_text,tool.input,tool.output}"
 TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE="${TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE:-${TELEMETRY_DATA_DIR}/analytics.jsonl}"
-TELEMETRY_CHANNEL_ANALYTICS_REDACT="${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input,hook.last_assistant_message,hook.transcript_path}"
+# The shipped analytics redaction list: the one bash copy, used as the analytics channel's
+# default and, for a pinned install, as the Console's. src/narrative/policy-filter.ts carries the
+# TypeScript copy; src/cli/telemetry-local-pin.test.mjs checks every copy against this one.
+TELEMETRY_SHIPPED_ANALYTICS_REDACT="tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input,hook.last_assistant_message,hook.transcript_path"
+TELEMETRY_CHANNEL_ANALYTICS_REDACT="${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-${TELEMETRY_SHIPPED_ANALYTICS_REDACT}}"
 TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL="${TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL:-}"
-# Captured before the config file is read: the analytics list as the environment or the shipped
-# default sets it. A pinned install's Console redaction falls back to this, never to a list the
-# installed telemetry.conf chose (#1483): the pin keeps channel redaction conf-controlled because
-# channel logs stay local, but a Console set in the environment is not local.
-TELEMETRY_DEFAULT_CONSOLE_REDACT="$TELEMETRY_CHANNEL_ANALYTICS_REDACT"
 CONSOLE_TELEMETRY_URL="${CONSOLE_TELEMETRY_URL:-${CONSOLE_URL:-}}"
 CONSOLE_TELEMETRY_ENDPOINT_URL="${CONSOLE_TELEMETRY_ENDPOINT_URL:-}"
 CONSOLE_TELEMETRY_TOKEN="${CONSOLE_TELEMETRY_TOKEN:-${CONSOLE_AUTH_TOKEN:-}}"
@@ -313,9 +312,12 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
 fi
 
 if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]]; then
-  # An exported CONSOLE_TELEMETRY_REDACT still wins, as it does unpinned (the pinned allowlist drops
-  # a console_telemetry_redact line, so only the environment can have set it here).
-  CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_DEFAULT_CONSOLE_REDACT}}"
+  # A pinned install's Console redaction is the shipped list itself (#1483). Not the analytics
+  # channel list: the installed telemetry.conf may set that, and the environment may narrow it (the
+  # runtime hook wrappers used to export a stale six-field copy). Only an exported, non-empty
+  # CONSOLE_TELEMETRY_REDACT overrides it, as unpinned; the pinned allowlist drops a
+  # console_telemetry_redact line, so only the environment can have set it here.
+  CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_SHIPPED_ANALYTICS_REDACT}}"
 else
   CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT}}"
 fi

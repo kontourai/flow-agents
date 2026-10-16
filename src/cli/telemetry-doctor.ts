@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { telemetryDataDir as defaultTelemetryDataDir } from "../lib/local-artifact-root.js";
+import { TELEMETRY_CHANNEL_ANALYTICS_REDACT_DEFAULT } from "../narrative/policy-filter.js";
 
 type Config = Record<string, string>;
 
@@ -353,8 +354,8 @@ export function isPinnedLocalOnly(file: string): boolean {
 // No [ ] { } in the path: curl reads them as URL globs (config.sh's TELEMETRY_LOOPBACK_URL_RE).
 const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(\/[^\][{} \t\n\r\f\v"\\]*)?$/;
 
-/** config.sh's shipped default for TELEMETRY_CHANNEL_ANALYTICS_REDACT. */
-const DEFAULT_ANALYTICS_REDACT = "tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input,hook.last_assistant_message,hook.transcript_path";
+/** config.sh's TELEMETRY_SHIPPED_ANALYTICS_REDACT, from the TypeScript copy of the list. */
+const DEFAULT_ANALYTICS_REDACT = TELEMETRY_CHANNEL_ANALYTICS_REDACT_DEFAULT.join(",");
 
 const asciiLower = (value: string) => value.replace(/[A-Z]/g, (char) => char.toLowerCase());
 
@@ -575,9 +576,9 @@ export async function buildReport(argv: string[]): Promise<DoctorReport> {
       urlSource: resolvedSource(vars, explicitEndpoint ? "CONSOLE_TELEMETRY_ENDPOINT_URL" : "CONSOLE_TELEMETRY_URL"),
       ...(endpointSource ? { endpointSource } : {}),
       // config.sh: an exported CONSOLE_TELEMETRY_REDACT, else (unpinned) a console_telemetry_redact
-      // line, else the analytics list -- for a pinned install the one set before the file is read.
+      // line, else the analytics list -- for a pinned install the shipped list itself.
       redactFields: resolved("CONSOLE_TELEMETRY_REDACT") || (localOnlyPinned
-        ? process.env.TELEMETRY_CHANNEL_ANALYTICS_REDACT || DEFAULT_ANALYTICS_REDACT
+        ? DEFAULT_ANALYTICS_REDACT
         : resolved("TELEMETRY_CHANNEL_ANALYTICS_REDACT", DEFAULT_ANALYTICS_REDACT)),
       reachability,
     },

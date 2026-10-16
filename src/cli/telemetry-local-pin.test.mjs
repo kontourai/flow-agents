@@ -1229,3 +1229,100 @@ test("a channel endpoint URL is posted literally (curl -g): one event, one POST"
     fs.writeFileSync(installedConf(unpinned.dest), original);
   }
 });
+
+// --- review round 6: one shipped analytics redaction list ----------------------------------------
+//
+// config.sh's TELEMETRY_SHIPPED_ANALYTICS_REDACT is the source. The runtime hook wrappers used to
+// export their own six-field copy, which a pinned install's Console redaction then inherited.
+const SHIPPED_ANALYTICS_REDACT = (() => {
+  const config = fs.readFileSync(path.join(repoRoot, "scripts", "telemetry", "lib", "config.sh"), "utf8");
+  const match = /^TELEMETRY_SHIPPED_ANALYTICS_REDACT="([^"]*)"$/m.exec(config);
+  assert.ok(match, "config.sh must define TELEMETRY_SHIPPED_ANALYTICS_REDACT as one literal");
+  return match[1];
+})();
+const WRAPPERS = ["claude", "codex", "opencode", "pi"];
+
+// Runs one installed wrapper against a stand-in telemetry.sh that sources the real lib/config.sh
+// (with a telemetry.conf that sets no redaction) and records what the wrapper exported and what
+// config.sh resolved.
+function wrapperRedaction(wrapper, extraEnv = {}) {
+  const root = makeFixtureDir(`telemetry-pin-wrapper-${wrapper}-`);
+  fs.mkdirSync(path.join(root, "scripts", "hooks"), { recursive: true });
+  fs.copyFileSync(path.join(repoRoot, "dist", "base", "scripts", "hooks", `${wrapper}-telemetry-hook.js`), path.join(root, "scripts", "hooks", `${wrapper}-telemetry-hook.js`));
+  fs.cpSync(path.join(repoRoot, "dist", "base", "scripts", "telemetry", "lib"), path.join(root, "scripts", "telemetry", "lib"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "telemetry", "telemetry.conf"), "enabled=true\n");
+  const probe = path.join(root, "probe.txt");
+  fs.writeFileSync(path.join(root, "scripts", "telemetry", "telemetry.sh"), `#!/usr/bin/env bash
+exported="\${TELEMETRY_CHANNEL_ANALYTICS_REDACT-<unset>}"
+source "$(dirname "\${BASH_SOURCE[0]}")/lib/config.sh"
+printf '%s\\n%s\\n' "$exported" "$TELEMETRY_CHANNEL_ANALYTICS_REDACT" > "${probe}"
+`);
+  const result = spawnSync(process.execPath, [path.join(root, "scripts", "hooks", `${wrapper}-telemetry-hook.js`), "Stop", "dev"], { input: "{}", cwd: root, env: { HOME: root, PATH: NODE_PATH, ...extraEnv }, encoding: "utf8" });
+  assert.ok(fs.existsSync(probe), `${wrapper}: telemetry.sh never ran: ${result.stderr}`);
+  const [exported, resolvedList] = fs.readFileSync(probe, "utf8").split("\n");
+  return { exported, resolved: resolvedList };
+}
+
+test("every copy of the shipped analytics redaction list equals config.sh's TELEMETRY_SHIPPED_ANALYTICS_REDACT", async () => {
+  assert.equal(SHIPPED_ANALYTICS_REDACT.split(",").length, 8, SHIPPED_ANALYTICS_REDACT);
+  // The installed bundle's config.sh.
+  assert.equal(readShellVars(pinned.dest, { HOME: makeFixtureDir("telemetry-pin-shipped-home-") }, ["TELEMETRY_SHIPPED_ANALYTICS_REDACT"]).TELEMETRY_SHIPPED_ANALYTICS_REDACT, SHIPPED_ANALYTICS_REDACT);
+  // The shipped telemetry.conf.
+  const conf = fs.readFileSync(path.join(repoRoot, "scripts", "telemetry", "telemetry.conf"), "utf8");
+  assert.equal(/^channel\.analytics\.redact=(.*)$/m.exec(conf)?.[1], SHIPPED_ANALYTICS_REDACT);
+  // The TypeScript copy (the doctor derives its default from it).
+  const { TELEMETRY_CHANNEL_ANALYTICS_REDACT_DEFAULT } = await import("../../build/src/index.js");
+  assert.equal(TELEMETRY_CHANNEL_ANALYTICS_REDACT_DEFAULT.join(","), SHIPPED_ANALYTICS_REDACT);
+  // The doctor, for a pinned install.
+  assert.equal(readDoctorReport(pinned.dest, { HOME: makeFixtureDir("telemetry-pin-shipped-doctor-home-") }).console.redactFields, SHIPPED_ANALYTICS_REDACT);
+  // Each runtime hook wrapper: exports nothing of its own, so config.sh's list applies.
+  for (const wrapper of WRAPPERS) {
+    assert.deepEqual(wrapperRedaction(wrapper), { exported: "<unset>", resolved: SHIPPED_ANALYTICS_REDACT }, wrapper);
+    // An operator's own export still passes through unchanged.
+    assert.equal(wrapperRedaction(wrapper, { TELEMETRY_CHANNEL_ANALYTICS_REDACT: "tool.input" }).exported, "tool.input", wrapper);
+  }
+});
+
+// Through the installed Claude Code wrapper, as a real session runs it.
+async function stopThroughWrapper(dest, extraEnv) {
+  const bodies = [];
+  const server = http.createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => { bodies.push({ url: request.url, body }); response.end("{}"); });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const home = makeFixtureDir("telemetry-pin-wrapper-stop-home-");
+    const env = { HOME: home, PATH: NODE_PATH, FLOW_AGENTS_CLAUDE_TELEMETRY_FOREGROUND: "true", CONSOLE_TELEMETRY_URL: `http://127.0.0.1:${server.address().port}`, ...extraEnv };
+    const wrapper = path.join(dest, "scripts", "hooks", "claude-telemetry-hook.js");
+    for (const payload of [
+      { hook_event_name: "SessionStart", session_id: "pin-wrapper-probe" },
+      { hook_event_name: "Stop", session_id: "pin-wrapper-probe", last_assistant_message: "SECRET-REPLY-1483", transcript_path: "/tmp/SECRET-TRANSCRIPT-1483.jsonl" },
+    ]) {
+      const child = spawn(process.execPath, [wrapper, payload.hook_event_name, "dev"], { cwd: home, env, stdio: ["pipe", "ignore", "ignore"] });
+      child.stdin.end(JSON.stringify(payload));
+      await new Promise((resolve) => child.on("close", resolve));
+    }
+    const records = () => bodies.filter((entry) => entry.url === "/api/telemetry/records");
+    for (let waited = 0; !records().some((entry) => entry.body.includes("session.end")) && waited < 8000; waited += 100) await new Promise((resolve) => setTimeout(resolve, 100));
+    return records();
+  } finally {
+    server.close();
+  }
+}
+
+for (const [label, extraEnv, expectSecrets] of [
+  ["pinned: the assistant reply and transcript path stay out", {}, false],
+  ["pinned + a narrower TELEMETRY_CHANNEL_ANALYTICS_REDACT exported: they still stay out", { TELEMETRY_CHANNEL_ANALYTICS_REDACT: "tool.input" }, false],
+  ["control, pinned + CONSOLE_TELEMETRY_REDACT=none: they reach the Console", { CONSOLE_TELEMETRY_REDACT: "none" }, true],
+]) {
+  test(`Stop through the installed claude-telemetry-hook.js with a Console in the environment, ${label}`, async () => {
+    const posts = await stopThroughWrapper(pinned.dest, extraEnv);
+    const stop = posts.filter((entry) => entry.body.includes("session.end"));
+    assert.equal(stop.length > 0, true, `no session.end POST arrived: ${posts.map((entry) => entry.body.slice(0, 120)).join(" | ")}`);
+    const text = stop.map((entry) => entry.body).join("\n");
+    assert.equal(text.includes("SECRET-REPLY-1483"), expectSecrets, text.slice(0, 600));
+    assert.equal(text.includes("SECRET-TRANSCRIPT-1483"), expectSecrets, text.slice(0, 600));
+  });
+}
