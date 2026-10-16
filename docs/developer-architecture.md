@@ -175,7 +175,13 @@ Relay's optional SDK import and the engine-host's own integration imports are
 bound to packaged code instead of an ambient npm installation.
 Flow's original schemas remain local to its vendor entry;
 packaging exposes its literal CommonJS imports to esbuild without changing the
-validators. Dependency upgrades that change these packaging seams fail the build.
+validators. A packaging-owned asset relocator reads the upstream validator's
+entry-relative package lookup and resolves only a dependency declared by that
+validator's owning package. Flow therefore retains its own resolved Hachure
+schemas, version metadata, and licenses, even when Surface resolves another
+version. The relocator records owner/version and asset digests; it adds no direct
+product-format dependency. Dependency upgrades that change these packaging seams
+fail the build.
 
 The shared kit-root resolver recognizes that same owned runtime metadata and marker,
 so installed kit declarations and canonical run binding find the same tree.
