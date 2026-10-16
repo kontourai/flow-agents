@@ -293,7 +293,7 @@ console_telemetry_emit() {
 }
 
 transport_emit() {
-  local event="$1"
+  local event="$1" delivery_failed=0
   [[ -z "$event" ]] && return
   
   # Process each channel
@@ -319,7 +319,11 @@ transport_emit() {
     processed_event=$(redact_event "$event" "$redact_fields")
     
     # Write to log file
-    echo "$processed_event" >> "$log_file" 2>/dev/null
+    if telemetry_log_destination_safe "$log_file"; then
+      echo "$processed_event" >> "$log_file" || delivery_failed=1
+    else
+      delivery_failed=1
+    fi
     
     # POST to endpoint if configured
     if [[ -n "$endpoint_url" ]]; then
@@ -332,6 +336,7 @@ transport_emit() {
   done
 
   console_telemetry_emit "$event"
+  return "$delivery_failed"
 }
 
 transport_maybe_rotate() {
@@ -348,6 +353,7 @@ transport_maybe_rotate() {
     channel_upper=$(echo "$channel" | tr '[:lower:]' '[:upper:]')
     log_file_var="TELEMETRY_CHANNEL_${channel_upper}_LOG_FILE"
     local log_file="${!log_file_var}"
+    telemetry_log_destination_safe "$log_file" || return 1
     [[ ! -f "$log_file" ]] && continue
     
     # Check file size - try GNU stat first, then BSD
@@ -362,21 +368,28 @@ transport_maybe_rotate() {
     [[ "$file_size_mb" -lt "$TELEMETRY_MAX_LOG_SIZE_MB" ]] && continue
     
     # Rotate logs
-    local base_name="${log_file%.*}"
-    local extension="${log_file##*.}"
+    local filename="${log_file##*/}"
+    local directory="${log_file%/*}"
+    [[ "$log_file" == */* ]] || directory=.
+    local base_name="${directory}/${filename%.*}"
+    local extension="${filename##*.}"
     
     # Remove oldest log if at limit
     local oldest_log="${base_name}.$((TELEMETRY_MAX_LOG_FILES - 1)).${extension}"
+    telemetry_log_destination_safe "$oldest_log" || return 1
     [[ -f "$oldest_log" ]] && rm -f "$oldest_log"
     
     # Shift existing logs
     for ((i = TELEMETRY_MAX_LOG_FILES - 2; i >= 1; i--)); do
       local current_log="${base_name}.${i}.${extension}"
       local next_log="${base_name}.$((i + 1)).${extension}"
+      telemetry_log_destination_safe "$current_log" || return 1
+      telemetry_log_destination_safe "$next_log" || return 1
       [[ -f "$current_log" ]] && mv "$current_log" "$next_log"
     done
     
     # Move current log to .1
+    telemetry_log_destination_safe "${base_name}.1.${extension}" || return 1
     mv "$log_file" "${base_name}.1.${extension}"
   done
 }
