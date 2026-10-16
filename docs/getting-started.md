@@ -88,9 +88,12 @@ ablation experiment, not a small-task shortcut.
 For a different workspace or runtime, use the version-pinned `flow_agents`
 helper above with `init --runtime <your-agent> --dest /path/to/workspace`.
 Supported runtime names are `claude-code`, `codex`, `kiro`, `opencode`, and `pi`;
-completion behavior differs as described below. Add `--activate-kit builder`
-when you want the Builder workflow. The catalog is copied during installation;
-kits are opt-in for activation.
+completion behavior differs as described below. Use `--activate-kit builder`
+to declare a Builder selection, or `--activate-kits` for every catalog kit.
+Defaults differ by runtime: without an explicit selection, Claude Code installs
+built-in kit skills and records every catalog kit as active; other runtimes
+record no active catalog kits by default. An explicit selection does not make
+Claude Code's unconditional built-in skill copying selective.
 
 To configure provider-backed Builder work at the same time, add
 `--configure-providers --online`. This detects the repository, verifies GitHub
@@ -99,7 +102,7 @@ settings. For non-interactive offline setup, provide
 `--provider-project NUMBER`; remote state remains explicitly unverified until
 you run the printed `gh` checks.
 
-The installer copies agents, skills, context contracts, hook scripts, Kit assets, and the Flow Agents telemetry descriptor into the workspace. The selected kit is activated. Start a new host session and complete its trust setup; copying files does not establish that the host loaded them.
+The installer copies agents, skills, context contracts, hook scripts, Kit assets, and the Flow Agents telemetry descriptor into the workspace. Kit activation follows the runtime defaults and explicit selection described above. Start a new host session and complete its trust setup; copying files does not establish that the host loaded them.
 
 For a normal Codex global install, target the Codex home instead of a project workspace:
 
@@ -134,7 +137,7 @@ Keep generated Codex base config lean. Put profile-specific model, provider, and
 - `context/` — shared contracts the agent follows, at the workspace root regardless of runtime
 - Agent and skill definitions, in a runtime-specific location: `.claude/agents/` + `.claude/skills/` for Claude Code, `.codex/agents/` + `.agents/skills/` for Codex, top-level `agents/` + `skills/` for Kiro, `.opencode/agents/` + `.opencode/skills/` for opencode, and `.pi/skills/` for pi
 - `scripts/hooks/` — four canonical policy scripts (steering, quality gate, stop-goal-fit, config protection) wired to the host's native hook surface
-- `kits/` — catalog kit assets, with only selected kits activated
+- `kits/` — catalog assets; activation defaults and installed skills differ by runtime as described above
 - `console.telemetry.json` — telemetry descriptor (writes locally by default)
 
 ### Completion checks by runtime
