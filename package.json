@@ -237,15 +237,15 @@
     "docs:build": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus build"
   },
   "devDependencies": {
-    "@kontourai/lookout": "0.3.2",
-    "@kontourai/traverse": "0.19.1",
+    "@kontourai/lookout": "0.8.8",
+    "@kontourai/traverse": "5.0.2",
     "@kontourai/veritas": "1.11.2",
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.6.5",
     "ajv": "8.20.0",
-    "gcp-metadata": "7.0.1",
-    "promptfoo": "^0.121.18",
+    "gcp-metadata": "9.2.0",
+    "promptfoo": "^0.124.1",
     "typescript": "^7.0.2",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "dependencies": {
     "@kontourai/conduit": "0.7.1",
