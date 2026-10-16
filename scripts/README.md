@@ -163,10 +163,13 @@ and board sync use the same Console. To keep one install from sending
 telemetry to a Console on a machine with a user-global Console config, install
 it with an explicit `--telemetry-sink local-files`. The liveness relay
 pre-gate and `telemetry-doctor` follow the same order, and the doctor reports
-`localOnlyPinned` and the operator confs the pin skipped. A pinned
-`telemetry.conf` supplies no Console URL, token or tenant and no non-loopback
-channel endpoint (see "Owner machine mirror" in
-[`docs/agent-usage-feedback-loop.md`](../docs/agent-usage-feedback-loop.md)).
+`localOnlyPinned`, the operator confs the pin skipped, and the lines of the
+installed `telemetry.conf` it ignored (`pinIgnored`). A pinned `telemetry.conf`
+may only set the allowlisted, local-by-construction settings listed under
+"Owner machine mirror" in
+[`docs/agent-usage-feedback-loop.md`](../docs/agent-usage-feedback-loop.md):
+no Console URL, token or tenant, no non-loopback channel endpoint, and no log
+path outside an ordinary absolute path.
 Re-running `init` without `--telemetry-sink local-files`, or with a Console
 sink, removes the pin, because an unedited installed `telemetry.conf` is reset
 to the bundle's copy on every re-run. A `telemetry.conf` edited after install is
@@ -176,8 +179,10 @@ Environment variables still apply to a pinned install, so launch the agent host
 with none of these set: `CONSOLE_*`, `FLOW_AGENTS_CONSOLE_*`,
 `TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL`, `TELEMETRY_PRICING_URL` and
 `FLOW_AGENTS_PRICING_URL`. The doctor warns, naming the source, for each
-Console endpoint, non-loopback channel endpoint or pricing URL that one of them,
-or `TELEMETRY_CONFIG_FILE`, still resolves. The value the doctor reports is the
+destination that one of them, or `TELEMETRY_CONFIG_FILE`, still resolves: a
+Console endpoint, a non-loopback channel endpoint, a channel log file under
+`/dev/tcp` or `/dev/udp`, a pricing URL, and an enabled economics or liveness
+relay with its endpoint (`FLOW_AGENTS_CONSOLE_URL` included). The value the doctor reports is the
 one `lib/config.sh` uses: an empty variable counts as unset, and a key in the
 resolved config file overrides the environment. For an install
 that cannot be pinned (`init --global` for `claude-code` or `opencode`), launch

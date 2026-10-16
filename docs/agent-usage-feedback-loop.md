@@ -257,18 +257,42 @@ The pin is the exact line `telemetry_sink_pin=local-files` (a trailing CR is
 allowed); a line with spaces, a different value or a byte-order mark is not a
 pin. Because the installed `telemetry.conf` is not trust-gated (it can be
 mode 644 and come from a repository or tarball), a pinned install takes no
-network destination from it: every `console_*` key is ignored except a
-`console_economics_relay` or `console_liveness_relay` opt-out (`0`, `false`,
-`no`, `off`), `pricing_url` is ignored, and a channel setting that becomes a
-channel endpoint is kept only when its value is a loopback URL
-(`http://127.0.0.1`, `http://localhost` or `http://[::1]`, with an optional
-port and path), so the shipped localhost channel keeps working. The channel
-check applies to the variable the setting becomes, not to how the key is
-spelled: `config.sh` uppercases `channel.<name>.<key>` into
-`TELEMETRY_CHANNEL_<NAME>_<KEY>`, so `channel.full.Endpoint_Url` and
-`channel.analytics_endpoint.url` are channel endpoints too. Standard keys are
-matched exactly, so a spelling such as `Console_Url` or `CONSOLE_URL` in the
-file is ignored by every install.
+network destination from it. Instead of filtering out what is known to be
+dangerous, `config.sh` holds that file to an allowlist of settings that are
+local by construction, each with a value grammar, and ignores every other
+line:
+
+| Setting | Allowed value |
+|---|---|
+| `enabled`, `enrich_system`, `enrich_workspace`, `enrich_auth`, `usage_tracking`, `notifications`, `governance` | `true` or `false` |
+| `channels` | channel names: letters, digits, `_`, commas and spaces |
+| `max_log_size_mb`, `max_log_files`, `governance_audit_max_size_mb`, `governance_audit_max_files` | digits only |
+| `notification_profile` | letters, digits, `_` and `-` |
+| `sync_include`, `sync_exclude` | any (agent-name glob patterns) |
+| `console_economics_relay`, `console_liveness_relay` | an opt-out only: `0`, `false`, `no` or `off` |
+| `pricing_file` | an ordinary absolute path |
+| `telemetry_sink_pin` | the pin itself |
+| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_REDACT` | any (a redaction field list) |
+| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_LOG_FILE` | an ordinary absolute path |
+| a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL` | a loopback URL: `http://127.0.0.1`, `http://localhost` or `http://[::1]`, with an optional port and path |
+
+The value grammars matter beyond networking. The numeric settings reach bash
+arithmetic, and channel names reach an indirect expansion; both would run a
+`$(...)` written inside the value. An ordinary absolute path starts with `/`,
+has no empty, `.` or `..` component, no trailing `/` and no control character,
+and is not under `/dev` or `/proc` in any letter case, because bash turns a
+write to `/dev/tcp/HOST/PORT` or `/dev/udp/HOST/PORT` into a network
+connection. Relative paths are refused, since a hook would resolve them
+against whatever directory the agent session runs in. Channel settings are
+checked by the variable they become: `config.sh` uppercases
+`channel.<name>.<key>` into `TELEMETRY_CHANNEL_<NAME>_<KEY>`, so
+`channel.full.Endpoint_Url` and `channel.analytics_endpoint.url` are endpoints
+too. The shipped `telemetry.conf` is entirely on the allowlist, and
+`telemetry-doctor` lists every line a pinned install ignores (`pinIgnored`).
+Standard keys are matched exactly, so a spelling such as `Console_Url` or
+`CONSOLE_URL` in the file is ignored by every install. Only ASCII whitespace
+is trimmed from keys and values, in `config.sh` (which runs `tr` and `sed`
+under `LC_ALL=C`), the liveness relay pre-gate and the doctor alike.
 
 Re-running `init` replaces an installed `telemetry.conf` that nobody edited
 with the bundle's copy and applies only that run's sink, so re-running it
@@ -288,8 +312,11 @@ Environment variables are not affected by the pin: they are an explicit
 runtime override. That covers the Console variables (`CONSOLE_TELEMETRY_URL`,
 `CONSOLE_URL`, `CONSOLE_TELEMETRY_ENDPOINT_URL`), a channel endpoint
 (`TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL`, unless the installed
-`telemetry.conf` sets that channel's endpoint itself, as it does for `full`)
-and a pricing URL (`TELEMETRY_PRICING_URL`, `FLOW_AGENTS_PRICING_URL`). When
+`telemetry.conf` sets that channel's endpoint itself, as it does for `full`),
+a channel log file (`TELEMETRY_CHANNEL_<NAME>_LOG_FILE`), a pricing URL (`TELEMETRY_PRICING_URL`, `FLOW_AGENTS_PRICING_URL`), and the
+economics and liveness relays (`FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY`,
+`FLOW_AGENTS_CONSOLE_LIVENESS_RELAY`, their `..._ENDPOINT_URL`, and
+`FLOW_AGENTS_CONSOLE_URL`). When
 one of them, or `TELEMETRY_CONFIG_FILE`, still sends a pinned install's data
 off the machine, `telemetry-doctor` warns once per destination and names its
 source, and init's summary says the install is not local-only.

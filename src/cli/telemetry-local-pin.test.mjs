@@ -23,6 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
+import net from "node:net";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -567,7 +568,7 @@ test("init summary: pinned with TELEMETRY_CONFIG_FILE carrying a Console URL say
   const result = runInit(["--runtime", "base", "--dest", dest, "--telemetry-sink", "local-files"], home, { TELEMETRY_CONFIG_FILE: explicit });
   assert.equal(result.status, 0, result.output);
   assert.match(fs.readFileSync(installedConf(dest), "utf8"), PIN_LINE);
-  assert.match(result.output, new RegExp(`! Telemetry pinned local-only in \\S+, but a Console endpoint still resolves from TELEMETRY_CONFIG_FILE \\(${explicit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\), so this install is NOT local-only`));
+  assert.match(result.output, new RegExp(`! Telemetry pinned local-only in \\S+, but a Console endpoint still resolves from TELEMETRY_CONFIG_FILE \\(${explicit.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)(; [^\\n]*)?, so this install is NOT local-only`));
   assert.doesNotMatch(result.output, /✓ Telemetry pinned local-only/);
 });
 
@@ -653,7 +654,7 @@ test("install-console-config.sh never pins the telemetry.conf of the Flow Agents
     const result = runInstaller(script, [conf, "--telemetry-sink", "local-files"], { PATH: NODE_PATH });
     assert.equal(result.status, 0, result.output);
     assert.equal(PIN_LINE.test(fs.readFileSync(conf, "utf8")), expectPin, `${name}: ${result.output}`);
-    if (!expectPin) assert.match(result.stderr, /not pinning .* local-only: it is the Flow Agents package's own telemetry\.conf/);
+    if (!expectPin) assert.match(result.stderr, /not pinning .* local-only: the directory it is in carries the Flow Agents package's package\.json, so it may be the package's own telemetry\.conf .* re-run with --install-destination/);
   }
 });
 
@@ -860,7 +861,7 @@ test("root install.sh --telemetry-sink local-files pins a destination copied fro
   const self = spawnSync("/bin/bash", [path.join(src, "install.sh"), src, "--telemetry-sink", "local-files"], { env, encoding: "utf8" });
   assert.equal(self.status, 0, `${self.stdout}\n${self.stderr}`);
   assert.equal(fs.readFileSync(path.join(src, "scripts", "telemetry", "telemetry.conf"), "utf8"), before);
-  assert.match(self.stderr, /not pinning .* it is the Flow Agents package's own telemetry\.conf/);
+  assert.match(self.stderr, /not pinning .* local-only: the directory it is in carries the Flow Agents package's package\.json/);
 });
 
 // --- install-codex-home.sh keeps a failure's exit status ----------------------------------------
@@ -900,4 +901,184 @@ test("liveness-write.js reads a key with inner whitespace as config.sh does", ()
     assert.equal(readShellVars(unpinned.dest, { HOME: home }, ["CONSOLE_TELEMETRY_URL"]).CONSOLE_TELEMETRY_URL, GLOBAL_URL);
     assert.equal(readLivenessWrite(unpinned.dest, { HOME: home }).enabled, true);
   });
+});
+
+// --- review round 3: an allowlist, and ordinary paths only ---------------------------------------
+//
+// transport.sh writes each event with `>> "$log_file"`, and bash turns a write to /dev/tcp/HOST/PORT
+// into a TCP connection. A raw TCP listener reached through 0.0.0.0 shows whether one is opened.
+async function emitAndCaptureSocket(dest, env) {
+  const received = [];
+  const server = net.createServer((socket) => socket.on("data", (chunk) => received.push(chunk.toString("utf8"))));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  try {
+    const script = 'source "$1/scripts/telemetry/lib/config.sh"; source "$1/scripts/telemetry/lib/transport.sh"; transport_emit "{\\"event\\":\\"socket-probe\\"}"; wait';
+    const child = spawn("/bin/bash", ["-c", script, "_", dest], { env: { PATH: SHELL_PATH, ...env(port) }, stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const status = await new Promise((resolve) => child.on("close", resolve));
+    assert.equal(status, 0, stderr);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return received.join("");
+  } finally {
+    server.close();
+  }
+}
+
+for (const [label, fixture, expectEvent] of [["pinned: the listener receives nothing", () => pinned, false], ["unpinned control: the listener receives the event", () => unpinned, true]]) {
+  test(`a channel log_file of /dev/tcp/HOST/PORT, ${label}`, async () => {
+    const { dest } = fixture();
+    const home = makeFixtureDir("telemetry-pin-devtcp-home-");
+    const original = fs.readFileSync(installedConf(dest), "utf8");
+    try {
+      const received = await emitAndCaptureSocket(dest, (port) => {
+        fs.writeFileSync(installedConf(dest), `${original}channel.full.log_file=/dev/tcp/0.0.0.0/${port}\n`);
+        return { HOME: home };
+      });
+      if (expectEvent) assert.match(received, /socket-probe/);
+      else assert.equal(received, "", "an event reached the socket");
+      if (!expectEvent) {
+        const doctor = readDoctorReport(dest, { HOME: home });
+        assert.deepEqual(doctor.telemetry.pinIgnored, [{ key: "channel.full.log_file", reason: "value not allowed for a pinned install" }]);
+      }
+    } finally {
+      fs.writeFileSync(installedConf(dest), original);
+    }
+  });
+}
+
+test("pinned: a log path is kept only when it is an ordinary absolute path", () => {
+  const home = makeFixtureDir("telemetry-pin-paths-home-");
+  const ordinary = path.join(fs.realpathSync(makeFixtureDir("telemetry-pin-paths-")), "full.jsonl");
+  const defaultLog = readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_CHANNEL_FULL_LOG_FILE"]).TELEMETRY_CHANNEL_FULL_LOG_FILE;
+  for (const [value, kept] of [
+    [ordinary, true],
+    ["/dev/tcp/0.0.0.0/9", false],
+    ["/dev/udp/0.0.0.0/9", false],
+    ["/DEV/tcp/0.0.0.0/9", false],
+    ["//dev/tcp/0.0.0.0/9", false],
+    ["/proc/self/fd/1", false],
+    ["/tmp/../dev/tcp/0.0.0.0/9", false],
+    ["/tmp/./x.jsonl", false],
+    ["/tmp/", false],
+    ["relative/full.jsonl", false],
+    ["~/full.jsonl", false],
+  ]) {
+    withInstalledConf(pinned.dest, (text) => `${text}channel.full.log_file=${value}\n`, () => {
+      assert.equal(readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_CHANNEL_FULL_LOG_FILE"]).TELEMETRY_CHANNEL_FULL_LOG_FILE, kept ? value : defaultLog, `config.sh: ${value}`);
+      const doctor = readDoctorReport(pinned.dest, { HOME: home });
+      assert.equal(doctor.telemetry.pinIgnored.length, kept ? 0 : 1, `telemetry-doctor: ${value}`);
+      if (kept) assert.equal(doctor.telemetry.channels.find((channel) => channel.name === "full")?.logFile, value);
+    });
+  }
+});
+
+test("pinned: the shipped telemetry.conf is entirely on the allowlist", () => {
+  const report = readDoctorReport(pinned.dest, { HOME: makeFixtureDir("telemetry-pin-clean-home-") });
+  assert.deepEqual(report.telemetry.pinIgnored, []);
+});
+
+test("pinned: anything off the allowlist is ignored by config.sh and reported by the doctor", () => {
+  const home = makeFixtureDir("telemetry-pin-allowlist-home-");
+  const marker = path.join(makeFixtureDir("telemetry-pin-allowlist-marker-"), "ran");
+  const lines = [
+    // Arithmetic and indirect expansion run a $(...) inside the value: off-grammar values are dropped.
+    `max_log_files=a[$(touch ${marker})]`,
+    `channels=full,a[$(touch ${marker})]`,
+    "enabled=yes",
+    "notification_profile=a b",
+    "console_telemetry_redact=nothing",
+    "some_future_key=1",
+    "channel.full.unknown_key=1",
+    "pricing_file=relative.json",
+  ];
+  withInstalledConf(pinned.dest, (text) => `${text}${lines.join("\n")}\n`, () => {
+    const vars = readShellVars(pinned.dest, { HOME: home }, ["TELEMETRY_MAX_LOG_FILES", "TELEMETRY_CHANNELS", "TELEMETRY_ENABLED", "TELEMETRY_NOTIFICATION_PROFILE", "TELEMETRY_PRICING_FILE", "TELEMETRY_CHANNEL_FULL_UNKNOWN_KEY"]);
+    assert.deepEqual(vars, { TELEMETRY_MAX_LOG_FILES: "3", TELEMETRY_CHANNELS: "full,analytics", TELEMETRY_ENABLED: "true", TELEMETRY_NOTIFICATION_PROFILE: "standard", TELEMETRY_PRICING_FILE: "", TELEMETRY_CHANNEL_FULL_UNKNOWN_KEY: "" });
+    // Rotation does arithmetic on TELEMETRY_MAX_LOG_FILES: run it, then check nothing executed.
+    spawnSync("/bin/bash", ["-c", 'source "$1/scripts/telemetry/lib/config.sh"; source "$1/scripts/telemetry/lib/transport.sh"; transport_maybe_rotate; transport_emit "{}"; wait', "_", pinned.dest], { env: { PATH: SHELL_PATH, HOME: home }, encoding: "utf8" });
+    assert.equal(fs.existsSync(marker), false, "a $(...) in a pinned value ran");
+    const doctor = readDoctorReport(pinned.dest, { HOME: home });
+    assert.deepEqual(doctor.telemetry.pinIgnored.map((entry) => entry.key), ["max_log_files", "channels", "enabled", "notification_profile", "console_telemetry_redact", "some_future_key", "channel.full.unknown_key", "pricing_file"]);
+    assert.deepEqual(doctor.telemetry.pinIgnored.map((entry) => entry.reason), [
+      "value not allowed for a pinned install", "value not allowed for a pinned install", "value not allowed for a pinned install", "value not allowed for a pinned install",
+      "not on the pinned allowlist", "not on the pinned allowlist", "not on the pinned allowlist", "value not allowed for a pinned install",
+    ]);
+  });
+});
+
+// --- ASCII whitespace only, in a UTF-8 locale too ------------------------------------------------
+
+test("all three readers treat NBSP and U+2003 as ordinary characters, even under a UTF-8 locale", () => {
+  const home = makeFixtureDir("telemetry-pin-unicode-home-");
+  const utf8 = { HOME: home, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" };
+  for (const [label, line, bashUrl] of [
+    ["NBSP in the key", `console_telemetry_url =${GLOBAL_URL}`, ""],
+    ["U+2003 in the key", `console _telemetry_url=${GLOBAL_URL}`, ""],
+    ["NBSP-only value", "console_telemetry_url= ", " "],
+  ]) {
+    withInstalledConf(unpinned.dest, (text) => `${text}${line}\n`, () => {
+      assert.equal(readShellVars(unpinned.dest, utf8, ["CONSOLE_TELEMETRY_URL"]).CONSOLE_TELEMETRY_URL, bashUrl, `config.sh: ${label}`);
+      assert.equal(readLivenessWrite(unpinned.dest, utf8).enabled, bashUrl !== "", `liveness-write.js: ${label}`);
+      assert.equal(readDoctorReport(unpinned.dest, utf8).console.sink, bashUrl !== "" ? "console" : "local-only", `telemetry-doctor: ${label}`);
+    });
+  }
+});
+
+test("pinned + TELEMETRY_CONFIG_FILE with an NBSP key: bash and the doctor agree", () => {
+  const home = makeFixtureDir("telemetry-pin-unicode-explicit-home-");
+  const explicit = path.join(makeFixtureDir("telemetry-pin-unicode-explicit-"), "explicit.conf");
+  fs.writeFileSync(explicit, `console_telemetry_url =http://127.0.0.1:7004\nconsole_url=http://127.0.0.1:7005\n`, { mode: 0o600 });
+  const env = { HOME: home, TELEMETRY_CONFIG_FILE: explicit, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" };
+  assert.equal(readShellVars(pinned.dest, env, ["CONSOLE_TELEMETRY_URL"]).CONSOLE_TELEMETRY_URL, "http://127.0.0.1:7005");
+  const report = readDoctorReport(pinned.dest, env);
+  assert.deepEqual(report.telemetry.pinOverrides.filter((entry) => entry.what === "a Console endpoint").map((entry) => entry.url), ["http://127.0.0.1:7005/api/telemetry/records"]);
+});
+
+test("config.sh keeps a value of -n or -e (printf, not echo)", () => {
+  const home = makeFixtureDir("telemetry-pin-echo-home-");
+  withInstalledConf(unpinned.dest, (text) => `${text}sync_include=-n\nsync_exclude=-e\n`, () => {
+    assert.deepEqual(readShellVars(unpinned.dest, { HOME: home }, ["TELEMETRY_SYNC_INCLUDE", "TELEMETRY_SYNC_EXCLUDE"]), { TELEMETRY_SYNC_INCLUDE: "-n", TELEMETRY_SYNC_EXCLUDE: "-e" });
+  });
+});
+
+// --- the economics and liveness relays a pinned install still runs -------------------------------
+
+test("doctor: environment relay endpoints on a pinned install are reported and named", () => {
+  const home = makeFixtureDir("telemetry-pin-relays-home-");
+  const cases = [
+    [{ FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY: "1", FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL: "https://evil.example/records" }, ["the economics relay", "environment variable FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL", "https://evil.example/records"]],
+    [{ FLOW_AGENTS_CONSOLE_LIVENESS_RELAY: "1", FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL: "https://evil.example/records" }, ["the liveness relay", "environment variable FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL", "https://evil.example/records"]],
+    [{ FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY: "1", FLOW_AGENTS_CONSOLE_URL: "https://evil.example" }, ["the economics relay", "environment variable FLOW_AGENTS_CONSOLE_URL", "https://evil.example/records"]],
+  ];
+  for (const [env, expected] of cases) {
+    const report = readDoctorReport(pinned.dest, { HOME: home, ...env });
+    assert.deepEqual(report.telemetry.pinOverrides.map((entry) => [entry.what, entry.source, entry.url]), [expected], JSON.stringify(env));
+    assert.equal(report.warnings.length, 1, JSON.stringify(report.warnings));
+  }
+  // A relay that is off contributes nothing, even with an endpoint set.
+  assert.deepEqual(readDoctorReport(pinned.dest, { HOME: home, FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL: "https://evil.example/records" }).telemetry.pinOverrides, []);
+});
+
+test("the liveness relay really POSTs where the doctor says it does (pinned + FLOW_AGENTS_CONSOLE_URL)", async () => {
+  const home = makeFixtureDir("telemetry-pin-relay-post-home-");
+  const hits = [];
+  const server = http.createServer((request, response) => {
+    hits.push(request.url);
+    response.end("{}");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const env = { HOME: home, FLOW_AGENTS_CONSOLE_LIVENESS_RELAY: "1", FLOW_AGENTS_CONSOLE_URL: base };
+    const report = readDoctorReport(pinned.dest, env);
+    assert.deepEqual(report.telemetry.pinOverrides.map((entry) => [entry.what, entry.url]), [["the liveness relay", `${base}/records`]]);
+    const child = spawn("/bin/bash", [path.join(pinned.dest, "scripts", "liveness", "relay.sh"), JSON.stringify({ type: "heartbeat", subjectId: "pin-probe", actor: "test" })], { env: { PATH: SHELL_PATH, ...env }, stdio: "ignore" });
+    await new Promise((resolve) => child.on("close", resolve));
+    for (let waited = 0; hits.length === 0 && waited < 5000; waited += 100) await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(hits, ["/records"]);
+  } finally {
+    server.close();
+  }
 });

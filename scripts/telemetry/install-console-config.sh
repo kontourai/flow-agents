@@ -261,7 +261,7 @@ main() {
   if [[ "$sink_flag_given" -eq 1 && "$console_sink_count" -eq 0 && "$has_console_values" -eq 0 ]] \
       && is_installed_conf "$conf"; then
     if [[ "$install_destination" -ne 1 ]] && is_flow_agents_package; then
-      echo "install-console-config.sh: not pinning $conf local-only: it is the Flow Agents package's own telemetry.conf (tracked in a source checkout, shared by every --global hook install), not one install's; to pin a workspace, install into it with install.sh or flow-agents init and --telemetry-sink local-files" >&2
+      echo "install-console-config.sh: not pinning $conf local-only: the directory it is in carries the Flow Agents package's package.json, so it may be the package's own telemetry.conf (a source checkout, or the installed package that every --global hook install shares). If it is a workspace copy of the package, re-run with --install-destination; to pin a workspace, install into it with install.sh or flow-agents init and --telemetry-sink local-files" >&2
     else
       set_config_key "$conf" "telemetry_sink_pin" "local-files"
       echo "Pinned telemetry to local files in $conf: operator Console configs (.kontourai/telemetry-console.conf, $(user_global_console_conf)) are ignored for this install"

@@ -23,6 +23,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const TRUTHY = new Set(['1', 'true', 'yes', 'on']);
+// Leading/trailing ASCII whitespace, matching config.sh's `sed` under LC_ALL=C (String#trim also
+// strips NBSP, U+2003 and other Unicode spaces).
+const ASCII_TRIM = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
 const FALSY = new Set(['0', 'false', 'no', 'off']);
 // Cheap per-process memo keyed by the exact env inputs, so a throttled hot path does at most one
 // conf read per (env flag, conf path) signature. Keyed inputs make unit tests that vary
@@ -104,11 +107,17 @@ function isPinnedLocalOnly(file) {
 /**
  * Conf-driven liveness relay enablement (#567 — parity with the economics relay #469, so an
  * operator enables via `console_liveness_relay=1` in the console conf, NOT an env var/.profile).
- * Precedence mirrors config.sh's economics rule EXACTLY (config.sh:182-204): an explicit
+ * Precedence follows config.sh's relay default-on rule: an explicit
  * `console_liveness_relay` conf key wins over the env var; absent a key, a pre-set env var is
  * honored; absent both, default ON once a console sink is configured (any console_*url key present)
  * — opt-out, not silent-off. Best-effort and cheap: any FS/parse failure falls back to the env-only
  * decision; never throws. This is the spawn pre-gate; relay.sh+config.sh is authoritative.
+ *
+ * The line reading is close to config.sh's but not identical: whitespace is ASCII only on both
+ * sides (config.sh strips under LC_ALL=C) and keys lose every whitespace character on both sides,
+ * but there is no trust gate here, a final line without a newline is still read, and config.sh's
+ * `read` quirk of dropping a lone trailing `=` is not copied. Each difference can only spawn a
+ * relay.sh that config.sh then turns into a no-op, or skip a pulse.
  */
 function resolveLivenessRelayEnabled(env) {
   const envFlag = String(env.FLOW_AGENTS_CONSOLE_LIVENESS_RELAY || '').toLowerCase();
@@ -122,13 +131,14 @@ function resolveLivenessRelayEnabled(env) {
     const { file: confPath, pinned } = resolveConsoleConf(env);
     if (confPath) {
       for (const raw of fs.readFileSync(confPath, 'utf8').split('\n')) {
-        const line = raw.trim();
+        const line = raw.replace(ASCII_TRIM, '');
         if (!line || line.startsWith('#')) continue;
         const eq = line.indexOf('=');
         if (eq < 0) continue;
-        // config.sh deletes every whitespace character from a key, so `console _url` is console_url there.
+        // config.sh deletes every ASCII whitespace character from a key (tr under LC_ALL=C), so
+        // `console _url` is console_url there too.
         const key = line.slice(0, eq).replace(/[ \t\n\r\f\v]/g, '');
-        const value = line.slice(eq + 1).trim().toLowerCase();
+        const value = line.slice(eq + 1).replace(ASCII_TRIM, '').toLowerCase();
         if (key === 'console_liveness_relay') {
           // A pinned conf may only opt out (config.sh's telemetry_pinned_key_allowed).
           if (TRUTHY.has(value) && !pinned) explicit = true;

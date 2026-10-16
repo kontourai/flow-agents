@@ -68,18 +68,42 @@ telemetry_conf_warn_untrusted() {
 #
 # The installed telemetry.conf is not trust-gated (it can be mode 644 and come
 # from a repository or tarball), so once the pin has made it outrank the
-# operator confs it must not name a network destination either. For a pinned
-# install the config loop below ignores every console_* key except a console_*_relay
-# opt-out (0/false/no/off), ignores pricing_url, and keeps a channel setting that
-# becomes a TELEMETRY_CHANNEL_*_ENDPOINT_URL only when its value is a loopback URL
-# (http://127.0.0.1, http://localhost or http://[::1], optional port, optional
-# path), so the shipped localhost channel still works. The channel check runs on
-# the variable name the loop derives (channel and key uppercased, joined by _),
-# because channel.full.Endpoint_Url and channel.analytics_endpoint.url both
-# become an *_ENDPOINT_URL. The standard keys are matched exactly and
-# case-sensitively by the loop, so the console_* glob covers every spelling it
-# applies. Environment variables are not filtered: they are the operator's
-# explicit runtime override.
+# operator confs it may only set what is local by construction. For a pinned
+# install the config loop below applies an ALLOWLIST (telemetry_pinned_key_allowed
+# and telemetry_pinned_channel_var_allowed); every other line is ignored:
+#   enabled, enrich_system, enrich_workspace, enrich_auth, usage_tracking,
+#     notifications, governance       true or false
+#   channels                          channel names: [A-Za-z0-9_], commas, spaces
+#   max_log_size_mb, max_log_files,
+#     governance_audit_max_size_mb,
+#     governance_audit_max_files      digits only (these reach bash arithmetic,
+#                                     which would run a $(...) in the value)
+#   notification_profile              [A-Za-z0-9_-]
+#   sync_include, sync_exclude        any value (agent-name glob patterns)
+#   console_economics_relay,
+#     console_liveness_relay          an opt-out only: 0, false, no or off
+#   pricing_file                      an ordinary absolute path (below)
+#   telemetry_sink_pin                the pin itself (sets nothing)
+#   channel settings, by the variable the loop derives
+#   (TELEMETRY_CHANNEL_<NAME>_<KEY>, channel and key uppercased):
+#     *_REDACT                        any value (redaction field list)
+#     *_LOG_FILE                      an ordinary absolute path (below)
+#     *_ENDPOINT_URL                  a loopback URL: http://127.0.0.1,
+#                                     http://localhost or http://[::1], optional
+#                                     port and path, so the shipped localhost
+#                                     channel still works
+# An ordinary absolute path starts with /, has no empty, . or .. component, no
+# trailing / and no control character, and is not under /dev or /proc (any
+# case): bash turns a write to /dev/tcp/HOST/PORT or /dev/udp/HOST/PORT into a
+# network connection. Relative paths are refused because a hook resolves them
+# against whatever directory the agent session happens to run in. Channel
+# checks use the derived name because channel.full.Endpoint_Url and
+# channel.analytics_endpoint.url both become an *_ENDPOINT_URL; standard keys
+# are matched exactly, as the loop's case statement matches them. Environment
+# variables are not filtered: they are the operator's explicit runtime override.
+#
+# The loop strips whitespace with tr and sed under LC_ALL=C, so only ASCII
+# whitespace counts, the same as in liveness-write.js and telemetry-doctor.
 TELEMETRY_LOCAL_CONFIG_FILE="${TELEMETRY_WORKSPACE_ROOT}/.kontourai/telemetry-console.conf"
 TELEMETRY_GLOBAL_CONFIG_FILE="${HOME:-}/.flow-agents/telemetry-console.conf"
 TELEMETRY_INSTALLED_CONFIG_FILE="${TELEMETRY_DIR}/telemetry.conf"
@@ -96,27 +120,57 @@ telemetry_conf_pinned_local_only() {
 
 TELEMETRY_LOOPBACK_URL_RE='^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[^[:space:]"\\]*)?$'
 
+# Whether VALUE is an ordinary absolute path (see the pin note above).
+telemetry_ordinary_path() {
+  local LC_ALL=C
+  local path="$1" lower
+  [[ "$path" == /?* ]] || return 1
+  [[ "$path" =~ [[:cntrl:]] ]] && return 1
+  case "$path" in
+    *//*|*/./*|*/../*|*/.|*/..|*/) return 1 ;;
+  esac
+  lower=$(printf '%s\n' "$path" | tr '[:upper:]' '[:lower:]')
+  case "$lower" in
+    /dev|/dev/*|/proc|/proc/*) return 1 ;;
+  esac
+  return 0
+}
+
 # Whether a pinned install may take the standard (non-channel) KEY=VALUE from its
-# installed telemetry.conf (see the pin note above).
+# installed telemetry.conf: the allowlist in the pin note above.
 telemetry_pinned_key_allowed() {
+  local LC_ALL=C
   local key="$1" value="$2"
   case "$key" in
+    enabled|enrich_system|enrich_workspace|enrich_auth|usage_tracking|notifications|governance)
+      [[ "$value" == "true" || "$value" == "false" ]] ;;
+    channels) [[ "$value" =~ ^[A-Za-z0-9_,\ ]*$ ]] ;;
+    max_log_size_mb|max_log_files|governance_audit_max_size_mb|governance_audit_max_files)
+      [[ "$value" =~ ^[0-9]+$ ]] ;;
+    notification_profile) [[ "$value" =~ ^[A-Za-z0-9_-]+$ ]] ;;
+    sync_include|sync_exclude) return 0 ;;
     console_economics_relay|console_liveness_relay)
-      case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+      case "$(printf '%s\n' "$value" | tr '[:upper:]' '[:lower:]')" in
         0|false|no|off) return 0 ;;
         *) return 1 ;;
       esac
       ;;
-    console_*|pricing_url) return 1 ;;
-    *) return 0 ;;
+    pricing_file) telemetry_ordinary_path "$value" ;;
+    telemetry_sink_pin) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
 # Whether a pinned install may set the channel variable VAR_NAME to VALUE.
 telemetry_pinned_channel_var_allowed() {
+  local LC_ALL=C
   local var_name="$1" value="$2"
-  [[ "$var_name" == *_ENDPOINT_URL ]] || return 0
-  [[ "$value" =~ $TELEMETRY_LOOPBACK_URL_RE ]]
+  case "$var_name" in
+    *_ENDPOINT_URL) [[ "$value" =~ $TELEMETRY_LOOPBACK_URL_RE ]] ;;
+    *_LOG_FILE) telemetry_ordinary_path "$value" ;;
+    *_REDACT) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 TELEMETRY_LOCAL_ONLY_PINNED=0
@@ -192,16 +246,19 @@ TELEMETRY_PRICING_URL="${TELEMETRY_PRICING_URL:-${FLOW_AGENTS_PRICING_URL:-}}"
 # Load config file if it exists
 if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
   while IFS='=' read -r key value; do
-    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
-    key=$(echo "$key" | tr -d '[:space:]')
-    value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [[ -z "$key" ]] && continue
+    # ASCII whitespace only (LC_ALL=C), and printf, not echo, so a value of -n or -e survives.
+    key=$(printf '%s\n' "$key" | LC_ALL=C tr -d '[:space:]')
+    # The same test as `^[[:space:]]*#` on the raw key, without depending on the locale.
+    [[ "$key" == \#* ]] && continue
+    value=$(printf '%s\n' "$value" | LC_ALL=C sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
     # Handle channel-specific config
     if [[ "$key" =~ ^channel\.([^.]+)\.(.+)$ ]]; then
       channel_name="${BASH_REMATCH[1]}"
       channel_key="${BASH_REMATCH[2]}"
       if [[ "$channel_name" =~ ^[A-Za-z0-9_]+$ && "$channel_key" =~ ^[A-Za-z0-9_]+$ ]]; then
-        var_name="TELEMETRY_CHANNEL_$(echo "$channel_name" | tr '[:lower:]' '[:upper:]')_$(echo "$channel_key" | tr '[:lower:]' '[:upper:]')"
+        var_name="TELEMETRY_CHANNEL_$(printf '%s\n' "$channel_name" | LC_ALL=C tr '[:lower:]' '[:upper:]')_$(printf '%s\n' "$channel_key" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
         if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]] && ! telemetry_pinned_channel_var_allowed "$var_name" "$value"; then
           continue
         fi
@@ -235,7 +292,7 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
         console_tenant_id) CONSOLE_TENANT_ID="$value" ;;
         console_telemetry_redact) CONSOLE_TELEMETRY_REDACT="$value" ;;
         console_economics_relay)
-          case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+          case "$(printf '%s\n' "$value" | LC_ALL=C tr '[:upper:]' '[:lower:]')" in
             1|true|yes|on) console_economics_relay_raw="1" ;;
             0|false|no|off) console_economics_relay_raw="0" ;;
             *)
@@ -246,7 +303,7 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
           ;;
         console_economics_endpoint_url) FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$value" ;;
         console_liveness_relay)
-          case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+          case "$(printf '%s\n' "$value" | LC_ALL=C tr '[:upper:]' '[:lower:]')" in
             1|true|yes|on) console_liveness_relay_raw="1" ;;
             0|false|no|off) console_liveness_relay_raw="0" ;;
             *)
