@@ -129,6 +129,7 @@ main() {
 }
 
 _stdin=$(cat)
+telemetry_log_rotation_destinations_safe "${TELEMETRY_DATA_DIR}/audit.jsonl" || true
 echo "$_stdin"
 (main "$@" "$_stdin") </dev/null &>/dev/null &
 disown 2>/dev/null
