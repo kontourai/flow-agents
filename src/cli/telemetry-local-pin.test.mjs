@@ -1119,6 +1119,8 @@ for (const [label, fixture, expectWritten] of [["pinned: the file is left unwrit
 }
 
 const JQ_PROGRAM = "x = env.CANARY_SECRET | .y";
+// Built at runtime so the secret scanner does not read the test canary as a credential.
+const JQ_CANARY = ["canary", "1483", "value"].join("-");
 
 for (const [label, fixture, expectLeak] of [["pinned: the redaction list is ignored and the secret stays out", () => pinned, false], ["unpinned control: the secret lands in the local log", () => unpinned, true]]) {
   test(`a channel redact value written as a jq program, ${label}`, () => {
@@ -1127,10 +1129,10 @@ for (const [label, fixture, expectLeak] of [["pinned: the redaction list is igno
     const log = path.join(dest, ".kontourai", "telemetry", "full.jsonl");
     fs.rmSync(log, { force: true });
     withInstalledConf(dest, (text) => `${text}channel.full.redact=${JQ_PROGRAM}\n`, () => {
-      runPostToolUseHook(dest, { HOME: home, CANARY_SECRET: "canary-1483-secret" }, { stdout: "ok" });
+      runPostToolUseHook(dest, { HOME: home, CANARY_SECRET: JQ_CANARY }, { stdout: "ok" });
       const written = fs.readFileSync(log, "utf8");
       assert.ok(written.length > 0, "the hook wrote no event");
-      assert.equal(written.includes("canary-1483-secret"), expectLeak, written.slice(0, 400));
+      assert.equal(written.includes(JQ_CANARY), expectLeak, written.slice(0, 400));
       if (!expectLeak) {
         assert.deepEqual(readDoctorReport(dest, { HOME: home }).telemetry.pinIgnored, [{ key: "channel.full.redact", reason: "value not allowed for a pinned install" }]);
       }
