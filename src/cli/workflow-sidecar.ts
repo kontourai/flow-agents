@@ -9094,6 +9094,9 @@ async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
 
 /** Locate Surface's self-contained, dependency-free panel element (ESM, no require). */
 function loadSurfacePanelJs(): string {
+  if (fs.existsSync(fileURLToPath(new URL("../../runtime-imports.json", import.meta.url)))) {
+    return fs.readFileSync(new URL("../vendor/surface/trust-panel.js", import.meta.url), "utf8");
+  }
   let d = path.dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 12; i += 1) {
     try { return fs.readFileSync(path.join(d, "node_modules/@kontourai/surface/dist/src/trust-panel/surface-trust-panel.js"), "utf8"); } catch { /* walk up */ }
