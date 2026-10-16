@@ -276,9 +276,9 @@ line:
 | a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_LOG_FILE` | an ordinary absolute path |
 | a channel setting that becomes `TELEMETRY_CHANNEL_<NAME>_ENDPOINT_URL` | a loopback URL: `http://127.0.0.1`, `http://localhost` or `http://[::1]`, with an optional port and path |
 
-The value grammars matter beyond networking. The numeric settings reach bash
-arithmetic, and channel names reach an indirect expansion; both would run a
-`$(...)` written inside the value. An ordinary absolute path starts with `/`,
+The value grammars matter beyond networking: the numeric settings reach bash
+arithmetic, which runs a `$(...)` written inside the value, and channel names
+become parts of variable names. An ordinary absolute path starts with `/`,
 has no empty, `.` or `..` component, no trailing `/` and no control character,
 and is not under `/dev` or `/proc` in any letter case, because bash turns a
 write to `/dev/tcp/HOST/PORT` or `/dev/udp/HOST/PORT` into a network

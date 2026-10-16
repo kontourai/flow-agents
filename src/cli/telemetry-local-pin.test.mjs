@@ -983,7 +983,7 @@ test("pinned: anything off the allowlist is ignored by config.sh and reported by
   const home = makeFixtureDir("telemetry-pin-allowlist-home-");
   const marker = path.join(makeFixtureDir("telemetry-pin-allowlist-marker-"), "ran");
   const lines = [
-    // Arithmetic and indirect expansion run a $(...) inside the value: off-grammar values are dropped.
+    // Bash arithmetic runs a $(...) inside a value, so off-grammar values are dropped.
     `max_log_files=a[$(touch ${marker})]`,
     `channels=full,a[$(touch ${marker})]`,
     "enabled=yes",
@@ -999,8 +999,8 @@ test("pinned: anything off the allowlist is ignored by config.sh and reported by
     assert.deepEqual(rest, { TELEMETRY_MAX_LOG_FILES: "3", TELEMETRY_CHANNELS: "full,analytics", TELEMETRY_ENABLED: "true", TELEMETRY_NOTIFICATION_PROFILE: "standard", TELEMETRY_PRICING_FILE: "", TELEMETRY_CHANNEL_FULL_UNKNOWN_KEY: "" });
     // console_telemetry_redact was dropped, so the Console redaction falls back to the analytics list.
     assert.equal(consoleRedact, analyticsRedact);
-    // transport_emit expands each channel name indirectly, and rotation does arithmetic on
-    // TELEMETRY_MAX_LOG_FILES (done directly here, since rotation only runs on a full log).
+    // Rotation does arithmetic on TELEMETRY_MAX_LOG_FILES; it only runs on a full log, so the same
+    // arithmetic is done directly here, after an emit that walks every channel name.
     const run = spawnSync("/bin/bash", ["-c", 'source "$1/scripts/telemetry/lib/config.sh"; source "$1/scripts/telemetry/lib/transport.sh"; transport_emit "{}"; : $(( TELEMETRY_MAX_LOG_FILES - 1 )); wait', "_", pinned.dest], { env: { PATH: SHELL_PATH, HOME: home }, encoding: "utf8" });
     assert.equal(run.status, 0, run.stderr);
     assert.equal(fs.existsSync(marker), false, "a $(...) in a pinned value ran");
