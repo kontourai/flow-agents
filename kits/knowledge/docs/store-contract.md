@@ -388,7 +388,11 @@ are `{ prefix?, includeRetired?, stale?, now? }` for category queries and
 `{ includeRetired?, stale?, now? }` for type queries. `prefix` includes exact
 category and dot-delimited descendants. Retired records are excluded by default;
 `get` retains access to full history. `stale: true` selects records expired at
-`now` (default current time); it does not mutate status.
+`now` (default current time); it does not mutate status. Listings use the adapter's
+working set: Obsidian excludes archived supersession predecessors from both
+listings even with `includeRetired: true`. The default adapter retains those
+predecessors in listings subject to lifecycle filters. Across both adapters,
+use `get(id)` and reverse `supersedes` links to inspect retained predecessor history.
 
 | Method | Signature | Description |
 |---|---|---|
@@ -447,6 +451,7 @@ transitions. Optional `reindex` repairs only the derived index from record links
 | Body wikilinks | Parsed into links unless `parse_wikilinks: false`. | Parsed into links; no opt-out switch. |
 | Person names | Ordinary title/tags/links storage. | Entity-card sections and vault-global routing; `alias:` tags differ from record-handle `aliases`. |
 | Provenance | Required `agent`; optional source ids/session/note. | Same creation requirements; vault path/layout does not strengthen assurance. |
+| Superseded predecessors in listings | Remain in `listByType` / `listByCategory`, subject to lifecycle filters. | Moved to `archive/` and excluded from both listings regardless of `includeRetired`; `get(id)` and reverse supersession links retain access. |
 
 Both implement the five types, eight mutations, identity queries and freshness
 options above. Explicit `link` resolves target ids, but `create`/`update` can
@@ -674,8 +679,12 @@ interface SupersedeEvidence {
 
 Superseded snapshots MUST remain queryable:
 - `get(id)` returns the full record (body, links, provenance, mutation_log).
-- `listByType("snapshot")` includes superseded snapshots unless retired; use
-  `{ includeRetired: true }` to include retired snapshots as well (§B).
+- The default adapter includes superseded snapshots in `listByType` and
+  `listByCategory` subject to lifecycle filters; `{ includeRetired: true }` also
+  includes retired predecessors (§B).
+- Obsidian archives superseded predecessors out of both listing working sets.
+  `includeRetired` does not include archived records. Retrieve their full history
+  through `get(id)` and reverse supersession links instead.
 - The caller can determine supersession status by inspecting `getLinks(id).reverse` for entries
   with `kind === "supersedes"`.
 
@@ -721,13 +730,16 @@ Records with `status === "retired"` are EXCLUDED from the default working set:
 - The vector similarity detector (`createVectorSimilarityDetector`) considers only non-retired
   compiled records as candidates.
 
-All four filtering surfaces accept an `includeRetired: true` option (or equivalent flag on the
-similarity detector) to restore retired records to the result set.
+All four filtering surfaces accept an `includeRetired: true` option (or equivalent
+flag on the similarity detector) to disable the lifecycle-status exclusion within
+the adapter's enumerated working set. This does not disable Obsidian's separate
+archive exclusion for superseded predecessors (§A.7).
 
 Retired records remain **fully queryable with provenance**:
 - `get(id)` always returns the full record regardless of status.
-- `listByType(type, { includeRetired: true })` returns all records of that type.
-- `listByCategory(category, { includeRetired: true })` returns all matching records.
+- `listByType(type, { includeRetired: true })` and the equivalent category query
+  include retired records in the adapter's enumerated working set; Obsidian's
+  archived supersession predecessors remain excluded. Use `get(id)` for those.
 - The record's `mutation_log` carries the full retirement evidence.
 
 ### B.4 `retire` Mutation Operation
@@ -797,7 +809,9 @@ interface RetireEvidence {
 
 Retired records MUST remain reachable from:
 - `get(id)` — always returns the full record.
-- `listByType(type, { includeRetired: true })` and `listByCategory(category, { includeRetired: true })`.
+- `listByType(type, { includeRetired: true })` and `listByCategory(category, { includeRetired: true })`
+  for records in the adapter's enumerated working set. Obsidian records also
+  archived by supersession remain available through `get(id)`, not these listings.
 - Snapshot `provenance.source_ids` — any snapshot that included the record in its cluster before
   retirement retains the reference intact. The retired record can be retrieved via `get(sourceId)`.
 - The retirement `mutation_log` entry carries the full evidence of why and when the record was
