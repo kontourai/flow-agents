@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 import { makeFixturePackage } from "./fixture-kit-package.mjs";
 
 for (const removeRoot of [false, true]) {
@@ -21,7 +23,7 @@ for (const removeRoot of [false, true]) {
         assert.equal(error, failure, "original exception, code and stack must survive");
         assert.equal(error.code, "ENOENT");
         assert.equal(error.syscall, "cp");
-        const diagnostic = error.fixtureCopy;
+        const diagnostic = JSON.parse(error.fixtureCopy);
         assert.equal(diagnostic.pid, process.pid);
         assert.equal(diagnostic.node, process.version);
         assert.equal(diagnostic.destination, path.join(root, "build"));
@@ -41,3 +43,29 @@ for (const removeRoot of [false, true]) {
     }
   });
 }
+
+test("the default spec reporter retains copy identities rather than collapsed objects", () => {
+  const root = makeFixtureDir("fixture-copy-reporter-");
+  try {
+    const file = path.join(root, "fault.test.mjs");
+    fs.writeFileSync(file, `
+import test from "node:test";
+import fs from "node:fs";
+import { makeFixturePackage } from ${JSON.stringify(new URL("./fixture-kit-package.mjs", import.meta.url).href)};
+test("intentional copy fault", () => {
+  fs.cpSync = () => { throw Object.assign(new Error("intentional copy fault"), { code: "ENOENT" }); };
+  makeFixturePackage("fixture-copy-reporter-child-", {});
+});
+`);
+    const { NODE_TEST_CONTEXT: _testContext, ...env } = process.env;
+    const result = spawnSync(process.execPath, ["--test", "--test-reporter=spec", file], { env, encoding: "utf8", timeout: 20_000 });
+    assert.equal(result.status, 1, `${result.stdout} ${result.stderr}`);
+    assert.match(result.stdout, /intentional copy fault/);
+    assert.match(result.stdout, /fixtureCopy:/);
+    assert.match(result.stdout, /"before":\{"source":\{"dev":\d+,"ino":\d+/);
+    assert.match(result.stdout, /"after":\{"source":\{"dev":\d+,"ino":\d+/);
+    assert.ok(!result.stdout.includes("[Object]"), "filesystem identities must be retained in raw failure output");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

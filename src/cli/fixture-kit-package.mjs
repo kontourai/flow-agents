@@ -174,7 +174,8 @@ export function makeFixturePackage(prefix, kits) {
     fs.cpSync(source, destination, { recursive: true });
   } catch (error) {
     try {
-      error.fixtureCopy = { pid: process.pid, node: process.version, source, destination, before, after: snapshot() };
+      // A string survives node:test reporter inspect-depth limits; nested objects become [Object].
+      error.fixtureCopy = JSON.stringify({ pid: process.pid, node: process.version, source, destination, before, after: snapshot() });
     } catch { /* diagnostic failure must not displace the original copy failure */ }
     throw error;
   }

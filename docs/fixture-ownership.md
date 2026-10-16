@@ -69,7 +69,7 @@ itself; it is a prompt to update or remove the owning eval and fixture together.
 
 `src/cli/fixture-kit-package.mjs` copies the compiled CLI into an owned package
 fixture. A failed copy rethrows the original exception with `fixtureCopy`
-metadata: process/Node identity and before/after filesystem metadata for the
+metadata serialized as JSON so test reporters retain the values: process/Node identity and before/after filesystem metadata for the
 source build, source `src`, fixture root, destination build, and destination
 `src`. It does not retry, read file contents, or turn setup failure into a
 contract-test result. Node's native copy path can name the containing destination
