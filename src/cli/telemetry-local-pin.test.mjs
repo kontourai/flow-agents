@@ -893,3 +893,11 @@ test("install-codex-home.sh still exits 0 for --help and 2 for an unknown option
   const unknown = spawnSync("/bin/bash", [path.join(repoRoot, "scripts", "install-codex-home.sh"), "--no-such-option"], { env: { HOME: makeFixtureDir("telemetry-pin-codex-unknown-"), PATH: NODE_PATH }, encoding: "utf8" });
   assert.equal(unknown.status, 2, unknown.stderr);
 });
+
+test("liveness-write.js reads a key with inner whitespace as config.sh does", () => {
+  const home = makeFixtureDir("telemetry-pin-key-space-home-");
+  withInstalledConf(unpinned.dest, (text) => `${text}console _telemetry_url = ${GLOBAL_URL}\n`, () => {
+    assert.equal(readShellVars(unpinned.dest, { HOME: home }, ["CONSOLE_TELEMETRY_URL"]).CONSOLE_TELEMETRY_URL, GLOBAL_URL);
+    assert.equal(readLivenessWrite(unpinned.dest, { HOME: home }).enabled, true);
+  });
+});
