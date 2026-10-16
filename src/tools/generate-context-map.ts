@@ -139,7 +139,10 @@ function schemas(): string[][] {
   const dir = path.join(root, "schemas");
   return fs.readdirSync(dir).filter((name) => name.endsWith(".schema.json")).sort().map((name) => {
     const data = loadJson<Record<string, unknown>>(path.join(dir, name));
-    return [name, oneLine(String(data.title ?? "")), oneLine(String(data.$id ?? ""))];
+    const reference = name === "kit-review-request.schema.json"
+      ? `[source schema](../schemas/${name})`
+      : String(data.$id ?? "");
+    return [name, oneLine(String(data.title ?? "")), oneLine(reference)];
   });
 }
 
