@@ -20,7 +20,12 @@ function bashDefault(name) {
 
 test("TypeScript redaction defaults cannot drift from config.sh", () => {
   assert.deepEqual([...TELEMETRY_CHANNEL_FULL_REDACT_DEFAULT], bashDefault("TELEMETRY_CHANNEL_FULL_REDACT"));
-  assert.deepEqual([...TELEMETRY_CHANNEL_ANALYTICS_REDACT_DEFAULT], bashDefault("TELEMETRY_CHANNEL_ANALYTICS_REDACT"));
+  // config.sh keeps the analytics list in one literal, TELEMETRY_SHIPPED_ANALYTICS_REDACT (#1483).
+  const config = fs.readFileSync(path.join(path.resolve(import.meta.dirname, "../.."), "scripts/telemetry/lib/config.sh"), "utf8");
+  assert.match(config, /^TELEMETRY_CHANNEL_ANALYTICS_REDACT="\$\{TELEMETRY_CHANNEL_ANALYTICS_REDACT:-\$\{TELEMETRY_SHIPPED_ANALYTICS_REDACT\}\}"$/m);
+  const shipped = /^TELEMETRY_SHIPPED_ANALYTICS_REDACT="([^"]*)"$/m.exec(config);
+  assert.ok(shipped, "TELEMETRY_SHIPPED_ANALYTICS_REDACT must remain parseable");
+  assert.deepEqual([...TELEMETRY_CHANNEL_ANALYTICS_REDACT_DEFAULT], shipped[1].split(","));
 });
 
 test("effective narrative fields union full-channel and caller-specific policy", () => {

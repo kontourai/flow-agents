@@ -23,6 +23,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const TRUTHY = new Set(['1', 'true', 'yes', 'on']);
+// Leading/trailing ASCII whitespace, matching config.sh's `sed` under LC_ALL=C (String#trim also
+// strips NBSP, U+2003 and other Unicode spaces).
+const ASCII_TRIM = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
 const FALSY = new Set(['0', 'false', 'no', 'off']);
 // Cheap per-process memo keyed by the exact env inputs, so a throttled hot path does at most one
 // conf read per (env flag, conf path) signature. Keyed inputs make unit tests that vary
@@ -35,6 +38,11 @@ const relayEnabledCache = new Map();
  *   2. per-workspace override: <workspace-root>/.kontourai/telemetry-console.conf
  *   3. user-global durable override: ~/.flow-agents/telemetry-console.conf
  *   4. the shipped default: scripts/telemetry/telemetry.conf (relative to this file)
+ * Local-only pin (#1483): when no TELEMETRY_CONFIG_FILE is set and slot 4 carries
+ * `telemetry_sink_pin=local-files` (written by an explicit `--telemetry-sink local-files` install),
+ * slots 2 and 3 are skipped and slot 4 is the answer, exactly as config.sh does. The pinned slot 4
+ * is not trust-gated, so it supplies no Console URL here, and its console_liveness_relay key counts
+ * only as an opt-out (resolveLivenessRelayEnabled), matching config.sh's pinned key filter.
  * Slot 4's path is <this file>/../../telemetry/telemetry.conf; the workspace root for slot 2 is
  * three levels up from scripts/hooks/lib. This resolver is only the SPAWN pre-gate — it is
  * intentionally lenient (no mode-600 trust gate). relay.sh re-sources config.sh, which applies the
@@ -53,30 +61,63 @@ const relayEnabledCache = new Map();
  * @returns {string|null}  first readable conf path, or null
  */
 function resolveConsoleConfPath(env) {
+  return resolveConsoleConf(env).file;
+}
+
+/** @returns {{ file: string|null, pinned: boolean }} the resolved conf and whether the pin chose it */
+function resolveConsoleConf(env) {
+  const installedConf = path.join(__dirname, '..', '..', 'telemetry', 'telemetry.conf');
+  const pinned = !env.TELEMETRY_CONFIG_FILE && isPinnedLocalOnly(installedConf);
   const candidates = [
     env.TELEMETRY_CONFIG_FILE,
-    path.join(__dirname, '..', '..', '..', '.kontourai', 'telemetry-console.conf'),
-    path.join(os.homedir(), '.flow-agents', 'telemetry-console.conf'),
-    path.join(__dirname, '..', '..', 'telemetry', 'telemetry.conf'),
+    ...(pinned
+      ? []
+      : [
+          path.join(__dirname, '..', '..', '..', '.kontourai', 'telemetry-console.conf'),
+          path.join(os.homedir(), '.flow-agents', 'telemetry-console.conf'),
+        ]),
+    installedConf,
   ];
   for (const c of candidates) {
     try {
-      if (c && fs.existsSync(c) && fs.statSync(c).isFile()) return c;
+      if (c && fs.existsSync(c) && fs.statSync(c).isFile()) return { file: c, pinned: pinned && c === installedConf };
     } catch {
       /* keep scanning */
     }
   }
-  return null;
+  return { file: null, pinned: false };
+}
+
+const PIN_LINE = 'telemetry_sink_pin=local-files';
+
+/**
+ * Whether the installed telemetry.conf pins this install local-only: it has a line that is exactly
+ * `telemetry_sink_pin=local-files`, optionally followed by a CR (config.sh's
+ * telemetry_conf_pinned_local_only). An unreadable file is not a pin.
+ * @returns {boolean}
+ */
+function isPinnedLocalOnly(file) {
+  try {
+    return fs.readFileSync(file, 'utf8').split('\n').some((line) => line === PIN_LINE || line === `${PIN_LINE}\r`);
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Conf-driven liveness relay enablement (#567 — parity with the economics relay #469, so an
  * operator enables via `console_liveness_relay=1` in the console conf, NOT an env var/.profile).
- * Precedence mirrors config.sh's economics rule EXACTLY (config.sh:182-204): an explicit
+ * Precedence follows config.sh's relay default-on rule: an explicit
  * `console_liveness_relay` conf key wins over the env var; absent a key, a pre-set env var is
  * honored; absent both, default ON once a console sink is configured (any console_*url key present)
  * — opt-out, not silent-off. Best-effort and cheap: any FS/parse failure falls back to the env-only
  * decision; never throws. This is the spawn pre-gate; relay.sh+config.sh is authoritative.
+ *
+ * The line reading is close to config.sh's but not identical: whitespace is ASCII only on both
+ * sides (config.sh strips under LC_ALL=C) and keys lose every whitespace character on both sides,
+ * but there is no trust gate here, a final line without a newline is still read, and config.sh's
+ * `read` quirk of dropping a lone trailing `=` is not copied. Each difference can only spawn a
+ * relay.sh that config.sh then turns into a no-op, or skip a pulse.
  */
 function resolveLivenessRelayEnabled(env) {
   const envFlag = String(env.FLOW_AGENTS_CONSOLE_LIVENESS_RELAY || '').toLowerCase();
@@ -87,19 +128,22 @@ function resolveLivenessRelayEnabled(env) {
   try {
     let explicit = null;
     let hasConsoleUrl = false;
-    const confPath = resolveConsoleConfPath(env);
+    const { file: confPath, pinned } = resolveConsoleConf(env);
     if (confPath) {
       for (const raw of fs.readFileSync(confPath, 'utf8').split('\n')) {
-        const line = raw.trim();
+        const line = raw.replace(ASCII_TRIM, '');
         if (!line || line.startsWith('#')) continue;
         const eq = line.indexOf('=');
         if (eq < 0) continue;
-        const key = line.slice(0, eq).trim();
-        const value = line.slice(eq + 1).trim().toLowerCase();
+        // config.sh deletes every ASCII whitespace character from a key (tr under LC_ALL=C), so
+        // `console _url` is console_url there too.
+        const key = line.slice(0, eq).replace(/[ \t\n\r\f\v]/g, '');
+        const value = line.slice(eq + 1).replace(ASCII_TRIM, '').toLowerCase();
         if (key === 'console_liveness_relay') {
-          if (TRUTHY.has(value)) explicit = true;
+          // A pinned conf may only opt out (config.sh's telemetry_pinned_key_allowed).
+          if (TRUTHY.has(value) && !pinned) explicit = true;
           else if (FALSY.has(value)) explicit = false;
-        } else if (key === 'console_telemetry_url' || key === 'console_url' || key === 'console_telemetry_endpoint_url') {
+        } else if (!pinned && (key === 'console_telemetry_url' || key === 'console_url' || key === 'console_telemetry_endpoint_url')) {
           if (value) hasConsoleUrl = true;
         }
       }
@@ -170,4 +214,4 @@ function appendLivenessEvent(root, evt) {
   relayLivenessEvent(evt); // then optionally mirror to the Console — best-effort, detached, off by default
 }
 
-module.exports = { livenessStreamFile, appendLivenessEvent, resolveLivenessRelayEnabled };
+module.exports = { livenessStreamFile, appendLivenessEvent, resolveLivenessRelayEnabled, resolveConsoleConfPath };

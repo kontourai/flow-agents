@@ -104,9 +104,9 @@ async function main() {
       FLOW_AGENTS_TELEMETRY_FOREGROUND: process.env.FLOW_AGENTS_OPENCODE_TELEMETRY_FOREGROUND || 'false',
       TELEMETRY_CHANNELS: process.env.FLOW_AGENTS_OPENCODE_TELEMETRY_CHANNELS || 'full,analytics',
       TELEMETRY_CHANNEL_FULL_REDACT: process.env.TELEMETRY_CHANNEL_FULL_REDACT || DEFAULT_FULL_REDACT,
-      TELEMETRY_CHANNEL_ANALYTICS_REDACT:
-        process.env.TELEMETRY_CHANNEL_ANALYTICS_REDACT ||
-        'tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input',
+      // No TELEMETRY_CHANNEL_ANALYTICS_REDACT here: an exported value passes through ...process.env,
+      // and otherwise lib/config.sh's shipped list applies. The copy that used to sit here had
+      // drifted to six fields, without hook.last_assistant_message and hook.transcript_path (#1483).
       TELEMETRY_CHANNEL_FULL_ENDPOINT_URL: process.env.TELEMETRY_CHANNEL_FULL_ENDPOINT_URL || '',
       TELEMETRY_USAGE_TRACKING: process.env.TELEMETRY_USAGE_TRACKING || 'true',
     },

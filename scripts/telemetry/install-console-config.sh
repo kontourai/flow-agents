@@ -19,6 +19,18 @@ Options:
                           automatic kit-economics relay (default-on once a
                           Console telemetry sink is configured; see
                           lib/config.sh).
+  --install-destination   Passed by the root install.sh: CONF is in a fresh
+                          install destination, so it may be pinned even though
+                          that destination is a copy of the Flow Agents package.
+
+When CONF is the telemetry.conf beside this script (the installed one) and
+--telemetry-sink names only local-files, with no Console URL, endpoint, token
+or tenant, the script records telemetry_sink_pin=local-files there. A pinned
+install ignores the operator Console configs
+(<workspace>/.kontourai/telemetry-console.conf and the user-global
+telemetry-console.conf in .flow-agents under the home directory); an explicit
+TELEMETRY_CONFIG_FILE still wins. Selecting a Console sink later removes the pin. A sink taken only from
+FLOW_AGENTS_TELEMETRY_SINK(S) never pins.
 EOF
 }
 
@@ -99,6 +111,45 @@ set_config_key() {
   mv "$tmp" "$conf"
 }
 
+# Remove every pin line, using the readers' grammar exactly: the line
+# `telemetry_sink_pin=local-files`, optionally followed by a CR, and nothing else.
+remove_local_only_pin() {
+  local conf="$1"
+  [[ -f "$conf" ]] || return 0
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/flow-agents-telemetry-conf.XXXXXX")"
+  awk '$0 != "telemetry_sink_pin=local-files" && $0 != "telemetry_sink_pin=local-files\r" { print }' "$conf" >"$tmp"
+  if cmp -s "$tmp" "$conf"; then rm -f "$tmp"; else mv "$tmp" "$conf"; fi
+}
+
+# True when CONF is the telemetry.conf beside this script, the one lib/config.sh reads as the
+# installed default. The local-only pin means something only there; written into an operator
+# conf it would be inert, so it is never written anywhere else.
+is_installed_conf() {
+  local conf="$1" conf_dir
+  conf_dir="$(cd "$(dirname "$conf")" 2>/dev/null && pwd -P)" || return 1
+  [[ "$(basename "$conf")" == "telemetry.conf" && "$conf_dir" == "$(cd "$SCRIPT_DIR" && pwd -P)" ]]
+}
+
+# Spelled with ${HOME:-}, not as a home-relative literal: the bundle build rewrites those.
+# True when this script runs from the Flow Agents package itself (a source checkout, or the
+# installed npm package whose scripts/ the `--global` claude-code and opencode hooks run from):
+# its root package.json is named @kontourai/flow-agents. Its telemetry.conf is shared by every
+# such install (and tracked, in a checkout), so it is not pinned unless an installer says, with
+# --install-destination, that this is a fresh copy in a destination: the root install.sh copies
+# the whole package, package.json included, so the copy looks the same. Without node the name
+# cannot be read and the check passes.
+is_flow_agents_package() {
+  local package_json="$SCRIPT_DIR/../../package.json"
+  [[ -f "$package_json" ]] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  node -e 'try { process.exit(require(process.argv[1]).name === "@kontourai/flow-agents" ? 0 : 1) } catch { process.exit(1) }' "$package_json"
+}
+
+user_global_console_conf() {
+  printf '%s/.flow-agents/telemetry-console.conf' "${HOME:-}"
+}
+
 main() {
   [[ $# -ge 1 ]] || { usage; exit 2; }
   local conf="$1"
@@ -110,6 +161,10 @@ main() {
   local console_token_file="${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-${CONSOLE_TELEMETRY_TOKEN_FILE:-}}"
   local console_tenant="${FLOW_AGENTS_CONSOLE_TENANT:-${CONSOLE_TENANT_ID:-}}"
   local no_economics_relay=0
+  # Set only by a --telemetry-sink argument: the local-only pin records an explicit choice,
+  # never a sink inherited from FLOW_AGENTS_TELEMETRY_SINK(S) or the local-files default.
+  local sink_flag_given=0
+  local install_destination=0
   telemetry_sinks=()
   if [[ -n "${FLOW_AGENTS_TELEMETRY_SINKS:-}" ]]; then
     append_sinks "$FLOW_AGENTS_TELEMETRY_SINKS"
@@ -122,6 +177,7 @@ main() {
       --telemetry-sink|--telemetry-sinks)
         [[ $# -ge 2 ]] || die "$1 requires a value"
         append_sinks "$2"
+        sink_flag_given=1
         shift 2
         ;;
       --console-url)
@@ -146,6 +202,10 @@ main() {
         ;;
       --no-economics-relay)
         no_economics_relay=1
+        shift
+        ;;
+      --install-destination)
+        install_destination=1
         shift
         ;;
       --help|-h)
@@ -194,8 +254,21 @@ main() {
     echo "warning: install-console-config.sh: a Console telemetry sink was selected with no --console-tenant; records will be untenanted" >&2
   fi
 
-  if [[ -z "$console_url" && -z "$console_endpoint" && -z "$console_token" && -z "$console_tenant" \
-        && "$no_economics_relay" -eq 0 ]]; then
+  local has_console_values=0
+  if [[ -n "$console_url" || -n "$console_endpoint" || -n "$console_token" || -n "$console_tenant" ]]; then
+    has_console_values=1
+  fi
+  if [[ "$sink_flag_given" -eq 1 && "$console_sink_count" -eq 0 && "$has_console_values" -eq 0 ]] \
+      && is_installed_conf "$conf"; then
+    if [[ "$install_destination" -ne 1 ]] && is_flow_agents_package; then
+      echo "install-console-config.sh: not pinning $conf local-only: the directory it is in carries the Flow Agents package's package.json, so it may be the package's own telemetry.conf (a source checkout, or the installed package that every --global hook install shares). If it is a workspace copy of the package, re-run with --install-destination; to pin a workspace, install into it with install.sh or flow-agents init and --telemetry-sink local-files" >&2
+    else
+      set_config_key "$conf" "telemetry_sink_pin" "local-files"
+      echo "Pinned telemetry to local files in $conf: operator Console configs (.kontourai/telemetry-console.conf, $(user_global_console_conf)) are ignored for this install"
+    fi
+  fi
+
+  if [[ "$has_console_values" -eq 0 && "$no_economics_relay" -eq 0 ]]; then
     return 0
   fi
   if [[ -z "$console_url" && -z "$console_endpoint" && ( -n "$console_token" || -n "$console_tenant" ) ]]; then
@@ -209,6 +282,8 @@ main() {
 
   mkdir -p "$(dirname "$conf")"
   [[ -f "$conf" ]] || : >"$conf"
+  # A Console selection is the latest stated intent, so it lifts an earlier local-only pin.
+  [[ "$has_console_values" -eq 1 ]] && remove_local_only_pin "$conf"
   set_config_key "$conf" "console_telemetry_url" "$console_url"
   set_config_key "$conf" "console_telemetry_endpoint_url" "$console_endpoint"
   set_config_key "$conf" "console_telemetry_token" "$console_token"

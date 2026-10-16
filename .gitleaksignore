@@ -1,2 +1,4 @@
 # Deliberate test canary in the narrative fail-closed redaction suite (never a real credential).
 efb977c87fdbc6a3841ee6f0f74ce9ed1dd9c8ed:evals/integration/test_narrative_redaction_failclosed.sh:generic-api-key:28
+# Deliberate test canary in the pinned-telemetry redaction test (never a real credential); the value is built at runtime from 0b75f69a's successors.
+0b75f69acf970051ec854f1d3c4cd67ea898d3d5:src/cli/telemetry-local-pin.test.mjs:generic-api-key:1130

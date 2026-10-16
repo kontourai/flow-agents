@@ -149,7 +149,11 @@ test("init updates a stale bundle-owned file without --force (upgrade path)", ()
   const second = runInit(dest);
   assert.equal(second.status, 0, second.output);
   assert.equal(fs.readFileSync(path.join(dest, "README.md"), "utf8"), bundleReadme());
-  assert.match(second.output, /1 replaced \(bundle-owned, stale\)/);
+  // README.md, plus scripts/telemetry/telemetry.conf: runInit's explicit --telemetry-sink
+  // local-files pins the install (#1483), so the recorded telemetry.conf differs from the bundle's
+  // and is reset to it, then pinned again by the installer.
+  assert.match(second.output, /2 replaced \(bundle-owned, stale\)/);
+  assert.match(fs.readFileSync(path.join(dest, "scripts", "telemetry", "telemetry.conf"), "utf8"), /^telemetry_sink_pin=local-files$/m);
   assert.doesNotMatch(second.output, /preserved: README\.md/);
 });
 

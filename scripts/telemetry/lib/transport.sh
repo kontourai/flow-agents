@@ -323,7 +323,8 @@ transport_emit() {
     
     # POST to endpoint if configured
     if [[ -n "$endpoint_url" ]]; then
-      curl -s --connect-timeout 2 --max-time 5 -X POST \
+      # -g: the URL is literal, so [ ] { } in it can never expand into more requests.
+      curl -s -g --connect-timeout 2 --max-time 5 -X POST \
         -H "Content-Type: application/json" \
         -d "$processed_event" \
         "$endpoint_url" >/dev/null 2>&1 &
