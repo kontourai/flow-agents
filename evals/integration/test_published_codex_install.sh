@@ -2,6 +2,11 @@
 # Proves the packed npm artifact is a self-contained, production-only Codex installer.
 set -euo pipefail
 
+# Resolve before isolating HOME: mise's shim consults HOME and is not the runtime.
+# Match test_init_uninstall.sh; this also pins /usr/bin/env node package-bin calls.
+NODE_BIN="$(node -p 'process.execPath')"
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMPDIR_EVAL="$(mktemp -d /tmp/published-codex-install.XXXXXX)"
 cleanup() { rm -rf "$TMPDIR_EVAL"; }
