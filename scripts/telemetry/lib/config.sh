@@ -53,10 +53,118 @@ telemetry_conf_warn_untrusted() {
 # into every packaged dist bundle, so it must never carry owner credentials.
 # A candidate that exists but fails the trust gate falls through silently
 # (telemetry stays fail-open).
+#
+# Local-only pin (#1483): an install run with an explicit `--telemetry-sink
+# local-files` records `telemetry_sink_pin=local-files` in the installed
+# telemetry.conf (install-console-config.sh). A pinned install skips BOTH
+# auto-discovered operator confs (2) and (3) and reads the installed
+# telemetry.conf; only an explicit TELEMETRY_CONFIG_FILE (1) still wins. The
+# same rule is mirrored by scripts/hooks/lib/liveness-write.js and
+# src/cli/telemetry-doctor.ts; src/cli/telemetry-local-pin.test.mjs runs all of
+# them against one fixture.
+#
+# The pin is one exact line, `telemetry_sink_pin=local-files`, optionally
+# followed by a CR; nothing else (no whitespace, BOM or other value) counts.
+#
+# The installed telemetry.conf is not trust-gated (it can be mode 644 and come
+# from a repository or tarball), so once the pin has made it outrank the
+# operator confs it may only set what is local by construction. For a pinned
+# install the config loop below applies an ALLOWLIST (telemetry_pinned_key_allowed
+# and telemetry_pinned_channel_var_allowed); every other line is ignored:
+#   enabled, enrich_system, enrich_workspace, enrich_auth, usage_tracking,
+#     notifications, governance       true or false
+#   channels                          channel names: [A-Za-z0-9_], commas, spaces
+#   max_log_size_mb, max_log_files,
+#     governance_audit_max_size_mb,
+#     governance_audit_max_files      digits only (these reach bash arithmetic,
+#                                     which would run a $(...) in the value)
+#   notification_profile              [A-Za-z0-9_-]
+#   sync_include, sync_exclude        any value (agent-name glob patterns)
+#   console_economics_relay,
+#     console_liveness_relay          an opt-out only: 0, false, no or off
+#   telemetry_sink_pin                the pin itself (sets nothing)
+#   channel settings, by the variable the loop derives
+#   (TELEMETRY_CHANNEL_<NAME>_<KEY>, channel and key uppercased):
+#     *_REDACT                        none, or a field list: [A-Za-z0-9_.,]
+#                                     (each field is spliced into a jq program);
+#                                     local logs only: the Console list
+#                                     (CONSOLE_TELEMETRY_REDACT) is an exported
+#                                     value or the shipped list itself
+#     *_ENDPOINT_URL                  a loopback URL: http://127.0.0.1,
+#                                     http://localhost or http://[::1], optional
+#                                     port and a path without [ ] { } (curl
+#                                     globs), so the shipped localhost channel
+#                                     still works
+# No path is accepted at all: not pricing_file and not a channel *_LOG_FILE.
+# Each event is appended to the log file verbatim, so a log path the file
+# chooses is a write of attacker-influenced text anywhere the user can write
+# (a shell rc file, a git hook, /dev/tcp/HOST/PORT). Channels keep their
+# default log files under TELEMETRY_DATA_DIR and pricing its default. Channel
+# checks use the derived name because channel.full.Endpoint_Url and
+# channel.analytics_endpoint.url both become an *_ENDPOINT_URL; standard keys
+# are matched exactly, as the loop's case statement matches them. Environment
+# variables are not filtered: they are the operator's explicit runtime override.
+#
+# The loop strips whitespace with tr and sed under LC_ALL=C, so only ASCII
+# whitespace counts, the same as in liveness-write.js and telemetry-doctor.
 TELEMETRY_LOCAL_CONFIG_FILE="${TELEMETRY_WORKSPACE_ROOT}/.kontourai/telemetry-console.conf"
 TELEMETRY_GLOBAL_CONFIG_FILE="${HOME:-}/.flow-agents/telemetry-console.conf"
+TELEMETRY_INSTALLED_CONFIG_FILE="${TELEMETRY_DIR}/telemetry.conf"
+
+# True when the installed telemetry.conf has the exact pin line.
+telemetry_conf_pinned_local_only() {
+  local file="$1" line
+  [[ -f "$file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == "telemetry_sink_pin=local-files" || "$line" == $'telemetry_sink_pin=local-files\r' ]] && return 0
+  done < "$file"
+  return 1
+}
+
+# No [ ] { } in the path: curl reads them as URL globs, so one event could fan out to many POSTs.
+TELEMETRY_LOOPBACK_URL_RE='^http://(127\.0\.0\.1|localhost|\[::1\])(:[0-9]{1,5})?(/[^][{}[:space:]"\\]*)?$'
+
+# Whether a pinned install may take the standard (non-channel) KEY=VALUE from its
+# installed telemetry.conf: the allowlist in the pin note above.
+telemetry_pinned_key_allowed() {
+  local LC_ALL=C
+  local key="$1" value="$2"
+  case "$key" in
+    enabled|enrich_system|enrich_workspace|enrich_auth|usage_tracking|notifications|governance)
+      [[ "$value" == "true" || "$value" == "false" ]] ;;
+    channels) [[ "$value" =~ ^[A-Za-z0-9_,\ ]*$ ]] ;;
+    max_log_size_mb|max_log_files|governance_audit_max_size_mb|governance_audit_max_files)
+      [[ "$value" =~ ^[0-9]+$ ]] ;;
+    notification_profile) [[ "$value" =~ ^[A-Za-z0-9_-]+$ ]] ;;
+    sync_include|sync_exclude) return 0 ;;
+    console_economics_relay|console_liveness_relay)
+      case "$(printf '%s\n' "$value" | tr '[:upper:]' '[:lower:]')" in
+        0|false|no|off) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    telemetry_sink_pin) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Whether a pinned install may set the channel variable VAR_NAME to VALUE.
+telemetry_pinned_channel_var_allowed() {
+  local LC_ALL=C
+  local var_name="$1" value="$2"
+  case "$var_name" in
+    *_ENDPOINT_URL) [[ "$value" =~ $TELEMETRY_LOOPBACK_URL_RE ]] ;;
+    *_REDACT) [[ "$value" == "none" || "$value" =~ ^[A-Za-z0-9_.,]*$ ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+TELEMETRY_LOCAL_ONLY_PINNED=0
 if [[ -n "${TELEMETRY_CONFIG_FILE:-}" ]]; then
   :
+elif telemetry_conf_pinned_local_only "$TELEMETRY_INSTALLED_CONFIG_FILE"; then
+  TELEMETRY_LOCAL_ONLY_PINNED=1
+  TELEMETRY_CONFIG_FILE="$TELEMETRY_INSTALLED_CONFIG_FILE"
 elif telemetry_conf_trusted "$TELEMETRY_LOCAL_CONFIG_FILE"; then
   TELEMETRY_CONFIG_FILE="$TELEMETRY_LOCAL_CONFIG_FILE"
 else
@@ -65,7 +173,7 @@ else
     TELEMETRY_CONFIG_FILE="$TELEMETRY_GLOBAL_CONFIG_FILE"
   else
     [[ -n "${HOME:-}" ]] && telemetry_conf_warn_untrusted "$TELEMETRY_GLOBAL_CONFIG_FILE"
-    TELEMETRY_CONFIG_FILE="${TELEMETRY_DIR}/telemetry.conf"
+    TELEMETRY_CONFIG_FILE="$TELEMETRY_INSTALLED_CONFIG_FILE"
   fi
 fi
 
@@ -95,7 +203,11 @@ TELEMETRY_GOVERNANCE_AUDIT_MAX_FILES="${TELEMETRY_GOVERNANCE_AUDIT_MAX_FILES:-5}
 TELEMETRY_CHANNEL_FULL_LOG_FILE="${TELEMETRY_CHANNEL_FULL_LOG_FILE:-${TELEMETRY_DATA_DIR}/full.jsonl}"
 TELEMETRY_CHANNEL_FULL_REDACT="${TELEMETRY_CHANNEL_FULL_REDACT:-hook.raw_input,turn.prompt_text,tool.input,tool.output}"
 TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE="${TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE:-${TELEMETRY_DATA_DIR}/analytics.jsonl}"
-TELEMETRY_CHANNEL_ANALYTICS_REDACT="${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input,hook.last_assistant_message,hook.transcript_path}"
+# The shipped analytics redaction list: the one bash copy, used as the analytics channel's
+# default and, for a pinned install, as the Console's. src/narrative/policy-filter.ts carries the
+# TypeScript copy; src/cli/telemetry-local-pin.test.mjs checks every copy against this one.
+TELEMETRY_SHIPPED_ANALYTICS_REDACT="tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input,hook.last_assistant_message,hook.transcript_path"
+TELEMETRY_CHANNEL_ANALYTICS_REDACT="${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-${TELEMETRY_SHIPPED_ANALYTICS_REDACT}}"
 TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL="${TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL:-}"
 CONSOLE_TELEMETRY_URL="${CONSOLE_TELEMETRY_URL:-${CONSOLE_URL:-}}"
 CONSOLE_TELEMETRY_ENDPOINT_URL="${CONSOLE_TELEMETRY_ENDPOINT_URL:-}"
@@ -124,19 +236,28 @@ TELEMETRY_PRICING_URL="${TELEMETRY_PRICING_URL:-${FLOW_AGENTS_PRICING_URL:-}}"
 # Load config file if it exists
 if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
   while IFS='=' read -r key value; do
-    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
-    key=$(echo "$key" | tr -d '[:space:]')
-    value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [[ -z "$key" ]] && continue
+    # ASCII whitespace only (LC_ALL=C), and printf, not echo, so a value of -n or -e survives.
+    key=$(printf '%s\n' "$key" | LC_ALL=C tr -d '[:space:]')
+    # The same test as `^[[:space:]]*#` on the raw key, without depending on the locale.
+    [[ "$key" == \#* ]] && continue
+    value=$(printf '%s\n' "$value" | LC_ALL=C sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
     # Handle channel-specific config
     if [[ "$key" =~ ^channel\.([^.]+)\.(.+)$ ]]; then
       channel_name="${BASH_REMATCH[1]}"
       channel_key="${BASH_REMATCH[2]}"
       if [[ "$channel_name" =~ ^[A-Za-z0-9_]+$ && "$channel_key" =~ ^[A-Za-z0-9_]+$ ]]; then
-        var_name="TELEMETRY_CHANNEL_$(echo "$channel_name" | tr '[:lower:]' '[:upper:]')_$(echo "$channel_key" | tr '[:lower:]' '[:upper:]')"
+        var_name="TELEMETRY_CHANNEL_$(printf '%s\n' "$channel_name" | LC_ALL=C tr '[:lower:]' '[:upper:]')_$(printf '%s\n' "$channel_key" | LC_ALL=C tr '[:lower:]' '[:upper:]')"
+        if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]] && ! telemetry_pinned_channel_var_allowed "$var_name" "$value"; then
+          continue
+        fi
         printf -v "$var_name" '%s' "$value"
       fi
     else
+      if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]] && ! telemetry_pinned_key_allowed "$key" "$value"; then
+        continue
+      fi
       # Standard config
       case "$key" in
         enabled) TELEMETRY_ENABLED="$value" ;;
@@ -161,7 +282,7 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
         console_tenant_id) CONSOLE_TENANT_ID="$value" ;;
         console_telemetry_redact) CONSOLE_TELEMETRY_REDACT="$value" ;;
         console_economics_relay)
-          case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+          case "$(printf '%s\n' "$value" | LC_ALL=C tr '[:upper:]' '[:lower:]')" in
             1|true|yes|on) console_economics_relay_raw="1" ;;
             0|false|no|off) console_economics_relay_raw="0" ;;
             *)
@@ -172,7 +293,7 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
           ;;
         console_economics_endpoint_url) FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$value" ;;
         console_liveness_relay)
-          case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+          case "$(printf '%s\n' "$value" | LC_ALL=C tr '[:upper:]' '[:lower:]')" in
             1|true|yes|on) console_liveness_relay_raw="1" ;;
             0|false|no|off) console_liveness_relay_raw="0" ;;
             *)
@@ -190,7 +311,16 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
   done < "$TELEMETRY_CONFIG_FILE"
 fi
 
-CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT}}"
+if [[ "$TELEMETRY_LOCAL_ONLY_PINNED" == "1" ]]; then
+  # A pinned install's Console redaction is the shipped list itself (#1483). Not the analytics
+  # channel list: the installed telemetry.conf may set that, and the environment may narrow it (the
+  # runtime hook wrappers used to export a stale six-field copy). Only an exported, non-empty
+  # CONSOLE_TELEMETRY_REDACT overrides it, as unpinned; the pinned allowlist drops a
+  # console_telemetry_redact line, so only the environment can have set it here.
+  CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_SHIPPED_ANALYTICS_REDACT}}"
+else
+  CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT}}"
+fi
 
 # Economics relay default-on rule (#469, opt-out not silent-off): an explicit
 # console_economics_relay config key always wins. Otherwise, once a console telemetry sink is
