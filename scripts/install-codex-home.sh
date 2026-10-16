@@ -76,6 +76,7 @@ const requiredFiles = [
   ".agents/skills/deliver/SKILL.md",
   "build/package.json",
   "build/src/cli.js",
+  "build/runtime-imports.json",
   "scripts/install-owned-files.js",
   "scripts/install-merge.js",
   "scripts/classify-codex-legacy-agents.js",
@@ -87,6 +88,12 @@ for (const relative of requiredFiles) {
   if (stat.isSymbolicLink() || !stat.isFile() || stat.size === 0) {
     throw new Error(`missing or empty ${relative}`);
   }
+}
+const runtimeImports = JSON.parse(fs.readFileSync(path.join(snapshot, "build/runtime-imports.json"), "utf8"));
+const runtimeFiles = first.filter(item => item.type === "file" && (item.path.startsWith("build/src/") || item.path.startsWith("integrations/codex-host/") || item.path === "build/package.json"))
+  .map(({ path, sha256 }) => ({ path, sha256 })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+if (runtimeImports.schema_version !== "1.0" || JSON.stringify(runtimeImports.files) !== JSON.stringify(runtimeFiles)) {
+  throw new Error("standalone runtime import inventory is missing, changed, or corrupt");
 }
 const hooks = JSON.parse(fs.readFileSync(path.join(snapshot, requiredFiles[0]), "utf8"));
 if (!hooks || typeof hooks !== "object" || !hooks.hooks || typeof hooks.hooks !== "object") {

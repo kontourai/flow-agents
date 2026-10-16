@@ -337,9 +337,12 @@ function tryLoadSurface(): { api: SurfaceModule; version: string } | null {
     // snapshotNarrative is intentionally synchronous. Node >=22 can require an
     // ESM module synchronously, preserving that public contract while loading
     // Surface only when this stream is actually captured.
-    const entry = fileURLToPath(import.meta.resolve("@kontourai/surface"));
+    const standalone = fs.existsSync(fileURLToPath(new URL("../../runtime-imports.json", import.meta.url)));
+    const entry = standalone
+      ? fileURLToPath(new URL("../vendor/surface/index.mjs", import.meta.url))
+      : fileURLToPath(import.meta.resolve("@kontourai/surface"));
     const api = require(entry) as SurfaceModule;
-    const packageFile = path.resolve(path.dirname(entry), "../../package.json");
+    const packageFile = path.resolve(path.dirname(entry), standalone ? "package.json" : "../../package.json");
     const metadata = parseObject(fs.readFileSync(packageFile), "surface package metadata");
     const version = typeof metadata["version"] === "string" ? metadata["version"] : "unknown";
     if (typeof api.buildTrustReport !== "function" || typeof api.explainClaim !== "function") {

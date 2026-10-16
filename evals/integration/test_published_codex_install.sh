@@ -165,4 +165,153 @@ if grep -Fq 'npm run build:bundles --silent' "$CORRUPT_ROOT/scripts/install-code
   exit 1
 fi
 
-echo "Published Codex install integration passed."
+
+# Runtime inventory corruption must fail before either destination is created.
+for runtime_case in missing changed extra panel; do
+  case "$runtime_case" in
+    missing) mv "$PACKAGE_ROOT/dist/codex/build/src/vendor/flow/index.mjs" "$TMPDIR_EVAL/flow-index.mjs" ;;
+    changed) cp "$PACKAGE_ROOT/dist/codex/build/src/vendor/flow/schemas/flow-run.schema.json" "$TMPDIR_EVAL/flow-schema.json"; printf '\n' >> "$PACKAGE_ROOT/dist/codex/build/src/vendor/flow/schemas/flow-run.schema.json" ;;
+    panel) mv "$PACKAGE_ROOT/dist/codex/build/src/vendor/surface/trust-panel.js" "$TMPDIR_EVAL/trust-panel.js" ;;
+    extra) printf 'unowned\n' > "$PACKAGE_ROOT/dist/codex/build/src/vendor/unowned.js" ;;
+  esac
+  RUNTIME_DEST="$TMPDIR_EVAL/runtime-corrupt-$runtime_case"
+  if HOME="$HOME_DIR" CODEX_HOME="$RUNTIME_DEST" CODEX_REAL_HOME="$RUNTIME_DEST" \
+    FLOW_AGENTS_SKILLS_DIR="$TMPDIR_EVAL/runtime-skills-$runtime_case" NPM_CONFIG_CACHE="$NPM_CACHE" \
+    node "$PACKAGE_ROOT/build/src/cli.js" init --runtime codex --global --yes > "$TMPDIR_EVAL/runtime-$runtime_case.out" 2>&1; then
+    echo "corrupt runtime unexpectedly installed: $runtime_case" >&2; exit 1
+  fi
+  grep -Fq 'standalone runtime import inventory is missing, changed, or corrupt' "$TMPDIR_EVAL/runtime-$runtime_case.out"
+  [[ ! -e "$RUNTIME_DEST" && ! -e "$TMPDIR_EVAL/runtime-skills-$runtime_case" ]]
+  case "$runtime_case" in
+    missing) mv "$TMPDIR_EVAL/flow-index.mjs" "$PACKAGE_ROOT/dist/codex/build/src/vendor/flow/index.mjs" ;;
+    changed) cp "$TMPDIR_EVAL/flow-schema.json" "$PACKAGE_ROOT/dist/codex/build/src/vendor/flow/schemas/flow-run.schema.json" ;;
+    panel) mv "$TMPDIR_EVAL/trust-panel.js" "$PACKAGE_ROOT/dist/codex/build/src/vendor/surface/trust-panel.js" ;;
+    extra) rm "$PACKAGE_ROOT/dist/codex/build/src/vendor/unowned.js" ;;
+  esac
+done
+
+# The public installer must leave an executable runtime after all package and
+# cache state is removed, from a project with no node_modules of its own.
+cp -R "$ROOT_DIR/evals/fixtures/flow-kit-repository/valid-local-kit" "$TMPDIR_EVAL/local-kit"
+node - "$TMPDIR_EVAL/local-kit" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const file = path.join(root, 'kit.json');
+const kit = JSON.parse(fs.readFileSync(file, 'utf8'));
+kit.execution = {module: 'entry.mjs', export: 'execute', contract: 'kontour.kit.execution_request@1.0'};
+fs.writeFileSync(file, JSON.stringify(kit));
+fs.writeFileSync(path.join(root, 'entry.mjs'), 'export async function execute(){return {status:"completed",standalone:true};}');
+NODE
+rm -rf "$CONSUMER" "$NPM_CACHE" "$SHIPPED_ROOT" "$PACK_DIR"
+[[ ! -e "$PACKAGE_ROOT" && ! -e "$NPM_CACHE" ]]
+export HOME="$HOME_DIR" CODEX_HOME="$CODEX_DIR" CODEX_REAL_HOME="$CODEX_DIR"
+export FLOW_AGENTS_SKILLS_DIR="$SKILLS_DIR" NPM_CONFIG_CACHE="$NPM_CACHE" NPM_CONFIG_OFFLINE=true
+unset NODE_PATH NODE_OPTIONS
+# Refuse any module resolution outside this isolated install/project, even while
+# the publisher's checkout still exists elsewhere on the machine.
+cat > "$TMPDIR_EVAL/module-boundary.mjs" <<'NODE'
+import {registerHooks} from 'node:module';
+import {realpathSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const allowed = realpathSync(path.dirname(fileURLToPath(import.meta.url))) + path.sep;
+registerHooks({resolve(specifier, context, next) {
+  const result = next(specifier, context);
+  if (result.url.startsWith('file:') && !realpathSync(fileURLToPath(result.url)).startsWith(allowed)) {
+    throw new Error(`Standalone module escaped isolated installation: ${result.url}`);
+  }
+  return result;
+}});
+NODE
+export NODE_OPTIONS="--import=$TMPDIR_EVAL/module-boundary.mjs"
+mkdir -p "$TMPDIR_EVAL/offline-project"
+cd "$TMPDIR_EVAL/offline-project"
+node "$CODEX_DIR/build/src/cli.js" --help >/dev/null
+node "$CODEX_DIR/build/src/cli.js" workflow --help >/dev/null
+node "$CODEX_DIR/build/src/cli.js" workflow start --flow builder.shape \
+  --task-slug installed-offline-smoke --summary "Standalone installed runtime smoke" > "$TMPDIR_EVAL/start.out"
+node "$CODEX_DIR/build/src/cli.js" workflow status \
+  --session-dir .kontourai/flow-agents/installed-offline-smoke --json > "$TMPDIR_EVAL/status.json"
+node - "$TMPDIR_EVAL/status.json" <<'NODE'
+const fs = require('node:fs');
+const status = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (status.current_step !== 'shape') throw new Error(`Unexpected installed workflow step: ${JSON.stringify(status)}`);
+NODE
+node "$CODEX_DIR/build/src/cli.js" kit validate "$TMPDIR_EVAL/local-kit"
+node "$CODEX_DIR/build/src/cli.js" kit install "$TMPDIR_EVAL/local-kit" --dest "$TMPDIR_EVAL/offline-project"
+node "$CODEX_DIR/build/src/cli.js" kit list --dest "$TMPDIR_EVAL/offline-project" > "$TMPDIR_EVAL/kits.out"
+grep -Fq 'example-kit' "$TMPDIR_EVAL/kits.out"
+printf '{"schema":"kontour.kit.execution_request","version":"1.0","kit_id":"example-kit"}\n' > "$TMPDIR_EVAL/request.json"
+node "$CODEX_DIR/build/src/cli.js" kit run example-kit --dest "$TMPDIR_EVAL/offline-project" \
+  --request "$TMPDIR_EVAL/request.json" --controller-root "$TMPDIR_EVAL/private" > "$TMPDIR_EVAL/result.json"
+node - "$TMPDIR_EVAL/result.json" <<'NODE'
+const fs = require('node:fs');
+const result = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (result.status !== 'completed' || result.standalone !== true) throw new Error('Installed kit did not execute');
+NODE
+# Exercise the synchronous Surface reader and browser asset seam called out in review.
+cat > "$TMPDIR_EVAL/surface-probe.mjs" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+const [home, session] = process.argv.slice(2);
+fs.mkdirSync(session, {recursive: true});
+const raw = JSON.stringify({schemaVersion:'5',source:'standalone-smoke',claims:[{id:'standalone-claim',type:'tests_pass',statement:'Standalone command evidence'}],evidence:[],policies:[],events:[]});
+fs.writeFileSync(path.join(session, 'trust.bundle'), raw);
+const {readSurfaceExplanationCandidate} = await import(pathToFileURL(path.join(home, 'build/src/narrative/readers.js')));
+const result = readSurfaceExplanationCandidate({sessionDir:session,bundleSha8:crypto.createHash('sha256').update(raw).digest('hex').slice(0,8),claimId:'standalone-claim'});
+const metadata = JSON.parse(fs.readFileSync(path.join(home, 'build/package.json'), 'utf8'));
+if (result.originPackage?.version !== metadata.dependencies['@kontourai/surface'] || result.record.found !== true) throw new Error(`Standalone Surface explanation unavailable: ${JSON.stringify(result)}`);
+NODE
+node "$TMPDIR_EVAL/surface-probe.mjs" "$CODEX_DIR" "$TMPDIR_EVAL/surface-session"
+cat > "$TMPDIR_EVAL/provider-probe.mjs" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+const vendor = path.join(process.argv[2], 'build/src/vendor');
+const survey = await import(pathToFileURL(path.join(vendor, 'survey/index.mjs')));
+const metadata = JSON.parse(fs.readFileSync(path.join(vendor, 'survey/resolved-survey-surface/package.json'), 'utf8'));
+const record = {metadata:{name:'standalone'},spec:{envelope:{result:{proposals:[{}]}}}};
+const [major, minor] = metadata.version.split(".").map(Number);
+if (major > 4 || major === 4 && minor >= 1) assert.equal(survey.toSurfaceReviewedExtractionImport(record), record);
+else assert.throws(() => survey.toSurfaceReviewedExtractionImport(record), error => error.message.includes(`@kontourai/surface ${metadata.version} requires`));
+const {createAnthropicRuntime} = await import(pathToFileURL(path.join(vendor, 'relay-anthropic/index.mjs')));
+const {createModelRuntimeProfile} = await import(pathToFileURL(path.join(vendor, 'relay-runtime-profile/index.mjs')));
+let requests = 0;
+const server = http.createServer(async (req, res) => {
+  let raw = ''; for await (const chunk of req) raw += chunk;
+  assert.equal(JSON.parse(raw).model, 'standalone-mock'); requests++;
+  res.setHeader('content-type','application/json');
+  res.end(JSON.stringify({id:'mock',type:'message',role:'assistant',model:'standalone-mock',content:[{type:'text',text:'standalone-sdk'}],stop_reason:'end_turn',stop_sequence:null,usage:{input_tokens:1,output_tokens:1}}));
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+try {
+  const options = {model:'standalone-mock',apiKey:'isolated-fixture',baseUrl:`http://127.0.0.1:${server.address().port}`};
+  for (const runtime of [createAnthropicRuntime(options), createModelRuntimeProfile({...options,profile:'anthropic'})]) {
+    const before = requests;
+    const result = await runtime.invoke({messages:[{role:'user',content:'fixture'}],maxOutputTokens:8});
+    assert.equal(result.outputText, 'standalone-sdk'); assert.equal(requests,before+1);
+  }
+} finally { await new Promise(resolve => server.close(resolve)); }
+NODE
+node "$TMPDIR_EVAL/provider-probe.mjs" "$CODEX_DIR"
+
+node "$CODEX_DIR/build/src/cli/workflow-sidecar.js" render-trust-panel "$TMPDIR_EVAL/surface-session" > "$TMPDIR_EVAL/panel.out"
+grep -Fq 'surface-trust-panel' "$TMPDIR_EVAL/surface-session/trust-panel.html"
+node - "$CODEX_DIR" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const manifest = JSON.parse(fs.readFileSync(path.join(root, '.flow-agents/codex-install-manifest.json'), 'utf8'));
+const inventory = JSON.parse(fs.readFileSync(path.join(root, 'build/runtime-imports.json'), 'utf8'));
+for (const file of inventory.files) {
+  if (!manifest.files.some(owned => owned.path === file.path && owned.sha256 === file.sha256)) {
+    throw new Error(`Standalone runtime file is not manifest owned: ${file.path}`);
+  }
+}
+NODE
+printf '1..1\nok 1 - packed Codex runtime survives package and cache removal\n'
