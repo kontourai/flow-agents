@@ -177,6 +177,8 @@ Flow's original schemas remain local to its vendor entry;
 packaging exposes its literal CommonJS imports to esbuild without changing the
 validators. Dependency upgrades that change these packaging seams fail the build.
 
+The shared kit-root resolver recognizes that same owned runtime metadata and marker,
+so installed kit declarations and canonical run binding find the same tree.
 Installed package metadata comes from the owned `build/package.json`, so commands
 do not need a user project's `package.json`. Build tools load esbuild only when
 building; installed command execution needs no compiler, npm install, or cache.

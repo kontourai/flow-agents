@@ -82,7 +82,7 @@
     {
       "source": "docs/developer-architecture.md",
       "section": "Concepts",
-      "covers": ["src/tools/build-universal-bundles.ts", "src/tools/common.ts", "src/lib/package-version.ts", "scripts/install-codex-home.sh"]
+      "covers": ["src/tools/build-universal-bundles.ts", "src/tools/common.ts", "src/lib/package-version.ts", "src/lib/kit-flow-binding.ts", "src/lib/flow-resolver.ts", "src/lib/kit-registry.ts", "scripts/install-codex-home.sh"]
     },
     {
       "source": "docs/workflow-artifact-lifecycle.md",
