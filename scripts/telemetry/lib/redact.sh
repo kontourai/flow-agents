@@ -2,21 +2,13 @@
 # redact.sh — Field redaction for telemetry events
 
 redact_event() {
-  local event="$1"
-  local redact_fields="$2"
-  
-  [[ -z "$event" || "$redact_fields" == "none" ]] && echo "$event" && return
-  
-  local result="$event"
-  IFS=',' read -ra fields <<< "$redact_fields"
-  
-  for field in "${fields[@]}"; do
-    field=$(echo "$field" | tr -d ' ')
-    [[ -z "$field" ]] && continue
-    
-    # Use jq to null out the field
-    result=$(echo "$result" | jq -c ".$field = null" 2>/dev/null || echo "$result")
-  done
-  
-  echo "$result"
+  local event="$1" redact_fields="$2"
+  [[ -z "$event" || "$redact_fields" == "none" || -z "$redact_fields" ]] && { printf '%s\n' "$event"; return 0; }
+
+  # Pass field paths as data. Never splice configuration into a jq program,
+  # including when this function is called with an environment override.
+  printf '%s\n' "$event" | jq -c --arg fields "$redact_fields" '
+    reduce ($fields | split(",")[] | gsub(" "; "") | select(length > 0) | split(".")) as $path
+      (. ; . as $event | try setpath($path; null) catch $event)
+  '
 }

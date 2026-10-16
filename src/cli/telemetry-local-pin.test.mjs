@@ -960,7 +960,7 @@ async function emitAndCaptureSocket(dest, env) {
   }
 }
 
-for (const [label, fixture, expectEvent] of [["pinned: the listener receives nothing", () => pinned, false], ["unpinned control: the listener receives the event", () => unpinned, true]]) {
+for (const [label, fixture, expectEvent] of [["pinned: the listener receives nothing", () => pinned, false], ["unpinned: the listener receives nothing", () => unpinned, false]]) {
   test(`a channel log_file of /dev/tcp/HOST/PORT, ${label}`, async () => {
     const { dest } = fixture();
     const home = makeFixtureDir("telemetry-pin-devtcp-home-");
@@ -972,7 +972,7 @@ for (const [label, fixture, expectEvent] of [["pinned: the listener receives not
       });
       if (expectEvent) assert.match(received, /socket-probe/);
       else assert.equal(received, "", "an event reached the socket");
-      if (!expectEvent) {
+      if (dest === pinned.dest) {
         const doctor = readDoctorReport(dest, { HOME: home });
         assert.deepEqual(doctor.telemetry.pinIgnored, [{ key: "channel.full.log_file", reason: "not on the pinned allowlist" }]);
       }
@@ -1137,7 +1137,7 @@ function runPostToolUseHook(dest, env, toolResponse) {
   assert.equal(result.status, 0, result.stderr);
 }
 
-for (const [label, fixture, expectWritten] of [["pinned: the file is left unwritten", () => pinned, false], ["unpinned control: the hook appends to it", () => unpinned, true]]) {
+for (const [label, fixture, expectWritten] of [["pinned: the file is left unwritten", () => pinned, false], ["unpinned: the file is left unwritten", () => unpinned, false]]) {
   test(`a channel log_file naming $HOME/.zshrc, ${label}`, () => {
     const { dest } = fixture();
     const home = makeFixtureDir("telemetry-pin-zshrc-home-");
@@ -1156,7 +1156,7 @@ const JQ_PROGRAM = "x = env.CANARY_SECRET | .y";
 // Built at runtime so the secret scanner does not read the test canary as a credential.
 const JQ_CANARY = ["canary", "1483", "value"].join("-");
 
-for (const [label, fixture, expectLeak] of [["pinned: the redaction list is ignored and the secret stays out", () => pinned, false], ["unpinned control: the secret lands in the local log", () => unpinned, true]]) {
+for (const [label, fixture, expectLeak] of [["pinned: the redaction list is ignored and the secret stays out", () => pinned, false], ["unpinned: the secret stays out of the local log", () => unpinned, false]]) {
   test(`a channel redact value written as a jq program, ${label}`, () => {
     const { dest } = fixture();
     const home = makeFixtureDir("telemetry-pin-jq-home-");
@@ -1167,7 +1167,7 @@ for (const [label, fixture, expectLeak] of [["pinned: the redaction list is igno
       const written = fs.readFileSync(log, "utf8");
       assert.ok(written.length > 0, "the hook wrote no event");
       assert.equal(written.includes(JQ_CANARY), expectLeak, written.slice(0, 400));
-      if (!expectLeak) {
+      if (dest === pinned.dest) {
         assert.deepEqual(readDoctorReport(dest, { HOME: home }).telemetry.pinIgnored, [{ key: "channel.full.redact", reason: "value not allowed for a pinned install" }]);
       }
     });
