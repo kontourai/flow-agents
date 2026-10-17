@@ -302,16 +302,21 @@ Retired records are excluded from:
 For `listByType` and `listByCategory`, `{ includeRetired: true }` disables only the
 retired-status filter within the adapter's enumerated working set. Obsidian still
 excludes archived supersession predecessors from both listings, even with this
-option. Use `get(id)` for an existing predecessor and inspect reverse `supersedes`
-links through `getLinks(id)` for retained history. See the
-[working-set and history contract](store-contract.md#b3-working-set-exclusion).
+option. The required historical access path is `get(id)` with reverse `supersedes`
+links through `getLinks(id)`. **Known Obsidian retention gap:** archiving another record
+with a reused category/title path can overwrite the earlier archive file;
+`get(earlierId)` can then return the later record's id/body/history. Index entries and
+links do not prove original-byte retention. See the
+[archive collision disclosure](store-contract.md#known-obsidian-archive-retention-gap)
+and [working-set contract](store-contract.md#b3-working-set-exclusion).
 
 Both built-in similarity detectors unconditionally exclude retired candidates;
 neither exposes an `includeRetired` override. They filter supplied candidates;
 they do not fetch records excluded by a store listing.
 
-For an existing record, `get(id)` returns the full record regardless of lifecycle
-status. An unresolved handle returns `null`, as described above.
+Lifecycle status does not itself restrict `get(id)`; the Obsidian archive collision
+gap above can nevertheless violate original-record retrieval. An unresolved handle
+returns `null`, as described above.
 
 ### Using the retire flow
 
@@ -452,11 +457,13 @@ to `0.70–0.80` to avoid over-clustering.
 ### Fail-closed rationale
 
 The bundled Ollama embedding function throws an `Error` with `code="EMBED_FAILURE"`
-for network/HTTP failures, invalid JSON, a missing embeddings array, or a wrong vector
-count. The detector also checks the outer array and count returned by an injected
+for network/HTTP failures, invalid JSON, a non-null decoded envelope missing an
+embeddings array, or a wrong vector count. The detector also checks the outer array and count returned by an injected
 embed function; errors from that function otherwise propagate as supplied.
 
-**Current validation limit:** individual vectors are not validated for numeric contents,
+**Current validation limits:** a valid JSON response of `null` is dereferenced before
+its envelope is checked, raising a plain `TypeError` rather than `EMBED_FAILURE`.
+Individual vectors are not validated for numeric contents,
 non-empty shape, or matching dimensions. Correct-count responses such as
 `{ embeddings: [null, null] }` can therefore score zero and return `[]` at the default
 threshold, while nonnumeric contents can produce `NaN` and be excluded. These cases can
@@ -504,9 +511,11 @@ provider read interface (issue #327). It is the **owner's opt-in personal
 default** — the file providers (`markdown-vault`, `git-repo`, `work-item`) remain
 the portfolio default. The graph is a **materialized view** synced from those
 providers: the file stores stay the source of truth, and the write side stays
-proposals-only. `neo4j-driver` is an optional dependency; with no Neo4j reachable
-everything degrades to the file providers with a clear message — it is never a
-hard dependency.
+proposals-only. `neo4j-driver` is an optional dependency. At selection time,
+`selectKnowledgeProvider` checks reachability and uses the supplied `fileProviders()`
+factory when configuration, the driver, or connectivity is unavailable. Callers must
+supply that factory (and a `neo4jFactory` for successful graph selection). This is
+selection-time degradation, not automatic failover of later graph queries.
 
 ### 1. Start Neo4j (Docker)
 
@@ -550,8 +559,12 @@ console.log(await syncToNeo4j({ driver, providers })); // { writes, unchanged, d
 ### 4. Query it — Neo4j Browser or the provider verbs
 
 Open `http://localhost:7474` for the interactive Browser, or use the provider's
-Cypher-backed query/health verbs (they fall back to a portable JS spelling with
-identical answers when no Neo4j is reachable):
+query/health verbs. With the real driver below, these use Cypher and propagate driver
+errors; an outage does not switch a direct `Neo4jProvider` call to file providers.
+The portable JS algorithms are selected for a driver without Cypher-analytics support,
+but still read that driver's data. A driverless provider with an explicit `sourceGraph`
+is a separate in-memory path, not outage failover. Supplying both a driver and
+`sourceGraph` still uses the driver:
 
 ```js
 import { Neo4jProvider } from "./kits/knowledge/providers/neo4j/index.js";

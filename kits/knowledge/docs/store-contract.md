@@ -403,7 +403,8 @@ The adapter MUST implement the following asynchronous methods. Listing options
 are `{ prefix?, includeRetired?, stale?, now? }` for category queries and
 `{ includeRetired?, stale?, now? }` for type queries. `prefix` includes exact
 category and dot-delimited descendants. Retired records are excluded by default;
-`get` retains access to full history. `stale: true` selects records expired at
+`get` is the required full-history access path, subject to the bundled Obsidian
+[archive retention gap](#known-obsidian-archive-retention-gap). `stale: true` selects records expired at
 `now` (default current time); it does not mutate status. Listings use the adapter's
 working set: Obsidian excludes archived supersession predecessors from both
 listings even with `includeRetired: true`. The default adapter retains those
@@ -458,8 +459,9 @@ interface RetireEvidence {
 }
 ```
 
-`supersede` requires a non-empty predecessor list and rationale and retains the
-predecessors; it does not retire them. `retire` requires rationale and, for the
+`supersede` requires a non-empty predecessor list and rationale and MUST retain
+predecessors; it does not retire them. The bundled Obsidian archive retention gap
+below is an implementation violation of that requirement. `retire` requires rationale and, for the
 implemented state, `implementedByRef`. See §A/§B for permitted targets and status
 transitions. Optional `reindex` repairs only the derived index from record links.
 
@@ -471,7 +473,22 @@ transitions. Optional `reindex` repairs only the derived index from record links
 | Body wikilinks | Parsed into links unless `parse_wikilinks: false`. | Parsed into links; no opt-out switch. |
 | Person names | Ordinary title/tags/links storage. | Entity-card sections and vault-global routing; `alias:` tags differ from record-handle `aliases`. |
 | Provenance | Required `agent`; optional source ids/session/note. | Same creation requirements; vault path/layout does not strengthen assurance. |
-| Superseded predecessors in listings | Remain in `listByType` / `listByCategory`, subject to lifecycle filters. | Moved to `archive/` and excluded from both listings regardless of `includeRetired`; `get(id)` and reverse supersession links retain access. |
+| Superseded predecessors in listings | Remain in `listByType` / `listByCategory`, subject to lifecycle filters. | Moved to `archive/` and excluded from both listings regardless of `includeRetired`; intended historical access is `get(id)` and reverse supersession links, subject to the archive collision gap below. |
+
+#### Known Obsidian archive retention gap
+
+The retention requirements in §A.5, §A.7 and §B.6 remain normative. The bundled
+Obsidian adapter does not satisfy them for every sequence of successful operations:
+archive destinations are derived from the active category/title path, without a
+collision check. After archiving a predecessor, creating and archiving a different
+record that reuses that active path can replace the earlier archive file on POSIX
+filesystems. This also arises from repeated same-topic consolidation's reused
+snapshot titles. The earlier id's path-index entry can then point at the later
+record: `get(earlierId)` can return the later id/body/history rather than the original.
+A retained index entry or reverse link is therefore not proof that the predecessor's
+original bytes remain. This is an inherited implementation gap, not an authorized
+purge or a waiver of the supersede-not-delete requirement. The summaries below
+refer to the required historical access path with this implementation limit.
 
 Both implement the five types, eight mutations, identity queries and freshness
 options above. Explicit `link` resolves target ids, but `create`/`update` can
@@ -671,9 +688,15 @@ It NEVER deletes records. Superseded records remain fully queryable with their p
 
 **Supersede-not-delete invariant:**
 > Calling `supersede` MUST NOT remove any record. No mutation op in this contract deletes records.
-> This is a hard invariant; adapters MUST enforce it. Obsidian's existing move to `archive/`
-> retains the record and is distinct from physical purge/deletion. A purge policy is a future
-> concern and is explicitly out of scope for this version.
+> This is a hard invariant; adapters MUST enforce it. Moving a record to `archive/`
+> MUST preserve its bytes and historical access; relocation is distinct from physical
+> purge/deletion. A purge policy is a future concern and is explicitly out of scope
+> for this version.
+
+**Bundled implementation gap:** Obsidian archive path reuse can overwrite an earlier
+predecessor and make `get(earlierId)` return a later record. See the
+[archive collision disclosure](#known-obsidian-archive-retention-gap). The invariant
+above is not a claim that this implementation already meets every retention case.
 
 ### A.6 Adapter Contract Extension
 
@@ -708,6 +731,9 @@ Superseded snapshots MUST remain queryable:
   through `get(id)` and reverse supersession links instead.
 - The caller can determine supersession status by inspecting `getLinks(id).reverse` for entries
   with `kind === "supersedes"`.
+
+The Obsidian [archive collision gap](#known-obsidian-archive-retention-gap) can violate
+the required original-record retrieval above even when an index entry and links remain.
 
 Supersession is expressed through links and mutation history, separately from
 the lifecycle `status` added in Addendum B. There is no archived/deleted status.
@@ -761,7 +787,8 @@ neither exposes an `includeRetired` override. They filter supplied candidates;
 they do not fetch records excluded by a store listing.
 
 Retired records remain **fully queryable with provenance**:
-- `get(id)` always returns the full record regardless of status.
+- Lifecycle status does not restrict `get(id)`; original-record retrieval remains
+  subject to the bundled Obsidian [archive collision gap](#known-obsidian-archive-retention-gap).
 - `listByType(type, { includeRetired: true })` and the equivalent category query
   include retired records in the adapter's enumerated working set; Obsidian's
   archived supersession predecessors remain excluded. Use `get(id)` for those.
@@ -842,8 +869,11 @@ Retired records MUST remain reachable from:
 - The retirement `mutation_log` entry carries the full evidence of why and when the record was
   retired and by whom.
 
-There is no deletion of records. Physical purge (if ever needed) is a separate, future policy
-hook not defined in this version.
+These are normative retention requirements. The bundled Obsidian
+[archive collision gap](#known-obsidian-archive-retention-gap) can violate full-record
+retrieval and original-byte retention; a surviving source id or graph link does not
+cure it. No deletion or overwrite of retained records is authorized. Physical purge
+(if ever needed) is a separate, future policy hook not defined in this version.
 
 ### B.7 Proposal-Artifact Lifecycle (close-on-apply)
 
@@ -1459,8 +1489,13 @@ Two **optional** envelope fields (§1.1), round-tripped by every adapter through
 - Both are settable at `create` and via `update` (they are mutable fields; `update` records them in
   its mutation-log `fields` evidence like any other). Supplying either as `null` / `""` on `update`
   **clears** it.
-- A malformed value (non-ISO `expires_at`, non-positive `ttl_seconds`) is rejected at the mutation
-  boundary with `error.code === "MISSING_EVIDENCE"` — bad freshness never reaches disk.
+- `expires_at` MUST use the ISO-8601 representation above. **Current implementation
+  limit:** bundled validation checks a nonempty string and `Date.parse` parseability,
+  not strict ISO syntax, and stores the accepted string unchanged. For example,
+  `Thu, 01 Jan 2026 00:00:00 GMT` is accepted despite not being ISO-8601. Non-string,
+  empty or unparseable expiry inputs (apart from the clearing values above), and
+  non-positive/non-finite `ttl_seconds`, are rejected with `MISSING_EVIDENCE`.
+  Parseability does not establish conformance to the required ISO representation.
 - **Effective expiry** = `expires_at` when present, else `created_at + ttl_seconds`. An explicit
   `expires_at` therefore **takes precedence** over `ttl_seconds`.
 - **Backward compatibility (R5):** a record carrying neither field has `null` effective expiry and is
@@ -1511,8 +1546,9 @@ their own authority; this record model does not replace them or map "fresh" to
 orthogonal to freshness. Retired records are excluded from the default working set (Addendum B.3) and
 so from stale-filtered listings. `includeRetired` affects only the enumerated
 working set (§B.3); Obsidian's archived predecessors remain excluded from listings.
-Existing retained records remain accessible through `get`, with reverse supersession
-links available through `getLinks` (§A.7).
+The required history path is `get` with reverse supersession links through
+`getLinks` (§A.7); the bundled Obsidian [archive collision gap](#known-obsidian-archive-retention-gap)
+can violate original-record retention despite surviving links.
 
 ### J.5 Query surface
 
@@ -1717,8 +1753,9 @@ The same condition holds when a caller supplies the actual current snapshot id.
 
 **Current explicit-id limit:** the runner accepts a retained older snapshot id without
 refreshing it. If S0 contains X, appending A via S0 can produce S1 containing X+A;
-appending B via S0 again can produce X+B and supersede S1. History is retained, but the
-current snapshot omits A. The no-lost-update requirement is not enforced for stale
+appending B via S0 again can produce X+B and supersede S1. Supersession is required
+to retain history (subject to the bundled Obsidian archive gap above), but the current
+snapshot omits A. The no-lost-update requirement is not enforced for stale
 explicit ids, and sequential topic selection does not establish concurrent-update safety.
 
 ### L.6 Conformance
@@ -1729,5 +1766,6 @@ An adapter conforms when the incremental-consolidation suite
 (R3, asserted via the portable `get()` + reverse-`supersedes`-link guarantees of A.7) are required
 of every adapter. The default-store's additional guarantee that `listByType("snapshot")` still
 returns superseded snapshots is covered for that adapter by `evals/consolidation/suite.test.js`
-(the Obsidian adapter archives superseded snapshots out of the working set — both keep them
-reachable via `get()`).
+(the Obsidian adapter archives superseded snapshots out of the working set; both are
+required to retain `get()` access, but the Obsidian archive collision gap above can
+violate that requirement).

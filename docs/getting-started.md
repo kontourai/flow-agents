@@ -273,7 +273,7 @@ Use verify-work on the current branch and report what evidence is present.
 - **Inspect the session records** under `.kontourai/flow-agents/<slug>/`: `state.json` tracks workflow control, `acceptance.json` holds the acceptance definition, and `handoff.json` carries continuation context. Review and verification records belong in `trust.bundle` slices, including `critique`, `acceptance-criteria`, `tests-evidence`, and `policy-compliance`. The active step's public operations update the relevant records; every file is not rewritten at every step. Retained records support later resumption. Legacy `critique.json` and `evidence.json` are retired sidecars, not the current evidence outputs.
 - **At each requested transition**, Flow evaluates the recorded evidence expectations and reports missing evidence or a route-back. This does not establish the truth of the supplied evidence.
 - **The stop-goal-fit hook**, when loaded and configured to block on a host that supports it, can refuse completion for qualifying evidence gaps. Check the runtime table above; warning-only and shutdown callbacks do not provide the same completion control.
-- **If verify fails**, the verify-gate routes back to execution (or plan, or design-probe, depending on the failure class) and tries again — up to three times before hard-blocking.
+- **If verify fails**, `verify-gate` routes missing evidence and the default failure class back to `verify`, implementation defects to `execute`, plan gaps to `plan`, and decision gaps to `design-probe`. The route-back budget is three attempts; exceeding it blocks the run.
 
 This is guided, not fully automated. The agent handles the mechanics; you make product decisions. Gates are explicit handoff points, not invisible checkboxes.
 
