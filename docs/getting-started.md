@@ -244,9 +244,13 @@ The `deliver` skill orchestrates the full `builder.build` flow:
 4. **execute-plan** — fans out to up to four `tool-worker` subagents in parallel waves (`execute-gate`)
 5. **review-work** — code and optional security review (`critique.json` sidecar)
 6. **verify-work** — tests and checks with evidence tied to the change; if evidence is missing the verify-gate triggers a route-back (`verify-gate`)
-7. **release-readiness** — scope, evidence, and risk assessment (`merge-ready-gate`)
-8. **pull-request** — PR with linked work item and verification evidence (`pr-open-gate`)
-9. **learning and workspace closeout** — route durable follow-up, retain open
+7. **evidence-gate** — scope, evidence, and risk assessment (`merge-ready-gate`)
+8. **publish-change operation** — create or update the provider change record with
+   linked work and verification evidence (`pr-open-gate`); this step uses an
+   operation, not a `pull-request` skill
+9. **release-readiness** — assess provider/CI merge readiness for that change
+   (`merge-ready-ci-gate`)
+10. **learning and workspace closeout** — route durable follow-up, retain open
    changes for review, and reclaim only clean linked worktrees whose exact head
    is freshly confirmed merged
 

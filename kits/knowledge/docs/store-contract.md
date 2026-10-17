@@ -71,6 +71,15 @@ a transcript snippet, a URL with notes, or any other unrefined input.
 - No semantic constraints on content.
 - Intended as the input stage before compilation.
 
+**Bundled implementation limitation:** verbatim preservation is the fidelity
+requirement, not a guarantee currently met for every accepted string. The shared
+Markdown reader strips leading newlines, so a default-store raw body beginning
+with a newline loses it on readback. Obsidian splits rendered content at its
+`<!-- kit:body-end -->` sentinel without escaping that text in input; a raw body
+containing it can be truncated. Ordinary text such as the first-note example is
+not a proof of universal lossless round trips. Codec repair is separate from this
+contract clarification; the required fidelity and contract version remain unchanged.
+
 ### 1.3 `compiled` Record
 
 A compiled record is intended to hold a normalized, editor-reviewed distillation of raw records.
@@ -179,6 +188,13 @@ all link relationships for O(1) lookup by source or target. The index enables:
 
 The index MUST be updated atomically with every mutation that changes links. After any
 mutation, a `getLinks(id)` call MUST reflect the current link state.
+
+**Bundled implementation gap:** the file adapters do not currently provide that
+record/index transaction. They write the record and derived graph separately,
+in different orders across operations, without rollback. A failure can leave one
+write complete while the mutation rejects; crash/error atomicity is not supplied
+by these adapters. The atomic-update requirement above remains normative. The
+derived-index `reindex` recovery path (§8) is not a transaction or rollback guarantee.
 
 The default adapter stores the index as `graph-index.json` at the store root.
 
@@ -397,12 +413,16 @@ use `get(id)` and reverse `supersedes` links to inspect retained predecessor his
 | Method | Signature | Description |
 |---|---|---|
 | `get` | `(idOrHandle: string) => Promise<Record \| null>` | Retrieve a record. `idOrHandle` may be a full id, a slug alias, or an unambiguous id prefix (Addendum H). Returns null if it resolves to nothing; throws `AMBIGUOUS_ID` on an ambiguous prefix. |
-| `getLinks` | `(idOrHandle: string) => Promise<{ forward: Link[], reverse: Backlink[] }>` | Return all links for a record from the graph index. Accepts the same handle forms as `get`; an unresolved handle yields empty arrays, an ambiguous prefix throws `AMBIGUOUS_ID`. |
+| `getLinks` | `(idOrHandle: string) => Promise<{ forward: Link[], reverse: Backlink[] }>` | Resolve the same handle forms as `get`, then read that graph-index key. If identity resolution fails, use the literal input key; return empty arrays when it has no indexed links. An ambiguous prefix throws `AMBIGUOUS_ID`. |
 | `listByCategory` | `(category: string, options?: CategoryQueryOptions) => Promise<Record[]>` | List records by exact category match. If `prefix` is true, match all records in that exact category or its dot-delimited descendants. |
 | `listByType` | `(type: RecordType, options?: QueryOptions) => Promise<Record[]>` | List all records of a given type. |
 
 > **Identity resolution** (`get`/`getLinks`) is specified in full in **Addendum H**. The `prefix`
 > option on `listByCategory` is unrelated — it filters by *category* prefix, not by id.
+
+Because `create`/`update` can index supplied links without validating their targets,
+a literal graph key can have backlinks even when `get` returns `null`. Link lookup
+does not establish that a record exists or that a target was validated.
 
 ---
 
@@ -651,8 +671,9 @@ It NEVER deletes records. Superseded records remain fully queryable with their p
 
 **Supersede-not-delete invariant:**
 > Calling `supersede` MUST NOT remove any record. No mutation op in this contract deletes records.
-> This is a hard invariant; adapters MUST enforce it. A retention policy hook for physical archival
-> is a future concern and is explicitly out of scope for this version.
+> This is a hard invariant; adapters MUST enforce it. Obsidian's existing move to `archive/`
+> retains the record and is distinct from physical purge/deletion. A purge policy is a future
+> concern and is explicitly out of scope for this version.
 
 ### A.6 Adapter Contract Extension
 
@@ -736,8 +757,8 @@ does not disable Obsidian's separate
 archive exclusion for superseded predecessors (§A.7).
 
 Both built-in similarity detectors unconditionally exclude retired candidates;
-neither exposes an `includeRetired` override. Their candidate sets cannot restore
-records already excluded by the store's listing.
+neither exposes an `includeRetired` override. They filter supplied candidates;
+they do not fetch records excluded by a store listing.
 
 Retired records remain **fully queryable with provenance**:
 - `get(id)` always returns the full record regardless of status.
@@ -826,9 +847,11 @@ hook not defined in this version.
 
 ### B.7 Proposal-Artifact Lifecycle (close-on-apply)
 
-A flow that gates a change through `propose` → `apply` mints a transient **proposal artifact**:
-a `raw` record (e.g. the `knowledge.retire` flow's `"Retirement proposal: <title>"` record) whose
-sole purpose is to carry the `"proposes"` link and the proposal text to the target.
+The `knowledge.retire` flow mints a transient **retirement-proposal artifact**:
+a `raw` record (`"Retirement proposal: <title>"`) that carries the `"proposes"`
+link and proposal text to the target. The close-on-apply behavior below is specific
+to that generated artifact. Synthesis and consolidation use existing compiled
+source records as proposers; they do not auto-retire those records on apply.
 
 Once the proposal has been **applied**, that artifact is *spent*. It MUST NOT be left as an
 `active` record:
@@ -839,21 +862,22 @@ Once the proposal has been **applied**, that artifact is *spent*. It MUST NOT be
   (`"Retirement proposal: Retirement proposal: …"`), because the retire flow mints a *new*
   proposal artifact for the artifact itself (#106).
 
-**Rule.** On `apply` (and only on `apply`), the flow auto-closes the spent proposal artifact by
-**retiring it via the existing `retire` op** (§B.4) — `active → retired`. There is no separate
+**Rule.** On `apply` (and only on `apply`), the retirement flow attempts to close its spent
+proposal artifact by **retiring it via the existing `retire` op** (§B.4). There is no separate
 "close" mutation; the close reuses `retire`. This close is:
 
 - **safe** — it touches only the named artifact, never the apply target;
-- **idempotent** — a no-op if the artifact is already retired/implemented (the §B.2 transition
-  table makes `retired` terminal, so a re-close is rejected and treated as a no-op);
+- **idempotent for missing/retired artifacts** — these are skipped. An active or implemented
+  artifact is passed to `retire(..., "retired", ...)`; implemented is not a no-op (§B.2);
 - **non-fatal** — the proposal has already been applied; a failure to close the artifact does not
   fail the flow (it is surfaced on the result instead).
 
-**`reject` is unchanged.** A rejected proposal is *not* spent — the artifact remains `active` so the
-proposal can be revisited. Closing happens only on the apply path.
+**`reject` is unchanged.** A rejected retirement proposal is *not* spent — its artifact remains
+`active`. Closing happens only on the retirement apply path.
 
-Do not hand-retire proposal artifacts: applying the proposal closes them. The retire lifecycle
-expects the artifact to exist transiently and to be auto-closed on apply.
+The retirement flow handles its own artifact's closure; hand-retiring it through
+the flow would create another retirement proposal. Inspect the close result for
+any cleanup failure. This does not define automatic closure for every proposer.
 
 ---
 
@@ -924,8 +948,11 @@ Card merge uses the existing `propose → apply/reject` gate:
 
 - `KnowledgeFlowRunner.mergePerson(primaryId, duplicateId, options)`
 - **apply**: unions body, adds `alias:<duplicate title>` tag to primary, unions `appears-in` links, calls
-  `store.supersede(primaryId, [duplicateId])` to archive the duplicate (supersede-not-delete invariant).
-- **reject**: both cards remain byte-identical.
+  `store.supersede(primaryId, [duplicateId])` to supersede the duplicate without deleting it.
+  Obsidian moves it to `archive/`; the default adapter retains it in place, subject to query filters.
+- **reject**: both bodies and tags are preserved, but the records are not byte-identical.
+  The initial proposal adds a duplicate-to-primary `proposes` link and mutation history;
+  rejection appends history on the primary. Timestamps/history/links can therefore change.
 
 ## Addendum D — Freshness Audit (Hygiene #1, #106)
 
@@ -1234,7 +1261,7 @@ The first form that matches wins. A `handle` that matches none of the three reso
 | Situation | `get` | `getLinks` |
 |---|---|---|
 | Resolves to exactly one record | returns that record | returns that record's `{ forward, reverse }` |
-| Resolves to nothing (no exact id, no alias, no ≥8-char single-match prefix) | returns `null` | returns `{ forward: [], reverse: [] }` |
+| Resolves to nothing (no exact id, no alias, no ≥8-char single-match prefix) | returns `null` | reads the literal input graph key; empty arrays only if it has no indexed links |
 | Prefix (≥8 chars) matches **more than one** record | **throws `AMBIGUOUS_ID`** | **throws `AMBIGUOUS_ID`** |
 
 An `AMBIGUOUS_ID` error MUST have `code === "AMBIGUOUS_ID"`, a human-readable `message`, and a
@@ -1457,24 +1484,30 @@ mutate the record's `status` (Addendum B) or any other field. "No silent rot" me
 
 ### J.4 Hachure vocabulary alignment
 
-The kit keeps **two orthogonal axes**, and aligns each to Hachure's vocabulary without forking a
-second lifecycle:
+The kit keeps **two orthogonal record axes**. Neither is a verification authority:
 
 1. **Lifecycle status** (stored; mutated only by `retire`, Addendum B): `active` / `implemented` /
    `retired`.
 2. **Freshness/derivation state** (derived; never stored): `fresh` / `stale` / `superseded`.
 
-| Hachure term | Kit representation | Axis | Derived from |
-|---|---|---|---|
-| `verified` | `active` and not past expiry ("fresh") | lifecycle + freshness | `status === "active"` **and** not stale |
-| `stale` | `stale` | freshness (derived) | now ≥ effective expiry (`expires_at`, or `created_at + ttl_seconds`), or an `auditFreshness` flag |
-| `superseded` | `superseded` | freshness (derived) | incoming `supersedes` edge / `superseded-by` log entry (Addendum A.5) |
-| `proposed` | open proposal | flow state | a pending `proposes` link (Addenda B.7 / D) — not a record status |
-| `unknown` | *(not modelled)* | — | the kit has no "unknown" state; every record is at least `active` |
+The bundled Surface projection (`providers/surface-adapter/index.js`) submits
+`superseded` for retired records and `proposed` for all other record statuses.
+It forwards `expiresAt` / `ttlSeconds` for Surface to derive freshness. A stored
+assertion can therefore be proposed without an open `proposes` link. The store's
+derived supersession edges are also distinct from its stored lifecycle status.
+
+No record is marked `verified` by this projection. Active status, lack of expiry,
+creation provenance, type labels and successful storage do not establish truth
+or independent review. Hachure/Surface verification and trust derivation remain
+their own authority; this record model does not replace them or map "fresh" to
+"verified". A local `auditFreshness` flag is a hygiene observation, not a trust verdict.
 
 `retired` (kit) has no Hachure freshness equivalent — it is a **terminal lifecycle decision**,
 orthogonal to freshness. Retired records are excluded from the default working set (Addendum B.3) and
-so from stale-filtered listings, but remain fully queryable via `includeRetired` and `get`.
+so from stale-filtered listings. `includeRetired` affects only the enumerated
+working set (§B.3); Obsidian's archived predecessors remain excluded from listings.
+Existing retained records remain accessible through `get`, with reverse supersession
+links available through `getLinks` (§A.7).
 
 ### J.5 Query surface
 

@@ -83,7 +83,10 @@ category-scoped **slug alias**, then an **unambiguous id prefix** (≥ 8 chars).
 Aliases are caller-supplied via the optional `aliases: string[]` field on `create`/`update`,
 append-only, and stored in an id-keyed alias map (`alias-index.json`) so a prefix or slug **still
 resolves after a store restructure** (e.g. a recategorize that moves the file). An unresolved
-handle returns `null` (`get`) / empty arrays (`getLinks`); an **ambiguous** prefix throws
+handle returns `null` from `get`. `getLinks` instead falls back to the literal
+input as a graph-index key; it returns empty arrays only when that key has no
+indexed links. Dangling targets can therefore have backlinks without a stored
+record. Use `get` to check record existence. An **ambiguous** prefix throws
 `error.code === "AMBIGUOUS_ID"` — it is never silently guessed. On-disk identity (`records/<id>.md`)
 is unchanged.
 
@@ -176,7 +179,8 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 - `apply(conceptId, proposerId, evidence)` → `Promise<void>`
 - `reject(conceptId, proposerId, evidence)` → `Promise<void>`
 - `get(idOrHandle)` → `Promise<Record | null>` (exact id, slug alias, or unambiguous id prefix — Addendum H)
-- `getLinks(idOrHandle)` → `Promise<{ forward: Link[], reverse: Link[] }>`
+- `getLinks(idOrHandle)` → `Promise<{ forward: Link[], reverse: Backlink[] }>`;
+  a backlink contains `source_id` and `kind`, while a forward link uses `target_id`
 - `listByCategory(category, options?)` → `Promise<Record[]>`
 - `listByType(type, options?)` → `Promise<Record[]>`
 - `supersede(newId, supersededIds, evidence)` → `Promise<void>`
@@ -303,8 +307,8 @@ links through `getLinks(id)` for retained history. See the
 [working-set and history contract](store-contract.md#b3-working-set-exclusion).
 
 Both built-in similarity detectors unconditionally exclude retired candidates;
-neither exposes an `includeRetired` override. A detector cannot restore candidates
-already excluded by the store's listing.
+neither exposes an `includeRetired` override. They filter supplied candidates;
+they do not fetch records excluded by a store listing.
 
 For an existing record, `get(id)` returns the full record regardless of lifecycle
 status. An unresolved handle returns `null`, as described above.
