@@ -133,6 +133,16 @@ from serialized storage. This violates the required shape, rather than being an
 unknown-string-kind compatibility case. Required-field rejection and returned-link
 requirements remain normative; no new link vocabulary or admission rule is added.
 
+**Known bundled link-deduplication gap:** the merge key concatenates
+`target_id + "::" + kind` rather than comparing the pair structurally. Distinct
+valid links `{ target_id: "a", kind: "b::c" }` and
+`{ target_id: "a::b", kind: "c" }` have the same key. With both target records
+present on the current POSIX host, `link` can return successfully while storing
+and indexing only the first link. Related body/explicit-link merges and supersede
+merges use the same key formulation. This is separate from missing-kind admission:
+opaque ids, unknown string kinds and triple-based idempotence/postconditions remain
+normative, without reserving the delimiter or authorizing silent link omission.
+
 ### 2.3 Wikilink Syntax
 
 In `body` text, outbound links may also appear as `[[target_id]]` or `[[target_id|label]]`.
@@ -334,8 +344,9 @@ an already-existing (source, target, kind) triple is not an error; the link is n
 
 **Post-conditions:** Each new link is present in `getLinks(source_id)`. Graph index updated.
 Mutation log entry appended to source record.
-The bundled missing-`kind` admission gap in §2.2 can violate the required Link
-shape despite successful target-existence and caller-evidence checks.
+The bundled missing-`kind` admission and delimiter-deduplication gaps in §2.2 can
+violate the required Link shape or omit distinct valid links despite successful
+target-existence and caller-evidence checks.
 
 ### 6.4 `propose`
 
@@ -965,15 +976,24 @@ proposal artifact by **retiring it via the existing `retire` op** (§B.4). There
 - **safe** — it touches only the named artifact, never the apply target;
 - **idempotent for missing/retired artifacts** — these are skipped. An active or implemented
   artifact is passed to `retire(..., "retired", ...)`; implemented is not a no-op (§B.2);
-- **non-fatal** — the proposal has already been applied; a failure to close the artifact does not
-  fail the flow (it is surfaced on the result instead).
+- **non-fatal for caught artifact-retirement failures** — if the artifact read succeeds
+  but its `store.retire` rejects, the helper catches that error and the outer result
+  reports `proposalClosed: false`. The public result does not expose the helper's
+  full error reason.
+
+**Current containment limit:** the preliminary `store.get(artifactId)` is outside
+the helper's catch. If that read rejects, the outer retirement call can reject
+with no `proposalClosed` result after the target's retirement has already succeeded.
+The spent-artifact lifecycle requirement remains; the implementation does not
+contain every cleanup error.
 
 **`reject` is unchanged.** A rejected retirement proposal is *not* spent — its artifact remains
 `active`. Closing happens only on the retirement apply path.
 
 The retirement flow handles its own artifact's closure; hand-retiring it through
-the flow would create another retirement proposal. Inspect the close result for
-any cleanup failure. This does not define automatic closure for every proposer.
+the flow would create another retirement proposal. Inspect `proposalClosed` on a
+returned result; a rejected cleanup read has no such result and does not imply the
+target mutation was rolled back. This does not define automatic closure for every proposer.
 
 ---
 
@@ -1489,18 +1509,26 @@ currently resolve, and an unresolved one **FAILS** (fail closed):
 
 **Candidate bare short-ids** — a standalone ≥8-hex token with **no** citation form is included in
 the index **only when it already resolves** to a record. A non-resolving bare hex is indistinguishable
-from a commit SHA, so it is **ignored** — never indexed, never failed.
+from a commit SHA, so it is **ignored** — never indexed, never failed. Ambiguous
+bare candidates are likewise ignored. A bare hash that resolves to a record handle
+is indexed as a citation, even when its author meant a Git commit; the heuristic
+does not determine author intent. Such a collision can also make propagation flag
+the sentence as a doc citer.
 
 > **Deliberate, documented miss.** A *broken* bare-hex short-id (no marker/wikilink) is invisible to
 > the check — by construction, since it does not resolve. This is a precision-over-recall choice:
-> **zero false positives on commit hashes**, at the cost of not catching bare-hex short-id rot until
-> the doc adopts a citation form. To get fail-closed protection for a short-id or slug, cite it in a
+> ignoring non-resolving/ambiguous commit-hash candidates avoids failures for those
+> hashes, but does not provide universal zero-false-positive precision when a hash
+> resolves to a record. Broken bare-hex short-id rot is missed until the doc adopts
+> a citation form. To get fail-closed protection for a short-id or slug, cite it in a
 > marker or wikilink form; full-UUID citations are protected with zero configuration. Migrating a
 > consuming repo's house style to a marker is a consumer-owned change (a non-goal here).
 
 Every extracted token is resolved via `get(token)` (Addendum H: exact id → slug alias → unambiguous
-≥8-char prefix). `null` → unresolved; an `AMBIGUOUS_ID` throw is caught and reported as an unresolved
-citation with `reason: "ambiguous"` (fail closed — an ambiguous citation does not uniquely resolve).
+≥8-char prefix). For definite citations, `null` is unresolved and a caught
+`AMBIGUOUS_ID` is reported with `reason: "ambiguous"` (fail closed — it does not
+uniquely resolve). Non-resolving or ambiguous bare candidates are dropped instead,
+as described above.
 
 ### I.4 Fail-Closed Semantics
 
