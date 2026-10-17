@@ -470,6 +470,22 @@ Because `create`/`update` can index supplied links without validating their targ
 a literal graph key can have backlinks even when `get` returns `null`. Link lookup
 does not establish that a record exists or that a target was validated.
 
+### Known default-store path-normalized identity gap
+
+The opaque-id and exact/alias/prefix requirements remain normative. The default
+adapter derives exact existence and prefix candidates from normalized filenames,
+while retaining the caller's original id in frontmatter. A contained id such as
+`abcdefgh/../plain-record` can be created at `records/plain-record.md` and read
+through the original id, but its unique eight-character stored-id prefix
+`abcdefgh` does not resolve: filename enumeration yields `plain-record` instead.
+Conversely, `get("plain-record")` can return that record without an issued alias
+or matching envelope id. `get("./<ordinary-id>")` can also resolve through filename
+normalization while `getLinks` uses that spelling as a different graph key.
+These are inside-root identity/indexing violations, not evidence of an outside-root
+traversal. They are separate from Obsidian's archive/dimension collisions and the
+prototype-key gaps below. No new forbidden-id syntax or migrated identity is
+introduced by this disclosure; generated-id first-note behavior is a separate case.
+
 ### Known bundled graph-key handling gap
 
 The query contract requires the structured array result above and permits opaque
@@ -1108,8 +1124,10 @@ default. The matched key is surfaced on each flag as `matchedThresholdKey` (`"*"
 default).
 
 **Last mutation** is the most recent of the record's `updated_at` and its latest `mutation_log`
-entry `at` — both are refreshed by every mutating op (§1.1 / §4.2), so the later of the two is
-authoritative even if an adapter lags one. It falls back to `created_at` when neither is present.
+entry `at`. They are not both refreshed by every mutation: rejection, target-side
+proposal history and superseded-predecessor history can preserve `updated_at`
+while appending a newer log entry. The audit uses the maximum of the available
+update/log timestamps and falls back to `created_at` when neither is present.
 
 **Flagging:** a record is flagged only when its age in **whole days** *strictly exceeds* its
 resolved threshold (`ageDays > thresholdDays`). Retired records are never flagged — the default
@@ -1306,6 +1324,17 @@ adapters (consume-never-fork):
 `retired` is terminal); records are grouped by exact category, so cross-category pairs are never
 formed; each unordered pair is compared at most once.
 
+**Known bundled pair-key omission:** each similar unordered pair is required to
+reach the contradiction detector, but the runner deduplicates lexically sorted
+ids using the unescaped key `idA + "|" + idB`. Distinct pairs (`a`, `b|c`) and
+(`a|b`, `c`) share `a|b|c`. With four ordinary active compiled records of those ids
+in one category on the current POSIX host, default similarity can select all six
+pairs, while the runner invokes an injected always-flagging contradiction detector
+only five times. The skipped pair contributes neither `compared` nor a flag.
+This is separate from link-key deduplication (§2.2); opaque ids and per-pair
+processing remain required, with no reserved `|` rule or runtime repair implied.
+Absence of a flag is not proof that every similar pair was judged.
+
 ### G.3 `ContradictionDetector` Interface and the Default
 
 ```ts
@@ -1344,7 +1373,9 @@ interface ContradictionFlag {
 
 `detectContradictions` returns `{ audited, compared, flags, telemetryEvents }` where `audited`
 counts the in-scope compiled records, `compared` counts the similar pairs the contradiction fn
-judged, and `flags` lists the conflicting pairs. Gate telemetry is emitted at `collect-gate` and
+actually judged, and `flags` lists the reported conflicting pairs. The pair-key gap
+in §G.2 can omit a distinct similar pair before either the comparison count or
+detector call, so these counts do not establish complete pair coverage. Gate telemetry is emitted at `collect-gate` and
 `flag-gate` (`knowledge.detect-contradictions`).
 
 ## Addendum H — Record Identity Resolution (short-id prefix + slug aliases, #339)
@@ -1371,6 +1402,9 @@ about how records are stored (H.6) — it only widens what `get`/`getLinks` acce
    prefix of **exactly one** record `id`.
 
 The first form that matches wins. A `handle` that matches none of the three resolves to *nothing*.
+The default adapter's [path-normalized identity gap](#known-default-store-path-normalized-identity-gap)
+can violate this required envelope-id model by using normalized filename existence
+and filename-derived prefix candidates instead.
 
 ### H.3 Resolution Outcomes
 
@@ -1426,7 +1460,8 @@ The alias map is a store-level structure `{ slug → id }`: each slug key maps t
   a prefix of that unchanged id); the slug still resolves (the map still points it at that id).
 
 So a previously issued short-id prefix or slug MUST still resolve to the same record after a
-restructure. Note the slug is a **stable alias**, not a value recomputed from the current category:
+restructure. The default adapter's path-normalized identity gap above can already
+violate stored-id prefix resolution for successfully created path-like opaque ids. Note the slug is a **stable alias**, not a value recomputed from the current category:
 a slug minted under `decision.design/…` keeps resolving even after the record moves to
 `decision.design`.
 

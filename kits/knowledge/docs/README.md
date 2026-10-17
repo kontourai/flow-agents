@@ -90,6 +90,13 @@ record. Use `get` to check record existence. An **ambiguous** prefix throws
 `error.code === "AMBIGUOUS_ID"` — it is never silently guessed. On-disk identity (`records/<id>.md`)
 is unchanged.
 
+**Known default-store identity gap:** contained path-like opaque ids can normalize
+to a different filename from their stored id. Such a record can be created and
+read while a unique stored-id prefix fails, or an unissued normalized spelling
+returns it. `get` and `getLinks` can also disagree on normalized spellings. The
+required exact/alias/prefix contract remains; see the
+[path-normalization disclosure](store-contract.md#known-default-store-path-normalized-identity-gap).
+
 **Known bundled graph-query gap:** the required `getLinks` array result is not met
 for some prototype-named keys. On an empty graph, `getLinks("constructor")` can
 throw a plain `TypeError` because an inherited object property is treated as an
