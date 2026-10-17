@@ -1569,7 +1569,7 @@ mkdir -p \
   "$CH6_ROOT/dist/codex/.agents/skills/deliver" \
   "$CH6_ROOT/dist/codex/build/src" \
   "$CH6_FAKE_BIN"
-cp "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$ROOT_DIR/scripts/install-merge.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
+cp "$ROOT_DIR/scripts/verify-runtime-imports.js" "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$ROOT_DIR/scripts/install-merge.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
 cp "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/install-merge.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/"
 cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/packaging/"
 cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/dist/codex/packaging/"

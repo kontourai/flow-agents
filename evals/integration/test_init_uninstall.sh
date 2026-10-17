@@ -26,7 +26,7 @@
 #
 # Isolation: every scenario runs against its own fixture $HOME / project dest under a private
 # TMPDIR_EVAL; the real $HOME is never touched.
-set -euo pipefail
+set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMPDIR_EVAL="$(mktemp -d /tmp/init-uninstall.XXXXXX)"
@@ -34,9 +34,16 @@ pass=0
 fail=0
 
 cleanup() {
-  rm -rf "$TMPDIR_EVAL"
+  local result=$?
+  if [[ "$result" -ne 0 || "$fail" -gt 0 ]]; then
+    echo "Uninstall fixture diagnostics retained: $TMPDIR_EVAL (exit=$result, assertions_failed=$fail)" >&2
+  else
+    rm -rf "$TMPDIR_EVAL"
+  fi
+  return "$result"
 }
 trap cleanup EXIT
+trap 'echo "Uninstall fixture command failed: line=$LINENO exit=$? command=$BASH_COMMAND" >&2' ERR
 
 _pass() { echo "  ✓ $1"; pass=$((pass + 1)); }
 _fail() { echo "  ✗ $1"; fail=$((fail + 1)); }
@@ -78,7 +85,7 @@ NODE
 echo "--- Build ---"
 if [[ "${FLOW_AGENTS_SKIP_BUNDLE_BUILD:-0}" == "1" ]]; then
   _pass "using existing bundles (explicit sandbox workaround)"
-elif (cd "$ROOT_DIR" && npm run build:bundles >/dev/null 2>&1); then
+elif (cd "$ROOT_DIR" && npm run build:bundles >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1); then
   _pass "bundle build completed"
 else
   _fail "bundle build failed"
@@ -107,7 +114,7 @@ NODE
 
 BEFORE_SNAPSHOT="$(tree_snapshot "$ROUNDTRIP_HOME")"
 
-HOME="$ROUNDTRIP_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$ROUNDTRIP_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 
 # Sanity: install actually wrote FA hooks (otherwise the round-trip below would trivially pass).
 if HOME="$ROUNDTRIP_HOME" node - "$ROUNDTRIP_HOME/.claude/settings.json" << 'NODE'
@@ -176,7 +183,7 @@ echo "--- Scenario B: Modified skill file is preserved and reported, unmodified 
 
 PRESERVE_HOME="$TMPDIR_EVAL/preserve-home"
 mkdir -p "$PRESERVE_HOME"
-HOME="$PRESERVE_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$PRESERVE_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 
 MODIFIED_SKILL="$PRESERVE_HOME/.claude/skills/deliver/SKILL.md"
 if [[ ! -f "$MODIFIED_SKILL" ]]; then
@@ -217,7 +224,7 @@ LEGACY_HOME="$TMPDIR_EVAL/legacy-home"
 mkdir -p "$LEGACY_HOME"
 LEGACY_DEST="$TMPDIR_EVAL/legacy-project"
 mkdir -p "$LEGACY_DEST"
-HOME="$LEGACY_HOME" $FA init --runtime claude-code --dest "$LEGACY_DEST" --yes >/dev/null 2>&1
+HOME="$LEGACY_HOME" $FA init --runtime claude-code --dest "$LEGACY_DEST" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 
 # Simulate a manifest-less (pre-manifest-era) install:
 rm -f "$LEGACY_DEST/.flow-agents/owned-files.json"
@@ -339,7 +346,7 @@ echo "--- Scenario E: Poisoned owned-files.json entry (path traversal) refuses a
 
 TRAVERSAL_HOME="$TMPDIR_EVAL/traversal-home"
 mkdir -p "$TRAVERSAL_HOME"
-HOME="$TRAVERSAL_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$TRAVERSAL_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 
 TRAVERSAL_VICTIM_DIR="$TMPDIR_EVAL/traversal-victim-outside-claude"
 mkdir -p "$TRAVERSAL_VICTIM_DIR"
@@ -398,7 +405,7 @@ echo "--- Scenario E2: Manifest entry through a symlinked intermediate directory
 
 SYMCOMP_HOME="$TMPDIR_EVAL/symcomp-home"
 mkdir -p "$SYMCOMP_HOME"
-HOME="$SYMCOMP_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$SYMCOMP_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 
 # An entirely lexically-in-bounds manifest path ("skills" + "/" + "evilfile") whose PARENT
 # directory is, on disk, a symlink pointing entirely outside dest. path.resolve/path.relative
@@ -474,7 +481,7 @@ echo "--- Scenario F: Mixed hook group -- co-located user hook survives, setting
 
 MIXED_HOME="$TMPDIR_EVAL/mixed-home"
 mkdir -p "$MIXED_HOME"
-HOME="$MIXED_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$MIXED_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 
 # Inject a user hook into an EXISTING FA-managed group's `hooks` array (not a new top-level
 # group) -- a shape the Claude Code settings schema allows and nothing in this tool controls.
@@ -528,7 +535,7 @@ PERM_HOME="$TMPDIR_EVAL/perm-home"
 mkdir -p "$PERM_HOME"
 PERM_DEST="$TMPDIR_EVAL/perm-project"
 mkdir -p "$PERM_DEST"
-HOME="$PERM_HOME" $FA init --runtime claude-code --dest "$PERM_DEST" --yes >/dev/null 2>&1
+HOME="$PERM_HOME" $FA init --runtime claude-code --dest "$PERM_DEST" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 rm -f "$PERM_DEST/.flow-agents/owned-files.json"
 
 PERM_SKILL_NAME="deliver"
@@ -585,7 +592,7 @@ echo "--- Scenario H: TOCTOU -- a file that changes between plan and apply is pr
 
 TOCTOU_HOME="$TMPDIR_EVAL/toctou-home"
 mkdir -p "$TOCTOU_HOME"
-HOME="$TOCTOU_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$TOCTOU_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 
 TOCTOU_TARGET_FILE="$TOCTOU_HOME/.claude/skills/deliver/SKILL.md"
 if [[ ! -f "$TOCTOU_TARGET_FILE" ]]; then
@@ -628,7 +635,7 @@ TOCTOU2_HOME="$TMPDIR_EVAL/toctou2-home"
 mkdir -p "$TOCTOU2_HOME"
 TOCTOU2_DEST="$TMPDIR_EVAL/toctou2-project"
 mkdir -p "$TOCTOU2_DEST"
-HOME="$TOCTOU2_HOME" $FA init --runtime claude-code --dest "$TOCTOU2_DEST" --yes >/dev/null 2>&1
+HOME="$TOCTOU2_HOME" $FA init --runtime claude-code --dest "$TOCTOU2_DEST" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 rm -f "$TOCTOU2_DEST/.flow-agents/owned-files.json"
 
 TOCTOU2_SKILL_NAME="deliver"
@@ -683,7 +690,7 @@ SWAP_HOME="$TMPDIR_EVAL/swap-home"
 mkdir -p "$SWAP_HOME"
 SWAP_DEST="$TMPDIR_EVAL/swap-project"
 mkdir -p "$SWAP_DEST"
-HOME="$SWAP_HOME" $FA init --runtime claude-code --dest "$SWAP_DEST" --yes >/dev/null 2>&1
+HOME="$SWAP_HOME" $FA init --runtime claude-code --dest "$SWAP_DEST" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 rm -f "$SWAP_DEST/.flow-agents/owned-files.json"
 
 SWAP_SKILL_NAME="deliver"
@@ -746,7 +753,7 @@ echo "--- Scenario H4: A directory swapped for an escaping symlink AFTER plannin
 
 CONTAIN_HOME="$TMPDIR_EVAL/contain-home"
 mkdir -p "$CONTAIN_HOME"
-HOME="$CONTAIN_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$CONTAIN_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 
 CONTAIN_SKILL_DIR="$CONTAIN_HOME/.claude/skills/plan-work"
 if [[ ! -d "$CONTAIN_SKILL_DIR" ]]; then
@@ -790,7 +797,7 @@ echo "--- Scenario I: Uninstall without confirmation (--yes) deletes nothing ---
 
 NOCONFIRM_HOME="$TMPDIR_EVAL/noconfirm-home"
 mkdir -p "$NOCONFIRM_HOME"
-HOME="$NOCONFIRM_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$NOCONFIRM_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 
 NOCONFIRM_MANIFEST="$NOCONFIRM_HOME/.claude/.flow-agents/owned-files.json"
 NOCONFIRM_SETTINGS_BEFORE="$(cat "$NOCONFIRM_HOME/.claude/settings.json")"
@@ -859,7 +866,7 @@ echo "--- Scenario K: Malformed owned-files.json entry (invalid sha256) fails cl
 
 MALFORMED_MANIFEST_HOME="$TMPDIR_EVAL/malformed-manifest-home"
 mkdir -p "$MALFORMED_MANIFEST_HOME"
-HOME="$MALFORMED_MANIFEST_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$MALFORMED_MANIFEST_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 MALFORMED_MANIFEST_SETTINGS_BEFORE="$(cat "$MALFORMED_MANIFEST_HOME/.claude/settings.json")"
 
 # Corrupt the sha256 of an EXISTING manifest entry in place (no new path literal needed).
@@ -909,7 +916,7 @@ const fs = require("node:fs");
 fs.writeFileSync(process.argv[2], `${JSON.stringify({ user: true, hooks: { Stop: [{ hooks: [{ type: "command", command: "echo user-codex-hook" }] }] } }, null, 2)}\n`);
 NODE
 CODEX_BEFORE="$(tree_snapshot "$CODEX_HOME")|$(tree_snapshot "$CODEX_SKILLS")"
-HOME="$TMPDIR_EVAL/codex-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_SKILLS" $FA init --runtime codex --global --dest "$CODEX_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/codex-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_SKILLS" $FA init --runtime codex --global --dest "$CODEX_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 CODEX_OUT="$TMPDIR_EVAL/codex-uninstall.out"
 HOME="$TMPDIR_EVAL/codex-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_SKILLS" $FA init --uninstall --runtime codex --dest "$CODEX_HOME" --yes >"$CODEX_OUT" 2>&1
 CODEX_AFTER="$(tree_snapshot "$CODEX_HOME" | grep -v 'hooks\.json\.bak-uninstall-' || true)|$(tree_snapshot "$CODEX_SKILLS")"
@@ -927,7 +934,7 @@ fi
 CODEX_PRESERVE_HOME="$TMPDIR_EVAL/codex-preserve-home"
 CODEX_PRESERVE_SKILLS="$TMPDIR_EVAL/codex-preserve-skills"
 mkdir -p "$CODEX_PRESERVE_HOME" "$CODEX_PRESERVE_SKILLS"
-HOME="$TMPDIR_EVAL/codex-preserve-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_PRESERVE_SKILLS" $FA init --runtime codex --global --dest "$CODEX_PRESERVE_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/codex-preserve-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_PRESERVE_SKILLS" $FA init --runtime codex --global --dest "$CODEX_PRESERVE_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 printf '\nuser edit sentinel\n' >> "$CODEX_PRESERVE_HOME/build/src/cli.js"
 HOME="$TMPDIR_EVAL/codex-preserve-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_PRESERVE_SKILLS" $FA init --uninstall --runtime codex --dest "$CODEX_PRESERVE_HOME" --yes >"$TMPDIR_EVAL/codex-preserve.out" 2>&1
 if [[ -f "$CODEX_PRESERVE_HOME/build/src/cli.js" ]] && grep -q 'user edit sentinel' "$CODEX_PRESERVE_HOME/build/src/cli.js" && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/codex-preserve.out" | grep -q 'build/src/cli.js'; then
@@ -940,7 +947,7 @@ CODEX_CONTAIN_HOME="$TMPDIR_EVAL/codex-containment-home"
 CODEX_CONTAIN_SKILLS="$TMPDIR_EVAL/codex-containment-skills"
 CODEX_EXTERNAL="$TMPDIR_EVAL/codex-external"
 mkdir -p "$CODEX_CONTAIN_HOME" "$CODEX_CONTAIN_SKILLS" "$CODEX_EXTERNAL"
-HOME="$TMPDIR_EVAL/codex-containment-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_CONTAIN_SKILLS" $FA init --runtime codex --global --dest "$CODEX_CONTAIN_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/codex-containment-fixture-home" FLOW_AGENTS_SKILLS_DIR="$CODEX_CONTAIN_SKILLS" $FA init --runtime codex --global --dest "$CODEX_CONTAIN_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 mv "$CODEX_CONTAIN_HOME/build" "$CODEX_EXTERNAL/build"
 ln -s "$CODEX_EXTERNAL/build" "$CODEX_CONTAIN_HOME/build"
 set +e
@@ -960,7 +967,7 @@ const fs = require("node:fs");
 fs.writeFileSync(process.argv[2], `${JSON.stringify({ custom: "preserve", instructions: ["/user/instructions.md"] }, null, 2)}\n`);
 NODE
 OPENCODE_BEFORE="$(tree_snapshot "$OPENCODE_HOME")"
-HOME="$TMPDIR_EVAL/opencode-fixture-home" $FA init --runtime opencode --global --dest "$OPENCODE_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-fixture-home" $FA init --runtime opencode --global --dest "$OPENCODE_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 HOME="$TMPDIR_EVAL/opencode-fixture-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_HOME" --yes >"$TMPDIR_EVAL/opencode-uninstall.out" 2>&1
 OPENCODE_AFTER="$(tree_snapshot "$OPENCODE_HOME" | grep -v 'opencode\.json\.bak-uninstall-' || true)"
 if [[ "$OPENCODE_BEFORE" == "$OPENCODE_AFTER" ]] && node - "$OPENCODE_HOME/opencode.json" <<'NODE'
@@ -981,7 +988,7 @@ node - "$OPENCODE_LEGACY_SCHEMA_HOME/opencode.json" <<'NODE'
 const fs = require("node:fs");
 fs.writeFileSync(process.argv[2], JSON.stringify({ "$schema": "https://opencode.ai/config.json", custom: "legacy-user" }, null, 2) + "\n");
 NODE
-HOME="$TMPDIR_EVAL/opencode-legacy-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_LEGACY_SCHEMA_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-legacy-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_LEGACY_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$OPENCODE_LEGACY_SCHEMA_HOME/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8"));
 delete record.config_premerge; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
@@ -1000,7 +1007,7 @@ fi
 # Legacy records have no config_premerge. Exact generated Claude values remain removable: this
 # is the regression guard for legacy owners whose whole harness must actually be unwired.
 LEGACY_CLAUDE_HOME="$TMPDIR_EVAL/legacy-claude-owned-values-home"; mkdir -p "$LEGACY_CLAUDE_HOME"
-HOME="$LEGACY_CLAUDE_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$LEGACY_CLAUDE_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$LEGACY_CLAUDE_HOME/.claude/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8"));
 delete record.config_premerge; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
@@ -1017,7 +1024,7 @@ then _pass "legacy ownership: byte-identical Claude hooks and statusLine are rem
 # A marker alone is not ownership. Changing an installed hook command produces sol's near-match
 # case: legacy uninstall must retain it and say precisely why.
 LEGACY_MODIFIED_HOOK_HOME="$TMPDIR_EVAL/legacy-modified-hook-home"; mkdir -p "$LEGACY_MODIFIED_HOOK_HOME"
-HOME="$LEGACY_MODIFIED_HOOK_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$LEGACY_MODIFIED_HOOK_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$LEGACY_MODIFIED_HOOK_HOME/.claude/settings.json" "$LEGACY_MODIFIED_HOOK_HOME/.claude/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const settingsFile = process.argv[2], recordFile = process.argv[3];
 const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
@@ -1047,7 +1054,7 @@ const fs = require("node:fs");
 const custom = { type: "command", command: "echo exact-user-marker-command", statusMessage: "Recording Flow Agents telemetry" };
 fs.writeFileSync(process.argv[2], JSON.stringify({ hooks: { Stop: [{ matcher: "user-marker", hooks: [custom] }] }, statusLine: { type: "command", command: "node /user/flow-agents-statusline.js" } }, null, 2) + "\n");
 NODE
-HOME="$ORIGIN_MARKER_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$ORIGIN_MARKER_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 HOME="$ORIGIN_MARKER_HOME" $FA init --uninstall --runtime claude-code --global --yes >"$TMPDIR_EVAL/origin-marker.out" 2>&1
 if node - "$ORIGIN_MARKER_HOME/.claude/settings.json" <<'NODE'
 const fs = require("node:fs"); const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -1062,7 +1069,7 @@ then _pass "origin marker collision: exact user hook/statusLine restored and gen
 # uninstall. This models the retired projected-action hook emitted by an older
 # package after an upgrade without a re-init.
 STALE_IMAGE_HOME="$TMPDIR_EVAL/stale-installed-image-home"; mkdir -p "$STALE_IMAGE_HOME"
-HOME="$STALE_IMAGE_HOME" $FA init --runtime claude-code --global --yes >/dev/null 2>&1
+HOME="$STALE_IMAGE_HOME" $FA init --runtime claude-code --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$STALE_IMAGE_HOME/.claude/settings.json" "$STALE_IMAGE_HOME/.claude/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const [settingsFile, recordFile] = process.argv.slice(2);
 const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8")); const record = JSON.parse(fs.readFileSync(recordFile, "utf8"));
@@ -1082,7 +1089,7 @@ then _pass "installed-values provenance: stale prior-version hook is removed aft
 OPENCODE_NEW_SCHEMA_HOME="$TMPDIR_EVAL/opencode-new-schema-home"
 mkdir -p "$OPENCODE_NEW_SCHEMA_HOME"
 printf '{"custom":"new-user"}\n' > "$OPENCODE_NEW_SCHEMA_HOME/opencode.json"
-HOME="$TMPDIR_EVAL/opencode-new-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_NEW_SCHEMA_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-new-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_NEW_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 HOME="$TMPDIR_EVAL/opencode-new-schema-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_NEW_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/opencode-new-schema.out" 2>&1
 if node - "$OPENCODE_NEW_SCHEMA_HOME/opencode.json" <<'NODE'
 const fs = require("node:fs"); const c = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -1094,7 +1101,7 @@ then _pass "opencode scalar provenance: snapshot-proven schema and self-identify
 # This is the mutation-killer for a false condition around hasOwnProperty.
 OPENCODE_PRESENT_SCHEMA_HOME="$TMPDIR_EVAL/opencode-present-schema-home"; mkdir -p "$OPENCODE_PRESENT_SCHEMA_HOME"
 printf '{"$schema":"https://opencode.ai/config.json","custom":"preexisting"}\n' > "$OPENCODE_PRESENT_SCHEMA_HOME/opencode.json"
-HOME="$TMPDIR_EVAL/opencode-present-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_PRESENT_SCHEMA_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-present-schema-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_PRESENT_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 HOME="$TMPDIR_EVAL/opencode-present-schema-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_PRESENT_SCHEMA_HOME" --yes >"$TMPDIR_EVAL/opencode-present-schema.out" 2>&1
 if node - "$OPENCODE_PRESENT_SCHEMA_HOME/opencode.json" <<'NODE'
 const fs = require("node:fs"); if (JSON.parse(fs.readFileSync(process.argv[2], "utf8")).$schema !== "https://opencode.ai/config.json") throw new Error("pre-existing schema deleted");
@@ -1105,7 +1112,7 @@ then _pass "opencode scalar provenance: pre-existing byte-identical schema is re
 for SNAPSHOT_CASE in malformed wrong-runtime; do
   SNAP_HOME="$TMPDIR_EVAL/opencode-snapshot-$SNAPSHOT_CASE"; mkdir -p "$SNAP_HOME"
   printf '{"custom":"snapshot-test"}\n' > "$SNAP_HOME/opencode.json"
-  HOME="$TMPDIR_EVAL/opencode-snapshot-$SNAPSHOT_CASE-user-home" $FA init --runtime opencode --global --dest "$SNAP_HOME" --yes >/dev/null 2>&1
+  HOME="$TMPDIR_EVAL/opencode-snapshot-$SNAPSHOT_CASE-user-home" $FA init --runtime opencode --global --dest "$SNAP_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
   node - "$SNAP_HOME/.flow-agents/install.json" "$SNAPSHOT_CASE" <<'NODE'
 const fs = require("node:fs"); const p = process.argv[2], mode = process.argv[3], r = JSON.parse(fs.readFileSync(p, "utf8"));
 if (mode === "malformed") r.config_premerge = { schema_version: "1.0", parsed: {} }; else r.config_premerge.origin.runtime = "claude-code";
@@ -1126,7 +1133,7 @@ done
 # that a pre-existing $schema survived, which is also the ignored outcome).
 VALID_V1_HOME="$TMPDIR_EVAL/valid-v1-provenance-home"; mkdir -p "$VALID_V1_HOME"
 printf '{"custom":"v1-user"}\n' > "$VALID_V1_HOME/opencode.json"
-HOME="$VALID_V1_HOME" $FA init --runtime opencode --global --dest "$VALID_V1_HOME" --yes >/dev/null 2>&1
+HOME="$VALID_V1_HOME" $FA init --runtime opencode --global --dest "$VALID_V1_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$VALID_V1_HOME/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const p = process.argv[2], r = JSON.parse(fs.readFileSync(p, "utf8"));
 r.config_premerge = r.config_premerge.origin; delete r.config_premerge.runtime; delete r.config_premerge.config_path;
@@ -1146,7 +1153,7 @@ then _pass "v1 provenance: released snapshot shape is honored as lineage origin 
 # would let a key the global config never had authorize deleting the user's project value.
 V1_SCOPE_DEST="$TMPDIR_EVAL/v1-scope-dest"; mkdir -p "$V1_SCOPE_DEST/.claude"
 printf '{"permissions":{"defaultMode":"auto"},"custom":"scope-user"}\n' > "$V1_SCOPE_DEST/.claude/settings.json"
-HOME="$TMPDIR_EVAL/v1-scope-user-home" $FA init --runtime claude-code --dest "$V1_SCOPE_DEST" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/v1-scope-user-home" $FA init --runtime claude-code --dest "$V1_SCOPE_DEST" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$V1_SCOPE_DEST/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const p = process.argv[2], r = JSON.parse(fs.readFileSync(p, "utf8"));
 const origin = r.config_premerge?.origin ?? r.config_premerge;
@@ -1165,9 +1172,9 @@ then _pass "v1 provenance: a record whose scope resolves to a different config i
 # origin on reinstall. Unknown origin falls back to conservative tier 2/3.
 DAMAGED_LINEAGE_HOME="$TMPDIR_EVAL/damaged-lineage-home"; mkdir -p "$DAMAGED_LINEAGE_HOME"
 printf '{"$schema":"https://opencode.ai/config.json","custom":"damaged-user"}\n' > "$DAMAGED_LINEAGE_HOME/opencode.json"
-HOME="$DAMAGED_LINEAGE_HOME" $FA init --runtime opencode --global --dest "$DAMAGED_LINEAGE_HOME" --yes >/dev/null 2>&1
+HOME="$DAMAGED_LINEAGE_HOME" $FA init --runtime opencode --global --dest "$DAMAGED_LINEAGE_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 printf '{truncated' > "$DAMAGED_LINEAGE_HOME/.flow-agents/install.json"
-HOME="$DAMAGED_LINEAGE_HOME" $FA init --runtime opencode --global --dest "$DAMAGED_LINEAGE_HOME" --yes >/dev/null 2>&1
+HOME="$DAMAGED_LINEAGE_HOME" $FA init --runtime opencode --global --dest "$DAMAGED_LINEAGE_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 if node - "$DAMAGED_LINEAGE_HOME/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const r = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); if (r.config_premerge?.origin?.schema_version !== "unknown") throw new Error("damaged record was promoted to origin");
 NODE
@@ -1183,7 +1190,7 @@ else _fail "damaged lineage: reinstall promoted an unreadable prior record"; fi
 # surviving in-destination directory must be named in the uninstall report.
 OPENCODE_RESIDUE_HOME="$TMPDIR_EVAL/opencode-residue-home"
 mkdir -p "$OPENCODE_RESIDUE_HOME"
-HOME="$TMPDIR_EVAL/opencode-residue-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_RESIDUE_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/opencode-residue-user-home" $FA init --runtime opencode --global --dest "$OPENCODE_RESIDUE_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 mkdir -p "$OPENCODE_RESIDUE_HOME/.flow-agents/runtime/.kontourai/telemetry"
 printf 'telemetry evidence\n' > "$OPENCODE_RESIDUE_HOME/.flow-agents/runtime/.kontourai/telemetry/events.jsonl"
 HOME="$TMPDIR_EVAL/opencode-residue-user-home" $FA init --uninstall --runtime opencode --dest "$OPENCODE_RESIDUE_HOME" --yes >"$TMPDIR_EVAL/opencode-residue.out" 2>&1
@@ -1210,14 +1217,14 @@ then _pass "statusLine: a user value merely mentioning the marker survives"; els
 CODEX_DEFAULT_HOME="$TMPDIR_EVAL/codex-default-home"
 CODEX_DEFAULT_DEST="$TMPDIR_EVAL/codex-default-dest"
 mkdir -p "$CODEX_DEFAULT_HOME" "$CODEX_DEFAULT_DEST"
-HOME="$CODEX_DEFAULT_HOME" $FA init --runtime codex --global --dest "$CODEX_DEFAULT_DEST" --yes >/dev/null 2>&1
+HOME="$CODEX_DEFAULT_HOME" $FA init --runtime codex --global --dest "$CODEX_DEFAULT_DEST" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 HOME="$CODEX_DEFAULT_HOME" $FA init --uninstall --runtime codex --dest "$CODEX_DEFAULT_DEST" --yes >"$TMPDIR_EVAL/codex-default.out" 2>&1
 if [[ ! -e "$CODEX_DEFAULT_HOME/.agents/skills/deliver/SKILL.md" ]] && [[ ! -e "$CODEX_DEFAULT_DEST/build/src/cli.js" ]]; then _pass "codex: default universal-skills root is manifest-cleaned without an override"; else _fail "codex: default universal-skills root retained owned files"; fi
 
 # Re-plan config immediately before writing: a user hook added after planning survives.
 SETTINGS_RACE_HOME="$TMPDIR_EVAL/settings-race-home"
 mkdir -p "$SETTINGS_RACE_HOME"
-HOME="$SETTINGS_RACE_HOME" $FA init --runtime codex --global --dest "$SETTINGS_RACE_HOME" --yes >/dev/null 2>&1
+HOME="$SETTINGS_RACE_HOME" $FA init --runtime codex --global --dest "$SETTINGS_RACE_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 HOME="$SETTINGS_RACE_HOME" FLOW_AGENTS_UNINSTALL_TEST_TOCTOU_ADD_USER_HOOK="$SETTINGS_RACE_HOME/hooks.json" $FA init --uninstall --runtime codex --dest "$SETTINGS_RACE_HOME" --yes >"$TMPDIR_EVAL/settings-race.out" 2>&1
 if grep -q 'user-hook-added-during-confirmation' "$SETTINGS_RACE_HOME/hooks.json" && ! grep -q 'Recording Flow Agents telemetry' "$SETTINGS_RACE_HOME/hooks.json"; then _pass "settings TOCTOU: newly added user hook survives while managed hook is removed"; else _fail "settings TOCTOU: stale config rewrite lost a user hook or retained managed content"; fi
 
@@ -1232,7 +1239,7 @@ printf '{\n  "model": "user-model",\n  "instructions": ["/user/AGENTS.md"]\n}\n'
 chmod 600 "$STOW_DOTFILES/opencode.json"
 ln -s "$STOW_DOTFILES/opencode.json" "$STOW_HOME/opencode.json"; ln -s "$STOW_DOTFILES/skills" "$STOW_HOME/skills"
 STOW_BEFORE="$(cat "$STOW_DOTFILES/opencode.json")"
-FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-opencode-user-home" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-opencode-user-home" $FA init --runtime opencode --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-opencode-user-home" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/stow-uninstall.out" 2>&1
 if [[ -L "$STOW_HOME/opencode.json" && -L "$STOW_HOME/skills" ]] && [[ "$(cat "$STOW_DOTFILES/opencode.json")" == "$STOW_BEFORE" ]] && [[ ! -e "$STOW_DOTFILES/skills/${STOW_MANAGED_SKILL}/SKILL.md" ]]; then _pass "opencode Stow: install-to-uninstall preserves links and restores backing config"; else _fail "opencode Stow: link or backing config was not safely restored"; fi
 
@@ -1243,7 +1250,7 @@ STOW_AUTH_HOME="$TMPDIR_EVAL/stow-auth-home"; STOW_AUTH_ONE="$TMPDIR_EVAL/stow-a
 mkdir -p "$STOW_AUTH_HOME" "$STOW_AUTH_ONE/skills" "$STOW_AUTH_TWO"; chmod 700 "$STOW_AUTH_ONE" "$STOW_AUTH_TWO"
 printf '{"model":"one"}\n' > "$STOW_AUTH_ONE/opencode.json"; printf '{"model":"two"}\n' > "$STOW_AUTH_TWO/opencode.json"
 ln -s "$STOW_AUTH_ONE/opencode.json" "$STOW_AUTH_HOME/opencode.json"; ln -s "$STOW_AUTH_ONE/skills" "$STOW_AUTH_HOME/skills"
-FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_AUTH_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-auth-user-home" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_AUTH_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-auth-user-home" $FA init --runtime opencode --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 rm "$STOW_AUTH_HOME/opencode.json"; ln -s "$STOW_AUTH_TWO/opencode.json" "$STOW_AUTH_HOME/opencode.json"
 set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$STOW_AUTH_HOME/opencode.json" HOME="$TMPDIR_EVAL/stow-auth-user-home" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/stow-auth-uninstall.out" 2>&1; STOW_AUTH_RC=$?; set -e
 if [[ "$STOW_AUTH_RC" -eq 2 && -f "$STOW_AUTH_ONE/skills/agentic-engineering/SKILL.md" ]] && grep -q 'not authorized by this install record' "$TMPDIR_EVAL/stow-auth-uninstall.out"; then _pass "opencode Stow: backing root introduced after install is refused"; else _fail "opencode Stow: re-pointed backing root was followed or not clearly refused"; fi
@@ -1256,7 +1263,7 @@ LEGACY_AUTH_ROOT_REAL="$(cd "$LEGACY_AUTH_ROOT" && pwd -P)"
 LEGACY_AUTH_BEFORE=$'{\n  "model": "legacy-user",\n  "instructions": ["/user/AGENTS.md"]\n}\n'
 printf '%s' "$LEGACY_AUTH_BEFORE" > "$LEGACY_AUTH_ROOT/opencode.json"; chmod 600 "$LEGACY_AUTH_ROOT/opencode.json"
 ln -s "$LEGACY_AUTH_ROOT/opencode.json" "$LEGACY_AUTH_HOME/opencode.json"; ln -s "$LEGACY_AUTH_ROOT/skills" "$LEGACY_AUTH_HOME/skills"
-FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_AUTH_HOME/opencode.json" HOME="$LEGACY_AUTH_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_AUTH_HOME/opencode.json" HOME="$LEGACY_AUTH_USER_HOME" $FA init --runtime opencode --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$LEGACY_AUTH_RECORD_DEST/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8"));
 fs.writeFileSync(file, JSON.stringify({ active_kit_ids: record.active_kit_ids ?? [], global: record.global, installedAt: record.installedAt, runtime: record.runtime, version: "5.5.0" }, null, 2) + "\n");
@@ -1282,7 +1289,7 @@ mkdir -p "$LEGACY_WRONG_HOME" "$LEGACY_WRONG_ROOT/skills" "$LEGACY_OTHER_ROOT"; 
 LEGACY_OTHER_ROOT_REAL="$(cd "$LEGACY_OTHER_ROOT" && pwd -P)"
 printf '{"model":"wrong-root"}\n' > "$LEGACY_WRONG_ROOT/opencode.json"; chmod 600 "$LEGACY_WRONG_ROOT/opencode.json"
 ln -s "$LEGACY_WRONG_ROOT/opencode.json" "$LEGACY_WRONG_HOME/opencode.json"; ln -s "$LEGACY_WRONG_ROOT/skills" "$LEGACY_WRONG_HOME/skills"
-FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_WRONG_HOME/opencode.json" HOME="$LEGACY_WRONG_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_WRONG_HOME/opencode.json" HOME="$LEGACY_WRONG_USER_HOME" $FA init --runtime opencode --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$LEGACY_WRONG_RECORD_DEST/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8")); delete record.authorized_backing_roots; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
 NODE
@@ -1303,7 +1310,7 @@ mkdir -p "$LEGACY_SWAP_HOME" "$LEGACY_SWAP_ONE/skills" "$LEGACY_SWAP_TWO"; chmod
 LEGACY_SWAP_ONE_REAL="$(cd "$LEGACY_SWAP_ONE" && pwd -P)"
 printf '{"model":"one"}\n' > "$LEGACY_SWAP_ONE/opencode.json"; printf '{"model":"two"}\n' > "$LEGACY_SWAP_TWO/opencode.json"; chmod 600 "$LEGACY_SWAP_ONE/opencode.json" "$LEGACY_SWAP_TWO/opencode.json"
 ln -s "$LEGACY_SWAP_ONE/opencode.json" "$LEGACY_SWAP_HOME/opencode.json"; ln -s "$LEGACY_SWAP_ONE/skills" "$LEGACY_SWAP_HOME/skills"
-FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_SWAP_HOME/opencode.json" HOME="$LEGACY_SWAP_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$LEGACY_SWAP_HOME/opencode.json" HOME="$LEGACY_SWAP_USER_HOME" $FA init --runtime opencode --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$LEGACY_SWAP_RECORD_DEST/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8")); delete record.authorized_backing_roots; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
 NODE
@@ -1318,7 +1325,7 @@ mkdir -p "$APPLY_SWAP_HOME" "$APPLY_SWAP_ONE/skills" "$APPLY_SWAP_TWO"; chmod 70
 APPLY_SWAP_ONE_REAL="$(cd "$APPLY_SWAP_ONE" && pwd -P)"
 printf '{"model":"one"}\n' > "$APPLY_SWAP_ONE/opencode.json"; printf '{"model":"two"}\n' > "$APPLY_SWAP_TWO/opencode.json"; chmod 600 "$APPLY_SWAP_ONE/opencode.json" "$APPLY_SWAP_TWO/opencode.json"
 ln -s "$APPLY_SWAP_ONE/opencode.json" "$APPLY_SWAP_HOME/opencode.json"; ln -s "$APPLY_SWAP_ONE/skills" "$APPLY_SWAP_HOME/skills"
-FLOW_AGENTS_USER_OPENCODE_CONFIG="$APPLY_SWAP_HOME/opencode.json" HOME="$APPLY_SWAP_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$APPLY_SWAP_HOME/opencode.json" HOME="$APPLY_SWAP_USER_HOME" $FA init --runtime opencode --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$APPLY_SWAP_HOME/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs"); const file = process.argv[2]; const record = JSON.parse(fs.readFileSync(file, "utf8")); delete record.authorized_backing_roots; fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
 NODE
@@ -1332,7 +1339,7 @@ mkdir -p "$SIBLING_LINK_HOME" "$SIBLING_LINK_ROOT/skills" "$SIBLING_LINK_ROOT/un
 SIBLING_LINK_ROOT_REAL="$(cd "$SIBLING_LINK_ROOT" && pwd -P)"
 printf '{"model":"sibling"}\n' > "$SIBLING_LINK_ROOT/opencode.json"; chmod 600 "$SIBLING_LINK_ROOT/opencode.json"
 ln -s "$SIBLING_LINK_ROOT/opencode.json" "$SIBLING_LINK_HOME/opencode.json"; ln -s "$SIBLING_LINK_ROOT/skills" "$SIBLING_LINK_HOME/skills"
-FLOW_AGENTS_USER_OPENCODE_CONFIG="$SIBLING_LINK_HOME/opencode.json" HOME="$SIBLING_LINK_USER_HOME" $FA init --runtime opencode --global --yes >/dev/null 2>&1
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$SIBLING_LINK_HOME/opencode.json" HOME="$SIBLING_LINK_USER_HOME" $FA init --runtime opencode --global --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 printf 'unrelated sibling content\n' > "$SIBLING_LINK_ROOT/unrelated-skills/agentic-engineering/SKILL.md"
 rm "$SIBLING_LINK_HOME/skills"; ln -s "$SIBLING_LINK_ROOT/unrelated-skills" "$SIBLING_LINK_HOME/skills"
 set +e; FLOW_AGENTS_USER_OPENCODE_CONFIG="$SIBLING_LINK_HOME/opencode.json" HOME="$SIBLING_LINK_USER_HOME" $FA init --uninstall --runtime opencode --global --yes >"$TMPDIR_EVAL/sibling-link.out" 2>&1; SIBLING_LINK_RC=$?; set -e
@@ -1342,9 +1349,9 @@ if [[ "$SIBLING_LINK_RC" -eq 2 && -f "$SIBLING_LINK_ROOT/unrelated-skills/agenti
 # while `previous` refreshes on each install for byte-exact restoration of intervening user edits.
 REINSTALL_HOME="$TMPDIR_EVAL/reinstall-snapshot-home"; mkdir -p "$REINSTALL_HOME"
 printf '{\n  "token": "first"\n}\n' > "$REINSTALL_HOME/opencode.json"
-HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --global --dest "$REINSTALL_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --global --dest "$REINSTALL_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 REINSTALL_BEFORE=$'{\n    "token": "second"\n}\n'; printf '%s' "$REINSTALL_BEFORE" > "$REINSTALL_HOME/opencode.json"
-HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --global --dest "$REINSTALL_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/reinstall-snapshot-user-home" $FA init --runtime opencode --global --dest "$REINSTALL_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$REINSTALL_HOME/.flow-agents/install.json" "$REINSTALL_BEFORE" <<'NODE'
 const fs = require("node:fs"); const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if ((fs.statSync(process.argv[2]).mode & 0o777) !== 0o600) throw new Error("install.json is not 0600");
@@ -1365,7 +1372,7 @@ fi
 
 # Durable runtime content is manifest-owned file-by-file; an edit survives and is reported.
 DURABLE_HOME="$TMPDIR_EVAL/durable-preserve-home"; mkdir -p "$DURABLE_HOME"
-HOME="$TMPDIR_EVAL/durable-preserve-user-home" $FA init --runtime opencode --global --dest "$DURABLE_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/durable-preserve-user-home" $FA init --runtime opencode --global --dest "$DURABLE_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 printf '\nuser durable edit\n' >> "$DURABLE_HOME/.flow-agents/runtime/AGENTS.md"
 HOME="$TMPDIR_EVAL/durable-preserve-user-home" $FA init --uninstall --runtime opencode --dest "$DURABLE_HOME" --yes >"$TMPDIR_EVAL/durable-preserve.out" 2>&1
 if grep -q 'user durable edit' "$DURABLE_HOME/.flow-agents/runtime/AGENTS.md" && sed -n '/^Preserved/,/^$/p' "$TMPDIR_EVAL/durable-preserve.out" | grep -q '.flow-agents/runtime/AGENTS.md'; then _pass "durable: edited runtime file survives and is truthfully preserved"; else _fail "durable: recursive cleanup deleted or hid an edited runtime file"; fi
@@ -1373,7 +1380,7 @@ if grep -q 'user durable edit' "$DURABLE_HOME/.flow-agents/runtime/AGENTS.md" &&
 # An escaping durable-root symlink aborts before any removal.
 DURABLE_ESCAPE_HOME="$TMPDIR_EVAL/durable-escape-home"; DURABLE_OUTSIDE="$TMPDIR_EVAL/durable-escape-outside"
 mkdir -p "$DURABLE_ESCAPE_HOME" "$DURABLE_OUTSIDE"
-HOME="$TMPDIR_EVAL/durable-escape-user-home" $FA init --runtime opencode --global --dest "$DURABLE_ESCAPE_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/durable-escape-user-home" $FA init --runtime opencode --global --dest "$DURABLE_ESCAPE_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 mv "$DURABLE_ESCAPE_HOME/.flow-agents" "$DURABLE_OUTSIDE/.flow-agents"; ln -s "$DURABLE_OUTSIDE/.flow-agents" "$DURABLE_ESCAPE_HOME/.flow-agents"
 set +e; HOME="$TMPDIR_EVAL/durable-escape-user-home" $FA init --uninstall --runtime opencode --dest "$DURABLE_ESCAPE_HOME" --yes >"$TMPDIR_EVAL/durable-escape.out" 2>&1; DURABLE_ESCAPE_RC=$?; set -e
 if [[ "$DURABLE_ESCAPE_RC" -eq 2 && -f "$DURABLE_OUTSIDE/.flow-agents/runtime/AGENTS.md" ]] && grep -qi 'symlinked parent' "$TMPDIR_EVAL/durable-escape.out"; then _pass "durable: symlinked .flow-agents escape is refused before deletion"; else _fail "durable: escaping durable root was not safely refused"; fi
@@ -1384,7 +1391,7 @@ INSTRUCTION_HOME="$TMPDIR_EVAL/instruction-drift-home"; mkdir -p "$INSTRUCTION_H
 node - "$INSTRUCTION_HOME/opencode.json" <<'NODE'
 const fs = require("node:fs"); fs.writeFileSync(process.argv[2], JSON.stringify({ instructions: ["/user/AGENTS.md"] }, null, 2) + "\n");
 NODE
-HOME="$TMPDIR_EVAL/instruction-drift-user-home" $FA init --runtime opencode --global --dest "$INSTRUCTION_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/instruction-drift-user-home" $FA init --runtime opencode --global --dest "$INSTRUCTION_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 node - "$INSTRUCTION_HOME/opencode.json" "$INSTRUCTION_HOME" <<'NODE'
 const fs = require("node:fs"), path = require("node:path"); const file = process.argv[2], root = process.argv[3], c = JSON.parse(fs.readFileSync(file, "utf8"));
 // String concat, NOT path.join: path.join would normalize the ".." away and produce the exact
@@ -1403,7 +1410,7 @@ INSTRUCTION_DIVERGE_HOME="$TMPDIR_EVAL/instruction-diverge-home"; mkdir -p "$INS
 node - "$INSTRUCTION_DIVERGE_HOME/opencode.json" <<'NODE'
 const fs = require("node:fs"); fs.writeFileSync(process.argv[2], JSON.stringify({ instructions: ["/user/AGENTS.md"] }, null, 2) + "\n");
 NODE
-HOME="$TMPDIR_EVAL/instruction-diverge-user-home" $FA init --runtime opencode --global --dest "$INSTRUCTION_DIVERGE_HOME" --yes >/dev/null 2>&1
+HOME="$TMPDIR_EVAL/instruction-diverge-user-home" $FA init --runtime opencode --global --dest "$INSTRUCTION_DIVERGE_HOME" --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 printf '# my own agents file\n' > "$INSTRUCTION_DIVERGE_HOME/custom/MY-AGENTS.md"
 node - "$INSTRUCTION_DIVERGE_HOME/opencode.json" "$INSTRUCTION_DIVERGE_HOME" <<'NODE'
 const fs = require("node:fs"), path = require("node:path"); const file = process.argv[2], root = process.argv[3], c = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -1542,7 +1549,7 @@ PROJECT_MOD_DEST="$TMPDIR_EVAL/project-modified-claude-md"
 PROJECT_MOD_HOME="$TMPDIR_EVAL/project-modified-fixture-home"
 mkdir -p "$PROJECT_MOD_DEST" "$PROJECT_MOD_HOME"
 HOME="$PROJECT_MOD_HOME" TELEMETRY_CONFIG_FILE="$PROJECT_MOD_HOME/absent-telemetry.conf" \
-  $FA init --runtime claude-code --dest "$PROJECT_MOD_DEST" --telemetry-sink local-files --yes >/dev/null 2>&1
+  $FA init --runtime claude-code --dest "$PROJECT_MOD_DEST" --telemetry-sink local-files --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 printf '\nuser edit sentinel\n' >> "$PROJECT_MOD_DEST/CLAUDE.md"
 HOME="$PROJECT_MOD_HOME" $FA init --uninstall --runtime claude-code --dest "$PROJECT_MOD_DEST" --yes >"$TMPDIR_EVAL/project-modified.out" 2>&1
 if [[ -f "$PROJECT_MOD_DEST/CLAUDE.md" ]] \
@@ -1559,7 +1566,7 @@ PERMISSIVE_DEST="$TMPDIR_EVAL/project-permissive-dest"
 PERMISSIVE_HOME="$TMPDIR_EVAL/project-permissive-home"
 mkdir -p "$PERMISSIVE_DEST" "$PERMISSIVE_HOME"
 HOME="$PERMISSIVE_HOME" TELEMETRY_CONFIG_FILE="$PERMISSIVE_HOME/absent-telemetry.conf" \
-  $FA init --runtime claude-code --dest "$PERMISSIVE_DEST" --telemetry-sink local-files --permissive-workspace --yes >/dev/null 2>&1
+  $FA init --runtime claude-code --dest "$PERMISSIVE_DEST" --telemetry-sink local-files --permissive-workspace --yes >"$TMPDIR_EVAL/setup-$LINENO.out" 2>&1
 if node - "$PERMISSIVE_DEST/.claude/settings.json" "$PERMISSIVE_DEST/.flow-agents/install.json" <<'NODE'
 const fs = require("node:fs");
 const settings = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
