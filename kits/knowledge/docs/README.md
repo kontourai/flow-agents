@@ -100,7 +100,13 @@ see the [graph-key disclosure](store-contract.md#known-bundled-graph-key-handlin
 | Error code | Raised when |
 |---|---|
 | `AMBIGUOUS_ID` | an id prefix matches more than one record (carries a `matches` array) |
-| `SLUG_CONFLICT` | a supplied slug alias is already assigned to a different record |
+| `SLUG_CONFLICT` | a supplied slug alias is already assigned to a different record; the bundled false-conflict gap below can also raise it without an owner |
+
+**Known bundled alias-admission gap:** an unused `constructor` alias meets the
+slug syntax but can be rejected by either adapter's `create` or `update` with
+`SLUG_CONFLICT`. An inherited property in the alias map is mistaken for an owner.
+This is separate from graph-query failure and does not introduce a reserved-alias
+rule; see [alias registration](store-contract.md#h4-slug-aliases).
 
 ---
 

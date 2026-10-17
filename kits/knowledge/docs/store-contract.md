@@ -199,6 +199,8 @@ in different orders across operations, without rollback. A failure can leave one
 write complete while the mutation rejects; crash/error atomicity is not supplied
 by these adapters. The atomic-update requirement above remains normative. The
 derived-index `reindex` recovery path (§8) is not a transaction or rollback guarantee.
+A separate successful self-proposal overwrite can also violate record/index coherence,
+even without a write failure; see the implementation exception in §6.4.
 
 The default adapter stores the index as `graph-index.json` at the store root.
 
@@ -266,7 +268,8 @@ Create a new record. The adapter generates `id` unless supplied and assigns
 during `create`/`update` of untrusted body text; the Obsidian adapter parses wikilinks
 in those operations without an opt-out. Neither adapter parses replacement body
 wikilinks during `apply` (§2.3).
-Do not assume that option is portable across adapters.
+Do not assume that option is portable across adapters. Alias syntax/admission is
+specified in §H.4, including the bundled false-conflict gap for `constructor`.
 
 **Rejection conditions:**
 - Missing or empty `type`, `title`, `body`, `category`.
@@ -291,7 +294,8 @@ Update mutable fields of an existing record. Immutable fields (`id`, `type`, `cr
 **Optional update fields (at least one must be supplied):** `title`, `body`,
 `category`, `tags`, `links`, `aliases`, `expires_at`, `ttl_seconds`. Aliases are
 append-only. `status` is ignored; lifecycle changes use `retire`. The default
-adapter's `parse_wikilinks` switch is not itself a mutable record field.
+adapter's `parse_wikilinks` switch is not itself a mutable record field. The alias
+registration gap in §H.4 affects both `create` and alias-adding `update`.
 
 **Rejection conditions:**
 - Record with `id` does not exist.
@@ -350,6 +354,18 @@ proposing record to the target, and appends mutation history with the proposal t
 **Post-conditions:** A link of kind `"proposes"` from `proposer_id` to `concept_id` is recorded
 in both the record and the graph index. Mutation log entry appended to the target record.
 
+**Known bundled self-proposal gap:** neither adapter rejects equal target/proposer
+ids. With a new self-proposal on an ordinary record R, both read R before either
+write, then write the proposer update followed by a target update from the older
+snapshot. The final successful write can discard the new stored proposal link,
+proposer timestamp and proposer-side history, while the graph retains the self
+`proposes` edge. `get(R).links` and `getLinks(R)` then disagree. A following
+`apply(R, R, ...)` checks the stored links and can reject `MISSING_EVIDENCE` despite
+the graph edge. Default `reindex` can remove the phantom edge but cannot recover
+the missing proposal. This violates the post-condition above without an I/O error;
+it is separate from the failed-write transaction gap in §5. The contract does not
+add a distinct-id requirement, and no runtime rejection rule is implied here.
+
 ### 6.5 `apply`
 
 Apply a pending proposal to any existing record type: replace its body and append
@@ -376,6 +392,8 @@ an `apply` mutation entry. The `concept_id` parameter names the target record.
 **Post-conditions:** Target `body` is replaced with `new_body`. `updated_at` refreshed.
 Mutation log entry (op=`"apply"`) appended. The `"proposes"` link MAY remain in the
 graph (it is a historical record); adapters SHOULD NOT silently delete it.
+The bundled self-proposal gap in §6.4 can leave only a graph edge, which does not
+satisfy the stored-proposal-link check used by `apply`.
 
 ### 6.6 `reject`
 
@@ -1342,10 +1360,19 @@ exact id or a slug). This keeps a stray short token from matching a large, surpr
 - A slug already assigned to a *different* record is a `SLUG_CONFLICT` (a slug identifies at most
   one record). Re-supplying a record's own slug is an idempotent no-op.
 
+**Known bundled alias-registration gap:** `constructor` is a valid unused slug
+under the declared syntax, but both adapters can reject it with `SLUG_CONFLICT`
+on a fresh store or when adding it through `update`. The shared alias map uses
+an ordinary object and reads `by_slug[slug]` without an own-property check; the
+inherited Object constructor is treated as an existing owner. No record actually
+owns that alias in this case. This differs from the graph-array gap in §7 and
+from a genuine alias collision. The syntax and genuine-conflict requirements above
+remain normative; this disclosure does not reserve or prohibit the alias.
+
 ### H.5 Restructure Survival (the alias map)
 
-The alias map is a store-level structure `{ slug → id }`. It is keyed by **full id** — never by
-category or file path. Therefore:
+The alias map is a store-level structure `{ slug → id }`: each slug key maps to a
+**full record id**, rather than a category or file path. Therefore:
 
 - Recategorizing a record via `update` (which, in the Obsidian adapter, **relocates the note's
   file**) leaves both the `id` and the `slug → id` mapping untouched.
