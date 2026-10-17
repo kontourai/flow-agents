@@ -1023,7 +1023,7 @@ export function ensureBundleReporting(runtime: Runtime): { bundle: string; rebui
 // `${CLAUDE_PROJECT_DIR}` — exec-form `args` elements use the literal
 // placeholder (substituted by Claude Code, no shell), and the statusLine shell
 // string uses `"$CLAUDE_PROJECT_DIR/…"`. A global install vendors the runtime
-// outside any project, so both forms are rewritten to the absolute source root.
+// outside any project, so both forms are rewritten to the owned durable runtime.
 const GLOBAL_INSTALL_ARGS_PLACEHOLDER_PREFIX = "${CLAUDE_PROJECT_DIR}/";
 const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$CLAUDE_PROJECT_DIR\//g;
 
@@ -1165,12 +1165,14 @@ function stampConfigPremergePostInstallHash(premerge: unknown, configPath: strin
   };
 }
 
-function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
-  return command.replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${sourceRoot}/`);
+export function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
+  // Only statusLine is shell-form. Exec-form args below must remain literal argv.
+  const escaped = sourceRoot.replace(/([\\"$`])/g, "\\$1");
+  return command.replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, () => `"${escaped}/`);
 }
 
 /** Recursively rewrite every `command` string and exec-form `args` element found under `value` in place. */
-function rewriteCommandsForGlobalInstall(value: unknown, sourceRoot: string): void {
+export function rewriteCommandsForGlobalInstall(value: unknown, sourceRoot: string): void {
   if (Array.isArray(value)) {
     for (const item of value) rewriteCommandsForGlobalInstall(item, sourceRoot);
     return;
@@ -1666,7 +1668,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // global settings dir is the claude config root, so the settings.json
     // lives directly in dest (not dest/.claude/).
     if (options.global && options.runtime === "claude-code") {
-      const { bundle, rebuilt } = ensureBundleReporting(options.runtime);
+      // Global commands consume a publisher-built runtime; a missing/corrupt artifact
+      // must never trigger compilation or dependency installation in a consumer.
+      const bundle = path.join(root, "dist", runtimeBundles[options.runtime]);
+      const installer = path.join(bundle, "install.sh");
+      if (!fs.existsSync(installer) || !installerSupportsPreserveExcludes(fs.readFileSync(installer, "utf8"))) {
+        throw new Error("required prebuilt Claude Code bundle is missing or invalid; reinstall the package, or regenerate with npm run build:bundles in a source checkout");
+      }
       // For --global, dest is ~/.claude/ (the global settings dir).
       // dogfoodClaudeCode writes to dest/.claude/settings.json — but for global,
       // the settings.json lives at dest/settings.json (dest IS ~/.claude/).
@@ -1703,11 +1711,28 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // reads, and both manifest builders below read the bundle tree a concurrent
       // `build-bundles` may be resetting.
       const globalExit = withBundleReadLock<number | null>(() => {
+      // Stage the existing built bundle, including its shared dependency closure and
+      // provenance. Never build/install dependencies in the destination (#945/#1514).
+      const overlay = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-claude-runtime-"));
+      try {
+      const runtimeRoot = path.join(overlay, ".flow-agents", "runtime");
+      for (const entry of ["build", "context", "kits", "packaging", "schemas", "scripts", "integrations", "console.telemetry.json"]) {
+        fs.cpSync(path.join(bundle, entry), path.join(runtimeRoot, entry), { recursive: true });
+      }
+      fs.cpSync(sourcePath, path.join(runtimeRoot, ".claude", "settings.json"), { recursive: true });
+      const { verifyRuntimeImports } = createRequire(import.meta.url)(path.join(root, "scripts", "verify-runtime-imports.js")) as { verifyRuntimeImports: (root: string) => void };
+      verifyRuntimeImports(runtimeRoot);
+      const runtimeMappings = [{ sourceDir: overlay, destDir: options.dest, prefix: "" }];
+      const runtimePlanParams = { ...globalPlanParams, mappings: runtimeMappings, force: false, refuseSymlinkParents: true };
+      const runtimePlan = computeInstallPlan(runtimePlanParams);
+      // Runtime collisions cannot silently preserve an incomplete/modified executable.
+      // User skills/agents keep their existing preserve/--force policy.
+      if (runtimePlan.preserved.length) throw new Error(`refusing to overwrite modified or unowned Claude runtime: ${runtimePlan.preserved.join(", ")}`);
       const globalPlan = computeInstallPlan(globalPlanParams);
       if (dryRun) {
         for (const line of formatDryRunLines(globalPlan, `${options.runtime} --global skills/agents`, options.dest)) console.log(line);
+        for (const line of formatDryRunLines(runtimePlan, "claude-code --global owned runtime", options.dest)) console.log(line);
         console.log("Note: settings.json is merge-owned (hooks merged into your existing settings; user keys preserved) and is not part of the file plan above.");
-        if (rebuilt) console.log("Note: rebuilt the claude-code bundle in the package dist/ to compute this plan (outside the destination).");
         return 0;
       }
       const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
@@ -1717,7 +1742,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // See rewriteCommandsForGlobalInstall: bundle hook commands assume
       // CLAUDE_PROJECT_DIR points at this package; a global install must not
       // depend on which project is currently open, so pin to an absolute path.
-      rewriteCommandsForGlobalInstall(managed, root);
+      rewriteCommandsForGlobalInstall(managed, path.join(options.dest, ".flow-agents", "runtime"));
       const destSettingsPath = path.join(options.dest, "settings.json");
       // #1288 round-3 HIGH-2: FAIL CLOSED before anything else reads or snapshots the
       // file. Merging over an unparseable settings file would replace the user's
@@ -1744,6 +1769,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // written"; the copy executor then re-enforces per file (exclusive creates,
       // re-hash-before-rename replaces).
       verifyInstallPlanMatchesDisk(globalPlan, globalPlanParams);
+      verifyInstallPlanMatchesDisk(runtimePlan, runtimePlanParams);
+      // Install all executable files before persisting commands that reference them.
+      const runtimeCopies = executePlanCopies(runtimePlan);
+      if (runtimeCopies.racedPaths.length) throw new InstallPlanDriftError(runtimeCopies.racedPaths);
       fs.mkdirSync(options.dest, { recursive: true });
       const tmp = `${destSettingsPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
@@ -1797,16 +1826,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // recording it as bundle-owned would authorize the next init to overwrite it.
       const globalManifestPkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
       writeOwnedFilesManifest(options.dest, buildOwnedFilesManifest({
-        mappings: [
-          { sourceDir: path.join(bundle, ".claude", "skills"), destDir: path.join(options.dest, "skills"), prefix: "skills" },
-          { sourceDir: path.join(bundle, ".claude", "agents"), destDir: path.join(options.dest, "agents"), prefix: "agents" },
-        ],
+        mappings: [...globalPlanParams.mappings, ...runtimeMappings],
         excludeRel: new Set([...globalPlan.preserved, ...globalCopies.racedPaths]),
         runtime: "claude-code",
         version: globalManifestPkgJson["version"] ?? "0.0.0",
         global: true,
       }));
       return null;
+      } finally {
+        fs.rmSync(overlay, { recursive: true, force: true });
+      }
       });
       if (globalExit !== null) return globalExit;
       return configureWorkflowProviders(options);

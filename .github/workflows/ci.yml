@@ -777,6 +777,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check gate-review-inquiry-records-integration
 
+      - name: Claude global durability integration
+        if: success() || failure()
+        run: bash evals/ci/run-baseline.sh --check claude-global-durability-integration
+
       - name: Install merge integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check install-merge-integration
