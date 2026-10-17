@@ -90,6 +90,13 @@ record. Use `get` to check record existence. An **ambiguous** prefix throws
 `error.code === "AMBIGUOUS_ID"` — it is never silently guessed. On-disk identity (`records/<id>.md`)
 is unchanged.
 
+**Known bundled graph-query gap:** the required `getLinks` array result is not met
+for some prototype-named keys. On an empty graph, `getLinks("constructor")` can
+throw a plain `TypeError` because an inherited object property is treated as an
+array. A no-link record with that opaque id can still be created/read via `get`
+while graph lookup fails. This is an implementation gap, not a reserved-id rule;
+see the [graph-key disclosure](store-contract.md#known-bundled-graph-key-handling-gap).
+
 | Error code | Raised when |
 |---|---|
 | `AMBIGUOUS_ID` | an id prefix matches more than one record (carries a `matches` array) |
@@ -180,7 +187,8 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 - `reject(conceptId, proposerId, evidence)` → `Promise<void>`
 - `get(idOrHandle)` → `Promise<Record | null>` (exact id, slug alias, or unambiguous id prefix — Addendum H)
 - `getLinks(idOrHandle)` → `Promise<{ forward: Link[], reverse: Backlink[] }>`;
-  a backlink contains `source_id` and `kind`, while a forward link uses `target_id`
+  a backlink contains `source_id` and `kind`, while a forward link uses `target_id`;
+  the prototype-key implementation gap above can prevent this required result
 - `listByCategory(category, options?)` → `Promise<Record[]>`
 - `listByType(type, options?)` → `Promise<Record[]>`
 - `supersede(newId, supersededIds, evidence)` → `Promise<void>`

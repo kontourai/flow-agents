@@ -128,10 +128,14 @@ kinds MUST NOT be rejected — forward compatibility requires tolerating new kin
 ### 2.3 Wikilink Syntax
 
 In `body` text, outbound links may also appear as `[[target_id]]` or `[[target_id|label]]`.
-The default adapter indexes these inline wikilinks into the `links` array on write and renders
-them back on read. The contract requires that after a round-trip, links declared in the `links`
-array are queryable via `getLinks(id)`. Inline wikilink parsing is an adapter implementation
-detail; the contract does not mandate a body format.
+Both bundled adapters parse inline body wikilinks during `create` and `update`; the
+default adapter permits `parse_wikilinks: false`, while Obsidian has no opt-out.
+`apply` replaces the body while preserving the existing link set: it does not parse
+new inline wikilinks or reindex the replacement text. The contract requires that
+after a round-trip, links explicitly declared in the `links` array are queryable
+via `getLinks(id)`. Inline parsing is an adapter implementation detail; the contract
+does not mandate a body format. The graph-key implementation limit in §7 remains
+separate from this operation-specific parsing behavior.
 
 ---
 
@@ -259,7 +263,9 @@ Create a new record. The adapter generates `id` unless supplied and assigns
 **Optional fields:** `id` (otherwise generated), `tags`, `aliases`, `links`,
 `expires_at`, `ttl_seconds`, `provenance.source_ids`, `provenance.session_id`,
 `provenance.note`. The default adapter also accepts `parse_wikilinks: false`
-when ingesting untrusted body text; the Obsidian adapter always parses wikilinks.
+during `create`/`update` of untrusted body text; the Obsidian adapter parses wikilinks
+in those operations without an opt-out. Neither adapter parses replacement body
+wikilinks during `apply` (§2.3).
 Do not assume that option is portable across adapters.
 
 **Rejection conditions:**
@@ -425,6 +431,22 @@ Because `create`/`update` can index supplied links without validating their targ
 a literal graph key can have backlinks even when `get` returns `null`. Link lookup
 does not establish that a record exists or that a target was validated.
 
+### Known bundled graph-key handling gap
+
+The query contract requires the structured array result above and permits opaque
+string ids; prototype-named ids are not reserved or forbidden. Both bundled graph
+indexes currently use ordinary JavaScript objects and read bracket keys without
+an own-property or array check. Consequently, `getLinks("constructor")` on an empty
+graph can retrieve an inherited property and throw a plain `TypeError` at `.map`
+instead of returning arrays. A successfully created no-link record with that id
+can still be retrieved through `get` while `getLinks` throws. Other inherited
+property names, including `__proto__` and `toString`, expose the same class of gap;
+graph mutation helpers also assume array-valued lookups. Accepted opaque-id
+create/get tests do not establish graph-query conformance. This is an inherited
+implementation violation, not a new reserved-id rule or a waiver of the result
+contract. The identity/query tables describe the required interface with this
+known implementation exception.
+
 ---
 
 ## 8. Adapter Contract Summary
@@ -470,7 +492,7 @@ transitions. Optional `reindex` repairs only the derived index from record links
 | Behavior | `default-store` | `obsidian-store` |
 |---|---|---|
 | Record paths | `records/<id>.md` | Category/title paths, source subfolders, and vault-global `people/`; stable ids resolved through a path index. |
-| Body wikilinks | Parsed into links unless `parse_wikilinks: false`. | Parsed into links; no opt-out switch. |
+| Body wikilinks | Parsed during `create`/`update` unless `parse_wikilinks: false`; `apply` preserves existing links without parsing its replacement body. | Parsed during `create`/`update`, no opt-out; `apply` likewise preserves existing links. |
 | Person names | Ordinary title/tags/links storage. | Entity-card sections and vault-global routing; `alias:` tags differ from record-handle `aliases`. |
 | Provenance | Required `agent`; optional source ids/session/note. | Same creation requirements; vault path/layout does not strengthen assurance. |
 | Superseded predecessors in listings | Remain in `listByType` / `listByCategory`, subject to lifecycle filters. | Moved to `archive/` and excluded from both listings regardless of `includeRetired`; intended historical access is `get(id)` and reverse supersession links, subject to the archive collision gap below. |
@@ -1298,6 +1320,11 @@ An `AMBIGUOUS_ID` error MUST have `code === "AMBIGUOUS_ID"`, a human-readable `m
 `matches` array of the colliding full ids. An ambiguous prefix MUST NOT be silently resolved to one
 arbitrary record, nor collapsed to `null` — ambiguity is a distinct, surfaced condition.
 
+The bundled [graph-key handling gap](#known-bundled-graph-key-handling-gap) can
+instead raise `TypeError` for prototype-named keys, whether resolved or used as a
+literal fallback. The required structured result above is not a claim that those
+current implementation cases already conform.
+
 A `handle` **shorter than `MIN_ID_PREFIX`** is never treated as a prefix (it can still match an
 exact id or a slug). This keeps a stray short token from matching a large, surprising set.
 
@@ -1378,8 +1405,18 @@ It resolves citations through the unchanged Addendum H identity path — it adds
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `docGlobs` | string[] | `[]` | Globs (relative to `docsRoot`) whose matching docs are scanned. **Empty = opt-in no-op pass** (Addenda D–G convention). Supports `*` (within a segment), `**` (across segments), `?`. |
-| `docsRoot` | string | `workspace`, then `cwd` | Root the globs resolve against (the docs live outside the store). |
+| `docsRoot` | string | per-call `workspace` for the direct instance checker, otherwise `cwd` | Root the globs resolve against. Supply explicitly when intended docs differ from cwd; constructor workspace and the module-level wrapper do not supply the scan default. |
 | `markers` | string[] | `["rec:", "record:"]` | Citation-marker prefixes that opt a following short-id/slug into **definite** citation status (I.3). |
+
+**Scan-root implementation boundary:** direct
+`runner.checkInboundReferences({ workspace: ... })` honors that call's workspace
+when `docsRoot` is absent. The runner does not retain its constructor workspace
+for scanning; the module-level `checkInboundReferences` wrapper consumes its
+`workspace` as a constructor option without forwarding it to the scan. Use an
+explicit `docsRoot` for that wrapper. `flagSupersededCiters` forwards `docsRoot`,
+not workspace, to its checker (§K.2). A wrong-root glob can match no files and
+produce `ok: true` from an empty unresolved list; inspect `scanned` as well as
+`ok`. Empty globs remain an explicit no-op, not scan coverage.
 
 ### I.3 Citation Forms — the commit-SHA precision problem
 
@@ -1605,7 +1642,7 @@ auto-edit citing docs, does **not** cascade status changes, and does **not** fol
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `docGlobs` | `string[]` | `[]` | Globs to scan for doc citers via the #340 citation index. Opt-in: `[]` = store citers only, no doc scan. |
-| `docsRoot` | `string` | workspace, then cwd | Root the globs resolve against. |
+| `docsRoot` | `string` | `cwd` | Root the globs resolve against. Supply explicitly when docs differ from cwd; neither constructor nor per-call workspace is forwarded to the doc scan (§I.2). |
 | `markers` | `string[]` | `DEFAULT_CITATION_MARKERS` | Citation marker prefixes forwarded to the inbound-reference scan (Addendum I). |
 | `agent` | `string` | runner agent | Agent recorded on the flow telemetry. |
 
@@ -1674,7 +1711,15 @@ I) also appear in the trail.
 
 `flagSupersededCiters` reads the store's query surface (`get`, `getLinks`) and — when doc globs are
 configured — the #340 inbound-reference scan (doc files + `get`). It mutates no record and appends no
-mutation-log entry. The store tree is byte-identical before and after the call.
+mutation-log entry. It does emit gate telemetry: runner construction can create the
+sink directory, and normal gate events append to
+`<workspace>/.kontourai/telemetry/full.jsonl` (workspace falls back to
+`FLOW_AGENTS_WORKSPACE`, then cwd). Whole-store-tree byte identity requires keeping
+that sink outside the store tree and excluding unrelated concurrent changes.
+Using the store root as workspace can change telemetry bytes inside it without
+mutating any knowledge record, graph link or mutation history. The same telemetry
+boundary applies to the inbound-reference checker; read-only describes its
+knowledge-record behavior, not an absence of filesystem output.
 
 ### K.5 Conformance
 
