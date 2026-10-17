@@ -81,7 +81,7 @@ category-scoped **slug alias**, then an **unambiguous id prefix** (≥ 8 chars).
 | Short-id prefix (≥ 8 chars, unique) | `a1b2c3d4` | the single record whose id starts with it |
 
 Aliases are caller-supplied via the optional `aliases: string[]` field on `create`/`update`,
-append-only, and stored in an id-keyed alias map (`alias-index.json`) so a prefix or slug **still
+append-only, and stored in a slug-to-full-id alias map (`alias-index.json`) so a prefix or slug **still
 resolves after a store restructure** (e.g. a recategorize that moves the file). An unresolved
 handle returns `null` from `get`. `getLinks` instead falls back to the literal
 input as a graph-index key; it returns empty arrays only when that key has no

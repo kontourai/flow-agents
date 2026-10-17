@@ -123,7 +123,15 @@ record's `links` array. The graph index (see §5) mirrors all links for efficien
 | `"proposes"` | any → any | Record proposes a change to an existing target (used with `propose` mutation). |
 
 Adapters MUST store and return link objects with at least `target_id` and `kind`. Unknown
-kinds MUST NOT be rejected — forward compatibility requires tolerating new kinds.
+kinds MUST NOT be rejected — forward compatibility requires tolerating new string kinds.
+
+**Known bundled link-admission gap:** `kind` remains a required string, but neither
+adapter validates it on caller-supplied links in `create`, `update` or `link`.
+For existing ordinary records S and T, `link(S, [{ target_id: T }], { agent: "caller" })`
+can succeed and persist/query a link without `kind`; undefined fields disappear
+from serialized storage. This violates the required shape, rather than being an
+unknown-string-kind compatibility case. Required-field rejection and returned-link
+requirements remain normative; no new link vocabulary or admission rule is added.
 
 ### 2.3 Wikilink Syntax
 
@@ -326,6 +334,8 @@ an already-existing (source, target, kind) triple is not an error; the link is n
 
 **Post-conditions:** Each new link is present in `getLinks(source_id)`. Graph index updated.
 Mutation log entry appended to source record.
+The bundled missing-`kind` admission gap in §2.2 can violate the required Link
+shape despite successful target-existence and caller-evidence checks.
 
 ### 6.4 `propose`
 
@@ -512,8 +522,22 @@ transitions. Optional `reindex` repairs only the derived index from record links
 | Record paths | `records/<id>.md` | Category/title paths, source subfolders, and vault-global `people/`; stable ids resolved through a path index. |
 | Body wikilinks | Parsed during `create`/`update` unless `parse_wikilinks: false`; `apply` preserves existing links without parsing its replacement body. | Parsed during `create`/`update`, no opt-out; `apply` likewise preserves existing links. |
 | Person names | Ordinary title/tags/links storage. | Entity-card sections and vault-global routing; `alias:` tags differ from record-handle `aliases`. |
-| Provenance | Required `agent`; optional source ids/session/note. | Same creation requirements; vault path/layout does not strengthen assurance. |
+| Provenance | Required `agent`; optional source ids/session/note. | Same creation requirements; vault path/layout does not strengthen assurance. Configured dimension collisions can overwrite canonical metadata as disclosed below. |
 | Superseded predecessors in listings | Remain in `listByType` / `listByCategory`, subject to lifecycle filters. | Moved to `archive/` and excluded from both listings regardless of `includeRetired`; intended historical access is `get(id)` and reverse supersession links, subject to the archive collision gap below. |
+
+#### Known Obsidian dimension collision gap
+
+Configurable `dimensions` names are not validated against envelope fields. The
+adapter derives values from category segments after the first and spreads those
+fields after canonical frontmatter, so a colliding name wins on disk. For example,
+`dimensions: ["id"]` with category `topic.replacement` can create a record indexed
+under generated id R but with persisted `id: replacement`; `get(R)` then returns
+the other id. `dimensions: ["status"]` with `topic.retired` can persist retired
+status without `retire`, and a `provenance` dimension can replace its mapping
+with a category string. Canonical identity, provenance and lifecycle requirements
+remain normative; they are not protected by this implementation's presentation-only
+comment. This inherited gap is separate from archive reuse and does not add a
+reserved-dimension rule or authorize rewriting stored records.
 
 #### Known Obsidian archive retention gap
 
@@ -530,8 +554,8 @@ original bytes remain. This is an inherited implementation gap, not an authorize
 purge or a waiver of the supersede-not-delete requirement. The summaries below
 refer to the required historical access path with this implementation limit.
 
-Both implement the five types, eight mutations, identity queries and freshness
-options above. Explicit `link` resolves target ids, but `create`/`update` can
+Both expose the five types, eight mutations, identity queries and freshness
+options above, with the documented implementation gaps. Explicit `link` resolves target ids, but `create`/`update` can
 retain supplied links without that target check. Neither operation validates the
 truth of linked content. Run the existing parameterized contract and extension
 suites against a new adapter, not just the base three-type examples.
@@ -539,7 +563,9 @@ suites against a new adapter, not just the base three-type examples.
 All mutation methods MUST throw (or return a rejected Promise) when required evidence is
 missing. The thrown error MUST have a `code` property set to `"MISSING_EVIDENCE"` and a
 human-readable `message`. This enables the contract suite to distinguish enforcement failures
-from unexpected errors.
+from unexpected errors. The bundled missing-link-`kind` admission gap (§2.2) does
+not meet that requirement; passing the other evidence checks is not full shape
+validation.
 
 ### 8.1 Error Codes
 
@@ -1491,7 +1517,7 @@ enumerate citers:
 
 ```json
 {
-  "ok": true,
+  "ok": false,
   "scanned": ["status.md", "docs/design.md"],
   "citations": [
     { "doc": "status.md", "line": 3, "column": 17, "token": "aaaaaaaa-1111-4111-8111-111111111111",
@@ -1510,14 +1536,27 @@ enumerate citers:
 - `byDoc` — doc → its cited record ids (every scanned doc appears, even if it cites nothing).
 - `byRecord` — record id → its citers (the doc→record edge; a natural typed edge under #317).
 
+**Known bundled citation-index key gap:** these result maps use ordinary objects
+and assume bracket lookups are own arrays. After successful `get` resolution of
+an accepted opaque id such as `constructor` or `toString`, adding its citer to
+`byRecord` can throw a plain `TypeError` at `.push`. A wikilink to `__proto__`
+exposes the same class of issue. The `byDoc` map also has this assumption: a scanned
+extensionless file named `constructor` can throw when it has a citation, or retain
+an inherited function rather than an own empty array when it has none. This is a
+runner result-indexing gap independent of `getLinks`, alias admission, scan-root
+selection and telemetry. The opaque-id and structured-result requirements remain;
+no reserved ids or filenames are introduced. A conforming adapter's `get` alone
+does not ensure this bundled checker can index every supported key.
+
 ### I.6 Conformance
 
 An adapter conforms to this addendum when the inbound-reference suite
 (`evals/inbound-references/suite.test.js`) passes against it — AC1 (three forms extracted +
 resolved), AC2 (fail closed on a nonexistent id; no-op pass with no globs), AC3 (read-only), and the
 commit-SHA-safety case. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance is required
-of every adapter (AC4). Because the check reuses `get`, any Addendum-H-conforming adapter satisfies it
-without new storage.
+of every adapter (AC4). The check reuses `get` and requires no new adapter storage,
+but the bundled result-map key gap above is a separate runner conformance limit;
+Addendum-H conformance alone does not eliminate it.
 
 ---
 
