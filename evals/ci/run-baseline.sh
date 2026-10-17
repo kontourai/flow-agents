@@ -199,6 +199,7 @@ LANE_WORKFLOW_CONTRACTS=(
   "Fixture retirement audit integration"
   "Kit gate policies integration"
   "Reviewed grounding reference integration"
+  "Promptfoo offline compatibility"
   "Narrative source contract integration"
   "Narrative runtime projection integration"
   "Narrative grounded envelope integration"
