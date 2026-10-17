@@ -451,17 +451,24 @@ to `0.70–0.80` to avoid over-clustering.
 
 ### Fail-closed rationale
 
-The vector detector throws an `Error` with `code="EMBED_FAILURE"` rather than returning `[]`
-when the embedding call fails (network error, HTTP error, malformed response, wrong vector
-count). This is intentional.
+The bundled Ollama embedding function throws an `Error` with `code="EMBED_FAILURE"`
+for network/HTTP failures, invalid JSON, a missing embeddings array, or a wrong vector
+count. The detector also checks the outer array and count returned by an injected
+embed function; errors from that function otherwise propagate as supplied.
+
+**Current validation limit:** individual vectors are not validated for numeric contents,
+non-empty shape, or matching dimensions. Correct-count responses such as
+`{ embeddings: [null, null] }` can therefore score zero and return `[]` at the default
+threshold, while nonnumeric contents can produce `NaN` and be excluded. These cases can
+still surface as `MISSING_EVIDENCE` downstream rather than `EMBED_FAILURE`.
 
 A detector that silently returns `[]` on infrastructure failure is indistinguishable from one
 that found no similar records. The result is a misleading `MISSING_EVIDENCE` at the detect-cluster
 gate, which looks like "this concept has no sources" rather than "the embedding service is down".
 
-Failing closed makes the infrastructure problem visible immediately, at the right level, with a
-clear error code. Operators can catch `EMBED_FAILURE` separately from `MISSING_EVIDENCE` and
-route them to different alerting channels.
+Failing closed is the intended boundary: recognized embedding failures should remain
+distinguishable from an empty cluster. Operators can route `EMBED_FAILURE` separately
+from `MISSING_EVIDENCE`, while accounting for the validation gaps above.
 
 ### Injecting a custom embed function
 

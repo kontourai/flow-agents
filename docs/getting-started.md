@@ -241,8 +241,8 @@ The `deliver` skill orchestrates the full `builder.build` flow:
 1. **pull-work** — selects the issue, confirms scope and acceptance criteria (`pull-work-gate`)
 2. **design-probe** — checks goal fit, identifies blockers and dependencies, and records planning readiness before touching a file (`design-probe-gate`)
 3. **plan-work** — delegates to `tool-planner`, which writes a structured plan artifact naming files, changes, sequencing, and acceptance evidence (`plan-gate`)
-4. **execute-plan** — fans out to up to four `tool-worker` subagents in parallel waves (`execute-gate`)
-5. **review-work** — code and optional security review (`critique.json` sidecar)
+4. **execute-plan** — delegates plan-scoped work to `tool-worker` subagents, running independent tasks concurrently when file ownership and dependencies permit; there is no fixed worker count (`execute-gate`)
+5. **review-work** — code and optional security review recorded in the `trust.bundle` critique slice
 6. **verify-work** — tests and checks with evidence tied to the change; if evidence is missing the verify-gate triggers a route-back (`verify-gate`)
 7. **evidence-gate** — scope, evidence, and risk assessment (`merge-ready-gate`)
 8. **publish-change operation** — create or update the provider change record with
@@ -270,7 +270,7 @@ Use verify-work on the current branch and report what evidence is present.
 
 ### What you observe
 
-- **Between each step**, the agent writes a local session sidecar under `.kontourai/flow-agents/<slug>/` — `state.json`, `acceptance.json`, `evidence.json`, and `handoff.json`. These survive compaction, tab close, or a new session. A future session can use those records to resume.
+- **Inspect the session records** under `.kontourai/flow-agents/<slug>/`: `state.json` tracks workflow control, `acceptance.json` holds the acceptance definition, and `handoff.json` carries continuation context. Review and verification records belong in `trust.bundle` slices, including `critique`, `acceptance-criteria`, `tests-evidence`, and `policy-compliance`. The active step's public operations update the relevant records; every file is not rewritten at every step. Retained records support later resumption. Legacy `critique.json` and `evidence.json` are retired sidecars, not the current evidence outputs.
 - **At each requested transition**, Flow evaluates the recorded evidence expectations and reports missing evidence or a route-back. This does not establish the truth of the supplied evidence.
 - **The stop-goal-fit hook**, when loaded and configured to block on a host that supports it, can refuse completion for qualifying evidence gaps. Check the runtime table above; warning-only and shutdown callbacks do not provide the same completion control.
 - **If verify fails**, the verify-gate routes back to execution (or plan, or design-probe, depending on the failure class) and tries again — up to three times before hard-blocking.

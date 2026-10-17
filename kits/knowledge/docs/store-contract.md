@@ -1475,12 +1475,17 @@ mutate the record's `status` (Addendum B) or any other field. "No silent rot" me
 - **`stale`** — the record's effective expiry exists and now is **at or past** it. The boundary is
   **inclusive**: a record `expires_at: T` is stale from `T` onward (`now >= T`). A record may also be
   surfaced as stale by `auditFreshness` (Addendum D + J.5). Derivation never changes the record.
-- **`superseded`** — the record is the target of an Addendum A.5 `supersede` relationship: it carries
-  a `superseded-by` mutation-log entry, equivalently an incoming `supersedes` edge in the graph
-  (`getLinks(id).reverse`). This is the cross-adapter query surface for supersession — it works
-  identically whether the adapter keeps superseded records in place (default) or archives them
-  (obsidian), because both maintain the graph. Supersession is a **derived state**, not a `status`
-  value; `supersede` remains the only op that establishes it.
+- **`superseded`** — the graph-derived state is detected from an incoming `supersedes`
+  edge (`getLinks(id).reverse`). A successful Addendum A.5 `supersede` operation pairs that
+  edge with a `superseded-by` mutation-log entry on the predecessor and the adapter's
+  retention behavior: in place (default) or archived (Obsidian). That paired edge/history
+  invariant is the operation's contract; supersession is not a stored `status` value.
+
+  **Current evidence limit:** both bundled adapters also accept caller-authored
+  `supersedes` links through `create`, `update`, and `link`. An incoming edge alone can
+  therefore produce the graph-derived state without a `supersede` operation, a
+  `superseded-by` log entry, or Obsidian archival. Inspect operation history separately;
+  the edge is not proof that the operation's full invariant ran.
 
 ### J.4 Hachure vocabulary alignment
 
@@ -1681,7 +1686,9 @@ both throws `MISSING_EVIDENCE`. The appended record MUST exist and be type `"com
 
 On an append-mode call the runner:
 
-1. Resolves the **current** (non-superseded) snapshot for the topic (or the given snapshot id).
+1. With a topic selector, resolves the **current** (non-superseded) snapshot for that topic.
+   With an explicit snapshot-id string, reads that snapshot directly; it does not follow
+   successors or check that the selected snapshot is still current.
 2. Reads that snapshot's contributing records: `provenance.source_ids` first, falling back to its
    kind `"source"` links (Addendum A.3).
 3. Forms the new source set = *prior sources* ++ *appended entry*, de-duplicated with order
@@ -1703,16 +1710,22 @@ supersede-not-delete invariant (A.5), or the telemetry gate points.
 
 ### L.5 Sequential-session safety (no lost update)
 
-Because the body is regenerated from the **current live snapshot's** records on every call, two
-sequential consolidations from different sessions/agents, each appending one distinct entry, yield
-a snapshot containing **both** entries — the second session resolves the first session's snapshot,
-reads its (now-larger) source set, and appends to it rather than overwriting a stale whole body.
+Sequential append safety requires each call to use the **current live snapshot's** source
+set. With a topic selector, the second of two sequential consolidations resolves the first
+session's snapshot and appends to its larger source set, preserving both contributions.
+The same condition holds when a caller supplies the actual current snapshot id.
+
+**Current explicit-id limit:** the runner accepts a retained older snapshot id without
+refreshing it. If S0 contains X, appending A via S0 can produce S1 containing X+A;
+appending B via S0 again can produce X+B and supersede S1. History is retained, but the
+current snapshot omits A. The no-lost-update requirement is not enforced for stale
+explicit ids, and sequential topic selection does not establish concurrent-update safety.
 
 ### L.6 Conformance
 
 An adapter conforms when the incremental-consolidation suite
 (`evals/consolidate-incremental/suite.test.js`) passes against it. The suite is parameterized by
-`KNOWLEDGE_ADAPTER`; the no-lost-update case (R4) and the provenance/source-link completeness case
+`KNOWLEDGE_ADAPTER`; the sequential topic-selector no-lost-update case (R4) and the provenance/source-link completeness case
 (R3, asserted via the portable `get()` + reverse-`supersedes`-link guarantees of A.7) are required
 of every adapter. The default-store's additional guarantee that `listByType("snapshot")` still
 returns superseded snapshots is covered for that adapter by `evals/consolidation/suite.test.js`
