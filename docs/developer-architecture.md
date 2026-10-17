@@ -220,6 +220,22 @@ model providers, native harness operation, and publication remain separate
 qualification steps.
 
 
+## Eval tooling and dependency security
+
+Promptfoo is development evaluation tooling, separate from the packaged runtime
+contracts. Its dependency updates can also refresh transitive packages shared with
+the runtime, so review the complete frozen lockfile and both full and
+production-only audit results. A clean production audit does not clear remaining
+development or optional-provider findings; denied build scripts do not prove that
+prebuilt native packages are unreachable.
+
+The [eval guide](../evals/README.md) records the supported tooling, offline
+compatibility checks and remaining dependency findings. Offline CLI and loopback
+metadata fixtures establish local compatibility, not cloud-provider, native
+inference or registry-release qualification. These updates retain the published
+runtime's direct dependency pins, explicit native-script policy and release-age
+rules.
+
 ## Durable Claude Code global runtime
 
 `init --runtime claude-code --global` installs the built Claude bundle runtime

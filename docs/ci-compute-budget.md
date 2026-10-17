@@ -38,6 +38,14 @@ for their assigned slot; a per-run `max-parallel` would not establish this
 repository-wide bound. A caller holding a slot while Pages changes stages
 can reduce utilization, but cannot increase the peak.
 
+Promptfoo offline compatibility is a step inside the existing Workflow Contracts
+job, so it shares slot 1 rather than creating another admission unit or runner.
+Its verification command is registered in the baseline check inventory, the
+workflow-contracts lane and that job's steps together. Adding a check within a
+job can increase its slot occupancy time; it does not change the two-slot peak.
+Changes that add a job or expand a reusable caller instead require a new
+participation and runner-width review.
+
 The security scan, docs gate and Pages callees are pinned to shared-workflow
 commit `fd058ed6fcc780d60cc22e26d8c327281a197932`. Full Veritas readiness retains
 its existing `ea4c99c803a565f56cd18abbf9041f3467d1ee93` pin. Exact downloaded
