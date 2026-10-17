@@ -41,6 +41,7 @@ CHECKS=(
   "Fixture retirement audit integration|bash evals/integration/test_fixture_retirement_audit.sh"
   "Kit gate policies integration|bash evals/integration/test_kit_gate_policies.sh"
   "Reviewed grounding reference integration|bash evals/integration/test_reviewed_grounding_workflow.sh"
+  "Promptfoo offline compatibility|node --test evals/integration/promptfoo-offline.test.mjs"
   "Publish-change helper integration|bash evals/integration/test_publish_change_helper.sh"
   "Publish-change operation integration|bash evals/integration/test_publish_change_operation.sh"
   "Workflow sidecar writer integration|bash evals/integration/test_workflow_sidecar_writer.sh"
