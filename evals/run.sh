@@ -151,6 +151,7 @@ run_static() {
   bash "$EVAL_DIR/static/test_ci_integration_coverage.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_ci_check_registration.sh" || result=1
+  bash "$EVAL_DIR/static/test_ci_compute_policy.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_pr_title_validation.sh" || result=1
   echo ""

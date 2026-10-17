@@ -191,7 +191,19 @@ provenance also uses this owned metadata.
 Installed package metadata comes from the owned `build/package.json`, so commands
 do not need a user project's `package.json`. Build tools load esbuild only when
 building; installed command execution needs no compiler, npm install, or cache.
-`build/runtime-imports.json` inventories the compiled runtime and vendor files.
+The production dependency pins esbuild to `0.28.2`, with the same exact version
+authorized in `pnpm-workspace.yaml`. Bundler updates must regenerate and check
+Knowledge YAML and runtime bundles, retaining their licenses and provenance;
+the generated runtime target remains Node 22.
+`build/runtime-imports.json` inventories the compiled runtime, vendor files and
+canonical config seed (`.codex/hooks.json` or `.claude/settings.json`). Codex
+retains that seed separately from the flattened, merged user `hooks.json`; the
+existing ownership manifest records it like other installed files. Standalone
+uninstall reads the seed through the shared inventory verifier, without compiling
+or installing dependencies after package/cache eviction. Missing, changed or
+symlinked seeds and missing/corrupt inventory refuse before removal. Current user
+hooks never become the canonical managed seed. Recorded installed values, config
+lineage and hash-based file ownership retain their existing removal rules.
 The Codex installer verifies that exact inventory before writing, then the
 existing install manifest owns those files and their SHA-256 digests. Kit selection
 continues to come from explicit installation flags and kit declarations.
@@ -206,3 +218,39 @@ CLI help, workflow start/status, and external kit validate/install/list/run from
 empty project. This is local packed-artifact evidence; registry release, live
 model providers, native harness operation, and publication remain separate
 qualification steps.
+
+
+## Durable Claude Code global runtime
+
+`init --runtime claude-code --global` installs the built Claude bundle runtime
+under `<dest>/.flow-agents/runtime/`. npm and the invoking consumer directory are
+delivery sources; managed hook argv and the shell statusline refer only to this
+owned runtime. Hooks retain literal argv paths; only the statusline's double-quoted
+shell path is escaped, including dollar signs, backticks, quotes and backslashes.
+Apostrophes remain literal in both forms.
+
+The Claude bundle uses the same standalone dependency bundling, public package
+contracts, license/provenance records and `build/runtime-imports.json` as Codex.
+Both installers verify that inventory before destination writes. No destination
+build or npm install occurs. Kits retain their declarations and selection rules;
+this distribution repair does not move methodology or policy into the adapter.
+
+The existing ownership plan and `.flow-agents/owned-files.json` cover runtime,
+skills and agents together. The runtime retains the canonical `.claude/settings.json`
+seed so its own uninstall command needs no source package or build. Runtime collisions refuse installation even with
+`--force`; user skills/agents retain their existing preserve/force behavior.
+Invalid settings JSON refuses before any destination writes. Dry-run includes
+runtime copies and changes no destination files. Upgrades replace hash-matching
+owned runtime files; uninstall removes unchanged owned files and preserves edits
+and unrelated user settings. Stale runtime files remain subject to the existing
+additive global-install policy rather than gaining new deletion authority.
+
+`node evals/integration/test_global_install_npx_durability.mjs` exercises packed
+artifact source eviction, all managed argv hooks and the shell statusline,
+standalone CLI loading, hostile/apostrophe paths, corruption/collision refusal,
+invalid settings, dry-run, repeat installation and uninstall. Run after
+`npm run build:bundles`, with actual Node and Python binaries on PATH before HOME
+is isolated. Set `FLOW_AGENTS_PACK_EVIDENCE_DIR` to retain the tested tarball and
+SHA256SUMS. npm packaging excludes the transient `dist/.build-lock/` directory.
+This simulates npm source eviction; real Claude sessions, registry
+publication and provider execution require separate qualification.

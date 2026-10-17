@@ -173,6 +173,7 @@
     "!**/.telemetry/",
     "!**/.veritas/",
     "!**/node_modules/",
+    "!dist/.build-lock/",
     "!build/src/cli/workflow.test-support.js",
     "integrations/codex-host/"
   ],
@@ -255,7 +256,7 @@
     "@kontourai/relay": "0.6.0",
     "@kontourai/surface": "5.0.0",
     "@kontourai/survey": "8.2.0",
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.2"
   },
   "optionalDependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

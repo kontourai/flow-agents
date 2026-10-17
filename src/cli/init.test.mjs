@@ -17,6 +17,7 @@ import {
   detectRuntimeFromProcessEnv,
   detectRuntimeFromFilesystem,
   detectDefaultRuntime,
+  rewriteCommandForGlobalInstall,
 } from "../../build/src/cli/init.js";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 
@@ -159,4 +160,20 @@ test("init headless: --activate-kit auto-includes declared kit dependencies", ()
   assert.equal(activatedKitIds.has("builder"), true);
   assert.equal(activatedKitIds.has("knowledge"), true);
   assert.deepEqual(activation.errors ?? [], []);
+});
+
+
+test("global statusline rewrite preserves hostile paths and shell replacement tokens", () => {
+  const temp = fakeHome();
+  const hostile = path.join(temp, `o'brien $(touch INJECTED) $& \u0060touch INJECTED2\u0060 "quote" \\`);
+  fs.mkdirSync(hostile);
+  fs.writeFileSync(path.join(hostile, "probe.cjs"), 'console.log("literal-path-ok");');
+  const rewritten = rewriteCommandForGlobalInstall('node "$CLAUDE_PROJECT_DIR/probe.cjs"', hostile);
+  const result = spawnSync("/bin/sh", ["-c", rewritten], {
+    cwd: temp, encoding: "utf8", env: { ...process.env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}` },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "literal-path-ok");
+  assert.equal(fs.existsSync(path.join(temp, "INJECTED")), false);
+  assert.equal(fs.existsSync(path.join(temp, "INJECTED2")), false);
 });

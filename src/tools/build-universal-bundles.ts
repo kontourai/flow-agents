@@ -702,7 +702,12 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   writeBundledConduit(targetRoot);
   writeBundledDatum(targetRoot);
   writeBundledSurvey(targetRoot);
-  if (targetName === "codex") writeBundledRuntimeImports(targetRoot);
+  if (targetName === "codex" || targetName === "claude-code") {
+    // Retain the publisher's canonical config, independently of merged user config.
+    const seed = targetName === "codex" ? ".codex/hooks.json" : ".claude/settings.json";
+    writeText(path.join(targetRoot, seed), targetName === "codex" ? exportCodexHooks() : exportClaudeSettings());
+    writeBundledRuntimeImports(targetRoot);
+  }
   // #620: ship the build-only capability-declarations JSON inside each bundle so an
   // installed economics-record emitter (and hooks) can read it at build/generated/
   // relative to the bundle root. It is generated unconditionally by `npm run build`
@@ -897,7 +902,7 @@ function writeBundledSurvey(targetRoot:string):void {
  writeText(path.join(vendorRoot,'survey.bundle.json'),JSON.stringify({schema_version:'1.0',entry_package:packageName,entry_version:metadata.version,bundles,assets,packages:[...packages.values()].sort((a,b)=>`${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`))},null,2)+'\n');
 }
 
-/** Finish Codex's standalone public import graph without shipping an npm tree.
+/** Finish the standalone public import graph without shipping an npm tree.
  * Keep module-relative data with Flow; staging changes only Node resolution,
  * never Flow's validators or process semantics. */
 function writeBundledRuntimeImports(targetRoot: string): void {
@@ -909,8 +914,8 @@ function writeBundledRuntimeImports(targetRoot: string): void {
     .replace('"@kontourai/flow-agents/docker-worker"', '"../../integrations/codex-host/docker-worker.mjs"'));
   const imports = new Map<string, string[]>();
   const pattern = /\b(?:from\s*|import\(\s*)(["'])(@kontourai\/[^"']+)\1/g;
-  for (const file of walkFiles(sourceRoot)) {
-    if (!file.endsWith(".js") || file.includes(`${path.sep}vendor${path.sep}`) || file.includes(`${path.sep}tools${path.sep}`)) continue;
+  for (const file of [...walkFiles(sourceRoot), ...walkFiles(path.join(targetRoot, "scripts/hooks")), ...walkFiles(path.join(targetRoot, "scripts/ci"))]) {
+    if (!/\.(?:js|mjs)$/.test(file) || file.includes(`${path.sep}vendor${path.sep}`) || file.includes(`${path.sep}tools${path.sep}`)) continue;
     for (const match of readText(file).matchAll(pattern)) {
       const files = imports.get(match[2]) ?? [];
       if (!files.includes(file)) files.push(file);
@@ -1059,7 +1064,7 @@ function writeBundledRuntimeImports(targetRoot: string): void {
     }
     writeText(file, JSON.stringify(provenance, null, 2) + "\n");
   }
-  const files = [...walkFiles(sourceRoot), ...walkFiles(path.join(targetRoot, "integrations/codex-host")), path.join(targetRoot, "build/package.json")].map(file => ({
+  const files = [...walkFiles(sourceRoot), ...walkFiles(path.join(targetRoot, "integrations/codex-host")), path.join(targetRoot, "build/package.json"), ...[".codex/hooks.json", ".claude/settings.json"].map(seed => path.join(targetRoot, seed)).filter(file => fs.existsSync(file))].map(file => ({
     path: path.relative(targetRoot, file).replaceAll(path.sep, "/"),
     sha256: crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"),
   })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);

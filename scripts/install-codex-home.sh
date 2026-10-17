@@ -106,12 +106,7 @@ for (const relative of requiredFiles) {
     throw new Error(`missing or empty ${relative}`);
   }
 }
-const runtimeImports = JSON.parse(fs.readFileSync(path.join(snapshot, "build/runtime-imports.json"), "utf8"));
-const runtimeFiles = first.filter(item => item.type === "file" && (item.path.startsWith("build/src/") || item.path.startsWith("integrations/codex-host/") || item.path === "build/package.json"))
-  .map(({ path, sha256 }) => ({ path, sha256 })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-if (runtimeImports.schema_version !== "1.0" || JSON.stringify(runtimeImports.files) !== JSON.stringify(runtimeFiles)) {
-  throw new Error("standalone runtime import inventory is missing, changed, or corrupt");
-}
+require(path.join(root, "scripts/verify-runtime-imports.js")).verifyRuntimeImports(snapshot, first);
 const hooks = JSON.parse(fs.readFileSync(path.join(snapshot, requiredFiles[0]), "utf8"));
 if (!hooks || typeof hooks !== "object" || !hooks.hooks || typeof hooks.hooks !== "object") {
   throw new Error(".codex/hooks.json has no hooks object");
@@ -322,6 +317,10 @@ do
     rsync -a "$BUNDLE_SOURCE/$managed_dir/" "$FA_OWNED_OVERLAY/$managed_dir/"
   fi
 done
+
+# Keep the canonical publisher seed separate from the flattened, mutable hooks.json.
+mkdir -p "$FA_OWNED_OVERLAY/.codex"
+cp "$BUNDLE_SOURCE/.codex/hooks.json" "$FA_OWNED_OVERLAY/.codex/hooks.json"
 
 # Portable skills use Codex's universal catalog, independently of CODEX_HOME.
 if [[ -d "$BUNDLE_SOURCE/.agents/skills" ]]; then

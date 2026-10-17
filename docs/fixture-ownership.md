@@ -13,6 +13,7 @@ run `npm run validate:source --` and `npm run fixture:retirement-audit --`.
 
 | Fixture directory | Classification | Owners | Cleanup rule |
 | --- | --- | --- | --- |
+| `evals/fixtures/ci-compute` | immutable reusable-workflow expansion snapshots for the participating CI compute budget | `scripts/ci/compute-policy.mjs`, `evals/ci/compute-policy.test.mjs`, `evals/static/test_ci_compute_policy.sh` | Keep while these immutable shared-workflow pins participate in the two-slot policy; replace with reviewed snapshots when pins change. |
 | `evals/fixtures/assignment-provider` | AssignmentProvider local-file and GitHub render/status fixtures (#290); hostile-effective-state.json is the #291 ensure-session ownership guard's AC9 sanitization fixture | `evals/integration/test_assignment_provider_local_file.sh`, `evals/integration/test_assignment_provider_github.sh`, `evals/integration/test_pull_work_assignment_join.sh`, `evals/integration/test_ensure_session_ownership_guard.sh` | Keep while the assignment provider contract's claim/release/supersede/status/list operations and the assignment ⋈ liveness join are tested against local-file and GitHub fixture inputs. |
 | `evals/fixtures/backlog-provider-settings` | settings precedence fixtures | `evals/integration/test_effective_backlog_settings.sh` | Keep while backlog provider settings resolution supports global defaults and project overrides. |
 | `evals/fixtures/builder-kit-workflow-state` | Builder Kit workflow-state fixtures | `evals/static/test_workflow_skills.sh` | Keep while Builder Kit state contract and resume behavior are documented in workflow skill contracts. |
@@ -64,3 +65,15 @@ Generated eval output belongs under ignored result directories, not under
 fixture groups as kept when they have documented owners and live eval/script
 references. A nonzero retire-candidate count is not permission to delete by
 itself; it is a prompt to update or remove the owning eval and fixture together.
+
+## Packaged CLI fixture copy failures
+
+`src/cli/fixture-kit-package.mjs` copies the compiled CLI into an owned package
+fixture. A failed copy rethrows the original exception with `fixtureCopy`
+metadata serialized as JSON so test reporters retain the values: process/Node identity and before/after filesystem metadata for the
+source build, source `src`, fixture root, destination build, and destination
+`src`. It does not retry, read file contents, or turn setup failure into a
+contract-test result. Node's native copy path can name the containing destination
+directory for a source-file failure, so the exception path alone is not proof
+that cleanup removed the destination. Retain the complete failing test output;
+missing historical metadata leaves the historical cause unverified.
