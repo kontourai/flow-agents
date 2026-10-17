@@ -1,5 +1,30 @@
 # Changelog
 
+## [9.2.0](https://github.com/kontourai/flow-agents/compare/v9.1.1...v9.2.0) (2026-10-17)
+
+
+### Features
+
+* export kit-neutral assignment coordination contracts ([#1518](https://github.com/kontourai/flow-agents/issues/1518)) ([f303ea8](https://github.com/kontourai/flow-agents/commit/f303ea8fb5bc83c146740efd3189e66af10c09d0))
+
+
+### Fixes
+
+* **ci:** bound participating compute with two native queue slots ([#1531](https://github.com/kontourai/flow-agents/issues/1531)) ([872c192](https://github.com/kontourai/flow-agents/commit/872c192a8ed74fc71c855b272c36746a6cd4036e))
+* **ci:** register focused local-pin verification before head pinning ([#1520](https://github.com/kontourai/flow-agents/issues/1520)) ([18ecfed](https://github.com/kontourai/flow-agents/commit/18ecfedeb696b2929a8dc884c891b5c873bbd4d0))
+* **deps:** partially remediate eval security graph and prove offline compatibility ([#1532](https://github.com/kontourai/flow-agents/issues/1532)) ([1fbe28a](https://github.com/kontourai/flow-agents/commit/1fbe28a6a39a5c6a1108561c8ee29f158c30c3f1))
+* **init:** own durable Claude Code global runtime ([#1515](https://github.com/kontourai/flow-agents/issues/1515)) ([1edfdd4](https://github.com/kontourai/flow-agents/commit/1edfdd41d852dcae89cafdd56603484629f0b109))
+* make Codex installed runtime imports self-contained ([#1514](https://github.com/kontourai/flow-agents/issues/1514)) ([336d636](https://github.com/kontourai/flow-agents/commit/336d636a40b4cda800473f4be03bf4647c484a96))
+* **review:** retain rejected CI assessments with honest evidence ([#1519](https://github.com/kontourai/flow-agents/issues/1519)) ([796ee9b](https://github.com/kontourai/flow-agents/commit/796ee9be5d7e6ed654ce7bbc46a8311ffca40ce2))
+* **telemetry:** validate configuration for every install ([#1521](https://github.com/kontourai/flow-agents/issues/1521)) ([f1ed229](https://github.com/kontourai/flow-agents/commit/f1ed2294176950c183de60426702ee91d60566da))
+* uninstall standalone Codex runtime without package source ([#1530](https://github.com/kontourai/flow-agents/issues/1530)) ([4c36da1](https://github.com/kontourai/flow-agents/commit/4c36da1657938fb74f29714a9634fe486197552a))
+
+
+### Documentation
+
+* link the review-request schema to its built source ([#1522](https://github.com/kontourai/flow-agents/issues/1522)) ([375ad61](https://github.com/kontourai/flow-agents/commit/375ad61a37ea52619443a3dda6f082d39aa3aa45))
+* route learning follow-up through configured providers ([#1525](https://github.com/kontourai/flow-agents/issues/1525)) ([bbd05e7](https://github.com/kontourai/flow-agents/commit/bbd05e71778b0764a411ab49ee2cfe344ab1b544))
+
 ## [9.1.1](https://github.com/kontourai/flow-agents/compare/v9.1.0...v9.1.1) (2026-10-16)
 
 
