@@ -6,7 +6,7 @@ allowBuilds:
   # postinstall selects the platform binary; without it esbuild falls back to
   # its slower JS implementation. Needed by the build, which bundles with
   # esbuild. Bump this pin together with the dependency.
-  esbuild@0.28.1: true
+  esbuild@0.28.2: true
 
   # The five below are refused, not merely unlisted. pnpm fails the install on
   # an undeclared build script, so writing the decision out is what keeps it a

@@ -82,7 +82,7 @@
     {
       "source": "docs/developer-architecture.md",
       "section": "Concepts",
-      "covers": ["src/tools/build-universal-bundles.ts", "src/tools/common.ts", "src/lib/package-version.ts", "src/lib/kit-flow-binding.ts", "src/lib/flow-resolver.ts", "src/lib/kit-registry.ts", "src/builder-gate-action-envelope.ts", "src/cli/narrative-sources.ts", "scripts/install-codex-home.sh"]
+      "covers": ["src/tools/build-universal-bundles.ts", "src/tools/common.ts", "src/lib/package-version.ts", "src/lib/kit-flow-binding.ts", "src/lib/flow-resolver.ts", "src/lib/kit-registry.ts", "src/builder-gate-action-envelope.ts", "src/cli/narrative-sources.ts", "scripts/install-codex-home.sh", "scripts/verify-runtime-imports.js", "src/cli/init.ts", "src/cli/uninstall.ts", "package.json"]
     },
     {
       "source": "docs/workflow-artifact-lifecycle.md",
@@ -155,7 +155,12 @@
     },
     {
       "source": "docs/codex-pr-review-adoption.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        ".github/actions/codex-pr-review/**",
+        "scripts/ci/codex-pr-review.mjs",
+        "schemas/codex-pr-review-*.schema.json"
+      ]
     },
     {
       "source": "docs/survey-utterance-check.md",
@@ -406,6 +411,22 @@
     {
       "source": "docs/workflow-eval-strategy.md",
       "section": "Contribute"
+    },
+    {
+      "source": "docs/ci-compute-budget.md",
+      "section": "Reference",
+      "covers": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/runtime-compat.yml",
+        ".github/workflows/veritas-advisory.yml",
+        ".github/workflows/docs.yml",
+        ".github/workflows/kit-gates-demo.yml",
+        "scripts/ci/compute-policy.mjs",
+        "scripts/ci/actionlint-compute.mjs",
+        "evals/ci/compute-policy.test.mjs",
+        "evals/static/test_ci_compute_policy.sh",
+        "evals/fixtures/ci-compute/**"
+      ]
     },
     {
       "source": "docs/fixture-ownership.md",

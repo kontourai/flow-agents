@@ -125,4 +125,37 @@ bash evals/run.sh llm <agent>
 - `Claude Code` for default behavioral and Kiro acceptance checks
 - `codex` for `--runtime codex`, `--judge-runtime codex`, and Codex acceptance checks
 - `claude` for `--runtime claude`, `--judge-runtime claude`, and Claude Code acceptance checks
-- `promptfoo` for behavioral evals and result viewing, installed with `npm install` from the repo root
+- `promptfoo` for behavioral evals and result viewing, installed with `pnpm install --frozen-lockfile` from the repo root. Promptfoo 0.124.1 requires Node >=22.22; this tooling requirement is separate from the published Flow Agents runtime's Node >=22 baseline.
+
+The credential-free compatibility check is `node --test evals/integration/promptfoo-offline.test.mjs`.
+It runs the installed CLI with repository custom assertions, deterministic passing and failing
+cases, isolated telemetry files, disabled Promptfoo telemetry, and blocked external connections.
+Metadata-client checks use a loopback fixture, including missing-resource and missing-header
+refusals. These checks exercise config and JSON result compatibility; they do not qualify real
+cloud/model providers or optional multimodal inference.
+
+Dependency security follow-up remains on #1135/#931, with metadata-chain ownership on #967
+and Socket.IO ownership on #708. The scoped refresh removes brace-expansion 2.1.2 and
+ws 8.20.1 and updates Promptfoo's direct Sharp path to 0.35.5. Optional
+`@huggingface/transformers@4.2.0 -> sharp@0.34.5` remains vulnerable; denied install scripts
+do not make its prebuilt native binary unreachable. Public transformers 4.3.1 can accept
+Sharp 0.35.x, but its ONNX/tokenizer changes require separate multimodal qualification under
+#1135/#931. No native scripts are enabled or cross-major override applied here.
+The full pnpm audit still reports findings; this is a bounded remediation,
+not closure of those issues. The production-only audit improved from 11 high and 9 moderate
+findings to zero in this lockfile snapshot; it does not qualify all development tooling.
+Compatible transitive refreshes also remove findings in parser, HTTP, archive, and proxy
+packages without changing the published direct runtime dependency declarations.
+Remaining development paths are owned by #1135/#931:
+
+| Path | Remaining constraint or qualification gap |
+| --- | --- |
+| transformers 4.2.0 -> Sharp 0.34.5 / ONNX -> adm-zip, protobufjs, sprintf-js | Multimodal parent migration and native inference are unqualified. |
+| optional IBM SDK -> axios 1.18.0 | SDK core 5.9.1 publicly pins axios 1.20.0; the existing optional peer still resolves core 5.5.0 and needs a qualified peer refresh. |
+| proxy-agent -> get-uri 8.0.1 -> basic-ftp 5.3.1 | Current public get-uri still requires 5.x; the advisory fix starts at 6.2.1. No compatible parent fix found. |
+| jks-js 1.1.7 -> node-forge 1.4.0 | Current public parent still selects the affected version; the advisory publishes no patched version. |
+
+These are retained findings, not approved exceptions or exploitability determinations.
+The pinned Traverse/Lookout
+reference migration remains deferred under #1513; its existing exact-version and refusal
+checks must continue to pass.

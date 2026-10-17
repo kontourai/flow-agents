@@ -79,7 +79,7 @@ import {
   ManifestContainmentViolationError,
   type OwnedFilesManifest,
 } from "../lib/owned-files-manifest.js";
-import { ensureBundle, globalDest, opencodeGlobalConfigPath, resolveOpenCodeConfigBinding, revalidateOpenCodeConfigBinding, type OpenCodeConfigBinding } from "./init.js";
+import { ensureBundle, rewriteCommandsForGlobalInstall, globalDest, opencodeGlobalConfigPath, resolveOpenCodeConfigBinding, revalidateOpenCodeConfigBinding, type OpenCodeConfigBinding } from "./init.js";
 
 type UninstallRuntime = "claude-code" | "codex" | "opencode";
 type RuntimeConfig = { runtime: UninstallRuntime; manifestName: string; configPath: (dest: string, global: boolean) => string; removeStatusLine: boolean; removeInstructionsPath?: (dest: string) => string; removeOwnedValues?: Record<string, unknown>; additionalManifestRoots?: () => { dest: string; manifestName: string; label: string }[] };
@@ -243,35 +243,32 @@ function snapshotHasManagedHook(premerge: ConfigPremergeSnapshot, isManagedInner
   }));
 }
 
-function rewriteExpectedGlobalClaudeCommands(value: unknown): void {
-  if (Array.isArray(value)) {
-    for (const entry of value) rewriteExpectedGlobalClaudeCommands(entry);
-    return;
-  }
-  if (!value || typeof value !== "object") return;
-  const record = value as Record<string, unknown>;
-  for (const [key, entry] of Object.entries(record)) {
-    if (key === "command" && typeof entry === "string") {
-      record[key] = entry
-        .replace(/root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g, "")
-        .replace(/"\$root\//g, `"${root}/`);
-    } else rewriteExpectedGlobalClaudeCommands(entry);
-  }
+function isStandaloneRuntime(config: RuntimeConfig): boolean {
+  return (config.runtime === "claude-code" || config.runtime === "codex")
+    && (fs.existsSync(path.join(root, "build", "package.json")) || !fs.existsSync(path.join(root, "package.json")));
 }
 
 /** Values emitted by this package for this runtime/install location. */
-function expectedManagedConfig(config: RuntimeConfig, global: boolean): Record<string, unknown> {
-  const bundle = ensureBundle(config.runtime);
+function expectedManagedConfig(config: RuntimeConfig, global: boolean, dest: string): Record<string, unknown> {
+  // Standalone homes have build/package.json rather than a source package.json.
+  // Missing/corrupt inventory must fail closed, never fall through to a rebuild.
+  const standalone = isStandaloneRuntime(config);
+  const bundle = standalone ? root : ensureBundle(config.runtime);
   const source = config.runtime === "claude-code"
     ? path.join(bundle, ".claude", "settings.json")
     : config.runtime === "codex"
       ? path.join(bundle, ".codex", "hooks.json")
       : path.join(bundle, "opencode.json");
-  const managed = JSON.parse(fs.readFileSync(source, "utf8")) as Record<string, unknown>;
+  const seedBytes = standalone
+    ? (createRequire(import.meta.url)(path.join(root, "scripts", "verify-runtime-imports.js")) as {
+      readVerifiedRuntimeFile: (root: string, relative: string) => Buffer;
+    }).readVerifiedRuntimeFile(root, path.relative(root, source))
+    : fs.readFileSync(source);
+  const managed = JSON.parse(seedBytes.toString("utf8")) as Record<string, unknown>;
   if (config.runtime === "claude-code" && global) {
     delete managed["permissions"];
     delete managed["skipDangerousModePermissionPrompt"];
-    rewriteExpectedGlobalClaudeCommands(managed);
+    rewriteCommandsForGlobalInstall(managed, path.join(dest, ".flow-agents", "runtime"));
   }
   return managed;
 }
@@ -322,6 +319,8 @@ function scalarRemovalProvenance(snapshot: PremergeRead, key: string): { introdu
 
 function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean, snapshot: PremergeRead, settingsPathOverride?: string): SettingsPlan {
   const settingsPath = settingsPathOverride ?? config.configPath(dest, global);
+  // Seed integrity is independent of mutable user config existence.
+  const standaloneManaged = isStandaloneRuntime(config) ? expectedManagedConfig(config, global, dest) : undefined;
   if (!fs.existsSync(settingsPath)) {
     return { settingsPath, exists: false, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null, preserved: [], protectedRuntimePaths: [] };
   }
@@ -335,7 +334,7 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   // Structural ownership decisions use the lineage origin, never the current
   // reinstall baseline. Byte restoration below deliberately uses `previous`.
   const premerge = snapshot.origin;
-  const managed = expectedManagedConfig(config, global);
+  const managed = standaloneManaged ?? expectedManagedConfig(config, global, dest);
   // A corrupt installed_values.hooks (e.g. `{}` or a truncated string) must fall back to the
   // current package's values, not propagate a non-array into `.some(...)` -- throwing there
   // fails safe against deletion but PREVENTS UNINSTALL, which is its own failure mode.
