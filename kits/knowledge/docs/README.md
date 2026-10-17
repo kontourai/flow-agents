@@ -50,8 +50,8 @@ See the [canonical envelope and adapter differences](store-contract.md#1-record-
 
 | Status | Meaning | Default |
 |---|---|---|
-| `active` | Live, part of the working set. | Yes (records without status field are treated as active). |
-| `implemented` | Decision was shipped; transitional state before archival. | No |
+| `active` | Default lifecycle state; archive and query filters still apply. | Yes (records without status field are treated as active). |
+| `implemented` | Marked implemented with the supplied artifact reference; not excluded by the lifecycle filter. | No |
 | `retired` | Excluded from default working-set queries; history preserved. | No |
 
 **Mutation operations**
@@ -272,9 +272,10 @@ node --test kits/knowledge/context-check/context-check.test.js
 
 ## Decision Lifecycle — Retiring Records (S7)
 
-Implemented or obsolete records can be retired from the working set via the `knowledge.retire`
-flow. Retirement is **non-destructive**: the record body, links, and creation provenance remain
-intact; the record is simply excluded from the default working set.
+The `knowledge.retire` flow marks an existing record `implemented` or `retired` using the
+evidence below. Both transitions preserve its body, links and creation provenance.
+Only `retired` triggers the default lifecycle exclusion; `implemented` does not.
+The adapter's separate working-set exclusions still apply.
 
 ### Status transitions
 
@@ -294,9 +295,19 @@ Retired records are excluded from:
 - `defaultSimilarityDetector` — default cluster candidates
 - `createVectorSimilarityDetector` — vector cluster candidates
 
-Add `{ includeRetired: true }` to any query to restore retired records.
+For `listByType` and `listByCategory`, `{ includeRetired: true }` disables only the
+retired-status filter within the adapter's enumerated working set. Obsidian still
+excludes archived supersession predecessors from both listings, even with this
+option. Use `get(id)` for an existing predecessor and inspect reverse `supersedes`
+links through `getLinks(id)` for retained history. See the
+[working-set and history contract](store-contract.md#b3-working-set-exclusion).
 
-`get(id)` **always** returns the full record regardless of status.
+Both built-in similarity detectors unconditionally exclude retired candidates;
+neither exposes an `includeRetired` override. A detector cannot restore candidates
+already excluded by the store's listing.
+
+For an existing record, `get(id)` returns the full record regardless of lifecycle
+status. An unresolved handle returns `null`, as described above.
 
 ### Using the retire flow
 
@@ -332,17 +343,18 @@ await runner.retire(recordId, {
 ### Accessing retired records with provenance
 
 ```js
-// Always works — returns full record including retirement evidence
+// Read an existing retired record, including retirement evidence
 const record = await store.get(retiredId);
 console.log(record.status);           // "retired"
 console.log(record.mutation_log);     // includes retire entry with rationale
 
-// Query all retired records of a type
-const allCompiled = await store.listByType('compiled', { includeRetired: true });
+// List compiled records in the adapter's working set, including retired ones.
+// Archived Obsidian predecessors remain excluded; this is not a retired-only query.
+const compiledWorkingSet = await store.listByType('compiled', { includeRetired: true });
 
 // Get history from snapshot provenance
 const snapshot = await store.get(snapshotId);
-for (const srcId of snapshot.provenance.source_ids) {
+for (const srcId of snapshot.provenance.source_ids ?? []) {
   const src = await store.get(srcId);   // works even if src is retired
   console.log(src.id, src.status);
 }

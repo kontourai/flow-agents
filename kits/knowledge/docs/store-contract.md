@@ -730,10 +730,14 @@ Records with `status === "retired"` are EXCLUDED from the default working set:
 - The vector similarity detector (`createVectorSimilarityDetector`) considers only non-retired
   compiled records as candidates.
 
-All four filtering surfaces accept an `includeRetired: true` option (or equivalent
-flag on the similarity detector) to disable the lifecycle-status exclusion within
-the adapter's enumerated working set. This does not disable Obsidian's separate
+The two listing methods accept an `includeRetired: true` option to disable the
+lifecycle-status exclusion within the adapter's enumerated working set. This
+does not disable Obsidian's separate
 archive exclusion for superseded predecessors (§A.7).
+
+Both built-in similarity detectors unconditionally exclude retired candidates;
+neither exposes an `includeRetired` override. Their candidate sets cannot restore
+records already excluded by the store's listing.
 
 Retired records remain **fully queryable with provenance**:
 - `get(id)` always returns the full record regardless of status.
