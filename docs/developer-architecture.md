@@ -191,7 +191,15 @@ provenance also uses this owned metadata.
 Installed package metadata comes from the owned `build/package.json`, so commands
 do not need a user project's `package.json`. Build tools load esbuild only when
 building; installed command execution needs no compiler, npm install, or cache.
-`build/runtime-imports.json` inventories the compiled runtime and vendor files.
+`build/runtime-imports.json` inventories the compiled runtime, vendor files and
+canonical config seed (`.codex/hooks.json` or `.claude/settings.json`). Codex
+retains that seed separately from the flattened, merged user `hooks.json`; the
+existing ownership manifest records it like other installed files. Standalone
+uninstall reads the seed through the shared inventory verifier, without compiling
+or installing dependencies after package/cache eviction. Missing, changed or
+symlinked seeds and missing/corrupt inventory refuse before removal. Current user
+hooks never become the canonical managed seed. Recorded installed values, config
+lineage and hash-based file ownership retain their existing removal rules.
 The Codex installer verifies that exact inventory before writing, then the
 existing install manifest owns those files and their SHA-256 digests. Kit selection
 continues to come from explicit installation flags and kit declarations.

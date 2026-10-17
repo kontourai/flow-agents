@@ -318,6 +318,10 @@ do
   fi
 done
 
+# Keep the canonical publisher seed separate from the flattened, mutable hooks.json.
+mkdir -p "$FA_OWNED_OVERLAY/.codex"
+cp "$BUNDLE_SOURCE/.codex/hooks.json" "$FA_OWNED_OVERLAY/.codex/hooks.json"
+
 # Portable skills use Codex's universal catalog, independently of CODEX_HOME.
 if [[ -d "$BUNDLE_SOURCE/.agents/skills" ]]; then
   rsync -a "$BUNDLE_SOURCE/.agents/skills/" "$FA_SKILLS_OVERLAY/"

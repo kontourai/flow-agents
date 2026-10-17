@@ -243,19 +243,28 @@ function snapshotHasManagedHook(premerge: ConfigPremergeSnapshot, isManagedInner
   }));
 }
 
+function isStandaloneRuntime(config: RuntimeConfig): boolean {
+  return (config.runtime === "claude-code" || config.runtime === "codex")
+    && (fs.existsSync(path.join(root, "build", "package.json")) || !fs.existsSync(path.join(root, "package.json")));
+}
+
 /** Values emitted by this package for this runtime/install location. */
 function expectedManagedConfig(config: RuntimeConfig, global: boolean, dest: string): Record<string, unknown> {
-  // Standalone Claude homes retain the canonical settings seed beside the owned
-  // executable runtime. Uninstall must not rebuild bundles after npm source eviction.
-  const standaloneClaude = config.runtime === "claude-code" && global
-    && fs.existsSync(path.join(root, "build", "runtime-imports.json"));
-  const bundle = standaloneClaude ? root : ensureBundle(config.runtime);
+  // Standalone homes have build/package.json rather than a source package.json.
+  // Missing/corrupt inventory must fail closed, never fall through to a rebuild.
+  const standalone = isStandaloneRuntime(config);
+  const bundle = standalone ? root : ensureBundle(config.runtime);
   const source = config.runtime === "claude-code"
     ? path.join(bundle, ".claude", "settings.json")
     : config.runtime === "codex"
       ? path.join(bundle, ".codex", "hooks.json")
       : path.join(bundle, "opencode.json");
-  const managed = JSON.parse(fs.readFileSync(source, "utf8")) as Record<string, unknown>;
+  const seedBytes = standalone
+    ? (createRequire(import.meta.url)(path.join(root, "scripts", "verify-runtime-imports.js")) as {
+      readVerifiedRuntimeFile: (root: string, relative: string) => Buffer;
+    }).readVerifiedRuntimeFile(root, path.relative(root, source))
+    : fs.readFileSync(source);
+  const managed = JSON.parse(seedBytes.toString("utf8")) as Record<string, unknown>;
   if (config.runtime === "claude-code" && global) {
     delete managed["permissions"];
     delete managed["skipDangerousModePermissionPrompt"];
@@ -310,6 +319,8 @@ function scalarRemovalProvenance(snapshot: PremergeRead, key: string): { introdu
 
 function planSettings(dest: string, global: boolean, config: RuntimeConfig, isManagedInnerHook: (hook: unknown) => boolean, snapshot: PremergeRead, settingsPathOverride?: string): SettingsPlan {
   const settingsPath = settingsPathOverride ?? config.configPath(dest, global);
+  // Seed integrity is independent of mutable user config existence.
+  const standaloneManaged = isStandaloneRuntime(config) ? expectedManagedConfig(config, global, dest) : undefined;
   if (!fs.existsSync(settingsPath)) {
     return { settingsPath, exists: false, removedHookEntryCount: 0, removedEventKeys: [], removedStatusLine: false, action: "none", nextContent: null, preserved: [], protectedRuntimePaths: [] };
   }
@@ -323,7 +334,7 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   // Structural ownership decisions use the lineage origin, never the current
   // reinstall baseline. Byte restoration below deliberately uses `previous`.
   const premerge = snapshot.origin;
-  const managed = expectedManagedConfig(config, global, dest);
+  const managed = standaloneManaged ?? expectedManagedConfig(config, global, dest);
   // A corrupt installed_values.hooks (e.g. `{}` or a truncated string) must fall back to the
   // current package's values, not propagate a non-array into `.some(...)` -- throwing there
   // fails safe against deletion but PREVENTS UNINSTALL, which is its own failure mode.

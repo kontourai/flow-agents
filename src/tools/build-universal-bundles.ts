@@ -702,7 +702,12 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   writeBundledConduit(targetRoot);
   writeBundledDatum(targetRoot);
   writeBundledSurvey(targetRoot);
-  if (targetName === "codex" || targetName === "claude-code") writeBundledRuntimeImports(targetRoot);
+  if (targetName === "codex" || targetName === "claude-code") {
+    // Retain the publisher's canonical config, independently of merged user config.
+    const seed = targetName === "codex" ? ".codex/hooks.json" : ".claude/settings.json";
+    writeText(path.join(targetRoot, seed), targetName === "codex" ? exportCodexHooks() : exportClaudeSettings());
+    writeBundledRuntimeImports(targetRoot);
+  }
   // #620: ship the build-only capability-declarations JSON inside each bundle so an
   // installed economics-record emitter (and hooks) can read it at build/generated/
   // relative to the bundle root. It is generated unconditionally by `npm run build`
@@ -1059,7 +1064,7 @@ function writeBundledRuntimeImports(targetRoot: string): void {
     }
     writeText(file, JSON.stringify(provenance, null, 2) + "\n");
   }
-  const files = [...walkFiles(sourceRoot), ...walkFiles(path.join(targetRoot, "integrations/codex-host")), path.join(targetRoot, "build/package.json")].map(file => ({
+  const files = [...walkFiles(sourceRoot), ...walkFiles(path.join(targetRoot, "integrations/codex-host")), path.join(targetRoot, "build/package.json"), ...[".codex/hooks.json", ".claude/settings.json"].map(seed => path.join(targetRoot, seed)).filter(file => fs.existsSync(file))].map(file => ({
     path: path.relative(targetRoot, file).replaceAll(path.sep, "/"),
     sha256: crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"),
   })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);

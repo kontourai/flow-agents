@@ -1592,7 +1592,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const root = process.argv[2];
-const files = ['build/package.json', 'build/src/cli.js'].map(relative => ({
+const files = ['.codex/hooks.json', 'build/package.json', 'build/src/cli.js'].map(relative => ({
   path: relative,
   sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, relative))).digest('hex'),
 }));
