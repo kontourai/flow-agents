@@ -195,7 +195,15 @@ The production dependency pins esbuild to `0.28.2`, with the same exact version
 authorized in `pnpm-workspace.yaml`. Bundler updates must regenerate and check
 Knowledge YAML and runtime bundles, retaining their licenses and provenance;
 the generated runtime target remains Node 22.
-`build/runtime-imports.json` inventories the compiled runtime and vendor files.
+`build/runtime-imports.json` inventories the compiled runtime, vendor files and
+canonical config seed (`.codex/hooks.json` or `.claude/settings.json`). Codex
+retains that seed separately from the flattened, merged user `hooks.json`; the
+existing ownership manifest records it like other installed files. Standalone
+uninstall reads the seed through the shared inventory verifier, without compiling
+or installing dependencies after package/cache eviction. Missing, changed or
+symlinked seeds and missing/corrupt inventory refuse before removal. Current user
+hooks never become the canonical managed seed. Recorded installed values, config
+lineage and hash-based file ownership retain their existing removal rules.
 The Codex installer verifies that exact inventory before writing, then the
 existing install manifest owns those files and their SHA-256 digests. Kit selection
 continues to come from explicit installation flags and kit declarations.
