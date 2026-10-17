@@ -5,11 +5,13 @@ audit_emit() {
   local event_json="$1"
   [[ -z "$event_json" ]] && return
   local audit_file="${TELEMETRY_DATA_DIR}/audit.jsonl"
+  telemetry_log_destination_safe "$audit_file" || return 1
   echo "$event_json" >> "$audit_file" 2>/dev/null
 }
 
 audit_maybe_rotate() {
   local audit_file="${TELEMETRY_DATA_DIR}/audit.jsonl"
+  telemetry_log_destination_safe "$audit_file" || return 1
   [[ ! -f "$audit_file" ]] && return
 
   local file_size_bytes=0
@@ -27,14 +29,18 @@ audit_maybe_rotate() {
 
   # Remove oldest
   local oldest="${base}.$((TELEMETRY_GOVERNANCE_AUDIT_MAX_FILES - 1)).${ext}"
+  telemetry_log_destination_safe "$oldest" || return 1
   [[ -f "$oldest" ]] && rm -f "$oldest"
 
   # Shift existing
   for ((i = TELEMETRY_GOVERNANCE_AUDIT_MAX_FILES - 2; i >= 1; i--)); do
     local cur="${base}.${i}.${ext}"
     local nxt="${base}.$((i + 1)).${ext}"
+    telemetry_log_destination_safe "$cur" || return 1
+    telemetry_log_destination_safe "$nxt" || return 1
     [[ -f "$cur" ]] && mv "$cur" "$nxt"
   done
 
+  telemetry_log_destination_safe "${base}.1.${ext}" || return 1
   mv "$audit_file" "${base}.1.${ext}"
 }

@@ -25,7 +25,7 @@ import { isWithinRuntimeArtifactRoot } from "./declared-artifact-roots.js";
 // resolver admitting bytes the run binding rejects (or vice versa) is exactly the disagreement
 // those rules exist to prevent, and it is the mechanism behind the start-validates-consumer /
 // run-binds-package split this merge closes.
-import { canonicalKitFlowSourceRoots, canonicalKitsRoot, kitManifestFlowDeclarations, declaredInstalledKitFlowBindings, hasRegisteredInstalledKit, resolveKitFlowBinding } from "./kit-flow-binding.js";
+import { packagedKitRoot, canonicalKitFlowSourceRoots, canonicalKitsRoot, kitManifestFlowDeclarations, declaredInstalledKitFlowBindings, hasRegisteredInstalledKit, resolveKitFlowBinding } from "./kit-flow-binding.js";
 
 // ─── Security: Layer 1 traversal defense ─────────────────────────────────────
 //
@@ -68,15 +68,7 @@ function isRuntimeArtifactDir(resolvedDir: string): boolean {
 }
 
 function installedPackageRoot(): string | null {
-  let directory = path.dirname(fileURLToPath(import.meta.url));
-  while (true) {
-    if (fs.existsSync(path.join(directory, "package.json")) && fs.existsSync(path.join(directory, "kits"))) {
-      return directory;
-    }
-    const parent = path.dirname(directory);
-    if (parent === directory) return null;
-    directory = parent;
-  }
+  return packagedKitRoot(path.dirname(fileURLToPath(import.meta.url)));
 }
 
 function packagedFlowFile(kitId: string, flowName: string, consumerRoot: string): string | null {

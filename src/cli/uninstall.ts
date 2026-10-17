@@ -79,7 +79,7 @@ import {
   ManifestContainmentViolationError,
   type OwnedFilesManifest,
 } from "../lib/owned-files-manifest.js";
-import { ensureBundle, globalDest, opencodeGlobalConfigPath, resolveOpenCodeConfigBinding, revalidateOpenCodeConfigBinding, type OpenCodeConfigBinding } from "./init.js";
+import { ensureBundle, rewriteCommandsForGlobalInstall, globalDest, opencodeGlobalConfigPath, resolveOpenCodeConfigBinding, revalidateOpenCodeConfigBinding, type OpenCodeConfigBinding } from "./init.js";
 
 type UninstallRuntime = "claude-code" | "codex" | "opencode";
 type RuntimeConfig = { runtime: UninstallRuntime; manifestName: string; configPath: (dest: string, global: boolean) => string; removeStatusLine: boolean; removeInstructionsPath?: (dest: string) => string; removeOwnedValues?: Record<string, unknown>; additionalManifestRoots?: () => { dest: string; manifestName: string; label: string }[] };
@@ -243,25 +243,13 @@ function snapshotHasManagedHook(premerge: ConfigPremergeSnapshot, isManagedInner
   }));
 }
 
-function rewriteExpectedGlobalClaudeCommands(value: unknown): void {
-  if (Array.isArray(value)) {
-    for (const entry of value) rewriteExpectedGlobalClaudeCommands(entry);
-    return;
-  }
-  if (!value || typeof value !== "object") return;
-  const record = value as Record<string, unknown>;
-  for (const [key, entry] of Object.entries(record)) {
-    if (key === "command" && typeof entry === "string") {
-      record[key] = entry
-        .replace(/root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g, "")
-        .replace(/"\$root\//g, `"${root}/`);
-    } else rewriteExpectedGlobalClaudeCommands(entry);
-  }
-}
-
 /** Values emitted by this package for this runtime/install location. */
-function expectedManagedConfig(config: RuntimeConfig, global: boolean): Record<string, unknown> {
-  const bundle = ensureBundle(config.runtime);
+function expectedManagedConfig(config: RuntimeConfig, global: boolean, dest: string): Record<string, unknown> {
+  // Standalone Claude homes retain the canonical settings seed beside the owned
+  // executable runtime. Uninstall must not rebuild bundles after npm source eviction.
+  const standaloneClaude = config.runtime === "claude-code" && global
+    && fs.existsSync(path.join(root, "build", "runtime-imports.json"));
+  const bundle = standaloneClaude ? root : ensureBundle(config.runtime);
   const source = config.runtime === "claude-code"
     ? path.join(bundle, ".claude", "settings.json")
     : config.runtime === "codex"
@@ -271,7 +259,7 @@ function expectedManagedConfig(config: RuntimeConfig, global: boolean): Record<s
   if (config.runtime === "claude-code" && global) {
     delete managed["permissions"];
     delete managed["skipDangerousModePermissionPrompt"];
-    rewriteExpectedGlobalClaudeCommands(managed);
+    rewriteCommandsForGlobalInstall(managed, path.join(dest, ".flow-agents", "runtime"));
   }
   return managed;
 }
@@ -335,7 +323,7 @@ function planSettings(dest: string, global: boolean, config: RuntimeConfig, isMa
   // Structural ownership decisions use the lineage origin, never the current
   // reinstall baseline. Byte restoration below deliberately uses `previous`.
   const premerge = snapshot.origin;
-  const managed = expectedManagedConfig(config, global);
+  const managed = expectedManagedConfig(config, global, dest);
   // A corrupt installed_values.hooks (e.g. `{}` or a truncated string) must fall back to the
   // current package's values, not propagate a non-array into `.some(...)` -- throwing there
   // fails safe against deletion but PREVENTS UNINSTALL, which is its own failure mode.

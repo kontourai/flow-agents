@@ -1,3 +1,4 @@
+import { flowAgentsPackageMetadata } from "./package-version.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { atomicWriteJson } from "./fs.js";
@@ -114,7 +115,7 @@ export function catalogKitSkillNames(packageRoot: string, kitId: string): string
 
 export function readPackageVersion(packageRoot: string): string {
   try {
-    const pkgJson = JSON.parse(fs.readFileSync(path.join(packageRoot, "package.json"), "utf8")) as Record<string, unknown>;
+    const pkgJson = flowAgentsPackageMetadata(packageRoot);
     return typeof pkgJson.version === "string" && pkgJson.version ? pkgJson.version : "0.0.0";
   } catch {
     return "0.0.0";

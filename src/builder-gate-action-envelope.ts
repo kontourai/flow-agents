@@ -19,7 +19,7 @@ import {
 } from "./cli/public-contracts.js";
 import { resolveEffectiveChangeProviderSettings } from "./cli/effective-change-provider-settings.js";
 import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
-import { flowAgentsPackageRoot } from "./lib/package-version.js";
+import { flowAgentsPackageMetadataRelativePath, flowAgentsPackageRoot } from "./lib/package-version.js";
 import { resolveKitFlowBinding, kitFlowSourceRoots, type KitFlowBinding } from "./lib/kit-flow-binding.js";
 
 const MAX_METADATA_BYTES = 1_048_576;
@@ -257,7 +257,7 @@ function declaringKitForFlow(definitionId: string, projectRoot?: string): { kitB
  * kit's skills — and had no way to say which kit it was answering for.
  */
 export function installedBuilderSkillIdentity(definitionId: string, skill: string, projectRoot?: string): GateActionEnvelope["action"]["skills"][number] {
-  const packageMetadata = readBoundedJson(flowAgentsPackageRoot(), "package.json", "flow-agents package metadata");
+  const packageMetadata = readBoundedJson(flowAgentsPackageRoot(), flowAgentsPackageMetadataRelativePath(), "flow-agents package metadata");
   if (typeof packageMetadata.version !== "string" || !packageMetadata.version) throw new Error("flow-agents package metadata has no version");
   const { kitBinding, manifest: kit } = declaringKitForFlow(definitionId, projectRoot);
   return skillIdentity(kit, kitBinding, packageMetadata.version, skill);
@@ -333,7 +333,7 @@ export function installedBuilderGateActionAuthority(definitionId: string, curren
   external_capability?: NonNullable<GateActionEnvelope["stop_condition"]["external_capability"]>;
 } {
   const packageRoot = flowAgentsPackageRoot();
-  const packageMetadata = readBoundedJson(packageRoot, "package.json", "flow-agents package metadata");
+  const packageMetadata = readBoundedJson(packageRoot, flowAgentsPackageMetadataRelativePath(packageRoot), "flow-agents package metadata");
   if (typeof packageMetadata.version !== "string" || !packageMetadata.version) throw new Error("flow-agents package metadata has no version");
   const packageVersion = packageMetadata.version;
   const { kitBinding, manifest: kit, manifestRef } = declaringKitForFlow(definitionId, projectRoot);
@@ -438,7 +438,7 @@ export function deriveBuilderGateActionProgressSnapshot(input: BuilderGateAction
 
 function loadGateAction(input: BuilderGateActionEnvelopeInput): LoadedGateAction {
   const packageRoot = flowAgentsPackageRoot();
-  const packageMetadata = readBoundedJson(packageRoot, "package.json", "flow-agents package metadata");
+  const packageMetadata = readBoundedJson(packageRoot, flowAgentsPackageMetadataRelativePath(packageRoot), "flow-agents package metadata");
   if (typeof packageMetadata.version !== "string" || !packageMetadata.version) throw new Error("flow-agents package metadata has no version");
   const packageVersion = packageMetadata.version;
   const { kitBinding, manifest: kit, manifestRef } = declaringKitForFlow(input.run.definitionId, input.projectRoot);

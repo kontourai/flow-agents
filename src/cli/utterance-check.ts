@@ -115,10 +115,9 @@ function hasConcerningBadge(badge: string): boolean {
 
 async function loadSurvey(): Promise<SurveyMod | undefined> {
   try {
-    const pkg = "@kontourai/survey";
-    // Dynamic import keeps the framework-neutral review engine optional.
-    const mod = await (Function("m", "return import(m)")(pkg) as Promise<unknown>);
-    return mod as SurveyMod;
+    // A literal dynamic import stays lazy and lets standalone packaging own it.
+    const mod = await import("@kontourai/survey");
+    return mod as unknown as SurveyMod;
   } catch {
     return undefined;
   }

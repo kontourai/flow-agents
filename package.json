@@ -1,6 +1,6 @@
 {
   "name": "@kontourai/flow-agents",
-  "version": "9.1.0",
+  "version": "9.1.1",
   "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
@@ -28,6 +28,18 @@
     ".": {
       "types": "./build/src/index.d.ts",
       "import": "./build/src/index.js"
+    },
+    "./assignment-contract": {
+      "types": "./build/src/assignment-contract.d.ts",
+      "import": "./build/src/assignment-contract.js"
+    },
+    "./assignment-github": {
+      "types": "./build/src/assignment-github.d.ts",
+      "import": "./build/src/assignment-github.js"
+    },
+    "./assignment-local-file": {
+      "types": "./build/src/assignment-local-file.d.ts",
+      "import": "./build/src/assignment-local-file.js"
     },
     "./console-contract": {
       "types": "./build/src/console-contract.d.ts",
@@ -161,6 +173,7 @@
     "!**/.telemetry/",
     "!**/.veritas/",
     "!**/node_modules/",
+    "!dist/.build-lock/",
     "!build/src/cli/workflow.test-support.js",
     "integrations/codex-host/"
   ],

@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 function findRoot(start: string): string {
   let current = start;
   for (;;) {
-    if (fs.existsSync(path.join(current, "package.json")) && fs.existsSync(path.join(current, "packaging"))) return current;
+    if ((fs.existsSync(path.join(current, "package.json")) || (fs.existsSync(path.join(current, "build/runtime-imports.json")) && fs.existsSync(path.join(current, "build/package.json"))))
+      && fs.existsSync(path.join(current, "packaging"))) return current;
     const parent = path.dirname(current);
     if (parent === current) return start;
     current = parent;

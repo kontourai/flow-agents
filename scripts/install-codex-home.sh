@@ -93,6 +93,7 @@ const requiredFiles = [
   ".agents/skills/deliver/SKILL.md",
   "build/package.json",
   "build/src/cli.js",
+  "build/runtime-imports.json",
   "scripts/install-owned-files.js",
   "scripts/install-merge.js",
   "scripts/classify-codex-legacy-agents.js",
@@ -105,6 +106,7 @@ for (const relative of requiredFiles) {
     throw new Error(`missing or empty ${relative}`);
   }
 }
+require(path.join(root, "scripts/verify-runtime-imports.js")).verifyRuntimeImports(snapshot, first);
 const hooks = JSON.parse(fs.readFileSync(path.join(snapshot, requiredFiles[0]), "utf8"));
 if (!hooks || typeof hooks !== "object" || !hooks.hooks || typeof hooks.hooks !== "object") {
   throw new Error(".codex/hooks.json has no hooks object");
@@ -359,6 +361,13 @@ for seed_source in "$BUNDLE_SOURCE/.codex/config.toml" "$BUNDLE_SOURCE"/.codex/*
   fi
 done
 
+# Configure the staged copy before ownership preflight: the manifest must record
+# the bytes the installer writes, including an explicit local-only pin or Console
+# settings. Never post-process an owned destination behind its recorded hash.
+if [[ ${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "${FLOW_AGENTS_CONSOLE_URL:-}" || -n "${CONSOLE_TELEMETRY_URL:-}" || -n "${CONSOLE_URL:-}" || -n "${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then
+  bash "$FA_OWNED_OVERLAY/scripts/telemetry/install-console-config.sh" "$FA_OWNED_OVERLAY/scripts/telemetry/telemetry.conf" ${CONSOLE_CONFIG_ARGS[@]+"${CONSOLE_CONFIG_ARGS[@]}"}
+fi
+
 # Check both destinations with the exact synchronizer before either can mutate.
 node "$BUNDLE_SOURCE/scripts/install-owned-files.js" \
   --check "$FA_SKILLS_OVERLAY" "$SKILLS_DIR_REAL" ".flow-agents/codex-universal-skills-install-manifest.json"
@@ -472,10 +481,6 @@ if command -v node >/dev/null 2>&1 && [[ -f "$FA_MANAGED_HOOKS" ]]; then
   atomic_copy "$FA_INSTALL_RECORD_WORK" ".flow-agents/install.json"
   rm -f "$FA_HOOKS_WORK" "$FA_INSTALL_RECORD_WORK"
   FA_USER_HOOKS_STASH=""
-fi
-
-if [[ ${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "${FLOW_AGENTS_CONSOLE_URL:-}" || -n "${CONSOLE_TELEMETRY_URL:-}" || -n "${CONSOLE_URL:-}" || -n "${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then
-  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" ${CONSOLE_CONFIG_ARGS[@]+"${CONSOLE_CONFIG_ARGS[@]}"}
 fi
 
 echo "Installed Flow Agents into Codex home at $DEST"

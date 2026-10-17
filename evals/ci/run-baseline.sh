@@ -28,6 +28,7 @@ CHECKS=(
   "Ablation arm parity unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/ablation-arm-parity.test.mjs"
   "Sealed execution authority unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/sealed-execution-authority.test.mjs"
   "Liveness fleet unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/liveness-fleet.test.mjs"
+  "Telemetry local pin unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/telemetry-local-pin.test.mjs"
   "Telemetry run binding unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/telemetry-run-binding.test.mjs"
   "Transition log unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/transition-log.test.mjs"
   "Gate scorecard unit tests|node --test --import ./src/cli/unit-test-state.mjs src/cli/gate-scorecard.test.mjs"
@@ -142,6 +143,7 @@ CHECKS=(
   "Measurement trend sink integration|bash evals/integration/test_measurement_trend.sh"
   "FlowDefinition session history preservation integration|bash evals/integration/test_flowdef_session_history_preservation.sh"
   "Gate review inquiry records integration|bash evals/integration/test_gate_review_inquiry_records.sh"
+  "Claude global durability integration|node evals/integration/test_global_install_npx_durability.mjs"
   "Install merge integration|bash evals/integration/test_install_merge.sh"
   "Kit identity trust integration|bash evals/integration/test_kit_identity_trust.sh"
   "Liveness worktree root integration|node --test evals/integration/liveness-worktree-root.test.mjs"
@@ -164,6 +166,7 @@ CHECKS=(
 )
 
 LANE_SOURCE_AND_STATIC=(
+  "Telemetry local pin unit tests"
   "Telemetry run binding unit tests"
   "Content boundary"
   "Layer boundary"
@@ -306,6 +309,7 @@ LANE_INTEGRATION_COVERAGE=(
   "Measurement trend sink integration"
   "FlowDefinition session history preservation integration"
   "Gate review inquiry records integration"
+  "Claude global durability integration"
   "Install merge integration"
   "Kit identity trust integration"
   "Liveness worktree root integration"

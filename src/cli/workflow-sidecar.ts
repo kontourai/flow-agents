@@ -55,6 +55,8 @@ import { withFlowSessionRecoveryFenceRead } from "../flow-recovery-fence.js";
 import { githubWorkItemIdentity, workItemSlug } from "../lib/work-item-identity.js";
 import { DEFAULT_ROUTE_BACK_MAX_ATTEMPTS, definitionDigest, flowRunHead, normalizeRouteReasonForBudget, openGates, runDir, validateRunStateConsistency } from "@kontourai/flow";
 
+import { decideTakeover } from "../lib/assignment-model.js";
+
 type AnyObj = Record<string, any>;
 
 export const statuses = new Set(["new", "planning", "planned", "in_progress", "blocked", "verifying", "verified", "needs_decision", "not_verified", "failed", "delivered", "canceled", "accepted", "archived"]);
@@ -8166,6 +8168,7 @@ export function runTakeoverPreflight(
   const events = readLivenessEvents(artifactRoot);
   const freshList = loadLivenessReadHelper().freshHolders(events, slug, actorKey, nowMs);
   const effective = computeEffectiveState(assignment, freshList, actorKey, nowMs);
+  const decision = decideTakeover(effective);
   const reason = sanitize(effective.reason);
   const holderActor = effective.holder?.actor ? sanitize(effective.holder.actor) : undefined;
   const holderLastAt = effective.holder?.last_at ? sanitize(effective.holder.last_at) : undefined;
@@ -8176,8 +8179,8 @@ export function runTakeoverPreflight(
       // derive a new one (AC1: takeover continues the incumbent's branch, no parallel branch).
       const resumeBranch = assignment.record?.branch ? sanitizeWide(assignment.record.branch) : undefined;
       return {
-        ok: true,
-        action: "grace-then-supersede",
+        ok: decision.ok,
+        action: decision.action,
         effective_state: "reclaimable",
         reason,
         holder: { actor: holderActor, last_at: holderLastAt },
@@ -8196,8 +8199,8 @@ export function runTakeoverPreflight(
     case "held": {
       const selfIsHolder = effective.reason === "self_is_holder";
       return {
-        ok: selfIsHolder,
-        action: selfIsHolder ? "proceed" : "back-off",
+        ok: decision.ok,
+        action: decision.action,
         effective_state: "held",
         reason,
         holder: { actor: holderActor, last_at: holderLastAt },
@@ -8208,8 +8211,8 @@ export function runTakeoverPreflight(
     }
     case "human-held": {
       return {
-        ok: false,
-        action: "ask-first",
+        ok: decision.ok,
+        action: decision.action,
         effective_state: "human-held",
         reason,
         holder: { actor: holderActor, last_at: holderLastAt },
@@ -8219,8 +8222,8 @@ export function runTakeoverPreflight(
     case "free":
     default: {
       return {
-        ok: true,
-        action: "claim",
+        ok: decision.ok,
+        action: decision.action,
         effective_state: "free",
         reason,
         next_steps: ["No durable claim to supersede — this is a normal claim, not a takeover. Run `ensure-session` to claim it."],
@@ -9094,6 +9097,9 @@ async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
 
 /** Locate Surface's self-contained, dependency-free panel element (ESM, no require). */
 function loadSurfacePanelJs(): string {
+  if (fs.existsSync(fileURLToPath(new URL("../../runtime-imports.json", import.meta.url)))) {
+    return fs.readFileSync(new URL("../vendor/surface/trust-panel.js", import.meta.url), "utf8");
+  }
   let d = path.dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 12; i += 1) {
     try { return fs.readFileSync(path.join(d, "node_modules/@kontourai/surface/dist/src/trust-panel/surface-trust-panel.js"), "utf8"); } catch { /* walk up */ }
