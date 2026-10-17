@@ -453,8 +453,8 @@
     },
     {
       "id": "quick-start",
-      "title": "First run: shape and build with Builder Kit",
-      "source": "docs/getting-started.md#3-a-two-minute-first-run"
+      "title": "First run: save and read back a local note",
+      "source": "docs/getting-started.md#save-your-first-note"
     },
     {
       "id": "engine",
