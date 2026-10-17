@@ -244,7 +244,7 @@
     "@types/node": "^26.1.1",
     "ajv": "8.20.0",
     "gcp-metadata": "7.0.1",
-    "promptfoo": "^0.121.18",
+    "promptfoo": "^0.124.1",
     "typescript": "^7.0.2",
     "yaml": "2.9.0"
   },
