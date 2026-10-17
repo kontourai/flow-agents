@@ -173,6 +173,7 @@
     "!**/.telemetry/",
     "!**/.veritas/",
     "!**/node_modules/",
+    "!dist/.build-lock/",
     "!build/src/cli/workflow.test-support.js",
     "integrations/codex-host/"
   ],
