@@ -29,6 +29,10 @@ permissions:
 
 jobs:
   release-evidence-gate-demo:
+    concurrency:
+      group: flow-agents-compute-1
+      queue: max
+      cancel-in-progress: false
     name: Release Evidence gate — verified passes, rejected is refused
     runs-on: ubuntu-latest
     timeout-minutes: 10

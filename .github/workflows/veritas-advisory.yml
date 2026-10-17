@@ -9,6 +9,10 @@ permissions:
 
 jobs:
   readiness:
+    concurrency:
+      group: flow-agents-compute-2
+      queue: max
+      cancel-in-progress: false
     uses: kontourai/.github/.github/workflows/veritas-advisory.yml@ea4c99c803a565f56cd18abbf9041f3467d1ee93 # Veritas 1.11.2
     with:
       require-ready: true

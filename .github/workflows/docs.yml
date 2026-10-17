@@ -12,12 +12,20 @@ permissions:
 
 jobs:
   gate:
-    uses: kontourai/.github/.github/workflows/docs-gate.yml@main
+    concurrency:
+      group: flow-agents-compute-1
+      queue: max
+      cancel-in-progress: false
+    uses: kontourai/.github/.github/workflows/docs-gate.yml@fd058ed6fcc780d60cc22e26d8c327281a197932
   pages:
+    concurrency:
+      group: flow-agents-compute-2
+      queue: max
+      cancel-in-progress: false
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: gate
     permissions:
       contents: read
       pages: write
       id-token: write
-    uses: kontourai/.github/.github/workflows/docs-pages.yml@main
+    uses: kontourai/.github/.github/workflows/docs-pages.yml@fd058ed6fcc780d60cc22e26d8c327281a197932

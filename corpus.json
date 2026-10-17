@@ -413,6 +413,22 @@
       "section": "Contribute"
     },
     {
+      "source": "docs/ci-compute-budget.md",
+      "section": "Reference",
+      "covers": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/runtime-compat.yml",
+        ".github/workflows/veritas-advisory.yml",
+        ".github/workflows/docs.yml",
+        ".github/workflows/kit-gates-demo.yml",
+        "scripts/ci/compute-policy.mjs",
+        "scripts/ci/actionlint-compute.mjs",
+        "evals/ci/compute-policy.test.mjs",
+        "evals/static/test_ci_compute_policy.sh",
+        "evals/fixtures/ci-compute/**"
+      ]
+    },
+    {
       "source": "docs/fixture-ownership.md",
       "section": "Contribute"
     },
