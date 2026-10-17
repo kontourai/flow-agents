@@ -39,6 +39,9 @@ echo "=== Published Codex Install Integration ==="
 (cd "$ROOT_DIR" && npm pack --json --pack-destination "$PACK_DIR" >/dev/null)
 TARBALL="$(find "$PACK_DIR" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
 [[ -n "$TARBALL" ]] || { echo "npm pack did not produce a tarball" >&2; exit 1; }
+# Run the regression while its delivering tarball still exists, before this
+# eval enables the installed-module boundary and evicts delivery artifacts.
+node "$ROOT_DIR/evals/integration/codex-offline-uninstall.mjs" "$TARBALL" published
 TARBALL_LIST="$TMPDIR_EVAL/tarball.list"
 tar -tzf "$TARBALL" > "$TARBALL_LIST"
 grep -Fxq 'package/dist/codex/.codex/hooks.json' "$TARBALL_LIST"
@@ -319,4 +322,4 @@ for (const file of inventory.files) {
   }
 }
 NODE
-printf '1..1\nok 1 - packed Codex runtime survives package and cache removal\n'
+printf '1..1\nok 1 - packed Codex runtime and uninstall survive package and cache removal\n'
