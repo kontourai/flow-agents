@@ -191,6 +191,10 @@ provenance also uses this owned metadata.
 Installed package metadata comes from the owned `build/package.json`, so commands
 do not need a user project's `package.json`. Build tools load esbuild only when
 building; installed command execution needs no compiler, npm install, or cache.
+The production dependency pins esbuild to `0.28.2`, with the same exact version
+authorized in `pnpm-workspace.yaml`. Bundler updates must regenerate and check
+Knowledge YAML and runtime bundles, retaining their licenses and provenance;
+the generated runtime target remains Node 22.
 `build/runtime-imports.json` inventories the compiled runtime, vendor files and
 canonical config seed (`.codex/hooks.json` or `.claude/settings.json`). Codex
 retains that seed separately from the flattened, merged user `hooks.json`; the
