@@ -63,11 +63,23 @@ Two behavior changes apply to existing callers that pass only
   `not_verified` result with `not_verified_reason: reviewer_unavailable`
   instead of failing the workflow. Callers that previously relied on a red
   check to notice reviewer breakage must gate on the `verdict` output (and
-  `not_verified_reason` in the artifact) instead. One asymmetry is
-  intentional: an engine run that *succeeds* but emits a parseable,
-  schema-invalid assessment still hard-fails the composite at finalize —
-  that is a contract violation worth a red check, not a quiet
-  `NOT_VERIFIED`.
+  `not_verified_reason` in the artifact) instead. An engine run that
+  *succeeds* but emits a parseable, contract-invalid assessment is recorded
+  the same way, with `not_verified_reason: assessment_invalid` and the
+  validation message in `summary` and `gaps`. An earlier revision
+  deliberately hard-failed that case as "a contract violation worth a red
+  check"; the first live kiro run showed what that buys — a red step with
+  no result, no comment, no artifact, and the rejected assessment discarded
+  with the runner (#1399). A bound `NOT_VERIFIED` naming the violation is
+  the louder signal, and the route-back contract below already specifies
+  `missing_evidence` for every `not_verified` result — a contract for
+  consumers, not something this action enforces. Finalize still hard-fails
+  on runner-side faults: an unreadable target or assessment file, a target
+  that no longer matches the expected head, or git being unable to inspect
+  the checkout while checking a finding's path. Only the verdict vocabulary
+  is echoed from a rejected document; other engine-controlled text reaches
+  the record solely through the bounded validation message, which the
+  publisher sanitizes like every other engine-authored string.
 - **The result schema change is one-directional.** Artifacts produced by this
   version validate against this version's schema only: new skip results carry
   `not_verified_reason`, which the pre-change schema rejects under
@@ -82,11 +94,19 @@ difference is disclosed rather than papered over:
   OS-level read-only sandbox, `drop-sudo`, and provider-side schema
   enforcement of the assessment.
 - **kiro** has no equivalent OS sandbox. Containment is CLI tool policy only:
-  the run trusts `fs_read` alone — no shell, no write tools, no network tools,
-  never blanket tool trust — the working directory is a trusted temporary
-  directory so a PR-authored `.kiro/` configuration is never loaded, and the
-  assessment is captured from the model's stdout response rather than written
-  by the model. Because `kiro-cli` cannot run git without shell trust, the
+  the run trusts the three read-only file tools, `fs_read` (the CLI's alias
+  for `read`), `grep`, and `glob` — no shell, no write tools, no network
+  tools, never blanket tool trust — the working directory is a trusted
+  temporary directory so a PR-authored `.kiro/` configuration is never
+  loaded, and the assessment is captured from the model's stdout response
+  rather than written by the model. `grep` and `glob` have to be named: their
+  default is "trust working directory", and the checkout is not the working
+  directory, so under `--trust-tools=fs_read` non-interactive mode denied
+  every search of the checkout (see the first-run findings below). None of
+  the three is path-scoped: each reads whatever the runner user can read,
+  which is the boundary `fs_read` alone already had — the change widens the
+  tool list, not the filesystem reach, and no evidence here confines reads
+  (or symlink following) to the checkout. Because `kiro-cli` cannot run git without shell trust, the
   prepare step materializes the exact merge-base diff as `diff.patch` for
   read-only inspection. A defect in the CLI's tool policy would not be caught
   by an OS sandbox; weigh that when choosing the engine.
@@ -100,15 +120,23 @@ inherently weaker evidence of "the model said exactly this" than a
 harness-written file; the strict finalize validation is the equalizer both
 engines pass through.
 
-Not yet verified for kiro (until the first Linux CI run): the `fs_read`
-tool-policy binding under `--trust-tools`, and whether tool traces appear on
-stdout during a multi-step headless run. Treat the first live kiro review as
-that probe and read its raw artifacts before trusting the lane. In
-particular, the extractor assumes nothing untrusted follows the model's
-final reply on stdout (the last `> `-marked region is model-authored and
-terminal, as the live 2.20.2 probe showed); the first-run artifact must
-confirm that ordering, because content after the final marker is what the
-extractor trusts.
+Historical evidence reported in #1398/#1400 used kiro-cli 2.20.2 in
+station run 33571203065 with `--trust-tools=fs_read`: checkout searches
+were denied, finalize rejected the assessment, and the raw stdout was not
+retained. Denial traces were reported on stderr; retaining stdout does not
+preserve stderr. A separate local `/tools` measurement used **2.21.0**,
+where `fs_read,grep,glob` trusted those tools while shell/write remained
+untrusted. Those observations are historical, not current pinned-runtime
+proof. Corrected **2.20.2** live search behavior, shell/write refusal,
+`code`/`introspect` behavior and possible environment access, symlink
+confinement, extractor ordering, and service model-id fidelity remain
+**NOT_VERIFIED**. Inspect retained raw evidence from a pinned run before
+claiming those properties.
+
+Contract rejection retains the unchanged assessment and records its digest
+as SHA-256 of canonical parsed JSON, not the literal file bytes. The result's
+`integrity.assessment_sha256` covers the synthesized NOT_VERIFIED assessment;
+the rejected document digest is identified separately in `gaps`.
 
 The kiro toolchain is pinned exactly: `scripts/ci/install-kiro-cli.sh`
 downloads one immutable versioned artifact from the official Kiro CLI
@@ -136,10 +164,13 @@ while labeled codex. The `role` field keeps the historical
 
 A failed or crashed engine run — install failure, CLI crash, refused model,
 unparseable output — is routed to the NOT_VERIFIED recording instead of
-failing the workflow, with `not_verified_reason: reviewer_unavailable`. A
-withheld credential records `not_verified_reason: reviewer_withheld` as
-before. Consumers can distinguish "no reviewer was authorized" from "the
-reviewer broke" without parsing prose.
+failing the workflow, with `not_verified_reason: reviewer_unavailable`. An
+engine that answered with an assessment finalize rejects records
+`not_verified_reason: assessment_invalid`, with the validation message and
+the rejected document's SHA-256 in `gaps`. A withheld credential records
+`not_verified_reason: reviewer_withheld` as before. Consumers can
+distinguish "no reviewer was authorized", "the reviewer broke", and "the
+reviewer answered but broke the contract" without parsing prose.
 
 ## Advisory workflow
 
@@ -187,6 +218,24 @@ jobs:
           name: builder-codex-pr-review-${{ github.event.pull_request.head.sha }}
           path: ${{ steps.review.outputs.result-file }}
           if-no-files-found: error
+          retention-days: 30
+
+      # The review directory is the only record of what the engine actually
+      # said when the result is NOT_VERIFIED or the run went red; without it
+      # a rejected assessment is unrecoverable. `if: always()` so it survives
+      # a failed step; skip when prepare did not complete and no directory exists.
+      # `warn` handles a prepared directory whose optional files are absent.
+      # It holds the prompt, the exact diff, and raw engine output that echoes
+      # whatever checkout content the reviewer read — visible to anyone who
+      # can download this run's artifacts, which for a public repository is
+      # everyone. Nothing in it is redacted.
+      - name: Retain the review directory on every outcome
+        if: ${{ always() && steps.review.outputs['review-directory'] != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: builder-codex-pr-review-evidence-${{ github.event.pull_request.head.sha }}
+          path: ${{ steps.review.outputs.review-directory }}
+          if-no-files-found: warn
           retention-days: 30
 ```
 

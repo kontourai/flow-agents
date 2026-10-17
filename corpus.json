@@ -155,7 +155,12 @@
     },
     {
       "source": "docs/codex-pr-review-adoption.md",
-      "section": "Guides"
+      "section": "Guides",
+      "covers": [
+        ".github/actions/codex-pr-review/**",
+        "scripts/ci/codex-pr-review.mjs",
+        "schemas/codex-pr-review-*.schema.json"
+      ]
     },
     {
       "source": "docs/survey-utterance-check.md",
