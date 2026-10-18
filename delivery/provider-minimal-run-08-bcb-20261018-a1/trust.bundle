@@ -1,0 +1,1137 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=3",
+  "claims": [
+    {
+      "id": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-selected-work.flow-agents-workflow.work-item-provider-minimal-run-08-bcb-20261018-a1-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-70a20c9a222d36a5c83bdb9be3ce39a280f9d66408aba72e018886ad7637c7f7-gate-visit-2026-10-18t03-30-25z",
+      "subjectType": "work-item",
+      "subjectId": "provider-minimal-run-08-bcb-20261018-a1/gate-claim-selected-work",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "Work Item provider:minimal-run-08-bcb-20261018-a1 is durably assigned to the active workflow actor (assignment sha256:70a20c9a222d36a5c83bdb9be3ce39a280f9d66408aba72e018886ad7637c7f7).",
+      "value": "pass",
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "updatedAt": "2026-10-18T03:49:22.909Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "provider:minimal-run-08-bcb-20261018-a1",
+        "expected_producer": "builder.pull-work",
+        "recorded_by": "codexthread-def6df564909fc433efc78b1Kontour",
+        "self_produced_trust_slices": [
+          "selected-work"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/assignment/provider-minimal-run-08-bcb-20261018-a1.json",
+            "summary": "Durable local assignment record for the selected Work Item and active actor; sha256:70a20c9a222d36a5c83bdb9be3ce39a280f9d66408aba72e018886ad7637c7f7."
+          },
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/provider-minimal-run-08-bcb-20261018-a1--pull-work.md",
+            "summary": "Concrete pull-work selection report for provider:minimal-run-08-bcb-20261018-a1."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+          "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "selected-work",
+          "claim_type": "builder.pull-work.selected",
+          "subject_type": "work-item",
+          "step_id": "pull-work",
+          "identity_version": 2,
+          "recorded_at": "2026-10-18T03:30:25Z",
+          "flow_run_head": "2dd36330438ff7e120ad643e2586f6021385bce67048ce02b8b210596622c9e7",
+          "flow_id": "builder.deliver-existing",
+          "definition_version": "1.0",
+          "definition_digest": "b01b10de68e7b53d39094bd072bbc6c0400c8023b444d6bd7b511aba43eca6e5"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-pre-existing-implementation.flow-agents-workflow.this-eight-file-docs-change-existed-before-the-new-run-at-exact-bcb-no-implementation-claim-or-historical-receipt-adoption-gate-visit-2026-10-18t03-30-53-524z",
+      "subjectType": "change",
+      "subjectId": "provider-minimal-run-08-bcb-20261018-a1/gate-claim-pre-existing-implementation",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.existing-change.pre-existing-implementation",
+      "fieldOrBehavior": "This eight-file docs change existed before the new run at exact BCB; no implementation claim or historical receipt adoption.",
+      "value": "pass",
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "updatedAt": "2026-10-18T03:49:22.909Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.existing-change.pre-existing-implementation:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "provider:minimal-run-08-bcb-20261018-a1",
+        "expected_producer": "builder.review-existing",
+        "recorded_by": "codexthread-def6df564909fc433efc78b1Kontour",
+        "self_produced_trust_slices": [
+          "pre-existing-implementation"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "provider",
+            "url": "https://github.com/kontourai/flow-agents/pull/1524",
+            "summary": "Sole existing PR to adopt."
+          },
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/provider-minimal-run-08-bcb-20261018-a1--existing-change.md",
+            "summary": "Actual B/H/tree/eight-file scope, controls and evidence mapping."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+          "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "pre-existing-implementation",
+          "claim_type": "builder.existing-change.pre-existing-implementation",
+          "subject_type": "change",
+          "step_id": "existing-change",
+          "identity_version": 2,
+          "recorded_at": "2026-10-18T03:30:53.524Z",
+          "flow_run_head": "d3d4e677875b96e091796abbe0d4bd5b710f5d870ab168e27487374de7926212",
+          "flow_id": "builder.deliver-existing",
+          "definition_version": "1.0",
+          "definition_digest": "b01b10de68e7b53d39094bd072bbc6c0400c8023b444d6bd7b511aba43eca6e5"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-tests-evidence.flow-agents-workflow.selected-knowledge-suites-support-affected-store-behavior-only-new-docs-validation-and-fresh-full-scoped-semantic-review-separately-support-all-eight-file-prose-and-b1-accuracy-no-universal-runtime-qualification-gate-visit-2026-10-18t03-44-59-465z",
+      "subjectType": "flow-step",
+      "subjectId": "provider-minimal-run-08-bcb-20261018-a1/gate-claim-tests-evidence",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Selected Knowledge suites support affected-store behavior only; new docs validation and fresh full scoped semantic review separately support all eight-file prose and B1 accuracy. No universal runtime qualification.",
+      "value": "pass",
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "updatedAt": "2026-10-18T03:49:22.909Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command",
+        "command": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+        "workflow_subject_ref": "provider:minimal-run-08-bcb-20261018-a1",
+        "expected_producer": "builder.verify-work",
+        "recorded_by": "codexthread-def6df564909fc433efc78b1Kontour",
+        "self_produced_trust_slices": [
+          "acceptance-criteria",
+          "tests-evidence",
+          "policy-compliance"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "command",
+            "excerpt": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+            "summary": "Writer executes this exact committed affected-store group once; ancillary for front-door and B1 prose."
+          },
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/docs-validation.json",
+            "summary": "New H-bound docs check/build/content results, hashes, warnings and limits."
+          },
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/fresh-semantic-review.md",
+            "summary": "Fresh independent complete eight-file semantic report; not old R9/B1 acceptance."
+          },
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/provider-minimal-run-08-bcb-20261018-a1--existing-change.md",
+            "summary": "Existing change identity and fixed scope."
+          }
+        ],
+        "output_digest": {
+          "algorithm": "sha256",
+          "hex": "2e3cdc870c3604ae6bbd1940870e17f33d514815436fed3415c7e06e719620fd"
+        },
+        "observed_commands": [
+          {
+            "command": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+            "exit_code": 0,
+            "output_sha256": "2e3cdc870c3604ae6bbd1940870e17f33d514815436fed3415c7e06e719620fd",
+            "source": "canonical-writer-execution",
+            "observed_at_commit": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+            "worktree_clean": true,
+            "verification_workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+              "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+              "worktree_clean": true
+            },
+            "test_count": 89,
+            "execution_proof": {
+              "kind": "local-process-exit",
+              "runner": "node --test",
+              "static_test_units": 89
+            }
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+          "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "tests-evidence",
+          "claim_type": "builder.verify.tests",
+          "subject_type": "flow-step",
+          "step_id": "verify",
+          "identity_version": 2,
+          "recorded_at": "2026-10-18T03:44:59.465Z",
+          "flow_run_head": "cc2c8f5ddc5a8c85948aeaa36d6e8439555bbccc144832523902bbaf2d6580ac",
+          "flow_id": "builder.deliver-existing",
+          "definition_version": "1.0",
+          "definition_digest": "b01b10de68e7b53d39094bd072bbc6c0400c8023b444d6bd7b511aba43eca6e5"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-ci-merge-readiness.flow-agents-workflow.current-exactbcb-bounded-docs-readiness-pass-with-new-independent-critique-89writer-cases-docs3pass-actual-pr-adoption-strict-required-ci-success-and-original-dated-veritas1792291281590-input-terminal-publication-t-provider-approval-merge-remain-parent-owned-gate-visit-2026-10-18t03-48-52-566z",
+      "subjectType": "pull-request",
+      "subjectId": "provider-minimal-run-08-bcb-20261018-a1/gate-claim-ci-merge-readiness",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.merge-ready-ci.readiness",
+      "fieldOrBehavior": "Current exactBCB bounded docs readiness PASS with new independent critique/89writer cases/docs3PASS/actual PR adoption/strict required CI success and original dated Veritas1792291281590 input; terminal publication/T/provider approval/merge remain parent-owned.",
+      "value": "pass",
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "updatedAt": "2026-10-18T03:49:22.909Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.merge-ready-ci.readiness:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "provider:minimal-run-08-bcb-20261018-a1",
+        "expected_producer": "builder.release-readiness",
+        "recorded_by": "codexthread-def6df564909fc433efc78b1Kontour",
+        "self_produced_trust_slices": [
+          "ci-merge-readiness"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/release.json",
+            "summary": "Current assessment, exact-head provider checks, original exact-H governance claim/artifact, risks and parent authority."
+          },
+          {
+            "kind": "artifact",
+            "file": ".kontourai/veritas/evidence/veritas-1792291281590.json",
+            "summary": "Unchanged ORIGINAL2026-10-18T02:41:21.590Z exactB..BCB Veritas producer; SHA25623321fd624c92f3e8b16b74c89b4a4e6fb49c80ee591c4be69224427a30ad4ce; not a fresh run08 engine execution."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+          "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "ci-merge-readiness",
+          "claim_type": "builder.merge-ready-ci.readiness",
+          "subject_type": "pull-request",
+          "step_id": "merge-ready-ci",
+          "identity_version": 2,
+          "recorded_at": "2026-10-18T03:48:52.566Z",
+          "flow_run_head": "30674e673121991df7ca6dd38e85cf15064900e6e234524e985b8e5c0ca0fa6d",
+          "flow_id": "builder.deliver-existing",
+          "definition_version": "1.0",
+          "definition_digest": "b01b10de68e7b53d39094bd072bbc6c0400c8023b444d6bd7b511aba43eca6e5"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-decision-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-125z",
+      "subjectType": "decision",
+      "subjectId": "provider-minimal-run-08-bcb-20261018-a1/gate-claim-decision-evidence",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.learn.decisions",
+      "fieldOrBehavior": "Actual bounded run08 docs qualification decisions/outcomes and explicit supported no-new-correction disposition recorded; O1–O13/historical failures unchanged; terminal publication/T/push/merge parent-owned, open worktree retained.",
+      "value": "pass",
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "updatedAt": "2026-10-18T03:49:22.909Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.learn.decisions:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "provider:minimal-run-08-bcb-20261018-a1",
+        "expected_producer": "builder.learning-review",
+        "recorded_by": "codexthread-def6df564909fc433efc78b1Kontour",
+        "self_produced_trust_slices": [
+          "decision-evidence",
+          "learning-evidence"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/learning.json",
+            "summary": "Actual decisions, outcomes and follow-up disposition; no rewritten history."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+          "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "decision-evidence",
+          "claim_type": "builder.learn.decisions",
+          "subject_type": "decision",
+          "step_id": "learn",
+          "identity_version": 2,
+          "recorded_at": "2026-10-18T03:49:22.125Z",
+          "flow_run_head": "3e26bba8c4e26a7993602bcfe90ca1c408a59bdaa0d902b854101564f9dae0b0",
+          "flow_id": "builder.deliver-existing",
+          "definition_version": "1.0",
+          "definition_digest": "b01b10de68e7b53d39094bd072bbc6c0400c8023b444d6bd7b511aba43eca6e5"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-learning-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-909z",
+      "subjectType": "release",
+      "subjectId": "provider-minimal-run-08-bcb-20261018-a1/gate-claim-learning-evidence",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.learn.evidence",
+      "fieldOrBehavior": "Actual bounded run08 docs qualification decisions/outcomes and explicit supported no-new-correction disposition recorded; O1–O13/historical failures unchanged; terminal publication/T/push/merge parent-owned, open worktree retained.",
+      "value": "pass",
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "updatedAt": "2026-10-18T03:49:22.909Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.learn.evidence:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "workflow_subject_ref": "provider:minimal-run-08-bcb-20261018-a1",
+        "expected_producer": "builder.learning-review",
+        "recorded_by": "codexthread-def6df564909fc433efc78b1Kontour",
+        "self_produced_trust_slices": [
+          "decision-evidence",
+          "learning-evidence"
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/learning.json",
+            "summary": "Actual decisions, outcomes and follow-up disposition; no rewritten history."
+          }
+        ],
+        "verification_workspace_snapshot": {
+          "version": 1,
+          "kind": "git-worktree",
+          "algorithm": "sha256",
+          "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+          "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+          "worktree_clean": true
+        },
+        "gate_claim": {
+          "expectation_id": "learning-evidence",
+          "claim_type": "builder.learn.evidence",
+          "subject_type": "release",
+          "step_id": "learn",
+          "identity_version": 2,
+          "recorded_at": "2026-10-18T03:49:22.909Z",
+          "flow_run_head": "3e26bba8c4e26a7993602bcfe90ca1c408a59bdaa0d902b854101564f9dae0b0",
+          "flow_id": "builder.deliver-existing",
+          "definition_version": "1.0",
+          "definition_digest": "b01b10de68e7b53d39094bd072bbc6c0400c8023b444d6bd7b511aba43eca6e5"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "provider-minimal-run-08-bcb-20261018-a1-runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests.flow-agents-workflow.runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests-verified-2026-10-18t03-44-59-465z",
+      "subjectType": "flow-step",
+      "subjectId": "provider-minimal-run-08-bcb-20261018-a1/runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Runtime-specific front-door activation seven-flow catalog first-note preview ablation and public writer guidance accurately describe owning current source and explicit limits at H, supported by separate docs validation and fresh semantic review with ancillary affected-store tests",
+      "value": "pass",
+      "createdAt": "2026-10-18T03:44:59.465Z",
+      "updatedAt": "2026-10-18T03:44:59.465Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+      "metadata": {
+        "origin": "acceptance",
+        "criterion": {
+          "id": "runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests",
+          "description": "Runtime-specific front-door activation seven-flow catalog first-note preview ablation and public writer guidance accurately describe owning current source and explicit limits at H, supported by separate docs validation and fresh semantic review with ancillary affected-store tests",
+          "status": "pass",
+          "evidence_refs": [
+            {
+              "kind": "command",
+              "excerpt": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+              "summary": "Declared affected-store suites; ancillary only for frontdoor/B1 and other unrelated prose."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/docs-validation.json",
+              "summary": "Fresh docs check/build/content PASS at exact H;206pages; warnings and protocol limits retained."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/fresh-semantic-review.md",
+              "summary": "Complete fresh independent eight-file source semantic critique; substantive owning-source traces for both criteria; all current files reviewed."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/provider-minimal-run-08-bcb-20261018-a1--existing-change.md",
+              "summary": "Exact immutable B/H/tree/eightfile scope, criteria, controls and composite evidence mapping."
+            },
+            {
+              "kind": "artifact",
+              "file": "README.md",
+              "summary": "Current exact-H scoped prose independently traced in semantic report."
+            },
+            {
+              "kind": "artifact",
+              "file": "agents/dev.json",
+              "summary": "Current exact-H scoped prose independently traced in semantic report."
+            },
+            {
+              "kind": "artifact",
+              "file": "corpus.json",
+              "summary": "Current exact-H scoped prose independently traced in semantic report."
+            },
+            {
+              "kind": "artifact",
+              "file": "docs/getting-started.md",
+              "summary": "Current exact-H scoped prose independently traced in semantic report."
+            },
+            {
+              "kind": "artifact",
+              "file": "integrations/strands-ts/README.md",
+              "summary": "Current exact-H scoped prose independently traced in semantic report."
+            },
+            {
+              "kind": "artifact",
+              "file": "integrations/strands/README.md",
+              "summary": "Current exact-H scoped prose independently traced in semantic report."
+            },
+            {
+              "kind": "source",
+              "file": "src/cli/init.ts",
+              "line_start": 238,
+              "line_end": 250,
+              "excerpt": "function selectedKitIdsFromFlags(flags: ReturnType<typeof parseArgs>[\"flags\"]): string[] {\n  const explicit = flagList(flags, \"activate-kit\").map((id) => id.trim()).filter(Boolean);\n  if (explicit.length) return [...new Set(explicit)];\n  if (flagBool(flags, \"activate-kits\")) return catalogKitIds();\n  return [];\n}\n\n/**\n * Compute the `active_kits` durable-record field (kontourai/flow-agents kit activation\n * registry): a richer, explicit companion to the pre-existing `active_kit_ids: string[]` field\n * (kept unchanged for backward compatibility -- opencode/codex installs already key runtime asset\n * selection off it, and existing evals assert its exact shape).\n *",
+              "summary": "Owning runtime-specific activation/default logic; full catalog/copy/preview/writer traces in fresh review."
+            }
+          ],
+          "observed_commands": [
+            {
+              "command": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+              "exit_code": 0,
+              "output_sha256": "2e3cdc870c3604ae6bbd1940870e17f33d514815436fed3415c7e06e719620fd",
+              "source": "canonical-writer-execution",
+              "observed_at_commit": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+              "worktree_clean": true,
+              "verification_workspace_snapshot": {
+                "version": 1,
+                "kind": "git-worktree",
+                "algorithm": "sha256",
+                "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+                "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+                "worktree_clean": true
+              },
+              "test_count": 89,
+              "execution_proof": {
+                "kind": "local-process-exit",
+                "runner": "node --test",
+                "static_test_units": 89
+              }
+            }
+          ],
+          "identity_version": 2,
+          "verified_at": "2026-10-18T03:44:59.465Z",
+          "verified_by": "codexthread-def6df564909fc433efc78b1Kontour"
+        },
+        "workflow_subject_ref": "provider:minimal-run-08-bcb-20261018-a1"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "provider-minimal-run-08-bcb-20261018-a1-knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review.flow-agents-workflow.knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review-verified-2026-10-18t03-44-59-465z",
+      "subjectType": "flow-step",
+      "subjectId": "provider-minimal-run-08-bcb-20261018-a1/knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Knowledge five types eight mutations provenance identity query history archive detector and working-store versus provider Corpus boundaries accurately describe current source and explicit nonconformance at H, supported by declared affected-store tests separate docs validation and fresh semantic review",
+      "value": "pass",
+      "createdAt": "2026-10-18T03:44:59.465Z",
+      "updatedAt": "2026-10-18T03:44:59.465Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+      "metadata": {
+        "origin": "acceptance",
+        "criterion": {
+          "id": "knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review",
+          "description": "Knowledge five types eight mutations provenance identity query history archive detector and working-store versus provider Corpus boundaries accurately describe current source and explicit nonconformance at H, supported by declared affected-store tests separate docs validation and fresh semantic review",
+          "status": "pass",
+          "evidence_refs": [
+            {
+              "kind": "command",
+              "excerpt": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+              "summary": "Declared affected-store suites; ancillary only for frontdoor/B1 and other unrelated prose."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/docs-validation.json",
+              "summary": "Fresh docs check/build/content PASS at exact H;206pages; warnings and protocol limits retained."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/fresh-semantic-review.md",
+              "summary": "Complete fresh independent eight-file source semantic critique; substantive owning-source traces for both criteria; all current files reviewed."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/provider-minimal-run-08-bcb-20261018-a1--existing-change.md",
+              "summary": "Exact immutable B/H/tree/eightfile scope, criteria, controls and composite evidence mapping."
+            },
+            {
+              "kind": "artifact",
+              "file": "kits/knowledge/docs/README.md",
+              "summary": "Current exact-H scoped prose independently traced in semantic report."
+            },
+            {
+              "kind": "artifact",
+              "file": "kits/knowledge/docs/store-contract.md",
+              "summary": "Current exact-H scoped prose independently traced in semantic report."
+            },
+            {
+              "kind": "source",
+              "file": "kits/knowledge/adapters/default-store/index.js",
+              "line_start": 915,
+              "line_end": 933,
+              "excerpt": "  async listByCategory(category, options = {}) {\n    const records = this._allRecords();\n    const includeRetired = options.includeRetired === true;\n    // Derived staleness filter (#341): keep only records past their own effective\n    // expiry at `now` (injectable for tests). Absent → no staleness filtering.\n    const staleOnly = options.stale === true;\n    const nowMs = options.now !== undefined ? new Date(options.now).getTime() : Date.now();\n    const keep = (r) =>\n      (includeRetired || (r.status || \"active\") !== \"retired\") &&\n      (!staleOnly || isRecordStale(r, nowMs));\n    if (options.prefix) {\n      return records.filter(\n        (r) => (r.category === category || r.category.startsWith(`${category}.`)) && keep(r)\n      );\n    }\n    return records.filter((r) => r.category === category && keep(r));\n  }\n\n  // -------------------------------------------------------------------------",
+              "summary": "Owning lifecycle listing implementation; complete mutation/identity/archive/detector/projection traces and nonconformance distinctions in fresh review."
+            }
+          ],
+          "observed_commands": [
+            {
+              "command": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+              "exit_code": 0,
+              "output_sha256": "2e3cdc870c3604ae6bbd1940870e17f33d514815436fed3415c7e06e719620fd",
+              "source": "canonical-writer-execution",
+              "observed_at_commit": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+              "worktree_clean": true,
+              "verification_workspace_snapshot": {
+                "version": 1,
+                "kind": "git-worktree",
+                "algorithm": "sha256",
+                "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+                "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+                "worktree_clean": true
+              },
+              "test_count": 89,
+              "execution_proof": {
+                "kind": "local-process-exit",
+                "runner": "node --test",
+                "static_test_units": 89
+              }
+            }
+          ],
+          "identity_version": 2,
+          "verified_at": "2026-10-18T03:44:59.465Z",
+          "verified_by": "codexthread-def6df564909fc433efc78b1Kontour"
+        },
+        "workflow_subject_ref": "provider:minimal-run-08-bcb-20261018-a1"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "provider-minimal-run-08-bcb-20261018-a1-run08-bcb-fresh-semantic-a1.flow-agents-workflow.fresh-complete-bounded-eight-file-source-semantic-pass-at-bcb-both-immutable-criteria-covered-no-material-scoped-contradictions-f1-f24-b1-accepted-o1-o13-disclosed-unrepaired-tests-and-acceptance-pending-no-runtime-conformance-authenticated-independence-hosted-publication-or-merge-claim-reviewed-2026-10-18t03-43-42-562z",
+      "subjectType": "workflow-critique",
+      "subjectId": "provider-minimal-run-08-bcb-20261018-a1/run08-bcb-fresh-semantic-a1",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Fresh complete bounded eight-file SOURCE semantic PASS at BCB, both immutable criteria covered; no material scoped contradictions. F1-F24/B1 accepted, O1-O13 disclosed/unrepaired. Tests and acceptance pending; no runtime conformance, authenticated independence, hosted publication or merge claim.",
+      "value": "pass",
+      "createdAt": "2026-10-18T03:43:42.562Z",
+      "updatedAt": "2026-10-18T03:43:42.562Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review:attestation",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "codex:thread-b78a367cd12fcae21e16a87f:Kontour",
+        "reviewer_source": "explicit",
+        "reviewed_at": "2026-10-18T03:43:42.562Z",
+        "identity_version": 2,
+        "critique_sequence": 1,
+        "critique_predecessor_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "critique_record_hash": "1157af11a260a6dc46e6b6723de1f5e9fcfe3df11d6327e941a5ce9cda19326c",
+        "findings": [],
+        "lanes": [
+          {
+            "id": "bounded-docs-semantics",
+            "status": "pass",
+            "summary": "Complete fresh eight-file C14 C15 C27 C28 C31 and B1 semantic source review at exact BCB; both immutable criteria covered. No material scoped contradiction. F1-F24 responses accepted; O1-O13 remain accurately disclosed/unrepaired. No tests, runtime conformance, external authenticated identity or delivery claim.",
+            "evidence_refs": [
+              {
+                "kind": "artifact",
+                "file": "/Users/brian/dev/github/kontourai/flow-agents-worktrees/docs-truth-final-20261016/.kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/fresh-semantic-review.md",
+                "summary": "Full current-file coverage, both criteria, all prior findings and explicit execution limits."
+              },
+              {
+                "kind": "source",
+                "file": "src/cli/workflow.ts",
+                "line_start": 3048,
+                "line_end": 3083,
+                "excerpt": "workflow critique must persist only through trust.bundle",
+                "summary": "Public distinct-reviewer critique output and unchanged Flow/legacy-sidecar boundary for B1."
+              },
+              {
+                "kind": "source",
+                "file": "kits/knowledge/adapters/obsidian-store/index.js",
+                "line_start": 507,
+                "line_end": 515,
+                "excerpt": "if (entry.archived) continue;",
+                "summary": "Archive exclusion precedes listings, matching qualified includeRetired/history account."
+              },
+              {
+                "kind": "source",
+                "file": "kits/knowledge/providers/surface-adapter/index.js",
+                "line_start": 39,
+                "line_end": 42,
+                "excerpt": "return \"proposed\";",
+                "summary": "Stored labels do not earn verification; retired maps separately to superseded."
+              },
+              {
+                "kind": "artifact",
+                "file": "/Users/brian/dev/github/kontourai/flow-agents-worktrees/docs-truth-final-20261016/.kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/docs-validation.json",
+                "summary": "Separate current-head operator docs results; log/output hashes inspected, not rerun."
+              }
+            ]
+          }
+        ],
+        "review_target": {
+          "artifacts": [
+            {
+              "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/provider-minimal-run-08-bcb-20261018-a1--existing-change.md",
+              "sha256": "a7608985097ac74908e52c61d0b059c33933c4ec32b5ef5e692bb6738c03c47b",
+              "role": "review_subject"
+            },
+            {
+              "file": "README.md",
+              "sha256": "11b49971c926e43022d2a2f02da0ffe7d21f719c3ed2df0ce8d177b8ba599f3e",
+              "role": "review_subject"
+            },
+            {
+              "file": "agents/dev.json",
+              "sha256": "bd2eeb9069cceafe5fe720ad9920af7e0b269f7e4373a78af45de1ac167da5f0",
+              "role": "review_subject"
+            },
+            {
+              "file": "corpus.json",
+              "sha256": "7dbf5dba987c2cff4bbb1d5e10a7ae12d268a74a5e994665bcde1b0a77425b06",
+              "role": "review_subject"
+            },
+            {
+              "file": "docs/getting-started.md",
+              "sha256": "a826130f2c909c018e0b3e341eceaa810107218633bc00be11150f0b93844fa6",
+              "role": "review_subject"
+            },
+            {
+              "file": "integrations/strands-ts/README.md",
+              "sha256": "b57bb5103b301f226dafba0b8da84c0dd7bb7234799a5a4e9f32b0a128a91d08",
+              "role": "review_subject"
+            },
+            {
+              "file": "integrations/strands/README.md",
+              "sha256": "7b9d67a993f7b5a678b88f4a495e9cfa5d1ff0eeddcc1d57bd9b0e8eb600701c",
+              "role": "review_subject"
+            },
+            {
+              "file": "kits/knowledge/docs/README.md",
+              "sha256": "8fef872ba017c06f1d7eb7dfefb8e73ffa9ae3a03ddc4fe8e021155843058b1c",
+              "role": "review_subject"
+            },
+            {
+              "file": "kits/knowledge/docs/store-contract.md",
+              "sha256": "0c1a02ff154db0d0bd84cbc84b8a15f84f8ceb83373cc46e055651e4cf220b93",
+              "role": "review_subject"
+            },
+            {
+              "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/fresh-semantic-review.md",
+              "sha256": "6109a1a3bc0be973603e9434b8cc2453cb1ab9cc23b121d9b4f557432a35d940",
+              "role": "review_subject"
+            },
+            {
+              "file": ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/provider-minimal-run-08-bcb-20261018-a1--deliver.md",
+              "sha256": "fb2d954021355a348c3423be10c70b1e51a2b805d67ad4119d88cd42b5ee830e",
+              "role": "review_subject",
+              "control_anchors": {
+                "version": 1,
+                "execution_mode": "entire_report",
+                "execution_sha256": "fb2d954021355a348c3423be10c70b1e51a2b805d67ad4119d88cd42b5ee830e",
+                "plan_sha256": "b7c03610089b9f660990ee7db3290cc8d8564161b079319c9c7ba1f19dc2e190",
+                "acceptance_sha256": "5a187ca2ea7b839fe7cfb3a258e2fcfd89d3592cf3056e16fdaf5bbd36f3280f",
+                "scope_claims_sha256": "7a767b2bfa261e5e34ca694999e1a81d9435516a4704d8c858046119ed11a1a8"
+              }
+            }
+          ],
+          "workspace_snapshot": {
+            "version": 1,
+            "kind": "git-worktree",
+            "algorithm": "sha256",
+            "digest": "2fc876dc5f09b1c522b420a4eed84d916a1be820b4237d35ec7f0ae80723df9e",
+            "head_sha": "bcb43338f6cd43dd7f34a4cc8f4cdf2d2a3a313c",
+            "worktree_clean": true
+          }
+        },
+        "artifact_refs": [
+          ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/provider-minimal-run-08-bcb-20261018-a1--existing-change.md",
+          "README.md",
+          "agents/dev.json",
+          "corpus.json",
+          "docs/getting-started.md",
+          "integrations/strands-ts/README.md",
+          "integrations/strands/README.md",
+          "kits/knowledge/docs/README.md",
+          "kits/knowledge/docs/store-contract.md",
+          ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/fresh-semantic-review.md",
+          ".kontourai/flow-agents/provider-minimal-run-08-bcb-20261018-a1/provider-minimal-run-08-bcb-20261018-a1--deliver.md"
+        ],
+        "workflow_subject_ref": "provider:minimal-run-08-bcb-20261018-a1",
+        "critique_record_id": "critique:1157af11a260a6dc46e6b6723de1f5e9fcfe3df11d6327e941a5ce9cda19326c"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-selected-work.flow-agents-workflow.work-item-provider-minimal-run-08-bcb-20261018-a1-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-70a20c9a222d36a5c83bdb9be3ce39a280f9d66408aba72e018886ad7637c7f7-gate-visit-2026-10-18t03-30-25z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-selected-work.flow-agents-workflow.work-item-provider-minimal-run-08-bcb-20261018-a1-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-70a20c9a222d36a5c83bdb9be3ce39a280f9d66408aba72e018886ad7637c7f7-gate-visit-2026-10-18t03-30-25z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "provider-minimal-run-08-bcb-20261018-a1/evidence.json",
+      "excerptOrSummary": "Work Item provider:minimal-run-08-bcb-20261018-a1 is durably assigned to the active workflow actor (assignment sha256:70a20c9a222d36a5c83bdb9be3ce39a280f9d66408aba72e018886ad7637c7f7).",
+      "observedAt": "2026-10-18T03:49:22.909Z",
+      "collectedBy": "codexthread-def6df564909fc433efc78b1Kontour",
+      "passing": true
+    },
+    {
+      "id": "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-pre-existing-implementation.flow-agents-workflow.this-eight-file-docs-change-existed-before-the-new-run-at-exact-bcb-no-implementation-claim-or-historical-receipt-adoption-gate-visit-2026-10-18t03-30-53-524z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-pre-existing-implementation.flow-agents-workflow.this-eight-file-docs-change-existed-before-the-new-run-at-exact-bcb-no-implementation-claim-or-historical-receipt-adoption-gate-visit-2026-10-18t03-30-53-524z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "provider-minimal-run-08-bcb-20261018-a1/evidence.json",
+      "excerptOrSummary": "This eight-file docs change existed before the new run at exact BCB; no implementation claim or historical receipt adoption.",
+      "observedAt": "2026-10-18T03:49:22.909Z",
+      "collectedBy": "codexthread-def6df564909fc433efc78b1Kontour",
+      "passing": true
+    },
+    {
+      "id": "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-tests-evidence.flow-agents-workflow.selected-knowledge-suites-support-affected-store-behavior-only-new-docs-validation-and-fresh-full-scoped-semantic-review-separately-support-all-eight-file-prose-and-b1-accuracy-no-universal-runtime-qualification-gate-visit-2026-10-18t03-44-59-465z:1",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-tests-evidence.flow-agents-workflow.selected-knowledge-suites-support-affected-store-behavior-only-new-docs-validation-and-fresh-full-scoped-semantic-review-separately-support-all-eight-file-prose-and-b1-accuracy-no-universal-runtime-qualification-gate-visit-2026-10-18t03-44-59-465z",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "provider-minimal-run-08-bcb-20261018-a1/command-log.jsonl",
+      "excerptOrSummary": "Selected Knowledge suites support affected-store behavior only; new docs validation and fresh full scoped semantic review separately support all eight-file prose and B1 accuracy. No universal runtime qualification.",
+      "observedAt": "2026-10-18T03:49:22.909Z",
+      "collectedBy": "codexthread-def6df564909fc433efc78b1Kontour",
+      "supportStrength": "entails",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-ci-merge-readiness.flow-agents-workflow.current-exactbcb-bounded-docs-readiness-pass-with-new-independent-critique-89writer-cases-docs3pass-actual-pr-adoption-strict-required-ci-success-and-original-dated-veritas1792291281590-input-terminal-publication-t-provider-approval-merge-remain-parent-owned-gate-visit-2026-10-18t03-48-52-566z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-ci-merge-readiness.flow-agents-workflow.current-exactbcb-bounded-docs-readiness-pass-with-new-independent-critique-89writer-cases-docs3pass-actual-pr-adoption-strict-required-ci-success-and-original-dated-veritas1792291281590-input-terminal-publication-t-provider-approval-merge-remain-parent-owned-gate-visit-2026-10-18t03-48-52-566z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "provider-minimal-run-08-bcb-20261018-a1/evidence.json",
+      "excerptOrSummary": "Current exactBCB bounded docs readiness PASS with new independent critique/89writer cases/docs3PASS/actual PR adoption/strict required CI success and original dated Veritas1792291281590 input; terminal publication/T/provider approval/merge remain parent-owned.",
+      "observedAt": "2026-10-18T03:49:22.909Z",
+      "collectedBy": "codexthread-def6df564909fc433efc78b1Kontour",
+      "passing": true
+    },
+    {
+      "id": "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-decision-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-125z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-decision-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-125z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "provider-minimal-run-08-bcb-20261018-a1/evidence.json",
+      "excerptOrSummary": "Actual bounded run08 docs qualification decisions/outcomes and explicit supported no-new-correction disposition recorded; O1–O13/historical failures unchanged; terminal publication/T/push/merge parent-owned, open worktree retained.",
+      "observedAt": "2026-10-18T03:49:22.909Z",
+      "collectedBy": "codexthread-def6df564909fc433efc78b1Kontour",
+      "passing": true
+    },
+    {
+      "id": "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-learning-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-909z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-learning-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-909z",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "provider-minimal-run-08-bcb-20261018-a1/evidence.json",
+      "excerptOrSummary": "Actual bounded run08 docs qualification decisions/outcomes and explicit supported no-new-correction disposition recorded; O1–O13/historical failures unchanged; terminal publication/T/push/merge parent-owned, open worktree retained.",
+      "observedAt": "2026-10-18T03:49:22.909Z",
+      "collectedBy": "codexthread-def6df564909fc433efc78b1Kontour",
+      "passing": true
+    },
+    {
+      "id": "ev:provider-minimal-run-08-bcb-20261018-a1-runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests.flow-agents-workflow.runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests-verified-2026-10-18t03-44-59-465z:f15012a5bc9c69e5",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests.flow-agents-workflow.runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests-verified-2026-10-18t03-44-59-465z",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "provider-minimal-run-08-bcb-20261018-a1/observed-command",
+      "excerptOrSummary": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+      "observedAt": "2026-10-18T03:44:59.465Z",
+      "collectedBy": "codexthread-def6df564909fc433efc78b1Kontour",
+      "supportStrength": "entails",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:provider-minimal-run-08-bcb-20261018-a1-knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review.flow-agents-workflow.knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review-verified-2026-10-18t03-44-59-465z:f15012a5bc9c69e5",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review.flow-agents-workflow.knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review-verified-2026-10-18t03-44-59-465z",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "provider-minimal-run-08-bcb-20261018-a1/observed-command",
+      "excerptOrSummary": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+      "observedAt": "2026-10-18T03:44:59.465Z",
+      "collectedBy": "codexthread-def6df564909fc433efc78b1Kontour",
+      "supportStrength": "entails",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "node --test kits/knowledge/ingest/ingest.test.js kits/knowledge/providers/surface-adapter/surface-adapter.test.js kits/knowledge/adapters/default-store/cache-version.test.js kits/knowledge/adapters/shared/conditional-get.test.js kits/knowledge/providers/work-item/conditional.test.js kits/knowledge/adapters/shared/ingest-graph.test.js",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:provider-minimal-run-08-bcb-20261018-a1-run08-bcb-fresh-semantic-a1.flow-agents-workflow.fresh-complete-bounded-eight-file-source-semantic-pass-at-bcb-both-immutable-criteria-covered-no-material-scoped-contradictions-f1-f24-b1-accepted-o1-o13-disclosed-unrepaired-tests-and-acceptance-pending-no-runtime-conformance-authenticated-independence-hosted-publication-or-merge-claim-reviewed-2026-10-18t03-43-42-562z:verdict",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-run08-bcb-fresh-semantic-a1.flow-agents-workflow.fresh-complete-bounded-eight-file-source-semantic-pass-at-bcb-both-immutable-criteria-covered-no-material-scoped-contradictions-f1-f24-b1-accepted-o1-o13-disclosed-unrepaired-tests-and-acceptance-pending-no-runtime-conformance-authenticated-independence-hosted-publication-or-merge-claim-reviewed-2026-10-18t03-43-42-562z",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "provider-minimal-run-08-bcb-20261018-a1/trust.bundle#critique/critique:1157af11a260a6dc46e6b6723de1f5e9fcfe3df11d6327e941a5ce9cda19326c",
+      "excerptOrSummary": "critique verdict: pass",
+      "observedAt": "2026-10-18T03:43:42.562Z",
+      "collectedBy": "codex:thread-b78a367cd12fcae21e16a87f:Kontour",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:attestation",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.existing-change.pre-existing-implementation:attestation",
+      "claimType": "builder.existing-change.pre-existing-implementation",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.existing-change.pre-existing-implementation claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:test_output",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.merge-ready-ci.readiness:attestation",
+      "claimType": "builder.merge-ready-ci.readiness",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.merge-ready-ci.readiness claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.learn.decisions:attestation",
+      "claimType": "builder.learn.decisions",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.learn.decisions claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.learn.evidence:attestation",
+      "claimType": "builder.learn.evidence",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.learn.evidence claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion:test_output",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review:attestation",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:provider-minimal-run-08-bcb-20261018-a1-gate-claim-selected-work.flow-agents-workflow.work-item-provider-minimal-run-08-bcb-20261018-a1-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-70a20c9a222d36a5c83bdb9be3ce39a280f9d66408aba72e018886ad7637c7f7-gate-visit-2026-10-18t03-30-25z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-selected-work.flow-agents-workflow.work-item-provider-minimal-run-08-bcb-20261018-a1-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-70a20c9a222d36a5c83bdb9be3ce39a280f9d66408aba72e018886ad7637c7f7-gate-visit-2026-10-18t03-30-25z",
+      "status": "verified",
+      "actor": "codexthread-def6df564909fc433efc78b1Kontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-selected-work.flow-agents-workflow.work-item-provider-minimal-run-08-bcb-20261018-a1-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-70a20c9a222d36a5c83bdb9be3ce39a280f9d66408aba72e018886ad7637c7f7-gate-visit-2026-10-18t03-30-25z"
+      ],
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "verifiedAt": "2026-10-18T03:49:22.909Z"
+    },
+    {
+      "id": "evt:provider-minimal-run-08-bcb-20261018-a1-gate-claim-pre-existing-implementation.flow-agents-workflow.this-eight-file-docs-change-existed-before-the-new-run-at-exact-bcb-no-implementation-claim-or-historical-receipt-adoption-gate-visit-2026-10-18t03-30-53-524z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-pre-existing-implementation.flow-agents-workflow.this-eight-file-docs-change-existed-before-the-new-run-at-exact-bcb-no-implementation-claim-or-historical-receipt-adoption-gate-visit-2026-10-18t03-30-53-524z",
+      "status": "verified",
+      "actor": "codexthread-def6df564909fc433efc78b1Kontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-pre-existing-implementation.flow-agents-workflow.this-eight-file-docs-change-existed-before-the-new-run-at-exact-bcb-no-implementation-claim-or-historical-receipt-adoption-gate-visit-2026-10-18t03-30-53-524z"
+      ],
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "verifiedAt": "2026-10-18T03:49:22.909Z"
+    },
+    {
+      "id": "evt:provider-minimal-run-08-bcb-20261018-a1-gate-claim-tests-evidence.flow-agents-workflow.selected-knowledge-suites-support-affected-store-behavior-only-new-docs-validation-and-fresh-full-scoped-semantic-review-separately-support-all-eight-file-prose-and-b1-accuracy-no-universal-runtime-qualification-gate-visit-2026-10-18t03-44-59-465z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-tests-evidence.flow-agents-workflow.selected-knowledge-suites-support-affected-store-behavior-only-new-docs-validation-and-fresh-full-scoped-semantic-review-separately-support-all-eight-file-prose-and-b1-accuracy-no-universal-runtime-qualification-gate-visit-2026-10-18t03-44-59-465z",
+      "status": "verified",
+      "actor": "codexthread-def6df564909fc433efc78b1Kontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-tests-evidence.flow-agents-workflow.selected-knowledge-suites-support-affected-store-behavior-only-new-docs-validation-and-fresh-full-scoped-semantic-review-separately-support-all-eight-file-prose-and-b1-accuracy-no-universal-runtime-qualification-gate-visit-2026-10-18t03-44-59-465z:1"
+      ],
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "verifiedAt": "2026-10-18T03:49:22.909Z"
+    },
+    {
+      "id": "evt:provider-minimal-run-08-bcb-20261018-a1-gate-claim-ci-merge-readiness.flow-agents-workflow.current-exactbcb-bounded-docs-readiness-pass-with-new-independent-critique-89writer-cases-docs3pass-actual-pr-adoption-strict-required-ci-success-and-original-dated-veritas1792291281590-input-terminal-publication-t-provider-approval-merge-remain-parent-owned-gate-visit-2026-10-18t03-48-52-566z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-ci-merge-readiness.flow-agents-workflow.current-exactbcb-bounded-docs-readiness-pass-with-new-independent-critique-89writer-cases-docs3pass-actual-pr-adoption-strict-required-ci-success-and-original-dated-veritas1792291281590-input-terminal-publication-t-provider-approval-merge-remain-parent-owned-gate-visit-2026-10-18t03-48-52-566z",
+      "status": "verified",
+      "actor": "codexthread-def6df564909fc433efc78b1Kontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-ci-merge-readiness.flow-agents-workflow.current-exactbcb-bounded-docs-readiness-pass-with-new-independent-critique-89writer-cases-docs3pass-actual-pr-adoption-strict-required-ci-success-and-original-dated-veritas1792291281590-input-terminal-publication-t-provider-approval-merge-remain-parent-owned-gate-visit-2026-10-18t03-48-52-566z"
+      ],
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "verifiedAt": "2026-10-18T03:49:22.909Z"
+    },
+    {
+      "id": "evt:provider-minimal-run-08-bcb-20261018-a1-gate-claim-decision-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-125z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-decision-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-125z",
+      "status": "verified",
+      "actor": "codexthread-def6df564909fc433efc78b1Kontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-decision-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-125z"
+      ],
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "verifiedAt": "2026-10-18T03:49:22.909Z"
+    },
+    {
+      "id": "evt:provider-minimal-run-08-bcb-20261018-a1-gate-claim-learning-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-909z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-gate-claim-learning-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-909z",
+      "status": "verified",
+      "actor": "codexthread-def6df564909fc433efc78b1Kontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:provider-minimal-run-08-bcb-20261018-a1-gate-claim-learning-evidence.flow-agents-workflow.actual-bounded-run08-docs-qualification-decisions-outcomes-and-explicit-supported-no-new-correction-disposition-recorded-o1-o13-historical-failures-unchanged-terminal-publication-t-push-merge-parent-owned-open-worktree-retained-gate-visit-2026-10-18t03-49-22-909z"
+      ],
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "verifiedAt": "2026-10-18T03:49:22.909Z"
+    },
+    {
+      "id": "evt:provider-minimal-run-08-bcb-20261018-a1-runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests.flow-agents-workflow.runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests-verified-2026-10-18t03-44-59-465z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests.flow-agents-workflow.runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests-verified-2026-10-18t03-44-59-465z",
+      "status": "verified",
+      "actor": "codexthread-def6df564909fc433efc78b1Kontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:provider-minimal-run-08-bcb-20261018-a1-runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests.flow-agents-workflow.runtime-specific-front-door-activation-seven-flow-catalog-first-note-preview-ablation-and-public-writer-guidance-accurately-describe-owning-current-source-and-explicit-limits-at-h-supported-by-separate-docs-validation-and-fresh-semantic-review-with-ancillary-affected-store-tests-verified-2026-10-18t03-44-59-465z:f15012a5bc9c69e5"
+      ],
+      "createdAt": "2026-10-18T03:44:59.465Z",
+      "verifiedAt": "2026-10-18T03:44:59.465Z"
+    },
+    {
+      "id": "evt:provider-minimal-run-08-bcb-20261018-a1-knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review.flow-agents-workflow.knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review-verified-2026-10-18t03-44-59-465z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review.flow-agents-workflow.knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review-verified-2026-10-18t03-44-59-465z",
+      "status": "verified",
+      "actor": "codexthread-def6df564909fc433efc78b1Kontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:provider-minimal-run-08-bcb-20261018-a1-knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review.flow-agents-workflow.knowledge-five-types-eight-mutations-provenance-identity-query-history-archive-detector-and-working-store-versus-provider-corpus-boundaries-accurately-describe-current-source-and-explicit-nonconformance-at-h-supported-by-declared-affected-store-tests-separate-docs-validation-and-fresh-semantic-review-verified-2026-10-18t03-44-59-465z:f15012a5bc9c69e5"
+      ],
+      "createdAt": "2026-10-18T03:44:59.465Z",
+      "verifiedAt": "2026-10-18T03:44:59.465Z"
+    },
+    {
+      "id": "evt:provider-minimal-run-08-bcb-20261018-a1-run08-bcb-fresh-semantic-a1.flow-agents-workflow.fresh-complete-bounded-eight-file-source-semantic-pass-at-bcb-both-immutable-criteria-covered-no-material-scoped-contradictions-f1-f24-b1-accepted-o1-o13-disclosed-unrepaired-tests-and-acceptance-pending-no-runtime-conformance-authenticated-independence-hosted-publication-or-merge-claim-reviewed-2026-10-18t03-43-42-562z",
+      "claimId": "provider-minimal-run-08-bcb-20261018-a1-run08-bcb-fresh-semantic-a1.flow-agents-workflow.fresh-complete-bounded-eight-file-source-semantic-pass-at-bcb-both-immutable-criteria-covered-no-material-scoped-contradictions-f1-f24-b1-accepted-o1-o13-disclosed-unrepaired-tests-and-acceptance-pending-no-runtime-conformance-authenticated-independence-hosted-publication-or-merge-claim-reviewed-2026-10-18t03-43-42-562z",
+      "status": "verified",
+      "actor": "codex:thread-b78a367cd12fcae21e16a87f:Kontour",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:provider-minimal-run-08-bcb-20261018-a1-run08-bcb-fresh-semantic-a1.flow-agents-workflow.fresh-complete-bounded-eight-file-source-semantic-pass-at-bcb-both-immutable-criteria-covered-no-material-scoped-contradictions-f1-f24-b1-accepted-o1-o13-disclosed-unrepaired-tests-and-acceptance-pending-no-runtime-conformance-authenticated-independence-hosted-publication-or-merge-claim-reviewed-2026-10-18t03-43-42-562z:verdict"
+      ],
+      "createdAt": "2026-10-18T03:49:22.909Z",
+      "verifiedAt": "2026-10-18T03:49:22.909Z"
+    }
+  ]
+}
