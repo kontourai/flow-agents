@@ -2,10 +2,12 @@
 
 **SPIKE — Framework Adapter Proof of Concept**
 
-This package proves the thesis: Flow Agents' process-discipline layer
-(telemetry events + workflow steering + policy gates) can compile to a
-**framework adapter** hook surface — here, AWS Strands Agents — not just
-coding-agent harnesses.
+This preview explores a **framework adapter** for AWS Strands Agents. It emits
+telemetry and calls the canonical config-protection policy through a subprocess,
+with a Python fallback. The package's unit tests can run without the Strands SDK;
+they do not qualify a live Strands application or full blocking workflow support.
+Use the coding-agent runtime table in the [root README](../../README.md#runtime-and-support-matrix)
+for the supported host paths.
 
 ---
 
@@ -215,11 +217,12 @@ Tests use stdlib `unittest` only — no pytest, no strands-agents required.
    or upstream SDK support for mutable system-prompt context in the invocation
    event.
 
-3. **session.usage event omitted**: The JS harness emits a `session.usage`
-   event on stop with token counts pulled from the transcript.  The Strands
-   `AfterInvocationEvent` does not (yet) expose token-usage data in the hook
-   payload, so this event is not emitted.  Productization would need to read
-   usage from the agent's response object and attach it here.
+3. **Conditional session.usage**: Registration adds the model-call callback only
+   when the installed SDK exposes `AfterModelCallEvent`. The callback accumulates
+   recognized usage payloads; after invocation, `session.usage` is emitted only
+   when data was collected. Older SDKs or unrecognized payloads can therefore
+   produce no usage event. This is not transcript-derived usage, billing evidence,
+   or a measured cost/efficacy/savings result.
 
 4. **No analytics channel**: The harness adapters write to two channels
    (full + analytics) with different redaction profiles.  This spike writes
@@ -248,7 +251,7 @@ Tests use stdlib `unittest` only — no pytest, no strands-agents required.
 ## What productization would require
 
 - Upstream Strands SDK support for mutable per-turn context injection.
-- Token-usage exposure in `AfterInvocationEvent` for `session.usage` events.
+- Live SDK/event/payload qualification of the conditional model-call usage path.
 - Dual-channel JSONL + optional HTTP transport mirroring the bash transport.
 - Packaging as a proper release with semantic versioning once the Strands hook
   API stabilizes.

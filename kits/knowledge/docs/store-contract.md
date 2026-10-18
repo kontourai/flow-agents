@@ -7,28 +7,54 @@ version: "1.0"
 
 This document defines the storage contract for the Knowledge Kit. Any store adapter that
 implements this contract can be substituted for the default adapter without changing kit flows.
-The contract is self-contained: a second adapter author should be able to read this document
-alone and produce a conforming implementation.
+Sections 1–9 consolidate the current envelope and adapter surface, including the
+existing snapshot, lifecycle, person, identity and freshness extensions. The
+addenda retain the reasons and detailed semantics of those extensions, in their
+original order; their earlier type counts and interface fragments are extension
+history, not alternative current contracts. This clarification retains contract
+version `1.0`; it changes neither stored records nor runtime behavior.
+
+This mutable store API is distinct from the proposals-only
+[Knowledge Store Provider graph API](../../../context/contracts/knowledge-store-contract.md).
+A provider projects records into graph nodes/edges with read provenance; it does
+not replace the record envelope or grant permission to mutate the store.
 
 ---
 
 ## 1. Record Types
 
-The store holds three record types. Every record, regardless of type, shares a common envelope.
+Both bundled adapters (`default-store` and `obsidian-store`) accept these five
+record types. Every type shares the envelope in §1.1.
+
+| Type | Intended content | Source convention |
+|---|---|---|
+| `raw` | Unprocessed material preserved as text (§1.2). | Creation provenance identifies the capturing process. |
+| `compiled` | A distillation reviewed by its authoring workflow (§1.3). | `source` links and `provenance.source_ids` identify input raw records. |
+| `concept` | A named idea, term or principle (§1.4). | May link to examples or related records. |
+| `snapshot` | A bounded topic summary (§A.3). | Consolidation supplies source links/ids and may supersede older snapshots. |
+| `person` | An entity card (§C.1). | May use `appears-in` / `person` links and `alias:` tags. |
+
+These content conventions do not imply adapter verification. In particular,
+`create` accepts compiled/snapshot records without source links or source ids;
+it does not certify review, truth, or whether the supplied sources support the
+body. Callers/flows must supply and check that evidence. Both adapters require
+`provenance.agent`; they accept the label supplied by the caller.
 
 ### 1.1 Common Record Envelope
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `id` | string | yes | Stable, opaque identifier. Must be unique within the store. Adapter may generate (e.g. UUID or slug). |
-| `type` | `"raw"` \| `"compiled"` \| `"concept"` | yes | Discriminates the record type. |
+| `type` | `"raw"` \| `"compiled"` \| `"concept"` \| `"snapshot"` \| `"person"` | yes | Discriminates the record type. |
 | `title` | string | yes | Human-readable title. |
 | `body` | string | yes | Primary content. Format is type-specific (see below). |
 | `category` | string | yes | Dot-separated hierarchical category string, e.g. `"engineering.api"`. Must be non-empty. |
 | `tags` | string[] | no | Flat list of tag strings for secondary classification. |
 | `aliases` | string[] | no | Human-readable, category-scoped slug aliases resolvable via `get`/`getLinks` (Addendum H). Append-only; never changes `id`. |
 | `links` | Link[] | no | Outbound links from this record (see §2). |
-| `provenance` | Provenance | yes | Immutable creation provenance (see §4). |
+| `provenance` | Provenance | yes | Immutable creation provenance (see §4); `agent` required, `source_ids`, `session_id`, `note` optional. |
+| `status` | `"active"` \| `"implemented"` \| `"retired"` | no | Created as active; absent means active. Change via `retire`, not `update` (§B). |
+| `mutation_log` | MutationLogEntry[] | adapter-maintained | Empty at creation; append-only operation/evidence history (§4.2). |
 | `created_at` | ISO-8601 string | yes | Creation timestamp in UTC. |
 | `updated_at` | ISO-8601 string | yes | Last mutation timestamp in UTC. |
 | `expires_at` | ISO-8601 string | no | Optional record-carried expiry (Addendum J). When now is at or past it, the record derives to `stale`. Never silently mutates the record. |
@@ -45,13 +71,23 @@ a transcript snippet, a URL with notes, or any other unrefined input.
 - No semantic constraints on content.
 - Intended as the input stage before compilation.
 
+**Bundled implementation limitation:** verbatim preservation is the fidelity
+requirement, not a guarantee currently met for every accepted string. The shared
+Markdown reader strips leading newlines, so a default-store raw body beginning
+with a newline loses it on readback. Obsidian splits rendered content at its
+`<!-- kit:body-end -->` sentinel without escaping that text in input; a raw body
+containing it can be truncated. Ordinary text such as the first-note example is
+not a proof of universal lossless round trips. Codec repair is separate from this
+contract clarification; the required fidelity and contract version remain unchanged.
+
 ### 1.3 `compiled` Record
 
-A compiled record is a normalized, editor-reviewed distillation of one or more raw records.
+A compiled record is intended to hold a normalized, editor-reviewed distillation of raw records.
 
 - `body`: structured markdown, expected to be human-readable reference prose.
-- Must link (via `links`) to at least one `raw` record as its source, using link kind `"source"`.
-- The `source_ids` provenance field (see §4) records which raw record(s) were compiled.
+- The compile flow supplies `source` links to its raw inputs and `provenance.source_ids`.
+- Direct adapter `create` does not require or validate those source relationships;
+  a type label alone does not establish that compilation or review happened.
 
 ### 1.4 `concept` Record
 
@@ -80,22 +116,44 @@ record's `links` array. The graph index (see §5) mirrors all links for efficien
 
 | Kind | Direction | Meaning |
 |---|---|---|
-| `"source"` | compiled → raw | Compiled record was derived from this raw record. |
+| `"source"` | compiled → raw; snapshot → compiled | Input record cited by compilation or consolidation. |
 | `"example"` | concept → compiled | This compiled record exemplifies the concept. |
 | `"related"` | any → any | General semantic relation. |
 | `"refines"` | compiled → compiled | Later record refines or supersedes an earlier one. |
-| `"proposes"` | any → concept | Record proposes a change to the concept (used with `propose` mutation). |
+| `"proposes"` | any → any | Record proposes a change to an existing target (used with `propose` mutation). |
 
 Adapters MUST store and return link objects with at least `target_id` and `kind`. Unknown
-kinds MUST NOT be rejected — forward compatibility requires tolerating new kinds.
+kinds MUST NOT be rejected — forward compatibility requires tolerating new string kinds.
+
+**Known bundled link-admission gap:** `kind` remains a required string, but neither
+adapter validates it on caller-supplied links in `create`, `update` or `link`.
+For existing ordinary records S and T, `link(S, [{ target_id: T }], { agent: "caller" })`
+can succeed and persist/query a link without `kind`; undefined fields disappear
+from serialized storage. This violates the required shape, rather than being an
+unknown-string-kind compatibility case. Required-field rejection and returned-link
+requirements remain normative; no new link vocabulary or admission rule is added.
+
+**Known bundled link-deduplication gap:** the merge key concatenates
+`target_id + "::" + kind` rather than comparing the pair structurally. Distinct
+valid links `{ target_id: "a", kind: "b::c" }` and
+`{ target_id: "a::b", kind: "c" }` have the same key. With both target records
+present on the current POSIX host, `link` can return successfully while storing
+and indexing only the first link. Related body/explicit-link merges and supersede
+merges use the same key formulation. This is separate from missing-kind admission:
+opaque ids, unknown string kinds and triple-based idempotence/postconditions remain
+normative, without reserving the delimiter or authorizing silent link omission.
 
 ### 2.3 Wikilink Syntax
 
 In `body` text, outbound links may also appear as `[[target_id]]` or `[[target_id|label]]`.
-The default adapter indexes these inline wikilinks into the `links` array on write and renders
-them back on read. The contract requires that after a round-trip, links declared in the `links`
-array are queryable via `getLinks(id)`. Inline wikilink parsing is an adapter implementation
-detail; the contract does not mandate a body format.
+Both bundled adapters parse inline body wikilinks during `create` and `update`; the
+default adapter permits `parse_wikilinks: false`, while Obsidian has no opt-out.
+`apply` replaces the body while preserving the existing link set: it does not parse
+new inline wikilinks or reindex the replacement text. The contract requires that
+after a round-trip, links explicitly declared in the `links` array are queryable
+via `getLinks(id)`. Inline parsing is an adapter implementation detail; the contract
+does not mandate a body format. The graph-key implementation limit in §7 remains
+separate from this operation-specific parsing behavior.
 
 ---
 
@@ -113,16 +171,17 @@ Categories provide hierarchical classification. Rules:
 
 ## 4. Provenance
 
-Every record carries immutable creation provenance. Mutation operations supply evidence that
-is appended to a mutable `mutation_log`. Adapters MUST enforce required provenance fields and
-MUST reject mutations missing them (see §6).
+Every record carries immutable creation provenance. Mutation operations append
+evidence to `mutation_log`. Adapters enforce required process labels and
+operation-specific fields (§6); labels, links and evidence references record
+what the caller supplied, not authenticated identity or independent verification.
 
 ### 4.1 Creation Provenance Object (`provenance`)
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `source_ids` | string[] | no | IDs of records this record was derived from (for compiled records). |
-| `agent` | string | yes | Identifier of the agent or process that created this record. |
+| `source_ids` | string[] | no | Caller-supplied input record ids (e.g. raw inputs for compiled records, compiled inputs for snapshots). Non-empty arrays are retained; `create` does not require them or resolve their targets. |
+| `agent` | string | yes | Caller-supplied identifier of the creating agent/process. Required, not authenticated by the adapter. |
 | `session_id` | string | no | Identifier of the session in which the record was created. |
 | `note` | string | no | Free-form provenance note. |
 
@@ -151,6 +210,15 @@ all link relationships for O(1) lookup by source or target. The index enables:
 
 The index MUST be updated atomically with every mutation that changes links. After any
 mutation, a `getLinks(id)` call MUST reflect the current link state.
+
+**Bundled implementation gap:** the file adapters do not currently provide that
+record/index transaction. They write the record and derived graph separately,
+in different orders across operations, without rollback. A failure can leave one
+write complete while the mutation rejects; crash/error atomicity is not supplied
+by these adapters. The atomic-update requirement above remains normative. The
+derived-index `reindex` recovery path (§8) is not a transaction or rollback guarantee.
+A separate successful self-proposal overwrite can also violate record/index coherence,
+even without a write failure; see the implementation exception in §6.4.
 
 The default adapter stores the index as `graph-index.json` at the store root.
 
@@ -190,7 +258,8 @@ adapter that persists a derived index SHOULD provide it as the recovery path.
 
 ## 6. Mutation Operations
 
-The store exposes six mutation operations. Each operation specifies:
+The store exposes eight mutation operations: the six detailed below, plus
+`supersede` (§A.5) and `retire` (§B.4), all included in §8. Each operation specifies:
 
 - **Required provenance/evidence fields** that the caller MUST supply.
 - The adapter MUST reject the call with an error if any required field is missing.
@@ -198,23 +267,31 @@ The store exposes six mutation operations. Each operation specifies:
 
 ### 6.1 `create`
 
-Create a new record. The adapter assigns `id`, `created_at`, and `updated_at`.
+Create a new record. The adapter generates `id` unless supplied and assigns
+`created_at` and `updated_at`.
 
 **Required fields:**
 
 | Field | Location | Description |
 |---|---|---|
-| `type` | top-level | Record type: `"raw"`, `"compiled"`, or `"concept"`. |
+| `type` | top-level | Record type: `"raw"`, `"compiled"`, `"concept"`, `"snapshot"`, or `"person"`. |
 | `title` | top-level | Non-empty title string. |
 | `body` | top-level | Non-empty body string. |
 | `category` | top-level | Non-empty dot-separated category. |
 | `provenance.agent` | provenance | Agent identifier. |
 
-**Optional fields:** `tags`, `links`, `provenance.source_ids`, `provenance.session_id`, `provenance.note`.
+**Optional fields:** `id` (otherwise generated), `tags`, `aliases`, `links`,
+`expires_at`, `ttl_seconds`, `provenance.source_ids`, `provenance.session_id`,
+`provenance.note`. The default adapter also accepts `parse_wikilinks: false`
+during `create`/`update` of untrusted body text; the Obsidian adapter parses wikilinks
+in those operations without an opt-out. Neither adapter parses replacement body
+wikilinks during `apply` (§2.3).
+Do not assume that option is portable across adapters. Alias syntax/admission is
+specified in §H.4, including the bundled false-conflict gap for `constructor`.
 
 **Rejection conditions:**
 - Missing or empty `type`, `title`, `body`, `category`.
-- `type` not one of `"raw"`, `"compiled"`, `"concept"`.
+- `type` outside the five types in §1.
 - Empty `category` or category with invalid segments.
 - Missing `provenance.agent`.
 
@@ -232,7 +309,11 @@ Update mutable fields of an existing record. Immutable fields (`id`, `type`, `cr
 | `id` | argument | ID of the record to update. |
 | `agent` | evidence | Agent performing the update. |
 
-**Optional update fields (at least one must be supplied):** `title`, `body`, `category`, `tags`, `links`.
+**Optional update fields (at least one must be supplied):** `title`, `body`,
+`category`, `tags`, `links`, `aliases`, `expires_at`, `ttl_seconds`. Aliases are
+append-only. `status` is ignored; lifecycle changes use `retire`. The default
+adapter's `parse_wikilinks` switch is not itself a mutable record field. The alias
+registration gap in §H.4 affects both `create` and alias-adding `update`.
 
 **Rejection conditions:**
 - Record with `id` does not exist.
@@ -263,97 +344,163 @@ an already-existing (source, target, kind) triple is not an error; the link is n
 
 **Post-conditions:** Each new link is present in `getLinks(source_id)`. Graph index updated.
 Mutation log entry appended to source record.
+The bundled missing-`kind` admission and delimiter-deduplication gaps in §2.2 can
+violate the required Link shape or omit distinct valid links despite successful
+target-existence and caller-evidence checks.
 
 ### 6.4 `propose`
 
-Record a proposed change to a concept record. The proposal does not modify the concept;
-it creates a link of kind `"proposes"` from the proposing record to the concept, and
-appends a mutation log entry with the proposal text.
+Record a proposed change to any existing record type. The original `conceptId`
+parameter name (shown below as `concept_id`) is retained for compatibility; it
+names the target record and does not restrict its type. Concept editing is one
+use; the retirement flow also proposes changes to other record types. The
+proposal leaves the target body unchanged, adds a `"proposes"` link from the
+proposing record to the target, and appends mutation history with the proposal text.
 
 **Required fields:**
 
 | Field | Location | Description |
 |---|---|---|
-| `concept_id` | argument | ID of the concept record to propose a change to. |
+| `concept_id` | argument | ID of the existing target record. |
 | `proposer_id` | argument | ID of the record making the proposal. |
 | `proposal` | evidence | Non-empty string describing the proposed change. |
 | `agent` | evidence | Agent submitting the proposal. |
 
 **Rejection conditions:**
-- `concept_id` does not exist or is not of type `"concept"`.
+- `concept_id` does not exist.
 - `proposer_id` does not exist.
 - `proposal` string is empty or missing.
 - Missing `agent` in evidence.
 
 **Post-conditions:** A link of kind `"proposes"` from `proposer_id` to `concept_id` is recorded
-in both the record and the graph index. Mutation log entry appended to concept record.
+in both the record and the graph index. Mutation log entry appended to the target record.
+
+**Known bundled self-proposal gap:** neither adapter rejects equal target/proposer
+ids. With a new self-proposal on an ordinary record R, both read R before either
+write, then write the proposer update followed by a target update from the older
+snapshot. The final successful write can discard the new stored proposal link,
+proposer timestamp and proposer-side history, while the graph retains the self
+`proposes` edge. `get(R).links` and `getLinks(R)` then disagree. A following
+`apply(R, R, ...)` checks the stored links and can reject `MISSING_EVIDENCE` despite
+the graph edge. Default `reindex` can remove the phantom edge but cannot recover
+the missing proposal. This violates the post-condition above without an I/O error;
+it is separate from the failed-write transaction gap in §5. The contract does not
+add a distinct-id requirement, and no runtime rejection rule is implied here.
 
 ### 6.5 `apply`
 
-Apply a pending proposal: update the concept body with the proposed change and mark the
-proposal as applied.
+Apply a pending proposal to any existing record type: replace its body and append
+an `apply` mutation entry. The `concept_id` parameter names the target record.
 
 **Required fields:**
 
 | Field | Location | Description |
 |---|---|---|
-| `concept_id` | argument | ID of the concept being updated. |
+| `concept_id` | argument | ID of the existing target record. |
 | `proposer_id` | argument | ID of the record whose proposal is being applied. |
-| `new_body` | evidence | The replacement body text for the concept. |
+| `new_body` | evidence | The replacement body text for the target record. |
 | `agent` | evidence | Agent applying the proposal. |
 | `rationale` | evidence | Non-empty string explaining why the proposal is accepted. |
 
 **Rejection conditions:**
-- `concept_id` does not exist or is not of type `"concept"`.
+- `concept_id` does not exist.
 - `proposer_id` does not exist.
 - No `"proposes"` link from `proposer_id` to `concept_id` exists.
 - `new_body` is missing or empty.
 - `rationale` is missing or empty.
 - Missing `agent` in evidence.
 
-**Post-conditions:** Concept `body` is replaced with `new_body`. `updated_at` refreshed.
+**Post-conditions:** Target `body` is replaced with `new_body`. `updated_at` refreshed.
 Mutation log entry (op=`"apply"`) appended. The `"proposes"` link MAY remain in the
 graph (it is a historical record); adapters SHOULD NOT silently delete it.
+The bundled self-proposal gap in §6.4 can leave only a graph edge, which does not
+satisfy the stored-proposal-link check used by `apply`.
 
 ### 6.6 `reject`
 
 Reject a pending proposal: record that the proposal was reviewed and declined.
-The concept is not modified.
+The target body is not modified; all existing record types are accepted.
 
 **Required fields:**
 
 | Field | Location | Description |
 |---|---|---|
-| `concept_id` | argument | ID of the concept. |
+| `concept_id` | argument | ID of the existing target record. |
 | `proposer_id` | argument | ID of the proposing record. |
 | `agent` | evidence | Agent rejecting the proposal. |
 | `reason` | evidence | Non-empty string explaining the rejection. |
 
 **Rejection conditions:**
-- `concept_id` does not exist or is not of type `"concept"`.
+- `concept_id` does not exist.
 - `proposer_id` does not exist.
 - No `"proposes"` link from `proposer_id` to `concept_id` exists.
 - `reason` is missing or empty.
 - Missing `agent` in evidence.
 
-**Post-conditions:** Concept `body` is unchanged. `updated_at` is NOT changed (concept
-itself was not mutated). Mutation log entry (op=`"reject"`) appended to concept record.
+**Post-conditions:** Target `body` is unchanged. `updated_at` is NOT changed;
+a mutation log entry (op=`"reject"`) is appended to the target record.
 
 ---
 
 ## 7. Query Interface
 
-The adapter MUST implement:
+The adapter MUST implement the following asynchronous methods. Listing options
+are `{ prefix?, includeRetired?, stale?, now? }` for category queries and
+`{ includeRetired?, stale?, now? }` for type queries. `prefix` includes exact
+category and dot-delimited descendants. Retired records are excluded by default;
+`get` is the required full-history access path, subject to the bundled Obsidian
+[archive retention gap](#known-obsidian-archive-retention-gap). `stale: true` selects records expired at
+`now` (default current time); it does not mutate status. Listings use the adapter's
+working set: Obsidian excludes archived supersession predecessors from both
+listings even with `includeRetired: true`. The default adapter retains those
+predecessors in listings subject to lifecycle filters. Across both adapters,
+use `get(id)` and reverse `supersedes` links to inspect retained predecessor history.
 
 | Method | Signature | Description |
 |---|---|---|
-| `get` | `(idOrHandle: string) => Record \| null` | Retrieve a record. `idOrHandle` may be a full id, a slug alias, or an unambiguous id prefix (Addendum H). Returns null if it resolves to nothing; throws `AMBIGUOUS_ID` on an ambiguous prefix. |
-| `getLinks` | `(idOrHandle: string) => { forward: Link[], reverse: Link[] }` | Return all links for a record from the graph index. Accepts the same handle forms as `get`; an unresolved handle yields empty arrays, an ambiguous prefix throws `AMBIGUOUS_ID`. |
-| `listByCategory` | `(category: string, options?: { prefix?: boolean }) => Record[]` | List records by exact category match. If `prefix` is true, match all records whose category starts with the given string. |
-| `listByType` | `(type: RecordType) => Record[]` | List all records of a given type. |
+| `get` | `(idOrHandle: string) => Promise<Record \| null>` | Retrieve a record. `idOrHandle` may be a full id, a slug alias, or an unambiguous id prefix (Addendum H). Returns null if it resolves to nothing; throws `AMBIGUOUS_ID` on an ambiguous prefix. |
+| `getLinks` | `(idOrHandle: string) => Promise<{ forward: Link[], reverse: Backlink[] }>` | Resolve the same handle forms as `get`, then read that graph-index key. If identity resolution fails, use the literal input key; return empty arrays when it has no indexed links. An ambiguous prefix throws `AMBIGUOUS_ID`. |
+| `listByCategory` | `(category: string, options?: CategoryQueryOptions) => Promise<Record[]>` | List records by exact category match. If `prefix` is true, match all records in that exact category or its dot-delimited descendants. |
+| `listByType` | `(type: RecordType, options?: QueryOptions) => Promise<Record[]>` | List all records of a given type. |
 
 > **Identity resolution** (`get`/`getLinks`) is specified in full in **Addendum H**. The `prefix`
 > option on `listByCategory` is unrelated — it filters by *category* prefix, not by id.
+
+Because `create`/`update` can index supplied links without validating their targets,
+a literal graph key can have backlinks even when `get` returns `null`. Link lookup
+does not establish that a record exists or that a target was validated.
+
+### Known default-store path-normalized identity gap
+
+The opaque-id and exact/alias/prefix requirements remain normative. The default
+adapter derives exact existence and prefix candidates from normalized filenames,
+while retaining the caller's original id in frontmatter. A contained id such as
+`abcdefgh/../plain-record` can be created at `records/plain-record.md` and read
+through the original id, but its unique eight-character stored-id prefix
+`abcdefgh` does not resolve: filename enumeration yields `plain-record` instead.
+Conversely, `get("plain-record")` can return that record without an issued alias
+or matching envelope id. `get("./<ordinary-id>")` can also resolve through filename
+normalization while `getLinks` uses that spelling as a different graph key.
+These are inside-root identity/indexing violations, not evidence of an outside-root
+traversal. They are separate from Obsidian's archive/dimension collisions and the
+prototype-key gaps below. No new forbidden-id syntax or migrated identity is
+introduced by this disclosure; generated-id first-note behavior is a separate case.
+
+### Known bundled graph-key handling gap
+
+The query contract requires the structured array result above and permits opaque
+string ids; prototype-named ids are not reserved or forbidden. Both bundled graph
+indexes currently use ordinary JavaScript objects and read bracket keys without
+an own-property or array check. Consequently, `getLinks("constructor")` on an empty
+graph can retrieve an inherited property and throw a plain `TypeError` at `.map`
+instead of returning arrays. A successfully created no-link record with that id
+can still be retrieved through `get` while `getLinks` throws. Other inherited
+property names, including `__proto__` and `toString`, expose the same class of gap;
+graph mutation helpers also assume array-valued lookups. Accepted opaque-id
+create/get tests do not establish graph-query conformance. This is an inherited
+implementation violation, not a new reserved-id rule or a waiver of the result
+contract. The identity/query tables describe the required interface with this
+known implementation exception.
 
 ---
 
@@ -370,17 +517,82 @@ interface KnowledgeStoreAdapter {
   propose(conceptId: string, proposerId: string, evidence: ProposeEvidence): Promise<void>;
   apply(conceptId: string, proposerId: string, evidence: ApplyEvidence): Promise<void>;
   reject(conceptId: string, proposerId: string, evidence: RejectEvidence): Promise<void>;
-  get(id: string): Promise<Record | null>;
-  getLinks(id: string): Promise<{ forward: Link[]; reverse: Link[] }>;
-  listByCategory(category: string, options?: { prefix?: boolean }): Promise<Record[]>;
-  listByType(type: "raw" | "compiled" | "concept"): Promise<Record[]>;
+  get(idOrHandle: string): Promise<Record | null>;
+  getLinks(idOrHandle: string): Promise<{ forward: Link[]; reverse: Backlink[] }>;
+  supersede(newId: string, supersededIds: string[], evidence: SupersedeEvidence): Promise<void>;
+  retire(id: string, targetStatus: "implemented" | "retired", evidence: RetireEvidence): Promise<void>;
+  listByCategory(category: string, options?: CategoryQueryOptions): Promise<Record[]>;
+  listByType(type: RecordType, options?: QueryOptions): Promise<Record[]>;
+  reindex?(): Promise<{ records: number; links: number; forwardSources: number;
+    reverseTargets: number; changed: boolean }>;
+}
+type RecordType = "raw" | "compiled" | "concept" | "snapshot" | "person";
+interface Backlink { source_id: string; kind: string }
+interface QueryOptions { includeRetired?: boolean; stale?: boolean; now?: string | number }
+interface CategoryQueryOptions extends QueryOptions { prefix?: boolean }
+interface SupersedeEvidence { agent: string; rationale: string; note?: string }
+interface RetireEvidence {
+  agent: string; rationale: string; implementedByRef?: string; supersededByRef?: string; note?: string;
 }
 ```
+
+`supersede` requires a non-empty predecessor list and rationale and MUST retain
+predecessors; it does not retire them. The bundled Obsidian archive retention gap
+below is an implementation violation of that requirement. `retire` requires rationale and, for the
+implemented state, `implementedByRef`. See §A/§B for permitted targets and status
+transitions. Optional `reindex` repairs only the derived index from record links.
+
+### Bundled adapter variations
+
+| Behavior | `default-store` | `obsidian-store` |
+|---|---|---|
+| Record paths | `records/<id>.md` | Category/title paths, source subfolders, and vault-global `people/`; stable ids resolved through a path index. |
+| Body wikilinks | Parsed during `create`/`update` unless `parse_wikilinks: false`; `apply` preserves existing links without parsing its replacement body. | Parsed during `create`/`update`, no opt-out; `apply` likewise preserves existing links. |
+| Person names | Ordinary title/tags/links storage. | Entity-card sections and vault-global routing; `alias:` tags differ from record-handle `aliases`. |
+| Provenance | Required `agent`; optional source ids/session/note. | Same creation requirements; vault path/layout does not strengthen assurance. Configured dimension collisions can overwrite canonical metadata as disclosed below. |
+| Superseded predecessors in listings | Remain in `listByType` / `listByCategory`, subject to lifecycle filters. | Moved to `archive/` and excluded from both listings regardless of `includeRetired`; intended historical access is `get(id)` and reverse supersession links, subject to the archive collision gap below. |
+
+#### Known Obsidian dimension collision gap
+
+Configurable `dimensions` names are not validated against envelope fields. The
+adapter derives values from category segments after the first and spreads those
+fields after canonical frontmatter, so a colliding name wins on disk. For example,
+`dimensions: ["id"]` with category `topic.replacement` can create a record indexed
+under generated id R but with persisted `id: replacement`; `get(R)` then returns
+the other id. `dimensions: ["status"]` with `topic.retired` can persist retired
+status without `retire`, and a `provenance` dimension can replace its mapping
+with a category string. Canonical identity, provenance and lifecycle requirements
+remain normative; they are not protected by this implementation's presentation-only
+comment. This inherited gap is separate from archive reuse and does not add a
+reserved-dimension rule or authorize rewriting stored records.
+
+#### Known Obsidian archive retention gap
+
+The retention requirements in §A.5, §A.7 and §B.6 remain normative. The bundled
+Obsidian adapter does not satisfy them for every sequence of successful operations:
+archive destinations are derived from the active category/title path, without a
+collision check. After archiving a predecessor, creating and archiving a different
+record that reuses that active path can replace the earlier archive file on POSIX
+filesystems. This also arises from repeated same-topic consolidation's reused
+snapshot titles. The earlier id's path-index entry can then point at the later
+record: `get(earlierId)` can return the later id/body/history rather than the original.
+A retained index entry or reverse link is therefore not proof that the predecessor's
+original bytes remain. This is an inherited implementation gap, not an authorized
+purge or a waiver of the supersede-not-delete requirement. The summaries below
+refer to the required historical access path with this implementation limit.
+
+Both expose the five types, eight mutations, identity queries and freshness
+options above, with the documented implementation gaps. Explicit `link` resolves target ids, but `create`/`update` can
+retain supplied links without that target check. Neither operation validates the
+truth of linked content. Run the existing parameterized contract and extension
+suites against a new adapter, not just the base three-type examples.
 
 All mutation methods MUST throw (or return a rejected Promise) when required evidence is
 missing. The thrown error MUST have a `code` property set to `"MISSING_EVIDENCE"` and a
 human-readable `message`. This enables the contract suite to distinguish enforcement failures
-from unexpected errors.
+from unexpected errors. The bundled missing-link-`kind` admission gap (§2.2) does
+not meet that requirement; passing the other evidence checks is not full shape
+validation.
 
 ### 8.1 Error Codes
 
@@ -400,13 +612,16 @@ The default adapter serializes each record as a markdown file with YAML frontmat
 ```markdown
 ---
 id: <id>
-type: <raw|compiled|concept>
+type: <raw|compiled|concept|snapshot|person>
 title: <title>
 category: <category>
 tags: [<tag>, ...]
 aliases: [<slug>, ...]        # optional — human-readable, category-scoped (Addendum H)
 created_at: <ISO-8601>
 updated_at: <ISO-8601>
+status: active              # absent on older records means active
+expires_at: <optional ISO-8601>
+ttl_seconds: <optional seconds>
 provenance:
   agent: <agent>
   session_id: <optional>
@@ -489,7 +704,8 @@ Adding `snapshot` as a fourth top-level type is the smallest, clearest extension
 
 ### A.2 Extended Type Discriminant
 
-The `type` field on the common envelope (§1.1) now accepts four values:
+At this extension point, `snapshot` expanded the original three-type envelope to
+four values. The current five-type table is §1 (including the later `person` extension):
 
 | Type | Description |
 |---|---|
@@ -565,8 +781,15 @@ It NEVER deletes records. Superseded records remain fully queryable with their p
 
 **Supersede-not-delete invariant:**
 > Calling `supersede` MUST NOT remove any record. No mutation op in this contract deletes records.
-> This is a hard invariant; adapters MUST enforce it. A retention policy hook for physical archival
-> is a future concern and is explicitly out of scope for this version.
+> This is a hard invariant; adapters MUST enforce it. Moving a record to `archive/`
+> MUST preserve its bytes and historical access; relocation is distinct from physical
+> purge/deletion. A purge policy is a future concern and is explicitly out of scope
+> for this version.
+
+**Bundled implementation gap:** Obsidian archive path reuse can overwrite an earlier
+predecessor and make `get(earlierId)` return a later record. See the
+[archive collision disclosure](#known-obsidian-archive-retention-gap). The invariant
+above is not a claim that this implementation already meets every retention case.
 
 ### A.6 Adapter Contract Extension
 
@@ -593,12 +816,20 @@ interface SupersedeEvidence {
 
 Superseded snapshots MUST remain queryable:
 - `get(id)` returns the full record (body, links, provenance, mutation_log).
-- `listByType("snapshot")` returns ALL snapshots, including superseded ones.
+- The default adapter includes superseded snapshots in `listByType` and
+  `listByCategory` subject to lifecycle filters; `{ includeRetired: true }` also
+  includes retired predecessors (§B).
+- Obsidian archives superseded predecessors out of both listing working sets.
+  `includeRetired` does not include archived records. Retrieve their full history
+  through `get(id)` and reverse supersession links instead.
 - The caller can determine supersession status by inspecting `getLinks(id).reverse` for entries
   with `kind === "supersedes"`.
 
-There is no `"archived"` or `"deleted"` status field; the supersession chain is expressed entirely
-through links and mutation log entries.
+The Obsidian [archive collision gap](#known-obsidian-archive-retention-gap) can violate
+the required original-record retrieval above even when an index entry and links remain.
+
+Supersession is expressed through links and mutation history, separately from
+the lifecycle `status` added in Addendum B. There is no archived/deleted status.
 
 ---
 
@@ -639,13 +870,21 @@ Records with `status === "retired"` are EXCLUDED from the default working set:
 - The vector similarity detector (`createVectorSimilarityDetector`) considers only non-retired
   compiled records as candidates.
 
-All four filtering surfaces accept an `includeRetired: true` option (or equivalent flag on the
-similarity detector) to restore retired records to the result set.
+The two listing methods accept an `includeRetired: true` option to disable the
+lifecycle-status exclusion within the adapter's enumerated working set. This
+does not disable Obsidian's separate
+archive exclusion for superseded predecessors (§A.7).
+
+Both built-in similarity detectors unconditionally exclude retired candidates;
+neither exposes an `includeRetired` override. They filter supplied candidates;
+they do not fetch records excluded by a store listing.
 
 Retired records remain **fully queryable with provenance**:
-- `get(id)` always returns the full record regardless of status.
-- `listByType(type, { includeRetired: true })` returns all records of that type.
-- `listByCategory(category, { includeRetired: true })` returns all matching records.
+- Lifecycle status does not restrict `get(id)`; original-record retrieval remains
+  subject to the bundled Obsidian [archive collision gap](#known-obsidian-archive-retention-gap).
+- `listByType(type, { includeRetired: true })` and the equivalent category query
+  include retired records in the adapter's enumerated working set; Obsidian's
+  archived supersession predecessors remain excluded. Use `get(id)` for those.
 - The record's `mutation_log` carries the full retirement evidence.
 
 ### B.4 `retire` Mutation Operation
@@ -715,20 +954,27 @@ interface RetireEvidence {
 
 Retired records MUST remain reachable from:
 - `get(id)` — always returns the full record.
-- `listByType(type, { includeRetired: true })` and `listByCategory(category, { includeRetired: true })`.
+- `listByType(type, { includeRetired: true })` and `listByCategory(category, { includeRetired: true })`
+  for records in the adapter's enumerated working set. Obsidian records also
+  archived by supersession remain available through `get(id)`, not these listings.
 - Snapshot `provenance.source_ids` — any snapshot that included the record in its cluster before
   retirement retains the reference intact. The retired record can be retrieved via `get(sourceId)`.
 - The retirement `mutation_log` entry carries the full evidence of why and when the record was
   retired and by whom.
 
-There is no deletion of records. Physical purge (if ever needed) is a separate, future policy
-hook not defined in this version.
+These are normative retention requirements. The bundled Obsidian
+[archive collision gap](#known-obsidian-archive-retention-gap) can violate full-record
+retrieval and original-byte retention; a surviving source id or graph link does not
+cure it. No deletion or overwrite of retained records is authorized. Physical purge
+(if ever needed) is a separate, future policy hook not defined in this version.
 
 ### B.7 Proposal-Artifact Lifecycle (close-on-apply)
 
-A flow that gates a change through `propose` → `apply` mints a transient **proposal artifact**:
-a `raw` record (e.g. the `knowledge.retire` flow's `"Retirement proposal: <title>"` record) whose
-sole purpose is to carry the `"proposes"` link and the proposal text to the target.
+The `knowledge.retire` flow mints a transient **retirement-proposal artifact**:
+a `raw` record (`"Retirement proposal: <title>"`) that carries the `"proposes"`
+link and proposal text to the target. The close-on-apply behavior below is specific
+to that generated artifact. Synthesis and consolidation use existing compiled
+source records as proposers; they do not auto-retire those records on apply.
 
 Once the proposal has been **applied**, that artifact is *spent*. It MUST NOT be left as an
 `active` record:
@@ -739,21 +985,31 @@ Once the proposal has been **applied**, that artifact is *spent*. It MUST NOT be
   (`"Retirement proposal: Retirement proposal: …"`), because the retire flow mints a *new*
   proposal artifact for the artifact itself (#106).
 
-**Rule.** On `apply` (and only on `apply`), the flow auto-closes the spent proposal artifact by
-**retiring it via the existing `retire` op** (§B.4) — `active → retired`. There is no separate
+**Rule.** On `apply` (and only on `apply`), the retirement flow attempts to close its spent
+proposal artifact by **retiring it via the existing `retire` op** (§B.4). There is no separate
 "close" mutation; the close reuses `retire`. This close is:
 
 - **safe** — it touches only the named artifact, never the apply target;
-- **idempotent** — a no-op if the artifact is already retired/implemented (the §B.2 transition
-  table makes `retired` terminal, so a re-close is rejected and treated as a no-op);
-- **non-fatal** — the proposal has already been applied; a failure to close the artifact does not
-  fail the flow (it is surfaced on the result instead).
+- **idempotent for missing/retired artifacts** — these are skipped. An active or implemented
+  artifact is passed to `retire(..., "retired", ...)`; implemented is not a no-op (§B.2);
+- **non-fatal for caught artifact-retirement failures** — if the artifact read succeeds
+  but its `store.retire` rejects, the helper catches that error and the outer result
+  reports `proposalClosed: false`. The public result does not expose the helper's
+  full error reason.
 
-**`reject` is unchanged.** A rejected proposal is *not* spent — the artifact remains `active` so the
-proposal can be revisited. Closing happens only on the apply path.
+**Current containment limit:** the preliminary `store.get(artifactId)` is outside
+the helper's catch. If that read rejects, the outer retirement call can reject
+with no `proposalClosed` result after the target's retirement has already succeeded.
+The spent-artifact lifecycle requirement remains; the implementation does not
+contain every cleanup error.
 
-Do not hand-retire proposal artifacts: applying the proposal closes them. The retire lifecycle
-expects the artifact to exist transiently and to be auto-closed on apply.
+**`reject` is unchanged.** A rejected retirement proposal is *not* spent — its artifact remains
+`active`. Closing happens only on the retirement apply path.
+
+The retirement flow handles its own artifact's closure; hand-retiring it through
+the flow would create another retirement proposal. Inspect `proposalClosed` on a
+returned result; a rejected cleanup read has no such result and does not imply the
+target mutation was rolled back. This does not define automatic closure for every proposer.
 
 ---
 
@@ -824,8 +1080,11 @@ Card merge uses the existing `propose → apply/reject` gate:
 
 - `KnowledgeFlowRunner.mergePerson(primaryId, duplicateId, options)`
 - **apply**: unions body, adds `alias:<duplicate title>` tag to primary, unions `appears-in` links, calls
-  `store.supersede(primaryId, [duplicateId])` to archive the duplicate (supersede-not-delete invariant).
-- **reject**: both cards remain byte-identical.
+  `store.supersede(primaryId, [duplicateId])` to supersede the duplicate without deleting it.
+  Obsidian moves it to `archive/`; the default adapter retains it in place, subject to query filters.
+- **reject**: both bodies and tags are preserved, but the records are not byte-identical.
+  The initial proposal adds a duplicate-to-primary `proposes` link and mutation history;
+  rejection appends history on the primary. Timestamps/history/links can therefore change.
 
 ## Addendum D — Freshness Audit (Hygiene #1, #106)
 
@@ -865,8 +1124,10 @@ default. The matched key is surfaced on each flag as `matchedThresholdKey` (`"*"
 default).
 
 **Last mutation** is the most recent of the record's `updated_at` and its latest `mutation_log`
-entry `at` — both are refreshed by every mutating op (§1.1 / §4.2), so the later of the two is
-authoritative even if an adapter lags one. It falls back to `created_at` when neither is present.
+entry `at`. They are not both refreshed by every mutation: rejection, target-side
+proposal history and superseded-predecessor history can preserve `updated_at`
+while appending a newer log entry. The audit uses the maximum of the available
+update/log timestamps and falls back to `created_at` when neither is present.
 
 **Flagging:** a record is flagged only when its age in **whole days** *strictly exceeds* its
 resolved threshold (`ageDays > thresholdDays`). Retired records are never flagged — the default
@@ -1063,6 +1324,17 @@ adapters (consume-never-fork):
 `retired` is terminal); records are grouped by exact category, so cross-category pairs are never
 formed; each unordered pair is compared at most once.
 
+**Known bundled pair-key omission:** each similar unordered pair is required to
+reach the contradiction detector, but the runner deduplicates lexically sorted
+ids using the unescaped key `idA + "|" + idB`. Distinct pairs (`a`, `b|c`) and
+(`a|b`, `c`) share `a|b|c`. With four ordinary active compiled records of those ids
+in one category on the current POSIX host, default similarity can select all six
+pairs, while the runner invokes an injected always-flagging contradiction detector
+only five times. The skipped pair contributes neither `compared` nor a flag.
+This is separate from link-key deduplication (§2.2); opaque ids and per-pair
+processing remain required, with no reserved `|` rule or runtime repair implied.
+Absence of a flag is not proof that every similar pair was judged.
+
 ### G.3 `ContradictionDetector` Interface and the Default
 
 ```ts
@@ -1101,7 +1373,9 @@ interface ContradictionFlag {
 
 `detectContradictions` returns `{ audited, compared, flags, telemetryEvents }` where `audited`
 counts the in-scope compiled records, `compared` counts the similar pairs the contradiction fn
-judged, and `flags` lists the conflicting pairs. Gate telemetry is emitted at `collect-gate` and
+actually judged, and `flags` lists the reported conflicting pairs. The pair-key gap
+in §G.2 can omit a distinct similar pair before either the comparison count or
+detector call, so these counts do not establish complete pair coverage. Gate telemetry is emitted at `collect-gate` and
 `flag-gate` (`knowledge.detect-contradictions`).
 
 ## Addendum H — Record Identity Resolution (short-id prefix + slug aliases, #339)
@@ -1110,7 +1384,7 @@ judged, and `flags` lists the conflicting pairs. Gate telemetry is emitted at `c
 
 On-disk identity is a full `id` (§1.1) plus a file path (§9). Prose that cites a record — a
 curated doc, a commit message, an issue comment — cannot practically carry a full 36-char UUID, so
-the field partner cites **8-char short ids** (`12cc5573`, `f5df7b4c`) and would prefer
+the field partner cites **8-char short ids** (`a1b2c3d4`, `b2c3d4e5`) and would prefer
 **human-readable slugs**. Neither resolves against exact-id `get`, and a store restructure that
 re-files a record silently severs every inbound short-id/slug reference.
 
@@ -1128,18 +1402,26 @@ about how records are stored (H.6) — it only widens what `get`/`getLinks` acce
    prefix of **exactly one** record `id`.
 
 The first form that matches wins. A `handle` that matches none of the three resolves to *nothing*.
+The default adapter's [path-normalized identity gap](#known-default-store-path-normalized-identity-gap)
+can violate this required envelope-id model by using normalized filename existence
+and filename-derived prefix candidates instead.
 
 ### H.3 Resolution Outcomes
 
 | Situation | `get` | `getLinks` |
 |---|---|---|
 | Resolves to exactly one record | returns that record | returns that record's `{ forward, reverse }` |
-| Resolves to nothing (no exact id, no alias, no ≥8-char single-match prefix) | returns `null` | returns `{ forward: [], reverse: [] }` |
+| Resolves to nothing (no exact id, no alias, no ≥8-char single-match prefix) | returns `null` | reads the literal input graph key; empty arrays only if it has no indexed links |
 | Prefix (≥8 chars) matches **more than one** record | **throws `AMBIGUOUS_ID`** | **throws `AMBIGUOUS_ID`** |
 
 An `AMBIGUOUS_ID` error MUST have `code === "AMBIGUOUS_ID"`, a human-readable `message`, and a
 `matches` array of the colliding full ids. An ambiguous prefix MUST NOT be silently resolved to one
 arbitrary record, nor collapsed to `null` — ambiguity is a distinct, surfaced condition.
+
+The bundled [graph-key handling gap](#known-bundled-graph-key-handling-gap) can
+instead raise `TypeError` for prototype-named keys, whether resolved or used as a
+literal fallback. The required structured result above is not a claim that those
+current implementation cases already conform.
 
 A `handle` **shorter than `MIN_ID_PREFIX`** is never treated as a prefix (it can still match an
 exact id or a slug). This keeps a stray short token from matching a large, surprising set.
@@ -1147,7 +1429,7 @@ exact id or a slug). This keeps a stray short token from matching a large, surpr
 ### H.4 Slug Aliases
 
 - A slug is a lowercase, category-scoped, human-readable handle, e.g.
-  `decision.strategy/2026-07-03-gtm-direction`. It MUST match
+  `decision.design/2026-01-01-api-shape`. It MUST match
   `^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?$` (≤ 200 chars). Malformed slugs are rejected at
   `create`/`update` with `MISSING_EVIDENCE`.
 - Slugs are **caller-supplied** via the optional `aliases: string[]` field on `create` and
@@ -1158,10 +1440,19 @@ exact id or a slug). This keeps a stray short token from matching a large, surpr
 - A slug already assigned to a *different* record is a `SLUG_CONFLICT` (a slug identifies at most
   one record). Re-supplying a record's own slug is an idempotent no-op.
 
+**Known bundled alias-registration gap:** `constructor` is a valid unused slug
+under the declared syntax, but both adapters can reject it with `SLUG_CONFLICT`
+on a fresh store or when adding it through `update`. The shared alias map uses
+an ordinary object and reads `by_slug[slug]` without an own-property check; the
+inherited Object constructor is treated as an existing owner. No record actually
+owns that alias in this case. This differs from the graph-array gap in §7 and
+from a genuine alias collision. The syntax and genuine-conflict requirements above
+remain normative; this disclosure does not reserve or prohibit the alias.
+
 ### H.5 Restructure Survival (the alias map)
 
-The alias map is a store-level structure `{ slug → id }`. It is keyed by **full id** — never by
-category or file path. Therefore:
+The alias map is a store-level structure `{ slug → id }`: each slug key maps to a
+**full record id**, rather than a category or file path. Therefore:
 
 - Recategorizing a record via `update` (which, in the Obsidian adapter, **relocates the note's
   file**) leaves both the `id` and the `slug → id` mapping untouched.
@@ -1169,9 +1460,10 @@ category or file path. Therefore:
   a prefix of that unchanged id); the slug still resolves (the map still points it at that id).
 
 So a previously issued short-id prefix or slug MUST still resolve to the same record after a
-restructure. Note the slug is a **stable alias**, not a value recomputed from the current category:
-a slug minted under `decision.strategy/…` keeps resolving even after the record moves to
-`decision.gtm`.
+restructure. The default adapter's path-normalized identity gap above can already
+violate stored-id prefix resolution for successfully created path-like opaque ids. Note the slug is a **stable alias**, not a value recomputed from the current category:
+a slug minted under `decision.design/…` keeps resolving even after the record moves to
+`decision.design`.
 
 Like the graph index (§5.2), the alias map is a **derived cache** — each record's own `aliases`
 array is the source of truth, so an adapter that persists the map SHOULD rebuild it on `reindex()`.
@@ -1205,11 +1497,12 @@ suite (`evals/contract-suite/suite.test.js`, §15–§17) pass against it.
 
 The store's graph (§2, §5) and the hygiene audits (Addenda D–G) cover record→record links and
 survey **records**. Nothing resolves the references a human actually reads: the record ids that
-curated docs — `NOW.md`, `strategy/*.md`, a roadmap — cite **into** the store. A store restructure
+curated docs — `status.md`, `docs/*.md`, a roadmap — cite **into** the store. A store restructure
 that re-files or retires a record silently severs every inbound doc citation, and every existing
-gate still reports PASS. Field evidence (design partner `kontourai/ops`): `verify-ops` stayed green
-for weeks while `NOW.md` and `strategy/vision.md` cited unresolvable short-ids (`12cc5573`,
-`f5df7b4c`). This addendum makes that rot **fail closed**.
+gate still reports PASS. The motivating failure was a consumer's repository
+check remaining green while curated documents cited unresolvable short ids.
+This addendum adds a citation-resolution check; the marker limitations below
+remain explicit.
 
 The check is a **read-only** flow (`KnowledgeFlowRunner.checkInboundReferences`) in the style of the
 Addenda D–G audits: it mutates no record, appends no mutation-log entry, and forks no mutation path.
@@ -1220,12 +1513,22 @@ It resolves citations through the unchanged Addendum H identity path — it adds
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `docGlobs` | string[] | `[]` | Globs (relative to `docsRoot`) whose matching docs are scanned. **Empty = opt-in no-op pass** (Addenda D–G convention). Supports `*` (within a segment), `**` (across segments), `?`. |
-| `docsRoot` | string | `workspace`, then `cwd` | Root the globs resolve against (the docs live outside the store). |
+| `docsRoot` | string | per-call `workspace` for the direct instance checker, otherwise `cwd` | Root the globs resolve against. Supply explicitly when intended docs differ from cwd; constructor workspace and the module-level wrapper do not supply the scan default. |
 | `markers` | string[] | `["rec:", "record:"]` | Citation-marker prefixes that opt a following short-id/slug into **definite** citation status (I.3). |
+
+**Scan-root implementation boundary:** direct
+`runner.checkInboundReferences({ workspace: ... })` honors that call's workspace
+when `docsRoot` is absent. The runner does not retain its constructor workspace
+for scanning; the module-level `checkInboundReferences` wrapper consumes its
+`workspace` as a constructor option without forwarding it to the scan. Use an
+explicit `docsRoot` for that wrapper. `flagSupersededCiters` forwards `docsRoot`,
+not workspace, to its checker (§K.2). A wrong-root glob can match no files and
+produce `ok: true` from an empty unresolved list; inspect `scanned` as well as
+`ok`. Empty globs remain an explicit no-op, not scan coverage.
 
 ### I.3 Citation Forms — the commit-SHA precision problem
 
-A bare 8-hex token is inherently ambiguous: `12cc5573` is equally a record short-id and an
+A bare 8-hex token is inherently ambiguous: `a1b2c3d4` is equally a record short-id and an
 abbreviated git commit SHA. Failing on every non-resolving 8-hex token would flag every SHA in prose
 (the gate cries wolf and gets muted); never failing on them re-opens the exact rot this closes. The
 check resolves the tension with **two tiers**:
@@ -1236,28 +1539,36 @@ currently resolve, and an unresolved one **FAILS** (fail closed):
 | Form | Example | Why it is SHA-safe |
 |---|---|---|
 | Full UUID (8-4-4-4-12 hex) | `aaaaaaaa-1111-4111-8111-111111111111` | The hyphenated shape never collides with a git SHA (40/abbrev hex, no hyphens) or prose. |
-| Marker + token | `rec:12cc5573`, `record:decision.strategy/gtm` | The marker is explicit intent; the token may be a short-id or slug. |
-| Wikilink | `[[decision.strategy/gtm]]` | The kit's own link syntax. |
+| Marker + token | `rec:a1b2c3d4`, `record:decision.design/api-shape` | The marker is explicit intent; the token may be a short-id or slug. |
+| Wikilink | `[[decision.design/api-shape]]` | The kit's own link syntax. |
 
 **Candidate bare short-ids** — a standalone ≥8-hex token with **no** citation form is included in
 the index **only when it already resolves** to a record. A non-resolving bare hex is indistinguishable
-from a commit SHA, so it is **ignored** — never indexed, never failed.
+from a commit SHA, so it is **ignored** — never indexed, never failed. Ambiguous
+bare candidates are likewise ignored. A bare hash that resolves to a record handle
+is indexed as a citation, even when its author meant a Git commit; the heuristic
+does not determine author intent. Such a collision can also make propagation flag
+the sentence as a doc citer.
 
 > **Deliberate, documented miss.** A *broken* bare-hex short-id (no marker/wikilink) is invisible to
 > the check — by construction, since it does not resolve. This is a precision-over-recall choice:
-> **zero false positives on commit hashes**, at the cost of not catching bare-hex short-id rot until
-> the doc adopts a citation form. To get fail-closed protection for a short-id or slug, cite it in a
+> ignoring non-resolving/ambiguous commit-hash candidates avoids failures for those
+> hashes, but does not provide universal zero-false-positive precision when a hash
+> resolves to a record. Broken bare-hex short-id rot is missed until the doc adopts
+> a citation form. To get fail-closed protection for a short-id or slug, cite it in a
 > marker or wikilink form; full-UUID citations are protected with zero configuration. Migrating a
-> consuming repo's house style to a marker is an ops-repo change (a non-goal here).
+> consuming repo's house style to a marker is a consumer-owned change (a non-goal here).
 
 Every extracted token is resolved via `get(token)` (Addendum H: exact id → slug alias → unambiguous
-≥8-char prefix). `null` → unresolved; an `AMBIGUOUS_ID` throw is caught and reported as an unresolved
-citation with `reason: "ambiguous"` (fail closed — an ambiguous citation does not uniquely resolve).
+≥8-char prefix). For definite citations, `null` is unresolved and a caught
+`AMBIGUOUS_ID` is reported with `reason: "ambiguous"` (fail closed — it does not
+uniquely resolve). Non-resolving or ambiguous bare candidates are dropped instead,
+as described above.
 
 ### I.4 Fail-Closed Semantics
 
 The result's `ok` is `true` **iff** `unresolved` is empty — i.e. every definite citation resolved. A
-caller (e.g. ops `verify-ops`) treats `ok === false` as a gate failure. Each `unresolved` entry names
+consumer that uses this as a required check treats `ok === false` as a gate failure. Each `unresolved` entry names
 `doc`, `line`, `column`, `token`, `form`, and `reason` so the break is actionable. An empty scan with
 configured globs that cite nothing is a pass; an empty scan from **no** globs is the explicit opt-in
 no-op — neither is an "empty success" that masks an unresolved definite citation.
@@ -1269,18 +1580,18 @@ enumerate citers:
 
 ```json
 {
-  "ok": true,
-  "scanned": ["NOW.md", "strategy/vision.md"],
+  "ok": false,
+  "scanned": ["status.md", "docs/design.md"],
   "citations": [
-    { "doc": "NOW.md", "line": 3, "column": 17, "token": "aaaaaaaa-1111-4111-8111-111111111111",
+    { "doc": "status.md", "line": 3, "column": 17, "token": "aaaaaaaa-1111-4111-8111-111111111111",
       "form": "uuid", "resolved": true, "recordId": "aaaaaaaa-1111-4111-8111-111111111111" }
   ],
   "unresolved": [
-    { "doc": "NOW.md", "line": 5, "column": 9, "token": "deadbeef-0000-4000-8000-000000000000",
+    { "doc": "status.md", "line": 5, "column": 9, "token": "deadbeef-0000-4000-8000-000000000000",
       "form": "uuid", "reason": "not-found" }
   ],
-  "byDoc":    { "NOW.md": [ { "token": "…", "form": "uuid", "resolved": true, "recordId": "…", "line": 3, "column": 17 } ] },
-  "byRecord": { "aaaaaaaa-1111-4111-8111-111111111111": [ { "doc": "NOW.md", "line": 3, "column": 17, "token": "…", "form": "uuid" } ] }
+  "byDoc":    { "status.md": [ { "token": "…", "form": "uuid", "resolved": true, "recordId": "…", "line": 3, "column": 17 } ] },
+  "byRecord": { "aaaaaaaa-1111-4111-8111-111111111111": [ { "doc": "status.md", "line": 3, "column": 17, "token": "…", "form": "uuid" } ] }
 }
 ```
 
@@ -1288,14 +1599,27 @@ enumerate citers:
 - `byDoc` — doc → its cited record ids (every scanned doc appears, even if it cites nothing).
 - `byRecord` — record id → its citers (the doc→record edge; a natural typed edge under #317).
 
+**Known bundled citation-index key gap:** these result maps use ordinary objects
+and assume bracket lookups are own arrays. After successful `get` resolution of
+an accepted opaque id such as `constructor` or `toString`, adding its citer to
+`byRecord` can throw a plain `TypeError` at `.push`. A wikilink to `__proto__`
+exposes the same class of issue. The `byDoc` map also has this assumption: a scanned
+extensionless file named `constructor` can throw when it has a citation, or retain
+an inherited function rather than an own empty array when it has none. This is a
+runner result-indexing gap independent of `getLinks`, alias admission, scan-root
+selection and telemetry. The opaque-id and structured-result requirements remain;
+no reserved ids or filenames are introduced. A conforming adapter's `get` alone
+does not ensure this bundled checker can index every supported key.
+
 ### I.6 Conformance
 
 An adapter conforms to this addendum when the inbound-reference suite
 (`evals/inbound-references/suite.test.js`) passes against it — AC1 (three forms extracted +
 resolved), AC2 (fail closed on a nonexistent id; no-op pass with no globs), AC3 (read-only), and the
 commit-SHA-safety case. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance is required
-of every adapter (AC4). Because the check reuses `get`, any Addendum-H-conforming adapter satisfies it
-without new storage.
+of every adapter (AC4). The check reuses `get` and requires no new adapter storage,
+but the bundled result-map key gap above is a separate runner conformance limit;
+Addendum-H conformance alone does not eliminate it.
 
 ---
 
@@ -1307,8 +1631,8 @@ The store is strong at *filing* and, since Addendum D, at *auditing* staleness �
 entirely in the auditor's call: thresholds are supplied per invocation, so freshness intent lived in
 whoever remembered to pass the right options, not on the record. A record could not say "I go stale
 on 2026-09-01"; the only freshness mechanism for a long-lived store was a human remembering to run an
-audit with the right numbers (field evidence: the ops design partner's radar section carried a
-`prune monthly` *comment* as its sole freshness mechanism). Knowledge rots silently between audits.
+audit with the right numbers. A maintenance comment such as `prune monthly` carries
+no executable expiry; knowledge can become stale between audits.
 
 Meanwhile Kontour already owns a trust vocabulary for exactly this — **Hachure**: `expiresAt` /
 `ttlSeconds`, statuses `unknown / proposed / verified / stale / superseded`, and the "no silent rot"
@@ -1331,8 +1655,13 @@ Two **optional** envelope fields (§1.1), round-tripped by every adapter through
 - Both are settable at `create` and via `update` (they are mutable fields; `update` records them in
   its mutation-log `fields` evidence like any other). Supplying either as `null` / `""` on `update`
   **clears** it.
-- A malformed value (non-ISO `expires_at`, non-positive `ttl_seconds`) is rejected at the mutation
-  boundary with `error.code === "MISSING_EVIDENCE"` — bad freshness never reaches disk.
+- `expires_at` MUST use the ISO-8601 representation above. **Current implementation
+  limit:** bundled validation checks a nonempty string and `Date.parse` parseability,
+  not strict ISO syntax, and stores the accepted string unchanged. For example,
+  `Thu, 01 Jan 2026 00:00:00 GMT` is accepted despite not being ISO-8601. Non-string,
+  empty or unparseable expiry inputs (apart from the clearing values above), and
+  non-positive/non-finite `ttl_seconds`, are rejected with `MISSING_EVIDENCE`.
+  Parseability does not establish conformance to the required ISO representation.
 - **Effective expiry** = `expires_at` when present, else `created_at + ttl_seconds`. An explicit
   `expires_at` therefore **takes precedence** over `ttl_seconds`.
 - **Backward compatibility (R5):** a record carrying neither field has `null` effective expiry and is
@@ -1347,33 +1676,45 @@ mutate the record's `status` (Addendum B) or any other field. "No silent rot" me
 - **`stale`** — the record's effective expiry exists and now is **at or past** it. The boundary is
   **inclusive**: a record `expires_at: T` is stale from `T` onward (`now >= T`). A record may also be
   surfaced as stale by `auditFreshness` (Addendum D + J.5). Derivation never changes the record.
-- **`superseded`** — the record is the target of an Addendum A.5 `supersede` relationship: it carries
-  a `superseded-by` mutation-log entry, equivalently an incoming `supersedes` edge in the graph
-  (`getLinks(id).reverse`). This is the cross-adapter query surface for supersession — it works
-  identically whether the adapter keeps superseded records in place (default) or archives them
-  (obsidian), because both maintain the graph. Supersession is a **derived state**, not a `status`
-  value; `supersede` remains the only op that establishes it.
+- **`superseded`** — the graph-derived state is detected from an incoming `supersedes`
+  edge (`getLinks(id).reverse`). A successful Addendum A.5 `supersede` operation pairs that
+  edge with a `superseded-by` mutation-log entry on the predecessor and the adapter's
+  retention behavior: in place (default) or archived (Obsidian). That paired edge/history
+  invariant is the operation's contract; supersession is not a stored `status` value.
+
+  **Current evidence limit:** both bundled adapters also accept caller-authored
+  `supersedes` links through `create`, `update`, and `link`. An incoming edge alone can
+  therefore produce the graph-derived state without a `supersede` operation, a
+  `superseded-by` log entry, or Obsidian archival. Inspect operation history separately;
+  the edge is not proof that the operation's full invariant ran.
 
 ### J.4 Hachure vocabulary alignment
 
-The kit keeps **two orthogonal axes**, and aligns each to Hachure's vocabulary without forking a
-second lifecycle:
+The kit keeps **two orthogonal record axes**. Neither is a verification authority:
 
 1. **Lifecycle status** (stored; mutated only by `retire`, Addendum B): `active` / `implemented` /
    `retired`.
 2. **Freshness/derivation state** (derived; never stored): `fresh` / `stale` / `superseded`.
 
-| Hachure term | Kit representation | Axis | Derived from |
-|---|---|---|---|
-| `verified` | `active` and not past expiry ("fresh") | lifecycle + freshness | `status === "active"` **and** not stale |
-| `stale` | `stale` | freshness (derived) | now ≥ effective expiry (`expires_at`, or `created_at + ttl_seconds`), or an `auditFreshness` flag |
-| `superseded` | `superseded` | freshness (derived) | incoming `supersedes` edge / `superseded-by` log entry (Addendum A.5) |
-| `proposed` | open proposal | flow state | a pending `proposes` link (Addenda B.7 / D) — not a record status |
-| `unknown` | *(not modelled)* | — | the kit has no "unknown" state; every record is at least `active` |
+The bundled Surface projection (`providers/surface-adapter/index.js`) submits
+`superseded` for retired records and `proposed` for all other record statuses.
+It forwards `expiresAt` / `ttlSeconds` for Surface to derive freshness. A stored
+assertion can therefore be proposed without an open `proposes` link. The store's
+derived supersession edges are also distinct from its stored lifecycle status.
+
+No record is marked `verified` by this projection. Active status, lack of expiry,
+creation provenance, type labels and successful storage do not establish truth
+or independent review. Hachure/Surface verification and trust derivation remain
+their own authority; this record model does not replace them or map "fresh" to
+"verified". A local `auditFreshness` flag is a hygiene observation, not a trust verdict.
 
 `retired` (kit) has no Hachure freshness equivalent — it is a **terminal lifecycle decision**,
 orthogonal to freshness. Retired records are excluded from the default working set (Addendum B.3) and
-so from stale-filtered listings, but remain fully queryable via `includeRetired` and `get`.
+so from stale-filtered listings. `includeRetired` affects only the enumerated
+working set (§B.3); Obsidian's archived predecessors remain excluded from listings.
+The required history path is `get` with reverse supersession links through
+`getLinks` (§A.7); the bundled Obsidian [archive collision gap](#known-obsidian-archive-retention-gap)
+can violate original-record retention despite surviving links.
 
 ### J.5 Query surface
 
@@ -1410,12 +1751,10 @@ discoverable via the reverse-link index (§5, `getLinks(id).reverse`). But nothi
 flagged the **docs** citing a superseded record — so a superseded decision could leave every citer
 silently pointing at dead or outdated authority.
 
-Field evidence (design partner `kontourai/ops`, knowledge record `0e439c57`): the 6/17 "sell the
-combination" decision became unresolvable after a store restructure and **four docs** (`NOW.md` ×2,
-`strategy/vision.md`, `strategy/2026-06-18-market-fork-decision.md`) cited it invisibly for weeks —
-the citers kept presenting a dead record as live authority. This addendum closes that loop: on a
-superseded/retired record it enumerates first-degree inbound citers from **both** indexes and emits a
-supersession-aware flag per citer.
+The motivating failure was a restructured decision store leaving several
+curated documents pointing at an unavailable or superseded record as live
+authority. This addendum enumerates first-degree inbound citers from **both**
+indexes and emits a supersession-aware flag per citer.
 
 This is a **read-only** enumeration in the hygiene-flow style (Addenda D–G): the existing gated
 `supersede` and `retire` ops are unchanged, and no new mutation path is forked. It does **not**
@@ -1432,7 +1771,7 @@ auto-edit citing docs, does **not** cascade status changes, and does **not** fol
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `docGlobs` | `string[]` | `[]` | Globs to scan for doc citers via the #340 citation index. Opt-in: `[]` = store citers only, no doc scan. |
-| `docsRoot` | `string` | workspace, then cwd | Root the globs resolve against. |
+| `docsRoot` | `string` | `cwd` | Root the globs resolve against. Supply explicitly when docs differ from cwd; neither constructor nor per-call workspace is forwarded to the doc scan (§I.2). |
 | `markers` | `string[]` | `DEFAULT_CITATION_MARKERS` | Citation marker prefixes forwarded to the inbound-reference scan (Addendum I). |
 | `agent` | `string` | runner agent | Agent recorded on the flow telemetry. |
 
@@ -1501,7 +1840,15 @@ I) also appear in the trail.
 
 `flagSupersededCiters` reads the store's query surface (`get`, `getLinks`) and — when doc globs are
 configured — the #340 inbound-reference scan (doc files + `get`). It mutates no record and appends no
-mutation-log entry. The store tree is byte-identical before and after the call.
+mutation-log entry. It does emit gate telemetry: runner construction can create the
+sink directory, and normal gate events append to
+`<workspace>/.kontourai/telemetry/full.jsonl` (workspace falls back to
+`FLOW_AGENTS_WORKSPACE`, then cwd). Whole-store-tree byte identity requires keeping
+that sink outside the store tree and excluding unrelated concurrent changes.
+Using the store root as workspace can change telemetry bytes inside it without
+mutating any knowledge record, graph link or mutation history. The same telemetry
+boundary applies to the inbound-reference checker; read-only describes its
+knowledge-record behavior, not an absence of filesystem output.
 
 ### K.5 Conformance
 
@@ -1522,9 +1869,9 @@ adapter conforming to Addenda A, B, H, and I satisfies it without new storage.
 The `knowledge.consolidate` flow (Addendum A) originally accepted only a **whole-body** input:
 the caller authored the *entire* updated snapshot body (`options.proposedBody`) and the runner
 replaced the snapshot with it. To add one decision, the caller had to re-read and re-emit every
-prior entry. Field evidence from the ops design partner (record `0e439c57`) showed this cost is
-high enough that real sessions **skip consolidation entirely** — the living decision snapshot
-silently stops living, defeating the flow.
+prior entry. Repeating that work can cause callers to skip consolidation and
+leave a decision snapshot stale. Append mode addresses that maintenance burden;
+it does not establish a measured time or cost saving.
 
 The snapshot already links its contributing compiled records with kind `"source"` and carries
 `provenance.source_ids` (Addendum A.3), so the body is *derivable from records*. Append mode uses
@@ -1549,7 +1896,9 @@ both throws `MISSING_EVIDENCE`. The appended record MUST exist and be type `"com
 
 On an append-mode call the runner:
 
-1. Resolves the **current** (non-superseded) snapshot for the topic (or the given snapshot id).
+1. With a topic selector, resolves the **current** (non-superseded) snapshot for that topic.
+   With an explicit snapshot-id string, reads that snapshot directly; it does not follow
+   successors or check that the selected snapshot is still current.
 2. Reads that snapshot's contributing records: `provenance.source_ids` first, falling back to its
    kind `"source"` links (Addendum A.3).
 3. Forms the new source set = *prior sources* ++ *appended entry*, de-duplicated with order
@@ -1571,18 +1920,26 @@ supersede-not-delete invariant (A.5), or the telemetry gate points.
 
 ### L.5 Sequential-session safety (no lost update)
 
-Because the body is regenerated from the **current live snapshot's** records on every call, two
-sequential consolidations from different sessions/agents, each appending one distinct entry, yield
-a snapshot containing **both** entries — the second session resolves the first session's snapshot,
-reads its (now-larger) source set, and appends to it rather than overwriting a stale whole body.
+Sequential append safety requires each call to use the **current live snapshot's** source
+set. With a topic selector, the second of two sequential consolidations resolves the first
+session's snapshot and appends to its larger source set, preserving both contributions.
+The same condition holds when a caller supplies the actual current snapshot id.
+
+**Current explicit-id limit:** the runner accepts a retained older snapshot id without
+refreshing it. If S0 contains X, appending A via S0 can produce S1 containing X+A;
+appending B via S0 again can produce X+B and supersede S1. Supersession is required
+to retain history (subject to the bundled Obsidian archive gap above), but the current
+snapshot omits A. The no-lost-update requirement is not enforced for stale
+explicit ids, and sequential topic selection does not establish concurrent-update safety.
 
 ### L.6 Conformance
 
 An adapter conforms when the incremental-consolidation suite
 (`evals/consolidate-incremental/suite.test.js`) passes against it. The suite is parameterized by
-`KNOWLEDGE_ADAPTER`; the no-lost-update case (R4) and the provenance/source-link completeness case
+`KNOWLEDGE_ADAPTER`; the sequential topic-selector no-lost-update case (R4) and the provenance/source-link completeness case
 (R3, asserted via the portable `get()` + reverse-`supersedes`-link guarantees of A.7) are required
 of every adapter. The default-store's additional guarantee that `listByType("snapshot")` still
 returns superseded snapshots is covered for that adapter by `evals/consolidation/suite.test.js`
-(the Obsidian adapter archives superseded snapshots out of the working set — both keep them
-reachable via `get()`).
+(the Obsidian adapter archives superseded snapshots out of the working set; both are
+required to retain `get()` access, but the Obsidian archive collision gap above can
+violate that requirement).

@@ -39,13 +39,19 @@ See [`store-contract.md`](store-contract.md) for the full specification. Quick r
 | `compiled` | Normalized, editor-reviewed distillations of raw records. |
 | `concept` | Named ideas or principles that other records reference. |
 | `snapshot` | Bounded decision summary for a topic (Addendum A). |
+| `person` | Entity card with links to mentions (Addendum C). |
+
+Both bundled adapters admit all five types. `provenance.agent` is required;
+`source_ids`, `session_id` and `note` are optional creation provenance. A compiled
+label or source link does not establish that review happened or content is true.
+See the [canonical envelope and adapter differences](store-contract.md#1-record-types).
 
 **Record status lifecycle**
 
 | Status | Meaning | Default |
 |---|---|---|
-| `active` | Live, part of the working set. | Yes (records without status field are treated as active). |
-| `implemented` | Decision was shipped; transitional state before archival. | No |
+| `active` | Default lifecycle state; archive and query filters still apply. | Yes (records without status field are treated as active). |
+| `implemented` | Marked implemented with the supplied artifact reference; not excluded by the lifecycle filter. | No |
 | `retired` | Excluded from default working-set queries; history preserved. | No |
 
 **Mutation operations**
@@ -70,21 +76,44 @@ category-scoped **slug alias**, then an **unambiguous id prefix** (≥ 8 chars).
 
 | Handle | Example | Resolves to |
 |---|---|---|
-| Full id | `12cc5573-1c4f-4a0e-8b6e-9d2f0a5b7c31` | the record (unchanged exact-id behavior) |
-| Slug alias | `decision.strategy/2026-07-03-gtm-direction` | the record that carries that alias |
-| Short-id prefix (≥ 8 chars, unique) | `12cc5573` | the single record whose id starts with it |
+| Full id | `a1b2c3d4-1c4f-4a0e-8b6e-9d2f0a5b7c31` | the record (unchanged exact-id behavior) |
+| Slug alias | `decision.design/2026-01-01-api-shape` | the record that carries that alias |
+| Short-id prefix (≥ 8 chars, unique) | `a1b2c3d4` | the single record whose id starts with it |
 
 Aliases are caller-supplied via the optional `aliases: string[]` field on `create`/`update`,
-append-only, and stored in an id-keyed alias map (`alias-index.json`) so a prefix or slug **still
+append-only, and stored in a slug-to-full-id alias map (`alias-index.json`) so a prefix or slug **still
 resolves after a store restructure** (e.g. a recategorize that moves the file). An unresolved
-handle returns `null` (`get`) / empty arrays (`getLinks`); an **ambiguous** prefix throws
+handle returns `null` from `get`. `getLinks` instead falls back to the literal
+input as a graph-index key; it returns empty arrays only when that key has no
+indexed links. Dangling targets can therefore have backlinks without a stored
+record. Use `get` to check record existence. An **ambiguous** prefix throws
 `error.code === "AMBIGUOUS_ID"` — it is never silently guessed. On-disk identity (`records/<id>.md`)
 is unchanged.
+
+**Known default-store identity gap:** contained path-like opaque ids can normalize
+to a different filename from their stored id. Such a record can be created and
+read while a unique stored-id prefix fails, or an unissued normalized spelling
+returns it. `get` and `getLinks` can also disagree on normalized spellings. The
+required exact/alias/prefix contract remains; see the
+[path-normalization disclosure](store-contract.md#known-default-store-path-normalized-identity-gap).
+
+**Known bundled graph-query gap:** the required `getLinks` array result is not met
+for some prototype-named keys. On an empty graph, `getLinks("constructor")` can
+throw a plain `TypeError` because an inherited object property is treated as an
+array. A no-link record with that opaque id can still be created/read via `get`
+while graph lookup fails. This is an implementation gap, not a reserved-id rule;
+see the [graph-key disclosure](store-contract.md#known-bundled-graph-key-handling-gap).
 
 | Error code | Raised when |
 |---|---|
 | `AMBIGUOUS_ID` | an id prefix matches more than one record (carries a `matches` array) |
-| `SLUG_CONFLICT` | a supplied slug alias is already assigned to a different record |
+| `SLUG_CONFLICT` | a supplied slug alias is already assigned to a different record; the bundled false-conflict gap below can also raise it without an owner |
+
+**Known bundled alias-admission gap:** an unused `constructor` alias meets the
+slug syntax but can be rejected by either adapter's `create` or `update` with
+`SLUG_CONFLICT`. An inherited property in the alias map is mistaken for an owner.
+This is separate from graph-query failure and does not introduce a reserved-alias
+rule; see [alias registration](store-contract.md#h4-slug-aliases).
 
 ---
 
@@ -122,7 +151,7 @@ All tests pass and exit 0. Any failure indicates a contract regression or an ada
 
 | AC | Requirement | Evidence |
 |---|---|---|
-| AC1 | Contract doc exists; mutation ops enumerate evidence fields. | [`docs/store-contract.md`](store-contract.md) — §6 covers all six ops with required-field tables. |
+| AC1 | Contract doc exists; mutation ops enumerate evidence fields. | [`docs/store-contract.md`](store-contract.md) — §6 plus Addenda A/B cover eight mutations; §8 consolidates the interface. |
 | AC2 | Default adapter passes contract suite (command evidence). | Run `node --test kits/knowledge/evals/contract-suite/suite.test.js` — exit 0, all tests pass. |
 | AC3 | Record round-trips raw → stored → queried with category + links intact. | Suite §2 "create: round-trip raw → stored → queried" tests this directly. |
 
@@ -170,9 +199,14 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 - `apply(conceptId, proposerId, evidence)` → `Promise<void>`
 - `reject(conceptId, proposerId, evidence)` → `Promise<void>`
 - `get(idOrHandle)` → `Promise<Record | null>` (exact id, slug alias, or unambiguous id prefix — Addendum H)
-- `getLinks(idOrHandle)` → `Promise<{ forward: Link[], reverse: Link[] }>`
+- `getLinks(idOrHandle)` → `Promise<{ forward: Link[], reverse: Backlink[] }>`;
+  a backlink contains `source_id` and `kind`, while a forward link uses `target_id`;
+  the prototype-key implementation gap above can prevent this required result
 - `listByCategory(category, options?)` → `Promise<Record[]>`
-- `listByType(type)` → `Promise<Record[]>`
+- `listByType(type, options?)` → `Promise<Record[]>`
+- `supersede(newId, supersededIds, evidence)` → `Promise<void>`
+- `retire(id, targetStatus, evidence)` → `Promise<void>`
+- `reindex()` → derived graph-index recovery report
 
 ---
 
@@ -182,8 +216,7 @@ The kit ships these flows:
 
 **`knowledge.store-contract`** — gates on three evidence claims before a store implementation
 is accepted: contract-suite pass, provenance-enforcement pass, and round-trip integrity pass.
-S2 will add pipeline flows for raw ingestion, compilation, and concept management; this flow
-and adapter infrastructure remain the foundation.
+The pipeline flows below build on this adapter infrastructure.
 
 ### Living Context: standalone Context Check
 
@@ -264,9 +297,10 @@ node --test kits/knowledge/context-check/context-check.test.js
 
 ## Decision Lifecycle — Retiring Records (S7)
 
-Implemented or obsolete records can be retired from the working set via the `knowledge.retire`
-flow. Retirement is **non-destructive**: the record body, links, and creation provenance remain
-intact; the record is simply excluded from the default working set.
+The `knowledge.retire` flow marks an existing record `implemented` or `retired` using the
+evidence below. Both transitions preserve its body, links and creation provenance.
+Only `retired` triggers the default lifecycle exclusion; `implemented` does not.
+The adapter's separate working-set exclusions still apply.
 
 ### Status transitions
 
@@ -286,9 +320,24 @@ Retired records are excluded from:
 - `defaultSimilarityDetector` — default cluster candidates
 - `createVectorSimilarityDetector` — vector cluster candidates
 
-Add `{ includeRetired: true }` to any query to restore retired records.
+For `listByType` and `listByCategory`, `{ includeRetired: true }` disables only the
+retired-status filter within the adapter's enumerated working set. Obsidian still
+excludes archived supersession predecessors from both listings, even with this
+option. The required historical access path is `get(id)` with reverse `supersedes`
+links through `getLinks(id)`. **Known Obsidian retention gap:** archiving another record
+with a reused category/title path can overwrite the earlier archive file;
+`get(earlierId)` can then return the later record's id/body/history. Index entries and
+links do not prove original-byte retention. See the
+[archive collision disclosure](store-contract.md#known-obsidian-archive-retention-gap)
+and [working-set contract](store-contract.md#b3-working-set-exclusion).
 
-`get(id)` **always** returns the full record regardless of status.
+Both built-in similarity detectors unconditionally exclude retired candidates;
+neither exposes an `includeRetired` override. They filter supplied candidates;
+they do not fetch records excluded by a store listing.
+
+Lifecycle status does not itself restrict `get(id)`; the Obsidian archive collision
+gap above can nevertheless violate original-record retrieval. An unresolved handle
+returns `null`, as described above.
 
 ### Using the retire flow
 
@@ -324,17 +373,18 @@ await runner.retire(recordId, {
 ### Accessing retired records with provenance
 
 ```js
-// Always works — returns full record including retirement evidence
+// Read an existing retired record, including retirement evidence
 const record = await store.get(retiredId);
 console.log(record.status);           // "retired"
 console.log(record.mutation_log);     // includes retire entry with rationale
 
-// Query all retired records of a type
-const allCompiled = await store.listByType('compiled', { includeRetired: true });
+// List compiled records in the adapter's working set, including retired ones.
+// Archived Obsidian predecessors remain excluded; this is not a retired-only query.
+const compiledWorkingSet = await store.listByType('compiled', { includeRetired: true });
 
 // Get history from snapshot provenance
 const snapshot = await store.get(snapshotId);
-for (const srcId of snapshot.provenance.source_ids) {
+for (const srcId of snapshot.provenance.source_ids ?? []) {
   const src = await store.get(srcId);   // works even if src is retired
   console.log(src.id, src.status);
 }
@@ -427,17 +477,26 @@ to `0.70–0.80` to avoid over-clustering.
 
 ### Fail-closed rationale
 
-The vector detector throws an `Error` with `code="EMBED_FAILURE"` rather than returning `[]`
-when the embedding call fails (network error, HTTP error, malformed response, wrong vector
-count). This is intentional.
+The bundled Ollama embedding function throws an `Error` with `code="EMBED_FAILURE"`
+for network/HTTP failures, invalid JSON, a non-null decoded envelope missing an
+embeddings array, or a wrong vector count. The detector also checks the outer array and count returned by an injected
+embed function; errors from that function otherwise propagate as supplied.
+
+**Current validation limits:** a valid JSON response of `null` is dereferenced before
+its envelope is checked, raising a plain `TypeError` rather than `EMBED_FAILURE`.
+Individual vectors are not validated for numeric contents,
+non-empty shape, or matching dimensions. Correct-count responses such as
+`{ embeddings: [null, null] }` can therefore score zero and return `[]` at the default
+threshold, while nonnumeric contents can produce `NaN` and be excluded. These cases can
+still surface as `MISSING_EVIDENCE` downstream rather than `EMBED_FAILURE`.
 
 A detector that silently returns `[]` on infrastructure failure is indistinguishable from one
 that found no similar records. The result is a misleading `MISSING_EVIDENCE` at the detect-cluster
 gate, which looks like "this concept has no sources" rather than "the embedding service is down".
 
-Failing closed makes the infrastructure problem visible immediately, at the right level, with a
-clear error code. Operators can catch `EMBED_FAILURE` separately from `MISSING_EVIDENCE` and
-route them to different alerting channels.
+Failing closed is the intended boundary: recognized embedding failures should remain
+distinguishable from an empty cluster. Operators can route `EMBED_FAILURE` separately
+from `MISSING_EVIDENCE`, while accounting for the validation gaps above.
 
 ### Injecting a custom embed function
 
@@ -473,9 +532,11 @@ provider read interface (issue #327). It is the **owner's opt-in personal
 default** — the file providers (`markdown-vault`, `git-repo`, `work-item`) remain
 the portfolio default. The graph is a **materialized view** synced from those
 providers: the file stores stay the source of truth, and the write side stays
-proposals-only. `neo4j-driver` is an optional dependency; with no Neo4j reachable
-everything degrades to the file providers with a clear message — it is never a
-hard dependency.
+proposals-only. `neo4j-driver` is an optional dependency. At selection time,
+`selectKnowledgeProvider` checks reachability and uses the supplied `fileProviders()`
+factory when configuration, the driver, or connectivity is unavailable. Callers must
+supply that factory (and a `neo4jFactory` for successful graph selection). This is
+selection-time degradation, not automatic failover of later graph queries.
 
 ### 1. Start Neo4j (Docker)
 
@@ -519,8 +580,12 @@ console.log(await syncToNeo4j({ driver, providers })); // { writes, unchanged, d
 ### 4. Query it — Neo4j Browser or the provider verbs
 
 Open `http://localhost:7474` for the interactive Browser, or use the provider's
-Cypher-backed query/health verbs (they fall back to a portable JS spelling with
-identical answers when no Neo4j is reachable):
+query/health verbs. With the real driver below, these use Cypher and propagate driver
+errors; an outage does not switch a direct `Neo4jProvider` call to file providers.
+The portable JS algorithms are selected for a driver without Cypher-analytics support,
+but still read that driver's data. A driverless provider with an explicit `sourceGraph`
+is a separate in-memory path, not outage failover. Supplying both a driver and
+`sourceGraph` still uses the driver:
 
 ```js
 import { Neo4jProvider } from "./kits/knowledge/providers/neo4j/index.js";

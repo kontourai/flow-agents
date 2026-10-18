@@ -1,8 +1,8 @@
 # @kontourai/flow-agents-strands
 
-**Native-import TypeScript adapter for AWS Strands Agents.**
+**Preview — native-import TypeScript adapter for AWS Strands Agents.**
 
-This is the first native-import consumer of the Flow Agents policy engine contract. It wires Flow Agents telemetry and native config-protection directly into Strands Agents TypeScript SDK hook callbacks — with no subprocess overhead for the critical hot path (config-protection on `BeforeToolCallEvent`). Workflow steering, quality-gate, and stop-goal-fit checks are exercised by the conformance shim only, not by the production `FlowAgentsHooks` callbacks.
+This preview implements telemetry callbacks and native config-protection for the Strands Agents TypeScript hook shape, without a subprocess on the config-protection hot path (`BeforeToolCallEvent`). Normal SDK registration currently has a known implementation gap described below; callback tests do not establish that registration works. Workflow steering, quality-gate, and stop-goal-fit checks are exercised by the conformance shim only, not by the production `FlowAgentsHooks` callbacks.
 
 ---
 
@@ -15,7 +15,9 @@ This is the first native-import consumer of the Flow Agents policy engine contra
 | Hot path latency | ~0 ms (direct function call) | ~50–100 ms per call (process spawn) |
 | Strands SDK optional? | Yes — duck-typed, SDK not required to build/test | Yes |
 | Config-protection | Native `run()` call | Subprocess, with Python fallback |
-| Other policies (steering, quality-gate, stop-goal-fit) | Subprocess checks in the conformance shim | Via subprocess |
+| Steering | Subprocess check in the conformance shim; no per-turn production injection | Local context loaded when `steering_context()` is requested for Agent construction; no per-turn canonical policy callback |
+| Quality-gate and stop-goal-fit | Subprocess checks in the conformance shim only | Not invoked by production callbacks; config-protection is the canonical policy subprocess |
+| Token usage | Conditional model-call accumulation and `session.usage` callback implementation; normal SDK registration is blocked | Conditional model-call accumulation and `session.usage` emission when the SDK supplies the optional event and usable payload |
 | Conformance target | L2-targeted policy coverage via conformance shim | L0 (+ config-protection) |
 
 The key innovation: `config-protection.js` exports `module.exports = { run }`. This adapter calls that function directly from the Node.js process, bypassing the subprocess round-trip for every `BeforeToolCallEvent` write call.
@@ -31,9 +33,19 @@ The key innovation: `config-protection.js` exports `module.exports = { run }`. T
 | Workflow steering L2 behavior | structural-only | The shim can exercise the canonical policy for L2-targeted fixtures; production callbacks emit telemetry only and do not inject per-turn steering. |
 | Quality-gate L2 behavior | structural-only | The shim invokes `quality-gate.js` for conformance checks; production callbacks do not run quality gates after tool calls. |
 | Stop-goal-fit L2 behavior | structural-only | The shim invokes `stop-goal-fit.js` for conformance checks; production callbacks emit stop telemetry only. |
-| Analytics channel, Console/HTTP sink, subagent events, permission requests, token usage | unavailable | These gaps are not wired in this adapter. |
+| Token usage | conditional callback implementation | `onAfterModelCall` accumulates recognized usage; `onAfterInvocation` emits `session.usage` only when data was collected. SDK event/payload support and successful wiring are required. |
+| Normal SDK registration | known implementation gap | `registerHooks` uses an unbound `require("strands-agents")` in ESM and names a different package from the declared `@strands-agents/sdk` peer. |
+| Analytics channel, Console/HTTP sink, subagent events, permission requests | unavailable | These gaps are not wired in this adapter. |
 
 ## Quickstart
+
+**SDK registration is currently blocked.** In the normal ESM build, `registerHooks`
+calls an unbound `require("strands-agents")`; it also targets a different package
+from the documented peer `@strands-agents/sdk`. Credentials do not resolve this
+source discrepancy. The example below shows the intended integration shape,
+not a currently working SDK quickstart. Registration needs a separate
+implementation repair. Manual callback tests and the conformance shim bypass
+this path and do not prove normal SDK registration.
 
 ```typescript
 import { Agent, BeforeInvocationEvent, AfterInvocationEvent,
@@ -54,7 +66,7 @@ const agent = new Agent({ hooks: [hooks] });
 hooks.emitSessionStart();
 ```
 
-Or wire manually without the SDK:
+For tests or a custom host, callbacks can be wired directly without SDK registration:
 
 ```typescript
 // Direct callback wiring (for testing or custom frameworks)
@@ -188,7 +200,7 @@ node --test integrations/strands-ts/dist/test/test-telemetry.js \
 
 2. **Quality-gate and stop-goal-fit via subprocess in conformance shim only**: The production `FlowAgentsHooks` callbacks don't wire `quality-gate.js` or `stop-goal-fit.js` (they have no clear Strands analogue for direct callback injection). The `bin/conformance-shim.mjs` shim wires them via subprocess to expose current target coverage and gaps.
 
-3. **session.usage event omitted**: The `AfterInvocationEvent` does not expose token usage in the Strands TS SDK hook payload.
+3. **Conditional session.usage**: `onAfterModelCall` accumulates recognized usage, then `onAfterInvocation` emits `session.usage` only when data was observed. Collection depends on the optional model-call event, payload and successful wiring; normal SDK registration is currently blocked as described above. These counters are not cost, efficacy or savings evidence.
 
 4. **No analytics channel**: Only the `full` JSONL channel is written. Analytics-channel redaction is not implemented.
 
@@ -201,6 +213,9 @@ node --test integrations/strands-ts/dist/test/test-telemetry.js \
 ---
 
 ## Conformance status
+
+The entries below describe callback/shim coverage, not successful normal SDK
+registration. The Quickstart registration gap remains independently blocking.
 
 ```
 conformance_target: L2 via conformance-shim.mjs
@@ -227,8 +242,9 @@ The canonical-taxonomy live loop is proven end-to-end with no API keys via the
 Python adapter (`integrations/strands/`): a real Strands agent on a local
 Ollama model (qwen3:1.7b) with `FlowAgentsHooks` attached persisted all five
 canonical event types (`session.start`, `turn.user`, `tool.invoke`,
-`tool.result`, `session.end`) on 2026-06-11. The TypeScript SDK currently
-ships only a Bedrock model provider, so this adapter's live-agent run requires
-AWS credentials; its correctness is covered by the real-engine tests and the
-conformance-shim validation path above. An Ollama `Model` implementation for
-the TS SDK is a candidate follow-up if keyless live runs are wanted here too.
+`tool.result`, `session.end`) on 2026-06-11. This historical Python observation
+does not qualify the TypeScript adapter. Its normal ESM SDK registration is
+blocked by the `require`/package mismatch above, independently of credentials.
+Real-engine callback tests and the separate conformance shim do not cover that
+path. Later SDK/provider qualification must demonstrate registration as well as
+callbacks; it cannot be inferred from the Python observation.

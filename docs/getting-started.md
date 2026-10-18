@@ -1,26 +1,99 @@
 ---
-title: Builder Kit Quick Start
+title: Getting Started
 ---
 
-# Builder Kit Quick Start
+# Getting Started
 
-This guide takes you from nothing to a running, gated build flow in about two minutes. By the end you will have Flow Agents installed in your coding agent's workspace and understand how the Builder Kit's two flows — `builder.shape` and `builder.build` — turn a raw idea into a merged change with evidence.
+<a id="builder-kit-quick-start"></a>
+
+Start by saving and reading back one local note through the Knowledge Kit's store
+API. This uses the published `9.1.1` package, Node.js 22 or newer, npm, and a
+writable directory. It needs no model credentials or provider calls. A coding
+agent is needed later to use the installed Claude Code hooks; this first task
+runs directly in Node and does not qualify live host enforcement.
+
+## Save your first note
+
+Create a new disposable directory and install the Claude Code workspace bundle
+with the Knowledge Kit selected:
+
+```bash
+mkdir flow-agents-first-note
+cd flow-agents-first-note
+flow_agents() (
+  tool_root=$(mktemp -d) || exit 1
+  trap 'rm -rf "$tool_root"' EXIT HUP INT TERM
+  npm exec --yes --prefix "$tool_root" \
+    --package=@kontourai/flow-agents@9.1.1 -- flow-agents "$@"
+)
+flow_agents init --runtime claude-code --dest . \
+  --activate-kit knowledge --telemetry-sink local-files --yes
+```
+
+The isolated npm prefix keeps a repository-local package from intercepting this
+versioned command. The installer prints the selected runtime, destination and
+local-files telemetry pin. Explicit `--telemetry-sink local-files` ignores
+operator Console configs; `TELEMETRY_CONFIG_FILE` can still override it, and a
+separately enabled OTLP bridge is outside this pin. See the full
+[telemetry resolution rules](../scripts/README.md#telemetry). This is not a
+network-isolation setting. Source changes newer than 9.1.1 validate telemetry
+configuration for every install; that additional validation is not claimed for
+this pinned release.
+
+Save a note using the installed [store API](../kits/knowledge/docs/store-contract.md):
+
+```bash
+node --input-type=module <<'JS'
+import DefaultKnowledgeStore from './kits/knowledge/adapters/default-store/index.js';
+const store = new DefaultKnowledgeStore({ storeRoot: './knowledge-demo' });
+const id = await store.create({
+  type: 'raw',
+  title: 'Upgrade reminder',
+  body: 'Read the release notes before upgrading.',
+  category: 'quickstart',
+  provenance: { agent: 'quickstart-cli', note: 'Local text entered in this example.' }
+});
+const saved = await store.get(id);
+console.log(JSON.stringify({ id, type: saved.type, body: saved.body,
+  agent: saved.provenance.agent }, null, 2));
+JS
+```
+
+Expect a generated `id`, `type: "raw"`, the same body, and
+`agent: "quickstart-cli"`. The record is saved at
+`knowledge-demo/records/<id>.md`; its graph index is in
+`knowledge-demo/graph-index.json`. The agent label identifies this example's
+calling process; it is supplied by the caller and is not authenticated identity
+or independent review. Saving the note records text and provenance, not its truth.
+Each execution creates a new record. Keep the returned id to read it again with
+`get(id)` rather than creating a duplicate.
+
+**Recovery:** if `create` refuses with `MISSING_EVIDENCE` for a missing
+`provenance.agent`, it has not created that record. Supply the actual calling
+process label and retry the rejected input. Do not remove provenance enforcement
+or edit a stored record to bypass it. For a missing adapter file, confirm the
+install above completed in this directory before running Node.
+
+This completes a local capture and read-back, not a gated software delivery.
+For a small code change, use your repository's normal implementation, meaningful
+checks and separate review; report unresolved gaps. To add a stateful delivery
+workflow, select the optional Builder Kit below. `builder.build-lean` is an
+ablation experiment, not a small-task shortcut.
+
+<details>
+<summary>Other installs, provider setup, host layouts and completion checks</summary>
 
 ## 1. Install
 
-Run this from any workspace you want to add discipline to:
-
-```bash
-npx @kontourai/flow-agents init --runtime <your-agent> --dest .
-```
-
-Where `--runtime` is one of `claude-code`, `codex`, `kiro`, `opencode`, or `pi`. For a fully unattended install:
-
-```bash
-npx @kontourai/flow-agents init --runtime claude-code --dest . --yes
-npx @kontourai/flow-agents init --runtime codex       --dest . --yes
-npx @kontourai/flow-agents init --runtime opencode    --dest . --yes
-```
+For a different workspace or runtime, use the version-pinned `flow_agents`
+helper above with `init --runtime <your-agent> --dest /path/to/workspace`.
+Supported runtime names are `claude-code`, `codex`, `kiro`, `opencode`, and `pi`;
+completion behavior differs as described below. Use `--activate-kit builder`
+to declare a Builder selection, or `--activate-kits` for every catalog kit.
+Defaults differ by runtime: without an explicit selection, Claude Code installs
+built-in kit skills and records every catalog kit as active; other runtimes
+record no active catalog kits by default. An explicit selection does not make
+Claude Code's unconditional built-in skill copying selective.
 
 To configure provider-backed Builder work at the same time, add
 `--configure-providers --online`. This detects the repository, verifies GitHub
@@ -29,12 +102,12 @@ settings. For non-interactive offline setup, provide
 `--provider-project NUMBER`; remote state remains explicitly unverified until
 you run the printed `gh` checks.
 
-The installer copies agents, skills, context contracts, hook scripts, Kit assets, and the Flow Agents telemetry descriptor into the workspace. The Builder Kit installs automatically. Your agent reads those files at startup; no plugin registry required.
+The installer copies agents, skills, context contracts, hook scripts, Kit assets, and the Flow Agents telemetry descriptor into the workspace. Kit activation follows the runtime defaults and explicit selection described above. Start a new host session and complete its trust setup; copying files does not establish that the host loaded them.
 
 For a normal Codex global install, target the Codex home instead of a project workspace:
 
 ```bash
-npx @kontourai/flow-agents init --runtime codex --global --activate-kits --yes
+flow_agents init --runtime codex --global --activate-kit builder --yes
 ```
 
 That splits installation by ownership: Codex-only runtime assets go into `CODEX_HOME` when set (otherwise `~/.codex`), while portable skills go into Codex's documented user catalog at `$HOME/.agents/skills`. A repository bundle install similarly exposes skills at `<repo>/.agents/skills`.
@@ -42,7 +115,7 @@ That splits installation by ownership: Codex-only runtime assets go into `CODEX_
 For OpenCode, a global install targets `${XDG_CONFIG_HOME:-$HOME/.config}/opencode` and keeps the candidate workspace clean:
 
 ```bash
-npx @kontourai/flow-agents init --runtime opencode --global --activate-kit builder --yes
+flow_agents init --runtime opencode --global --activate-kit builder --yes
 ```
 
 The installer additively merges `opencode.json`, syncs the Flow Agents plugin and agents, and exposes core skills plus the selected kits and their transitive dependencies. Runtime support and a SHA-256 managed-file manifest live under `.flow-agents/`; unrelated user plugins, agents, skills, and config entries remain user-owned. The manifest includes a secret-free Conduit receipt (asset IDs, kinds, and digests only) for the plugin, agents, and skills.
@@ -64,7 +137,7 @@ Keep generated Codex base config lean. Put profile-specific model, provider, and
 - `context/` — shared contracts the agent follows, at the workspace root regardless of runtime
 - Agent and skill definitions, in a runtime-specific location: `.claude/agents/` + `.claude/skills/` for Claude Code, `.codex/agents/` + `.agents/skills/` for Codex, top-level `agents/` + `skills/` for Kiro, `.opencode/agents/` + `.opencode/skills/` for opencode, and `.pi/skills/` for pi
 - `scripts/hooks/` — four canonical policy scripts (steering, quality gate, stop-goal-fit, config protection) wired to the host's native hook surface
-- `kits/builder/` — Builder Kit flows and skills
+- `kits/` — catalog assets; activation defaults and installed skills differ by runtime as described above
 - `console.telemetry.json` — telemetry descriptor (writes locally by default)
 
 ### Completion checks by runtime
@@ -83,14 +156,24 @@ Installing hook files does not prove that a running agent loaded or executed the
 
 Even in blocking mode, stop-goal-fit checks recorded workflow state and evidence; it is not a guarantee that every incomplete task is caught. Bounded retry and escalation behavior can end a turn with unresolved gaps. See the [Runtime Hook Surface spec](spec/runtime-hook-surface.md#23-stop-goal-fit) for policy resolution and limits. Repository-required CI checks remain a separate boundary.
 
+</details>
+
 ## 2. What the Builder Kit gives you
 
-The Builder Kit installs two flows:
+Builder is optional. Activate it in an existing workspace with
+`flow_agents init --runtime claude-code --dest . --activate-kit builder --telemetry-sink local-files --yes`.
+The current [manifest](../kits/builder/kit.json) declares the following catalog;
+`builder.shape` and `builder.build` are the starter pair, not the complete list:
 
 | Flow | ID | What it does |
 |---|---|---|
 | Shape | `builder.shape` | Turns a raw idea into slices and executable work items |
 | Build | `builder.build` | Takes a ready work item through design probe → plan → execute → verify → PR → merge readiness → learn |
+| Review existing | `builder.review-existing` | Review and verify an existing exact commit; no implementation or merge step. A changed head needs a new run. |
+| Deliver existing | `builder.deliver-existing` | Review, verify and deliver an existing open same-repository PR at its pinned head; no retroactive implementation claim. |
+| Publish and learn | `builder.publish-learn` | Reusable publication, CI readiness and learning extension. |
+| Publish existing | `builder.publish-existing` | Closeout extension that adopts an existing PR at the pinned head. |
+| Gate-value ablation | `builder.build-lean` | **Experiment only.** Removes gates together with demanded design-probe and planning work; enforces less than `builder.build`. Never a delivery substitute. |
 
 These are not freeform chat sessions. Each flow has **evidence gates** — named checkpoints that expect specific claims before the next step starts. Flow evaluates those expectations when a transition is requested. Whether the host can also prevent the agent from ending its turn depends on the completion-check wiring and configuration above.
 
@@ -114,7 +197,9 @@ These are not freeform chat sessions. Each flow has **evidence gates** — named
 
 The gate semantics live in [Kontour Flow](https://kontourai.github.io/flow/); Flow Agents compiles them to whatever hook surface your agent exposes.
 
-## 3. A two-minute first run
+<a id="3-a-two-minute-first-run"></a>
+
+## 3. Optional Builder walkthrough
 
 ### Step 1 — Shape an idea
 
@@ -127,12 +212,12 @@ like "[2/5] Copying agents". Shape this into an executable work item and stop
 at the backlog gate.
 ```
 
-The agent will run the `builder-shape` / `idea-to-backlog` skill, which:
+The prompt asks the agent to run the `builder-shape` / `idea-to-backlog` skill, which:
 
 1. inventories the idea and classifies it
 2. proposes the thinnest meaningful slice (the step counter) and names what is out of scope
 3. drafts a shaped work item with a stated outcome, non-goals, acceptance criteria, and a verification expectation
-4. stops at the `breakdown-gate` and waits for you to confirm before creating GitHub issues
+4. presents the breakdown for confirmation before creating provider-backed work items
 
 You will see the agent write a local artifact at `.kontourai/flow-agents/<slug>/<slug>--idea-to-backlog.md`. That artifact is the machine-readable input to the next stage — not a summary in the chat window.
 
@@ -156,12 +241,16 @@ The `deliver` skill orchestrates the full `builder.build` flow:
 1. **pull-work** — selects the issue, confirms scope and acceptance criteria (`pull-work-gate`)
 2. **design-probe** — checks goal fit, identifies blockers and dependencies, and records planning readiness before touching a file (`design-probe-gate`)
 3. **plan-work** — delegates to `tool-planner`, which writes a structured plan artifact naming files, changes, sequencing, and acceptance evidence (`plan-gate`)
-4. **execute-plan** — fans out to up to four `tool-worker` subagents in parallel waves (`execute-gate`)
-5. **review-work** — code and optional security review (`critique.json` sidecar)
+4. **execute-plan** — delegates plan-scoped work to `tool-worker` subagents, running independent tasks concurrently when file ownership and dependencies permit; there is no fixed worker count (`execute-gate`)
+5. **review-work** — code and optional security review recorded in the `trust.bundle` critique slice
 6. **verify-work** — tests and checks with evidence tied to the change; if evidence is missing the verify-gate triggers a route-back (`verify-gate`)
-7. **release-readiness** — scope, evidence, and risk assessment (`merge-ready-gate`)
-8. **pull-request** — PR with linked work item and verification evidence (`pr-open-gate`)
-9. **learning and workspace closeout** — route durable follow-up, retain open
+7. **evidence-gate** — scope, evidence, and risk assessment (`merge-ready-gate`)
+8. **publish-change operation** — create or update the provider change record with
+   linked work and verification evidence (`pr-open-gate`); this step uses an
+   operation, not a `pull-request` skill
+9. **release-readiness** — assess provider/CI merge readiness for that change
+   (`merge-ready-ci-gate`)
+10. **learning and workspace closeout** — route durable follow-up, retain open
    changes for review, and reclaim only clean linked worktrees whose exact head
    is freshly confirmed merged
 
@@ -181,10 +270,10 @@ Use verify-work on the current branch and report what evidence is present.
 
 ### What you observe
 
-- **Between each step**, the agent writes a local session sidecar under `.kontourai/flow-agents/<slug>/` — `state.json`, `acceptance.json`, `evidence.json`, and `handoff.json`. These survive compaction, tab close, or a new session. A future session resumes from recorded state.
-- **At each gate**, the agent either presents the evidence and moves forward, or blocks and explains what is missing. It does not make up a confident summary and proceed.
+- **Inspect the session records** under `.kontourai/flow-agents/<slug>/`: `state.json` tracks workflow control, `acceptance.json` holds the acceptance definition, and `handoff.json` carries continuation context. Review and verification records belong in `trust.bundle` slices, including `critique`, `acceptance-criteria`, `tests-evidence`, and `policy-compliance`. The active step's public operations update the relevant records; every file is not rewritten at every step. Retained records support later resumption. Legacy `critique.json` and `evidence.json` are retired sidecars, not the current evidence outputs.
+- **At each requested transition**, Flow evaluates the recorded evidence expectations and reports missing evidence or a route-back. This does not establish the truth of the supplied evidence.
 - **The stop-goal-fit hook**, when loaded and configured to block on a host that supports it, can refuse completion for qualifying evidence gaps. Check the runtime table above; warning-only and shutdown callbacks do not provide the same completion control.
-- **If verify fails**, the verify-gate routes back to execution (or plan, or design-probe, depending on the failure class) and tries again — up to three times before hard-blocking.
+- **If verify fails**, `verify-gate` routes missing evidence and the default failure class back to `verify`, implementation defects to `execute`, plan gaps to `plan`, and decision gaps to `design-probe`. The route-back budget is three attempts; exceeding it blocks the run.
 
 This is guided, not fully automated. The agent handles the mechanics; you make product decisions. Gates are explicit handoff points, not invisible checkboxes.
 
@@ -193,10 +282,8 @@ This is guided, not fully automated. The agent handles the mechanics; you make p
 After installing, you can inspect the Builder Kit's declared contents:
 
 ```bash
-node build/src/cli.js kit inspect kits/builder
+flow_agents kit inspect kits/builder --json
 ```
-
-(Or, from a global install: `flow-agents kit inspect kits/builder`)
 
 This prints a JSON object with the kit id, name, conformance levels (`k0`/`k1`/`k2`), declared targets, and any third-party extensions — for example:
 
@@ -222,17 +309,17 @@ cat kits/builder/flows/build.flow.json
 
 ## 5. Verify your setup
 
-After installing, run the source validation to confirm the workspace is coherent:
+The note read-back above checks that the installed store API works locally.
+For the kit's own adapter contract checks, run its existing suite from the
+installed workspace (no build or project dependency installation is needed):
 
 ```bash
-npm run validate:source
+node --test kits/knowledge/evals/contract-suite/suite.test.js
 ```
 
-For a full static eval pass (docs layout, legacy-term checks, bundle assertions):
-
-```bash
-npm run eval:static
-```
+For contributors in the Flow Agents **source checkout**, `npm run validate:source`
+and `npm run eval:static` validate source and generated bundles. They are not
+consumer-workspace setup commands and do not prove a host loaded its hooks.
 
 ## What to read next
 
