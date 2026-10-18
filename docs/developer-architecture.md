@@ -6,6 +6,14 @@ title: Developer Architecture
 
 This guide is the local starting point for Flow Agents maintainers who need to understand how this repository coordinates with Flow, Surface, Veritas, and Builder Kit. It describes the architecture from the Flow Agents side only; product-specific runtime details remain in their owning products.
 
+**Package identity:** This source guide accompanies `@kontourai/flow-agents` version `9.1.1`, as declared in [`package.json`](../package.json). <!-- x-release-please-version -->
+
+Release Please updates this binding alongside package metadata through the
+`extra-files` entry in [`release-please-config.json`](../release-please-config.json).
+It records the source package version, not publication or runtime qualification.
+Changes to exports, dependencies, or build behavior still require review of the
+corresponding architecture sections below.
+
 ## Orientation
 
 Flow Agents is the agent-facing operating layer. It turns a user's intent into workflow skills, local artifacts, sidecars, checks, and handoffs that a human or another agent can inspect later.
