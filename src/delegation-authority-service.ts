@@ -8,6 +8,7 @@ import {
   type DelegationEnvelopeV2,
 } from "./delegation-envelope-v2.js";
 
+/** Cost is integer millionths of USD, rounded upward; unknown cost must retain the reservation. */
 export type DelegationInvocationAmounts = { inputTokens: number; outputTokens: number; costMicros: number };
 export type DelegationInvocation = {
   invocationId: string; envelopeId: string; allocation: DelegationInvocationAmounts;

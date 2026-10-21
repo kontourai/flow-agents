@@ -95,6 +95,12 @@ expired or cancelled. It does not rerun envelope, readiness, budget or evidence 
 another attempt. `replayed: true` is not
 a new dispatch grant. Read the service again for the current projection.
 
+V2 `max_cost_micros` and invocation `costMicros` are integer millionths of USD.
+Reservations and known usage round fractional micros upward; the execution bridge uses
+`ceil(costUsd * 1_000_000)` for known usage. These values do not perform currency
+conversion. A host with another currency or incomplete tariff/usage evidence cannot
+settle it as zero USD: retain unknown capacity until authoritative reconciliation.
+
 `reserve` atomically allocates an attempt, concurrency slot, input/output tokens and integer cost
 micros, and persists a unique dispatch-intent id plus bounded Dispatch plan reference. It never invokes
 Dispatch or Relay. Lifetime attempt count and actual spend do not reset on retry. A seat cannot retry

@@ -411,6 +411,7 @@
           "maximum": 1000000000000
         },
         "max_cost_micros": {
+          "description": "Upper bound in millionths of USD; fractional micros round upward. No currency conversion.",
           "type": "integer",
           "minimum": 0,
           "maximum": 1000000000000

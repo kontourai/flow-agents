@@ -37,6 +37,7 @@ export type DelegationBudgetV2 = {
   max_runtime_ms: number;
   max_input_tokens: number;
   max_output_tokens: number;
+  /** Upper bound in millionths of USD; fractional micros round upward. No currency conversion. */
   max_cost_micros: number;
   max_attempts: number;
   expires_at: string;
