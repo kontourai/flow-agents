@@ -3,6 +3,8 @@ import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+import { startRun, claimReadyStep, loadRun, projectReadyStepFrontier, validateDurableStepClaim, releaseStepClaim } from "@kontourai/flow";
 import { createHash } from "node:crypto";
 import {
   createDelegationGroupService,
@@ -88,7 +90,7 @@ test("reopened ledger retains exact operation outcomes; conflicting intent and s
   const request = f.request(reserve(), 1, "reserve-once");
   const first = await f.service.operate(request);
   await f.act({ kind: "cancel" });
-  f.expire(); f.deny();
+  f.expire();
   const reopened = createDelegationGroupService(createLocalFileDelegationGroupStore(f.root), f.host);
   const replay = await reopened.operate(request);
   assert.equal(replay.replayed, true);
@@ -260,24 +262,62 @@ test("independent envelope identities allow model diversity but never widen enve
   }
 });
 
-test("Flow admission consumes a host-confirmed current claimed frontier and never schedules a competing DAG", async () => {
-  const definition = { id: "definition", version: "1", digest: `sha256:${"b".repeat(64)}` };
-  const f = fixture({ topology: { kind: "flow", run_id: "run-a", definition_digest: definition.digest }, adjustEnvelopes(envelopes) {
-    envelopes.forEach((e, i) => { e.flow_binding = { status: "bound", flow_run_id: "run-a", flow_step_id: i === 0 ? "parent-step" : `step-${i}`, gate_attempt: 0 }; });
+async function flowFixture() {
+  const cwd = makeFixtureDir("group-real-flow-");
+  const file = path.join(cwd, "definition.json");
+  fs.writeFileSync(file, JSON.stringify({
+    id: "group-flow-fixture", version: "1", execution: { mode: "multi-cursor", claim_contract_version: "1" },
+    steps: [1, 2, 3].map((i) => ({ id: `step-${i}`, next: null, mutable_resources: [] })),
+    gates: Object.fromEntries([1, 2, 3].map((i) => [`gate-${i}`, { step: `step-${i}`, expects: [{
+      id: "optional", description: "Optional group observation", kind: "trust.bundle", required: false, bundle_claim: { claimType: "fixture.optional" },
+    }] }])),
+  }));
+  await startRun(file, { cwd, runId: "group-run", params: { subject: "flow-agents#1113" } });
+  const result = await claimReadyStep("group-run", { cwd, step_id: "step-1", claim_id: "group-claim", liveness_id: "group-live", actor: { key: "actor-2" }, now: NOW, lease_seconds: 3600 });
+  const observed = await loadRun("group-run", cwd);
+  const claim = validateDurableStepClaim(observed.definition, observed.state, result.claim, new Date(NOW));
+  const frontier = projectReadyStepFrontier(observed.definition, observed.state);
+  assert.match(claim.definition.digest, /^[a-f0-9]{64}$/);
+  assert.notEqual(claim.claim_base.head, frontier.run_head, "step domain and whole-run heads are distinct");
+  const f = fixture({ topology: { kind: "flow", run_id: "group-run", definition_digest: claim.definition.digest }, adjustEnvelopes(envelopes) {
+    envelopes.forEach((e, i) => { e.flow_binding = { status: "bound", flow_run_id: "group-run", flow_step_id: i === 0 ? "parent-step" : `step-${i}`, gate_attempt: 0 }; });
   } });
+  f.host.confirmReadiness = async () => {
+    const run = await loadRun("group-run", cwd);
+    return { kind: "flow_claim", reference: ref("flow-readiness"), claim,
+      frontier: projectReadyStepFrontier(run.definition, run.state), definition: run.definition, state: run.state };
+  };
+  return { f, cwd, claim, frontier };
+}
+
+test("Flow 5.2 public durable receipts admit with native digest and step-domain head", async () => {
+  const { f, cwd } = await flowFixture();
   await f.create();
-  await assert.rejects(f.act(reserve()), code("flow_claim_required"));
-  const claim = { schema_version: "1", claim_id: "claim", liveness_id: "live", run_id: "run-a", definition,
-    claim_base: { schema_version: "1", step_id: "step-1", head: "flow-head" }, step_id: "step-1", actor: { key: "actor-2" },
-    mutable_resources: [], issued_at: NOW, renewed_at: NOW, expires_at: "2026-10-21T13:00:00.000Z" };
-  const frontier = { schema_version: "1", run_id: "run-a", definition, run_head: "flow-head", ready_steps: [] };
-  f.host.confirmReadiness = async () => ({ kind: "flow_claim", reference: ref("flow-readiness"), claim, frontier });
-  await assert.rejects(f.act(reserve()), code("flow_claim_mismatch"));
-  frontier.ready_steps = [{ step_id: "step-1", mutable_resources: [] }];
-  claim.claim_base.head = "stale-head";
-  await assert.rejects(f.act(reserve()), code("flow_claim_mismatch"));
-  claim.claim_base.head = "flow-head";
+  const before = await loadRun("group-run", cwd);
   assert.equal((await f.act(reserve())).outcome.status, "applied");
+  assert.deepEqual((await loadRun("group-run", cwd)).state, before.state, "group admission cannot advance Flow");
+});
+
+test("Flow topology rejects prefixed native identities and stale or released durable receipts", async () => {
+  const { f, cwd, claim } = await flowFixture();
+  const prefixed = structuredClone(f.spec); prefixed.topology.definition_digest = `sha256:${claim.definition.digest}`;
+  assert.throws(() => validateDelegationGroupSpec(prefixed), code("invalid_flow_definition_digest"));
+  await f.create();
+  const original = f.host.confirmReadiness;
+  f.host.confirmReadiness = async (...args) => { const receipt = await original(...args); receipt.claim = { ...claim, claim_base: { ...claim.claim_base, head: "a".repeat(64) } }; return receipt; };
+  await assert.rejects(f.act(reserve()), code("flow_claim_mismatch"));
+  for (const alter of [
+    (receipt) => { receipt.frontier.run_head = "a".repeat(64); },
+    (receipt) => { receipt.claim = { ...claim, actor: { key: "foreign-actor" } }; },
+    (receipt) => { receipt.claim = { ...claim, expires_at: NOW }; },
+  ]) {
+    f.host.confirmReadiness = async (...args) => { const receipt = await original(...args); alter(receipt); return receipt; };
+    await assert.rejects(f.act(reserve()), code("flow_claim_mismatch"));
+  }
+  f.host.confirmReadiness = original;
+  await releaseStepClaim("group-run", { cwd, claim_id: claim.claim_id, liveness_id: claim.liveness_id, actor: claim.actor, now: NOW });
+  await assert.rejects(f.act(reserve()), code("flow_claim_mismatch"));
+  assert.deepEqual((await f.service.read("group-a")).attempts, []);
 });
 
 test("closed contract bounds reject oversized seats, metadata, output paths, recursion, and tampered policies", async () => {
@@ -395,4 +435,125 @@ test("authorization expiring while host capabilities are checked cannot persist 
   const state = await f.service.read("group-a");
   assert.equal(state.revision, 1);
   assert.deepEqual(state.attempts, []);
+});
+
+
+test("historical replay requires current controller authorization without repeating admission effects", async () => {
+  const f = fixture(); await f.create();
+  const request = f.request(reserve(), 1, "historical-reserve");
+  const original = await f.service.operate(request);
+  const successor = { controller_id: "controller-b", epoch: 2 };
+  await f.act({ kind: "take_control", successor });
+  const observed = [];
+  f.host.confirmController = async (incoming, current) => { observed.push({ incoming, current }); return null; };
+  await assert.rejects(f.act({ kind: "cancel" }, "denied-current-controller", successor), code("controller_fence_unsupported"));
+  observed.length = 0;
+  for (const name of ["resolveAuthorizedEnvelope", "confirmReadiness", "confirmBudgetEnforcement", "confirmEvidence"]) {
+    f.host[name] = async () => { assert.fail(`replay reran ${name}`); };
+  }
+  await assert.rejects(f.service.operate(request), code("controller_fence_unsupported"));
+  assert.equal(observed.length, 1);
+  assert.deepEqual(observed[0].current.fence, successor);
+  assert.deepEqual(observed[0].incoming, request, "the original intent remains immutable; host authenticates trusted caller context against current state");
+  f.host.confirmController = async (_incoming, current) => { assert.deepEqual(current.fence, successor); return ref("current-controller"); };
+  const replay = await f.service.operate(request);
+  assert.equal(replay.replayed, true);
+  assert.deepEqual(replay.outcome, original.outcome);
+  assert.deepEqual(replay.projection, original.projection);
+  assert.equal((await f.service.read("group-a")).revision, 3);
+});
+
+function ledgerFile(f) { return path.join(f.root, "delegation-groups", `${createHash("sha256").update("group-a").digest("hex")}.json`); }
+async function accountingFixture() {
+  const f = fixture(); await f.create(); await f.act(reserve());
+  await f.act({ kind: "terminal", attempt_id: "attempt-1", outcome: "succeeded", receipt: ref(), outputs: [] });
+  return { f, request: f.request({ kind: "account", attempt_id: "attempt-1", usage: AMOUNT, receipt: ref() }, 3) };
+}
+function faultFsync(t, reject) {
+  const actual = fs.fsyncSync;
+  t.mock.method(fs, "fsyncSync", (fd) => { if (reject(fd)) throw Object.assign(new Error("injected precise fsync EIO"), { code: "EIO" }); return actual(fd); });
+  syncBuiltinESMExports();
+  return () => { t.mock.restoreAll(); syncBuiltinESMExports(); };
+}
+
+test("temp fsync EIO preserves the previous acknowledged accounting recovery point", async (t) => {
+  const { f, request } = await accountingFixture();
+  const bytes = fs.readFileSync(ledgerFile(f));
+  const previousInode = fs.statSync(ledgerFile(f)).ino;
+  let hits = 0;
+  const restore = faultFsync(t, (fd) => { const stat = fs.fstatSync(fd); if (stat.isFile() && stat.ino !== previousInode) { hits++; return true; } return false; });
+  try { await assert.rejects(f.service.operate(request), /EIO|durability_unavailable/); }
+  finally { restore(); }
+  assert.equal(hits, 1);
+  assert.equal(fs.readFileSync(ledgerFile(f)).equals(bytes), true, "previous acknowledged bytes survive temp sync failure");
+  const current = await f.service.read("group-a");
+  assert.equal(current.revision, 3); assert.deepEqual(current.held, AMOUNT);
+  assert.equal((await f.service.operate(request)).replayed, false);
+});
+
+test("post-rename fsync EIO makes reads and replay unavailable until file and directory repair", async (t) => {
+  for (const entry of ["file", "group-directory", "root", "root-parent"]) {
+    const { f, request } = await accountingFixture();
+    const file = ledgerFile(f);
+    const previousInode = fs.statSync(file).ino;
+    const directory = entry === "group-directory" ? path.dirname(file) : entry === "root" ? f.root : path.dirname(f.root);
+    const directoryStat = fs.statSync(directory);
+    let hits = 0;
+    const restore = faultFsync(t, (fd) => {
+      if (fs.statSync(file).ino === previousInode) return false;
+      const stat = fs.fstatSync(fd);
+      const match = entry === "file" ? stat.isFile() : stat.dev === directoryStat.dev && stat.ino === directoryStat.ino;
+      if (match) hits++;
+      return match;
+    });
+    try {
+      await assert.rejects(f.service.operate(request), /EIO|durability_unavailable/, entry);
+      assert.equal(JSON.parse(fs.readFileSync(file)).events.length, 4, "fault occurs after rename");
+      const reopened = createDelegationGroupService(createLocalFileDelegationGroupStore(f.root), f.host);
+      await assert.rejects(reopened.read("group-a"), code("durability_unavailable"), entry);
+      await assert.rejects(reopened.operate(request), code("durability_unavailable"), entry);
+      assert.equal(hits, 3, "each failed write/read/replay independently retries the precise flush");
+    } finally { restore(); }
+    const reopened = createDelegationGroupService(createLocalFileDelegationGroupStore(f.root), f.host);
+    const current = await reopened.read("group-a");
+    assert.equal(current.revision, 4); assert.deepEqual(current.held, { input_tokens: 0, output_tokens: 0, cost_micros: 0 });
+    const bytes = fs.readFileSync(file);
+    assert.equal((await reopened.operate(request)).replayed, true);
+    assert.deepEqual(fs.readFileSync(file), bytes);
+  }
+});
+
+test("owned group paths stay private under umask 022 and reject hardlinks and foreign roots", async () => {
+  const oldMask = process.umask(0o022);
+  try {
+    const parent = makeFixtureDir("group-private-parent-");
+    fs.chmodSync(parent, 0o755);
+    const root = path.join(parent, "owned-root");
+    createLocalFileDelegationGroupStore(root);
+    assert.equal(fs.statSync(root).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(path.join(root, "delegation-groups")).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(parent).mode & 0o777, 0o755, "ancestor permissions remain untouched");
+    const peerDirectory = path.join(parent, "peer-directory"); fs.mkdirSync(peerDirectory, { mode: 0o755 });
+    const aliasRoot = path.join(parent, "alias-root"); fs.symlinkSync(peerDirectory, aliasRoot);
+    assert.throws(() => createLocalFileDelegationGroupStore(aliasRoot), code("unsafe_store_directory"));
+    assert.equal(fs.statSync(peerDirectory).mode & 0o777, 0o755);
+    fs.rmdirSync(path.join(root, "delegation-groups"));
+    fs.symlinkSync(peerDirectory, path.join(root, "delegation-groups"));
+    assert.throws(() => createLocalFileDelegationGroupStore(root), code("unsafe_store_directory"));
+    assert.equal(fs.statSync(peerDirectory).mode & 0o777, 0o755);
+    const f = fixture(); await f.create();
+    const file = ledgerFile(f);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    const peer = path.join(parent, "peer.json"); fs.linkSync(file, peer);
+    const bytes = fs.readFileSync(peer);
+    await assert.rejects(f.service.read("group-a"), code("unsafe_ledger_file"));
+    await assert.rejects(f.act(reserve()), code("unsafe_ledger_file"));
+    assert.deepEqual(fs.readFileSync(peer), bytes);
+    assert.equal(fs.statSync(peer).nlink, 2);
+    const foreign = "/var/empty";
+    assert.notEqual(fs.statSync(foreign).uid, process.getuid());
+    const before = fs.statSync(foreign).mode;
+    assert.throws(() => createLocalFileDelegationGroupStore(foreign), code("unsafe_store_directory"));
+    assert.equal(fs.statSync(foreign).mode, before);
+  } finally { process.umask(oldMask); }
 });

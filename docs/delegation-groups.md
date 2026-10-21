@@ -37,9 +37,14 @@ Supporting diversified **derived** children requires a separately designed envel
 explicit delegation authority for those immutable dimensions; metadata is not a compatibility bridge.
 
 Topology is either `independent` or an explicit Flow run/definition digest with seat step references.
-There are no local dependency edges or competing ready-frontier reducer. For Flow work, a host must
-confirm the current durable claim and frontier through Flow's public contracts. The service compares
-run, definition, head, step, actor, expiry, and empty mutable resources. The host remains responsible
+Flow definition identities retain their native bare 64-character hex digest; group references, policies,
+and request digests retain their `sha256:` prefix. There are no local dependency edges or competing
+ready-frontier reducer. For Flow work, the host supplies a current loaded definition/state observation,
+durable claim, and frontier. The service calls Flow's public `validateDurableStepClaim()` against that
+observation, requires the exact claim in its active claim ledger, and compares the frontier against
+`projectReadyStepFrontier()` from the same observation. The step-local `claim_base.head` and whole-run
+`frontier.run_head` belong to separate contracts and are never compared to each other. Run, definition,
+step, actor, expiry, and empty mutable resources must also match. The host remains responsible
 for authenticating that these are **current** observations under its execution fence. Caller-provided
 claim-shaped JSON alone is not a capability.
 
@@ -58,8 +63,13 @@ The service runs its entire read/validate/confirm/append transaction under the s
 operations and business refusals (such as exhausted ceilings or a closed group) append a decision and
 increment the ledger revision. Structural, revision, fence, capability and envelope validation errors
 throw before append. Such rejected preconditions are not recorded outcomes. Reusing a recorded
-operation id with different intent refuses. Exact replay returns the **original** outcome and original
-projection even if the current group has since changed, expired or cancelled. `replayed: true` is not
+operation id with different intent refuses. Exact replay first calls `confirmController()` with the
+original immutable request and the **current** projection/fence. The host must authenticate the current
+caller through trusted host context; request metadata and the historical request's controller identity
+do not authenticate replay access. Denial throws without yielding a historical result. Authorized replay
+returns the **original** outcome and original projection even if the current group has since changed,
+expired or cancelled. It does not rerun envelope, readiness, budget or evidence callbacks or reserve
+another attempt. `replayed: true` is not
 a new dispatch grant. Read the service again for the current projection.
 
 `reserve` atomically allocates an attempt, concurrency slot, input/output tokens and integer cost
@@ -102,12 +112,23 @@ checks and must return bounded, authenticated receipt references for the **exact
 - `resolveAuthorizedEnvelope(identity, groupId)`: independently authorized, active, immutable envelope
   and exclusive group allocation. Assignment eligibility or correlation is insufficient.
 - `confirmController(request, current)`: current controller fencing, including successor ownership for
-  takeover. It is called last, immediately before the ledger decision; it must perform no invocation.
+  takeover. It is called last, immediately before a new ledger decision, and on exact replay against the current
+  projection/fence. Replay authenticates access, not renewed admission. It must perform no invocation.
 - `confirmReadiness(request, current, seat)`: current independent admission or Flow-owned claimed
   readiness; includes current cancellation/liveness checks. Group topology cannot supply it.
 - `confirmBudgetEnforcement(request, current)`: confirmed ability to bound the proposed external
-  attempt, including every underlying Dispatch fallback/retry and token/cost allocation. Dispatch's
-  per-plan budgets/receipts do not constitute aggregate group accounting or durable invoke dedup.
+  attempt, including every underlying Dispatch fallback/retry and token/cost allocation. This checkout
+  pins Dispatch 0.3.0 and Relay 0.6.0; this service has not composed their receipts into execution
+  authorization or reconciled live usage. This gap is version-scoped. Per Brian's dependency inventory,
+  public Dispatch 0.7.1 provides `FileAuthorizationLedger`, `ExecutionAuthorization`, and `worstCaseUsage`
+  for durable cross-invocation reservation; Relay 0.7.1 provides `costUsd` and `modelSource` provenance.
+  Parent-supplied bounded evidence exercised concurrent plans sharing an authorization/root with one
+  allowed attempt: one succeeded, one exceeded budget, and one physical invocation occurred. Reopening
+  the ledger and repeating the successful invocation id raised `AuthorizationPersistenceError` in
+  recovery with `duplicateInvocationRisk: true`, without a second invocation; configured model
+  provenance stayed configured. That fake-runtime probe is not provider billing or native-runtime
+  proof. The later executor should compose the public Dispatch physical reservation with group
+  accounting. Dependency upgrades and consumer qualification belong to the parent continuation.
 - `confirmEvidence(request, current)`: current invocation/loss, terminal, actual accounting or
   cancellation evidence, bound to the exact attempt and requested immutable references. A raw provider
   string, unverified receipt, estimated cost, or successful cancellation request is insufficient.
@@ -119,15 +140,29 @@ it does not qualify any real host's authorization, runtime fencing, cancellation
 
 ## Local durability and limits
 
-The local adapter composes the existing safe atomic writer and `withSubjectLockAsync` under
+The local adapter composes the additive `atomicWriteDurableFile()` and `withSubjectLockAsync` under
 `<artifactRoot>/delegation-groups/`. Filenames are full SHA-256 hashes of group ids; the separate
 store-wide lock makes envelope ownership and ledger append atomic across cooperative processes.
 Each file contains the complete append-only event log in canonical JSON plus a newline. Reads validate every request, receipt shape,
 revision, outcome and transition; projections are replayed rather than trusted cached state. Corrupt,
-unsupported, symlinked or non-regular ledger files fail closed. Replay does not rewrite bytes. Data
-and directory are flushed before returning, including replay after an ambiguous commit acknowledgement.
+unsupported, foreign-owned, symlinked, multiply linked or non-regular ledger files fail closed.
+The new writer flushes the temporary file **before** rename, then flushes the parent directory. A failed
+temporary-file flush preserves the previous acknowledged ledger. The shared `atomicWriteFile()` keeps
+its existing behavior and defaults. After publication the adapter also flushes the ledger directory,
+artifact root and root's parent entry before acknowledgement. Replay does not rewrite ledger bytes.
+Every ledger read, including replay and cross-group ownership checks, retries file/directory durability
+before yielding state. If that repair fails it throws `durability_unavailable`; visible but unacknowledged
+accounting cannot release held amounts through a read. Successful repair may expose the already
+published decision, after which exact replay recovers its original result without appending again.
 
-The caller must own the artifact root and enforce filesystem access. This is a single-host store,
+The caller must designate a dedicated artifact root owned by the effective user, with an existing
+parent directory. Ownership support is required; unsupported platforms refuse. The adapter checks
+actual uid ownership and enforces mode 0700 on that root, its group directory and assignment-lock
+container; ledger files and temporary replacements use mode 0600. Existing owned store paths have
+permissions repaired only after ownership/type/link checks. Ancestors and peer paths are never chmodded.
+Symlink roots/directories and foreign roots refuse before permission changes. POSIX modes are the
+local access boundary; hosts must also manage ACLs and the authority to choose that dedicated root.
+This is a single-host store,
 not hostile-directory race protection, distributed consensus, authenticated receipt verification, or
 cross-machine execution fencing. A crash leaving a lock requires explicit operator cleanup after
 confirming no live owner, following the existing assignment-lock behavior. No automatic stale takeover
@@ -154,7 +189,12 @@ The tests reach public service operations over real temporary persistence/reopen
 separate-process admission contention, exclusive envelope ownership, conflicting replay, lost commit
 acknowledgement, ambiguous invocation, cancellation, missing/overrun accounting, all-terminal join,
 strict bounds and host capability refusals. Existing envelope v1 validation/narrowing stays unchanged.
-These are source diagnostics, not installed-runtime or live-provider acceptance.
+Real Flow 5.2.0 fixtures exercise `startRun`, `claimReadyStep`, `loadRun`,
+`projectReadyStepFrontier`, and `validateDurableStepClaim` through group admission. Precise fsync EIO
+injection over real temporary paths exercises pre-rename preservation and post-rename unavailable/read
+repair. These checks do not simulate power loss or establish hardware/filesystem crash guarantees.
+They are source diagnostics, not installed-runtime or live-provider acceptance. Flow 5.2.2 consumer
+qualification remains with the parent dependency-upgrade continuation.
 
 The fresh-context continuation should start from #1113, `AGENTS.md`, this guide and the exact handoff
 commits. Remaining acceptance includes real three-member installed execution and parent/member tree,

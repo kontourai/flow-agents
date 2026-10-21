@@ -1,4 +1,4 @@
-import type { FlowDurableStepClaim, FlowReadyStepFrontier } from "@kontourai/flow";
+import { projectReadyStepFrontier, validateDurableStepClaim, type FlowDefinition, type FlowRunState, type FlowDurableStepClaim, type FlowReadyStepFrontier } from "@kontourai/flow";
 import { canonicalJson } from "@kontourai/relay";
 import { assertDelegationEnvelopeActiveAt, type DelegationEnvelope } from "./delegation-envelope.js";
 import {
@@ -30,7 +30,7 @@ export interface DelegationGroupStore {
 }
 export type GroupReadinessReceipt =
   | { kind: "independent"; reference: GroupReference }
-  | { kind: "flow_claim"; reference: GroupReference; claim: FlowDurableStepClaim; frontier: FlowReadyStepFrontier };
+  | { kind: "flow_claim"; reference: GroupReference; claim: FlowDurableStepClaim; frontier: FlowReadyStepFrontier; definition: FlowDefinition; state: FlowRunState };
 export type AuthorizedGroupEnvelope = { envelope: DelegationEnvelope; authorization: GroupReference };
 
 /** Trusted host boundary. Receipts attest this exact request and current external state, not caller metadata. */
@@ -119,10 +119,18 @@ export function createDelegationGroupService(store: DelegationGroupStore, host: 
       if (state.spec.topology.kind === "flow") {
         if (ready.kind !== "flow_claim" || seat.work.kind !== "flow") throw new DelegationGroupError("flow_claim_required");
         const { claim, frontier } = ready;
+        // Flow owns both head domains; never compare a step claim base with a whole-run head.
+        try {
+          validateDurableStepClaim(ready.definition, ready.state, claim, new Date(host.now()));
+          if (!same(frontier, projectReadyStepFrontier(ready.definition, ready.state))
+            || !ready.state.multi_cursor?.active_claims.some((active) => same(active, claim))) {
+            throw new DelegationGroupError("flow_claim_mismatch");
+          }
+        } catch { throw new DelegationGroupError("flow_claim_mismatch"); }
         claimExpiry = claim.expires_at;
         if (claim.schema_version !== "1" || frontier.schema_version !== "1" || claim.run_id !== state.spec.topology.run_id
           || frontier.run_id !== claim.run_id || claim.definition.digest !== state.spec.topology.definition_digest
-          || !same(claim.definition, frontier.definition) || claim.claim_base.head !== frontier.run_head
+          || !same(claim.definition, frontier.definition)
           || claim.claim_base.step_id !== claim.step_id || claim.step_id !== seat.work.step_id
           || claim.actor.key !== member.envelope.actor_id || claim.mutable_resources.length !== 0
           || !frontier.ready_steps.some((s) => s.step_id === claim.step_id && s.mutable_resources.length === 0)
@@ -160,6 +168,9 @@ export function createDelegationGroupService(store: DelegationGroupStore, host: 
         if (previousIndex >= 0) {
           const previous = ledger.events[previousIndex];
           if (previous.request.request_digest !== request.request_digest) throw new DelegationGroupError("operation_intent_conflict");
+          const current = projectDelegationGroup(ledger);
+          // Authenticate access under today's fence without rerunning historical admission/effects.
+          requireCapability(await host.confirmController(structuredClone(request), structuredClone(current)), "controller_fence_unsupported");
           return { ledger, result: { replayed: true, outcome: previous.outcome,
             projection: projectDelegationGroup({ ...ledger, events: ledger.events.slice(0, previousIndex + 1) }) } };
         }

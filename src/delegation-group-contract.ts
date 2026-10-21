@@ -208,7 +208,7 @@ export function validateDelegationGroupSpec(value: unknown): DelegationGroupSpec
   if (topology.kind === "flow") {
     record(topology, ["kind", "run_id", "definition_digest"]);
     identifier(topology.run_id);
-    digest(topology.definition_digest);
+    requireGroup(typeof topology.definition_digest === "string" && /^[a-f0-9]{64}$/.test(topology.definition_digest), "invalid_flow_definition_digest");
   }
   requireGroup(Array.isArray(r.seats) && r.seats.length > 0 && r.seats.length <= 64, "seat_bounds");
   const seats = new Set<string>();
