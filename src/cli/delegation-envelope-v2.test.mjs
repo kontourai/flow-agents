@@ -696,7 +696,7 @@ test(`context sync retains bounded receipt for ${scenario}`, async () => {
         entered(); await waiting;
         return { runtime, runtimeReceipt: ref('drifted-runtime'), modelReceipt: child.execution_binding.runtime.model_receipt_ref };
       } } });
-      const rejected = assert.rejects(other, /runtime_receipt_mismatch/);
+      const rejected = assert.rejects(other, (error) => error.code === 'runtime_receipt_mismatch' || error.cause?.code === 'runtime_receipt_mismatch');
       await resolving;
       const completed = await syncDelegationContext(input);
       release(); await rejected;
