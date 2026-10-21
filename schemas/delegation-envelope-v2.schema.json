@@ -1,0 +1,183 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "envelope_id",
+    "generation",
+    "parent",
+    "root_authority_ref",
+    "execution_id",
+    "actor",
+    "assignment_subject",
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "selected_grant_id",
+    "remaining_allowed_grant_ids",
+    "execution_binding",
+    "delegation_ceiling",
+    "execution_authority",
+    "budget",
+    "continuation_ref",
+    "cancellation_ref"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "envelope_id": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 32
+    },
+    "parent": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version",
+            "id",
+            "generation",
+            "digest"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+            },
+            "generation": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 31
+            },
+            "digest": {
+              "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/digest"
+            }
+          }
+        }
+      ]
+    },
+    "root_authority_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "digest",
+        "authority_epoch"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+        },
+        "digest": {
+          "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/digest"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        }
+      }
+    },
+    "execution_id": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+    },
+    "actor": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/reference"
+    },
+    "assignment_subject": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/reference"
+    },
+    "trace_id": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+    },
+    "span_id": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+    },
+    "parent_span_id": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+        }
+      ]
+    },
+    "selected_grant_id": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+    },
+    "remaining_allowed_grant_ids": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+      }
+    },
+    "execution_binding": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/executionBinding"
+    },
+    "delegation_ceiling": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/authority"
+    },
+    "execution_authority": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/authority"
+    },
+    "budget": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/budget"
+    },
+    "continuation_ref": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/reference"
+    },
+    "cancellation_ref": {
+      "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/reference"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/delegation-envelope/2.0.json",
+  "title": "Delegation envelope v2",
+  "$comment": "Structural schema only; use validateDelegationEnvelopeV2 and narrowDelegationEnvelopeV2 for semantic/root/parent checks and validateDelegationAncestryV2 for complete ordered ancestry. No authentication, aggregate reservations, or effect enforcement.",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "parent": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "generation": {
+            "const": 0
+          },
+          "parent_span_id": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "generation": {
+            "minimum": 1
+          },
+          "parent_span_id": {
+            "$ref": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json#/$defs/id"
+          }
+        }
+      }
+    }
+  ]
+}

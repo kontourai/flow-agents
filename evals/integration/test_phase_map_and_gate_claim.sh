@@ -23,6 +23,8 @@ GATE="$ROOT/scripts/hooks/stop-goal-fit.js"
 export FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000
 
 TMP="$(mktemp -d)"
+# Authenticated discovery precedes cwd-local fixtures; own its state for this eval.
+export XDG_STATE_HOME="$TMP/xdg-state"
 errors=0
 
 _pass() { echo "  ✓ $1"; }

@@ -171,7 +171,11 @@ export function makeFixturePackage(prefix, kits) {
   const snapshot = () => Object.fromEntries(Object.entries(paths).map(([name, file]) => [name, copyPathState(file)]));
   const before = snapshot();
   try {
-    fs.cpSync(source, destination, { recursive: true });
+    fs.cpSync(source, destination, { recursive: true, filter(file) {
+      // Parallel suites briefly add private instrumented modules beside the build.
+      // They are not package assets and can disappear before cp reads them.
+      return !/^\.builder-(?:deliver-existing|flow-runtime)\.test-seam-\d+-\d+\.mjs$/.test(path.basename(file));
+    } });
   } catch (error) {
     try {
       // A string survives node:test reporter inspect-depth limits; nested objects become [Object].

@@ -785,3 +785,21 @@ export function writeSidecar(dir: string, name: string, payload: Record<string, 
 
 export {openInstalledKitReview,serveSurveyReview,parseKitReview} from './kit-review.js';
 export type {KitReviewDescriptor,KitReviewHost,KitReviewServices,PreparedKitReview} from './kit-review.js';
+
+export * from "./delegation-group-contract.js";
+export * from "./delegation-group.js";
+export * from "./delegation-group-local-file.js";
+
+export * from "./delegation-authority-contract.js";
+export * from "./delegation-envelope-v2.js";
+export * from "./delegation-dispatch.js";
+export * from "./delegation-mailbox.js";
+export * from "./delegation-mailbox-local-file.js";
+export * from "./delegation-authority-service.js";
+export * from "./delegation-authority-local-file.js";
+export * from "./delegation-execution.js";
+export * from "./delegation-flow-execution.js";
+export * from "./delegation-context-sync.js";
+export * from "./delegation-group-v2.js";
+export * from "./delegation-group-v2-local-file.js";
+export * from "./delegation-group-mailbox.js";

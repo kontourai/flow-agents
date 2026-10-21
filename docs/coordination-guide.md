@@ -450,3 +450,13 @@ links; the ratified subject decisions live in [`docs/decisions/`](decisions/inde
 Shipped across issues #287 (actor identity), #288 (liveness), #289 (branches), #166 (pull-work), #320
 (overlap), #290 (AssignmentProvider), #291 (ensure-session guard), #292 (stop-release), #356
 (reconcile-preflight), #293 (verify-hold); #294 (takeover) and #398 (CI identity) forthcoming.
+
+## Delegation group ledger
+
+The [delegation group contracts and durable ledgers](delegation-groups.md) add coordination
+records alongside assignment/liveness. Current source also includes a v2 group controller,
+authority/Dispatch execution composition, Flow-owned scheduling and group mailbox admission.
+Their host capability checks do not change this guide's assignment eligibility or publish fence.
+Group membership alone cannot authorize execution, advance Flow or derive acceptance.
+Production host authentication, effect-time fencing, isolated writers and Station adoption remain
+open integration obligations for #1113; source composition does not establish their enforcement.

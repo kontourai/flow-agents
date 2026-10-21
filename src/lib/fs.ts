@@ -128,6 +128,49 @@ export function atomicWriteFile(root: string, file: string, data: string | Buffe
   }
 }
 
+/** Additive durable replacement: sync the new file before publishing, then its directory entry.
+ * privateMode requires an owned, unaliased target and never changes the ordinary atomic writer.
+ * A failure after rename is an ambiguous commit; callers must repair durability before exposing it.
+ */
+export function atomicWriteDurableFile(root: string, file: string, data: string | Buffer, privateMode = false): void {
+  const target = path.resolve(file);
+  if (privateMode) {
+    const uid = process.getuid?.();
+    if (uid === undefined) throw new Error("private durable files require filesystem ownership support");
+    const rootPath = path.resolve(root);
+    if (!isContained(rootPath, target) || rootPath === target) throw new Error(`path escapes root: ${target}`);
+    const directories = [rootPath];
+    for (const part of path.relative(rootPath, path.dirname(target)).split(path.sep).filter(Boolean)) {
+      directories.push(path.join(directories[directories.length - 1], part));
+    }
+    for (const directory of directories) {
+      const stat = fs.lstatSync(directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== uid || (stat.mode & 0o777) !== 0o700) {
+        throw new Error(`private durable directory is not owned and private: ${directory}`);
+      }
+    }
+    try {
+      const stat = fs.lstatSync(target);
+      if (!stat.isFile() || stat.uid !== uid || stat.nlink !== 1 || (stat.mode & 0o777) !== 0o600) {
+        throw new Error(`private durable target is not owned and private: ${target}`);
+      }
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  }
+  assertSafeFileTarget(root, target);
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.flow-agents-${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`);
+  try {
+    const fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, privateMode ? 0o600 : 0o666);
+    try {
+      if (privateMode) fs.fchmodSync(fd, 0o600);
+      fs.writeFileSync(fd, data);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    fs.renameSync(temp, target);
+    const parent = fs.openSync(path.dirname(target), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try { fs.fsyncSync(parent); } finally { fs.closeSync(parent); }
+  } finally { fs.rmSync(temp, { force: true }); }
+}
+
 export function atomicWriteJson(root: string, file: string, value: unknown): void {
   atomicWriteFile(root, file, `${JSON.stringify(value, null, 2)}\n`);
 }

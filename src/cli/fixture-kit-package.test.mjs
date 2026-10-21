@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 import { makeFixturePackage } from "./fixture-kit-package.mjs";
 
@@ -67,5 +68,26 @@ test("intentional copy fault", () => {
     assert.ok(!result.stdout.includes("[Object]"), "filesystem identities must be retained in raw failure output");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('fixture package ignores disappearing private instrumentation but preserves real copy failures', () => {
+  const originalCopy = fs.cpSync;
+  const source = fileURLToPath(new URL('../../build/src/.builder-flow-runtime.test-seam-123-456.mjs', import.meta.url));
+  fs.writeFileSync(source, 'export const privateProbe = true;\n', { flag: 'wx' });
+  let root, observed = false;
+  fs.cpSync = (from, to, options) => originalCopy(from, to, { ...options, filter(file, destination) {
+    const include = options?.filter ? options.filter(file, destination) : true;
+    if (file === source) { observed = true; fs.unlinkSync(source); }
+    return include;
+  } });
+  try {
+    const fixture = makeFixturePackage('fixture-copy-transient-', {}); root = fixture.root;
+    assert.equal(observed, true);
+    assert.equal(fs.existsSync(path.join(root, 'build/src', path.basename(source))), false);
+    assert.equal(fs.existsSync(fixture.cli), true);
+  } finally {
+    fs.cpSync = originalCopy; fs.rmSync(source, { force: true });
+    if (root) fs.rmSync(root, { recursive: true, force: true });
   }
 });

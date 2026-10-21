@@ -1,7 +1,7 @@
 {
   "name": "@kontourai/flow-agents",
   "version": "9.2.0",
-  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
+  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows \u2014 a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi \u2014 with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
     "ai-agents",
@@ -94,6 +94,70 @@
     "./kit-review": {
       "types": "./build/src/kit-review.d.ts",
       "import": "./build/src/kit-review.js"
+    },
+    "./delegation-group-contract": {
+      "types": "./build/src/delegation-group-contract.d.ts",
+      "import": "./build/src/delegation-group-contract.js"
+    },
+    "./delegation-group": {
+      "types": "./build/src/delegation-group.d.ts",
+      "import": "./build/src/delegation-group.js"
+    },
+    "./delegation-group-local-file": {
+      "types": "./build/src/delegation-group-local-file.d.ts",
+      "import": "./build/src/delegation-group-local-file.js"
+    },
+    "./delegation-authority-contract": {
+      "types": "./build/src/delegation-authority-contract.d.ts",
+      "import": "./build/src/delegation-authority-contract.js"
+    },
+    "./delegation-envelope-v2": {
+      "types": "./build/src/delegation-envelope-v2.d.ts",
+      "import": "./build/src/delegation-envelope-v2.js"
+    },
+    "./delegation-dispatch": {
+      "types": "./build/src/delegation-dispatch.d.ts",
+      "import": "./build/src/delegation-dispatch.js"
+    },
+    "./delegation-mailbox": {
+      "types": "./build/src/delegation-mailbox.d.ts",
+      "import": "./build/src/delegation-mailbox.js"
+    },
+    "./delegation-mailbox-local-file": {
+      "types": "./build/src/delegation-mailbox-local-file.d.ts",
+      "import": "./build/src/delegation-mailbox-local-file.js"
+    },
+    "./delegation-authority-service": {
+      "types": "./build/src/delegation-authority-service.d.ts",
+      "import": "./build/src/delegation-authority-service.js"
+    },
+    "./delegation-authority-local-file": {
+      "types": "./build/src/delegation-authority-local-file.d.ts",
+      "import": "./build/src/delegation-authority-local-file.js"
+    },
+    "./delegation-execution": {
+      "types": "./build/src/delegation-execution.d.ts",
+      "import": "./build/src/delegation-execution.js"
+    },
+    "./delegation-flow-execution": {
+      "types": "./build/src/delegation-flow-execution.d.ts",
+      "import": "./build/src/delegation-flow-execution.js"
+    },
+    "./delegation-context-sync": {
+      "types": "./build/src/delegation-context-sync.d.ts",
+      "import": "./build/src/delegation-context-sync.js"
+    },
+    "./delegation-group-v2": {
+      "types": "./build/src/delegation-group-v2.d.ts",
+      "import": "./build/src/delegation-group-v2.js"
+    },
+    "./delegation-group-v2-local-file": {
+      "types": "./build/src/delegation-group-v2-local-file.d.ts",
+      "import": "./build/src/delegation-group-v2-local-file.js"
+    },
+    "./delegation-group-mailbox": {
+      "types": "./build/src/delegation-group-mailbox.d.ts",
+      "import": "./build/src/delegation-group-mailbox.js"
     }
   },
   "repository": {
@@ -251,9 +315,9 @@
   "dependencies": {
     "@kontourai/conduit": "0.7.1",
     "@kontourai/datum": "0.8.0",
-    "@kontourai/dispatch": "0.3.0",
+    "@kontourai/dispatch": "0.7.1",
     "@kontourai/flow": "5.2.0",
-    "@kontourai/relay": "0.6.0",
+    "@kontourai/relay": "0.7.1",
     "@kontourai/surface": "5.0.0",
     "@kontourai/survey": "8.2.0",
     "esbuild": "0.28.2"

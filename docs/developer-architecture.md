@@ -25,6 +25,7 @@ Flow Agents is the agent-facing operating layer. It turns a user's intent into w
 Use these local references when you need more detail:
 
 - [Context glossary](../CONTEXT.md) defines Flow Agents vocabulary.
+- [Delegation groups](delegation-groups.md) defines the bounded contract/ledger package subpaths and required host capabilities; execution acceptance remains follow-up work.
 - [Repository Structure](repository-structure.md) is the canonical map for source, generated output, runtime state, packaging, eval, and cleanup boundaries.
 - [ADR 0003](adr/0003-flow-agents-coordinates-kits-and-adapters.md) records the kit and adapter boundary.
 - [ADR 0005](adr/0005-kubernetes-inspired-resource-contracts.md) records the Kontour Resource Contract direction.

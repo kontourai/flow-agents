@@ -198,7 +198,11 @@ function createRuntime(options: UtteranceModelExtractorOptions): ModelRuntime {
 async function persistReceipt(receiptPath: string, receipt: DispatchReceipt): Promise<void> {
   const resolved = path.resolve(receiptPath);
   await mkdir(path.dirname(resolved), { recursive: true, mode: 0o700 });
-  await appendFile(resolved, `${JSON.stringify(receipt)}\n`, {
+  const persisted = {
+    ...receipt,
+    attempts: receipt.attempts.map(({ model: _model, modelSource: _modelSource, ...attempt }) => attempt),
+  };
+  await appendFile(resolved, `${JSON.stringify(persisted)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });

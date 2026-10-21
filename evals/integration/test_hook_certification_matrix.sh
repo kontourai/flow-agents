@@ -6,8 +6,10 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMPDIR_EVAL="$(mktemp -d)"
+# Authenticated discovery precedes cwd-local fixtures; own its state for this eval.
+export XDG_STATE_HOME="$TMPDIR_EVAL/xdg-state"
 errors=0
-declare -A cell
+mkdir -p "$TMPDIR_EVAL/cells"
 trap 'rm -rf "$TMPDIR_EVAL"' EXIT
 # Pin the only Claude-specific filesystem surface. Do not replace HOME: toolchain
 # shims may legitimately consult it, while this hook never needs the real ~/.claude.
@@ -16,10 +18,11 @@ mkdir -p "$TMPDIR_EVAL/home"
 
 pass() { echo "  PASS  $1"; }
 fail() { echo "  FAIL  $1"; errors=$((errors + 1)); }
-cert() { cell["$1:$2"]="PASS"; pass "$1 / $2 — $3"; }
-uncertified() { cell["$1:$2"]="NOT-CERTIFIED: $3"; echo "  NOT-CERTIFIED  $1 / $2 — $3"; }
-covered() { cell["$1:$2"]="COVERED: $3"; echo "  COVERED-ELSEWHERE  $1 / $2 — $3"; }
-failed() { cell["$1:$2"]="FAIL"; fail "$1 / $2 — $3"; }
+set_cell() { printf '%s\n' "$3" >"$TMPDIR_EVAL/cells/$1:$2"; }
+cert() { set_cell "$1" "$2" "PASS"; pass "$1 / $2 — $3"; }
+uncertified() { set_cell "$1" "$2" "NOT-CERTIFIED: $3"; echo "  NOT-CERTIFIED  $1 / $2 — $3"; }
+covered() { set_cell "$1" "$2" "COVERED: $3"; echo "  COVERED-ELSEWHERE  $1 / $2 — $3"; }
+failed() { set_cell "$1" "$2" "FAIL"; fail "$1 / $2 — $3"; }
 
 json_has() {
   node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if (!eval(process.argv[2])) process.exit(1)' "$1" "$2"
@@ -146,7 +149,14 @@ echo
 printf '%-20s | %-26s | %-26s | %-26s\n' 'HOOK' 'FIRES' 'PASSES-THROUGH' 'USEFUL'
 printf '%s\n' '---------------------+----------------------------+----------------------------+----------------------------'
 for hook in workflow-steering quality-gate stop-goal-fit config-protection evidence-capture; do
-  printf '%-20s | %-26s | %-26s | %-26s\n' "$hook" "${cell[$hook:FIRES]}" "${cell[$hook:PASSES-THROUGH]}" "${cell[$hook:USEFUL]}"
+  # Read fixture-local cells without Bash 4 associative arrays or code evaluation.
+  if IFS= read -r fires <"$TMPDIR_EVAL/cells/$hook:FIRES" \
+    && IFS= read -r passes_through <"$TMPDIR_EVAL/cells/$hook:PASSES-THROUGH" \
+    && IFS= read -r useful <"$TMPDIR_EVAL/cells/$hook:USEFUL"; then
+    printf '%-20s | %-26s | %-26s | %-26s\n' "$hook" "$fires" "$passes_through" "$useful"
+  else
+    fail "$hook / missing matrix cell"
+  fi
 done
 if [[ $errors -gt 0 ]]; then echo "HOOK CERTIFICATION MATRIX: FAIL ($errors cells/power probes)"; exit 1; fi
 echo "HOOK CERTIFICATION MATRIX: PASS (covered-elsewhere cells are named above)"
