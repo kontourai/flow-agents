@@ -34,7 +34,7 @@ jobs:
       cancel-in-progress: false
     name: Source and Static
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       FLOW_AGENTS_CI_LANE: source-and-static
       FLOW_AGENTS_CI_RESULTS_DIR: evals/results/ci-baseline/source-and-static

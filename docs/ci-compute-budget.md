@@ -66,6 +66,23 @@ boundary: a writer who can change workflows can also propose changing the budget
 Regression checks reject candidate bypasses; they cannot remove already-admitted
 legacy jobs.
 
+## Job execution deadlines
+
+Source and Static has a 30-minute deadline, matching Runtime and Kit. In
+[run 39605314051](https://github.com/kontourai/flow-agents/actions/runs/39605314051/job/119239881007)
+at `82ddfaa6018aa46a03656fbda9de31d6a530e9cf`, static eval passed in 10m43s,
+but the job reached Transition log at 14m59s and exhausted its former
+15-minute deadline. Gate scorecard, Run pulse and Knowledge integration were
+skipped; evidence finalization then failed on the incomplete lane.
+
+The remaining checks took 23 seconds in the preceding successful main
+[run 39114040325](https://github.com/kontourai/flow-agents/actions/runs/39114040325/job/117636033558),
+with about two more seconds for finalization and upload. Combining those
+measurements projects roughly 15m24s, leaving about 14m36s under the new limit.
+This is a budget estimate, not proof that the repaired head passes hosted CI.
+The change preserves every check and the two-slot concurrency bound; a longer
+deadline can increase slot occupancy without increasing peak runners.
+
 ## Queue and cancellation limits
 
 GitHub allows one running admission and up to 100 pending entries per group.
