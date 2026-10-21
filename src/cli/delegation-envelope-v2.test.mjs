@@ -541,11 +541,11 @@ test("authorized execution binds selected runtime, reserves before launch and re
     });
     const { root, parent, child } = edgeFixture();
     await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child);
-    let calls = 0, retained = null, fail = false, overrun = false, failureRetained = false;
+    let calls = 0, retained = null, fail = false, overrun = false, failureRetained = false, mutateRequest = false;
     const runtime = { id: 'selected-runtime', capabilities: () => ({ structuredTools: true, outputTokenLimitFidelity: 'native', streaming: false, abort: true, usage: true }),
-      async invoke() { calls++; if (fail) throw new Error('native failure'); return { provider: 'fixture', model: 'configured', outputText: 'child report', toolCalls: [], usage: { inputTokens: overrun ? 8 : 2, outputTokens: 3, costUsd: 0.000004 }, latencyMs: 1 }; } };
+      async invoke(request) { assert.equal(request.maxOutputTokens, 5); calls++; if (fail) throw new Error('native failure'); return { provider: 'fixture', model: 'configured', outputText: 'child report', toolCalls: [], usage: { inputTokens: overrun ? 8 : 2, outputTokens: 3, costUsd: 0.000004 }, latencyMs: 1 }; } };
     const host = {
-      resolveRuntime: async () => ({ runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }),
+      resolveRuntime: async () => { if (mutateRequest) { input.request.maxOutputTokens = 9999; mutateRequest = false; } return { runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }; },
       async invokeFenced(_envelope, id, launch) {
         const state = await service.inspect(root.authority_id);
         assert.equal(state.invocations.find((i) => i.invocationId === id).terminal, false);
@@ -568,7 +568,9 @@ test("authorized execution binds selected runtime, reserves before launch and re
     await assert.rejects(executeAuthorizedDelegation({ ...input, allocation: { ...input.allocation, costMicros: 0 } }));
     await assert.rejects(executeAuthorizedDelegation({ ...input, signal: AbortSignal.abort() }));
     assert.equal((await service.inspect(root.authority_id)).invocations.length, 0);
+    mutateRequest = true;
     assert.equal((await executeAuthorizedDelegation(input)).outcome, 'succeeded');
+    input.request.maxOutputTokens = 5;
     assert.equal(retained, 'child report');
     assert.deepEqual((await service.inspect(root.authority_id)).invocations[0].usage, { inputTokens: 2, outputTokens: 3, costMicros: 4 });
     await assert.rejects(executeAuthorizedDelegation(input), /invocation_already_reserved/);

@@ -29,6 +29,7 @@ export async function executeAuthorizedDelegation(input: {
   allocation: DelegationInvocationAmounts;
   signal?: AbortSignal;
 }): Promise<DelegationDispatchOutcome> {
+  input = { ...input, request: structuredClone(input.request), allocation: structuredClone(input.allocation) };
   input.signal?.throwIfAborted();
   const { envelope } = await input.service.admitEffect(input.authorityId, input.envelopeId, input.effect);
   const selected = await input.host.resolveRuntime(structuredClone(envelope));
