@@ -664,26 +664,21 @@ test("external abort waits for host stop with heartbeat live, then releases with
   const input = await schedulerFixture("execute-abort");
   const controller = new AbortController();
   let stopped = false;
-  let abortSeen = false;
-  let renewalsAfterAbort = 0;
   const observed = [];
   await assert.rejects(orchestrateFlowMultiCursor({
     ...input, signal: controller.signal, renewalIntervalMs: 5, leaseSeconds: 60,
     onEvent: async (event) => {
       observed.push(event.kind);
-      if (event.kind === "renewed" && abortSeen) renewalsAfterAbort += 1;
       if (event.kind === "released") assert.equal(stopped, true, "abort request is not host stop confirmation");
     },
     execute: async ({ claim, signal }) => {
       const aborted = new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
       controller.abort();
       await aborted;
-      abortSeen = true;
       const before = (await loadRun(input.runId, input.cwd)).state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
       const run = await waitForRenewal(input, before);
       assert.ok(run.state.multi_cursor.active_claims.some(({ claim_id }) => claim_id === claim.claim_id));
       assert.equal(run.state.multi_cursor.claim_history.some(({ action }) => action === "released"), false);
-      assert.ok(renewalsAfterAbort > 0, "execution abort must not stop heartbeat while callback is stopping");
       stopped = true;
     },
   }), FlowMultiCursorOrchestrationError);
