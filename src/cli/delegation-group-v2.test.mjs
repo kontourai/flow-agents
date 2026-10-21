@@ -424,3 +424,34 @@ test("returned and cancelled groups require authenticated terminal/accounting pr
   assert.equal(proofs, 2); assert.equal((await reconciler.recordTerminal(last)).replayed, true); assert.equal(proofs, 2);
   assert.equal((await f.open().get("group")).terminal, "proven"); assert.equal(f.state.calls, 2);
 });
+
+test('mailbox validator binds current group seats and both live assignments before delivery', async t => {
+  const { createDelegationGroupMailboxValidator } = await import('../../build/src/delegation-group-mailbox.js');
+  const { createLocalFileDelegationMailbox } = await import('../../build/src/delegation-mailbox-local-file.js');
+  const { createMailboxMessage } = await import('../../build/src/delegation-mailbox.js');
+  const f = await fixture(t);
+  const identity = seat => ({ groupId: 'group', groupGeneration: 1, controllerActorKey: 'host-controller', controllerGeneration: 3,
+    memberId: seat.seatId, memberGeneration: seat.envelope.generation, assignmentId: `assignment-${seat.seatId}`, assignmentGeneration: 1, actorKey: `actor-${seat.seatId}` });
+  const first = identity(f.spec.seats[0]), second = identity(f.spec.seats[1]);
+  const live = new Map(f.spec.seats.map(seat => [seat.seatId, identity(seat)]));
+  let authenticated = first.actorKey;
+  const validateHost = createDelegationGroupMailboxValidator({ controller: f.controller, authority: f.service, host: {
+    authenticateCaller: async caller => caller.actorKey === authenticated,
+    withMembershipFence: async (_id, body) => body(),
+    resolveLiveMember: async (spec, seat) => ({ identity: live.get(seat.seatId), controller: spec.controller, envelope: seat.envelope }),
+  } });
+  const mailbox = createLocalFileDelegationMailbox({ artifactRoot: f.cwd, now: () => NOW, validateHost });
+  const message = createMailboxMessage({ schemaVersion: '1.0', messageId: 'message', operationId: 'operation', exchangeId: 'exchange', subjectId: 'flow-agents#1113', resourceScope: ['src/task.ts'],
+    sender: first, recipient: second, correlation: { status: 'incomplete', reason: 'controlled host' }, kind: 'dependency_question', inReplyTo: null,
+    createdAt: NOW, expiresAt: '2026-10-21T12:30:00.000Z', payload: { summary: 'Can you review?', evidenceRefs: [], outputRefs: [] } });
+  assert.equal((await mailbox.enqueue(message, first)).status, 'ok');
+  live.set(second.memberId, { ...second, assignmentGeneration: 2 });
+  assert.equal((await mailbox.deliver(message.operationId, first)).status, 'refused');
+  live.set(second.memberId, second);
+  assert.equal((await mailbox.deliver(message.operationId, first)).status, 'ok');
+  authenticated = second.actorKey;
+  assert.equal((await mailbox.inbox(second)).value.length, 1);
+  await f.controller.cancel(f.command('cancel', 1));
+  assert.equal((await mailbox.inbox(second)).status, 'refused');
+  assert.equal(f.state.calls, 0);
+});
