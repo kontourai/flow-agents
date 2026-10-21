@@ -499,6 +499,15 @@ test("authority service registers exact ancestry and partitions sibling allocati
   await open().derive(root.authority_id, child);
   assert.equal((await open().inspect(root.authority_id)).envelopes.length, 2);
   const allocation = { inputTokens: 5, outputTokens: 5, costMicros: 10 };
+  const byteLength = Buffer.byteLength;
+  try {
+    Buffer.byteLength = function(value, encoding) {
+      if (typeof value === 'string' && value.includes('"invocationId":"capacity-probe"') && value.includes('"invocations":')) return 16 * 1024 * 1024 - 10;
+      return byteLength(value, encoding);
+    };
+    await assert.rejects(service.reserveInvocation(root.authority_id, child.envelope_id, 'capacity-probe', allocation), /authority_ledger_full/);
+  } finally { Buffer.byteLength = byteLength; }
+  assert.equal((await open().inspect(root.authority_id)).invocations.length, 0);
   await service.reserveInvocation(root.authority_id, child.envelope_id, 'invoke-one', allocation);
   await assert.rejects(open().reserveInvocation(root.authority_id, child.envelope_id, 'invoke-one', allocation), /invocation_already_reserved/);
   await assert.rejects(open().reserveInvocation(root.authority_id, child.envelope_id, 'invoke-two', allocation), /active_slot_exhausted/);

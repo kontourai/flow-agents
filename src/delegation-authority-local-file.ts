@@ -87,7 +87,10 @@ export function createLocalFileDelegationAuthorityStore(artifactRoot: string): D
           if (other.envelopes.some((e) => identities.has(e.execution_id))) throw new DelegationAdmissionError("execution_already_bound");
         }
         const bytes = `${canonicalJson(ledger)}\n`;
-        if (Buffer.byteLength(bytes) > 16 * 1024 * 1024) throw new DelegationAdmissionError("authority_ledger_full");
+        // Each unresolved usage can replace null with three bounded integers.
+        // Reserve space now so confirmed accounting can always be retained later.
+        const settlementCapacity = ledger.invocations.filter((i) => i.usage === null).length * 256;
+        if (Buffer.byteLength(bytes) + settlementCapacity > 16 * 1024 * 1024) throw new DelegationAdmissionError("authority_ledger_full");
         if (!previous || canonicalJson(previous) !== canonicalJson(ledger)) atomicWriteDurableFile(root, file, bytes, true);
         read(file);
         return next.result;
