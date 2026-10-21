@@ -442,7 +442,9 @@
         "src/delegation-authority-contract.ts",
         "src/delegation-envelope-v2.ts",
         "src/multi-cursor-flow-orchestrator.ts",
-        "src/delegation-dispatch.ts"
+        "src/delegation-dispatch.ts",
+        "src/delegation-mailbox.ts",
+        "src/delegation-mailbox-local-file.ts"
       ]
     },
     {

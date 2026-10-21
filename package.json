@@ -118,6 +118,14 @@
     "./delegation-dispatch": {
       "types": "./build/src/delegation-dispatch.d.ts",
       "import": "./build/src/delegation-dispatch.js"
+    },
+    "./delegation-mailbox": {
+      "types": "./build/src/delegation-mailbox.d.ts",
+      "import": "./build/src/delegation-mailbox.js"
+    },
+    "./delegation-mailbox-local-file": {
+      "types": "./build/src/delegation-mailbox-local-file.d.ts",
+      "import": "./build/src/delegation-mailbox-local-file.js"
     }
   },
   "repository": {

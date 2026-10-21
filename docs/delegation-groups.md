@@ -3,7 +3,8 @@
 This is the first source increment of [#1113](https://github.com/kontourai/flow-agents/issues/1113).
 It provides a versioned coordination contract, deterministic projection, host service, and offline
 local-file ledger. It does **not** establish the epic's execution acceptance criteria or ship an
-executor, mailbox, isolated writer enforcement, or installed-runtime group fixture. The separate
+executor, isolated writer enforcement, or installed-runtime group fixture. The mailbox is a separate
+offline transport primitive and is not yet composed with live group authorization. The separate
 Flow scheduler supports bounded admission, external cancellation, and awaited lifecycle observations;
 these hooks are not a composed group executor or authenticated reservation service.
 
@@ -238,3 +239,22 @@ contains Dispatch's estimates and is not the accounting authority or semantic ac
 These calls are not yet composed with group attempts, authority issuance, ancestor reservations,
 mailbox admission or effect fencing. Tests use the real temporary FileAuthorizationLedger and a
 controlled runtime; they do not establish live provider metering or confinement.
+
+## Offline mailbox
+
+The `delegation-mailbox` subpath exports the closed message/identity contract; the separate
+`delegation-mailbox-local-file` subpath exports `createLocalFileDelegationMailbox()`. Both are also
+root exports. Pending outbox records require explicit delivery; reopen does not send. Delivery and
+acknowledgement are transport states, not agreement, gate evidence or ownership transfer.
+
+The required host validator authenticates the caller and both participants' exact group, controller,
+member and assignment generations, actor identities, liveness and cancellation state on every action.
+The offline adapter cannot establish those facts itself. Its journal retains one request/response per
+subject and exact participant pair, at most 256 operations, 4096 UTF-8 payload bytes and one hour per
+message. Cancellation fences persist. There is no automatic garbage collection or resend.
+
+Owned paths use private modes and reject links/foreign ownership. Missing ancestors are created
+privately without changing existing ancestor permissions. Replacement flushes temporary bytes before
+rename; successful observations confirm journal and ancestor directory entries. Failed confirmation
+returns unavailable until repaired. Filesystem failure injection and descriptor tracing do not prove
+power-loss durability, cross-user confinement or live host authentication.
