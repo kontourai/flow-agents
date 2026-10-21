@@ -1,7 +1,7 @@
 import { canonicalJson } from "@kontourai/relay";
 import {
   validateRootAuthorityV2, rootAuthorityDigestV2, delegationIdV2,
-  delegationIntegerV2, type RootAuthorityV2, type DelegationBudgetV2,
+  delegationIntegerV2, copyDelegationJsonV2, delegationRecordV2, type RootAuthorityV2, type DelegationBudgetV2,
 } from "./delegation-authority-contract.js";
 import {
   validateDelegationAncestryV2, validateDelegationEnvelopeV2, delegationEnvelopeDigestV2,
@@ -39,6 +39,12 @@ export class DelegationAdmissionError extends Error {
 const capacityKeys = ["max_attempts", "max_input_tokens", "max_output_tokens", "max_cost_micros", "max_total_envelopes"] as const;
 function requireAdmission(value: unknown, code: string): asserts value {
   if (!value) throw new DelegationAdmissionError(code);
+}
+function amounts(value: unknown): DelegationInvocationAmounts {
+  requireAdmission(typeof value === "object" && value !== null && !Array.isArray(value), "invalid_amounts");
+  const normalized = delegationRecordV2(copyDelegationJsonV2(value), ["inputTokens", "outputTokens", "costMicros"]);
+  for (const key of ["inputTokens", "outputTokens", "costMicros"] as const) delegationIntegerV2(normalized[key]);
+  return { inputTokens: normalized.inputTokens as number, outputTokens: normalized.outputTokens as number, costMicros: normalized.costMicros as number };
 }
 function hasOverrun(ledger: DelegationAuthorityLedger): boolean {
   return ledger.invocations.some((invocation) => invocation.usage !== null
@@ -82,7 +88,10 @@ export function validateDelegationAuthorityLedger(value: DelegationAuthorityLedg
     && value.envelopes.length <= root.budget.max_total_envelopes, "invalid_authority_ledger");
   const envelopes = value.envelopes.map(validateDelegationEnvelopeV2);
   requireAdmission(Array.isArray(value.invocations) && value.invocations.length <= 4096, "invocation_bound");
-  const invocations = structuredClone(value.invocations);
+  const invocations = value.invocations.map((invocation) => {
+    requireAdmission(invocation.usage === null || (typeof invocation.usage === "object" && invocation.usage !== null), "invalid_invocation_usage");
+    return { ...invocation, allocation: amounts(invocation.allocation), usage: invocation.usage === null ? null : amounts(invocation.usage) };
+  });
   for (const invocation of invocations) {
     delegationIdV2(invocation.invocationId); delegationIdV2(invocation.envelopeId);
     requireAdmission(envelopes.some((e) => e.envelope_id === invocation.envelopeId) && typeof invocation.terminal === "boolean", "invalid_invocation");
@@ -155,13 +164,13 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
         requireAdmission(!ledger.invocations.some((i) => i.invocationId === invocationId), "invocation_already_reserved");
         requireAdmission(await host.confirmExecution(structuredClone(envelope), structuredClone(ledger.root)), "execution_binding_unconfirmed");
         for (const ancestor of chain) {
-          const active = ledger.invocations.filter((i) => !i.terminal || i.usage === null).filter((i) => {
+          const active = ledger.invocations.filter((i) => !i.terminal || i.usage == null).filter((i) => {
             const member = ledger.envelopes.find((e) => e.envelope_id === i.envelopeId)!;
-            return ancestry(ledger, member, host.now()).some((e) => e.envelope_id === ancestor.envelope_id);
+            return ancestry(ledger, member, "0000-01-01T00:00:00.000Z").some((e) => e.envelope_id === ancestor.envelope_id);
           });
           requireAdmission(active.length < ancestor.budget.max_concurrent_children, "active_slot_exhausted");
         }
-        const invocation: DelegationInvocation = { invocationId, envelopeId, allocation: structuredClone(allocation), usage: null, terminal: false };
+        const invocation: DelegationInvocation = { invocationId, envelopeId, allocation: amounts(allocation), usage: null, terminal: false };
         ledger.invocations.push(invocation);
         validateDelegationAuthorityLedger(ledger);
         ancestry(ledger, envelope, host.now());
@@ -170,6 +179,8 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
     },
     async reconcileInvocation(authorityId: string, invocationId: string, usage: DelegationInvocationAmounts | null, terminal: boolean): Promise<void> {
       delegationIdV2(authorityId); delegationIdV2(invocationId);
+      requireAdmission(usage === null || (typeof usage === "object" && usage !== null), "invalid_invocation_usage");
+      const normalizedUsage = usage === null ? null : amounts(usage);
       return store.transact(authorityId, async (current) => {
         requireAdmission(current, "authority_missing");
         const ledger = validateDelegationAuthorityLedger(current);
@@ -179,7 +190,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
         await authorized("reconcile", ledger, envelope);
         requireAdmission(!invocation.terminal || terminal, "terminal_reversal");
         requireAdmission(!invocation.usage || same(invocation.usage, usage), "accounting_conflict");
-        const observed = { ...invocation, usage: usage && structuredClone(usage), terminal };
+        const observed = { ...invocation, usage: normalizedUsage, terminal };
         requireAdmission(await host.confirmReconciliation?.(structuredClone(observed), structuredClone(ledger.root)), "reconciliation_unconfirmed");
         Object.assign(invocation, observed);
         validateDelegationAuthorityLedger(ledger);

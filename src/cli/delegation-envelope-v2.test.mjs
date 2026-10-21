@@ -558,3 +558,39 @@ test("authorized execution binds selected runtime, reserves before launch and re
     assert.equal(calls, 1);
   } finally { fs.rmSync(rootPath, { recursive: true, force: true }); }
 });
+
+for (const scenario of ['undefined-usage', 'array-allocation', 'expired-sibling']) {
+  test(`authority admission preserves ledger and holds for ${scenario}`, async () => {
+    const { createDelegationAuthorityService } = await import('../../build/src/delegation-authority-service.js');
+    const { createLocalFileDelegationAuthorityStore } = await import('../../build/src/delegation-authority-local-file.js');
+    const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+    const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-admission-boundary-'));
+    try {
+      let now = NOW;
+      const service = createDelegationAuthorityService(createLocalFileDelegationAuthorityStore(rootPath), {
+        now: () => now, authorize: async () => true, confirmExecution: async () => true, confirmReconciliation: async () => true,
+      });
+      const { root, parent, child } = edgeFixture();
+      Object.assign(child.budget, { max_attempts: 1, max_input_tokens: 100, max_output_tokens: 100, max_cost_micros: 100,
+        max_total_envelopes: 2, max_concurrent_children: 1, expires_at: '2026-10-21T13:00:00.000Z' });
+      const sibling = { ...structuredClone(child), envelope_id: 'sibling', execution_id: 'sibling-execution', span_id: 'sibling-span', budget: { ...child.budget, expires_at: EXPIRY } };
+      await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child); await service.derive(root.authority_id, sibling);
+      const allocation = { inputTokens: 1, outputTokens: 1, costMicros: 1 };
+      if (scenario === 'array-allocation') {
+        await assert.rejects(service.reserveInvocation(root.authority_id, child.envelope_id, 'malformed', Object.assign([], allocation)), /invalid_amounts/);
+        assert.equal((await service.inspect(root.authority_id)).invocations.length, 0);
+      } else {
+        await service.reserveInvocation(root.authority_id, child.envelope_id, 'first', allocation);
+        if (scenario === 'undefined-usage') {
+          await assert.rejects(service.reconcileInvocation(root.authority_id, 'first', undefined, true), /invalid_invocation_usage/);
+          assert.equal((await service.inspect(root.authority_id)).invocations[0].usage, null);
+          await assert.rejects(service.reserveInvocation(root.authority_id, child.envelope_id, 'second', allocation), /active_slot_exhausted/);
+        } else {
+          now = '2026-10-21T14:00:00.000Z';
+          await service.reserveInvocation(root.authority_id, sibling.envelope_id, 'second', allocation);
+          assert.equal((await service.inspect(root.authority_id)).invocations.length, 2);
+        }
+      }
+    } finally { fs.rmSync(rootPath, { recursive: true, force: true }); }
+  });
+}
