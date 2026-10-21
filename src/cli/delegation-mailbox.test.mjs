@@ -585,3 +585,42 @@ for (const phase of ["acknowledged", "cancelled"]) {
     });
   }
 }
+
+test("replacement flushes its temporary data before replacing an acknowledged journal", async (t) => {
+  const f = fixture(t);
+  ok(await f.sender.enqueue(message(), A));
+  const synced = new Set();
+  const replacements = [];
+  const sync = fsDefault.fsyncSync;
+  const rename = fsDefault.renameSync;
+  const inode = (stat) => `${stat.dev}:${stat.ino}`;
+  t.mock.method(fsDefault, "fsyncSync", (fd) => {
+    sync(fd);
+    const stat = fs.fstatSync(fd);
+    if (stat.isFile()) synced.add(inode(stat));
+  });
+  t.mock.method(fsDefault, "renameSync", (from, to) => {
+    replacements.push(synced.has(inode(fs.statSync(from))));
+    return rename(from, to);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  ok(await f.sender.deliver("operation-1", A));
+  assert.deepEqual(replacements, [true]);
+});
+
+test("temporary data fsync failure preserves the prior acknowledged journal", async (t) => {
+  const f = fixture(t);
+  ok(await f.sender.enqueue(message(), A));
+  const file = path.join(f.root, "mailbox/state.json");
+  const prior = fs.readFileSync(file);
+  const sync = fsDefault.fsyncSync;
+  t.mock.method(fsDefault, "fsyncSync", (fd) => {
+    if (fs.fstatSync(fd).isFile()) throw Object.assign(new Error("temporary data not durable"), { code: "EIO" });
+    return sync(fd);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  await assert.rejects(f.sender.deliver("operation-1", A), { code: "EIO" });
+  assert.deepEqual(fs.readFileSync(file), prior);
+});

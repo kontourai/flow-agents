@@ -91,6 +91,7 @@ export function createLocalFileDelegationMailbox(options: {
     try {
       privateDescriptor(fd, false);
       fs.writeFileSync(fd, data, "utf8");
+      fs.fsyncSync(fd);
       fs.renameSync(temp, file);
     } finally {
       fs.closeSync(fd);
