@@ -293,8 +293,10 @@ for (const target of ["mailbox", "mailbox/assignment", "mailbox/state.json"]) {
     else fs.mkdirSync(external);
     const link = path.join(f.root, target);
     fs.mkdirSync(path.dirname(link), { recursive: true });
+    const externalMode = fs.statSync(external).mode;
     fs.symlinkSync(external, link);
-    await assert.rejects(f.sender.enqueue(message(), A), /symlink|Unsafe|ELOOP|escapes/);
+    await assert.rejects(f.sender.enqueue(message(), A), /symlink|Unsafe|ELOOP|ENOTDIR|escapes/);
+    assert.equal(fs.statSync(external).mode, externalMode);
     if (target.endsWith("json")) assert.equal(fs.readFileSync(external, "utf8"), "untouched");
     else assert.deepEqual(fs.readdirSync(external), []);
   });
@@ -310,8 +312,8 @@ test("corrupt retained state fails closed and a failed durable write never expos
   fs.writeFileSync(file, original);
   const interrupted = createLocalFileDelegationMailbox({
     artifactRoot: f.root, now: () => AT,
-    validateHost: ({ action }) => {
-      if (action === "deliver") {
+    validateHost: ({ action, message: candidate }) => {
+      if (action === "deliver" && candidate) {
         fs.renameSync(file, `${file}.retained`);
         fs.mkdirSync(file);
       }
@@ -429,7 +431,7 @@ createMailboxMessage({ ...intent, correlation });
 // @ts-expect-error a raw envelope is outside the published mailbox type
 createMailboxMessage({ ...intent, correlation: { schema_version: "1.0", correlation_id: "run", identities: {} } });
 `);
-  const result = spawnSync(path.resolve("node_modules/.bin/tsc"), ["--noEmit", "--strict", "--skipLibCheck", "--target", "ES2022",
+  const result = spawnSync(path.resolve("node_modules/.bin/tsc"), ["--ignoreConfig", "--noEmit", "--strict", "--skipLibCheck", "--target", "ES2022",
     "--module", "Node16", "--moduleResolution", "Node16", "--ignoreDeprecations", "6.0", types], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
@@ -441,8 +443,9 @@ test("real local assignment subject retains exact owner identity in mailbox and 
   await provider.claim(subject, { runtime: "codex", session_id: "mailbox-test", host: "offline" }, {
     ttlSeconds: 3600, branch: "detached", artifactDir: f.root, workItemRef: subject,
   });
-  assert.equal((await provider.status(subject)).subject_id, subject);
-  const sent = message({ subjectId: subject });
+  const assignment = await provider.status(subject);
+  assert.equal(assignment.subject_id, subject);
+  const sent = message({ subjectId: assignment.subject_id });
   ok(await f.sender.enqueue(sent, A));
   ok(await f.sender.deliver(sent.operationId, A));
   assert.equal(ok(await f.open(B.actorKey).inbox(B))[0].message.subjectId, subject);
@@ -515,3 +518,70 @@ test("foreign-owned root and hardlinked journal are refused without chmod or dis
   assert.equal(fs.statSync(link).mode & 0o777, 0o644);
   assert.deepEqual(fs.readFileSync(link), bytes);
 });
+
+
+test("exact 4096 UTF8 payload, one hour lifetime and 256 operations remain bounded", async (t) => {
+  const f = fixture(t);
+  const payload = { summary: "🧭".repeat(496) + "x", evidenceRefs: Array.from({ length: 8 }, (_, i) => `${i}${"r".repeat(254)}`), outputRefs: [] };
+  assert.equal(Buffer.byteLength(canonicalMailboxJson(payload)), 4096);
+  const sent = message({ payload, expiresAt: "2026-10-21T07:00:00.000Z" });
+  assert.deepEqual(ok(await f.sender.enqueue(sent, A)).message, sent);
+  assert.throws(() => message({ payload: { ...payload, summary: payload.summary + "x" } }), MailboxValidationError);
+  assert.throws(() => message({ expiresAt: "2026-10-21T07:00:00.001Z" }), MailboxValidationError);
+  for (let i = 1; i < 256; i++) {
+    ok(await f.sender.enqueue(message({ messageId: `capacity-m-${i}`, operationId: `capacity-op-${i}`,
+      exchangeId: `capacity-ex-${i}`, subjectId: `capacity-subject-${i}` }), A));
+  }
+  refused(await f.sender.enqueue(message({ messageId: "overflow-m", operationId: "overflow-op", exchangeId: "overflow-ex", subjectId: "overflow-subject" }), A), "capacity");
+  assert.equal(ok(await f.open(A.actorKey).outbox(A)).length, 256);
+  assert.deepEqual(ok(await f.sender.enqueue(sent, A)).message, sent);
+  ok(await f.sender.deliver(sent.operationId, A));
+  assert.deepEqual(ok(await f.open(B.actorKey).inbox(B))[0].message, sent);
+});
+
+
+for (const phase of ["acknowledged", "cancelled"]) {
+  for (const target of ["file", "directory"]) {
+    test(`${phase} post-replace ${target} fsync failure requires confirmed retry`, async (t) => {
+      const f = fixture(t);
+      ok(await f.sender.enqueue(message(), A));
+      ok(await f.sender.deliver("operation-1", A));
+      const file = path.join(f.root, "mailbox/state.json");
+      let failing = true;
+      let calls = 0;
+      const actual = fsDefault.fsyncSync;
+      t.mock.method(fsDefault, "fsyncSync", (fd) => {
+        const retained = JSON.parse(fs.readFileSync(file, "utf8"));
+        const replaced = phase === "acknowledged" ? retained.operations[0].status === phase : retained.cancelled.length === 1;
+        const stat = fs.fstatSync(fd);
+        if (replaced && (target === "file" ? stat.isFile() : stat.isDirectory())) {
+          calls++;
+          if (failing) throw Object.assign(new Error("injected post-replace EIO"), { code: "EIO" });
+        }
+        return actual(fd);
+      });
+      syncBuiltinESMExports();
+      t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+      const retry = () => phase === "acknowledged"
+        ? f.open(B.actorKey).acknowledge("operation-1", B) : f.open(CONTROLLER.actorKey).cancel(CONTROLLER);
+      for (let i = 0; i < 2; i++) {
+        const before = calls;
+        assert.deepEqual(await retry(), { status: "unavailable", code: "durability_unconfirmed" });
+        assert.ok(calls > before);
+      }
+      if (phase === "acknowledged") assert.equal((await f.open(B.actorKey).inbox(B)).status, "unavailable");
+      else refused(await f.open(B.actorKey).inbox(B), "inactive");
+      failing = false;
+      const before = calls;
+      const repaired = ok(await retry());
+      assert.ok(calls > before);
+      if (phase === "acknowledged") {
+        assert.equal(repaired.status, phase);
+        assert.deepEqual(ok(await f.open(B.actorKey).inbox(B)), [repaired]);
+      } else {
+        assert.equal(repaired, null);
+        refused(await f.open(A.actorKey).enqueue(message(), A), "inactive");
+      }
+    });
+  }
+}

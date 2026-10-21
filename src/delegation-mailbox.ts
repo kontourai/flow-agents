@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { containsSensitiveCredential, validateRunCorrelationPresence, type RunCorrelationPresence } from "./run-correlation.js";
+import { containsSensitiveCredential, validateRunCorrelationEnvelope, validateRunCorrelationPresence, type RunCorrelationPresence } from "./run-correlation.js";
+import { workItemSlug } from "./lib/work-item-identity.js";
 
 export const MAILBOX_MAX_PAYLOAD_BYTES = 4096;
 export const MAILBOX_MAX_OPERATIONS = 256;
@@ -67,8 +68,14 @@ function record(value: unknown): value is Record<string, unknown> {
 function closed(value: unknown, keys: readonly string[]): asserts value is Record<string, unknown> {
   requireValid(record(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)));
 }
-function identifier(value: unknown): value is string {
+function identifier(value: unknown): boolean {
   return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:@#-]{0,254}$/.test(value) && !containsSensitiveCredential(value);
+}
+function subject(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 255 || containsSensitiveCredential(value)) return false;
+  if (identifier(value)) return true;
+  if (value.split("/").some((part) => part === "." || part === "..")) return false;
+  try { workItemSlug(value); return true; } catch { return false; }
 }
 function timestamp(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
@@ -78,6 +85,7 @@ function refs(value: unknown): value is string[] {
   return Array.isArray(value) && value.length <= 16 && value.every(identifier) && new Set(value).size === value.length;
 }
 export function validateMailboxIdentity(value: unknown): MailboxIdentity {
+  canonicalMailboxJson(value);
   closed(value, identityKeys);
   for (const key of identityKeys) {
     if (key.endsWith("Generation")) requireValid(Number.isSafeInteger(value[key]) && Number(value[key]) >= 0);
@@ -86,9 +94,32 @@ export function validateMailboxIdentity(value: unknown): MailboxIdentity {
   return structuredClone(value) as MailboxIdentity;
 }
 export function canonicalMailboxJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalMailboxJson).join(",")}]`;
-  if (record(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalMailboxJson(value[key])}`).join(",")}}`;
-  return JSON.stringify(value);
+  const ancestors = new Set<object>();
+  function encode(item: unknown, depth: number): string {
+    requireValid(depth <= 32);
+    if (item === null || typeof item === "string" || typeof item === "boolean") return JSON.stringify(item);
+    if (typeof item === "number") {
+      requireValid(Number.isFinite(item) && !Object.is(item, -0));
+      return JSON.stringify(item);
+    }
+    requireValid(typeof item === "object" && item !== null && !ancestors.has(item));
+    const array = Array.isArray(item);
+    requireValid(Object.getPrototypeOf(item) === (array ? Array.prototype : Object.prototype) || (!array && Object.getPrototypeOf(item) === null));
+    const keys = Reflect.ownKeys(item);
+    if (array) requireValid(item.length <= MAILBOX_MAX_OPERATIONS && keys.length === item.length + 1 && Array.from({ length: item.length }, (_, index) => Object.hasOwn(item, index)).every(Boolean));
+    for (const key of keys) {
+      if (array && key === "length") continue;
+      const descriptor = Object.getOwnPropertyDescriptor(item, key)!;
+      requireValid(typeof key === "string" && descriptor.enumerable && Object.hasOwn(descriptor, "value"));
+    }
+    ancestors.add(item);
+    const encoded = array
+      ? `[${item.map((entry) => encode(entry, depth + 1)).join(",")}]`
+      : `{${Object.keys(item).sort().map((key) => `${JSON.stringify(key)}:${encode((item as Record<string, unknown>)[key], depth + 1)}`).join(",")}}`;
+    ancestors.delete(item);
+    return encoded;
+  }
+  return encode(value, 0);
 }
 export function sameMailboxIdentity(left: MailboxIdentity, right: MailboxIdentity): boolean {
   return canonicalMailboxJson(left) === canonicalMailboxJson(right);
@@ -99,16 +130,28 @@ export function mailboxGroupKey(identity: MailboxIdentity): string {
 export function isMailboxRequest(kind: MailboxKind): boolean { return requests.has(kind); }
 
 function validateIntent(value: unknown): MailboxMessageIntent {
+  canonicalMailboxJson(value);
   closed(value, intentKeys);
   requireValid(value.schemaVersion === "1.0");
-  for (const key of ["messageId", "operationId", "exchangeId", "subjectId"]) requireValid(identifier(value[key]));
+  for (const key of ["messageId", "operationId", "exchangeId"]) requireValid(identifier(value[key]));
+  requireValid(subject(value.subjectId));
   const sender = validateMailboxIdentity(value.sender);
   const recipient = validateMailboxIdentity(value.recipient);
   requireValid(mailboxGroupKey(sender) === mailboxGroupKey(recipient) && sender.memberId !== recipient.memberId && sender.actorKey !== recipient.actorKey);
   requireValid(Array.isArray(value.resourceScope) && value.resourceScope.length > 0 && value.resourceScope.length <= 16
     && value.resourceScope.every((item) => typeof item === "string" && item.length <= 255 && /^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._@-]+(?:\/[A-Za-z0-9._@-]+)*$/.test(item) && !containsSensitiveCredential(item))
     && new Set(value.resourceScope).size === value.resourceScope.length);
-  try { validateRunCorrelationPresence(value.correlation); } catch { throw new MailboxValidationError(); }
+  try {
+    requireValid(record(value.correlation));
+    if (value.correlation.status === "present") {
+      closed(value.correlation, ["status", "envelope"]);
+      validateRunCorrelationEnvelope(value.correlation.envelope);
+    } else {
+      closed(value.correlation, ["status", "reason"]);
+      requireValid(value.correlation.status === "incomplete");
+      validateRunCorrelationPresence(value.correlation);
+    }
+  } catch { throw new MailboxValidationError(); }
   requireValid(requests.has(value.kind as MailboxKind) || responses.has(value.kind as MailboxKind));
   requireValid(requests.has(value.kind as MailboxKind) ? value.inReplyTo === null : identifier(value.inReplyTo));
   requireValid(timestamp(value.createdAt) && timestamp(value.expiresAt) && value.createdAt < value.expiresAt
@@ -125,6 +168,7 @@ export function createMailboxMessage(value: MailboxMessageIntent): MailboxMessag
   return { ...intent, intentDigest: createHash("sha256").update(canonicalMailboxJson(intent)).digest("hex") };
 }
 export function validateMailboxMessage(value: unknown): MailboxMessage {
+  canonicalMailboxJson(value);
   closed(value, [...intentKeys, "intentDigest"]);
   const { intentDigest, ...intent } = value;
   const message = createMailboxMessage(intent as MailboxMessageIntent);

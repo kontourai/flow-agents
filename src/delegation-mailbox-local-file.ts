@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { atomicWriteJson, ensureSafeDirectory } from "./lib/fs.js";
+import { randomUUID } from "node:crypto";
 import { withSubjectLockAsync } from "./lib/assignment-local-store.js";
 import {
   MAILBOX_MAX_OPERATIONS, MailboxValidationError, assertMailboxActive, canonicalMailboxJson,
@@ -23,17 +23,25 @@ export function createLocalFileDelegationMailbox(options: {
   const file = path.join(directory, "state.json");
   const now = options.now ?? (() => new Date().toISOString());
 
-  function prepare(): void {
-    ensureSafeDirectory(root, root);
-    for (const dir of [directory, path.join(directory, "assignment")]) {
-      try {
-        const stat = fs.lstatSync(dir);
-        if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("Unsafe mailbox directory");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-      ensureSafeDirectory(root, dir);
+  // Narrow only this adapter's owned paths, using descriptors that cannot follow links.
+  function privateDescriptor(fd: number, directory: boolean): void {
+    const stat = fs.fstatSync(fd);
+    if (typeof process.geteuid !== "function" || stat.uid !== process.geteuid()) throw new Error("Mailbox filesystem owner is unavailable or foreign");
+    if (directory ? !stat.isDirectory() : !stat.isFile() || stat.nlink !== 1) throw new Error("Unsafe mailbox directory or regular file (hardlink)");
+    const mode = directory ? 0o700 : 0o600;
+    if ((stat.mode & 0o7777) !== mode) fs.fchmodSync(fd, mode);
+    const current = fs.fstatSync(fd);
+    if (current.uid !== process.geteuid() || (current.mode & 0o7777) !== mode) throw new Error("Unsafe mailbox permissions");
+  }
+  function privateDirectory(dir: string): void {
+    try { fs.mkdirSync(dir, { mode: 0o700 }); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
+    const fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_DIRECTORY);
+    try { privateDescriptor(fd, true); } finally { fs.closeSync(fd); }
+  }
+  function prepare(): void {
+    for (const dir of [root, directory, path.join(directory, "assignment")]) privateDirectory(dir);
   }
   function read(): Journal {
     let fd: number;
@@ -45,7 +53,8 @@ export function createLocalFileDelegationMailbox(options: {
     let value: unknown;
     try {
       const stat = fs.fstatSync(fd);
-      if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_JOURNAL_BYTES) throw new Error("Unsafe mailbox journal");
+      privateDescriptor(fd, false);
+      if (stat.size > MAX_JOURNAL_BYTES) throw new Error("Unsafe mailbox journal");
       value = JSON.parse(fs.readFileSync(fd, "utf8"));
     } finally { fs.closeSync(fd); }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Corrupt mailbox journal");
@@ -67,12 +76,41 @@ export function createLocalFileDelegationMailbox(options: {
     return journal;
   }
   function write(journal: Journal): void {
-    if (Buffer.byteLength(JSON.stringify(journal, null, 2), "utf8") + 1 > MAX_JOURNAL_BYTES) throw new Error("Mailbox journal capacity exceeded");
-    atomicWriteJson(root, file, journal);
-    // A returned transition has reached the local filesystem before delivery/ack.
-    for (const target of [file, directory]) {
-      const fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-      try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    const data = `${JSON.stringify(journal, null, 2)}\n`;
+    if (Buffer.byteLength(data, "utf8") > MAX_JOURNAL_BYTES) throw new Error("Mailbox journal capacity exceeded");
+    // Check the existing target before replacement, including ownership and hardlinks.
+    let existing: number | undefined;
+    try {
+      existing = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      privateDescriptor(existing, false);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    } finally { if (existing !== undefined) fs.closeSync(existing); }
+    const temp = path.join(directory, `.state-${randomUUID()}.tmp`);
+    const fd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+    try {
+      privateDescriptor(fd, false);
+      fs.writeFileSync(fd, data, "utf8");
+      fs.renameSync(temp, file);
+    } finally {
+      fs.closeSync(fd);
+      fs.rmSync(temp, { force: true });
+    }
+  }
+  function confirmDurability(journal: Journal): void {
+    // Also run for unchanged replay and read results: a prior rename may have
+    // succeeded before fsync failed. Visibility alone is never confirmation.
+    for (const target of [file, directory, root]) {
+      let fd: number;
+      try { fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); }
+      catch (error) {
+        if (target === file && (error as NodeJS.ErrnoException).code === "ENOENT" && journal.operations.length === 0 && journal.cancelled.length === 0) continue;
+        throw error;
+      }
+      try {
+        privateDescriptor(fd, target !== file);
+        fs.fsyncSync(fd);
+      } finally { fs.closeSync(fd); }
     }
   }
   async function host(action: Parameters<MailboxHostValidator>[0]["action"], caller: MailboxIdentity, message?: MailboxMessage): Promise<MailboxResult<null>> {
@@ -84,7 +122,16 @@ export function createLocalFileDelegationMailbox(options: {
   }
   async function transaction<T>(body: (journal: Journal) => Promise<MailboxResult<T>>): Promise<MailboxResult<T>> {
     prepare();
-    return withSubjectLockAsync(directory, "mailbox-journal", async () => body(read()));
+    return withSubjectLockAsync(directory, "mailbox-journal", async () => {
+      privateDirectory(path.join(directory, "assignment", ".mailbox-journal.lockdir"));
+      const journal = read();
+      const result = await body(journal);
+      if (result.status === "ok") {
+        try { confirmDurability(journal); }
+        catch { return { status: "unavailable", code: "durability_unconfirmed" }; }
+      }
+      return result;
+    });
   }
   function active(journal: Journal, message: MailboxMessage): boolean {
     if (journal.cancelled.includes(mailboxGroupKey(message.sender))) return false;
@@ -132,6 +179,8 @@ export function createLocalFileDelegationMailbox(options: {
   async function transition(operationId: string, identity: MailboxIdentity, action: "deliver" | "ack"): Promise<MailboxResult<MailboxOperation>> {
     const caller = validateMailboxIdentity(identity);
     return transaction(async (journal) => {
+      const authentication = await host(action, caller);
+      if (authentication.status !== "ok") return authentication;
       const operation = journal.operations.find((op) => op.message.operationId === operationId);
       if (!operation || !sameMailboxIdentity(caller, action === "deliver" ? operation.message.sender : operation.message.recipient)) return refused("operation_unavailable");
       const admission = await host(action, caller, operation.message);
