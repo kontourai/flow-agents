@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import fsDefault from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
 import {
-  createMailboxMessage, MailboxValidationError, MAILBOX_MAX_PAYLOAD_BYTES,
+  createMailboxMessage, validateMailboxMessage, canonicalMailboxJson, MailboxValidationError, MAILBOX_MAX_PAYLOAD_BYTES,
 } from "../../build/src/delegation-mailbox.js";
 import { createLocalFileDelegationMailbox } from "../../build/src/delegation-mailbox-local-file.js";
+
+import { createRunCorrelationEnvelope, readRunCorrelation, RUN_CORRELATION_IDENTITY_KEYS } from "../../build/src/run-correlation.js";
+import { createLocalFileAssignmentProvider } from "../../build/src/assignment-local-file.js";
 
 const AT = "2026-10-21T06:00:00.000Z";
 const EXPIRES = "2026-10-21T06:30:00.000Z";
@@ -331,4 +338,180 @@ test("uncertain host delivery remains pending across reopen and never automatica
   assert.deepEqual(ok(await f.open(B.actorKey).inbox(B)), []);
   assert.deepEqual(ok(await f.open(A.actorKey).enqueue(message(), A)), pending);
   refused(await f.recipient.acknowledge("operation-1", B), "not_delivered");
+});
+
+
+for (const field of ["evidenceRefs", "outputRefs", "resourceScope"]) {
+  test(`noncanonical ${field} cannot enter the journal or corrupt later reads`, async (t) => {
+    const f = fixture(t);
+    const pending = ok(await f.sender.enqueue(message(), A));
+    const original = fs.readFileSync(path.join(f.root, "mailbox/state.json"));
+    for (const bad of [new Array(1), Object.assign(["ref:one"], { extra: "discarded" }),
+      Object.defineProperty(["ref:one"], "0", { get: () => "ref:one", enumerable: true })]) {
+      const value = intent({ messageId: "bad-message", operationId: "bad-operation", exchangeId: "bad-exchange", subjectId: "other" });
+      if (field === "resourceScope") value.resourceScope = bad;
+      else value.payload[field] = bad;
+      // A caller can supply a digest directly; validation must reject before persistence.
+      const normalized = { ...value, payload: { ...value.payload } };
+      if (field === "resourceScope") normalized.resourceScope = bad.filter(() => true);
+      else normalized.payload[field] = bad.filter(() => true);
+      const raw = { ...value, intentDigest: createHash("sha256").update(canonicalMailboxJson(normalized)).digest("hex") };
+      await assert.rejects(f.sender.enqueue(raw, A), MailboxValidationError);
+      assert.throws(() => createMailboxMessage(value), MailboxValidationError);
+      assert.deepEqual(fs.readFileSync(path.join(f.root, "mailbox/state.json")), original);
+    }
+    const roundtrip = JSON.parse(JSON.stringify(pending.message));
+    assert.deepEqual(validateMailboxMessage(roundtrip), pending.message);
+    assert.equal(canonicalMailboxJson(roundtrip), canonicalMailboxJson(pending.message));
+    assert.deepEqual(ok(await f.open(A.actorKey).outbox(A)), [pending]);
+  });
+}
+
+for (const target of ["file", "directory"]) {
+  test(`post-replace ${target} fsync failure stays unavailable through retry and reopen until confirmed`, async (t) => {
+    const f = fixture(t);
+    const sent = message();
+    ok(await f.sender.enqueue(sent, A));
+    const file = path.join(f.root, "mailbox/state.json");
+    let failing = true;
+    let calls = 0;
+    const actual = fsDefault.fsyncSync;
+    t.mock.method(fsDefault, "fsyncSync", (fd) => {
+      const stat = fs.fstatSync(fd);
+      const retained = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (retained.operations[0].status === "delivered" && (target === "file" ? stat.isFile() : stat.isDirectory())) {
+        calls++;
+        if (failing) throw Object.assign(new Error("injected post-replace EIO"), { code: "EIO" });
+      }
+      return actual(fd);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    const uncertain = (result) => assert.deepEqual(result, { status: "unavailable", code: "durability_unconfirmed" });
+    uncertain(await f.sender.deliver(sent.operationId, A));
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).operations[0].status, "delivered");
+    for (const observe of [() => f.open(B.actorKey).inbox(B), () => f.open(A.actorKey).outbox(A),
+      () => f.open(A.actorKey).enqueue(sent, A), () => f.open(A.actorKey).deliver(sent.operationId, A)]) {
+      const before = calls;
+      uncertain(await observe());
+      assert.ok(calls > before, "each observation must attempt durability repair");
+    }
+    failing = false;
+    const before = calls;
+    const delivered = ok(await f.open(A.actorKey).deliver(sent.operationId, A));
+    assert.ok(calls > before);
+    assert.equal(delivered.status, "delivered");
+    assert.deepEqual(ok(await f.open(B.actorKey).inbox(B)), [delivered]);
+    assert.equal(ok(await f.open(B.actorKey).acknowledge(sent.operationId, B)).status, "acknowledged");
+  });
+}
+
+test("published present correlation reader result roundtrips; raw envelopes are rejected", async (t) => {
+  const f = fixture(t);
+  const envelope = createRunCorrelationEnvelope({ correlation_id: "run-mailbox", identities: Object.fromEntries(
+    RUN_CORRELATION_IDENTITY_KEYS.map((key) => [key, { status: "unavailable", reason: "offline" }])) });
+  const correlation = readRunCorrelation({ run_correlation: envelope });
+  assert.equal(correlation.status, "present");
+  const sent = message({ correlation });
+  ok(await f.sender.enqueue(sent, A));
+  ok(await f.sender.deliver(sent.operationId, A));
+  assert.deepEqual(ok(await f.open(B.actorKey).inbox(B))[0].message.correlation, correlation);
+  for (const malformed of [envelope, { ...correlation, gatePass: true }, { status: "present" }]) {
+    assert.throws(() => message({ correlation: malformed }), MailboxValidationError);
+  }
+  const types = path.join(f.root, "correlation-contract.mts");
+  const source = path.resolve("build/src");
+  fs.writeFileSync(types, `import { readRunCorrelation, type RunCorrelationPresence } from ${JSON.stringify(source + "/run-correlation.js")};
+import { createMailboxMessage, type MailboxMessageIntent } from ${JSON.stringify(source + "/delegation-mailbox.js")};
+const correlation: RunCorrelationPresence = readRunCorrelation({});
+declare const intent: Omit<MailboxMessageIntent, "correlation">;
+createMailboxMessage({ ...intent, correlation });
+// @ts-expect-error a raw envelope is outside the published mailbox type
+createMailboxMessage({ ...intent, correlation: { schema_version: "1.0", correlation_id: "run", identities: {} } });
+`);
+  const result = spawnSync(path.resolve("node_modules/.bin/tsc"), ["--noEmit", "--strict", "--skipLibCheck", "--target", "ES2022",
+    "--module", "Node16", "--moduleResolution", "Node16", "--ignoreDeprecations", "6.0", types], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test("real local assignment subject retains exact owner identity in mailbox and replay", async (t) => {
+  const f = fixture(t);
+  const provider = createLocalFileAssignmentProvider(path.join(f.root, "assignments"));
+  const subject = "kontourai/flow-agents#561";
+  await provider.claim(subject, { runtime: "codex", session_id: "mailbox-test", host: "offline" }, {
+    ttlSeconds: 3600, branch: "detached", artifactDir: f.root, workItemRef: subject,
+  });
+  assert.equal((await provider.status(subject)).subject_id, subject);
+  const sent = message({ subjectId: subject });
+  ok(await f.sender.enqueue(sent, A));
+  ok(await f.sender.deliver(sent.operationId, A));
+  assert.equal(ok(await f.open(B.actorKey).inbox(B))[0].message.subjectId, subject);
+  refused(await f.sender.enqueue(message({ subjectId: "other-owner/flow-agents#561" }), A), "conflicting_replay");
+  for (const subjectId of ["../flow-agents#561", "kontourai/flow-agents#0", "owner/repo#01", "owner/repo#9007199254740992",
+    "Bearer credential", "owner/ghp_abcdefgh12345678#561", "x".repeat(256)]) {
+    assert.throws(() => message({ subjectId }), MailboxValidationError);
+  }
+});
+
+test("forged transition callers cannot distinguish existing and absent operations before authentication", async (t) => {
+  const f = fixture(t);
+  ok(await f.sender.enqueue(message(), A));
+  const calls = [];
+  const attacker = createLocalFileDelegationMailbox({ artifactRoot: f.root, now: () => AT, validateHost: (observation) => {
+    calls.push(observation);
+    return { status: "refused" };
+  } });
+  for (const action of ["deliver", "acknowledge"]) {
+    calls.length = 0;
+    const existing = await attacker[action]("operation-1", action === "deliver" ? A : B);
+    const absent = await attacker[action]("absent-operation", action === "deliver" ? A : B);
+    assert.deepEqual(existing, { status: "refused", code: "host_refused" });
+    assert.deepEqual(absent, existing);
+    assert.equal(calls.length, 2);
+    assert.ok(calls.every((call) => !Object.hasOwn(call, "message")), "refused callers receive no participant-bearing observation");
+  }
+  refused(await f.open(C.actorKey).deliver("operation-1", A), "host_refused");
+  refused(await f.open(C.actorKey).deliver("absent-operation", A), "host_refused");
+});
+
+test("umask 022 journal is private, owned, and never chmods ancestors or peers", async (t) => {
+  const f = fixture(t);
+  const parentMode = fs.statSync(path.dirname(f.root)).mode;
+  fs.chmodSync(f.root, 0o755);
+  const peer = path.join(f.root, "peer");
+  fs.mkdirSync(peer, { mode: 0o755 });
+  const old = process.umask(0o022);
+  t.after(() => process.umask(old));
+  ok(await f.sender.enqueue(message(), A));
+  for (const target of [f.root, path.join(f.root, "mailbox"), path.join(f.root, "mailbox/assignment")]) {
+    const stat = fs.lstatSync(target);
+    assert.equal(stat.uid, process.geteuid());
+    assert.equal(stat.mode & 0o777, 0o700, target);
+  }
+  const file = path.join(f.root, "mailbox/state.json");
+  assert.equal(fs.lstatSync(file).mode & 0o777, 0o600);
+  fs.chmodSync(file, 0o644);
+  assert.equal(ok(await f.open(A.actorKey).outbox(A)).length, 1);
+  assert.equal(fs.lstatSync(file).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(peer).mode & 0o777, 0o755);
+  assert.equal(fs.statSync(path.dirname(f.root)).mode, parentMode);
+});
+
+test("foreign-owned root and hardlinked journal are refused without chmod or disclosure", async (t) => {
+  const f = fixture(t);
+  const foreign = fs.realpathSync("/usr");
+  assert.notEqual(fs.statSync(foreign).uid, process.geteuid(), "test requires the real system-owned directory");
+  const before = fs.statSync(foreign);
+  const foreignMailbox = createLocalFileDelegationMailbox({ artifactRoot: foreign, validateHost: () => ({ status: "current" }) });
+  await assert.rejects(foreignMailbox.outbox(A), /owner/i);
+  assert.equal(fs.statSync(foreign).mode, before.mode);
+  ok(await f.sender.enqueue(message(), A));
+  const file = path.join(f.root, "mailbox/state.json");
+  const link = path.join(f.root, "peer-state");
+  fs.linkSync(file, link);
+  fs.chmodSync(link, 0o644);
+  const bytes = fs.readFileSync(link);
+  await assert.rejects(f.open(A.actorKey).outbox(A), /Unsafe|hardlink/i);
+  assert.equal(fs.statSync(link).mode & 0o777, 0o644);
+  assert.deepEqual(fs.readFileSync(link), bytes);
 });
