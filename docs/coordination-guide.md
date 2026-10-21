@@ -450,3 +450,11 @@ links; the ratified subject decisions live in [`docs/decisions/`](decisions/inde
 Shipped across issues #287 (actor identity), #288 (liveness), #289 (branches), #166 (pull-work), #320
 (overlap), #290 (AssignmentProvider), #291 (ensure-session guard), #292 (stop-release), #356
 (reconcile-preflight), #293 (verify-hold); #294 (takeover) and #398 (CI identity) forthcoming.
+
+## Delegation group ledger
+
+The [delegation group contract and durable ledger](delegation-groups.md) add bounded read-only
+coordination records alongside assignment/liveness. Their strict host capability checks do not
+change this guide's assignment eligibility or publish fence. Group membership cannot authorize
+execution, advance Flow, or derive acceptance. The ledger is the first source increment of #1113;
+full execution, DAG scheduling, isolated writers and mailbox integration remain follow-up work.

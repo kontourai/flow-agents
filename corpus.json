@@ -433,6 +433,15 @@
       "section": "Contribute"
     },
     {
+      "source": "docs/delegation-groups.md",
+      "section": "Contracts",
+      "covers": [
+        "src/delegation-group-contract.ts",
+        "src/delegation-group.ts",
+        "src/delegation-group-local-file.ts"
+      ]
+    },
+    {
       "source": "docs/assignment-host-contract.md",
       "section": "Contracts",
       "covers": [
@@ -505,6 +514,11 @@
       "id": "evidence-gate",
       "title": "Evidence gate: is completed work trustworthy enough to publish",
       "source": "docs/workflow-usage-guide.md#6-build-trust-with-evidence-gate"
+    },
+    {
+      "id": "delegation-groups",
+      "title": "Delegation group contract, durable ledger and capability boundaries",
+      "source": "docs/delegation-groups.md"
     },
     {
       "id": "coordination",

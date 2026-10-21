@@ -1,0 +1,164 @@
+# Delegation groups: contract and durable ledger
+
+This is the first source increment of [#1113](https://github.com/kontourai/flow-agents/issues/1113).
+It provides a versioned coordination contract, deterministic projection, host service, and offline
+local-file ledger. It does **not** establish the epic's execution acceptance criteria or ship an
+executor, scheduler, mailbox, isolated writer enforcement, or installed-runtime group fixture.
+
+## Public entry points
+
+| Subpath | Purpose |
+| --- | --- |
+| `@kontourai/flow-agents/delegation-group-contract` | Closed schema 1.0 validators, canonical digests, pure transitions and replay projection |
+| `@kontourai/flow-agents/delegation-group` | Transactional service and host/store interfaces |
+| `@kontourai/flow-agents/delegation-group-local-file` | `createLocalFileDelegationGroupStore(artifactRoot)` |
+
+The same APIs are exported at the package root. Package version and publication are separate from
+these source exports. Reference identities are opaque; none grants filesystem access.
+
+## Identity and authority
+
+A group freezes its group id, parent envelope reference, common source, policy revision and digest,
+explicit topology, and 1–64 unique seats. Each seat names an independently preauthorized envelope id,
+generation and canonical digest, its exact source/worktree binding, and independent work or a Flow
+step. Grouping does not mint an envelope or derive authority. The host resolves and authenticates
+the exact envelope for the specified group on creation and again on each reservation.
+
+Only root envelopes (`generation: 0`), shared-source report-only membership, and empty mutable
+resources are supported. Parent and members must match the group's exact source and policy revision.
+They may have distinct preauthorized runtime/model bindings; these remain inside their immutable
+envelopes. No envelope field, including correlation, runtime, source or Flow binding, is overwritten.
+The local store binds every parent/member envelope id permanently to one group, under its transaction
+lock, so creating another group cannot reset spend. Hosts must also prevent reuse across stores.
+
+Recursion and ancestor budgets are explicitly unsupported. Nested groups, child-envelope ancestry,
+source diversity, isolated writers, and inferred worktree/session/correlation bindings refuse.
+Supporting diversified **derived** children requires a separately designed envelope revision with
+explicit delegation authority for those immutable dimensions; metadata is not a compatibility bridge.
+
+Topology is either `independent` or an explicit Flow run/definition digest with seat step references.
+There are no local dependency edges or competing ready-frontier reducer. For Flow work, a host must
+confirm the current durable claim and frontier through Flow's public contracts. The service compares
+run, definition, head, step, actor, expiry, and empty mutable resources. The host remains responsible
+for authenticating that these are **current** observations under its execution fence. Caller-provided
+claim-shaped JSON alone is not a capability.
+
+## Transaction protocol
+
+Use `groupPolicyDigest()` over the policy excluding its `digest`, and `groupRequestDigest()` over the
+request excluding its `request_digest`. Both consume Relay's public canonical JSON/SHA-256 contract.
+Unknown properties, non-JSON values, oversized fields and incorrect digests refuse.
+
+Every mutation supplies `operation_id`, canonical request digest, expected ledger revision and
+`{controller_id, epoch}` fence. `create` expects revision zero. `take_control` requires the existing
+fence, a strictly larger successor epoch, and current host confirmation of the successor ownership.
+It changes ledger control only; it cannot fence an external invocation or mutable worktree.
+
+The service runs its entire read/validate/confirm/append transaction under the store lock. Successful
+operations and business refusals (such as exhausted ceilings or a closed group) append a decision and
+increment the ledger revision. Structural, revision, fence, capability and envelope validation errors
+throw before append. Such rejected preconditions are not recorded outcomes. Reusing a recorded
+operation id with different intent refuses. Exact replay returns the **original** outcome and original
+projection even if the current group has since changed, expired or cancelled. `replayed: true` is not
+a new dispatch grant. Read the service again for the current projection.
+
+`reserve` atomically allocates an attempt, concurrency slot, input/output tokens and integer cost
+micros, and persists a unique dispatch-intent id plus bounded Dispatch plan reference. It never invokes
+Dispatch or Relay. Lifetime attempt count and actual spend do not reset on retry. A seat cannot retry
+until its previous attempt is terminal **and** fully accounted. Unknown usage also retains its
+concurrency allocation. Reservations must fit both group and resolved member-envelope limits.
+
+All newly persisted intents start at `invocation_unknown`: a crash between durable intent and an
+external invocation cannot prove whether the effect happened. `invoked` records confirmed invocation
+identity. `mark_unknown` records lost contact without erasing that identity or permitting another
+invocation attachment. There is no auto redispatch, expired-intent reclaim, timeout refund, or durable
+provider invoke-dedup claim. A host must persist intent before any external effect and reconcile an
+ambiguous effect through a current authenticated terminal receipt. This increment intentionally
+exposes no executable dispatch method.
+
+`terminal` retains bounded output/evidence references and confirmed outcome, while leaving allocation
+held. `account` requires a confirmed terminal attempt and complete actual input tokens, output tokens
+and cost micros. Missing Relay usage cannot become zero; partial/estimated usage is not accounting.
+Complete explicit zero usage is accepted only with host confirmation. Accounting is immutable.
+Actual overrun is retained truthfully and closes admission; it cannot be hidden by rejecting the bill.
+Any unspent allocation becomes available only after complete confirmed accounting.
+
+`cancel` closes admission in the ledger transaction without waiting for external cancellation evidence.
+`cancellation_confirmed` records the host's current cancellation receipt but does not refund outstanding
+work. Confirmed terminal **and** accounting receipts are still required to release reservations.
+Cancellation neither kills a process nor proves an external effect has ended.
+
+Execution status, join, and acceptance are distinct. A join is ready only when every seat has an
+attempt and every attempt is terminal. `join` additionally requires full accounting and closes
+admission. Failed members can join: joining reports collected terminal outcomes, not accepted work.
+Acceptance always remains `unassessed`. Counts, majority, topology and model output never satisfy a
+Flow gate or derive Surface trust. No group operation advances Flow.
+
+## Required host capabilities
+
+`DelegationGroupHost` has no permissive default implementation. The embedding host owns these
+checks and must return bounded, authenticated receipt references for the **exact** request:
+
+- `resolveAuthorizedEnvelope(identity, groupId)`: independently authorized, active, immutable envelope
+  and exclusive group allocation. Assignment eligibility or correlation is insufficient.
+- `confirmController(request, current)`: current controller fencing, including successor ownership for
+  takeover. It is called last, immediately before the ledger decision; it must perform no invocation.
+- `confirmReadiness(request, current, seat)`: current independent admission or Flow-owned claimed
+  readiness; includes current cancellation/liveness checks. Group topology cannot supply it.
+- `confirmBudgetEnforcement(request, current)`: confirmed ability to bound the proposed external
+  attempt, including every underlying Dispatch fallback/retry and token/cost allocation. Dispatch's
+  per-plan budgets/receipts do not constitute aggregate group accounting or durable invoke dedup.
+- `confirmEvidence(request, current)`: current invocation/loss, terminal, actual accounting or
+  cancellation evidence, bound to the exact attempt and requested immutable references. A raw provider
+  string, unverified receipt, estimated cost, or successful cancellation request is insufficient.
+
+`now()` supplies canonical UTC observation time for envelope activation and current claim expiry.
+Missing or unconfirmed required capabilities throw before intent persistence. Host callbacks receive
+defensive copies and must not execute work. This source fixture supplies a deterministic test host;
+it does not qualify any real host's authorization, runtime fencing, cancellation or provider limits.
+
+## Local durability and limits
+
+The local adapter composes the existing safe atomic writer and `withSubjectLockAsync` under
+`<artifactRoot>/delegation-groups/`. Filenames are full SHA-256 hashes of group ids; the separate
+store-wide lock makes envelope ownership and ledger append atomic across cooperative processes.
+Each file contains the complete append-only event log in canonical JSON plus a newline. Reads validate every request, receipt shape,
+revision, outcome and transition; projections are replayed rather than trusted cached state. Corrupt,
+unsupported, symlinked or non-regular ledger files fail closed. Replay does not rewrite bytes. Data
+and directory are flushed before returning, including replay after an ambiguous commit acknowledgement.
+
+The caller must own the artifact root and enforce filesystem access. This is a single-host store,
+not hostile-directory race protection, distributed consensus, authenticated receipt verification, or
+cross-machine execution fencing. A crash leaving a lock requires explicit operator cleanup after
+confirming no live owner, following the existing assignment-lock behavior. No automatic stale takeover
+is introduced.
+
+There are at most 4,096 attempts, 16,384 ledger decisions, 16 output references per terminal attempt,
+32 MiB serialized ledger data, and 1 GiB referenced-object length per reference. Each reference has
+an opaque bounded id, SHA-256 digest, byte length and provenance id; there are no paths, raw prompts,
+provider strings, or embedded outputs. Integer amounts are at most 10^12 per allocation/accounting;
+aggregate sums stay within JavaScript safe integers. Each decision preserves event and byte capacity for confirmed
+terminal/accounting of every outstanding attempt and cancellation request/confirmation. New decisions
+that would consume this settlement capacity refuse before append. Archival, compaction and administrative
+recovery are unsupported; unresolved allocations remain held. Offline ledger bytes are trusted host storage, not signed authority.
+
+## Focused evidence and next slice
+
+The narrow repository test command after `npm run build` is:
+
+```sh
+node --import ./src/cli/unit-test-state.mjs --test src/cli/delegation-group.test.mjs src/cli/delegation-envelope.test.mjs
+```
+
+The tests reach public service operations over real temporary persistence/reopen, same-process and
+separate-process admission contention, exclusive envelope ownership, conflicting replay, lost commit
+acknowledgement, ambiguous invocation, cancellation, missing/overrun accounting, all-terminal join,
+strict bounds and host capability refusals. Existing envelope v1 validation/narrowing stays unchanged.
+These are source diagnostics, not installed-runtime or live-provider acceptance.
+
+The fresh-context continuation should start from #1113, `AGENTS.md`, this guide and the exact handoff
+commits. Remaining acceptance includes real three-member installed execution and parent/member tree,
+Flow-owned DAG scheduling/join/gates, isolated writer lanes with integration ownership, bounded real
+liveness/timeout/takeover and mailbox integration, authenticated host callbacks, exact Dispatch/Relay
+receipt reconciliation, and coordination efficacy/cost/wall-time evaluation. None is inferred from
+this ledger increment. Keep each next slice independently reviewable and serialize shared exports.

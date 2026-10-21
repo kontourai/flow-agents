@@ -785,3 +785,7 @@ export function writeSidecar(dir: string, name: string, payload: Record<string, 
 
 export {openInstalledKitReview,serveSurveyReview,parseKitReview} from './kit-review.js';
 export type {KitReviewDescriptor,KitReviewHost,KitReviewServices,PreparedKitReview} from './kit-review.js';
+
+export * from "./delegation-group-contract.js";
+export * from "./delegation-group.js";
+export * from "./delegation-group-local-file.js";

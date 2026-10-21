@@ -94,6 +94,18 @@
     "./kit-review": {
       "types": "./build/src/kit-review.d.ts",
       "import": "./build/src/kit-review.js"
+    },
+    "./delegation-group-contract": {
+      "types": "./build/src/delegation-group-contract.d.ts",
+      "import": "./build/src/delegation-group-contract.js"
+    },
+    "./delegation-group": {
+      "types": "./build/src/delegation-group.d.ts",
+      "import": "./build/src/delegation-group.js"
+    },
+    "./delegation-group-local-file": {
+      "types": "./build/src/delegation-group-local-file.d.ts",
+      "import": "./build/src/delegation-group-local-file.js"
     }
   },
   "repository": {
