@@ -547,6 +547,10 @@ test("authorized execution binds selected runtime, reserves before launch and re
     const input = { service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(rootPath, 'dispatch') }), authorityId: root.authority_id,
       envelopeId: child.envelope_id, invocationId: 'first', effect: 'write', request: { messages: [{ role: 'user', content: 'work' }] },
       allocation: { inputTokens: 5, outputTokens: 5, costMicros: 10 } };
+    const mismatchHost = { ...host, resolveRuntime: async () => ({ runtime, runtimeReceipt: ref('wrong-runtime'), modelReceipt: child.execution_binding.runtime.model_receipt_ref }) };
+    await assert.rejects(executeAuthorizedDelegation({ ...input, host: mismatchHost }), /runtime_receipt_mismatch/);
+    assert.equal(calls, 0);
+    assert.equal((await service.inspect(root.authority_id)).invocations.length, 0);
     assert.equal((await executeAuthorizedDelegation(input)).outcome, 'succeeded');
     assert.equal(retained, 'child report');
     assert.deepEqual((await service.inspect(root.authority_id)).invocations[0].usage, { inputTokens: 2, outputTokens: 3, costMicros: 4 });
