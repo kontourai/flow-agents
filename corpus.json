@@ -449,7 +449,9 @@
         "src/delegation-authority-local-file.ts",
         "src/delegation-execution.ts",
         "src/delegation-flow-execution.ts",
-        "src/delegation-context-sync.ts"
+        "src/delegation-context-sync.ts",
+        "src/delegation-group-v2.ts",
+        "src/delegation-group-v2-local-file.ts"
       ]
     },
     {

@@ -362,3 +362,29 @@ The authority adapter also reserves 256 journal bytes for each unresolved usage 
 admission. This covers its later canonical three-integer usage record without allowing unrelated
 ledger growth to consume settlement space. Boundary injection tests establish refusal before a new
 reservation, not a literal near-16-MiB storage or power-loss result.
+
+## V2 durable group controller
+
+The source subpaths `delegation-group-v2` and `delegation-group-v2-local-file` export
+`createDelegationGroupControllerV2()` and its local store. The controller provides create/get/list/events,
+cancel/run and authenticated terminal reconciliation. It freezes the root authority reference,
+controller generation, policy, topology and exact seat envelopes/allocations. Flow definition identity
+text retains its public bytes, including semantic-version build metadata.
+
+Operations bind canonical intent, operation identity, expected revision and controller fence.
+Reads and replays require current host authorization. Intent and invocation linkage persist before
+launch; reopen and replay never dispatch automatically. Independent groups are bounded report-only
+advisory execution. Flow groups use the existing claim wrapper and Flow-owned dependencies/evaluation.
+Raw dissent and failures remain retained observations; group acceptance remains unassessed.
+
+Cancellation persists closed admission, then cancels authority and requests descendant cancellation.
+A crash or lost acknowledgement across these operations leaves cancellation pending. Replaying a
+request does not repeat uncertain external effects. Terminal reconciliation requires confirmed
+terminal/accounting state and host proof for the exact invocation and descendants. Unadmitted seats
+or missing invocation links remain conservatively unproven; no zero-usage inference resolves them.
+
+The local store permanently binds an authority to one group within that store and escrows future
+record capacity. Cross-store custody, actual actor/liveness, launch confinement, physical cancellation,
+mailbox authorization and missing-output recovery remain host responsibilities. There is no takeover,
+route-back seat reexecution, compaction or automatic redispatch in this increment. These source APIs
+are not yet a published package or a Station group launch feature.

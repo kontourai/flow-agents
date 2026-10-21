@@ -800,3 +800,5 @@ export * from "./delegation-authority-local-file.js";
 export * from "./delegation-execution.js";
 export * from "./delegation-flow-execution.js";
 export * from "./delegation-context-sync.js";
+export * from "./delegation-group-v2.js";
+export * from "./delegation-group-v2-local-file.js";
