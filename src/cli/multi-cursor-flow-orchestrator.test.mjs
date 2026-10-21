@@ -525,6 +525,17 @@ async function schedulerFixture(runId, count = 1) {
   return { cwd, runId, actor: { key: "scheduler-host", kind: "test" }, identityFactory: identity };
 }
 
+async function waitForRenewal(input, after) {
+  const deadline = Date.now() + 5_000;
+  do {
+    const run = await loadRun(input.runId, input.cwd);
+    const count = run.state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
+    if (count > after) return run;
+    await delay(5);
+  } while (Date.now() < deadline);
+  assert.fail("Flow did not persist another renewal while the host was stopping");
+}
+
 function assertUnusedClaimsReleased(run, count) {
   assert.deepEqual(run.state.multi_cursor.active_claims, []);
   const history = run.state.multi_cursor.claim_history;
@@ -668,8 +679,8 @@ test("external abort waits for host stop with heartbeat live, then releases with
       controller.abort();
       await aborted;
       abortSeen = true;
-      await delay(80);
-      const run = await loadRun(input.runId, input.cwd);
+      const before = (await loadRun(input.runId, input.cwd)).state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
+      const run = await waitForRenewal(input, before);
       assert.ok(run.state.multi_cursor.active_claims.some(({ claim_id }) => claim_id === claim.claim_id));
       assert.equal(run.state.multi_cursor.claim_history.some(({ action }) => action === "released"), false);
       assert.ok(renewalsAfterAbort > 0, "execution abort must not stop heartbeat while callback is stopping");
@@ -750,8 +761,7 @@ test("renewal observer rejection aborts execution but retains heartbeat until ho
       await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
       signalObserved = true;
       const before = (await loadRun(input.runId, input.cwd)).state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
-      await delay(80);
-      const duringStop = await loadRun(input.runId, input.cwd);
+      const duringStop = await waitForRenewal(input, before);
       assert.equal(duringStop.state.multi_cursor.active_claims.length, 1);
       assert.ok(duringStop.state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length > before);
       stopped = true;
@@ -838,6 +848,8 @@ test("slow renewal observation cannot suspend leases while an aborted host is st
   let notifyRenewing;
   const renewing = new Promise((resolve) => { notifyRenewing = resolve; });
   let confirmed = false;
+  let finishObservation;
+  const observationFinished = new Promise((resolve) => { finishObservation = resolve; });
   let observations = 0;
   await assert.rejects(orchestrateFlowMultiCursor({
     ...input, signal: controller.signal, renewalIntervalMs: 5, leaseSeconds: 60,
@@ -845,17 +857,17 @@ test("slow renewal observation cannot suspend leases while an aborted host is st
       if (kind !== "renewed" || observations++ > 0) return;
       const before = (await loadRun(input.runId, input.cwd)).state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
       notifyRenewing();
-      await delay(70);
-      const during = await loadRun(input.runId, input.cwd);
-      assert.ok(during.state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length > before,
-        "a pending renewal observer must not stop lease renewal");
-      confirmed = true;
+      try {
+        const during = await waitForRenewal(input, before);
+        assert.equal(during.state.multi_cursor.active_claims.length, 1);
+        confirmed = true;
+      } finally { finishObservation(); }
     },
     execute: async ({ signal }) => {
       await renewing;
       controller.abort();
       assert.ok(signal.aborted);
-      await delay(140);
+      await observationFinished;
     },
   }), FlowMultiCursorOrchestrationError);
   assert.ok(confirmed);
