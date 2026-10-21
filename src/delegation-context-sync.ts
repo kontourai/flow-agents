@@ -57,28 +57,28 @@ export async function syncDelegationContext(input: {
   let attempts = 0;
   let executionFailure: unknown;
   try {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    input.signal?.throwIfAborted();
-    attempts++;
-    const outcome = await executeAuthorizedDelegation({
-      ...input,
-      invocationId: `sync_${identity}_${attempt}`,
-      effect: "context-sync",
-      request: {
-        messages: [
-          { role: "system", content: `Receive context only. Do not call tools. Reply exactly ACK SYNC ${input.runId}` },
-          { role: "user", content: input.text },
-        ],
-        tools: [],
-        maxOutputTokens: input.maxOutputTokens,
-      },
-    });
-    if (outcome.outcome !== "succeeded" || !outcome.result) { reason = "execution_incomplete"; break; }
-    if (outcome.result.toolCalls.length !== 0) reason = "unexpected_tools";
-    else if (outcome.result.outputText !== `ACK SYNC ${input.runId}`) reason = "ack_mismatch";
-    else { reason = "exact_ack"; break; }
-    // Only a completed, reconciled response reaches this bounded retry.
-  }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      input.signal?.throwIfAborted();
+      attempts++;
+      const outcome = await executeAuthorizedDelegation({
+        ...input,
+        invocationId: `sync_${identity}_${attempt}`,
+        effect: "context-sync",
+        request: {
+          messages: [
+            { role: "system", content: `Receive context only. Do not call tools. Reply exactly ACK SYNC ${input.runId}` },
+            { role: "user", content: input.text },
+          ],
+          tools: [],
+          maxOutputTokens: input.maxOutputTokens,
+        },
+      });
+      if (outcome.outcome !== "succeeded" || !outcome.result) { reason = "execution_incomplete"; break; }
+      if (outcome.result.toolCalls.length !== 0) reason = "unexpected_tools";
+      else if (outcome.result.outputText !== `ACK SYNC ${input.runId}`) reason = "ack_mismatch";
+      else { reason = "exact_ack"; break; }
+      // Only a completed, reconciled response reaches this bounded retry.
+    }
   } catch (error) {
     if (attempts === 0 || (error instanceof DelegationAdmissionError && error.code === "invocation_already_reserved")) throw error;
     executionFailure = error;

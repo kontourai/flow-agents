@@ -97,14 +97,14 @@ export async function executeAuthorizedDelegation(input: {
   let outcome: DelegationDispatchOutcome;
   try {
     outcome = await dispatchDelegation({
-    plan,
-    runtimes: new Map([["selected", runtime]]), ledger: input.dispatchLedger,
-    ...(input.signal ? { signal: input.signal } : {}),
-    async retainResult(result) {
-      await input.host.retainResult(structuredClone(result), structuredClone(envelope), input.invocationId);
-      observed = structuredClone(result);
-    },
-  });
+      plan,
+      runtimes: new Map([["selected", runtime]]), ledger: input.dispatchLedger,
+      ...(input.signal ? { signal: input.signal } : {}),
+      async retainResult(result) {
+        await input.host.retainResult(structuredClone(result), structuredClone(envelope), input.invocationId);
+        observed = structuredClone(result);
+      },
+    });
   } catch (error) {
     // A retained result can outlive a failed Dispatch settlement. Preserve its
     // confirmed accounting so a known overrun cannot remain an unknown hold.
