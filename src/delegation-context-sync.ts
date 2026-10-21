@@ -64,6 +64,7 @@ export async function syncDelegationContext(input: {
   let attempts = 0;
   let executionFailure: unknown;
   let executionFailed = false;
+  let ownsInvocation = false;
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       input.signal?.throwIfAborted();
@@ -71,6 +72,7 @@ export async function syncDelegationContext(input: {
       const outcome = await executeAuthorizedDelegation({
         ...input,
         invocationId: `sync_${identity}_${attempt}`,
+        onReserved: async () => { ownsInvocation = true; },
         effect: "context-sync",
         request: {
           messages: [
@@ -88,7 +90,7 @@ export async function syncDelegationContext(input: {
       // Only a completed, reconciled response reaches this bounded retry.
     }
   } catch (error) {
-    if (attempts === 0 || (error instanceof DelegationAdmissionError && error.code === "invocation_already_reserved")) throw error;
+    if (!ownsInvocation || attempts === 0 || (error instanceof DelegationAdmissionError && error.code === "invocation_already_reserved")) throw error;
     executionFailed = true;
     executionFailure = error;
     reason = "execution_incomplete";

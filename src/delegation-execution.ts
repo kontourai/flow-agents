@@ -28,6 +28,8 @@ export async function executeAuthorizedDelegation(input: {
   request: ModelInvocationRequest;
   allocation: DelegationInvocationAmounts;
   signal?: AbortSignal;
+  /** Awaited after durable reservation, before any physical dispatch. */
+  onReserved?: () => Promise<void>;
 }): Promise<DelegationDispatchOutcome> {
   input = { ...input, request: structuredClone(input.request), allocation: structuredClone(input.allocation) };
   input.signal?.throwIfAborted();
@@ -69,6 +71,7 @@ export async function executeAuthorizedDelegation(input: {
   await dispatch(plan, new Map(), { signal: AbortSignal.abort() });
   input.signal?.throwIfAborted();
   await input.service.reserveInvocation(input.authorityId, input.envelopeId, input.invocationId, input.allocation);
+  await input.onReserved?.();
   let observed: ModelInvocationResult | undefined;
   const runtime: ModelRuntime = {
     id: selected.runtime.id,

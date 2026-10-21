@@ -663,7 +663,7 @@ test('Flow execution composes real claims with registered authority and controll
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
 });
 
-for (const scenario of ['retry-ack', 'unexpected-tools', 'always-mismatch', 'unknown-usage', 'storage-failure', 'unknown-storage-failure', 'null-abort']) {
+for (const scenario of ['retry-ack', 'unexpected-tools', 'always-mismatch', 'unknown-usage', 'storage-failure', 'unknown-storage-failure', 'null-abort', 'concurrent-drift']) {
 test(`context sync retains bounded receipt for ${scenario}`, async () => {
   const { syncDelegationContext } = await import('../../build/src/delegation-context-sync.js');
   const { FileAuthorizationLedger } = await import('@kontourai/dispatch');
@@ -688,6 +688,21 @@ test(`context sync retains bounded receipt for ${scenario}`, async () => {
     const input = { authorityId: root.authority_id, envelopeId: child.envelope_id, service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(cwd, 'dispatch') }), runId: 'run-1', signal: controller.signal, text: 'folded context', maxOutputTokens: 5, allocation: { inputTokens: 5, outputTokens: 5, costMicros: 10 } };
     await assert.rejects(syncDelegationContext({ ...input, envelopeId: parent.envelope_id }), /explicit no-tools/);
     assert.equal(calls, 0);
+    if (scenario === 'concurrent-drift') {
+      let release, entered;
+      const waiting = new Promise((resolve) => { release = resolve; });
+      const resolving = new Promise((resolve) => { entered = resolve; });
+      const other = syncDelegationContext({ ...input, host: { ...host, resolveRuntime: async () => {
+        entered(); await waiting;
+        return { runtime, runtimeReceipt: ref('drifted-runtime'), modelReceipt: child.execution_binding.runtime.model_receipt_ref };
+      } } });
+      const rejected = assert.rejects(other, /runtime_receipt_mismatch/);
+      await resolving;
+      const completed = await syncDelegationContext(input);
+      release(); await rejected;
+      assert.equal(completed.status, 'acknowledged');
+      assert.deepEqual(receipts, [completed]); assert.equal(calls, 2); return;
+    }
     if (scenario === 'null-abort') {
       await assert.rejects(syncDelegationContext(input), (error) => error.receipt?.status === 'incomplete' && error.cause === null);
       assert.equal(calls, 1); assert.equal(receipts.length, 1); return;
