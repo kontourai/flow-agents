@@ -14,6 +14,7 @@ import { createLocalFileDelegationMailbox } from "../../build/src/delegation-mai
 
 import { createRunCorrelationEnvelope, readRunCorrelation, RUN_CORRELATION_IDENTITY_KEYS } from "../../build/src/run-correlation.js";
 import { createLocalFileAssignmentProvider } from "../../build/src/assignment-local-file.js";
+import { canonicalHolderActorKey } from "../../build/src/assignment-contract.js";
 
 const AT = "2026-10-21T06:00:00.000Z";
 const EXPIRES = "2026-10-21T06:30:00.000Z";
@@ -44,8 +45,8 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const live = new Map([A, B, C, CONTROLLER].map((item) => [item.actorKey, structuredClone(item)]));
   const state = { now: AT, unavailable: false, throwHost: false, cancelled: false };
-  const open = (authenticatedActor) => createLocalFileDelegationMailbox({
-    artifactRoot: root,
+  const open = (authenticatedActor, artifactRoot = root) => createLocalFileDelegationMailbox({
+    artifactRoot,
     now: () => state.now,
     validateHost: ({ action, caller, message: candidate }) => {
       if (state.throwHost) throw new Error("host temporarily offline");
@@ -624,3 +625,100 @@ test("temporary data fsync failure preserves the prior acknowledged journal", as
   await assert.rejects(f.sender.deliver("operation-1", A), { code: "EIO" });
   assert.deepEqual(fs.readFileSync(file), prior);
 });
+
+
+test("first enqueue must confirm the new artifact root entry through retry and reopen", async (t) => {
+  const f = fixture(t);
+  const root = path.join(f.root, "new-root");
+  const parent = fs.statSync(f.root);
+  const sync = fsDefault.fsyncSync;
+  let failing = true;
+  let attempts = 0;
+  t.mock.method(fsDefault, "fsyncSync", (fd) => {
+    const stat = fs.fstatSync(fd);
+    if (stat.dev === parent.dev && stat.ino === parent.ino) {
+      attempts++;
+      if (failing) throw Object.assign(new Error("new root entry not durable"), { code: "EIO" });
+    }
+    return sync(fd);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const sent = message();
+  const sender = f.open(A.actorKey, root);
+  for (const observe of [() => sender.enqueue(sent, A), () => sender.enqueue(sent, A),
+    () => f.open(A.actorKey, root).enqueue(sent, A), () => f.open(A.actorKey, root).outbox(A)]) {
+    const before = attempts;
+    assert.deepEqual(await observe(), { status: "unavailable", code: "durability_unconfirmed" });
+    assert.ok(attempts > before, "an existing path does not confirm its directory entry");
+  }
+  const journal = JSON.parse(fs.readFileSync(path.join(root, "mailbox/state.json"), "utf8"));
+  assert.equal(journal.operations.length, 1);
+  assert.equal(journal.operations[0].status, "pending");
+  failing = false;
+  const before = attempts;
+  const pending = ok(await f.open(A.actorKey, root).enqueue(sent, A));
+  assert.ok(attempts > before);
+  assert.deepEqual(ok(await f.open(A.actorKey, root).outbox(A)), [pending]);
+});
+
+test("nested absent ancestors are created privately and every directory entry is flushed", async (t) => {
+  const f = fixture(t);
+  fs.chmodSync(f.root, 0o755);
+  const peer = path.join(f.root, "peer");
+  fs.mkdirSync(peer, { mode: 0o755 });
+  const root = path.join(f.root, "missing-parent", "another-parent", "new-root");
+  const created = [path.dirname(path.dirname(root)), path.dirname(root), root,
+    path.join(root, "mailbox"), path.join(root, "mailbox/assignment")];
+  const synced = new Set();
+  const sync = fsDefault.fsyncSync;
+  const inode = (stat) => `${stat.dev}:${stat.ino}`;
+  t.mock.method(fsDefault, "fsyncSync", (fd) => {
+    sync(fd);
+    const stat = fs.fstatSync(fd);
+    if (stat.isDirectory()) synced.add(inode(stat));
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const pending = ok(await f.open(A.actorKey, root).enqueue(message(), A));
+  for (const dir of created) {
+    const stat = fs.lstatSync(dir);
+    assert.equal(stat.isDirectory(), true, dir);
+    assert.equal(stat.uid, process.geteuid(), dir);
+    assert.equal(stat.mode & 0o7777, 0o700, dir);
+    assert.ok(synced.has(inode(stat)), `directory contents and metadata flushed: ${dir}`);
+    assert.ok(synced.has(inode(fs.statSync(path.dirname(dir)))), `parent entry flushed: ${dir}`);
+  }
+  assert.equal(fs.statSync(f.root).mode & 0o7777, 0o755);
+  assert.equal(fs.statSync(peer).mode & 0o7777, 0o755);
+  assert.deepEqual(ok(await f.open(A.actorKey, root).outbox(A)), [pending]);
+});
+
+for (const actorKey of ["_reviewer", ".reviewer", "-reviewer", "reviewer/é @ workstation", "r".repeat(1100)]) {
+  test(`canonical assignment actor key survives mailbox unchanged (${actorKey.slice(0, 30)})`, async (t) => {
+    const f = fixture(t);
+    const provider = createLocalFileAssignmentProvider(path.join(f.root, "assignments"));
+    const record = await provider.claimReturning("kontourai/flow-agents#561", {
+      runtime: "explicit-override", session_id: "descriptive-session", host: "offline",
+    }, { actorKey, ttlSeconds: 3600, branch: "detached", artifactDir: f.root });
+    const canonical = canonicalHolderActorKey(record);
+    assert.equal(canonical, actorKey);
+    const sender = { ...A, actorKey: canonical, controllerActorKey: canonical };
+    const recipient = { ...B, controllerActorKey: canonical };
+    f.live.set(canonical, sender);
+    f.live.set(B.actorKey, recipient);
+    const sent = message({ sender, recipient });
+    const pending = ok(await f.open(canonical).enqueue(sent, sender));
+    assert.equal(pending.message.sender.actorKey, canonical);
+    assert.equal(pending.message.sender.controllerActorKey, canonical);
+    assert.deepEqual(ok(await f.open(canonical).enqueue(sent, sender)), pending);
+    const altered = { ...sender, actorKey: `${canonical}-other` };
+    refused(await f.open(canonical).enqueue(sent, altered), "sender_mismatch");
+    ok(await f.open(canonical).deliver(sent.operationId, sender));
+    assert.deepEqual(ok(await f.open(B.actorKey).inbox(recipient))[0].message, sent);
+    assert.equal(ok(await f.open(B.actorKey).acknowledge(sent.operationId, recipient)).status, "acknowledged");
+    ok(await f.open(canonical).cancel(sender));
+    ok(await f.open(canonical).cancel(sender));
+    refused(await f.open(B.actorKey).inbox(recipient), "inactive");
+  });
+}
