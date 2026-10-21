@@ -108,7 +108,10 @@ export async function executeAuthorizedDelegation(input: {
   } catch (error) {
     // A retained result can outlive a failed Dispatch settlement. Preserve its
     // confirmed accounting so a known overrun cannot remain an unknown hold.
-    await reconcileObserved();
+    try { await reconcileObserved(); }
+    catch (reconciliationError) {
+      throw new AggregateError([error, reconciliationError], "Dispatch settlement and authority reconciliation failed", { cause: error });
+    }
     throw error;
   }
   if (await reconcileObserved()) {

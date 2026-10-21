@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
 import { delegationIdV2 } from "./delegation-authority-contract.js";
-import { createDelegationAuthorityService, type DelegationInvocationAmounts } from "./delegation-authority-service.js";
+import { createDelegationAuthorityService, DelegationAdmissionError, type DelegationInvocationAmounts } from "./delegation-authority-service.js";
 import { executeAuthorizedDelegation, type DelegationExecutionHost } from "./delegation-execution.js";
 
 export interface DelegationSyncReceipt {
@@ -11,6 +11,27 @@ export interface DelegationSyncReceipt {
   attempts: number;
   status: "acknowledged" | "incomplete";
   reason: "exact_ack" | "ack_mismatch" | "unexpected_tools" | "execution_incomplete";
+}
+
+export class DelegationSyncExecutionError extends Error {
+  constructor(readonly receipt: DelegationSyncReceipt, cause: unknown) {
+    super("Delegation context sync incomplete", { cause });
+    this.name = "DelegationSyncExecutionError";
+  }
+}
+
+export class DelegationSyncReceiptPersistenceError extends Error {
+  readonly receipt: DelegationSyncReceipt;
+  constructor(receipt: DelegationSyncReceipt, cause: unknown) {
+    super("Delegation sync receipt persistence failed", { cause });
+    this.name = "DelegationSyncReceiptPersistenceError";
+    this.receipt = structuredClone(receipt);
+  }
+  /** Storage-only recovery: never redispatches a model invocation. */
+  async retryRetention(host: { retainSyncReceipt(receipt: DelegationSyncReceipt): Promise<void> }): Promise<DelegationSyncReceipt> {
+    await host.retainSyncReceipt(structuredClone(this.receipt));
+    return structuredClone(this.receipt);
+  }
 }
 
 /** Model acknowledgement only: this neither grants tools nor proves semantic understanding. */
@@ -34,6 +55,8 @@ export async function syncDelegationContext(input: {
   const identity = createHash("sha256").update(JSON.stringify([input.authorityId, input.envelopeId, input.runId, contentDigest])).digest("hex");
   let reason: DelegationSyncReceipt["reason"] = "execution_incomplete";
   let attempts = 0;
+  let executionFailure: unknown;
+  try {
   for (let attempt = 0; attempt < 2; attempt++) {
     input.signal?.throwIfAborted();
     attempts++;
@@ -56,10 +79,17 @@ export async function syncDelegationContext(input: {
     else { reason = "exact_ack"; break; }
     // Only a completed, reconciled response reaches this bounded retry.
   }
+  } catch (error) {
+    if (attempts === 0 || (error instanceof DelegationAdmissionError && error.code === "invocation_already_reserved")) throw error;
+    executionFailure = error;
+    reason = "execution_incomplete";
+  }
   const receipt: DelegationSyncReceipt = {
     runId: input.runId, envelopeId: input.envelopeId, contentDigest, attempts,
     status: reason === "exact_ack" ? "acknowledged" : "incomplete", reason,
   };
-  await input.host.retainSyncReceipt(structuredClone(receipt));
+  try { await input.host.retainSyncReceipt(structuredClone(receipt)); }
+  catch (error) { throw new DelegationSyncReceiptPersistenceError(receipt, error); }
+  if (executionFailure) throw new DelegationSyncExecutionError(structuredClone(receipt), executionFailure);
   return receipt;
 }

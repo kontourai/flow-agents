@@ -309,8 +309,10 @@ its runtime receipts; matching reference text and capability declarations alone 
 
 Raw results and thrown failures reach separate awaited host retention callbacks before Dispatch
 normalizes them. Retention failures and unknown usage keep holds. Successful usage reconciles into
-the authority ledger; per-input, per-output or cost overruns return `budget-exceeded` without a result
-while retaining the accounting observation. An abort request or thrown runtime error does not prove
+the authority ledger. A per-dimension overrun that Dispatch can settle returns `budget-exceeded`
+without a result. Combined-token or cost capacity overruns can instead make Dispatch refuse settlement;
+the bridge reconciles retained usage into authority, then preserves the settlement error. If authority
+reconciliation also fails, an aggregate error retains both failures and the original Dispatch cause. An abort request or thrown runtime error does not prove
 termination or known zero spend. Durable retention, actual confinement, input/cost ceilings and native
 cancellation fidelity still require production host evidence. No installed group executor or Station
 consumer is established by this controlled-runtime bridge test.
