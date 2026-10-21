@@ -58,7 +58,7 @@ function remaining(ledger: DelegationAuthorityLedger, envelope: DelegationEnvelo
   budget.max_total_children -= children.length;
   return budget;
 }
-function validateLedger(value: DelegationAuthorityLedger): DelegationAuthorityLedger {
+export function validateDelegationAuthorityLedger(value: DelegationAuthorityLedger): DelegationAuthorityLedger {
   const root = validateRootAuthorityV2(value.root);
   requireAdmission(typeof value.cancelled === "boolean" && Array.isArray(value.envelopes)
     && value.envelopes.length <= root.budget.max_total_envelopes, "invalid_authority_ledger");
@@ -84,7 +84,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
     async issue(rootValue: unknown): Promise<string> {
       const root = validateRootAuthorityV2(rootValue);
       return store.transact(root.authority_id, async (current) => {
-        const ledger = current ? validateLedger(current) : { root, envelopes: [], cancelled: false };
+        const ledger = current ? validateDelegationAuthorityLedger(current) : { root, envelopes: [], cancelled: false };
         await authorized("issue", ledger, null);
         requireAdmission(same(root, ledger.root), "authority_identity_conflict");
         requireAdmission(!ledger.cancelled && host.now() < root.budget.expires_at, "authority_inactive");
@@ -96,7 +96,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
       const child = validateDelegationEnvelopeV2(value);
       return store.transact(authorityId, async (current) => {
         requireAdmission(current, "authority_missing");
-        const ledger = validateLedger(current);
+        const ledger = validateDelegationAuthorityLedger(current);
         await authorized("derive", ledger, child);
         requireAdmission(!ledger.cancelled, "authority_cancelled");
         ancestry(ledger, child, host.now());
@@ -104,7 +104,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
         const previous = ledger.envelopes.find((e) => e.envelope_id === child.envelope_id);
         if (previous) requireAdmission(delegationEnvelopeDigestV2(previous) === delegationEnvelopeDigestV2(child), "envelope_identity_conflict");
         else ledger.envelopes.push(child);
-        validateLedger(ledger);
+        validateDelegationAuthorityLedger(ledger);
         // Recheck expiry after asynchronous host admission, before durable publication.
         ancestry(ledger, child, host.now());
         return { ledger, result: structuredClone(child) };
@@ -114,7 +114,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
       delegationIdV2(authorityId);
       return store.transact(authorityId, async (current) => {
         requireAdmission(current, "authority_missing");
-        const ledger = validateLedger(current);
+        const ledger = validateDelegationAuthorityLedger(current);
         await authorized("cancel", ledger, null);
         ledger.cancelled = true;
         return { ledger, result: undefined };
@@ -124,7 +124,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
       delegationIdV2(authorityId);
       return store.transact(authorityId, async (current) => {
         requireAdmission(current, "authority_missing");
-        const ledger = validateLedger(current);
+        const ledger = validateDelegationAuthorityLedger(current);
         await authorized("inspect", ledger, null);
         return { ledger, result: structuredClone(ledger) };
       });
@@ -133,7 +133,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
       delegationIdV2(authorityId); delegationIdV2(envelopeId); delegationIdV2(effect);
       return store.transact(authorityId, async (current) => {
         requireAdmission(current, "authority_missing");
-        const ledger = validateLedger(current);
+        const ledger = validateDelegationAuthorityLedger(current);
         const envelope = ledger.envelopes.find((e) => e.envelope_id === envelopeId);
         requireAdmission(envelope, "envelope_missing");
         await authorized("effect", ledger, envelope);

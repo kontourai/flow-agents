@@ -450,11 +450,16 @@ test("existing v1 equality still rejects changed source/runtime/correlation", ()
 
 test("authority service registers exact ancestry and partitions sibling allocations before effects", async () => {
   const { createDelegationAuthorityService } = await import('../../build/src/delegation-authority-service.js');
-  let ledger = null, allowed = true;
-  const service = createDelegationAuthorityService({ async transact(_id, body) {
-    const next = await body(ledger && structuredClone(ledger));
-    ledger = structuredClone(next.ledger); return next.result;
-  } }, { now: () => NOW, authorize: async () => allowed, confirmExecution: async () => allowed });
+  const { createLocalFileDelegationAuthorityStore } = await import('../../build/src/delegation-authority-local-file.js');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-authority-service-'));
+  let allowed = true;
+  const host = { now: () => NOW, authorize: async () => allowed, confirmExecution: async () => allowed };
+  const open = () => createDelegationAuthorityService(createLocalFileDelegationAuthorityStore(rootPath), host);
+  const service = open();
+  try {
   const { root, parent, child } = edgeFixture();
   await service.issue(root);
   await service.derive(root.authority_id, parent);
@@ -463,11 +468,13 @@ test("authority service registers exact ancestry and partitions sibling allocati
   const sibling = { ...structuredClone(child), envelope_id: 'sibling', execution_id: 'sibling-execution', span_id: 'sibling-span' };
   await assert.rejects(service.derive(root.authority_id, sibling), /aggregate_allocation_exhausted/);
   assert.equal((await service.inspect(root.authority_id)).envelopes.length, 2);
-  await service.derive(root.authority_id, child);
+  await open().derive(root.authority_id, child);
+  assert.equal((await open().inspect(root.authority_id)).envelopes.length, 2);
   allowed = false;
   await assert.rejects(service.derive(root.authority_id, child), /host_authorization_refused/);
   await assert.rejects(service.inspect(root.authority_id), /host_authorization_refused/);
   allowed = true;
   await service.cancel(root.authority_id);
-  await assert.rejects(service.admitEffect(root.authority_id, child.envelope_id, 'write'), /effect_refused/);
+  await assert.rejects(open().admitEffect(root.authority_id, child.envelope_id, 'write'), /effect_refused/);
+  } finally { fs.rmSync(rootPath, { recursive: true, force: true }); }
 });
