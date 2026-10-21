@@ -444,7 +444,9 @@
         "src/multi-cursor-flow-orchestrator.ts",
         "src/delegation-dispatch.ts",
         "src/delegation-mailbox.ts",
-        "src/delegation-mailbox-local-file.ts"
+        "src/delegation-mailbox-local-file.ts",
+        "src/delegation-authority-service.ts",
+        "src/delegation-authority-local-file.ts"
       ]
     },
     {

@@ -263,3 +263,26 @@ privately without changing existing ancestor permissions. Replacement flushes te
 rename; successful observations confirm journal and ancestor directory entries. Failed confirmation
 returns unavailable until repaired. Filesystem failure injection and descriptor tracing do not prove
 power-loss durability, cross-user confinement or live host authentication.
+
+## V2 admission service in progress
+
+The source-only `delegation-authority-service.ts` increment registers a root authority and exact
+root/child ancestry under a transactional store. Every issue, derivation, inspection, cancellation and
+effect-admission request calls the authenticated host boundary. Replay rechecks current access.
+Sibling allocations partition the parent's token, cost, attempt and lifetime-envelope ceilings;
+lifetime child counts cannot reset through replay. Derivation also confirms the exact execution grant
+and rechecks expiry after asynchronous host admission. Cancellation is irreversible in the ledger.
+
+The local adapter requires an existing private host-owned root and serializes transactions under a
+store-wide lock. Root authority and previously registered envelopes are immutable; execution ids
+cannot be reused across authorities in that store. Private unaliased files are flushed before use,
+replacement data before rename, and directory entries before return. Reopen confirms durability.
+The host must provision and durably establish the root path before constructing this adapter.
+Same-uid ownership/mode checks do not protect this root from workers with the same filesystem access.
+
+This increment is not yet a public package entry point or complete enforcement service. It lacks
+invocation spend/reservation integration, active-slot accounting, executable effect fencing, and
+production host authentication. `admitEffect` returns a checked observation, not a transferable
+capability or permission to bypass a host effect-time check. Real temporary-store tests establish
+reopen, allocation refusal, access refusal and persisted cancellation; they do not establish crash,
+power-loss, hostile-worker or live-provider enforcement.
