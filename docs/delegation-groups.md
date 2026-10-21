@@ -346,8 +346,12 @@ with zero returned tool calls. A SHA-256 binds each retained receipt to the supp
 response permits one retry only after the first response completed and its usage reconciled. Unknown
 invocation/retention/accounting failures retain an incomplete receipt and propagate with their cause,
 without an automatic retry. Replay of the same invocation identity is refused by durable admission
-and does not overwrite an existing receipt. If receipt persistence fails, the returned persistence
-error carries that receipt and a storage-only retry method; recovery never invokes the model.
+and does not overwrite an existing receipt. Receipt publication also requires this caller to have
+completed durable invocation reservation: a concurrent preflight refusal cannot replace another
+caller's acknowledgement. If receipt persistence fails, the returned persistence error carries an
+immutable receipt snapshot and a storage-only retry method; recovery never invokes the model.
+Editing a returned receipt copy does not change the snapshot used by recovery. Combined execution
+and storage failures preserve both diagnostics; falsy abort reasons remain execution failures.
 
 The host retains the receipt and raw responses; callback delivery is not durable-storage proof.
 An acknowledgement is transport/protocol evidence, not understanding, tool confinement or a gate.
