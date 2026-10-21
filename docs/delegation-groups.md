@@ -386,9 +386,13 @@ Raw dissent and failures remain retained observations; group acceptance remains 
 
 Cancellation persists closed admission, then cancels authority and requests descendant cancellation.
 A crash or lost acknowledgement across these operations leaves cancellation pending. Replaying a
-request does not repeat uncertain external effects. Terminal reconciliation requires confirmed
-terminal/accounting state and host proof for the exact invocation and descendants. Unadmitted seats
-or missing invocation links remain conservatively unproven; no zero-usage inference resolves them.
+request does not repeat uncertain external effects. `reconcileCancellation()` requires the exact
+original request and a current host confirmation before recording that the request was observed;
+concurrent confirmations return the same requested projection without another send. Terminal reconciliation requires confirmed
+terminal/accounting state and host proof for the exact invocation and descendants. Missing invocation links with retained authority holds remain conservatively unproven. For a
+cancelled seat with no invocation link or authority invocation, `recordNotLaunched()` requires
+revoked authority and an independent host non-launch proof. It records terminal closure without
+inventing usage or acceptance. The journal reserves capacity for those proofs.
 
 The local store permanently binds an authority to one group within that store and escrows future
 record capacity. Cross-store custody, actual actor/liveness, launch confinement, physical cancellation,
