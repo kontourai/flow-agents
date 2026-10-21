@@ -215,9 +215,16 @@ test("allowed grants and authority sets/approval/escalation narrow monotonically
 
 test("bound Flow grants preserve the published definition identity/run/step/gate attempt exactly", () => {
   const root = rootAuthority();
-  const definition = definitionIdentity(JSON.parse(readFileSync(new URL("../../node_modules/@kontourai/flow/examples/agent-dev-flow.json", import.meta.url), "utf8")));
+  const flow = JSON.parse(readFileSync(new URL("../../node_modules/@kontourai/flow/examples/agent-dev-flow.json", import.meta.url), "utf8"));
+  flow.id = " Définition 日本語 + [review] ";
+  flow.version = "1.0.0+build.1";
+  const definition = definitionIdentity(flow);
+  assert.equal(definition.id, flow.id);
+  assert.equal(definition.version, flow.version);
   root.execution_grants[1].flow_binding = { status: "bound", flow_run_id: "flow-run-a", definition, flow_step_id: "implement", gate_attempt: 2 };
+  assert.equal(schemaRoot(root), true, JSON.stringify(schemaRoot.errors));
   const parent = rootEnvelope(root), child = childOf(root, parent);
+  assert.equal(schemaEnvelope(child), true, JSON.stringify(schemaEnvelope.errors));
   assert.deepEqual(narrowDelegationEnvelopeV2(root, parent, child, NOW).execution_binding.flow_binding.definition, definition);
   for (const mutate of [
     f => { f.flow_run_id = "flow-run-b"; }, f => { f.flow_step_id = "other"; },
@@ -227,7 +234,70 @@ test("bound Flow grants preserve the published definition identity/run/step/gate
     const changed = structuredClone(child); mutate(changed.execution_binding.flow_binding);
     reject(() => narrowDelegationEnvelopeV2(root, parent, changed, NOW), "execution_grant_binding_mismatch");
   }
-  assert.equal(schemaRoot(root), true, JSON.stringify(schemaRoot.errors));
+  for (const field of ["id", "version"]) {
+    for (const [value, accepted] of [[" ", true], ["😀".repeat(128), true], ["a".repeat(128), true], ["a".repeat(129), false], ["😀".repeat(129), false], ["bad\u0085", false]]) {
+      const candidate = rootAuthority();
+      const identity = definitionIdentity({ ...flow, [field]: value });
+      candidate.execution_grants[1].flow_binding = { ...root.execution_grants[1].flow_binding, definition: identity };
+      assert.equal(schemaRoot(candidate), accepted, `${field}: ${JSON.stringify(value)}`);
+      // The public envelope validator must enforce the same identity text bounds independently of root validation.
+      const { child: envelope } = edgeFixture();
+      envelope.execution_binding.flow_binding = structuredClone(candidate.execution_grants[1].flow_binding);
+      assert.equal(schemaEnvelope(envelope), accepted);
+      if (accepted) {
+        const coordinator = rootEnvelope(candidate), child = childOf(candidate, coordinator);
+        assert.deepEqual(narrowDelegationEnvelopeV2(candidate, coordinator, child, NOW).execution_binding.flow_binding.definition, identity);
+      } else {
+        reject(() => validateRootAuthorityV2(candidate), "invalid_flow_definition_text");
+        reject(() => validateDelegationEnvelopeV2(envelope), "invalid_flow_definition_text");
+      }
+    }
+  }
+});
+
+test("canonical POSIX filenames remain literal exact resources through schema and child admission", () => {
+  for (const path of ["src/routes/[id].tsx", "docs/design notes.md", "src/日本語.ts", "src/a+b.ts"]) {
+    const root = rootAuthority();
+    const resources = [resource("worktree-b", path)];
+    root.execution_grants[1].authority_ceiling.readable_resources = structuredClone(resources);
+    root.execution_grants[1].authority_ceiling.mutable_resources = structuredClone(resources);
+    root.delegation_ceiling.readable_resources.push(...structuredClone(resources));
+    root.delegation_ceiling.mutable_resources.push(...structuredClone(resources));
+    assert.equal(schemaRoot(root), true, JSON.stringify(schemaRoot.errors));
+    const parent = rootEnvelope(root), child = childOf(root, parent);
+    assert.equal(schemaEnvelope(child), true, JSON.stringify(schemaEnvelope.errors));
+    assert.equal(narrowDelegationEnvelopeV2(root, parent, child, NOW).execution_authority.mutable_resources[0].path, path);
+    for (const other of [path.split("/")[0], `${path}/child`, `${path}x`, path.replace("[id]", "123")].filter(other => other !== path)) {
+      const changed = structuredClone(child);
+      changed.execution_authority.mutable_resources = [resource("worktree-b", other)];
+      reject(() => narrowDelegationEnvelopeV2(root, parent, changed, NOW), "authority_widening:mutable_resources");
+    }
+  }
+});
+
+test("unbound reasons share schema code-point boundaries at root and envelope admission", () => {
+  for (const [reason, accepted] of [
+    ["", false], ["a", true], ["a".repeat(512), true], ["a".repeat(513), false],
+    ["😀".repeat(257), true], ["😀".repeat(512), true], ["😀".repeat(513), false],
+    [`${"😀".repeat(256)}${"a".repeat(256)}`, true], [`${"😀".repeat(256)}${"a".repeat(257)}`, false],
+  ]) {
+    const root = rootAuthority();
+    root.execution_grants[1].flow_binding.reason = reason;
+    assert.equal(schemaRoot(root), accepted, `root reason code points: ${[...reason].length}`);
+    // Construct the envelope before replacing its binding, so a rejected root does not mask its validator.
+    const base = rootAuthority(), parent = rootEnvelope(base), child = childOf(base, parent);
+    child.execution_binding.flow_binding.reason = reason;
+    assert.equal(schemaEnvelope(child), accepted, `envelope reason code points: ${[...reason].length}`);
+    if (accepted) {
+      assert.equal(validateRootAuthorityV2(root).execution_grants[1].flow_binding.reason, reason);
+      assert.equal(validateDelegationEnvelopeV2(child).execution_binding.flow_binding.reason, reason);
+      const boundParent = rootEnvelope(root), boundChild = childOf(root, boundParent);
+      assert.equal(narrowDelegationEnvelopeV2(root, boundParent, boundChild, NOW).execution_binding.flow_binding.reason, reason);
+    } else {
+      reject(() => validateRootAuthorityV2(root), "invalid_unbound_reason");
+      reject(() => validateDelegationEnvelopeV2(child), "invalid_unbound_reason");
+    }
+  }
 });
 
 test("budgets consume depth and one envelope; all active expiries and lifetime fanout bounds hold", () => {
@@ -305,9 +375,25 @@ test("hostile JSON, unknown fields, credentials, ambiguous paths, duplicates and
     reject(() => validateRootAuthorityV2(root), "sensitive_credential");
     assert.equal(schemaRoot(root), false);
   }
-  for (const path of ["/absolute", "../escape", "src/../escape", "src/./file", "src//file", "src/", "C:/file", "src\\file", "src/../", "..", ""]) {
+  for (const path of ["/absolute", "//server/file", "../escape", "src/../escape", "src/./file", "src//file", "src/", "C:/file", "C:file", "src\\file", "src/../", "..", "", "src/\u0085file", "a".repeat(513), "😀".repeat(513)]) {
     const root = rootAuthority(); root.execution_grants[0].authority_ceiling.readable_resources[0].path = path;
+    assert.equal(schemaRoot(root), false, path);
     reject(() => validateRootAuthorityV2(root), "invalid_resource_path");
+    const { child } = edgeFixture(); child.execution_authority.readable_resources[0].path = path;
+    assert.equal(schemaEnvelope(child), false, path);
+    reject(() => validateDelegationEnvelopeV2(child), "invalid_resource_path");
+  }
+  for (const path of ["src/\u0000file", "src/\nfile", "src/\u007ffile"]) {
+    const root = rootAuthority(); root.execution_grants[0].authority_ceiling.readable_resources[0].path = path;
+    assert.equal(schemaRoot(root), false);
+    reject(() => validateRootAuthorityV2(root), "invalid_json_text");
+  }
+  for (const path of ["a".repeat(512), "😀".repeat(512)]) {
+    const root = rootAuthority(); root.delegation_ceiling.readable_resources.push(resource("worktree-a", path));
+    assert.equal(schemaRoot(root), true, JSON.stringify(schemaRoot.errors));
+    const envelope = rootEnvelope(root);
+    assert.equal(schemaEnvelope(envelope), true, JSON.stringify(schemaEnvelope.errors));
+    assert.equal(narrowDelegationEnvelopeV2(root, null, envelope, NOW).delegation_ceiling.readable_resources.at(-1).path, path);
   }
   const { root, parent } = edgeFixture();
   for (const field of ["prompts", "credentials", "provider_diagnostics", "runtime_session", "terminal_record"]) {

@@ -186,8 +186,8 @@ export function copyDelegationJsonV2(value: unknown): unknown {
 function resource(value: unknown): asserts value is DelegationResourceV2 {
   const r = delegationRecordV2(value, ["repository_id", "execution_worktree_id", "path"]);
   delegationIdV2(r.repository_id); delegationIdV2(r.execution_worktree_id);
-  requireDelegationV2(typeof r.path === "string" && r.path.length <= 512 && (r.path === "."
-    || /^(?!.*(?:^|\/)\.{1,2}(?:\/|$))[A-Za-z0-9._@-]+(?:\/[A-Za-z0-9._@-]+)*$/.test(r.path)), "invalid_resource_path");
+  requireDelegationV2(typeof r.path === "string" && [...r.path].length <= 512 && (r.path === "."
+    || /^(?![A-Za-z]:)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^/\\\u0000-\u001f\u007f-\u009f]+(?:\/[^/\\\u0000-\u001f\u007f-\u009f]+)*$/.test(r.path)), "invalid_resource_path");
 }
 export function delegationAuthorityV2(value: unknown): asserts value is DelegationAuthorityV2 {
   const r = delegationRecordV2(value, ["allowed_tools", "allowed_effects", "readable_resources", "mutable_resources", "posture", "approval", "escalation"]);
@@ -240,14 +240,18 @@ export function delegationExecutionBindingV2(value: unknown): asserts value is D
   const flow = r.flow_binding as Record<string, unknown> | null;
   if (flow?.status === "unbound") {
     delegationRecordV2(flow, ["status", "reason"]);
-    requireDelegationV2(typeof flow.reason === "string" && flow.reason.length > 0 && flow.reason.length <= 512
+    requireDelegationV2(typeof flow.reason === "string" && flow.reason.length > 0 && [...flow.reason].length <= 512
       && !/[\u0000-\u001f\u007f]/.test(flow.reason), "invalid_unbound_reason");
   } else {
     const f = delegationRecordV2(flow, ["status", "flow_run_id", "definition", "flow_step_id", "gate_attempt"]);
     requireDelegationV2(f.status === "bound", "invalid_flow_binding");
     delegationIdV2(f.flow_run_id); delegationIdV2(f.flow_step_id); delegationIntegerV2(f.gate_attempt);
     const definition = delegationRecordV2(f.definition, ["id", "version", "digest"]);
-    delegationIdV2(definition.id); delegationIdV2(definition.version);
+    // Flow identity references are bounded text, not delegation identifiers. Preserve their bytes.
+    for (const value of [definition.id, definition.version]) {
+      requireDelegationV2(typeof value === "string" && value.length > 0 && [...value].length <= 128
+        && !/[\u0000-\u001f\u007f-\u009f]/u.test(value), "invalid_flow_definition_text");
+    }
     // Flow's published definitionIdentity uses an unprefixed SHA-256 digest.
     requireDelegationV2(typeof definition.digest === "string" && /^[a-f0-9]{64}$/.test(definition.digest), "invalid_flow_definition_digest");
   }
