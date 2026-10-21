@@ -280,9 +280,15 @@ replacement data before rename, and directory entries before return. Reopen conf
 The host must provision and durably establish the root path before constructing this adapter.
 Same-uid ownership/mode checks do not protect this root from workers with the same filesystem access.
 
+Invocation ids are reserved once and remain bound across reopen. Each invocation consumes its
+own envelope's unallocated attempt/token/cost capacity and active capacity along every ancestor.
+Unknown usage holds its allocation even after terminal status is confirmed. Only host-confirmed
+terminal accounting releases the active slot; actual spend remains charged. Confirmed usage above
+its allocation is retained and closes further derivation, invocation admission and effect admission.
+Cancellation stops admission without claiming that existing invocations have terminated.
+
 This increment is not yet a public package entry point or complete enforcement service. It lacks
-invocation spend/reservation integration, active-slot accounting, executable effect fencing, and
-production host authentication. `admitEffect` returns a checked observation, not a transferable
+Dispatch/group reservation composition, executable effect fencing, and production host authentication. `admitEffect` returns a checked observation, not a transferable
 capability or permission to bypass a host effect-time check. Real temporary-store tests establish
-reopen, allocation refusal, access refusal and persisted cancellation; they do not establish crash,
+reopen, allocation refusal, active-slot/unknown-usage holds, overrun retention, access refusal and persisted cancellation; they do not establish crash,
 power-loss, hostile-worker or live-provider enforcement.
