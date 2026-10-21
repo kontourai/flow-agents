@@ -233,8 +233,13 @@ validate the plan against authenticated authority and enforce the claimed runtim
 The wrapper awaits durable retention of each raw result before settlement. Retention failure stops
 fallback and leaves the reservation unresolved. Settlement requires provider-reported input tokens,
 output tokens and cost; absent values remain unknown. Actual cost replaces Dispatch's estimated cost
-at the ledger boundary. An inconsistent reported total is refused. The returned Dispatch receipt still
-contains Dispatch's estimates and is not the accounting authority or semantic acceptance evidence.
+at the ledger boundary. An inconsistent reported total is refused. Candidate estimators are removed
+from the internal Dispatch plan, so they cannot suppress an otherwise successful result or hide a
+reported cost overrun. The wrapper returns its own `outcome` and `reportedCostUsd`, with the unmodified
+internal receipt under `dispatchReceipt`. Cost overrun returns `budget-exceeded` without a result.
+`reportedCostUsd` sums settled observations only: failed attempts retain unknown usage and held
+reservations. Neither this sum nor the diagnostic Dispatch receipt establishes complete accounting
+for those failed attempts, physical cost enforcement, or semantic acceptance.
 
 These calls are not yet composed with group attempts, authority issuance, ancestor reservations,
 mailbox admission or effect fencing. Tests use the real temporary FileAuthorizationLedger and a

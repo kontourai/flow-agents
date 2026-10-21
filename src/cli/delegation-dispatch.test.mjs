@@ -20,11 +20,11 @@ for (const usage of [{}, { inputTokens: 2, outputTokens: 3, costUsd: 0.002 }]) {
         ledger: new FileAuthorizationLedger({ root }), runtimes: new Map([['worker', runtime]]), retainResult: async (result) => { retained.push(result.outputText); } });
       if (usage.costUsd === undefined) {
         await assert.rejects(run('one'), AuthorizationPersistenceError);
-        assert.equal((await run('two')).receipt.outcome, 'budget-exceeded');
+        assert.equal((await run('two')).outcome, 'budget-exceeded');
         assert.equal(calls, 1);
       } else {
-        assert.equal((await run('one')).receipt.outcome, 'succeeded');
-        assert.equal((await run('two')).receipt.outcome, 'succeeded');
+        assert.equal((await run('one')).outcome, 'succeeded');
+        assert.equal((await run('two')).outcome, 'succeeded');
         assert.equal(calls, 2);
       }
       assert.deepEqual(retained, Array(calls).fill('raw report'));
@@ -52,3 +52,22 @@ test('failed durable result retention stops fallback and replay after a physical
     assert.equal(calls, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+for (const [budget, estimate, expected] of [[0.01, 0, 'budget-exceeded'], [0.03, 100, 'succeeded']]) {
+  test(`reported cost determines outcome with budget ${budget} and estimator ${estimate}`, async () => {
+    const root = await makeFixtureDirAsync('delegation-cost-');
+    try {
+      let calls = 0;
+      const runtime = { id: 'worker', capabilities: () => ({ structuredTools: false, streaming: false, abort: true, usage: true }),
+        async invoke() { calls++; return { provider: 'fixture', model: 'fixture', outputText: 'report', toolCalls: [], usage: { inputTokens: 2, outputTokens: 3, costUsd: 0.02 }, latencyMs: 1 }; } };
+      const result = await dispatchDelegation({ plan: { schemaVersion: 1, role: 'reader', request: { messages: [{ role: 'user', content: 'read' }] },
+        candidates: [{ id: 'worker', runtimeId: 'worker', estimatedUsdPer1kTokens: estimate, worstCaseUsage: { maxTokens: 10, maxCostUsd: 0.025 } }],
+        budget: { maxAttempts: 1, maxCostUsd: budget }, authorization: { schemaVersion: 1, id: 'family', invocationId: 'one', limits: { maxAttempts: 1, maxTotalTokens: 10, maxCostUsd: 0.05 } } },
+        ledger: new FileAuthorizationLedger({ root }), runtimes: new Map([['worker', runtime]]), retainResult: async () => {} });
+      assert.equal(result.outcome, expected);
+      assert.equal(result.result?.outputText, expected === 'succeeded' ? 'report' : undefined);
+      assert.equal(calls, 1);
+      assert.equal(result.reportedCostUsd, 0.02);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+}
