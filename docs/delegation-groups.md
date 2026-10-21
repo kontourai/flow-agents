@@ -140,25 +140,16 @@ checks and must return bounded, authenticated receipt references for the **exact
 - `confirmReadiness(request, current, seat)`: current independent admission or Flow-owned claimed
   readiness; includes current cancellation/liveness checks. Group topology cannot supply it.
 - `confirmBudgetEnforcement(request, current)`: confirmed ability to bound the proposed external
-  attempt, including every underlying Dispatch fallback/retry and token/cost allocation. This checkout
-  pins Dispatch 0.3.0 and Relay 0.6.0; this service has not composed their receipts into execution
-  authorization or reconciled live usage. This gap is version-scoped. Per Brian's dependency inventory,
-  public Dispatch 0.7.1 provides `FileAuthorizationLedger`, `ExecutionAuthorization`, and `worstCaseUsage`
-  for durable cross-invocation reservation; Relay 0.7.1 provides `costUsd` and `modelSource` provenance.
-  Parent-supplied bounded evidence exercised concurrent plans sharing an authorization/root with one
-  allowed attempt: one succeeded, one exceeded budget, and one physical invocation occurred. Reopening
-  the ledger and repeating the successful invocation id raised `AuthorizationPersistenceError` in
-  recovery with `duplicateInvocationRisk: true`, without a second invocation; configured model
-  provenance stayed configured. That fake-runtime probe is not provider billing or native-runtime
-  proof. A further parent-supplied 0.7.1 probe found that raw `ModelInvocationResult.usage = {}`
-  settles Dispatch's reservation with `totalTokens: 0`; with room for two attempts and sufficient cost
-  capacity, the next invocation succeeds despite absent token accounting. Therefore neither a zero
-  token receipt nor `reservationState: "settled"` proves actual usage when raw source fields are missing.
-  The group must retain unknown usage and require complete actual input/output figures and cost.
-  A later adapter can refuse incomplete accounting in `AuthorizationLedger.settle` **before** forwarding
-  settlement, persisting the observed result for recovery; typed `AuthorizationPersistenceError`
-  prevents automatic reinvocation. The later executor should compose the public Dispatch physical
-  reservation with group accounting. Dependency upgrades and consumer qualification belong to the parent continuation.
+  attempt, including every underlying Dispatch fallback/retry and token/cost allocation. This v1
+  host callback does not itself compose physical execution or reconcile usage. The current checkout
+  pins Dispatch and Relay 0.7.1; the v2 execution bridge described below composes Dispatch reservation
+  with authority accounting and retains unknown usage conservatively.
+
+  Historical controlled-runtime probes of 0.7.1 established shared-authorization contention and
+  duplicate-invocation refusal after reopen. They also found that raw usage `{}` could settle a
+  Dispatch reservation as zero tokens. Those probes establish neither provider billing nor native
+  enforcement. A settled receipt alone therefore cannot establish complete actual usage; the current
+  bridge requires observed input/output figures and cost before reconciling known accounting.
 - `confirmEvidence(request, current)`: current invocation/loss, terminal, actual accounting or
   cancellation evidence, bound to the exact attempt and requested immutable references. A raw provider
   string, unverified receipt, estimated cost, or successful cancellation request is insufficient.
@@ -298,15 +289,17 @@ terminal accounting releases the active slot; actual spend remains charged. Conf
 its allocation is retained and closes further derivation, invocation admission and effect admission.
 Cancellation stops admission without claiming that existing invocations have terminated.
 
-This increment has source package entry points, but is not yet published or a complete enforcement service. It lacks
-Dispatch/group reservation composition, executable effect fencing, and production host authentication. `admitEffect` returns a checked observation, not a transferable
-capability or permission to bypass a host effect-time check. Real temporary-store tests establish
+These source package entry points are not yet published. The execution bridge and v2 group
+controller compose authority reservations, Dispatch and group records as described below.
+Production host authentication and executable effect fencing remain host responsibilities.
+`admitEffect` returns a checked observation, not a transferable capability or permission to bypass
+a host effect-time check. Real temporary-store tests establish
 reopen, allocation refusal, active-slot/unknown-usage holds, overrun retention, access refusal and persisted cancellation; they do not establish crash,
 power-loss, hostile-worker or live-provider enforcement.
 
 ## Authority-bound execution in progress
 
-The `delegation-execution` source entry point exports an `executeAuthorizedDelegation()` bridge selects the exact registered runtime/model
+The `delegation-execution` source entry point exports `executeAuthorizedDelegation()`, which selects the exact registered runtime/model
 receipts and checks required capabilities, tool names and native output-token limiting before
 reservation. It requires an explicit output limit within the allocation. Public Dispatch validation
 runs with an already-aborted signal and no runtime or ledger, so incompatible plans cannot consume
@@ -330,11 +323,14 @@ consumer is established by this controlled-runtime bridge test.
 
 ## Flow execution composition in progress
 
-The `delegation-flow-execution` source entry point exports an `orchestrateDelegationFlow()` wrapper binds unique seats to registered envelopes and
+The `delegation-flow-execution` source entry point exports `orchestrateDelegationFlow()`, which binds unique seats to registered envelopes and
 exact Flow run/step/definition identities. Flow supplies ready steps and claims; the wrapper awaits
 host lifecycle persistence and claim authentication before preparing or invoking a member. Invocation
-ids include the exact claim identity, preventing an interrupted claim from silently launching again.
-Member outcomes are retained through the host before the callback returns to Flow evaluation.
+ids include the exact claim identity, preventing duplicate reservation of that invocation identity.
+Recovery of an expired claim can produce a fresh claim id and therefore a different invocation id.
+The host must authenticate the current gate attempt and authorize recovery after an ambiguous
+launch; this standalone wrapper does not independently prevent another launch under a fresh claim.
+The v2 controller separately refuses repeated group runs. Member outcomes are retained through the host before the callback returns to Flow evaluation.
 
 This is not a second dependency scheduler or acceptance reducer. The host must use Flow's authorized
 evidence operations to submit results; a successful model call does not satisfy a gate by itself.

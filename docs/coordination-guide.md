@@ -453,8 +453,10 @@ Shipped across issues #287 (actor identity), #288 (liveness), #289 (branches), #
 
 ## Delegation group ledger
 
-The [delegation group contract and durable ledger](delegation-groups.md) add bounded read-only
-coordination records alongside assignment/liveness. Their strict host capability checks do not
-change this guide's assignment eligibility or publish fence. Group membership cannot authorize
-execution, advance Flow, or derive acceptance. The ledger is the first source increment of #1113;
-full execution, DAG scheduling, isolated writers and mailbox integration remain follow-up work.
+The [delegation group contracts and durable ledgers](delegation-groups.md) add coordination
+records alongside assignment/liveness. Current source also includes a v2 group controller,
+authority/Dispatch execution composition, Flow-owned scheduling and group mailbox admission.
+Their host capability checks do not change this guide's assignment eligibility or publish fence.
+Group membership alone cannot authorize execution, advance Flow or derive acceptance.
+Production host authentication, effect-time fencing, isolated writers and Station adoption remain
+open integration obligations for #1113; source composition does not establish their enforcement.
