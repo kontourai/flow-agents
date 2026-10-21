@@ -18,8 +18,8 @@ importers:
         specifier: 0.7.1
         version: 0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/bearing@0.2.0(playwright@1.61.0))(@kontourai/datum@0.8.0(playwright@1.61.0))
       '@kontourai/flow':
-        specifier: 5.2.2
-        version: 5.2.2
+        specifier: 5.2.0
+        version: 5.2.0
       '@kontourai/relay':
         specifier: 0.7.1
         version: 0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))
@@ -1158,8 +1158,8 @@ packages:
       '@kontourai/datum':
         optional: true
 
-  '@kontourai/flow@5.2.2':
-    resolution: {integrity: sha512-vqDE+OHhDVNxgW9//3gl3lZdCvqcnhw7p6aMY7URgQfOpzJ+UpBrM4B4z5yaZdNxSZS+jhrGyoZzS6mru4exVw==}
+  '@kontourai/flow@5.2.0':
+    resolution: {integrity: sha512-tJ/XFrcKaLPnvv/2EIX9Db1cLEsnS4vbHMjULcVQHKMGz1cMNbvj/i1IXJVD4YWZ2I/0a6skN//NWUrlKX7F+w==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -5496,7 +5496,7 @@ snapshots:
     transitivePeerDependencies:
       - '@anthropic-ai/sdk'
 
-  '@kontourai/flow@5.2.2':
+  '@kontourai/flow@5.2.0':
     dependencies:
       '@kontourai/surface': 2.14.0
       ajv: 8.20.0
