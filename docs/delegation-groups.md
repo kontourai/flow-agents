@@ -314,3 +314,19 @@ while retaining the accounting observation. An abort request or thrown runtime e
 termination or known zero spend. Durable retention, actual confinement, input/cost ceilings and native
 cancellation fidelity still require production host evidence. No installed group executor or Station
 consumer is established by this controlled-runtime bridge test.
+
+## Flow execution composition in progress
+
+The source-only `orchestrateDelegationFlow()` wrapper binds unique seats to registered envelopes and
+exact Flow run/step/definition identities. Flow supplies ready steps and claims; the wrapper awaits
+host lifecycle persistence and claim authentication before preparing or invoking a member. Invocation
+ids include the exact claim identity, preventing an interrupted claim from silently launching again.
+Member outcomes are retained through the host before the callback returns to Flow evaluation.
+
+This is not a second dependency scheduler or acceptance reducer. The host must use Flow's authorized
+evidence operations to submit results; a successful model call does not satisfy a gate by itself.
+The controlled-runtime fixture uses an optional expectation, so its completed run proves composition
+and lifecycle ordering, not a required gate accepting returned artifacts. A denied claim produces no
+authority invocation in that fixture. A host must still enforce assignment/source/worktree fences,
+actual tool effects, durable outputs and cancellation. Group records, mailbox authentication and the
+Station consumer are not yet connected to this wrapper.
