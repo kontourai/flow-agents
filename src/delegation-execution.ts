@@ -33,6 +33,23 @@ export async function executeAuthorizedDelegation(input: {
     || canonicalJson(selected.modelReceipt) !== canonicalJson(envelope.execution_binding.runtime.model_receipt_ref)) {
     throw new DelegationAdmissionError("runtime_receipt_mismatch");
   }
+  const capabilities = selected.runtime.capabilities();
+  if (!Number.isSafeInteger(input.request.maxOutputTokens) || input.request.maxOutputTokens! < 1
+    || input.request.maxOutputTokens! > input.allocation.outputTokens || capabilities.outputTokenLimitFidelity !== "native"
+    || !capabilities.abort || !capabilities.usage) {
+    throw new DelegationAdmissionError("runtime_bounds_unsupported");
+  }
+  const supported = new Set([
+    ...(capabilities.structuredTools ? ["tool-use", "structured-tools"] : []),
+    ...(capabilities.abort ? ["abort"] : []), ...(capabilities.usage ? ["usage"] : []),
+    ...(capabilities.streaming ? ["streaming"] : []),
+  ]);
+  const choice = input.request.toolChoice;
+  if (envelope.execution_binding.runtime.required_capabilities.some((name) => !supported.has(name))
+    || input.request.tools?.some((tool) => !envelope.execution_authority.allowed_tools.includes(tool.name))
+    || (choice?.type === "tool" && !input.request.tools?.some((tool) => tool.name === choice.name))) {
+    throw new DelegationAdmissionError("runtime_authority_unsupported");
+  }
   await input.service.reserveInvocation(input.authorityId, input.envelopeId, input.invocationId, input.allocation);
   let observed: ModelInvocationResult | undefined;
   const runtime: ModelRuntime = {

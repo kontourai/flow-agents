@@ -533,7 +533,7 @@ test("authorized execution binds selected runtime, reserves before launch and re
     const { root, parent, child } = edgeFixture();
     await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child);
     let calls = 0, retained = null;
-    const runtime = { id: 'selected-runtime', capabilities: () => ({ structuredTools: false, streaming: false, abort: true, usage: true }),
+    const runtime = { id: 'selected-runtime', capabilities: () => ({ structuredTools: true, outputTokenLimitFidelity: 'native', streaming: false, abort: true, usage: true }),
       async invoke() { calls++; return { provider: 'fixture', model: 'configured', outputText: 'child report', toolCalls: [], usage: { inputTokens: 2, outputTokens: 3, costUsd: 0.000004 }, latencyMs: 1 }; } };
     const host = {
       resolveRuntime: async () => ({ runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }),
@@ -545,10 +545,14 @@ test("authorized execution binds selected runtime, reserves before launch and re
       async retainResult(result) { retained = result.outputText; },
     };
     const input = { service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(rootPath, 'dispatch') }), authorityId: root.authority_id,
-      envelopeId: child.envelope_id, invocationId: 'first', effect: 'write', request: { messages: [{ role: 'user', content: 'work' }] },
+      envelopeId: child.envelope_id, invocationId: 'first', effect: 'write', request: { maxOutputTokens: 5, messages: [{ role: 'user', content: 'work' }] },
       allocation: { inputTokens: 5, outputTokens: 5, costMicros: 10 } };
     const mismatchHost = { ...host, resolveRuntime: async () => ({ runtime, runtimeReceipt: ref('wrong-runtime'), modelReceipt: child.execution_binding.runtime.model_receipt_ref }) };
     await assert.rejects(executeAuthorizedDelegation({ ...input, host: mismatchHost }), /runtime_receipt_mismatch/);
+    assert.equal(calls, 0);
+    assert.equal((await service.inspect(root.authority_id)).invocations.length, 0);
+    await assert.rejects(executeAuthorizedDelegation({ ...input, request: { ...input.request, maxOutputTokens: 6 } }), /runtime_bounds_unsupported/);
+    await assert.rejects(executeAuthorizedDelegation({ ...input, request: { ...input.request, tools: [{ name: 'undeclared', inputSchema: {} }] } }), /runtime_authority_unsupported/);
     assert.equal(calls, 0);
     assert.equal((await service.inspect(root.authority_id)).invocations.length, 0);
     assert.equal((await executeAuthorizedDelegation(input)).outcome, 'succeeded');
