@@ -1,17 +1,23 @@
 import { canonicalJson } from "@kontourai/relay";
 import {
   validateRootAuthorityV2, rootAuthorityDigestV2, delegationIdV2,
-  type RootAuthorityV2, type DelegationBudgetV2,
+  delegationIntegerV2, type RootAuthorityV2, type DelegationBudgetV2,
 } from "./delegation-authority-contract.js";
 import {
   validateDelegationAncestryV2, validateDelegationEnvelopeV2, delegationEnvelopeDigestV2,
   type DelegationEnvelopeV2,
 } from "./delegation-envelope-v2.js";
 
+export type DelegationInvocationAmounts = { inputTokens: number; outputTokens: number; costMicros: number };
+export type DelegationInvocation = {
+  invocationId: string; envelopeId: string; allocation: DelegationInvocationAmounts;
+  usage: DelegationInvocationAmounts | null; terminal: boolean;
+};
 export interface DelegationAuthorityLedger {
   root: RootAuthorityV2;
   envelopes: DelegationEnvelopeV2[];
   cancelled: boolean;
+  invocations: DelegationInvocation[];
 }
 /** Host-protected storage: serialized callback and durable commit precede return. */
 export interface DelegationAuthorityStore {
@@ -22,8 +28,9 @@ export interface DelegationAuthorityStore {
 /** Authenticated host boundary; no caller-supplied reference authenticates itself. */
 export interface DelegationAuthorityHost {
   now(): string;
-  authorize(action: "issue" | "derive" | "inspect" | "cancel" | "effect", root: RootAuthorityV2, envelope: DelegationEnvelopeV2 | null): Promise<boolean>;
+  authorize(action: "issue" | "derive" | "inspect" | "cancel" | "effect" | "reserve" | "reconcile", root: RootAuthorityV2, envelope: DelegationEnvelopeV2 | null): Promise<boolean>;
   /** Confirms exact grant runtime/source/assignment and current revocation, not merely existence. */
+  confirmReconciliation?(invocation: DelegationInvocation, root: RootAuthorityV2): Promise<boolean>;
   confirmExecution(envelope: DelegationEnvelopeV2, root: RootAuthorityV2): Promise<boolean>;
 }
 export class DelegationAdmissionError extends Error {
@@ -51,6 +58,12 @@ function remaining(ledger: DelegationAuthorityLedger, envelope: DelegationEnvelo
     const allocated = children.reduce((sum, child) => sum + child.budget[key], 0);
     requireAdmission(Number.isSafeInteger(allocated) && allocated <= budget[key], "aggregate_allocation_exhausted");
     budget[key] -= allocated;
+    const own = ledger.invocations.filter((i) => i.envelopeId === envelope.envelope_id);
+    const field = { max_input_tokens: "inputTokens", max_output_tokens: "outputTokens", max_cost_micros: "costMicros" } as const;
+    const consumed = key === "max_attempts" ? own.length : key === "max_total_envelopes" ? 0
+      : own.reduce((sum, invocation) => sum + (invocation.usage ?? invocation.allocation)[field[key]], 0);
+    requireAdmission(Number.isSafeInteger(consumed) && consumed <= budget[key], "invocation_budget_exhausted");
+    budget[key] -= consumed;
   }
   // The node itself always occupies one lifetime envelope slot.
   requireAdmission(budget.max_total_envelopes >= 1, "aggregate_envelope_exhausted");
@@ -63,7 +76,21 @@ export function validateDelegationAuthorityLedger(value: DelegationAuthorityLedg
   requireAdmission(typeof value.cancelled === "boolean" && Array.isArray(value.envelopes)
     && value.envelopes.length <= root.budget.max_total_envelopes, "invalid_authority_ledger");
   const envelopes = value.envelopes.map(validateDelegationEnvelopeV2);
-  const ledger = { root, envelopes, cancelled: value.cancelled };
+  requireAdmission(Array.isArray(value.invocations) && value.invocations.length <= 4096, "invocation_bound");
+  const invocations = structuredClone(value.invocations);
+  for (const invocation of invocations) {
+    delegationIdV2(invocation.invocationId); delegationIdV2(invocation.envelopeId);
+    requireAdmission(envelopes.some((e) => e.envelope_id === invocation.envelopeId) && typeof invocation.terminal === "boolean", "invalid_invocation");
+    for (const amounts of [invocation.allocation, ...(invocation.usage ? [invocation.usage] : [])]) {
+      for (const key of ["inputTokens", "outputTokens", "costMicros"] as const) delegationIntegerV2(amounts[key]);
+    }
+    requireAdmission(!invocation.usage || invocation.terminal, "accounting_requires_terminal");
+    if (invocation.usage) for (const key of ["inputTokens", "outputTokens", "costMicros"] as const) {
+      requireAdmission(invocation.usage[key] <= invocation.allocation[key], "usage_exceeds_reserved_capacity");
+    }
+  }
+  requireAdmission(new Set(invocations.map((i) => i.invocationId)).size === invocations.length, "duplicate_invocation");
+  const ledger = { root, envelopes, cancelled: value.cancelled, invocations };
   for (const key of ["envelope_id", "execution_id", "span_id"] as const) {
     requireAdmission(new Set(envelopes.map((e) => e[key])).size === envelopes.length, "duplicate_execution_identity");
   }
@@ -84,7 +111,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
     async issue(rootValue: unknown): Promise<string> {
       const root = validateRootAuthorityV2(rootValue);
       return store.transact(root.authority_id, async (current) => {
-        const ledger = current ? validateDelegationAuthorityLedger(current) : { root, envelopes: [], cancelled: false };
+        const ledger = current ? validateDelegationAuthorityLedger(current) : { root, envelopes: [], cancelled: false, invocations: [] };
         await authorized("issue", ledger, null);
         requireAdmission(same(root, ledger.root), "authority_identity_conflict");
         requireAdmission(!ledger.cancelled && host.now() < root.budget.expires_at, "authority_inactive");
@@ -108,6 +135,50 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
         // Recheck expiry after asynchronous host admission, before durable publication.
         ancestry(ledger, child, host.now());
         return { ledger, result: structuredClone(child) };
+      });
+    },
+    async reserveInvocation(authorityId: string, envelopeId: string, invocationId: string, allocation: DelegationInvocationAmounts): Promise<DelegationInvocation> {
+      delegationIdV2(authorityId); delegationIdV2(envelopeId); delegationIdV2(invocationId);
+      return store.transact(authorityId, async (current) => {
+        requireAdmission(current, "authority_missing");
+        const ledger = validateDelegationAuthorityLedger(current);
+        const envelope = ledger.envelopes.find((e) => e.envelope_id === envelopeId);
+        requireAdmission(envelope, "envelope_missing");
+        await authorized("reserve", ledger, envelope);
+        requireAdmission(!ledger.cancelled, "authority_cancelled");
+        const chain = ancestry(ledger, envelope, host.now());
+        requireAdmission(!ledger.invocations.some((i) => i.invocationId === invocationId), "invocation_already_reserved");
+        requireAdmission(await host.confirmExecution(structuredClone(envelope), structuredClone(ledger.root)), "execution_binding_unconfirmed");
+        for (const ancestor of chain) {
+          const active = ledger.invocations.filter((i) => !i.terminal || i.usage === null).filter((i) => {
+            const member = ledger.envelopes.find((e) => e.envelope_id === i.envelopeId)!;
+            return ancestry(ledger, member, host.now()).some((e) => e.envelope_id === ancestor.envelope_id);
+          });
+          requireAdmission(active.length < ancestor.budget.max_concurrent_children, "active_slot_exhausted");
+        }
+        const invocation: DelegationInvocation = { invocationId, envelopeId, allocation: structuredClone(allocation), usage: null, terminal: false };
+        ledger.invocations.push(invocation);
+        validateDelegationAuthorityLedger(ledger);
+        ancestry(ledger, envelope, host.now());
+        return { ledger, result: structuredClone(invocation) };
+      });
+    },
+    async reconcileInvocation(authorityId: string, invocationId: string, usage: DelegationInvocationAmounts | null, terminal: boolean): Promise<void> {
+      delegationIdV2(authorityId); delegationIdV2(invocationId);
+      return store.transact(authorityId, async (current) => {
+        requireAdmission(current, "authority_missing");
+        const ledger = validateDelegationAuthorityLedger(current);
+        const invocation = ledger.invocations.find((i) => i.invocationId === invocationId);
+        requireAdmission(invocation, "invocation_missing");
+        const envelope = ledger.envelopes.find((e) => e.envelope_id === invocation.envelopeId)!;
+        await authorized("reconcile", ledger, envelope);
+        requireAdmission(!invocation.terminal || terminal, "terminal_reversal");
+        requireAdmission(!invocation.usage || same(invocation.usage, usage), "accounting_conflict");
+        const observed = { ...invocation, usage: usage && structuredClone(usage), terminal };
+        requireAdmission(await host.confirmReconciliation?.(structuredClone(observed), structuredClone(ledger.root)), "reconciliation_unconfirmed");
+        Object.assign(invocation, observed);
+        validateDelegationAuthorityLedger(ledger);
+        return { ledger, result: undefined };
       });
     },
     async cancel(authorityId: string): Promise<void> {

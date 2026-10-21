@@ -69,6 +69,15 @@ export function createLocalFileDelegationAuthorityStore(artifactRoot: string): D
           || ledger.envelopes.length < previous.envelopes.length
           || canonicalJson(ledger.envelopes.slice(0, previous.envelopes.length)) !== canonicalJson(previous.envelopes)
         ))) throw new DelegationAdmissionError("immutable_authority_required");
+        if (previous) {
+          for (const old of previous.invocations) {
+            const current = ledger.invocations.find((i) => i.invocationId === old.invocationId);
+            if (!current || current.envelopeId !== old.envelopeId || canonicalJson(current.allocation) !== canonicalJson(old.allocation)
+              || (old.terminal && !current.terminal) || (old.usage && canonicalJson(old.usage) !== canonicalJson(current.usage))) {
+              throw new DelegationAdmissionError("immutable_invocation_required");
+            }
+          }
+        }
         const identities = new Set(ledger.envelopes.map((e) => e.execution_id));
         for (const entry of fs.readdirSync(storage)) {
           const otherFile = path.join(storage, entry);

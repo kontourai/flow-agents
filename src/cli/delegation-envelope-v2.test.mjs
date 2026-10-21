@@ -456,11 +456,12 @@ test("authority service registers exact ancestry and partitions sibling allocati
   const path = await import('node:path');
   const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-authority-service-'));
   let allowed = true;
-  const host = { now: () => NOW, authorize: async () => allowed, confirmExecution: async () => allowed };
+  const host = { now: () => NOW, authorize: async () => allowed, confirmExecution: async () => allowed, confirmReconciliation: async () => allowed };
   const open = () => createDelegationAuthorityService(createLocalFileDelegationAuthorityStore(rootPath), host);
   const service = open();
   try {
   const { root, parent, child } = edgeFixture();
+  child.budget.max_concurrent_children = 1;
   await service.issue(root);
   await service.derive(root.authority_id, parent);
   await service.derive(root.authority_id, child);
@@ -470,6 +471,14 @@ test("authority service registers exact ancestry and partitions sibling allocati
   assert.equal((await service.inspect(root.authority_id)).envelopes.length, 2);
   await open().derive(root.authority_id, child);
   assert.equal((await open().inspect(root.authority_id)).envelopes.length, 2);
+  const allocation = { inputTokens: 5, outputTokens: 5, costMicros: 10 };
+  await service.reserveInvocation(root.authority_id, child.envelope_id, 'invoke-one', allocation);
+  await assert.rejects(open().reserveInvocation(root.authority_id, child.envelope_id, 'invoke-one', allocation), /invocation_already_reserved/);
+  await assert.rejects(open().reserveInvocation(root.authority_id, child.envelope_id, 'invoke-two', allocation), /active_slot_exhausted/);
+  await open().reconcileInvocation(root.authority_id, 'invoke-one', null, true);
+  await assert.rejects(open().reserveInvocation(root.authority_id, child.envelope_id, 'invoke-two', allocation), /active_slot_exhausted/);
+  await open().reconcileInvocation(root.authority_id, 'invoke-one', { inputTokens: 2, outputTokens: 3, costMicros: 4 }, true);
+  await open().reserveInvocation(root.authority_id, child.envelope_id, 'invoke-two', allocation);
   allowed = false;
   await assert.rejects(service.derive(root.authority_id, child), /host_authorization_refused/);
   await assert.rejects(service.inspect(root.authority_id), /host_authorization_refused/);
