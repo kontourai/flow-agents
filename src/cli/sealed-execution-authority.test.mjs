@@ -342,10 +342,13 @@ for (const [label, marker] of [
   await withFixtureCaller(async () => {
     const replacement = "this-is-untrusted-B-and-must-never-execute\n";
     const projection = JSON.stringify({ schema_version: "1.0", kind: "flow-agents.sealed-result.v1", outcome: "ok", metrics: { staged_a: true }, artifacts: [], policy_chain: [] });
-    const fixture = await sealedCoordinatorFixture({ runtimeBytes: fs.readFileSync(process.execPath), controllerScript: `process.stdout.write(${JSON.stringify(`${projection}\n`)});`, instrumentSource: (source) => source.replace(marker, `${marker}\n  { const replacement = \`${"${source.path}"}.sealed-test-b\`; fs.writeFileSync(replacement, ${JSON.stringify(replacement)}); fs.renameSync(replacement, source.path); }`) });
+    // A script avoids cold Node startup and macOS restrictions on copied platform binaries.
+    const fixture = await sealedCoordinatorFixture({ runtimeBytes: Buffer.from('#!/bin/sh\n. "$1"\n'), controllerScript: `printf '%s\\n' '${projection}'\n`, instrumentSource: (source) => source.replace(marker, `${marker}\n  { const replacement = \`${"${source.path}"}.sealed-test-b\`; fs.writeFileSync(replacement, ${JSON.stringify(replacement)}); fs.renameSync(replacement, source.path); }`) });
     const result = await fixture.invoke(`swap-${label}`, fixture.signAuthorization(`swap-${label}`, `swap-${label}-nonce`));
     assert.equal(result.result.safe_result.status, "ok", "the descriptor-read A closure remains executable after its source pathname changes");
+    assert.deepEqual(result.result.safe_result.projection, JSON.parse(projection), "the staged A controller produces its authorized result");
     assert.deepEqual(fs.readdirSync(path.join(fixture.state, "stages")), []);
+    assert.deepEqual(fs.readdirSync(fixture.execution), [], "the protected executable stage is removed");
   });
 });
 
