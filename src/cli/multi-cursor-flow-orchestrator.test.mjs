@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { inspect } from "node:util";
 
 import { claimReadyStep, loadRun, releaseStepClaim, startRun } from "@kontourai/flow";
 import {
@@ -837,6 +838,11 @@ test("a capped resource conflict does not hide the remaining disjoint Flow front
   assert.deepEqual((await loadRun(runId, cwd)).state.multi_cursor.active_claims, [foreign.claim]);
 });
 
+// A bounded 1.1s scheduling stall exhausts a 1s lease before renewal can run.
+// Budget for that stall plus durable Flow I/O. These tests still cross the real
+// lease boundary, with the same five-second observation deadline.
+const observerLeaseSeconds = 3;
+
 for (const outcome of ["success", "callback-error", "cancel", "observer-error"]) {
   test(`pending renewal observation keeps the returned callback's claim live through ${outcome}`, async (t) => {
     const input = await schedulerFixture(`returned-callback-${outcome}`);
@@ -852,7 +858,7 @@ for (const outcome of ["success", "callback-error", "cancel", "observer-error"])
     let checkpoint;
     let firstRenewal = true;
     const completed = await orchestrateFlowMultiCursor({
-      ...input, signal: controller.signal, renewalIntervalMs: 100, leaseSeconds: 1,
+      ...input, signal: controller.signal, renewalIntervalMs: 100, leaseSeconds: observerLeaseSeconds,
       onEvent: async ({ kind }) => {
         if (["settled", "released"].includes(kind)) {
           assert.ok(observerFinished, "Flow consumption waits for the pending observer");
@@ -908,6 +914,7 @@ for (const outcome of ["success", "callback-error", "cancel", "observer-error"])
       activeClaims: run.state.multi_cursor.active_claims.length, gateOutcomes: run.state.gate_outcomes.length,
       errors: completed.error ? String(completed.error.cause) : null,
     }));
+    if (checkpointError) t.diagnostic(inspect(completed.error, { depth: null }));
     assert.ifError(checkpointError);
     assert.ok(checkpoint);
     assert.deepEqual(getEventListeners(controller.signal, "abort"), []);
@@ -927,7 +934,7 @@ for (const outcome of ["success", "callback-error", "cancel", "observer-error"])
   });
 }
 
-test("an unsettled Flow claim renews through settlement observation before exact release", async () => {
+test("an unsettled Flow claim renews through settlement observation before exact release", async (t) => {
   const cwd = workspace();
   const runId = "wait-gate-observer";
   const file = writeDisjointDefinition(cwd, 1);
@@ -936,33 +943,55 @@ test("an unsettled Flow claim renews through settlement observation before exact
   fs.writeFileSync(file, JSON.stringify(definition));
   await startRun(file, { cwd, runId, params: { subject: "flow-agents#1113" } });
   const input = { cwd, runId, actor: { key: "scheduler-host", kind: "test" }, identityFactory: identity };
-  let observedWait = false;
+  let originalClaim;
+  let checkpoint;
+  let observerFinished = false;
+  let renewalsAtEntry;
+  let observerExpiry;
   const observation = await orchestrateFlowMultiCursor({
-    ...input, leaseSeconds: 1, renewalIntervalMs: 100,
-    execute: async () => {},
+    ...input, leaseSeconds: observerLeaseSeconds, renewalIntervalMs: 100,
+    execute: async ({ claim }) => { originalClaim = claim; },
     onEvent: async (event) => {
+      if (event.kind === "released") {
+        assert.ok(observerFinished, "exact release waits for settlement observation");
+      }
       if (event.kind !== "settled") return;
       assert.equal(event.settled, false, "Flow's empty gate remains authoritative");
       const before = await loadRun(runId, cwd);
-      const expiry = Date.parse(before.state.multi_cursor.active_claims[0].expires_at);
+      observerExpiry = Date.parse(before.state.multi_cursor.active_claims[0].expires_at);
+      renewalsAtEntry = before.state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
       const deadline = Date.now() + 5_000;
       do {
         const run = await loadRun(runId, cwd);
         const claim = run.state.multi_cursor.active_claims[0];
-        if (claim && Date.parse(claim.renewed_at) >= expiry) {
-          observedWait = true;
+        const renewals = run.state.multi_cursor.claim_history.filter(({ action, claim_id }) => action === "renewed" && claim_id === originalClaim.claim_id);
+        if (claim && Date.parse(claim.renewed_at) >= observerExpiry && renewals.length >= renewalsAtEntry + 2) {
+          assert.equal(claim.claim_id, originalClaim.claim_id);
+          assert.equal(claim.liveness_id, originalClaim.liveness_id);
+          assert.ok(Date.parse(claim.renewed_at) >= Date.parse(originalClaim.expires_at), "real renewal crosses the initial lease boundary");
+          assert.deepEqual(run.state.gate_outcomes, [], "the waiting Flow gate remains unconsumed");
+          assert.equal(run.state.multi_cursor.claim_history.some(({ action }) => ["released", "settled", "expired"].includes(action)), false);
+          checkpoint = { renewedAt: claim.renewed_at, renewals: renewals.length };
           break;
         }
-        await delay(10);
+        await delay(50);
       } while (Date.now() < deadline);
-      assert.ok(observedWait, "renewal continues after Flow evaluation until exact release");
+      assert.ok(checkpoint, "renewal continues after Flow evaluation until exact release");
+      observerFinished = true;
     },
+  }).catch((error) => {
+    t.diagnostic(inspect(error, { depth: null }));
+    throw error;
   });
-  assert.ok(observedWait);
+  assert.ok(checkpoint);
   assert.deepEqual(observation.unsettledSteps, ["step-0"]);
   const run = await loadRun(runId, cwd);
   assertUnusedClaimsReleased(run, 1);
-  assert.ok(run.state.multi_cursor.claim_history.some(({ action, reason }) => action === "released" && reason === "gate-not-settled"));
+  const released = run.state.multi_cursor.claim_history.filter(({ action }) => action === "released");
+  assert.equal(released[0].claim_id, originalClaim.claim_id);
+  assert.equal(released[0].reason, "gate-not-settled");
+  assert.ok(Date.parse(released[0].at) >= Date.parse(checkpoint.renewedAt));
+  t.diagnostic(JSON.stringify({ originalExpiry: originalClaim.expires_at, observerExpiry, renewalsAtEntry, checkpoint, releasedAt: released[0].at }));
 });
 
 test("a still-ready claim under an amended definition is released before host dispatch", async () => {
