@@ -9,8 +9,22 @@ export interface DelegationGroupMailboxHost {
   /** Trusted current UTC timestamp, sampled under the fence after asynchronous live resolution. */
   now(): string;
   authenticateCaller(caller: MailboxIdentity): Promise<boolean>;
-  /** Holds the host's current membership/cancellation fence throughout the read checks. */
+  /**
+   * Serializes membership, controller custody and group/authority cancellation with
+   * these checks. The host must also fence the subsequent mailbox read/commit;
+   * this callback alone ends before the mailbox store uses the returned decision.
+   */
   withMembershipFence<T>(groupId: string, body: () => Promise<T>): Promise<T>;
+  /**
+   * Resolves the authenticated live controller's own assignment and all nine exact
+   * identity fields for this group/controller generation, independently of seats.
+   * Controller ids and actor keys are distinct opaque host identities.
+   * Must remain available for cleanup after group/authority cancellation or expiry.
+   */
+  resolveLiveController(spec: DelegationGroupSpecV2): Promise<{
+    identity: MailboxIdentity;
+    controller: DelegationGroupSpecV2["controller"];
+  } | null>;
   /** Resolves actual assignment/liveness, never infers a member from a session or correlation id. */
   resolveLiveMember(spec: DelegationGroupSpecV2, seat: DelegationGroupSeatV2): Promise<{
     identity: MailboxIdentity;
@@ -28,13 +42,23 @@ export function createDelegationGroupMailboxValidator(input: {
     if (!await input.host.authenticateCaller(structuredClone(caller))) return { status: "refused" };
     return input.host.withMembershipFence(caller.groupId, async () => {
       const group = await input.controller.get(caller.groupId);
-      if (group.cancellation !== "none" || group.terminal === "proven") return { status: "refused" };
+      if (caller.groupId !== group.spec.groupId || caller.controllerGeneration !== group.spec.controller.generation || group.terminal === "proven") return { status: "refused" };
       const authority = await input.authority.inspect(group.spec.rootAuthorityRef.id);
-      if (authority.cancelled || canonicalJson(rootAuthorityReferenceV2(authority.root)) !== canonicalJson(group.spec.rootAuthorityRef)) return { status: "refused" };
+      if (canonicalJson(rootAuthorityReferenceV2(authority.root)) !== canonicalJson(group.spec.rootAuthorityRef)) return { status: "refused" };
+      if (action === "cancel") {
+        // Cleanup revokes mailbox access; it grants no execution authority and must
+        // still fence an offline journal after group/authority cancellation or expiry.
+        if (message || caller.groupId !== group.spec.groupId || caller.actorKey !== caller.controllerActorKey) return { status: "refused" };
+        const live = await input.host.resolveLiveController(structuredClone(group.spec));
+        if (!live || canonicalJson(live.controller) !== canonicalJson(group.spec.controller)
+          || !sameMailboxIdentity(live.identity, caller)) return { status: "refused" };
+        return { status: "current" };
+      }
+      if (group.cancellation !== "none" || authority.cancelled) return { status: "refused" };
       const chains: DelegationEnvelopeV2[][] = [];
       const participants = [caller, ...(message ? [message.sender, message.recipient] : [])];
       for (const participant of participants) {
-        if (participant.groupId !== group.spec.groupId) return { status: "refused" };
+        if (participant.groupId !== group.spec.groupId || participant.controllerGeneration !== group.spec.controller.generation) return { status: "refused" };
         const seat = group.spec.seats.find((s) => s.seatId === participant.memberId);
         if (!seat) return { status: "refused" };
         const live = await input.host.resolveLiveMember(structuredClone(group.spec), structuredClone(seat));
@@ -61,7 +85,6 @@ export function createDelegationGroupMailboxValidator(input: {
         if (error instanceof DelegationContractV2Error) return { status: "refused" };
         throw error;
       }
-      if (action === "cancel" && caller.actorKey !== caller.controllerActorKey) return { status: "refused" };
       return { status: "current" };
     });
   };

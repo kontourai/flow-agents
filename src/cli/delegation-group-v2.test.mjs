@@ -423,24 +423,35 @@ test("returned and cancelled groups require authenticated terminal/accounting pr
   }
   assert.equal(proofs, 2); assert.equal((await reconciler.recordTerminal(last)).replayed, true); assert.equal(proofs, 2);
   assert.equal((await f.open().get("group")).terminal, "proven"); assert.equal(f.state.calls, 2);
+  const m = await mailboxFixture(t, { groupFixture: f });
+  assert.equal((await m.mailbox.inbox(m.first)).status, 'refused');
+  m.mailboxState.authenticated = m.controllerIdentity.actorKey;
+  assert.equal((await m.mailbox.cancel(m.controllerIdentity)).status, 'refused');
 });
 
 async function mailboxFixture(t, options = {}) {
   const { createDelegationGroupMailboxValidator } = await import('../../build/src/delegation-group-mailbox.js');
   const { createLocalFileDelegationMailbox } = await import('../../build/src/delegation-mailbox-local-file.js');
   const { createMailboxMessage } = await import('../../build/src/delegation-mailbox.js');
-  const f = await fixture(t, options);
-  const identity = seat => ({ groupId: 'group', groupGeneration: 1, controllerActorKey: 'host-controller', controllerGeneration: 3,
+  const f = options.groupFixture ?? await fixture(t, options);
+  const identity = seat => ({ groupId: 'group', groupGeneration: 1, controllerActorKey: 'actor/controller:exact', controllerGeneration: 3,
     memberId: seat.seatId, memberGeneration: seat.envelope.generation, assignmentId: `assignment-${seat.seatId}`, assignmentGeneration: 1, actorKey: `actor-${seat.seatId}` });
   const first = identity(f.spec.seats[0]), second = identity(f.spec.seats[1]);
   const live = new Map(f.spec.seats.map(seat => [seat.seatId, identity(seat)]));
-  const state = { authenticated: first.actorKey, now: NOW, fenced: false, lookups: 0 };
+  const controllerIdentity = { ...first, memberId: 'controller-member', memberGeneration: 7,
+    assignmentId: 'controller-assignment', assignmentGeneration: 2, actorKey: first.controllerActorKey };
+  const state = { authenticated: first.actorKey, now: NOW, fenced: false, lookups: 0,
+    liveController: { identity: structuredClone(controllerIdentity), controller: structuredClone(f.spec.controller) } };
   const host = {
     now: () => { assert.equal(state.fenced, true); return state.now; },
     authenticateCaller: async caller => caller.actorKey === state.authenticated,
     withMembershipFence: async (_id, body) => {
       assert.equal(state.fenced, false); state.fenced = true;
       try { return await body(); } finally { state.fenced = false; }
+    },
+    resolveLiveController: async () => {
+      assert.equal(state.fenced, true);
+      return structuredClone(state.liveController);
     },
     resolveLiveMember: async (spec, seat) => {
       assert.equal(state.fenced, true); state.lookups++;
@@ -452,18 +463,27 @@ async function mailboxFixture(t, options = {}) {
   const message = createMailboxMessage({ schemaVersion: '1.0', messageId: 'message', operationId: 'operation', exchangeId: 'exchange', subjectId: 'flow-agents#1113', resourceScope: ['src/task.ts'],
     sender: first, recipient: second, correlation: { status: 'incomplete', reason: 'controlled host' }, kind: 'dependency_question', inReplyTo: null,
     createdAt: NOW, expiresAt: '2026-10-21T12:30:00.000Z', payload: { summary: 'Can you review?', evidenceRefs: [], outputRefs: [] } });
-  return { ...f, mailbox, validateHost, host, first, second, live, message, mailboxState: state };
+  return { ...f, mailbox, validateHost, host, first, second, controllerIdentity, live, message, mailboxState: state };
 }
 
 test('mailbox validator binds current group seats and both live assignments before delivery', async t => {
   const f = await mailboxFixture(t), { mailbox, first, second, live, message, mailboxState: state } = f;
   assert.equal((await mailbox.enqueue(message, first)).status, 'ok');
-  live.set(second.memberId, { ...second, assignmentGeneration: 2 });
-  assert.equal((await mailbox.deliver(message.operationId, first)).status, 'refused');
-  live.set(second.memberId, second);
+  for (const participant of [first, second]) {
+    for (const key of Object.keys(participant)) {
+      const changed = typeof participant[key] === 'number' ? participant[key] + 1 : `${participant[key]}-stale`;
+      live.set(participant.memberId, { ...participant, [key]: changed });
+      assert.equal((await mailbox.deliver(message.operationId, first)).status, 'refused', `${participant.memberId}/${key}`);
+    }
+    live.set(participant.memberId, participant);
+  }
   assert.equal((await mailbox.deliver(message.operationId, first)).status, 'ok');
   state.authenticated = second.actorKey;
   assert.equal((await mailbox.inbox(second)).value.length, 1);
+  live.set(first.memberId, { ...first, assignmentGeneration: 2 });
+  assert.equal((await mailbox.inbox(second)).status, 'refused');
+  live.set(first.memberId, first);
+  assert.equal((await mailbox.acknowledge(message.operationId, second)).status, 'ok');
   await f.controller.cancel(f.command('cancel', 1));
   assert.equal((await mailbox.inbox(second)).status, 'refused');
   assert.equal(f.state.calls, 0);
@@ -488,4 +508,93 @@ for (const boundary of ['root', 'child']) test(`mailbox refuses ${boundary} expi
   assert.equal((await mailbox.inbox(second)).status, 'refused');
   assert.equal((await mailbox.acknowledge(message.operationId, second)).status, 'refused');
   assert.equal(f.state.calls, 0);
+});
+
+for (const cancellation of ['none', 'pending', 'requested', 'authority', 'expired']) test(`mailbox controller can fence its journal with group cancellation ${cancellation}`, async t => {
+  const f = await mailboxFixture(t, { rootExpiry: '2026-10-21T12:10:00.000Z' });
+  const { mailbox, message, first, second, controllerIdentity, mailboxState: state } = f;
+  assert.equal(f.spec.seats.some(seat => seat.seatId === controllerIdentity.memberId), false);
+  assert.equal((await mailbox.enqueue(message, first)).status, 'ok');
+  assert.equal((await mailbox.deliver(message.operationId, first)).status, 'ok');
+  if (cancellation === 'pending') {
+    const c = f.open({ async requestDescendantCancellation() { throw new Error('offline descendants'); } });
+    await assert.rejects(c.cancel(f.command('cancel', 1)), /offline descendants/);
+    assert.equal((await f.controller.get('group')).cancellation, 'pending');
+  } else if (cancellation === 'requested') await f.controller.cancel(f.command('cancel', 1));
+  else if (cancellation === 'authority') await f.service.cancel('root');
+  else if (cancellation === 'expired') state.now = '2026-10-21T12:10:00.000Z';
+  if (cancellation !== 'none') {
+    assert.equal((await mailbox.deliver(message.operationId, first)).status, 'refused');
+    state.authenticated = second.actorKey;
+    assert.equal((await mailbox.inbox(second)).status, 'refused');
+  }
+  const lookups = state.lookups;
+  state.authenticated = controllerIdentity.actorKey;
+  assert.equal((await mailbox.cancel(controllerIdentity)).status, 'ok');
+  assert.equal((await mailbox.cancel(controllerIdentity)).status, 'ok');
+  assert.equal(state.lookups, lookups, 'controller cleanup never resolves a worker seat');
+  // An offline journal consumer still sees the durable mailbox fence.
+  const { createLocalFileDelegationMailbox } = await import('../../build/src/delegation-mailbox-local-file.js');
+  const offline = createLocalFileDelegationMailbox({ artifactRoot: f.cwd, now: () => NOW, validateHost: async () => ({ status: 'current' }) });
+  assert.deepEqual(await offline.inbox(second), { status: 'refused', code: 'inactive' });
+  assert.deepEqual(await offline.deliver(message.operationId, first), { status: 'refused', code: 'inactive' });
+  state.authenticated = first.actorKey;
+  assert.equal((await mailbox.enqueue(message, first)).status, 'refused');
+  assert.equal(f.state.calls, 0);
+});
+
+test('mailbox controller cleanup rejects spoofed workers and stale exact controller identities', async t => {
+  const f = await mailboxFixture(t), { mailbox, controllerIdentity, first, mailboxState: state } = f;
+  assert.equal((await mailbox.cancel(first)).status, 'refused');
+  // Copying the controller's actor string cannot authenticate the actual worker caller.
+  assert.equal((await mailbox.cancel(controllerIdentity)).status, 'refused');
+  state.authenticated = controllerIdentity.actorKey;
+  assert.equal((await mailbox.cancel({ ...first, actorKey: controllerIdentity.actorKey })).status, 'refused');
+  const exact = structuredClone(state.liveController);
+  for (const key of Object.keys(controllerIdentity)) {
+    state.liveController = structuredClone(exact);
+    state.liveController.identity[key] = typeof controllerIdentity[key] === 'number' ? controllerIdentity[key] + 1 : `${controllerIdentity[key]}-stale`;
+    assert.equal((await mailbox.cancel(controllerIdentity)).status, 'refused', key);
+  }
+  state.liveController = { ...structuredClone(exact), controller: { ...f.spec.controller, generation: 4 } };
+  assert.equal((await mailbox.cancel(controllerIdentity)).status, 'refused');
+  state.liveController = { ...structuredClone(exact), controller: { ...f.spec.controller, id: 'another-controller' } };
+  assert.equal((await mailbox.cancel(controllerIdentity)).status, 'refused');
+  state.liveController = null;
+  assert.equal((await mailbox.cancel(controllerIdentity)).status, 'refused');
+  state.liveController = exact;
+  const wrongGeneration = { ...controllerIdentity, controllerGeneration: 4 };
+  state.liveController = { ...structuredClone(exact), identity: wrongGeneration };
+  assert.equal((await mailbox.cancel(wrongGeneration)).status, 'refused');
+  state.liveController = exact;
+  // Even a host-authenticated worker-shaped identity cannot borrow the controller path.
+  state.authenticated = first.actorKey;
+  assert.equal((await f.validateHost({ action: 'cancel', caller: first })).status, 'refused');
+  state.authenticated = controllerIdentity.actorKey;
+  assert.equal((await mailbox.cancel(controllerIdentity)).status, 'ok');
+});
+
+
+test('mailbox authenticates before group lookup and samples time after live resolution', async t => {
+  const expiresAt = '2026-10-21T12:10:00.000Z';
+  const f = await mailboxFixture(t, { childExpiry: expiresAt });
+  const { mailbox, message, first, host, mailboxState: state } = f;
+  state.authenticated = 'unauthenticated';
+  // The real controller would throw group_missing if this lookup were reached.
+  assert.deepEqual(await f.validateHost({ action: 'read', caller: { ...first, groupId: 'missing' } }), { status: 'refused' });
+  assert.equal(state.lookups, 0);
+  state.authenticated = first.actorKey;
+  for (const invalid of ['not-a-timestamp', '2026-10-21T12:00:00Z']) {
+    state.now = invalid;
+    assert.deepEqual(await mailbox.enqueue(message, first), { status: 'refused', code: 'host_refused' });
+  }
+  state.now = NOW;
+  const resolve = host.resolveLiveMember;
+  host.resolveLiveMember = async (...args) => {
+    const result = await resolve(...args);
+    if (args[1].seatId === f.spec.seats[1].seatId) state.now = expiresAt;
+    return result;
+  };
+  assert.equal((await mailbox.enqueue(message, first)).status, 'refused');
+  assert.equal((await f.service.inspect('root')).invocations.length, 0);
 });
