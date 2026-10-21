@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { getEventListeners } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -379,6 +381,7 @@ test("an authorized definition amendment between rounds fails closed and release
   const successorFile = path.join(cwd, "route-back-v2.flow.json");
   fs.writeFileSync(successorFile, `${JSON.stringify(successor, null, 2)}\n`);
   let amended = false;
+  const executed = [];
 
   await assert.rejects(orchestrateFlowMultiCursor({
     cwd,
@@ -413,7 +416,7 @@ test("an authorized definition amendment between rounds fails closed and release
       }
       return identity(stepId);
     },
-    execute: async () => {},
+    execute: async ({ claim }) => { executed.push(claim.step_id); },
   }), (error) => {
     assert.ok(error instanceof FlowMultiCursorOrchestrationError);
     assert.equal(error.observation.definition.version, "1");
@@ -421,6 +424,7 @@ test("an authorized definition amendment between rounds fails closed and release
   });
 
   assert.equal(amended, true);
+  assert.deepEqual(executed, ["root"], "a claim under the amended definition must not reach the host");
   assert.deepEqual((await loadRun(runId, cwd)).state.multi_cursor.active_claims, []);
 });
 
@@ -494,4 +498,360 @@ test("expired Flow leases are recovered before dispatch; recovery is not a host-
   const run = await loadRun(runId, cwd);
   assert.deepEqual(run.state.multi_cursor.active_claims, []);
   assert.ok(run.state.multi_cursor.claim_history.some((entry) => entry.action === "expired" && entry.claim_id === "abandoned-claim"));
+});
+
+function writeDisjointDefinition(cwd, count = 4) {
+  const file = writeOneStepDefinition(cwd);
+  const definition = JSON.parse(fs.readFileSync(file, "utf8"));
+  definition.steps = Array.from({ length: count }, (_, index) => ({
+    id: `step-${index}`, next: null, mutable_resources: [`generated/step-${index}`],
+  }));
+  definition.gates = Object.fromEntries(definition.steps.map(({ id }) => [
+    `${id}-gate`, { ...definition.gates["only-gate"], step: id },
+  ]));
+  fs.writeFileSync(file, JSON.stringify(definition));
+  return file;
+}
+
+async function schedulerFixture(runId, count = 1) {
+  const cwd = workspace();
+  await startRun(writeDisjointDefinition(cwd, count), { cwd, runId, params: { subject: "flow-agents#1113" } });
+  return { cwd, runId, actor: { key: "scheduler-host", kind: "test" }, identityFactory: identity };
+}
+
+function assertUnusedClaimsReleased(run, count) {
+  assert.deepEqual(run.state.multi_cursor.active_claims, []);
+  const history = run.state.multi_cursor.claim_history;
+  const claimed = history.filter(({ action }) => action === "claimed").map(({ claim_id }) => claim_id).sort();
+  const released = history.filter(({ action }) => action === "released").map(({ claim_id }) => claim_id).sort();
+  assert.equal(claimed.length, count);
+  assert.deepEqual(released, claimed, "only the exact newly admitted claims are released");
+  assert.equal(history.some(({ action }) => action === "settled"), false);
+  assert.deepEqual(run.state.gate_outcomes, []);
+}
+
+for (const maxConcurrent of [1, 2]) {
+  test(`bounded ready admission cap ${maxConcurrent} drains independent Flow steps`, async () => {
+    const larger = await schedulerFixture(`bounded-frontier-${maxConcurrent}`, 4);
+    let running = 0;
+    let peak = 0;
+    const seen = [];
+    await orchestrateFlowMultiCursor({
+      ...larger, maxConcurrent,
+      execute: async ({ claim }) => {
+        running += 1;
+        peak = Math.max(peak, running);
+        const active = (await loadRun(larger.runId, larger.cwd)).state.multi_cursor.active_claims;
+        assert.ok(active.length <= maxConcurrent, "cap applies before Flow claims, not only before callbacks");
+        seen.push(claim.step_id);
+        await delay(20);
+        running -= 1;
+      },
+    });
+    assert.equal(peak, maxConcurrent);
+    assert.deepEqual(seen.sort(), ["step-0", "step-1", "step-2", "step-3"]);
+    assert.equal((await loadRun(larger.runId, larger.cwd)).state.status, "completed");
+  });
+}
+
+test("maxConcurrent validates finite integer bounds before any Flow mutation", async () => {
+  const input = await schedulerFixture("invalid-cap");
+  for (const maxConcurrent of [0, -1, 1.5, NaN, Infinity, 1025]) {
+    await assert.rejects(orchestrateFlowMultiCursor({ ...input, maxConcurrent, execute: async () => assert.fail("invalid cap executed") }), /maxConcurrent/);
+  }
+  assert.equal((await loadRun(input.runId, input.cwd)).state.multi_cursor.claim_history.length, 0);
+});
+
+test("already aborted scheduling performs no recovery, admission, or dispatch", async () => {
+  const input = await schedulerFixture("pre-aborted");
+  await claimReadyStep(input.runId, {
+    cwd: input.cwd, step_id: "step-0", claim_id: "expired-before-abort", liveness_id: "expired-liveness",
+    actor: input.actor, lease_seconds: 60, now: "2000-01-01T00:00:00.000Z",
+  });
+  const before = (await loadRun(input.runId, input.cwd)).state;
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(orchestrateFlowMultiCursor({
+    ...input, signal: controller.signal,
+    onEvent: async () => assert.fail("aborted schedule observed a mutation"),
+    execute: async () => assert.fail("aborted schedule executed"),
+  }), FlowMultiCursorOrchestrationError);
+  assert.deepEqual((await loadRun(input.runId, input.cwd)).state, before);
+  assert.deepEqual(getEventListeners(controller.signal, "abort"), []);
+});
+
+test("abort during a Flow claim cleans up the new claim without dispatch", async () => {
+  const input = await schedulerFixture("claim-abort");
+  const controller = new AbortController();
+  await assert.rejects(orchestrateFlowMultiCursor({
+    ...input, signal: controller.signal,
+    identityFactory: (step) => { setImmediate(() => controller.abort()); return identity(step); },
+    execute: async () => assert.fail("claim-time abort executed"),
+  }), FlowMultiCursorOrchestrationError);
+  assertUnusedClaimsReleased(await loadRun(input.runId, input.cwd), 1);
+  assert.deepEqual(getEventListeners(controller.signal, "abort"), []);
+});
+
+for (const boundary of ["admitted", "started"]) {
+  test(`durable ${boundary} observation is awaited and rejection prevents dispatch`, async () => {
+    const input = await schedulerFixture(`observer-${boundary}`, 2);
+    const observerError = new Error(`observer-${boundary}-failed`);
+    let callbacks = 0;
+    const observed = [];
+    await assert.rejects(orchestrateFlowMultiCursor({
+      ...input, renewalIntervalMs: 5, leaseSeconds: 60,
+      onEvent: async (event) => {
+        observed.push(event.kind);
+        if (event.kind === boundary) { await delay(20); throw observerError; }
+      },
+      execute: async () => { callbacks += 1; },
+    }), (error) => {
+      assert.ok(error instanceof FlowMultiCursorOrchestrationError);
+      assert.match(error.observation.finalRunHead, /^[a-f0-9]{64}$/);
+      assert.equal(error.observation.events.some(({ kind }) => kind === "settled"), false);
+      assert.ok(hasCause(error, observerError), "asynchronous observer failure is retained as a cause");
+      return true;
+    });
+    assert.equal(callbacks, 0);
+    assert.ok(observed.includes("released"), "cleanup lifecycle is also observed");
+    assertUnusedClaimsReleased(await loadRun(input.runId, input.cwd), 2);
+  });
+}
+
+test("delayed durable observations precede callback and retain claim renewal", async () => {
+  const input = await schedulerFixture("observer-delay");
+  const durable = [];
+  let renewals = 0;
+  let renewed;
+  const renewal = new Promise((resolve) => { renewed = resolve; });
+  const observation = await orchestrateFlowMultiCursor({
+    ...input, renewalIntervalMs: 5, leaseSeconds: 60,
+    onEvent: async (event) => {
+      if (event.kind === "renewed") { renewals += 1; renewed(); }
+      if (event.kind === "admitted") await renewal;
+      if (["admitted", "started", "settled"].includes(event.kind)) {
+        await delay(20);
+        durable.push(event.kind);
+      }
+    },
+    execute: async () => {
+      assert.deepEqual(durable, ["admitted", "started"]);
+      assert.ok(renewals > 0, "claims stay live while durable admission is pending");
+    },
+  });
+  assert.deepEqual(durable, ["admitted", "started", "settled"]);
+  assert.ok(observation.finalRunHead);
+});
+
+test("external abort waits for host stop with heartbeat live, then releases without evaluation", async () => {
+  const input = await schedulerFixture("execute-abort");
+  const controller = new AbortController();
+  let stopped = false;
+  let abortSeen = false;
+  let renewalsAfterAbort = 0;
+  const observed = [];
+  await assert.rejects(orchestrateFlowMultiCursor({
+    ...input, signal: controller.signal, renewalIntervalMs: 5, leaseSeconds: 60,
+    onEvent: async (event) => {
+      observed.push(event.kind);
+      if (event.kind === "renewed" && abortSeen) renewalsAfterAbort += 1;
+      if (event.kind === "released") assert.equal(stopped, true, "abort request is not host stop confirmation");
+    },
+    execute: async ({ claim, signal }) => {
+      const aborted = new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      controller.abort();
+      await aborted;
+      abortSeen = true;
+      await delay(80);
+      const run = await loadRun(input.runId, input.cwd);
+      assert.ok(run.state.multi_cursor.active_claims.some(({ claim_id }) => claim_id === claim.claim_id));
+      assert.equal(run.state.multi_cursor.claim_history.some(({ action }) => action === "released"), false);
+      assert.ok(renewalsAfterAbort > 0, "execution abort must not stop heartbeat while callback is stopping");
+      stopped = true;
+    },
+  }), FlowMultiCursorOrchestrationError);
+  assert.equal(stopped, true);
+  assertUnusedClaimsReleased(await loadRun(input.runId, input.cwd), 1);
+  assert.deepEqual(getEventListeners(controller.signal, "abort"), []);
+  const count = observed.length;
+  await delay(30);
+  assert.equal(observed.length, count, "heartbeat is joined before orchestration rejects");
+});
+
+test("abort during durable admission releases unused claims without callback", async () => {
+  const input = await schedulerFixture("observer-abort", 2);
+  const controller = new AbortController();
+  await assert.rejects(orchestrateFlowMultiCursor({
+    ...input, signal: controller.signal,
+    onEvent: async ({ kind }) => { if (kind === "admitted") { await delay(10); controller.abort(); } },
+    execute: async () => assert.fail("admission abort executed"),
+  }), FlowMultiCursorOrchestrationError);
+  assertUnusedClaimsReleased(await loadRun(input.runId, input.cwd), 2);
+});
+
+test("bounded batches preserve maxRounds failure and final-round success", async () => {
+  for (const maxRounds of [1, 2]) {
+    const input = await schedulerFixture(`bounded-rounds-${maxRounds}`, 2);
+    let executed = 0;
+    const promise = orchestrateFlowMultiCursor({ ...input, maxConcurrent: 1, maxRounds, execute: async () => { executed += 1; } });
+    if (maxRounds === 1) await assert.rejects(promise, FlowMultiCursorOrchestrationError);
+    else await promise;
+    assert.equal(executed, maxRounds);
+    assert.deepEqual((await loadRun(input.runId, input.cwd)).state.multi_cursor.active_claims, []);
+  }
+});
+
+function hasCause(error, expected) {
+  return error === expected || Boolean(error && (
+    error.errors?.some((cause) => hasCause(cause, expected)) || hasCause(error.cause, expected)
+  ));
+}
+
+test("observer admission failure preserves another actor's exact active claim", async () => {
+  const input = await schedulerFixture("observer-foreign-claim", 3);
+  const foreign = await claimReadyStep(input.runId, {
+    cwd: input.cwd, step_id: "step-0", claim_id: "foreign-claim", liveness_id: "foreign-liveness",
+    actor: { key: "other-host", kind: "test" }, lease_seconds: 60,
+  });
+  await assert.rejects(orchestrateFlowMultiCursor({
+    ...input,
+    onEvent: async ({ kind }) => { if (kind === "admitted") throw new Error("durable write failed"); },
+    execute: async () => assert.fail("observer rejection dispatched"),
+  }), FlowMultiCursorOrchestrationError);
+  const run = await loadRun(input.runId, input.cwd);
+  assert.deepEqual(run.state.multi_cursor.active_claims, [foreign.claim]);
+  const history = run.state.multi_cursor.claim_history;
+  assert.deepEqual(history.filter(({ action }) => action === "released").map(({ claim_id }) => claim_id).sort(), [
+    "fixture-claim-step-1", "fixture-claim-step-2",
+  ]);
+  assert.deepEqual(run.state.gate_outcomes, []);
+});
+
+test("renewal observer rejection aborts execution but retains heartbeat until host stops", async () => {
+  const input = await schedulerFixture("renewal-observer-failure");
+  const durableError = new Error("renewal persistence failed");
+  const cleanupError = new Error("release persistence failed");
+  let stopped = false;
+  let signalObserved = false;
+  let observedRenewals = 0;
+  await assert.rejects(orchestrateFlowMultiCursor({
+    ...input, renewalIntervalMs: 5, leaseSeconds: 60,
+    onEvent: async ({ kind }) => {
+      if (kind === "renewed") { observedRenewals += 1; throw durableError; }
+      if (kind === "released") { assert.ok(stopped); throw cleanupError; }
+    },
+    execute: async ({ signal }) => {
+      await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      signalObserved = true;
+      const before = (await loadRun(input.runId, input.cwd)).state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
+      await delay(80);
+      const duringStop = await loadRun(input.runId, input.cwd);
+      assert.equal(duringStop.state.multi_cursor.active_claims.length, 1);
+      assert.ok(duringStop.state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length > before);
+      stopped = true;
+    },
+  }), (error) => {
+    assert.ok(error instanceof FlowMultiCursorOrchestrationError);
+    assert.ok(hasCause(error, durableError));
+    assert.ok(hasCause(error, cleanupError));
+    assert.ok(error.observation.finalRunHead);
+    assert.ok(error.observation.events.some(({ kind }) => kind === "failed"));
+    return true;
+  });
+  assert.equal(signalObserved, true);
+  assert.equal(stopped, true);
+  assert.equal(observedRenewals, 1, "failed observer is not retried by heartbeat");
+  assertUnusedClaimsReleased(await loadRun(input.runId, input.cwd), 1);
+});
+
+test("post-settlement observer failure reports the real Flow terminal state without releasing it again", async () => {
+  const input = await schedulerFixture("settled-observer-failure");
+  const observerError = new Error("terminal observation failed");
+  await assert.rejects(orchestrateFlowMultiCursor({
+    ...input,
+    onEvent: async ({ kind }) => { if (kind === "settled") { await delay(5); throw observerError; } },
+    execute: async () => {},
+  }), (error) => {
+    assert.ok(hasCause(error, observerError));
+    assert.ok(error.observation.events.some(({ kind, settled }) => kind === "settled" && settled));
+    assert.equal(error.observation.events.some(({ kind }) => kind === "released"), false);
+    assert.ok(error.observation.finalRunHead);
+    return true;
+  });
+  const run = await loadRun(input.runId, input.cwd);
+  assert.equal(run.state.status, "completed");
+  assert.deepEqual(run.state.multi_cursor.active_claims, []);
+  assert.equal(run.state.multi_cursor.claim_history.filter(({ action }) => action === "settled").length, 1);
+});
+
+test("default admission is bounded at 64 before claiming and the upper cap is accepted", async () => {
+  const input = await schedulerFixture("default-cap", 65);
+  let callbacks = 0;
+  await assert.rejects(orchestrateFlowMultiCursor({
+    ...input, maxRounds: 1,
+    execute: async () => { callbacks += 1; },
+  }), (error) => {
+    assert.ok(error instanceof FlowMultiCursorOrchestrationError);
+    return true;
+  });
+  assert.equal(callbacks, 64);
+  const run = await loadRun(input.runId, input.cwd);
+  assert.deepEqual(run.state.multi_cursor.active_claims, []);
+  assert.equal(run.state.multi_cursor.claim_history.filter(({ action }) => action === "claimed").length, 64);
+  assert.equal(run.state.multi_cursor.claim_history.filter(({ action }) => action === "settled").length, 64);
+  const upper = await schedulerFixture("upper-cap");
+  await orchestrateFlowMultiCursor({ ...upper, maxConcurrent: 1024, execute: async () => {} });
+  assert.equal((await loadRun(upper.runId, upper.cwd)).state.status, "completed");
+});
+
+test("a capped resource conflict does not hide the remaining disjoint Flow frontier", async () => {
+  const cwd = workspace();
+  const runId = "bounded-resource-conflict";
+  const file = writeDisjointDefinition(cwd, 3);
+  const definition = JSON.parse(fs.readFileSync(file, "utf8"));
+  definition.steps[1].mutable_resources = definition.steps[0].mutable_resources;
+  fs.writeFileSync(file, JSON.stringify(definition));
+  await startRun(file, { cwd, runId, params: { subject: "flow-agents#1113" } });
+  const actor = { key: "foreign-host", kind: "test" };
+  const foreign = await claimReadyStep(runId, {
+    cwd, step_id: "step-0", claim_id: "foreign-conflicting", liveness_id: "foreign-live", actor, lease_seconds: 60,
+  });
+  const executed = [];
+  const observation = await orchestrateFlowMultiCursor({
+    cwd, runId, actor: { key: "scheduler-host", kind: "test" }, maxConcurrent: 1,
+    execute: async ({ claim }) => { executed.push(claim.step_id); },
+  });
+  assert.deepEqual(executed, ["step-2"]);
+  assert.deepEqual(observation.deferredSteps, ["step-1"]);
+  assert.deepEqual((await loadRun(runId, cwd)).state.multi_cursor.active_claims, [foreign.claim]);
+});
+
+test("slow renewal observation cannot suspend leases while an aborted host is stopping", async () => {
+  const input = await schedulerFixture("slow-renewal-observer");
+  const controller = new AbortController();
+  let notifyRenewing;
+  const renewing = new Promise((resolve) => { notifyRenewing = resolve; });
+  let confirmed = false;
+  let observations = 0;
+  await assert.rejects(orchestrateFlowMultiCursor({
+    ...input, signal: controller.signal, renewalIntervalMs: 5, leaseSeconds: 60,
+    onEvent: async ({ kind }) => {
+      if (kind !== "renewed" || observations++ > 0) return;
+      const before = (await loadRun(input.runId, input.cwd)).state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
+      notifyRenewing();
+      await delay(70);
+      const during = await loadRun(input.runId, input.cwd);
+      assert.ok(during.state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length > before,
+        "a pending renewal observer must not stop lease renewal");
+      confirmed = true;
+    },
+    execute: async ({ signal }) => {
+      await renewing;
+      controller.abort();
+      assert.ok(signal.aborted);
+      await delay(140);
+    },
+  }), FlowMultiCursorOrchestrationError);
+  assert.ok(confirmed);
+  assertUnusedClaimsReleased(await loadRun(input.runId, input.cwd), 1);
 });

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setMaxListeners } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   FlowMultiCursorError,
@@ -45,7 +46,7 @@ export interface FlowMultiCursorExecution {
   claim: FlowDurableStepClaim;
   runId: string;
   cwd: string;
-  /** Aborted when claim renewal fails; callbacks must stop before returning. */
+  /** Aborted on cancellation or lost liveness; callbacks must stop before returning. */
   signal: AbortSignal;
 }
 
@@ -56,7 +57,22 @@ export interface OrchestrateFlowMultiCursorInput {
   cwd?: string;
   leaseSeconds?: number;
   renewalIntervalMs?: number;
+  /** Maximum dispatch rounds, including batches of a bounded ready frontier. Default: 100. */
   maxRounds?: number;
+  /**
+   * Maximum ready steps claimed per round, an integer from 1 through 1024.
+   * Default: 64, bounding host fan-out while preserving smaller ready frontiers.
+   */
+  maxConcurrent?: number;
+  signal?: AbortSignal;
+  /**
+   * Awaited lifecycle persistence; admitted and started must succeed before execute.
+   * This observer provides neither budget reservation nor authorization proof.
+   * Events for independent claims may overlap; each receives an isolated snapshot.
+   * Renewal counts are coalesced while an observer is pending; observation is
+   * joined before evaluation or release without pausing the lease heartbeat.
+   */
+  onEvent?: (event: FlowScheduleEvent) => Promise<void>;
   identityFactory?: (stepId: string) => { claimId: string; livenessId: string };
 }
 
@@ -73,6 +89,20 @@ export class FlowMultiCursorOrchestrationError extends Error {
 interface AdmittedExecution {
   claim: FlowDurableStepClaim;
   livenessId: string;
+  execution: AbortController;
+  heartbeatStop: AbortController;
+  heartbeat: Promise<void>;
+  failures: unknown[];
+  claimOpen: boolean;
+  detach: () => void;
+}
+
+interface ScheduleContext {
+  input: OrchestrateFlowMultiCursorInput;
+  result: FlowScheduleObservation;
+  controller: AbortController;
+  observerFailed: boolean;
+  mutation: Promise<void>;
 }
 
 interface RoundBarrier {
@@ -122,6 +152,10 @@ function validateInput(input: OrchestrateFlowMultiCursorInput): void {
   if (!Number.isInteger(input.maxRounds ?? 100) || (input.maxRounds ?? 100) < 1) {
     throw new TypeError("maxRounds must be a positive integer");
   }
+  const cap = input.maxConcurrent ?? 64;
+  if (!Number.isInteger(cap) || cap < 1 || cap > 1024) {
+    throw new TypeError("maxConcurrent must be an integer from 1 through 1024");
+  }
   if (!Number.isFinite(renewalMs) || renewalMs < 1 || renewalMs >= leaseMs) {
     throw new TypeError("renewalIntervalMs must be positive and shorter than the Flow claim lease");
   }
@@ -138,48 +172,79 @@ function assertDefinitionUnchanged(expected: FlowDefinitionIdentity, actual: Flo
   }
 }
 
-async function admitStep(
-  input: OrchestrateFlowMultiCursorInput,
-  stepId: string,
-  result: FlowScheduleObservation,
-): Promise<AdmittedExecution | null> {
-  const identity = identityFor(input, stepId);
+// Flow serializes run mutations itself. Queue this host's calls before entering
+// that lock so a wide frontier cannot exhaust Flow's lock-wait timeout.
+function mutateFlow<T>(context: ScheduleContext, operation: () => Promise<T>): Promise<T> {
+  const pending = context.mutation.then(operation);
+  context.mutation = pending.then(() => undefined, () => undefined);
+  return pending;
+}
+
+async function observe(context: ScheduleContext, event: FlowScheduleEvent): Promise<void> {
+  context.result.events.push(event);
+  await notify(context, event);
+}
+
+async function notify(context: ScheduleContext, event: FlowScheduleEvent): Promise<void> {
   try {
-    const admitted = await claimReadyStep(input.runId, {
-      claim_id: identity.claimId,
-      liveness_id: identity.livenessId,
-      step_id: stepId,
-      actor: input.actor,
-      lease_seconds: input.leaseSeconds,
-      cwd: input.cwd,
+    await context.input.onEvent?.(structuredClone(event));
+  } catch (error) {
+    context.observerFailed = true;
+    context.controller.abort(error);
+    throw error;
+  }
+}
+
+function startHeartbeat(context: ScheduleContext, claim: FlowDurableStepClaim): AdmittedExecution {
+  const execution = new AbortController();
+  const heartbeatStop = new AbortController();
+  const relayAbort = () => execution.abort(context.controller.signal.reason);
+  context.controller.signal.addEventListener("abort", relayAbort, { once: true });
+  if (context.controller.signal.aborted) relayAbort();
+  const admitted: AdmittedExecution = {
+    claim,
+    livenessId: claim.liveness_id,
+    execution,
+    heartbeatStop,
+    heartbeat: Promise.resolve(),
+    failures: [],
+    claimOpen: true,
+    detach: () => context.controller.signal.removeEventListener("abort", relayAbort),
+  };
+  admitted.heartbeat = renewUntilStopped(context, admitted).catch((error) => {
+    admitted.failures.push(error);
+    execution.abort(error);
+  });
+  return admitted;
+}
+
+async function stopHeartbeat(admitted: AdmittedExecution): Promise<void> {
+  admitted.heartbeatStop.abort();
+  await admitted.heartbeat;
+  admitted.detach();
+}
+
+async function admitStep(context: ScheduleContext, stepId: string): Promise<AdmittedExecution | null> {
+  const { input, result } = context;
+  context.controller.signal.throwIfAborted();
+  const identity = identityFor(input, stepId);
+  context.controller.signal.throwIfAborted();
+  let claimed: Awaited<ReturnType<typeof claimReadyStep>>;
+  try {
+    claimed = await mutateFlow(context, () => {
+      context.controller.signal.throwIfAborted();
+      return claimReadyStep(input.runId, {
+        claim_id: identity.claimId,
+        liveness_id: identity.livenessId,
+        step_id: stepId,
+        actor: input.actor,
+        lease_seconds: input.leaseSeconds,
+        cwd: input.cwd,
+      });
     });
-    try {
-      assertDefinitionUnchanged(result.definition, admitted.claim.definition);
-    } catch (error) {
-      try {
-        await releaseStepClaim(input.runId, {
-          claim_id: admitted.claim.claim_id,
-          liveness_id: admitted.claim.liveness_id,
-          actor: input.actor,
-          reason: "definition-identity-drift",
-          cwd: input.cwd,
-        });
-      } catch (releaseError) {
-        throw new AggregateError([error, releaseError], "definition drift claim cleanup failed");
-      }
-      throw error;
-    }
-    result.events.push({
-      kind: "admitted",
-      claimId: admitted.claim.claim_id,
-      livenessId: admitted.claim.liveness_id,
-      stepId,
-      mutableResources: [...admitted.claim.mutable_resources],
-    });
-    return { claim: admitted.claim, livenessId: identity.livenessId };
   } catch (error) {
     if (!isResourceConflict(error)) throw error;
-    result.events.push({
+    await observe(context, {
       kind: "deferred",
       stepId,
       diagnosticCode: error.code,
@@ -188,137 +253,159 @@ async function admitStep(
     if (!result.deferredSteps.includes(stepId)) result.deferredSteps.push(stepId);
     return null;
   }
-}
-
-async function renewUntilStopped(
-  input: OrchestrateFlowMultiCursorInput,
-  admitted: AdmittedExecution,
-  result: FlowScheduleObservation,
-  signal: AbortSignal,
-): Promise<void> {
-  const interval = input.renewalIntervalMs ?? Math.max(250, Math.floor((input.leaseSeconds ?? 300) * 500));
-  while (!signal.aborted) {
-    try {
-      await delay(interval, undefined, { signal });
-    } catch (error) {
-      if (signal.aborted) return;
-      throw error;
-    }
-    if (signal.aborted) return;
-    await renewStepClaim(input.runId, {
-      claim_id: admitted.claim.claim_id,
-      liveness_id: admitted.livenessId,
-      actor: input.actor,
-      lease_seconds: input.leaseSeconds,
-      cwd: input.cwd,
+  const admitted = startHeartbeat(context, claimed.claim);
+  let reason = "definition-identity-drift";
+  try {
+    assertDefinitionUnchanged(result.definition, admitted.claim.definition);
+    reason = "admission-round-failed";
+    context.controller.signal.throwIfAborted();
+    await observe(context, {
+      kind: "admitted",
+      claimId: admitted.claim.claim_id,
+      livenessId: admitted.livenessId,
+      stepId,
+      mutableResources: [...admitted.claim.mutable_resources],
     });
-    const prior = result.events.find((event) => event.kind === "renewed" && event.claimId === admitted.claim.claim_id);
-    if (prior?.kind === "renewed") prior.count += 1;
-    else result.events.push({ kind: "renewed", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, count: 1 });
+    admitted.execution.signal.throwIfAborted();
+    return admitted;
+  } catch (error) {
+    await stopHeartbeat(admitted);
+    const failures = [error, ...admitted.failures.filter((failure) => failure !== error)];
+    try { await releaseAdmitted(context, admitted, reason); }
+    catch (releaseError) { failures.push(releaseError); }
+    throw new AggregateError(failures, "multi-cursor unused claim cleanup");
   }
 }
 
-async function releaseAdmitted(
-  input: OrchestrateFlowMultiCursorInput,
-  admitted: AdmittedExecution,
-  result: FlowScheduleObservation,
-  reason: string,
-): Promise<void> {
-  await releaseStepClaim(input.runId, {
+async function renewUntilStopped(context: ScheduleContext, admitted: AdmittedExecution): Promise<void> {
+  const { input, result } = context;
+  const signal = admitted.heartbeatStop.signal;
+  const interval = input.renewalIntervalMs ?? Math.max(250, Math.floor((input.leaseSeconds ?? 300) * 500));
+  let pendingObservation: Promise<void> | undefined;
+  let observedCount = 0;
+  let renewal: Extract<FlowScheduleEvent, { kind: "renewed" }> | undefined;
+  const observeRenewal = (event: Extract<FlowScheduleEvent, { kind: "renewed" }>) => {
+    observedCount = event.count;
+    return notify(context, event).catch((error) => { admitted.failures.push(error); });
+  };
+  try {
+    while (!signal.aborted) {
+      try {
+        await delay(interval, undefined, { signal });
+      } catch (error) {
+        if (signal.aborted) break;
+        throw error;
+      }
+      if (signal.aborted) break;
+      try {
+        await mutateFlow(context, () => renewStepClaim(input.runId, {
+          claim_id: admitted.claim.claim_id,
+          liveness_id: admitted.livenessId,
+          actor: input.actor,
+          lease_seconds: input.leaseSeconds,
+          cwd: input.cwd,
+        }));
+      } catch (error) {
+        admitted.execution.abort(error);
+        throw error;
+      }
+      if (renewal) renewal.count += 1;
+      else {
+        renewal = { kind: "renewed", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, count: 1 };
+        result.events.push(renewal);
+      }
+      // At most one pending renewal observer per claim; lease renewal continues
+      // even when persistence is slow or has already aborted execution.
+      if (!context.observerFailed && !pendingObservation) {
+        pendingObservation = observeRenewal(renewal).finally(() => { pendingObservation = undefined; });
+      }
+    }
+  } finally {
+    await pendingObservation;
+    if (renewal && renewal.count > observedCount && !context.observerFailed) await observeRenewal(renewal);
+  }
+}
+
+async function releaseAdmitted(context: ScheduleContext, admitted: AdmittedExecution, reason: string): Promise<void> {
+  const { input } = context;
+  await mutateFlow(context, () => releaseStepClaim(input.runId, {
     claim_id: admitted.claim.claim_id,
     liveness_id: admitted.livenessId,
     actor: input.actor,
     reason,
     cwd: input.cwd,
-  });
-  result.events.push({ kind: "released", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, reason });
+  }));
+  admitted.claimOpen = false;
+  await observe(context, { kind: "released", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, reason });
 }
 
-async function executeAdmitted(
-  input: OrchestrateFlowMultiCursorInput,
-  admitted: AdmittedExecution,
-  result: FlowScheduleObservation,
-  barrier: RoundBarrier,
-): Promise<void> {
-  const controller = new AbortController();
-  let arrived = false;
-  const heartbeat = renewUntilStopped(input, admitted, result, controller.signal);
-  result.events.push({ kind: "started", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id });
-  const callback = Promise.resolve().then(() => input.execute({
-    claim: structuredClone(admitted.claim),
-    runId: input.runId,
-    cwd: input.cwd ?? process.cwd(),
-    signal: controller.signal,
-  }));
-  const heartbeatFailure = heartbeat.then(
-    () => new Promise<never>(() => undefined),
-    (error) => Promise.reject(error),
-  );
+async function executeAdmitted(context: ScheduleContext, admitted: AdmittedExecution, barrier: RoundBarrier): Promise<void> {
+  const { input, result } = context;
+  const failures: unknown[] = [];
   try {
-    await Promise.race([callback, heartbeatFailure]);
-    await barrier.arrive();
-    arrived = true;
-    controller.abort();
-    await heartbeat;
-    await callback;
-    const evaluated = await evaluateClaimedStep(input.runId, {
-      claim_id: admitted.claim.claim_id,
-      liveness_id: admitted.livenessId,
-      actor: input.actor,
-      cwd: input.cwd,
+    admitted.execution.signal.throwIfAborted();
+    await observe(context, { kind: "started", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id });
+    admitted.execution.signal.throwIfAborted();
+    await input.execute({
+      claim: structuredClone(admitted.claim),
+      runId: input.runId,
+      cwd: input.cwd ?? process.cwd(),
+      signal: admitted.execution.signal,
     });
-    result.events.push({ kind: "settled", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, settled: evaluated.settled });
+    admitted.execution.signal.throwIfAborted();
+  } catch (error) {
+    failures.push(error);
+    admitted.execution.abort(error);
+  }
+  // Flow evaluation can route back and invalidate sibling claims. Every host
+  // must have stopped first, with heartbeats kept alive across the barrier.
+  await barrier.arrive();
+  await stopHeartbeat(admitted);
+  failures.push(...admitted.failures.filter((error) => !failures.includes(error)));
+  try {
+    context.controller.signal.throwIfAborted();
+    admitted.execution.signal.throwIfAborted();
+    if (failures.length > 0) throw new AggregateError(failures, "host execution failed");
+    const evaluated = await mutateFlow(context, () => {
+      context.controller.signal.throwIfAborted();
+      admitted.execution.signal.throwIfAborted();
+      return evaluateClaimedStep(input.runId, {
+        claim_id: admitted.claim.claim_id,
+        liveness_id: admitted.livenessId,
+        actor: input.actor,
+        cwd: input.cwd,
+      });
+    });
+    if (evaluated.settled) admitted.claimOpen = false;
+    await observe(context, { kind: "settled", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, settled: evaluated.settled });
     if (!evaluated.settled) {
       result.unsettledSteps.push(admitted.claim.step_id);
-      await releaseAdmitted(input, admitted, result, "gate-not-settled");
+      await releaseAdmitted(context, admitted, "gate-not-settled");
     }
   } catch (error) {
-    const failure = await cleanupFailedExecution(input, admitted, result, controller, heartbeat, callback, error);
-    if (!arrived) await barrier.arrive();
-    throw failure;
+    if (!failures.includes(error)) failures.push(error);
+    try { if (admitted.claimOpen) await releaseAdmitted(context, admitted, "host-execution-failed"); }
+    catch (releaseError) { failures.push(releaseError); }
+    try {
+      await observe(context, {
+        kind: "failed", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id,
+        summary: "Host execution or exact-claim cleanup failed.",
+      });
+    } catch (observerError) { failures.push(observerError); }
+    throw new AggregateError(failures, "multi-cursor host execution and cleanup failed");
   }
 }
 
-async function cleanupFailedExecution(
-  input: OrchestrateFlowMultiCursorInput,
-  admitted: AdmittedExecution,
-  result: FlowScheduleObservation,
-  controller: AbortController,
-  heartbeat: Promise<void>,
-  callback: Promise<void>,
-  primary: unknown,
-): Promise<unknown> {
-  controller.abort();
-  const cleanup: unknown[] = [];
-  for (const operation of [heartbeat, callback]) {
-    try { await operation; } catch (error) { if (error !== primary) cleanup.push(error); }
-  }
-  try { await releaseAdmitted(input, admitted, result, "host-execution-failed"); }
-  catch (error) { cleanup.push(error); }
-  result.events.push({
-    kind: "failed",
-    claimId: admitted.claim.claim_id,
-    stepId: admitted.claim.step_id,
-    summary: "Host execution or exact-claim cleanup failed.",
-  });
-  return cleanup.length > 0
-    ? new AggregateError([primary, ...cleanup], "multi-cursor host execution and cleanup failed")
-    : primary;
-}
-
-async function recoverClaims(input: OrchestrateFlowMultiCursorInput, result: FlowScheduleObservation): Promise<void> {
+async function recoverClaims(context: ScheduleContext): Promise<void> {
+  const { input } = context;
   const recovered = await recoverExpiredStepClaims(input.runId, { cwd: input.cwd });
   for (const claim of [...recovered.expired, ...recovered.invalidated]) {
-    result.events.push({ kind: "recovered", claimId: claim.claim_id, stepId: claim.step_id });
+    await observe(context, { kind: "recovered", claimId: claim.claim_id, stepId: claim.step_id });
   }
 }
 
-async function admitReadySteps(
-  input: OrchestrateFlowMultiCursorInput,
-  ready: string[],
-  result: FlowScheduleObservation,
-): Promise<AdmittedExecution[]> {
-  const attempts = await Promise.allSettled(ready.map((stepId) => admitStep(input, stepId, result)));
+async function admitReadySteps(context: ScheduleContext, ready: string[]): Promise<AdmittedExecution[]> {
+  const attempts = await Promise.allSettled(ready.map((stepId) => admitStep(context, stepId)));
   const admitted = attempts
     .filter((attempt): attempt is PromiseFulfilledResult<AdmittedExecution | null> => attempt.status === "fulfilled")
     .map((attempt) => attempt.value)
@@ -326,10 +413,12 @@ async function admitReadySteps(
   const failures = attempts
     .filter((attempt): attempt is PromiseRejectedResult => attempt.status === "rejected")
     .map((attempt) => attempt.reason);
-  if (failures.length === 0) return admitted;
-  const cleanup = await Promise.allSettled(
-    admitted.map((claim) => releaseAdmitted(input, claim, result, "admission-round-failed")),
-  );
+  if (failures.length === 0 && !context.controller.signal.aborted) return admitted;
+  if (context.controller.signal.aborted) failures.push(context.controller.signal.reason);
+  const cleanup = await Promise.allSettled(admitted.map(async (claim) => {
+    await stopHeartbeat(claim);
+    await releaseAdmitted(context, claim, "admission-round-failed");
+  }));
   const cleanupFailures = cleanup
     .filter((attempt): attempt is PromiseRejectedResult => attempt.status === "rejected")
     .map((attempt) => attempt.reason);
@@ -341,20 +430,38 @@ export async function orchestrateFlowMultiCursor(input: OrchestrateFlowMultiCurs
   validateInput(input);
   const startingRun = await loadRun(input.runId, input.cwd);
   const result = observation(input, startingRun);
+  const controller = new AbortController();
+  setMaxListeners(input.maxConcurrent ?? 64, controller.signal);
+  const relayAbort = () => controller.abort(input.signal?.reason);
+  input.signal?.addEventListener("abort", relayAbort, { once: true });
+  if (input.signal?.aborted) relayAbort();
+  const context: ScheduleContext = { input, result, controller, observerFailed: false, mutation: Promise.resolve() };
   const maxRounds = input.maxRounds ?? 100;
+  const deferredFrontier = new Set<string>();
   try {
-    await recoverClaims(input, result);
+    controller.signal.throwIfAborted();
+    await recoverClaims(context);
     for (let round = 0; round < maxRounds; round += 1) {
-      const ready = await readySteps(input, result);
-      if (ready.length === 0) return finalizeObservation(input, result);
-      const admitted = await admitReadySteps(input, ready, result);
-      if (admitted.length === 0) return finalizeObservation(input, result);
+      controller.signal.throwIfAborted();
+      const ready = (await readySteps(input, result)).filter((stepId) => !deferredFrontier.has(stepId));
+      controller.signal.throwIfAborted();
+      if (ready.length === 0) return await finalizeObservation(input, result);
+      const batch = ready.slice(0, input.maxConcurrent ?? 64);
+      const admitted = await admitReadySteps(context, batch);
+      if (admitted.length === 0) {
+        for (const stepId of batch) deferredFrontier.add(stepId);
+        continue;
+      }
+      deferredFrontier.clear();
       const barrier = roundBarrier(admitted.length);
-      const executions = await Promise.allSettled(admitted.map((claim) => executeAdmitted(input, claim, result, barrier)));
-      const failure = executions.find((execution): execution is PromiseRejectedResult => execution.status === "rejected");
-      if (failure) throw failure.reason;
+      const executions = await Promise.allSettled(admitted.map((claim) => executeAdmitted(context, claim, barrier)));
+      const failures = executions
+        .filter((execution): execution is PromiseRejectedResult => execution.status === "rejected")
+        .map((execution) => execution.reason);
+      if (failures.length > 0) throw new AggregateError(failures, "multi-cursor execution round failed");
     }
-    if ((await readySteps(input, result)).length === 0) return finalizeObservation(input, result);
+    controller.signal.throwIfAborted();
+    if ((await readySteps(input, result)).every((stepId) => deferredFrontier.has(stepId))) return await finalizeObservation(input, result);
     throw new Error(`multi-cursor orchestration exceeded ${maxRounds} rounds`);
   } catch (error) {
     let failure = error;
@@ -362,8 +469,9 @@ export async function orchestrateFlowMultiCursor(input: OrchestrateFlowMultiCurs
     catch (finalizationError) {
       failure = new AggregateError([error, finalizationError], "multi-cursor failure and final observation capture both failed");
     }
-    if (failure instanceof FlowMultiCursorOrchestrationError) throw failure;
     throw new FlowMultiCursorOrchestrationError("multi-cursor orchestration failed", result, { cause: failure });
+  } finally {
+    input.signal?.removeEventListener("abort", relayAbort);
   }
 }
 
