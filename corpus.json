@@ -452,7 +452,14 @@
         "src/delegation-context-sync.ts",
         "src/delegation-group-v2.ts",
         "src/delegation-group-v2-local-file.ts",
-        "src/delegation-group-mailbox.ts"
+        "src/delegation-group-mailbox.ts",
+        "src/delegation-group-rounds.ts",
+        "src/delegation-group-rounds-local-file.ts",
+        "src/delegation-rounds-flow.ts",
+        "src/delegation-rounds-continuation.ts",
+        "src/delegation-rounds-recipient.ts",
+        "src/delegation-authority-service-v3.ts",
+        "src/delegation-authority-local-file-v3.ts"
       ]
     },
     {

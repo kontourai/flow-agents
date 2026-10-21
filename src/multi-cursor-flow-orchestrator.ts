@@ -15,6 +15,7 @@ import {
   type FlowDurableStepClaim,
   type FlowDefinitionIdentity,
   type FlowStepClaimActor,
+  type GateOutcome,
 } from "@kontourai/flow";
 
 export type FlowScheduleEvent =
@@ -73,6 +74,14 @@ export interface OrchestrateFlowMultiCursorInput {
    * joined before evaluation or release without pausing the lease heartbeat.
    */
   onEvent?: (event: FlowScheduleEvent) => Promise<void>;
+  /** Optional admission selection over Flow's ready frontier. Checked before any claim. */
+  selectReadySteps?: (ready: readonly string[]) => Promise<readonly string[]>;
+  /** Reauthenticate admission immediately before each queued public Flow claim. */
+  beforeClaim?: (stepId: string) => Promise<void>;
+  /** Hold the host's admission fence across the actual public Flow claim mutation. */
+  withClaimAdmission?: <T>(stepId: string, claim: () => Promise<T>) => Promise<T>;
+  /** Awaited receipt after public Flow evaluation; this grants no gate authority. */
+  onEvaluation?: (receipt: { claim: FlowDurableStepClaim; settled: boolean; outcomes: GateOutcome[]; runHead: string }) => Promise<void>;
   identityFactory?: (stepId: string) => { claimId: string; livenessId: string };
 }
 
@@ -233,9 +242,11 @@ async function admitStep(context: ScheduleContext, stepId: string): Promise<Admi
   context.controller.signal.throwIfAborted();
   let claimed: Awaited<ReturnType<typeof claimReadyStep>>;
   try {
-    claimed = await mutateFlow(context, () => {
+    claimed = await mutateFlow(context, async () => {
       context.controller.signal.throwIfAborted();
-      return claimReadyStep(input.runId, {
+      if (input.beforeClaim) await input.beforeClaim(stepId);
+      context.controller.signal.throwIfAborted();
+      const claim = () => claimReadyStep(input.runId, {
         claim_id: identity.claimId,
         liveness_id: identity.livenessId,
         step_id: stepId,
@@ -243,6 +254,7 @@ async function admitStep(context: ScheduleContext, stepId: string): Promise<Admi
         lease_seconds: input.leaseSeconds,
         cwd: input.cwd,
       });
+      return input.withClaimAdmission ? input.withClaimAdmission(stepId, claim) : claim();
     });
   } catch (error) {
     if (!isResourceConflict(error)) throw error;
@@ -391,6 +403,14 @@ async function executeAdmitted(context: ScheduleContext, admitted: AdmittedExecu
         cwd: input.cwd,
       });
       if (evaluation.settled) admitted.claimOpen = false;
+      if (input.onEvaluation) {
+        try {
+          await input.onEvaluation({ claim: structuredClone(admitted.claim), settled: evaluation.settled,
+            outcomes: structuredClone(evaluation.outcomes), runHead: flowRunHead(evaluation.state) });
+        } catch (error) {
+          context.observerFailed = true; context.controller.abort(error); throw error;
+        }
+      }
       return evaluation;
     });
     await observe(context, { kind: "settled", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, settled: evaluated.settled });
@@ -500,8 +520,14 @@ async function readySteps(
 ): Promise<string[]> {
   const run = await loadRun(input.runId, input.cwd);
   assertDefinitionUnchanged(result.definition, definitionIdentity(run.definition));
-  return claimableMultiCursorSteps(run.definition, run.state)
+  const ready = claimableMultiCursorSteps(run.definition, run.state)
     .filter((stepId) => !result.unsettledSteps.includes(stepId));
+  if (!input.selectReadySteps) return ready;
+  const selected = [...await input.selectReadySteps([...ready])];
+  if (new Set(selected).size !== selected.length || selected.some(id => !ready.includes(id))) {
+    throw new TypeError("selected steps must be a unique subset of Flow's ready frontier");
+  }
+  return selected;
 }
 
 async function finalizeObservation(

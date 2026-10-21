@@ -1,7 +1,7 @@
 {
   "name": "@kontourai/flow-agents",
   "version": "9.3.0",
-  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
+  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows \u2014 a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi \u2014 with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
     "ai-agents",
@@ -158,6 +158,22 @@
     "./delegation-group-mailbox": {
       "types": "./build/src/delegation-group-mailbox.d.ts",
       "import": "./build/src/delegation-group-mailbox.js"
+    },
+    "./delegation-group-rounds": {
+      "types": "./build/src/delegation-group-rounds.d.ts",
+      "import": "./build/src/delegation-group-rounds.js"
+    },
+    "./delegation-group-rounds-local-file": {
+      "types": "./build/src/delegation-group-rounds-local-file.d.ts",
+      "import": "./build/src/delegation-group-rounds-local-file.js"
+    },
+    "./delegation-authority-service-v3": {
+      "types": "./build/src/delegation-authority-service-v3.d.ts",
+      "import": "./build/src/delegation-authority-service-v3.js"
+    },
+    "./delegation-authority-local-file-v3": {
+      "types": "./build/src/delegation-authority-local-file-v3.d.ts",
+      "import": "./build/src/delegation-authority-local-file-v3.js"
     }
   },
   "repository": {
@@ -299,7 +315,8 @@
     "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources",
     "reference:reviewed-grounding": "node evals/reference/reviewed-grounding-workflow/run.mjs",
     "docs:check": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus check",
-    "docs:build": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus build"
+    "docs:build": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus build",
+    "test:delegation-rounds": "npm run build --silent && node --test src/cli/delegation-group-rounds.test.mjs"
   },
   "devDependencies": {
     "@kontourai/lookout": "0.3.2",

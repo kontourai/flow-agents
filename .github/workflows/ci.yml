@@ -157,6 +157,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check public-api-unit-tests
 
+      - name: Delegation rounds public contract
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check delegation-rounds-public-contract
+
       - name: Workspace Kit verification
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check workspace-kit-verification
