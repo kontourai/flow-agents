@@ -92,6 +92,7 @@ interface AdmittedExecution {
   execution: AbortController;
   heartbeatStop: AbortController;
   heartbeat: Promise<void>;
+  joinRenewalObservation: () => Promise<void>;
   failures: unknown[];
   claimOpen: boolean;
   detach: () => void;
@@ -207,6 +208,7 @@ function startHeartbeat(context: ScheduleContext, claim: FlowDurableStepClaim): 
     execution,
     heartbeatStop,
     heartbeat: Promise.resolve(),
+    joinRenewalObservation: async () => {},
     failures: [],
     claimOpen: true,
     detach: () => context.controller.signal.removeEventListener("abort", relayAbort),
@@ -269,10 +271,11 @@ async function admitStep(context: ScheduleContext, stepId: string): Promise<Admi
     admitted.execution.signal.throwIfAborted();
     return admitted;
   } catch (error) {
-    await stopHeartbeat(admitted);
+    await admitted.joinRenewalObservation();
     const failures = [error, ...admitted.failures.filter((failure) => failure !== error)];
     try { await releaseAdmitted(context, admitted, reason); }
     catch (releaseError) { failures.push(releaseError); }
+    finally { await stopHeartbeat(admitted); }
     throw new AggregateError(failures, "multi-cursor unused claim cleanup");
   }
 }
@@ -283,59 +286,71 @@ async function renewUntilStopped(context: ScheduleContext, admitted: AdmittedExe
   const interval = input.renewalIntervalMs ?? Math.max(250, Math.floor((input.leaseSeconds ?? 300) * 500));
   let pendingObservation: Promise<void> | undefined;
   let observedCount = 0;
+  let joiningObservation = false;
   let renewal: Extract<FlowScheduleEvent, { kind: "renewed" }> | undefined;
   const observeRenewal = (event: Extract<FlowScheduleEvent, { kind: "renewed" }>) => {
     observedCount = event.count;
     return notify(context, event).catch((error) => { admitted.failures.push(error); });
   };
-  try {
-    while (!signal.aborted) {
-      try {
-        await delay(interval, undefined, { signal });
-      } catch (error) {
-        if (signal.aborted) break;
-        throw error;
-      }
+  admitted.joinRenewalObservation = async () => {
+    // Stop launching observers, not renewals. A slow final observer must not
+    // outlive the lease that Flow still needs for evaluation or exact release.
+    joiningObservation = true;
+    await pendingObservation;
+    if (renewal && renewal.count > observedCount && !context.observerFailed) await observeRenewal(renewal);
+  };
+  while (!signal.aborted) {
+    try {
+      await delay(interval, undefined, { signal });
+    } catch (error) {
       if (signal.aborted) break;
-      try {
-        await mutateFlow(context, () => renewStepClaim(input.runId, {
+      throw error;
+    }
+    if (signal.aborted) break;
+    try {
+      const renewed = await mutateFlow(context, async () => {
+        // Recheck inside the queue: an earlier evaluation/release may have
+        // consumed this claim while this renewal was waiting for its turn.
+        if (!admitted.claimOpen || signal.aborted) return false;
+        await renewStepClaim(input.runId, {
           claim_id: admitted.claim.claim_id,
           liveness_id: admitted.livenessId,
           actor: input.actor,
           lease_seconds: input.leaseSeconds,
           cwd: input.cwd,
-        }));
-      } catch (error) {
-        admitted.execution.abort(error);
-        throw error;
-      }
-      if (renewal) renewal.count += 1;
-      else {
-        renewal = { kind: "renewed", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, count: 1 };
-        result.events.push(renewal);
-      }
-      // At most one pending renewal observer per claim; lease renewal continues
-      // even when persistence is slow or has already aborted execution.
-      if (!context.observerFailed && !pendingObservation) {
-        pendingObservation = observeRenewal(renewal).finally(() => { pendingObservation = undefined; });
-      }
+        });
+        return true;
+      });
+      if (!renewed) break;
+    } catch (error) {
+      admitted.execution.abort(error);
+      throw error;
     }
-  } finally {
-    await pendingObservation;
-    if (renewal && renewal.count > observedCount && !context.observerFailed) await observeRenewal(renewal);
+    if (renewal) renewal.count += 1;
+    else {
+      renewal = { kind: "renewed", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, count: 1 };
+      result.events.push(renewal);
+    }
+    // At most one pending renewal observer per claim; lease renewal continues
+    // even when persistence is slow or has already aborted execution.
+    if (!joiningObservation && !context.observerFailed && !pendingObservation) {
+      pendingObservation = observeRenewal(renewal).finally(() => { pendingObservation = undefined; });
+    }
   }
 }
 
 async function releaseAdmitted(context: ScheduleContext, admitted: AdmittedExecution, reason: string): Promise<void> {
   const { input } = context;
-  await mutateFlow(context, () => releaseStepClaim(input.runId, {
-    claim_id: admitted.claim.claim_id,
-    liveness_id: admitted.livenessId,
-    actor: input.actor,
-    reason,
-    cwd: input.cwd,
-  }));
-  admitted.claimOpen = false;
+  await mutateFlow(context, async () => {
+    await releaseStepClaim(input.runId, {
+      claim_id: admitted.claim.claim_id,
+      liveness_id: admitted.livenessId,
+      actor: input.actor,
+      reason,
+      cwd: input.cwd,
+    });
+    admitted.claimOpen = false;
+  });
   await observe(context, { kind: "released", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, reason });
 }
 
@@ -360,23 +375,24 @@ async function executeAdmitted(context: ScheduleContext, admitted: AdmittedExecu
   // Flow evaluation can route back and invalidate sibling claims. Every host
   // must have stopped first, with heartbeats kept alive across the barrier.
   await barrier.arrive();
-  await stopHeartbeat(admitted);
+  await admitted.joinRenewalObservation();
   failures.push(...admitted.failures.filter((error) => !failures.includes(error)));
   try {
     context.controller.signal.throwIfAborted();
     admitted.execution.signal.throwIfAborted();
     if (failures.length > 0) throw new AggregateError(failures, "host execution failed");
-    const evaluated = await mutateFlow(context, () => {
+    const evaluated = await mutateFlow(context, async () => {
       context.controller.signal.throwIfAborted();
       admitted.execution.signal.throwIfAborted();
-      return evaluateClaimedStep(input.runId, {
+      const evaluation = await evaluateClaimedStep(input.runId, {
         claim_id: admitted.claim.claim_id,
         liveness_id: admitted.livenessId,
         actor: input.actor,
         cwd: input.cwd,
       });
+      if (evaluation.settled) admitted.claimOpen = false;
+      return evaluation;
     });
-    if (evaluated.settled) admitted.claimOpen = false;
     await observe(context, { kind: "settled", claimId: admitted.claim.claim_id, stepId: admitted.claim.step_id, settled: evaluated.settled });
     if (!evaluated.settled) {
       result.unsettledSteps.push(admitted.claim.step_id);
@@ -393,6 +409,8 @@ async function executeAdmitted(context: ScheduleContext, admitted: AdmittedExecu
       });
     } catch (observerError) { failures.push(observerError); }
     throw new AggregateError(failures, "multi-cursor host execution and cleanup failed");
+  } finally {
+    await stopHeartbeat(admitted);
   }
 }
 
@@ -416,8 +434,9 @@ async function admitReadySteps(context: ScheduleContext, ready: string[]): Promi
   if (failures.length === 0 && !context.controller.signal.aborted) return admitted;
   if (context.controller.signal.aborted) failures.push(context.controller.signal.reason);
   const cleanup = await Promise.allSettled(admitted.map(async (claim) => {
-    await stopHeartbeat(claim);
-    await releaseAdmitted(context, claim, "admission-round-failed");
+    await claim.joinRenewalObservation();
+    try { await releaseAdmitted(context, claim, "admission-round-failed"); }
+    finally { await stopHeartbeat(claim); }
   }));
   const cleanupFailures = cleanup
     .filter((attempt): attempt is PromiseRejectedResult => attempt.status === "rejected")

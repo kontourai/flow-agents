@@ -837,36 +837,132 @@ test("a capped resource conflict does not hide the remaining disjoint Flow front
   assert.deepEqual((await loadRun(runId, cwd)).state.multi_cursor.active_claims, [foreign.claim]);
 });
 
-test("slow renewal observation cannot suspend leases while an aborted host is stopping", async () => {
-  const input = await schedulerFixture("slow-renewal-observer");
-  const controller = new AbortController();
-  let notifyRenewing;
-  const renewing = new Promise((resolve) => { notifyRenewing = resolve; });
-  let confirmed = false;
-  let finishObservation;
-  const observationFinished = new Promise((resolve) => { finishObservation = resolve; });
-  let observations = 0;
-  await assert.rejects(orchestrateFlowMultiCursor({
-    ...input, signal: controller.signal, renewalIntervalMs: 5, leaseSeconds: 60,
-    onEvent: async ({ kind }) => {
-      if (kind !== "renewed" || observations++ > 0) return;
-      const before = (await loadRun(input.runId, input.cwd)).state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
-      notifyRenewing();
-      try {
-        const during = await waitForRenewal(input, before);
-        assert.equal(during.state.multi_cursor.active_claims.length, 1);
-        confirmed = true;
-      } finally { finishObservation(); }
+for (const outcome of ["success", "callback-error", "cancel", "observer-error"]) {
+  test(`pending renewal observation keeps the returned callback's claim live through ${outcome}`, async (t) => {
+    const input = await schedulerFixture(`returned-callback-${outcome}`);
+    const controller = new AbortController();
+    const hostError = new Error(`host-${outcome}`);
+    const observerError = new Error("renewal observer failed after callback return");
+    let beginObservation;
+    const observationBegan = new Promise((resolve) => { beginObservation = resolve; });
+    let returnCallback;
+    const callbackReturned = new Promise((resolve) => { returnCallback = resolve; });
+    let observerFinished = false;
+    let checkpointError;
+    let checkpoint;
+    let firstRenewal = true;
+    const completed = await orchestrateFlowMultiCursor({
+      ...input, signal: controller.signal, renewalIntervalMs: 100, leaseSeconds: 1,
+      onEvent: async ({ kind }) => {
+        if (["settled", "released"].includes(kind)) {
+          assert.ok(observerFinished, "Flow consumption waits for the pending observer");
+        }
+        if (kind !== "renewed" || !firstRenewal) return;
+        firstRenewal = false;
+        const first = await loadRun(input.runId, input.cwd);
+        const firstExpiry = Date.parse(first.state.multi_cursor.active_claims[0].expires_at);
+        beginObservation();
+        await callbackReturned;
+        try {
+          // Require a persisted renewal beyond the first renewal's expiry, with
+          // the callback already returned and this observer still pending.
+          const deadline = Date.now() + 5_000;
+          do {
+            const run = await loadRun(input.runId, input.cwd);
+            const claim = run.state.multi_cursor.active_claims[0];
+            if (claim && Date.parse(claim.renewed_at) >= firstExpiry) {
+              assert.equal(claim.claim_id, "fixture-claim-step-0");
+              assert.deepEqual(run.state.gate_outcomes, [], "no early Flow evaluation");
+              assert.equal(run.state.multi_cursor.claim_history.some(({ action }) => ["released", "settled", "expired"].includes(action)), false);
+              checkpoint = run;
+              break;
+            }
+            await delay(10);
+          } while (Date.now() < deadline);
+          assert.ok(checkpoint, "Flow must renew beyond the first lease while joining the observer after callback return");
+        } catch (error) {
+          checkpointError = error;
+          throw error;
+        } finally {
+          observerFinished = true;
+        }
+        if (outcome === "observer-error") throw observerError;
+      },
+      execute: async ({ signal }) => {
+        await observationBegan;
+        try {
+          if (outcome === "cancel") {
+            controller.abort(hostError);
+            assert.ok(signal.aborted);
+          }
+          if (outcome === "callback-error") throw hostError;
+        } finally {
+          returnCallback();
+        }
+      },
+    }).then((value) => ({ value }), (error) => ({ error }));
+    const run = await loadRun(input.runId, input.cwd);
+    t.diagnostic(JSON.stringify({
+      outcome, status: run.state.status,
+      renewals: run.state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length,
+      activeClaims: run.state.multi_cursor.active_claims.length, gateOutcomes: run.state.gate_outcomes.length,
+      errors: completed.error ? String(completed.error.cause) : null,
+    }));
+    assert.ifError(checkpointError);
+    assert.ok(checkpoint);
+    assert.deepEqual(getEventListeners(controller.signal, "abort"), []);
+    if (outcome === "success") {
+      assert.ifError(completed.error);
+      assert.ok(completed.value.finalRunHead);
+      assert.equal(run.state.status, "completed");
+      assert.deepEqual(run.state.multi_cursor.active_claims, []);
+      assert.equal(run.state.multi_cursor.claim_history.filter(({ action }) => action === "settled").length, 1);
+      assert.equal(run.state.multi_cursor.claim_history.some(({ action }) => action === "released"), false);
+      assert.equal(run.state.gate_outcomes.length, 1);
+    } else {
+      assert.ok(completed.error instanceof FlowMultiCursorOrchestrationError);
+      assert.ok(hasCause(completed.error, outcome === "observer-error" ? observerError : hostError));
+      assertUnusedClaimsReleased(run, 1);
+    }
+  });
+}
+
+test("an unsettled Flow claim renews through settlement observation before exact release", async () => {
+  const cwd = workspace();
+  const runId = "wait-gate-observer";
+  const file = writeDisjointDefinition(cwd, 1);
+  const definition = JSON.parse(fs.readFileSync(file, "utf8"));
+  definition.gates["step-0-gate"].expects = [];
+  fs.writeFileSync(file, JSON.stringify(definition));
+  await startRun(file, { cwd, runId, params: { subject: "flow-agents#1113" } });
+  const input = { cwd, runId, actor: { key: "scheduler-host", kind: "test" }, identityFactory: identity };
+  let observedWait = false;
+  const observation = await orchestrateFlowMultiCursor({
+    ...input, leaseSeconds: 1, renewalIntervalMs: 100,
+    execute: async () => {},
+    onEvent: async (event) => {
+      if (event.kind !== "settled") return;
+      assert.equal(event.settled, false, "Flow's empty gate remains authoritative");
+      const before = await loadRun(runId, cwd);
+      const expiry = Date.parse(before.state.multi_cursor.active_claims[0].expires_at);
+      const deadline = Date.now() + 5_000;
+      do {
+        const run = await loadRun(runId, cwd);
+        const claim = run.state.multi_cursor.active_claims[0];
+        if (claim && Date.parse(claim.renewed_at) >= expiry) {
+          observedWait = true;
+          break;
+        }
+        await delay(10);
+      } while (Date.now() < deadline);
+      assert.ok(observedWait, "renewal continues after Flow evaluation until exact release");
     },
-    execute: async ({ signal }) => {
-      await renewing;
-      controller.abort();
-      assert.ok(signal.aborted);
-      await observationFinished;
-    },
-  }), FlowMultiCursorOrchestrationError);
-  assert.ok(confirmed);
-  assertUnusedClaimsReleased(await loadRun(input.runId, input.cwd), 1);
+  });
+  assert.ok(observedWait);
+  assert.deepEqual(observation.unsettledSteps, ["step-0"]);
+  const run = await loadRun(runId, cwd);
+  assertUnusedClaimsReleased(run, 1);
+  assert.ok(run.state.multi_cursor.claim_history.some(({ action, reason }) => action === "released" && reason === "gate-not-settled"));
 });
 
 test("a still-ready claim under an amended definition is released before host dispatch", async () => {
