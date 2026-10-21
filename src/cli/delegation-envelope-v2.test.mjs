@@ -641,8 +641,12 @@ test('Flow execution composes real claims with registered authority and controll
       invokeFenced: async (_envelope, _id, invoke) => invoke(), retainResult: async () => {}, retainFailure: async () => {},
       recordMemberOutcome: async (_claim, _envelope, outcome) => { assert.equal(outcome.outcome, 'succeeded'); recorded++; },
     };
-    await orchestrateDelegationFlow({ authorityId: root.authority_id, service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(cwd, 'dispatch') }),
-      runId, actor: { key: 'fixture-host', kind: 'test' }, seats: [{ stepId: 'reader', envelopeId: child.envelope_id, effect: 'write', allocation: { inputTokens: 5, outputTokens: 5, costMicros: 10 } }], cwd, maxConcurrent: 1 });
+    const input = { authorityId: root.authority_id, service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(cwd, 'dispatch') }),
+      runId, actor: { key: 'fixture-host', kind: 'test' }, seats: [{ stepId: 'reader', envelopeId: child.envelope_id, effect: 'write', allocation: { inputTokens: 5, outputTokens: 5, costMicros: 10 } }], cwd, maxConcurrent: 1 };
+    await assert.rejects(orchestrateDelegationFlow({ ...input, host: { ...host, confirmClaim: async () => false } }));
+    assert.equal(calls, 0);
+    assert.equal((await service.inspect(root.authority_id)).invocations.length, 0);
+    await orchestrateDelegationFlow(input);
     assert.equal(calls, 1); assert.equal(recorded, 1);
     assert.equal((await loadRun(runId, cwd)).state.status, 'completed');
     assert.equal((await service.inspect(root.authority_id)).invocations[0].terminal, true);
