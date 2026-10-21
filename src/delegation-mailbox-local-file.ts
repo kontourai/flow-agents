@@ -40,8 +40,14 @@ export function createLocalFileDelegationMailbox(options: {
     }
     const fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_DIRECTORY);
     try {
-      if (!ancestor || created) privateDescriptor(fd, true);
-      else if (!fs.fstatSync(fd).isDirectory()) throw new Error("Unsafe mailbox ancestor directory");
+      if (!ancestor) privateDescriptor(fd, true);
+      else {
+        // mkdir success does not identify the inode opened afterward. Never
+        // chmod ambient ancestors; refuse a nonprivate replacement instead.
+        const stat = fs.fstatSync(fd);
+        if (!stat.isDirectory() || (created && (typeof process.geteuid !== "function"
+          || stat.uid !== process.geteuid() || (stat.mode & 0o7777) !== 0o700))) throw new Error("Unsafe mailbox ancestor directory");
+      }
     } finally { fs.closeSync(fd); }
   }
   function prepare(): void {
@@ -120,16 +126,22 @@ export function createLocalFileDelegationMailbox(options: {
   function confirmDurability(journal: Journal): void {
     // Also run for unchanged replay and read results: a prior rename may have
     // succeeded before fsync failed. Visibility alone is never confirmation.
-    // Re-confirm the complete pathname even on a fresh adapter: an earlier
-    // mkdir may be visible after its parent fsync failed. Resolving ancestors
-    // also handles platform aliases such as /var -> /private/var on macOS.
-    const ancestors: string[] = [];
-    let parent = fs.realpathSync(path.dirname(root));
+    // Re-confirm both the configured pathname and its canonical targets on
+    // every reopen. An alias's parent retains its symlink entry even when
+    // realpath resolves that entry away (including /var on macOS).
+    const ancestors = new Set<string>();
+    let lexical = path.dirname(root);
     while (true) {
-      ancestors.push(parent);
-      const next = path.dirname(parent);
-      if (next === parent) break;
-      parent = next;
+      let canonical = fs.realpathSync(lexical);
+      while (!ancestors.has(canonical)) {
+        ancestors.add(canonical);
+        const next = path.dirname(canonical);
+        if (next === canonical) break;
+        canonical = next;
+      }
+      const next = path.dirname(lexical);
+      if (next === lexical) break;
+      lexical = next;
     }
     const owned = [file, path.join(directory, "assignment"), directory, root];
     for (const target of [...owned, ...ancestors]) {

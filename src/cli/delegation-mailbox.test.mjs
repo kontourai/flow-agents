@@ -764,3 +764,115 @@ test("ancestor created by a peer during preparation keeps its permissions", asyn
   assert.equal(fs.statSync(parent).mode & 0o7777, 0o755);
   assert.equal(fs.statSync(root).mode & 0o7777, 0o700);
 });
+
+
+test("ancestor replaced after successful mkdir is never chmodded or accepted as private", async (t) => {
+  const f = fixture(t);
+  const parent = path.join(f.root, "new-parent");
+  const displaced = path.join(f.root, "displaced-created-parent");
+  const peer = path.join(f.root, "unrelated-peer");
+  const root = path.join(parent, "new-root");
+  fs.mkdirSync(peer, { mode: 0o755 });
+  fs.chmodSync(peer, 0o755);
+  fs.writeFileSync(path.join(peer, "retained"), "unrelated contents");
+  const before = fs.statSync(peer);
+  const open = fsDefault.openSync;
+  const chmod = fsDefault.fchmodSync;
+  let replaced = false;
+  let peerChmods = 0;
+  t.mock.method(fsDefault, "openSync", (target, ...args) => {
+    if (target === parent && !replaced) {
+      assert.equal(fs.statSync(parent).mode & 0o7777, 0o700, "mkdir really succeeded before replacement");
+      replaced = true;
+      fs.renameSync(parent, displaced);
+      fs.renameSync(peer, parent);
+    }
+    return open(target, ...args);
+  });
+  t.mock.method(fsDefault, "fchmodSync", (fd, mode) => {
+    const stat = fs.fstatSync(fd);
+    if (stat.dev === before.dev && stat.ino === before.ino) peerChmods++;
+    return chmod(fd, mode);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const outcome = await f.open(A.actorKey, root).enqueue(message(), A).then(
+    (value) => ({ value }), (error) => ({ error }));
+  assert.equal(replaced, true);
+  const after = fs.statSync(parent);
+  assert.equal(after.dev, before.dev);
+  assert.equal(after.ino, before.ino);
+  assert.equal(after.mode & 0o7777, 0o755, "the unrelated inode must retain its permissions");
+  assert.equal(peerChmods, 0, "historical mkdir success cannot authorize chmod of an ambient ancestor");
+  assert.equal(fs.readFileSync(path.join(parent, "retained"), "utf8"), "unrelated contents");
+  assert.match(outcome.error?.message ?? JSON.stringify(outcome.value), /Unsafe mailbox ancestor/);
+  assert.equal(fs.existsSync(root), false);
+  assert.equal(fs.statSync(displaced).mode & 0o7777, 0o700);
+});
+
+for (const dependency of ["alias-parent", "real-parent"]) {
+  test(`aliased artifact root confirms ${dependency} through retry and reopen`, async (t) => {
+    const f = fixture(t);
+    const alias = path.join(f.root, "alias-parent");
+    const real = path.join(f.root, "real-parent");
+    fs.mkdirSync(alias);
+    fs.mkdirSync(real);
+    fs.symlinkSync("../real-parent", path.join(alias, "link"));
+    const root = path.join(alias, "link", "new-root");
+    const parent = fs.statSync(path.join(f.root, dependency));
+    const sync = fsDefault.fsyncSync;
+    let failing = true;
+    let attempts = 0;
+    t.mock.method(fsDefault, "fsyncSync", (fd) => {
+      const stat = fs.fstatSync(fd);
+      if (stat.dev === parent.dev && stat.ino === parent.ino) {
+        attempts++;
+        if (failing) throw Object.assign(new Error("alias pathname dependency not durable"), { code: "EIO" });
+      }
+      return sync(fd);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    const sender = f.open(A.actorKey, root);
+    const sent = message();
+    for (const observe of [() => sender.enqueue(sent, A), () => sender.enqueue(sent, A),
+      () => f.open(A.actorKey, root).enqueue(sent, A), () => f.open(A.actorKey, root).outbox(A)]) {
+      const before = attempts;
+      const result = await observe();
+      assert.ok(attempts > before, "the configured pathname dependency must actually be flushed");
+      assert.deepEqual(result, { status: "unavailable", code: "durability_unconfirmed" });
+    }
+    const journal = JSON.parse(fs.readFileSync(path.join(real, "new-root/mailbox/state.json"), "utf8"));
+    assert.equal(journal.operations.length, 1);
+    assert.equal(journal.operations[0].status, "pending");
+    failing = false;
+    const before = attempts;
+    const pending = ok(await f.open(A.actorKey, root).enqueue(sent, A));
+    assert.ok(attempts > before);
+    assert.deepEqual(ok(await f.open(A.actorKey, root).outbox(A)), [pending]);
+    ok(await f.open(A.actorKey, root).deliver(sent.operationId, A));
+    assert.equal(ok(await f.open(B.actorKey, root).inbox(B))[0].status, "delivered");
+    assert.equal(fs.statSync(root).mode & 0o7777, 0o700);
+  });
+}
+
+test("unreadable search-write ancestor cannot claim durability until it can be flushed", async (t) => {
+  const f = fixture(t);
+  const parent = path.join(f.root, "search-write-parent");
+  const root = path.join(parent, "existing-root");
+  fs.mkdirSync(parent);
+  fs.mkdirSync(root, { mode: 0o700 });
+  fs.chmodSync(parent, 0o300);
+  try {
+    assert.throws(() => fs.openSync(parent, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY), { code: "EACCES" },
+      "this platform must enforce unreadable directory descriptors");
+    assert.deepEqual(await f.open(A.actorKey, root).enqueue(message(), A),
+      { status: "unavailable", code: "durability_unconfirmed" });
+    assert.deepEqual(await f.open(A.actorKey, root).outbox(A),
+      { status: "unavailable", code: "durability_unconfirmed" });
+    assert.equal(fs.statSync(parent).mode & 0o7777, 0o300);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "mailbox/state.json"), "utf8")).operations.length, 1);
+  } finally { fs.chmodSync(parent, 0o700); }
+  assert.equal(ok(await f.open(A.actorKey, root).enqueue(message(), A)).status, "pending");
+  assert.equal(ok(await f.open(A.actorKey, root).outbox(A)).length, 1);
+});
