@@ -127,8 +127,15 @@ checks and must return bounded, authenticated receipt references for the **exact
   the ledger and repeating the successful invocation id raised `AuthorizationPersistenceError` in
   recovery with `duplicateInvocationRisk: true`, without a second invocation; configured model
   provenance stayed configured. That fake-runtime probe is not provider billing or native-runtime
-  proof. The later executor should compose the public Dispatch physical reservation with group
-  accounting. Dependency upgrades and consumer qualification belong to the parent continuation.
+  proof. A further parent-supplied 0.7.1 probe found that raw `ModelInvocationResult.usage = {}`
+  settles Dispatch's reservation with `totalTokens: 0`; with room for two attempts and sufficient cost
+  capacity, the next invocation succeeds despite absent token accounting. Therefore neither a zero
+  token receipt nor `reservationState: "settled"` proves actual usage when raw source fields are missing.
+  The group must retain unknown usage and require complete actual input/output figures and cost.
+  A later adapter can refuse incomplete accounting in `AuthorizationLedger.settle` **before** forwarding
+  settlement, persisting the observed result for recovery; typed `AuthorizationPersistenceError`
+  prevents automatic reinvocation. The later executor should compose the public Dispatch physical
+  reservation with group accounting. Dependency upgrades and consumer qualification belong to the parent continuation.
 - `confirmEvidence(request, current)`: current invocation/loss, terminal, actual accounting or
   cancellation evidence, bound to the exact attempt and requested immutable references. A raw provider
   string, unverified receipt, estimated cost, or successful cancellation request is insufficient.
