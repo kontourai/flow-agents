@@ -438,7 +438,10 @@
       "covers": [
         "src/delegation-group-contract.ts",
         "src/delegation-group.ts",
-        "src/delegation-group-local-file.ts"
+        "src/delegation-group-local-file.ts",
+        "src/delegation-authority-contract.ts",
+        "src/delegation-envelope-v2.ts",
+        "src/multi-cursor-flow-orchestrator.ts"
       ]
     },
     {

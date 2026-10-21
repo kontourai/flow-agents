@@ -3,7 +3,9 @@
 This is the first source increment of [#1113](https://github.com/kontourai/flow-agents/issues/1113).
 It provides a versioned coordination contract, deterministic projection, host service, and offline
 local-file ledger. It does **not** establish the epic's execution acceptance criteria or ship an
-executor, scheduler, mailbox, isolated writer enforcement, or installed-runtime group fixture.
+executor, mailbox, isolated writer enforcement, or installed-runtime group fixture. The separate
+Flow scheduler supports bounded admission, external cancellation, and awaited lifecycle observations;
+these hooks are not a composed group executor or authenticated reservation service.
 
 ## Public entry points
 
@@ -12,6 +14,8 @@ executor, scheduler, mailbox, isolated writer enforcement, or installed-runtime 
 | `@kontourai/flow-agents/delegation-group-contract` | Closed schema 1.0 validators, canonical digests, pure transitions and replay projection |
 | `@kontourai/flow-agents/delegation-group` | Transactional service and host/store interfaces |
 | `@kontourai/flow-agents/delegation-group-local-file` | `createLocalFileDelegationGroupStore(artifactRoot)` |
+| `@kontourai/flow-agents/delegation-authority-contract` | Pure v2 root authority, execution grant and budget validators |
+| `@kontourai/flow-agents/delegation-envelope-v2` | Pure v2 envelope narrowing, digests and complete ancestry validation |
 
 The same APIs are exported at the package root. Package version and publication are separate from
 these source exports. Reference identities are opaque; none grants filesystem access.
@@ -33,8 +37,14 @@ lock, so creating another group cannot reset spend. Hosts must also prevent reus
 
 Recursion and ancestor budgets are explicitly unsupported. Nested groups, child-envelope ancestry,
 source diversity, isolated writers, and inferred worktree/session/correlation bindings refuse.
-Supporting diversified **derived** children requires a separately designed envelope revision with
-explicit delegation authority for those immutable dimensions; metadata is not a compatibility bridge.
+The additive v2 contract describes diversified **derived** children through indivisible, preauthorized
+runtime/model/source/worktree/Flow grants. It keeps execution authority separate from the delegation
+ceiling: a report-only coordinator can delegate a writer only within an explicitly authorized writer
+ceiling and selected grant. Root actor identifies the authorization principal. Exact parent digests,
+epochs, spans and complete ancestry are validated; subtree envelope limits include the envelope itself.
+Parsing and narrowing do not authenticate issuance, enforce aggregate fanout or reservations, check
+current revocation, or confine effects. The current group service still accepts only its v1 membership
+contract; v2 service composition remains unfinished. Metadata is not a compatibility bridge.
 
 Topology is either `independent` or an explicit Flow run/definition digest with seat step references.
 Flow definition identities retain their native bare 64-character hex digest; group references, policies,
