@@ -534,7 +534,7 @@ test("authorized execution binds selected runtime, reserves before launch and re
     await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child);
     let calls = 0, retained = null, fail = false, overrun = false, failureRetained = false;
     const runtime = { id: 'selected-runtime', capabilities: () => ({ structuredTools: true, outputTokenLimitFidelity: 'native', streaming: false, abort: true, usage: true }),
-      async invoke() { calls++; if (fail) throw new Error('native failure'); return { provider: 'fixture', model: 'configured', outputText: 'child report', toolCalls: [], usage: { inputTokens: overrun ? 8 : 2, outputTokens: overrun ? 2 : 3, costUsd: 0.000004 }, latencyMs: 1 }; } };
+      async invoke() { calls++; if (fail) throw new Error('native failure'); return { provider: 'fixture', model: 'configured', outputText: 'child report', toolCalls: [], usage: { inputTokens: overrun ? 8 : 2, outputTokens: 3, costUsd: 0.000004 }, latencyMs: 1 }; } };
     const host = {
       resolveRuntime: async () => ({ runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }),
       async invokeFenced(_envelope, id, launch) {
@@ -568,9 +568,8 @@ test("authorized execution binds selected runtime, reserves before launch and re
     await executeAuthorizedDelegation({ ...input, invocationId: 'attempt#failure' });
     assert.equal(failureRetained, true);
     fail = false; overrun = true;
-    const excess = await executeAuthorizedDelegation({ ...input, invocationId: 'x'.repeat(240) });
-    assert.equal(excess.outcome, 'budget-exceeded');
-    assert.equal(excess.result, undefined);
+    await assert.rejects(executeAuthorizedDelegation({ ...input, invocationId: 'x'.repeat(240) }), /settlement failed/);
+    await assert.rejects(executeAuthorizedDelegation({ ...input, invocationId: 'after-overrun' }), /accounting_overrun/);
     assert.equal((await service.inspect(root.authority_id)).invocations.at(-1).usage.inputTokens, 8);
   } finally { fs.rmSync(rootPath, { recursive: true, force: true }); }
 });

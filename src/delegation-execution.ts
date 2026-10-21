@@ -48,7 +48,8 @@ export async function executeAuthorizedDelegation(input: {
     ...(capabilities.streaming ? ["streaming"] : []),
   ]);
   const choice = input.request.toolChoice;
-  if (envelope.execution_binding.runtime.required_capabilities.some((name) => !supported.has(name))
+  if ((input.request.tools && input.request.tools.length > 0 && !capabilities.structuredTools)
+    || envelope.execution_binding.runtime.required_capabilities.some((name) => !supported.has(name))
     || input.request.tools?.some((tool) => !envelope.execution_authority.allowed_tools.includes(tool.name))
     || (choice?.type === "tool" && !input.request.tools?.some((tool) => tool.name === choice.name))) {
     throw new DelegationAdmissionError("runtime_authority_unsupported");
@@ -84,7 +85,18 @@ export async function executeAuthorizedDelegation(input: {
       }
     },
   };
-  const outcome = await dispatchDelegation({
+  async function reconcileObserved(): Promise<boolean> {
+    if (!observed) return false;
+    const usage = observed.usage;
+    const costMicros = usage.costUsd === undefined ? NaN : Math.ceil(usage.costUsd * 1_000_000);
+    const amounts = Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens) && Number.isSafeInteger(costMicros)
+      ? { inputTokens: usage.inputTokens!, outputTokens: usage.outputTokens!, costMicros } : null;
+    await input.service.reconcileInvocation(input.authorityId, input.invocationId, amounts, true);
+    return amounts !== null && (amounts.inputTokens > input.allocation.inputTokens || amounts.outputTokens > input.allocation.outputTokens || amounts.costMicros > input.allocation.costMicros);
+  }
+  let outcome: DelegationDispatchOutcome;
+  try {
+    outcome = await dispatchDelegation({
     plan,
     runtimes: new Map([["selected", runtime]]), ledger: input.dispatchLedger,
     ...(input.signal ? { signal: input.signal } : {}),
@@ -93,16 +105,14 @@ export async function executeAuthorizedDelegation(input: {
       observed = structuredClone(result);
     },
   });
-  if (observed) {
-    const usage = observed.usage;
-    const costMicros = usage.costUsd === undefined ? NaN : Math.ceil(usage.costUsd * 1_000_000);
-    const amounts = Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens) && Number.isSafeInteger(costMicros)
-      ? { inputTokens: usage.inputTokens!, outputTokens: usage.outputTokens!, costMicros } : null;
-    await input.service.reconcileInvocation(input.authorityId, input.invocationId, amounts, true);
-    if (amounts && (amounts.inputTokens > input.allocation.inputTokens || amounts.outputTokens > input.allocation.outputTokens
-      || amounts.costMicros > input.allocation.costMicros)) {
-      return { outcome: "budget-exceeded", dispatchReceipt: outcome.dispatchReceipt, reportedCostUsd: outcome.reportedCostUsd };
-    }
+  } catch (error) {
+    // A retained result can outlive a failed Dispatch settlement. Preserve its
+    // confirmed accounting so a known overrun cannot remain an unknown hold.
+    await reconcileObserved();
+    throw error;
+  }
+  if (await reconcileObserved()) {
+    return { outcome: "budget-exceeded", dispatchReceipt: outcome.dispatchReceipt, reportedCostUsd: outcome.reportedCostUsd };
   }
   return outcome;
 }
