@@ -8,7 +8,7 @@ import {
 } from "@kontourai/flow";
 import { requireDelegationV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService } from "./delegation-authority-service.js";
-import { executeAuthorizedDelegation } from "./delegation-execution.js";
+import { executeRoundsDelegation } from "./delegation-rounds-accounting.js";
 import { orchestrateFlowMultiCursor } from "./multi-cursor-flow-orchestrator.js";
 import type {
   DelegationRoundsSpec, DelegationRoundsProjection, DelegationRoundsCommand,
@@ -170,7 +170,7 @@ export async function runDelegationFlowRound(input: {
         request.messages = [{ role: "user", content: text }, ...request.messages];
       }
       const paidHost = selection.syncKey ? (await assertSyncedRecipient(await input.get(), selection.syncKey, host, input.authorityService)).executionHost : flowHost;
-      const outcome = await executeAuthorizedDelegation({ service: input.authorityService, dispatchLedger: input.dispatchLedger,
+      const outcome = await executeRoundsDelegation({ accountingProtocol: host.accountingProtocol, service: input.authorityService, dispatchLedger: input.dispatchLedger,
         authorityId: spec.rootAuthorityRef.id, envelopeId: seat.envelope.id, invocationId: action.invocationId,
         effect: seat.effect, allocation: seat.allocation, request, signal,
         host: {

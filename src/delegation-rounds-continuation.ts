@@ -5,7 +5,8 @@ import { canonicalJson } from "@kontourai/relay";
 import { delegationRecordV2, delegationIdV2, delegationIntegerV2, delegationDigestV2, requireDelegationV2, delegationReferenceV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService } from "./delegation-authority-service.js";
 import { bindRoundsRecipient, validateRecipientIdentity, type DelegationRecipientIdentity } from "./delegation-rounds-recipient.js";
-import { type DelegationSyncReceipt, syncDelegationContext } from "./delegation-context-sync.js";
+import { type DelegationSyncReceipt } from "./delegation-context-sync.js";
+import { syncRoundsDelegation } from "./delegation-rounds-accounting.js";
 import type { DelegationRoundsSpec, DelegationRoundsProjection, DelegationRoundsCommand, DelegationRoundsHost, DelegationRoundsEventBody, FinalizeRoundsSyncCommand } from "./delegation-group-rounds.js";
 
 type Continuation = Extract<DelegationRoundsCommand, {kind: "reappraise" | "authorizeRetry" | "sync"}>;
@@ -54,7 +55,7 @@ export async function runRoundsContinuation(input: {
     const terminalProofs: PreparedRoundsSync["terminalProofs"] = [], attempted: string[] = [];
     const priorRecipient = (id: string): DelegationRecipientIdentity | null => input.projection.attempts.find(a => a.invocationId === id)?.recipient
       ?? input.projection.continuations.find(r => r.prepared?.invocations.some(i => i.invocationId === id))?.prepared?.recipient ?? null;
-    const receipt = await syncDelegationContext({ service: input.authorityService, dispatchLedger: input.dispatchLedger,
+    const receipt = await syncRoundsDelegation({ accountingProtocol: host.accountingProtocol, service: input.authorityService, dispatchLedger: input.dispatchLedger,
       authorityId: spec.rootAuthorityRef.id, envelopeId: seat.envelope.id, runId: syncId, text, allocation: seat.allocation,
       maxOutputTokens: seat.allocation.outputTokens,
       host: { resolveRuntime: e => physical.resolveRuntime(e), retainResult: (r, e, id) => physical.retainResult(r, e, id),

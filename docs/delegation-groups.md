@@ -804,3 +804,21 @@ root tariff and SDK candidates are neither imported nor modified. Retain-result
 wrappers return underlying host promises directly and perform no micros/dollars
 round trip. The claimed-exhaustion compatibility evidence is explicitly Flow
 5.2.0-bound; nothing here establishes behavior of root Flow 5.2.1.
+
+### Exact accounting in bounded rounds
+
+The unpublished rounds controller accepts the explicit host option
+`accountingProtocol: "retained-tariff-v1"`. Its independent attempts, paid Flow
+rounds and recipient-bound context ACKs all use the AccountingV1 execution
+path. `retainResult` must first retain its evidence, then return exact integer
+token/micro amounts with `costBasis: "tariff-upper-bound"`, or `null` for unknown
+usage. An undefined return retains legacy provider-reported dollar semantics.
+Returning tagged accounting without opting in refuses settlement and retains
+the allocation; it cannot silently disappear through a void callback.
+
+Round observation and Flow member callbacks receive either the legacy outcome
+or the tagged AccountingV1 outcome. Tariff results leave `reportedCostUsd`
+undefined and preserve any existing raw Relay cost field without inventing one.
+Storage-only sync finalization compares the retained integer accounting; it does
+not dispatch again or change its cost basis. These source contracts do not
+establish publication, Station adoption or actual provider billing.

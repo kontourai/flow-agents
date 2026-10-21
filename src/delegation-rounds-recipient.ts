@@ -1,7 +1,7 @@
 import { canonicalJson, type ModelRuntime } from "@kontourai/relay";
 import { rootAuthorityReferenceV2, delegationEnvelopeDigestV2, type DelegationEnvelopeV2, type RootAuthorityReferenceV2 } from "./delegation-envelope-v2.js";
 import { delegationRecordV2, delegationIdV2, delegationIntegerV2, delegationReferenceV2, delegationDigestV2, requireDelegationV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
-import type { DelegationExecutionHost } from "./delegation-execution.js";
+import type { DelegationRoundsExecutionHost } from "./delegation-rounds-accounting.js";
 import type { DelegationRoundsHost, DelegationRoundsSpec, DelegationRoundsProjection } from "./delegation-group-rounds.js";
 import { createDelegationAuthorityService } from "./delegation-authority-service.js";
 
@@ -13,8 +13,8 @@ export type DelegationRecipientIdentity = {
 };
 export type ResolvedDelegationRecipient = {
   identity: DelegationRecipientIdentity; runtime: ModelRuntime;
-  retainResult: DelegationExecutionHost["retainResult"]; retainFailure: DelegationExecutionHost["retainFailure"];
-  invokeFenced: DelegationExecutionHost["invokeFenced"];
+  retainResult: DelegationRoundsExecutionHost["retainResult"]; retainFailure: DelegationRoundsExecutionHost["retainFailure"];
+  invokeFenced: DelegationRoundsExecutionHost["invokeFenced"];
 };
 export function validateRecipientIdentity(identity: DelegationRecipientIdentity): void {
   delegationRecordV2(identity, ["hostId", "recipientId", "generation", "executionId", "authority", "envelope", "runtimeReceipt", "modelReceipt", "sessionReceipt"]);
@@ -28,7 +28,7 @@ export async function bindRoundsRecipient(input: {
   spec: DelegationRoundsSpec; seatId: string; envelope: DelegationEnvelopeV2; host: DelegationRoundsHost;
   service: ReturnType<typeof createDelegationAuthorityService>;
   expected?: DelegationRecipientIdentity;
-}): Promise<{ identity: DelegationRecipientIdentity; executionHost: DelegationExecutionHost }> {
+}): Promise<{ identity: DelegationRecipientIdentity; executionHost: DelegationRoundsExecutionHost }> {
   const { spec, host, envelope, seatId } = input; requireDelegationV2(host.recipient, "rounds_recipient_registry_required");
   const seat = spec.seats.find(s => s.seatId === seatId); requireDelegationV2(seat, "rounds_unauthorized_seat");
   const binding = await host.recipient.resolve(structuredClone(spec), structuredClone(seat), structuredClone(envelope));

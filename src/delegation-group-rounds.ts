@@ -5,7 +5,6 @@ import { runDelegationFlowRound, validateFlowRoundRelease, validateFlowRoundCrea
 import { finalizeRoundsSync, type PreparedRoundsSync, preparedRoundsSyncDigest, validatePreparedRoundsSync, runRoundsContinuation, validateRoundsContinuation } from "./delegation-rounds-continuation.js";
 import { authorityLineageReference, type AuthorityEpochV3 } from "./delegation-authority-service-v3.js";
 import { assertSyncedRecipient, type ResolvedDelegationRecipient, type DelegationRecipientIdentity, validateRecipientIdentity } from "./delegation-rounds-recipient.js";
-import type { DelegationFlowExecutionHost } from "./delegation-flow-execution.js";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
 import {
   copyDelegationJsonV2, delegationRecordV2, delegationIdV2, delegationIntegerV2, delegationDigestV2, delegationFlowDefinitionIdentityV2, delegationTimestampV2,
@@ -13,8 +12,8 @@ import {
 } from "./delegation-authority-contract.js";
 import { rootAuthorityReferenceV2, delegationEnvelopeDigestV2, type RootAuthorityReferenceV2, type DelegationEnvelopeV2 } from "./delegation-envelope-v2.js";
 import { createDelegationAuthorityService, type DelegationInvocation, type DelegationInvocationAmounts } from "./delegation-authority-service.js";
-import { executeAuthorizedDelegation, type DelegationExecutionHost } from "./delegation-execution.js";
-import type { DelegationDispatchOutcome } from "./delegation-dispatch.js";
+import { executeRoundsDelegation, type DelegationRoundsExecutionHost, type DelegationRoundsFlowExecutionHost, type DelegationRoundsOutcome } from "./delegation-rounds-accounting.js";
+export type { DelegationRoundsExecutionHost, DelegationRoundsFlowExecutionHost, DelegationRoundsOutcome } from "./delegation-rounds-accounting.js";
 
 export type RoundSeat = {
   seatId: string; envelope: { id: string; generation: number; digest: string };
@@ -89,20 +88,22 @@ export interface DelegationRoundsStore {
   transact<T>(groupId: string, body: (journal: DelegationRoundsJournal | null) => Promise<{ journal: DelegationRoundsJournal; result: T }>): Promise<T>;
 }
 export interface DelegationRoundsHost {
+  /** Explicit host-only opt-in; tagged accounting is never inferred from Relay dollars. */
+  accountingProtocol?: "retained-tariff-v1";
   /** Authenticate current caller/custody, immutable roster/policy and root exclusivity across stores.
    * For release, authorize this exact checkpoint, seat subset and all predecessor identities NOW.
    * A checkpoint reference does not authorize itself. Reads/replays must also authenticate. */
   authorize(input: { action: "create" | "release" | "terminal" | "cancel" | "get" | "events" | "replay" | "execute" | "record" | "reappraise" | "authorizeRetry" | "sync" | "finalizeSync" | "adoptRenewal";
     groupId: string; current: DelegationRoundsProjection | null; command: DelegationRoundsAuthorizationCommand | null }): Promise<DelegationReferenceV2 | null>;
-  executionHost(spec: DelegationRoundsSpec): DelegationExecutionHost;
+  executionHost(spec: DelegationRoundsSpec): DelegationRoundsExecutionHost;
   prepareRequest(spec: DelegationRoundsSpec, seat: RoundSeat, attempt: RoundAttempt, envelope: DelegationEnvelopeV2): Promise<ModelInvocationRequest>;
   /** Retain raw output/dissent/uncertainty or error. A reference grants no acceptance. */
-  retainObservation(spec: DelegationRoundsSpec, attempt: RoundAttempt, observation: { outcome: DelegationDispatchOutcome } | { error: unknown }): Promise<DelegationReferenceV2>;
+  retainObservation(spec: DelegationRoundsSpec, attempt: RoundAttempt, observation: { outcome: DelegationRoundsOutcome } | { error: unknown }): Promise<DelegationReferenceV2>;
   /** Confirm exact physical invocation AND descendants are terminal, independently of model output. */
   confirmTerminal(spec: DelegationRoundsSpec, attempt: RoundAttempt, invocation: DelegationInvocation): Promise<DelegationReferenceV2 | null>;
   /** Flow-specific authenticated boundary. Existing independent callers need not implement it. */
   flow?: {
-    executionHost(spec: DelegationRoundsSpec): DelegationFlowExecutionHost;
+    executionHost(spec: DelegationRoundsSpec): DelegationRoundsFlowExecutionHost;
     /** Exclusive host custody over other Flow mutations; public evaluateRun lacks expected-head admission. */
     withContinuationMutation?<T>(spec: DelegationRoundsSpec, command: DelegationRoundsCommand, body: () => Promise<T>): Promise<T>;
     confirmRetainedResult(spec: DelegationRoundsSpec, attempt: RoundAttempt, reference: DelegationReferenceV2): Promise<boolean>;
@@ -113,7 +114,7 @@ export interface DelegationRoundsHost {
   retainContinuation?(spec: DelegationRoundsSpec, receipt: unknown): Promise<DelegationReferenceV2>;
   context?: {
     load(reference: DelegationReferenceV2): Promise<string>;
-    executionHost(spec: DelegationRoundsSpec, seat: RoundSeat): DelegationExecutionHost;
+    executionHost(spec: DelegationRoundsSpec, seat: RoundSeat): DelegationRoundsExecutionHost;
     confirmTerminal(spec: DelegationRoundsSpec, seat: RoundSeat, invocation: DelegationInvocation, recipient: DelegationRecipientIdentity | null): Promise<DelegationReferenceV2 | null>;
   };
   requestDescendantCancellation(spec: DelegationRoundsSpec): Promise<DelegationReferenceV2>;
@@ -405,6 +406,7 @@ export function createDelegationRoundsController(input: {
   dispatchLedger: AuthorizationLedger; host: DelegationRoundsHost; cwd?: string;
 }) {
   const { store, host, authorityService: service } = input;
+  requireDelegationV2(host.accountingProtocol === undefined || host.accountingProtocol === "retained-tariff-v1", "rounds_accounting_protocol");
   async function authorize(action: Parameters<DelegationRoundsHost["authorize"]>[0]["action"], groupId: string, p: DelegationRoundsProjection | null, c: DelegationRoundsAuthorizationCommand | null = null) {
     const receipt = await host.authorize({ action, groupId, current: p && structuredClone(p), command: c && structuredClone(c) });
     requireDelegationV2(receipt, "rounds_host_authorization");
@@ -599,7 +601,7 @@ export function createDelegationRoundsController(input: {
       const workers = Array.from({ length: Math.min(attempts.length, spec.policy.maxConcurrent) }, async () => {
         while (cursor < attempts.length) {
           const attempt = attempts[cursor++], seat = spec.seats.find(s => s.seatId === attempt.seatId)!;
-          let observation: { outcome: DelegationDispatchOutcome } | { error: unknown };
+          let observation: { outcome: DelegationRoundsOutcome } | { error: unknown };
           try {
             const current = (await get(c.groupId)).projection;
             await authorize("execute", c.groupId, current, c); requireDelegationV2(current.cancellation === "none", "rounds_cancelled");
@@ -607,7 +609,7 @@ export function createDelegationRoundsController(input: {
             requireDelegationV2(envelope.generation === seat.envelope.generation && delegationEnvelopeDigestV2(envelope) === seat.envelope.digest, "rounds_envelope_mismatch");
             const request = await host.prepareRequest(structuredClone(spec), structuredClone(seat), structuredClone(attempt), envelope);
             const physical = host.executionHost(structuredClone(spec));
-            const outcome = await executeAuthorizedDelegation({ service, dispatchLedger: input.dispatchLedger, authorityId: spec.rootAuthorityRef.id,
+            const outcome = await executeRoundsDelegation({ accountingProtocol: host.accountingProtocol, service, dispatchLedger: input.dispatchLedger, authorityId: spec.rootAuthorityRef.id,
               envelopeId: seat.envelope.id, invocationId: attempt.invocationId, effect: seat.effect, allocation: seat.allocation, request,
               host: {
                 resolveRuntime: e => physical.resolveRuntime(e),

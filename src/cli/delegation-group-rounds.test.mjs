@@ -103,7 +103,7 @@ async function fixture(t, options = {}) {
   const spec = { schemaVersion: "1.0", groupId: "rounds-group", rootAuthorityRef: rootAuthorityReferenceV2(root),
     controller: { id: "controller", generation: 1 }, topology: options.managedDefinition ? { kind: "flow", runId: options.flow.runId, definition: options.flow.identity, actor: { key: "host", kind: "test" } } : { kind: "independent-advisory" },
     policy: { reference: root.revisions.policy, maxRounds: options.maxRounds ?? 4, maxAttempts: options.groupAttempts ?? options.attempts ?? 6, maxConcurrent: options.maxConcurrent ?? 2, ...(options.managedDefinition ? { maxEvaluations: options.maxEvaluations ?? 8, ...(options.maxRecoveries === undefined ? {} : { maxRecoveries: options.maxRecoveries }), ...(options.contextSync ? { maxSyncs: options.maxSyncs ?? 8 } : {}), ...(options.v3 ? { maxRenewals: 4 } : {}) } : {}) },
-    seats: envelopes.map((e, i) => ({ seatId: `seat-${i}`, envelope: { id: e.envelope_id, generation: e.generation, digest: delegationEnvelopeDigestV2(e) }, effect: "read", allocation, ...(options.managedDefinition ? { stepId: options.managedDefinition.steps[i].id } : {}) })) };
+    seats: envelopes.map((e, i) => ({ seatId: `seat-${i}`, envelope: { id: e.envelope_id, generation: e.generation, digest: delegationEnvelopeDigestV2(e) }, effect: "read", allocation: i === 0 ? options.allocation ?? allocation : allocation, ...(options.managedDefinition ? { stepId: options.managedDefinition.steps[i].id } : {}) })) };
   let counter = 0;
   function retain(value) {
     const id = `observation-${++counter}`, bytes = JSON.stringify(value, (k, v) => v instanceof Error ? { message: v.message } : v);
@@ -120,7 +120,7 @@ async function fixture(t, options = {}) {
         await setImmediate(); await state.onInvoke?.();
         if (state.fail) throw new Error("controlled failure");
         return { provider: "controlled", model: "local-only", outputText: syncInstruction ? (state.badAck ? "ACK WRONG" : syncInstruction.content.match(/Reply exactly (.*)$/)[1]) : "Dissent remains advisory", toolCalls: [],
-          usage: state.unknown ? {} : { inputTokens: 1, outputTokens: 2, costUsd: 0.000003 }, latencyMs: 1 };
+          usage: state.unknown ? {} : { inputTokens: 1, outputTokens: 2, ...(options.retainedAccounting ? {} : { costUsd: 0.000003 }) }, latencyMs: 1 };
       } finally { state.active--; }
     } };
   let controller;
@@ -136,7 +136,12 @@ async function fixture(t, options = {}) {
       assert.equal(invocation?.terminal, false); assert.equal(invocation.envelopeId, envelope.envelope_id);
       state.launches.push(id); return launch();
     },
-    async retainResult(result) { retain(result); }, async retainFailure(error) { retain(error); },
+    async retainResult(result) {
+      retain(result);
+      if (options.retainedAccounting) return state.unknown ? null : {
+        inputTokens: 1, outputTokens: 2, costMicros: options.tariffMicros ?? 3, costBasis: "tariff-upper-bound",
+      };
+    }, async retainFailure(error) { retain(error); },
     async recordScheduleEvent(event) { state.schedules.push(event); await state.onSchedule?.(event); }, async confirmClaim(claim) {
       if (!options.managedDefinition) return true;
       const run = await loadRun(options.flow.runId, cwd);
@@ -146,6 +151,7 @@ async function fixture(t, options = {}) {
     async recordMemberOutcome(claim, envelope, outcome) { state.observations.push({ claim, envelope, outcome }); },
   };
   const host = {
+    ...(options.accountingProtocol ? {accountingProtocol: options.accountingProtocol} : {}),
     async authorize({ action, current, command }) {
       if (!state.allowed || current && current.spec.controller.generation !== 1) return null;
       if (action === "release" && state.denyCheckpoint === command?.checkpoint.id) return null;
@@ -1104,4 +1110,50 @@ test("R3: postmerge renewal invalidates the old session ACK without resetting ro
   const previous = await f.service.inspect("root"); fs.writeFileSync(path.join(f.cwd, "actual-host-source.txt"), "unexpected-source");
   await assert.rejects(f.service.admitEffect("root", "parent", "read"), /execution_binding_unconfirmed/);
   assert.deepEqual((await f.service.inspect("root")).invocations, previous.invocations);
+});
+
+
+test("Accounting rounds: independent attempt preserves exact 123 micros without reported Relay dollars", async t => {
+  const f = await fixture(t, {retainedAccounting:true, accountingProtocol:"retained-tariff-v1", tariffMicros:123,
+    allocation:{inputTokens:5,outputTokens:5,costMicros:200}});
+  const command=await f.release("tariff-first",["seat-0"]);
+  await f.controller.release(command);
+  const ledger=await f.service.inspect("root");
+  assert.equal(f.state.calls,1);assert.equal(ledger.invocations[0].usage.costMicros,123);
+  const outcome=f.state.observations.at(-1).observation.outcome;
+  assert.equal(outcome.costBasis,"tariff-upper-bound");assert.equal(outcome.reportedCostUsd,undefined);
+  assert.equal(outcome.result.usage.costUsd,undefined);
+  assert.equal((await f.open().release(command)).replayed,true);assert.equal(f.state.calls,1);
+});
+
+test("Accounting rounds: missing opt-in and unknown tariff retain full allocations", async t => {
+  for(const protocol of [undefined,"retained-tariff-v1"]){
+    const f=await fixture(t,{retainedAccounting:true,accountingProtocol:protocol});
+    if(protocol)f.state.unknown=true;
+    await f.controller.release(await f.release("held",["seat-0"]));
+    const ledger=await f.service.inspect("root");assert.equal(f.state.calls,1);
+    assert.equal(ledger.invocations[0].usage,null);assert.deepEqual(ledger.invocations[0].allocation,allocation);
+    assert.ok(f.state.observations.at(-1).observation.error);
+  }
+});
+
+test("Accounting rounds: exact session ACK, paid Flow continuation and storage-only recovery preserve tariff basis", async t => {
+  const f=await fixture(t,{managedDefinition:managedDefinition("blocked"),contextSync:true,attempts:12,
+    retainedAccounting:true,accountingProtocol:"retained-tariff-v1",tariffMicros:7});
+  f.state.continuationRetentionFailure=true;
+  let original;const originalSync=f.controller.sync.bind(f.controller);f.controller.sync=command=>{original=command;return originalSync(command);};
+  await assert.rejects(seatSync(f,"seat-0","tariff-sync","Retained exact context"));
+  const p=await f.open().get(f.spec.groupId), exchange=p.continuations.at(-1);
+  assert.equal(exchange.prepared.invocations[0].usage.costMicros,7);assert.equal(f.state.calls,1);
+  const before=await f.service.inspect("root");f.state.continuationRetentionFailure=false;
+  await f.open().finalizeSync(f.cmd("finalizeSync",p,"tariff-finalize",{
+    syncOperationKey:original.operationKey,preparedDigest:preparedRoundsSyncDigest(exchange.prepared)}));
+  assert.equal(f.state.calls,1);assert.deepEqual(await f.service.inspect("root"),before);
+  await f.open().release(await flowRelease(f,"tariff-paid",[{...invoke("seat-0"),syncKey:original.operationKey}]));
+  assert.equal(f.state.calls,2);const ledger=await f.service.inspect("root");
+  assert.deepEqual(ledger.invocations.map(i=>i.usage.costMicros),[7,7]);
+  const outcome=f.state.observations.find(o=>o.outcome)?.outcome;
+  assert.equal(outcome.costBasis,"tariff-upper-bound");assert.equal(outcome.reportedCostUsd,undefined);
+  assert.ok(f.state.requests.every(r=>r.tools?.length===0||r.tools===undefined));
+  assert.ok(f.state.sessionCalls.every(session=>session==="session-A"));
 });
