@@ -401,10 +401,13 @@ test("pre-abort consumes no intent; lost cancellation callback leaves durable pe
   assert.equal(requests, 1); assert.equal(f.state.cancellations, 0);
   assert.equal((await f.openAuthority().inspect("root")).cancelled, true);
   await assert.rejects(f.open().reconcileCancellation(cancel), /cancellation_confirmation_unavailable/);
+  let confirmations = 0, release;
+  const both = new Promise(resolve => { release = resolve; });
   const reconciler = f.open({ async confirmDescendantCancellation(_spec, original) {
-    assert.deepEqual(original, cancel); return ref("observed-original-cancel");
+    assert.deepEqual(original, cancel); if (++confirmations === 2) release(); await both; return ref("observed-original-cancel");
   } });
-  const confirmed = await reconciler.reconcileCancellation(cancel);
+  const [confirmed, concurrent] = await Promise.all([reconciler.reconcileCancellation(cancel), reconciler.reconcileCancellation(cancel)]);
+  assert.equal(concurrent.projection.revision, confirmed.projection.revision);
   assert.equal(confirmed.projection.cancellation, "requested");
   assert.equal(confirmed.projection.terminal, "unproven");
   assert.equal((await reconciler.reconcileCancellation(cancel)).projection.cancellation, "requested");
@@ -605,5 +608,21 @@ test('mailbox authenticates before group lookup and samples time after live reso
     return result;
   };
   assert.equal((await mailbox.enqueue(message, first)).status, 'refused');
+  assert.equal((await f.service.inspect('root')).invocations.length, 0);
+});
+
+
+test('cancelled seats require explicit non-launch proof and zero ancestor invocations to become terminal', async t => {
+  const f = await fixture(t);
+  await f.controller.cancel(f.command('cancel', 1));
+  const command = (seatId, revision) => ({ ...f.command('not_launched', revision, `not-launched-${seatId}`), seatId });
+  await assert.rejects(f.controller.recordNotLaunched(command('seat-0', 3)), /unlaunched_host_proof_required/);
+  const reconciler = f.open({ confirmNotLaunched: async (_spec, seat) => ref(`not-launched-${seat.seatId}`) });
+  const first = await reconciler.recordNotLaunched(command('seat-0', 3));
+  assert.equal(first.projection.terminal, 'unproven');
+  const second = await reconciler.recordNotLaunched(command('seat-1', first.projection.revision));
+  assert.equal(second.projection.terminal, 'proven');
+  assert.equal(second.projection.acceptance, 'unassessed');
+  assert.equal(f.state.calls, 0);
   assert.equal((await f.service.inspect('root')).invocations.length, 0);
 });

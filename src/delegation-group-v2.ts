@@ -37,7 +37,8 @@ export type DelegationGroupSpecV2 = {
 export type GroupCommandV2 = {
   groupId: string; operationKey: string; expectedRevision: number; controller: GroupControllerV2;
 } & ({ kind: "create"; spec: DelegationGroupSpecV2 } | { kind: "run" } | { kind: "cancel" }
-  | { kind: "terminal"; seatId: string; invocationId: string; observation: GroupMemberObservationV2 });
+  | { kind: "terminal"; seatId: string; invocationId: string; observation: GroupMemberObservationV2 }
+  | { kind: "not_launched"; seatId: string });
 export type GroupMemberObservationV2 = {
   outcome: DelegationDispatchOutcome["outcome"];
   outcomeRef: DelegationReferenceV2;
@@ -45,7 +46,7 @@ export type GroupMemberObservationV2 = {
   uncertaintyRefs: DelegationReferenceV2[];
 };
 type GroupEventBodyV2 =
-  | { kind: "created" | "run_pending" | "cancel_pending" | "terminal_recorded"; command: GroupCommandV2; authorization: DelegationReferenceV2 }
+  | { kind: "created" | "run_pending" | "cancel_pending" | "terminal_recorded" | "terminal_unlaunched"; command: GroupCommandV2; authorization: DelegationReferenceV2 }
   | { kind: "member_pending"; operationKey: string; seatId: string; claimId: string | null }
   | { kind: "member_invoking"; operationKey: string; seatId: string; invocationId: string }
   | { kind: "member_observed"; operationKey: string; seatId: string; observation: GroupMemberObservationV2 }
@@ -73,7 +74,7 @@ export interface DelegationGroupStoreV2 {
 export interface DelegationGroupHostV2 {
   /** Authenticate the actual caller, immutable membership and exclusive root custody across stores, including replay. */
   authorize(input: {
-    action: "create" | "run" | "cancel" | "terminal" | "get" | "list" | "events" | "replay" | "execute" | "record";
+    action: "create" | "run" | "cancel" | "terminal" | "not_launched" | "get" | "list" | "events" | "replay" | "execute" | "record";
     groupId: string | null; spec: DelegationGroupSpecV2 | null; current: DelegationGroupProjectionV2 | null; command: GroupCommandV2 | null;
   }): Promise<DelegationReferenceV2 | null>;
   /** Its invokeFenced must enforce this group's current custody/cancellation across the actual launch. */
@@ -83,6 +84,7 @@ export interface DelegationGroupHostV2 {
   retainRunObservation(spec: DelegationGroupSpecV2, observation: unknown): Promise<DelegationReferenceV2>;
   retainRunFailure(spec: DelegationGroupSpecV2, error: unknown): Promise<DelegationReferenceV2>;
   /** Authenticates physical termination of this exact invocation and its descendants, not a model's claim. */
+  confirmNotLaunched?(spec: DelegationGroupSpecV2, seat: DelegationGroupSeatV2): Promise<DelegationReferenceV2 | null>;
   confirmTerminal?(spec: DelegationGroupSpecV2, seat: DelegationGroupSeatV2, invocation: DelegationInvocation, observation: GroupMemberObservationV2): Promise<DelegationReferenceV2 | null>;
   /** Request cancellation of these seats and descendants; acknowledgement is not terminal proof. */
   confirmDescendantCancellation?(spec: DelegationGroupSpecV2, command: GroupCommandV2): Promise<DelegationReferenceV2 | null>;
@@ -138,14 +140,15 @@ export function validateDelegationGroupSpecV2(value: unknown): DelegationGroupSp
 function command(value: unknown): GroupCommandV2 {
   const copy = copyDelegationJsonV2(value);
   const kind = (copy as { kind?: unknown })?.kind;
-  const r = delegationRecordV2(copy, ["kind", "groupId", "operationKey", "expectedRevision", "controller", ...(kind === "create" ? ["spec"] : kind === "terminal" ? ["seatId", "invocationId", "observation"] : [])]);
-  requireDelegationV2(kind === "create" || kind === "run" || kind === "cancel" || kind === "terminal", "invalid_group_command");
+  const r = delegationRecordV2(copy, ["kind", "groupId", "operationKey", "expectedRevision", "controller", ...(kind === "create" ? ["spec"] : kind === "terminal" ? ["seatId", "invocationId", "observation"] : kind === "not_launched" ? ["seatId"] : [])]);
+  requireDelegationV2(kind === "create" || kind === "run" || kind === "cancel" || kind === "terminal" || kind === "not_launched", "invalid_group_command");
   delegationIdV2(r.groupId); delegationIdV2(r.operationKey); delegationIntegerV2(r.expectedRevision, GROUP_V2_MAX_EVENTS); controller(r.controller);
   if (kind === "create") {
     const spec = validateDelegationGroupSpecV2(r.spec);
     requireDelegationV2(spec.groupId === r.groupId && same(spec.controller, r.controller), "group_identity_mismatch");
     r.spec = spec;
   }
+  if (kind === "not_launched") delegationIdV2(r.seatId);
   if (kind === "terminal") { delegationIdV2(r.seatId); delegationIdV2(r.invocationId); observation(r.observation); }
   return r as GroupCommandV2;
 }
@@ -175,7 +178,7 @@ export function projectDelegationGroupV2(journal: DelegationGroupJournalV2): Del
     const e = copyDelegationJsonV2(raw) as GroupEventV2;
     requireDelegationV2(e.revision === index + 1, "group_revision_mismatch");
     if ("command" in e) {
-      requireDelegationV2(["created", "run_pending", "cancel_pending", "terminal_recorded"].includes(e.kind), "invalid_group_event");
+      requireDelegationV2(["created", "run_pending", "cancel_pending", "terminal_recorded", "terminal_unlaunched"].includes(e.kind), "invalid_group_event");
       delegationRecordV2(e, ["revision", "kind", "command", "authorization"]);
       const c = command(e.command);
       delegationReferenceV2(e.authorization);
@@ -187,7 +190,14 @@ export function projectDelegationGroupV2(journal: DelegationGroupJournalV2): Del
         result = { spec: c.spec, revision: 1, execution: "idle", cancellation: "none", acceptance: "unassessed", terminal: "unproven", members: [] };
       } else {
         requireDelegationV2(result && same(c.controller, result.spec.controller), "controller_fence_conflict");
-        if (e.kind === "terminal_recorded") {
+        if (e.kind === "terminal_unlaunched") {
+          requireDelegationV2(c.kind === "not_launched" && result.cancellation !== "none"
+            && result.spec.seats.some(s => s.seatId === c.seatId), "unlaunched_member_mismatch");
+          const member = result.members.find(m => m.seatId === c.seatId);
+          requireDelegationV2(!member?.invocationId && !member?.terminalReference, "unlaunched_member_mismatch");
+          if (member) member.terminalReference = e.authorization;
+          else result.members.push({ seatId: c.seatId, claimId: null, invocationId: null, terminalReference: e.authorization, observation: null });
+        } else if (e.kind === "terminal_recorded") {
           requireDelegationV2(c.kind === "terminal", "terminal_command_required");
           const member = result.members.find(m => m.seatId === c.seatId);
           requireDelegationV2(member && member.invocationId === c.invocationId && !member.terminalReference
@@ -244,9 +254,10 @@ export function delegationGroupCapacityV2(journal: DelegationGroupJournalV2): { 
   const p = projectDelegationGroupV2(journal);
   const run = journal.events.some(e => e.kind === "run_pending");
   const returned = journal.events.some(e => e.kind === "run_returned");
-  const unstarted = returned || p.cancellation !== "none" ? 0 : p.spec.seats.length - p.members.length;
+  const unrepresented = p.spec.seats.length - p.members.length;
+  const unstarted = returned || p.cancellation !== "none" ? 0 : unrepresented;
   const outstanding = p.members.reduce((sum, m) => sum + (m.observation ? 0 : 1) + (m.invocationId ? 0 : 1) + (m.terminalReference ? 0 : 1), 0);
-  const events = unstarted * 4 + outstanding + (returned ? 0 : run ? 1 : 2)
+  const events = unstarted * 4 + (p.cancellation !== "none" ? unrepresented : 0) + outstanding + (returned ? 0 : run ? 1 : 2)
     + (p.cancellation === "none" ? 2 : p.cancellation === "pending" ? 1 : 0);
   return { events, bytes: events * MAX_RECORD_BYTES };
 }
@@ -315,7 +326,16 @@ export function createDelegationGroupControllerV2(input: {
         }
       } else {
         requireDelegationV2(p, "group_missing");
-        if (c.kind === "terminal") {
+        if (c.kind === "not_launched") {
+          const seat = p.spec.seats.find(s => s.seatId === c.seatId);
+          const member = p.members.find(m => m.seatId === c.seatId);
+          requireDelegationV2(seat && p.cancellation !== "none" && !member?.invocationId && !member?.terminalReference, "unlaunched_member_mismatch");
+          const authority = await service.inspect(p.spec.rootAuthorityRef.id);
+          requireDelegationV2(authority.cancelled && !authority.invocations.some(i => i.envelopeId === seat.envelope.id), "unlaunched_authority_unconfirmed");
+          const receipt = await host.confirmNotLaunched?.(structuredClone(p.spec), structuredClone(seat));
+          requireDelegationV2(receipt, "unlaunched_host_proof_required");
+          const copy = copyDelegationJsonV2(receipt); delegationReferenceV2(copy); terminalReceipt = copy;
+        } else if (c.kind === "terminal") {
           const seat = p.spec.seats.find(s => s.seatId === c.seatId);
           const member = p.members.find(m => m.seatId === c.seatId);
           requireDelegationV2(seat && member?.invocationId === c.invocationId && !member.terminalReference, "terminal_member_mismatch");
@@ -330,7 +350,7 @@ export function createDelegationGroupControllerV2(input: {
       }
       const authorization = await authorize(kind, p, c);
       const next: DelegationGroupJournalV2 = journal ?? { schemaVersion: "2.0", groupId: c.groupId, events: [] };
-      next.events.push({ revision: next.events.length + 1, kind: kind === "create" ? "created" : kind === "run" ? "run_pending" : kind === "terminal" ? "terminal_recorded" : "cancel_pending", command: c, authorization: terminalReceipt ?? authorization });
+      next.events.push({ revision: next.events.length + 1, kind: kind === "create" ? "created" : kind === "run" ? "run_pending" : kind === "terminal" ? "terminal_recorded" : kind === "not_launched" ? "terminal_unlaunched" : "cancel_pending", command: c, authorization: terminalReceipt ?? authorization });
       return { journal: next, result: { replayed: false, projection: projectDelegationGroupV2(next) } };
     });
   }
@@ -339,6 +359,12 @@ export function createDelegationGroupControllerV2(input: {
     return store.transact(groupId, async journal => {
       requireDelegationV2(journal, "group_missing");
       await authorize(body.kind === "member_pending" || body.kind === "member_invoking" ? "execute" : "record", projectDelegationGroupV2(journal));
+      if (body.kind === "cancel_requested") {
+        const pending = journal.events.find(e => e.kind === "cancel_pending");
+        requireDelegationV2(pending && "command" in pending && pending.command.operationKey === body.operationKey, "cancellation_identity_mismatch");
+        const current = projectDelegationGroupV2(journal);
+        if (current.cancellation === "requested") return { journal, result: current };
+      }
       if (body.kind === "run_returned" && journal.events.some(e => e.kind === "run_returned")) {
         return { journal, result: projectDelegationGroupV2(journal) };
       }
@@ -355,6 +381,7 @@ export function createDelegationGroupControllerV2(input: {
   return {
     create: (value: unknown) => begin(value, "create"),
     recordTerminal: (value: unknown) => begin(value, "terminal"),
+    recordNotLaunched: (value: unknown) => begin(value, "not_launched"),
     async get(groupId: string) { return (await get(groupId)).projection; },
     async events(groupId: string, afterRevision = 0) {
       delegationIntegerV2(afterRevision, GROUP_V2_MAX_EVENTS);
