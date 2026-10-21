@@ -33,3 +33,22 @@ for (const usage of [{}, { inputTokens: 2, outputTokens: 3, costUsd: 0.002 }]) {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 }
+
+test('failed durable result retention stops fallback and replay after a physical invocation', async () => {
+  const root = await makeFixtureDirAsync('delegation-retention-');
+  try {
+    let calls = 0;
+    const runtime = { id: 'worker', capabilities: () => ({ structuredTools: false, streaming: false, abort: true, usage: true }),
+      async invoke() { calls++; return { provider: 'fixture', model: 'fixture', outputText: 'report', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, costUsd: 0.001 }, latencyMs: 1 }; } };
+    const plan = { schemaVersion: 1, role: 'reader', request: { messages: [{ role: 'user', content: 'read' }] },
+      candidates: ['first', 'fallback'].map((id) => ({ id, runtimeId: 'worker', worstCaseUsage: { maxTokens: 10, maxCostUsd: 0.01 } })),
+      policy: { retryRuntimeFailures: true }, budget: { maxAttempts: 2 },
+      authorization: { schemaVersion: 1, id: 'family', invocationId: 'one', limits: { maxAttempts: 2, maxTotalTokens: 20, maxCostUsd: 0.05 } } };
+    const run = () => dispatchDelegation({ plan, ledger: new FileAuthorizationLedger({ root }), runtimes: new Map([['worker', runtime]]),
+      retainResult: async () => { throw new Error('storage unavailable'); } });
+    await assert.rejects(run(), AuthorizationPersistenceError);
+    assert.equal(calls, 1);
+    await assert.rejects(run(), AuthorizationPersistenceError);
+    assert.equal(calls, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
