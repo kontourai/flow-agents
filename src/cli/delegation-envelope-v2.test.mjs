@@ -661,7 +661,8 @@ test('Flow execution composes real claims with registered authority and controll
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
 });
 
-test('context sync requires no tools and retains exact ACK/hash with one bounded retry', async () => {
+for (const scenario of ['retry-ack', 'unexpected-tools', 'always-mismatch']) {
+test(`context sync retains bounded receipt for ${scenario}`, async () => {
   const { syncDelegationContext } = await import('../../build/src/delegation-context-sync.js');
   const { FileAuthorizationLedger } = await import('@kontourai/dispatch');
   const { createDelegationAuthorityService } = await import('../../build/src/delegation-authority-service.js');
@@ -669,24 +670,29 @@ test('context sync requires no tools and retains exact ACK/hash with one bounded
   const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'delegation-sync-'));
   try {
-    const root = rootAuthority(); root.delegation_ceiling.allowed_tools = [];
+    const root = rootAuthority();
     root.delegation_ceiling.allowed_effects.push('context-sync');
-    for (const grant of root.execution_grants) { grant.authority_ceiling.allowed_tools = []; grant.authority_ceiling.allowed_effects.push('context-sync'); }
-    const parent = rootEnvelope(root); parent.execution_authority.allowed_tools = [];
-    const child = childOf(root, parent);
+    for (const grant of root.execution_grants) { grant.authority_ceiling.allowed_effects.push('context-sync'); }
+    const parent = rootEnvelope(root); parent.execution_authority.allowed_effects.push('context-sync');
+    const child = childOf(root, parent); child.execution_authority.allowed_tools = [];
     const service = createDelegationAuthorityService(createLocalFileDelegationAuthorityStore(cwd), { now: () => NOW, authorize: async () => true, confirmExecution: async () => true, confirmReconciliation: async () => true });
     await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child);
     let calls = 0; const receipts = [];
     const runtime = { id: 'sync-runtime', capabilities: () => ({ structuredTools: true, outputTokenLimitFidelity: 'native', streaming: false, abort: true, usage: true }),
-      async invoke(request) { assert.deepEqual(request.tools, []); calls++; return { provider: 'fixture', model: 'fixture', outputText: calls === 1 ? 'received' : 'ACK SYNC run-1', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, costUsd: 0.000001 }, latencyMs: 1 }; } };
+      async invoke(request) { assert.deepEqual(request.tools, []); calls++; return { provider: 'fixture', model: 'fixture', outputText: scenario === 'always-mismatch' || calls === 1 ? 'received' : 'ACK SYNC run-1', toolCalls: scenario === 'unexpected-tools' ? [{ id: 'unexpected', name: 'read', input: {} }] : [], usage: { inputTokens: 1, outputTokens: 1, costUsd: 0.000001 }, latencyMs: 1 }; } };
     const host = { resolveRuntime: async () => ({ runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }),
       invokeFenced: async (_e, _id, invoke) => invoke(), retainResult: async () => {}, retainFailure: async () => {}, retainSyncReceipt: async (receipt) => { receipts.push(receipt); } };
     const input = { authorityId: root.authority_id, envelopeId: child.envelope_id, service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(cwd, 'dispatch') }), runId: 'run-1', text: 'folded context', maxOutputTokens: 5, allocation: { inputTokens: 5, outputTokens: 5, costMicros: 10 } };
+    await assert.rejects(syncDelegationContext({ ...input, envelopeId: parent.envelope_id }), /explicit no-tools/);
+    assert.equal(calls, 0);
     const receipt = await syncDelegationContext(input);
-    assert.equal(receipt.status, 'acknowledged'); assert.equal(receipt.attempts, 2); assert.equal(calls, 2);
+    assert.equal(receipt.status, scenario === 'retry-ack' ? 'acknowledged' : 'incomplete');
+    assert.equal(receipt.reason, scenario === 'retry-ack' ? 'exact_ack' : scenario === 'unexpected-tools' ? 'unexpected_tools' : 'ack_mismatch'); assert.equal(receipt.attempts, 2); assert.equal(calls, 2);
     assert.equal(receipt.contentDigest, `sha256:${createHash('sha256').update('folded context').digest('hex')}`);
     assert.deepEqual(receipts, [receipt]);
     await assert.rejects(syncDelegationContext(input), /invocation_already_reserved/);
     assert.equal(calls, 2);
   } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
 });
+
+}
