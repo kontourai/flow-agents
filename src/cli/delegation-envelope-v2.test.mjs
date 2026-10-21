@@ -517,3 +517,40 @@ test("authority service registers exact ancestry and partitions sibling allocati
   await assert.rejects(open().admitEffect(root.authority_id, child.envelope_id, 'write'), /effect_refused/);
   } finally { fs.rmSync(rootPath, { recursive: true, force: true }); }
 });
+
+
+test("authorized execution binds selected runtime, reserves before launch and retains/reconciles the result", async () => {
+  const { createDelegationAuthorityService } = await import('../../build/src/delegation-authority-service.js');
+  const { createLocalFileDelegationAuthorityStore } = await import('../../build/src/delegation-authority-local-file.js');
+  const { executeAuthorizedDelegation } = await import('../../build/src/delegation-execution.js');
+  const { FileAuthorizationLedger } = await import('@kontourai/dispatch');
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-authorized-execution-'));
+  try {
+    const service = createDelegationAuthorityService(createLocalFileDelegationAuthorityStore(rootPath), {
+      now: () => NOW, authorize: async () => true, confirmExecution: async () => true, confirmReconciliation: async () => true,
+    });
+    const { root, parent, child } = edgeFixture();
+    await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child);
+    let calls = 0, retained = null;
+    const runtime = { id: 'selected-runtime', capabilities: () => ({ structuredTools: false, streaming: false, abort: true, usage: true }),
+      async invoke() { calls++; return { provider: 'fixture', model: 'configured', outputText: 'child report', toolCalls: [], usage: { inputTokens: 2, outputTokens: 3, costUsd: 0.000004 }, latencyMs: 1 }; } };
+    const host = {
+      resolveRuntime: async () => ({ runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }),
+      async invokeFenced(_envelope, id, launch) {
+        const state = await service.inspect(root.authority_id);
+        assert.equal(state.invocations.find((i) => i.invocationId === id).terminal, false);
+        return launch();
+      },
+      async retainResult(result) { retained = result.outputText; },
+    };
+    const input = { service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(rootPath, 'dispatch') }), authorityId: root.authority_id,
+      envelopeId: child.envelope_id, invocationId: 'first', effect: 'write', request: { messages: [{ role: 'user', content: 'work' }] },
+      allocation: { inputTokens: 5, outputTokens: 5, costMicros: 10 } };
+    assert.equal((await executeAuthorizedDelegation(input)).outcome, 'succeeded');
+    assert.equal(retained, 'child report');
+    assert.deepEqual((await service.inspect(root.authority_id)).invocations[0].usage, { inputTokens: 2, outputTokens: 3, costMicros: 4 });
+    await assert.rejects(executeAuthorizedDelegation(input), /invocation_already_reserved/);
+    assert.equal(calls, 1);
+  } finally { fs.rmSync(rootPath, { recursive: true, force: true }); }
+});
