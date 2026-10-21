@@ -339,8 +339,10 @@ The source-only `syncDelegationContext()` uses explicit empty tool authority and
 effect. It sends zero tools, bounds text to 64 KiB, and requires the exact response `ACK SYNC <run-id>`
 with zero returned tool calls. A SHA-256 binds each retained receipt to the supplied text. A wrong
 response permits one retry only after the first response completed and its usage reconciled. Unknown
-invocation/retention/accounting failures propagate without an automatic retry. Replay of the same
-invocation identity is refused by durable admission.
+invocation/retention/accounting failures retain an incomplete receipt and propagate with their cause,
+without an automatic retry. Replay of the same invocation identity is refused by durable admission
+and does not overwrite an existing receipt. If receipt persistence fails, the returned persistence
+error carries that receipt and a storage-only retry method; recovery never invokes the model.
 
 The host retains the receipt and raw responses; callback delivery is not durable-storage proof.
 An acknowledgement is transport/protocol evidence, not understanding, tool confinement or a gate.
