@@ -89,7 +89,11 @@ export function validateMailboxIdentity(value: unknown): MailboxIdentity {
   closed(value, identityKeys);
   for (const key of identityKeys) {
     if (key.endsWith("Generation")) requireValid(Number.isSafeInteger(value[key]) && Number(value[key]) >= 0);
-    else requireValid(identifier(value[key]));
+    // Assignment actor keys are opaque canonical strings, not mailbox IDs.
+    // In particular, never sanitize/re-serialize a host's explicit actor key.
+    else if (key === "actorKey" || key === "controllerActorKey") {
+      requireValid(typeof value[key] === "string" && value[key].length > 0 && !containsSensitiveCredential(value[key]));
+    } else requireValid(identifier(value[key]));
   }
   return structuredClone(value) as MailboxIdentity;
 }

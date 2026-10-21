@@ -33,14 +33,33 @@ export function createLocalFileDelegationMailbox(options: {
     const current = fs.fstatSync(fd);
     if (current.uid !== process.geteuid() || (current.mode & 0o7777) !== mode) throw new Error("Unsafe mailbox permissions");
   }
-  function privateDirectory(dir: string): void {
-    try { fs.mkdirSync(dir, { mode: 0o700 }); } catch (error) {
+  function privateDirectory(dir: string, ancestor = false): void {
+    let created = false;
+    try { fs.mkdirSync(dir, { mode: 0o700 }); created = true; } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
     const fd = fs.openSync(dir, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_DIRECTORY);
-    try { privateDescriptor(fd, true); } finally { fs.closeSync(fd); }
+    try {
+      if (!ancestor || created) privateDescriptor(fd, true);
+      else if (!fs.fstatSync(fd).isDirectory()) throw new Error("Unsafe mailbox ancestor directory");
+    } finally { fs.closeSync(fd); }
   }
   function prepare(): void {
+    // Only create missing ancestors; existing parents and peers are not owned
+    // by this adapter and must never have their permissions narrowed.
+    const missing: string[] = [];
+    let parent = path.dirname(root);
+    while (true) {
+      try {
+        if (!fs.statSync(parent).isDirectory()) throw new Error("Unsafe mailbox ancestor directory");
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        missing.push(parent);
+        parent = path.dirname(parent);
+      }
+    }
+    for (const dir of missing.reverse()) privateDirectory(dir, true);
     for (const dir of [root, directory, path.join(directory, "assignment")]) privateDirectory(dir);
   }
   function read(): Journal {
@@ -62,7 +81,7 @@ export function createLocalFileDelegationMailbox(options: {
     if (Object.keys(journal).sort().join(",") !== "cancelled,operations,schemaVersion" || journal.schemaVersion !== "1.0"
       || !Array.isArray(journal.operations) || journal.operations.length > MAILBOX_MAX_OPERATIONS
       || !Array.isArray(journal.cancelled) || journal.cancelled.length > MAILBOX_MAX_OPERATIONS
-      || !journal.cancelled.every((key) => typeof key === "string" && key.length <= 1024)
+      || !journal.cancelled.every((key) => typeof key === "string")
       || new Set(journal.cancelled).size !== journal.cancelled.length) throw new Error("Corrupt mailbox journal");
     const ids = new Set<string>();
     const messages = new Set<string>();
@@ -101,15 +120,29 @@ export function createLocalFileDelegationMailbox(options: {
   function confirmDurability(journal: Journal): void {
     // Also run for unchanged replay and read results: a prior rename may have
     // succeeded before fsync failed. Visibility alone is never confirmation.
-    for (const target of [file, directory, root]) {
+    // Re-confirm the complete pathname even on a fresh adapter: an earlier
+    // mkdir may be visible after its parent fsync failed. Resolving ancestors
+    // also handles platform aliases such as /var -> /private/var on macOS.
+    const ancestors: string[] = [];
+    let parent = fs.realpathSync(path.dirname(root));
+    while (true) {
+      ancestors.push(parent);
+      const next = path.dirname(parent);
+      if (next === parent) break;
+      parent = next;
+    }
+    const owned = [file, path.join(directory, "assignment"), directory, root];
+    for (const target of [...owned, ...ancestors]) {
       let fd: number;
-      try { fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); }
+      try { fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK
+        | (target === file ? 0 : fs.constants.O_DIRECTORY)); }
       catch (error) {
         if (target === file && (error as NodeJS.ErrnoException).code === "ENOENT" && journal.operations.length === 0 && journal.cancelled.length === 0) continue;
         throw error;
       }
       try {
-        privateDescriptor(fd, target !== file);
+        if (owned.includes(target)) privateDescriptor(fd, target !== file);
+        else if (!fs.fstatSync(fd).isDirectory()) throw new Error("Unsafe mailbox ancestor directory");
         fs.fsyncSync(fd);
       } finally { fs.closeSync(fd); }
     }

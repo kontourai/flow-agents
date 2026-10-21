@@ -54,7 +54,7 @@ function fixture(t) {
       const current = (item) => JSON.stringify(item) === JSON.stringify(live.get(item.actorKey));
       if (state.cancelled || caller.actorKey !== authenticatedActor || !current(caller)
         || (candidate && (!current(candidate.sender) || !current(candidate.recipient)))
-        || (action === "cancel" && authenticatedActor !== "host:controller")) return { status: "refused" };
+        || (action === "cancel" && authenticatedActor !== caller.controllerActorKey)) return { status: "refused" };
       return { status: "current" };
     },
   });
@@ -263,6 +263,10 @@ test("closed validation refuses authority fields, secrets, invalid kinds, path r
     { payload: { summary: "🧭".repeat(513), evidenceRefs: [], outputRefs: [] } },
     { payload: { summary: "x".repeat(1500), evidenceRefs: Array.from({ length: 16 }, (_, i) => `${i}${"r".repeat(200)}`), outputRefs: [] } },
     { sender: { ...A, assignmentGeneration: Number.MAX_SAFE_INTEGER + 1 } },
+    { sender: { ...A, actorKey: "" } }, { sender: { ...A, actorKey: 42 } },
+    { sender: { ...A, actorKey: "Bearer credential" } },
+    { sender: { ...A, controllerActorKey: "TOKEN=credential" } },
+    { sender: { ...A, groupId: "_not-a-mailbox-id" } },
     { correlation: { status: "incomplete", reason: "Bearer credential" } },
     { correlation: { status: "incomplete", reason: "offline", establishTrust: true } },
     { sender: { ...A, guessedIdentity: true } }, { createdAt: "2026-02-30T06:00:00.000Z" },
@@ -627,40 +631,43 @@ test("temporary data fsync failure preserves the prior acknowledged journal", as
 });
 
 
-test("first enqueue must confirm the new artifact root entry through retry and reopen", async (t) => {
-  const f = fixture(t);
-  const root = path.join(f.root, "new-root");
-  const parent = fs.statSync(f.root);
-  const sync = fsDefault.fsyncSync;
-  let failing = true;
-  let attempts = 0;
-  t.mock.method(fsDefault, "fsyncSync", (fd) => {
-    const stat = fs.fstatSync(fd);
-    if (stat.dev === parent.dev && stat.ino === parent.ino) {
-      attempts++;
-      if (failing) throw Object.assign(new Error("new root entry not durable"), { code: "EIO" });
+for (const [relativeRoot, syncParent] of [["new-root", "."], ["missing-parent/new-root", "."],
+  ["missing-parent/new-root", "missing-parent"]]) {
+  test(`first enqueue must confirm each new ancestor entry through retry and reopen (${relativeRoot}, ${syncParent})`, async (t) => {
+    const f = fixture(t);
+    const root = path.join(f.root, relativeRoot);
+    const sync = fsDefault.fsyncSync;
+    let failing = true;
+    let attempts = 0;
+    t.mock.method(fsDefault, "fsyncSync", (fd) => {
+      const stat = fs.fstatSync(fd);
+      const parent = fs.statSync(path.join(f.root, syncParent));
+      if (stat.dev === parent.dev && stat.ino === parent.ino) {
+        attempts++;
+        if (failing) throw Object.assign(new Error("new root entry not durable"), { code: "EIO" });
+      }
+      return sync(fd);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    const sent = message();
+    const sender = f.open(A.actorKey, root);
+    for (const observe of [() => sender.enqueue(sent, A), () => sender.enqueue(sent, A),
+      () => f.open(A.actorKey, root).enqueue(sent, A), () => f.open(A.actorKey, root).outbox(A)]) {
+      const before = attempts;
+      assert.deepEqual(await observe(), { status: "unavailable", code: "durability_unconfirmed" });
+      assert.ok(attempts > before, "an existing path does not confirm its directory entry");
     }
-    return sync(fd);
-  });
-  syncBuiltinESMExports();
-  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
-  const sent = message();
-  const sender = f.open(A.actorKey, root);
-  for (const observe of [() => sender.enqueue(sent, A), () => sender.enqueue(sent, A),
-    () => f.open(A.actorKey, root).enqueue(sent, A), () => f.open(A.actorKey, root).outbox(A)]) {
+    const journal = JSON.parse(fs.readFileSync(path.join(root, "mailbox/state.json"), "utf8"));
+    assert.equal(journal.operations.length, 1);
+    assert.equal(journal.operations[0].status, "pending");
+    failing = false;
     const before = attempts;
-    assert.deepEqual(await observe(), { status: "unavailable", code: "durability_unconfirmed" });
-    assert.ok(attempts > before, "an existing path does not confirm its directory entry");
-  }
-  const journal = JSON.parse(fs.readFileSync(path.join(root, "mailbox/state.json"), "utf8"));
-  assert.equal(journal.operations.length, 1);
-  assert.equal(journal.operations[0].status, "pending");
-  failing = false;
-  const before = attempts;
-  const pending = ok(await f.open(A.actorKey, root).enqueue(sent, A));
-  assert.ok(attempts > before);
-  assert.deepEqual(ok(await f.open(A.actorKey, root).outbox(A)), [pending]);
-});
+    const pending = ok(await f.open(A.actorKey, root).enqueue(sent, A));
+    assert.ok(attempts > before);
+    assert.deepEqual(ok(await f.open(A.actorKey, root).outbox(A)), [pending]);
+  });
+}
 
 test("nested absent ancestors are created privately and every directory entry is flushed", async (t) => {
   const f = fixture(t);
@@ -722,3 +729,38 @@ for (const actorKey of ["_reviewer", ".reviewer", "-reviewer", "reviewer/é @ wo
     refused(await f.open(B.actorKey).inbox(recipient), "inactive");
   });
 }
+
+
+test("symlink artifact root is refused without changing its target", async (t) => {
+  const f = fixture(t);
+  const target = path.join(f.root, "unrelated");
+  const root = path.join(f.root, "linked-root");
+  fs.mkdirSync(target, { mode: 0o755 });
+  const before = fs.statSync(target).mode;
+  fs.symlinkSync(target, root);
+  await assert.rejects(f.open(A.actorKey, root).enqueue(message(), A), /ELOOP|ENOTDIR|symlink/i);
+  assert.equal(fs.statSync(target).mode, before);
+  assert.deepEqual(fs.readdirSync(target), []);
+});
+
+test("ancestor created by a peer during preparation keeps its permissions", async (t) => {
+  const f = fixture(t);
+  const parent = path.join(f.root, "peer-parent");
+  const root = path.join(parent, "new-root");
+  const mkdir = fsDefault.mkdirSync;
+  let raced = false;
+  t.mock.method(fsDefault, "mkdirSync", (target, options) => {
+    if (target === parent && !raced) {
+      raced = true;
+      mkdir(target, { mode: 0o755 });
+      fs.chmodSync(target, 0o755);
+    }
+    return mkdir(target, options);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  ok(await f.open(A.actorKey, root).enqueue(message(), A));
+  assert.equal(raced, true);
+  assert.equal(fs.statSync(parent).mode & 0o7777, 0o755);
+  assert.equal(fs.statSync(root).mode & 0o7777, 0o700);
+});
