@@ -60,6 +60,8 @@ Machine-readable workflow state lives beside Markdown artifacts in `.kontourai/f
 | change-provider-settings.schema.json | Flow Agents Change Provider Settings | https://flow-agents.dev/schemas/change-provider-settings.schema.json |
 | codex-pr-review-assessment.schema.json | Codex pull request review assessment | https://flow-agents.dev/schemas/codex-pr-review-assessment.schema.json |
 | codex-pr-review-result.schema.json | Builder Codex pull request review result | https://flow-agents.dev/schemas/codex-pr-review-result.schema.json |
+| delegation-authority.schema.json | Delegation root authority v2 | https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json |
+| delegation-envelope-v2.schema.json | Delegation envelope v2 | https://kontourai.dev/schemas/flow-agents/delegation-envelope/2.0.json |
 | delegation-envelope.schema.json | Provider-neutral delegation envelope | https://kontourai.dev/schemas/flow-agents/delegation-envelope/1.0.json |
 | flow-agents-core-config.schema.json | Flow Agents committed core configuration |  |
 | flow-agents-kit-config.schema.json | Flow Agents committed Kit Flow config proposal |  |
