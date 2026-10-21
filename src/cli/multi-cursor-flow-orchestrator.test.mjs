@@ -839,8 +839,8 @@ test("a capped resource conflict does not hide the remaining disjoint Flow front
 });
 
 // A bounded 1.1s scheduling stall exhausts a 1s lease before renewal can run.
-// Budget for that stall plus durable Flow I/O. These tests still cross the real
-// lease boundary, with the same five-second observation deadline.
+// Budget for that stall plus durable Flow I/O. Observe persisted renewal for
+// five seconds after the real lease boundary becomes eligible to cross.
 const observerLeaseSeconds = 3;
 
 for (const outcome of ["success", "callback-error", "cancel", "observer-error"]) {
@@ -866,24 +866,31 @@ for (const outcome of ["success", "callback-error", "cancel", "observer-error"])
         if (kind !== "renewed" || !firstRenewal) return;
         firstRenewal = false;
         const first = await loadRun(input.runId, input.cwd);
-        const firstExpiry = Date.parse(first.state.multi_cursor.active_claims[0].expires_at);
+        const firstClaim = first.state.multi_cursor.active_claims[0];
+        const firstExpiry = Date.parse(firstClaim.expires_at);
+        const renewalsAtEntry = first.state.multi_cursor.claim_history.filter(({ action, claim_id }) => action === "renewed" && claim_id === firstClaim.claim_id).length;
         beginObservation();
         await callbackReturned;
         try {
           // Require a persisted renewal beyond the first renewal's expiry, with
           // the callback already returned and this observer still pending.
+          await delay(Math.max(0, firstExpiry - Date.now()));
           const deadline = Date.now() + 5_000;
           do {
             const run = await loadRun(input.runId, input.cwd);
             const claim = run.state.multi_cursor.active_claims[0];
             if (claim && Date.parse(claim.renewed_at) >= firstExpiry) {
               assert.equal(claim.claim_id, "fixture-claim-step-0");
+              assert.equal(claim.liveness_id, firstClaim.liveness_id);
+              const renewals = run.state.multi_cursor.claim_history.filter(({ action, claim_id }) => action === "renewed" && claim_id === firstClaim.claim_id);
+              assert.ok(renewals.length > renewalsAtEntry, "a later exact-claim renewal is persisted");
+              assert.equal(renewals.at(-1).at, claim.renewed_at);
               assert.deepEqual(run.state.gate_outcomes, [], "no early Flow evaluation");
               assert.equal(run.state.multi_cursor.claim_history.some(({ action }) => ["released", "settled", "expired"].includes(action)), false);
               checkpoint = run;
               break;
             }
-            await delay(10);
+            await delay(50);
           } while (Date.now() < deadline);
           assert.ok(checkpoint, "Flow must renew beyond the first lease while joining the observer after callback return");
         } catch (error) {
@@ -960,6 +967,7 @@ test("an unsettled Flow claim renews through settlement observation before exact
       const before = await loadRun(runId, cwd);
       observerExpiry = Date.parse(before.state.multi_cursor.active_claims[0].expires_at);
       renewalsAtEntry = before.state.multi_cursor.claim_history.filter(({ action }) => action === "renewed").length;
+      await delay(Math.max(0, observerExpiry - Date.now()));
       const deadline = Date.now() + 5_000;
       do {
         const run = await loadRun(runId, cwd);
