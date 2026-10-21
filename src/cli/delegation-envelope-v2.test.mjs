@@ -479,6 +479,9 @@ test("authority service registers exact ancestry and partitions sibling allocati
   await assert.rejects(open().reserveInvocation(root.authority_id, child.envelope_id, 'invoke-two', allocation), /active_slot_exhausted/);
   await open().reconcileInvocation(root.authority_id, 'invoke-one', { inputTokens: 2, outputTokens: 3, costMicros: 4 }, true);
   await open().reserveInvocation(root.authority_id, child.envelope_id, 'invoke-two', allocation);
+  await open().reconcileInvocation(root.authority_id, 'invoke-two', { inputTokens: 6, outputTokens: 3, costMicros: 12 }, true);
+  assert.equal((await open().inspect(root.authority_id)).invocations[1].usage.costMicros, 12);
+  await assert.rejects(open().reserveInvocation(root.authority_id, child.envelope_id, 'invoke-three', allocation), /accounting_overrun/);
   allowed = false;
   await assert.rejects(service.derive(root.authority_id, child), /host_authorization_refused/);
   await assert.rejects(service.inspect(root.authority_id), /host_authorization_refused/);

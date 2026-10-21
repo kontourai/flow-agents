@@ -40,6 +40,10 @@ const capacityKeys = ["max_attempts", "max_input_tokens", "max_output_tokens", "
 function requireAdmission(value: unknown, code: string): asserts value {
   if (!value) throw new DelegationAdmissionError(code);
 }
+function hasOverrun(ledger: DelegationAuthorityLedger): boolean {
+  return ledger.invocations.some((invocation) => invocation.usage !== null
+    && (["inputTokens", "outputTokens", "costMicros"] as const).some((key) => invocation.usage![key] > invocation.allocation[key]));
+}
 function same(a: unknown, b: unknown): boolean { return canonicalJson(a) === canonicalJson(b); }
 function ancestry(ledger: DelegationAuthorityLedger, leaf: DelegationEnvelopeV2, now: string): DelegationEnvelopeV2[] {
   const chain = [leaf];
@@ -62,8 +66,9 @@ function remaining(ledger: DelegationAuthorityLedger, envelope: DelegationEnvelo
     const field = { max_input_tokens: "inputTokens", max_output_tokens: "outputTokens", max_cost_micros: "costMicros" } as const;
     const consumed = key === "max_attempts" ? own.length : key === "max_total_envelopes" ? 0
       : own.reduce((sum, invocation) => sum + (invocation.usage ?? invocation.allocation)[field[key]], 0);
-    requireAdmission(Number.isSafeInteger(consumed) && consumed <= budget[key], "invocation_budget_exhausted");
-    budget[key] -= consumed;
+    requireAdmission(Number.isSafeInteger(consumed), "invocation_budget_exhausted");
+    if (!hasOverrun(ledger)) requireAdmission(consumed <= budget[key], "invocation_budget_exhausted");
+    budget[key] = Math.max(0, budget[key] - consumed);
   }
   // The node itself always occupies one lifetime envelope slot.
   requireAdmission(budget.max_total_envelopes >= 1, "aggregate_envelope_exhausted");
@@ -85,9 +90,7 @@ export function validateDelegationAuthorityLedger(value: DelegationAuthorityLedg
       for (const key of ["inputTokens", "outputTokens", "costMicros"] as const) delegationIntegerV2(amounts[key]);
     }
     requireAdmission(!invocation.usage || invocation.terminal, "accounting_requires_terminal");
-    if (invocation.usage) for (const key of ["inputTokens", "outputTokens", "costMicros"] as const) {
-      requireAdmission(invocation.usage[key] <= invocation.allocation[key], "usage_exceeds_reserved_capacity");
-    }
+
   }
   requireAdmission(new Set(invocations.map((i) => i.invocationId)).size === invocations.length, "duplicate_invocation");
   const ledger = { root, envelopes, cancelled: value.cancelled, invocations };
@@ -126,6 +129,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
         const ledger = validateDelegationAuthorityLedger(current);
         await authorized("derive", ledger, child);
         requireAdmission(!ledger.cancelled, "authority_cancelled");
+        requireAdmission(!hasOverrun(ledger), "accounting_overrun");
         ancestry(ledger, child, host.now());
         requireAdmission(await host.confirmExecution(structuredClone(child), structuredClone(ledger.root)), "execution_binding_unconfirmed");
         const previous = ledger.envelopes.find((e) => e.envelope_id === child.envelope_id);
@@ -146,6 +150,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
         requireAdmission(envelope, "envelope_missing");
         await authorized("reserve", ledger, envelope);
         requireAdmission(!ledger.cancelled, "authority_cancelled");
+        requireAdmission(!hasOverrun(ledger), "accounting_overrun");
         const chain = ancestry(ledger, envelope, host.now());
         requireAdmission(!ledger.invocations.some((i) => i.invocationId === invocationId), "invocation_already_reserved");
         requireAdmission(await host.confirmExecution(structuredClone(envelope), structuredClone(ledger.root)), "execution_binding_unconfirmed");
@@ -209,6 +214,7 @@ export function createDelegationAuthorityService(store: DelegationAuthorityStore
         requireAdmission(envelope, "envelope_missing");
         await authorized("effect", ledger, envelope);
         requireAdmission(!ledger.cancelled && envelope.execution_authority.allowed_effects.includes(effect), "effect_refused");
+        requireAdmission(!hasOverrun(ledger), "accounting_overrun");
         requireAdmission(await host.confirmExecution(structuredClone(envelope), structuredClone(ledger.root)), "execution_binding_unconfirmed");
         ancestry(ledger, envelope, host.now());
         return { ledger, result: { envelope: structuredClone(envelope), availableBudget: remaining(ledger, envelope) } };
