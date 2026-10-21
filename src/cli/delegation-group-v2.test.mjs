@@ -400,7 +400,16 @@ test("pre-abort consumes no intent; lost cancellation callback leaves durable pe
   assert.equal((await f.open().cancel(cancel)).projection.cancellation, "pending");
   assert.equal(requests, 1); assert.equal(f.state.cancellations, 0);
   assert.equal((await f.openAuthority().inspect("root")).cancelled, true);
-  await assert.rejects(f.controller.run(f.command("run", 2)), /group_run_already_admitted/);
+  await assert.rejects(f.open().reconcileCancellation(cancel), /cancellation_confirmation_unavailable/);
+  const reconciler = f.open({ async confirmDescendantCancellation(_spec, original) {
+    assert.deepEqual(original, cancel); return ref("observed-original-cancel");
+  } });
+  const confirmed = await reconciler.reconcileCancellation(cancel);
+  assert.equal(confirmed.projection.cancellation, "requested");
+  assert.equal(confirmed.projection.terminal, "unproven");
+  assert.equal((await reconciler.reconcileCancellation(cancel)).projection.cancellation, "requested");
+  assert.equal(requests, 1); assert.equal(f.state.cancellations, 0);
+  await assert.rejects(f.controller.run(f.command("run", confirmed.projection.revision)), /group_run_already_admitted/);
 });
 
 test("returned and cancelled groups require authenticated terminal/accounting proof for every admitted member", async t => {

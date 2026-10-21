@@ -85,6 +85,7 @@ export interface DelegationGroupHostV2 {
   /** Authenticates physical termination of this exact invocation and its descendants, not a model's claim. */
   confirmTerminal?(spec: DelegationGroupSpecV2, seat: DelegationGroupSeatV2, invocation: DelegationInvocation, observation: GroupMemberObservationV2): Promise<DelegationReferenceV2 | null>;
   /** Request cancellation of these seats and descendants; acknowledgement is not terminal proof. */
+  confirmDescendantCancellation?(spec: DelegationGroupSpecV2, command: GroupCommandV2): Promise<DelegationReferenceV2 | null>;
   requestDescendantCancellation(spec: DelegationGroupSpecV2): Promise<DelegationReferenceV2>;
 }
 export const GROUP_V2_MAX_EVENTS = 512;
@@ -378,6 +379,23 @@ export function createDelegationGroupControllerV2(input: {
       await authorize("cancel", started.projection, c);
       await service.cancel(started.projection.spec.rootAuthorityRef.id);
       const reference = await host.requestDescendantCancellation(structuredClone(started.projection.spec));
+      delegationReferenceV2(reference);
+      return { replayed: false, projection: await append(c.groupId, { kind: "cancel_requested", operationKey: c.operationKey, reference }) };
+    },
+    async reconcileCancellation(value: unknown) {
+      const c = command(value);
+      requireDelegationV2(c.kind === "cancel", "cancel_command_required");
+      const current = await get(c.groupId);
+      requireDelegationV2(current.projection.cancellation !== "none", "cancellation_not_requested");
+      const original = current.journal.events.find(e => e.kind === "cancel_pending");
+      requireDelegationV2(original && "command" in original && same(original.command, c), "cancellation_identity_mismatch");
+      const started = await begin(c, "cancel");
+      if (started.projection.cancellation === "requested") return started;
+      await authorize("cancel", started.projection, c);
+      // Local revocation is idempotent; observation of the external request is not a resend.
+      await service.cancel(started.projection.spec.rootAuthorityRef.id);
+      const reference = await host.confirmDescendantCancellation?.(structuredClone(started.projection.spec), structuredClone(c));
+      requireDelegationV2(reference, "cancellation_confirmation_unavailable");
       delegationReferenceV2(reference);
       return { replayed: false, projection: await append(c.groupId, { kind: "cancel_requested", operationKey: c.operationKey, reference }) };
     },
