@@ -810,49 +810,109 @@ test("ancestor replaced after successful mkdir is never chmodded or accepted as 
   assert.equal(fs.statSync(displaced).mode & 0o7777, 0o700);
 });
 
-for (const dependency of ["alias-parent", "real-parent"]) {
-  test(`aliased artifact root confirms ${dependency} through retry and reopen`, async (t) => {
+for (const chained of [false, true]) {
+  for (const dependency of chained ? ["alias-parent", "target-alias", "real-parent"] : ["alias-parent", "real-parent"]) {
+    test(`${chained ? "chained " : ""}aliased artifact root confirms ${dependency} through retry and reopen`, async (t) => {
+      const f = fixture(t);
+      const alias = path.join(f.root, "alias-parent");
+      const real = path.join(f.root, "real-parent");
+      fs.mkdirSync(alias);
+      fs.mkdirSync(real);
+      const ambient = [alias, real];
+      if (chained) {
+        const targetAlias = path.join(f.root, "target-alias");
+        fs.mkdirSync(targetAlias);
+        ambient.push(targetAlias);
+        fs.symlinkSync("../real-parent", path.join(targetAlias, "inner"));
+      }
+      fs.symlinkSync(chained ? "../target-alias/inner" : "../real-parent", path.join(alias, "link"));
+      const modes = ambient.map((dir) => fs.statSync(dir).mode);
+      const root = path.join(alias, "link", "new-root");
+      const parent = fs.statSync(path.join(f.root, dependency));
+      const sync = fsDefault.fsyncSync;
+      let failing = true;
+      let attempts = 0;
+      t.mock.method(fsDefault, "fsyncSync", (fd) => {
+        const stat = fs.fstatSync(fd);
+        if (stat.dev === parent.dev && stat.ino === parent.ino) {
+          attempts++;
+          if (failing) throw Object.assign(new Error("alias pathname dependency not durable"), { code: "EIO" });
+        }
+        return sync(fd);
+      });
+      syncBuiltinESMExports();
+      t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+      const sender = f.open(A.actorKey, root);
+      const sent = message();
+      const observations = [];
+      for (const [phase, observe] of [
+        ["enqueue", () => sender.enqueue(sent, A)],
+        ["replay", () => sender.enqueue(sent, A)],
+        ["reopened enqueue", () => f.open(A.actorKey, root).enqueue(sent, A)],
+        ["reopened outbox", () => f.open(A.actorKey, root).outbox(A)],
+      ]) {
+        const before = attempts;
+        const result = await observe();
+        observations.push({ phase, attempts: attempts - before, status: result.status, code: result.code });
+      }
+      for (const { phase, attempts, status, code } of observations) {
+        assert.ok(attempts > 0, `${phase} must actually flush the configured pathname dependency`);
+        assert.deepEqual({ status, code }, { status: "unavailable", code: "durability_unconfirmed" }, phase);
+      }
+      const journal = JSON.parse(fs.readFileSync(path.join(real, "new-root/mailbox/state.json"), "utf8"));
+      assert.equal(journal.operations.length, 1);
+      assert.equal(journal.operations[0].status, "pending");
+      failing = false;
+      const before = attempts;
+      const pending = ok(await f.open(A.actorKey, root).enqueue(sent, A));
+      assert.ok(attempts > before);
+      assert.deepEqual(ok(await f.open(A.actorKey, root).outbox(A)), [pending]);
+      ok(await f.open(A.actorKey, root).deliver(sent.operationId, A));
+      assert.equal(ok(await f.open(B.actorKey, root).inbox(B))[0].status, "delivered");
+      assert.equal(fs.statSync(root).mode & 0o7777, 0o700);
+      assert.deepEqual(ambient.map((dir) => fs.statSync(dir).mode), modes, "ambient directory permissions stay unchanged");
+    });
+  }
+}
+
+for (const resolution of ["cyclic", "too deep"]) {
+  test(`${resolution} ancestor link resolution fails closed within its expansion bound`, async (t) => {
     const f = fixture(t);
     const alias = path.join(f.root, "alias-parent");
     const real = path.join(f.root, "real-parent");
     fs.mkdirSync(alias);
     fs.mkdirSync(real);
-    fs.symlinkSync("../real-parent", path.join(alias, "link"));
-    const root = path.join(alias, "link", "new-root");
-    const parent = fs.statSync(path.join(f.root, dependency));
-    const sync = fsDefault.fsyncSync;
-    let failing = true;
-    let attempts = 0;
-    t.mock.method(fsDefault, "fsyncSync", (fd) => {
-      const stat = fs.fstatSync(fd);
-      if (stat.dev === parent.dev && stat.ino === parent.ino) {
-        attempts++;
-        if (failing) throw Object.assign(new Error("alias pathname dependency not durable"), { code: "EIO" });
+    const link = path.join(alias, "link");
+    fs.symlinkSync("../real-parent", link);
+    const root = path.join(link, "new-root");
+    const sent = message();
+    const pending = ok(await f.open(A.actorKey, root).enqueue(sent, A));
+    if (resolution === "too deep") {
+      for (let i = 0; i < 41; i++) {
+        fs.symlinkSync(i === 40 ? "../real-parent" : `hop-${i + 1}`, path.join(alias, `hop-${i}`));
       }
-      return sync(fd);
+    }
+    const canonicalAlias = fs.realpathSync(alias);
+    const readlink = fsDefault.readlinkSync;
+    let expansions = 0;
+    t.mock.method(fsDefault, "readlinkSync", (target, ...args) => {
+      if (path.dirname(target) === canonicalAlias) {
+        expansions++;
+        // Bound a broken resolver in the test as well, so a removed limit fails without hanging.
+        if (expansions > 40) throw new Error("test symlink watchdog");
+        // Model a changed link observed after preparation, without invalidating lock cleanup.
+        if (path.basename(target) === "link") return resolution === "cyclic" ? "link" : "hop-0";
+      }
+      return readlink(target, ...args);
     });
     syncBuiltinESMExports();
     t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
-    const sender = f.open(A.actorKey, root);
-    const sent = message();
-    for (const observe of [() => sender.enqueue(sent, A), () => sender.enqueue(sent, A),
-      () => f.open(A.actorKey, root).enqueue(sent, A), () => f.open(A.actorKey, root).outbox(A)]) {
-      const before = attempts;
-      const result = await observe();
-      assert.ok(attempts > before, "the configured pathname dependency must actually be flushed");
-      assert.deepEqual(result, { status: "unavailable", code: "durability_unconfirmed" });
-    }
-    const journal = JSON.parse(fs.readFileSync(path.join(real, "new-root/mailbox/state.json"), "utf8"));
-    assert.equal(journal.operations.length, 1);
-    assert.equal(journal.operations[0].status, "pending");
-    failing = false;
-    const before = attempts;
-    const pending = ok(await f.open(A.actorKey, root).enqueue(sent, A));
-    assert.ok(attempts > before);
+    assert.deepEqual(await f.open(A.actorKey, root).outbox(A),
+      { status: "unavailable", code: "durability_unconfirmed" });
+    assert.ok(expansions > 0 && expansions <= 40, `bounded link expansions: ${expansions}`);
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
     assert.deepEqual(ok(await f.open(A.actorKey, root).outbox(A)), [pending]);
-    ok(await f.open(A.actorKey, root).deliver(sent.operationId, A));
-    assert.equal(ok(await f.open(B.actorKey, root).inbox(B))[0].status, "delivered");
-    assert.equal(fs.statSync(root).mode & 0o7777, 0o700);
   });
 }
 

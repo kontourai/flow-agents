@@ -126,25 +126,34 @@ export function createLocalFileDelegationMailbox(options: {
   function confirmDurability(journal: Journal): void {
     // Also run for unchanged replay and read results: a prior rename may have
     // succeeded before fsync failed. Visibility alone is never confirmation.
-    // Re-confirm both the configured pathname and its canonical targets on
-    // every reopen. An alias's parent retains its symlink entry even when
-    // realpath resolves that entry away (including /var on macOS).
-    const ancestors = new Set<string>();
-    let lexical = path.dirname(root);
-    while (true) {
-      let canonical = fs.realpathSync(lexical);
-      while (!ancestors.has(canonical)) {
-        ancestors.add(canonical);
-        const next = path.dirname(canonical);
-        if (next === canonical) break;
-        canonical = next;
+    // Resolve each component, retaining directories even when a later link or
+    // .. leaves them behind: they still hold entries required by this pathname.
+    let current = path.parse(root).root;
+    let remaining = path.dirname(root).slice(current.length).split(path.sep);
+    const ancestors = new Set<string>([current]);
+    let links = 0;
+    while (remaining.length) {
+      const component = remaining.shift();
+      if (!component || component === ".") continue;
+      if (component === "..") {
+        current = path.dirname(current);
+        continue;
       }
-      const next = path.dirname(lexical);
-      if (next === lexical) break;
-      lexical = next;
+      const target = path.join(current, component);
+      const stat = fs.lstatSync(target);
+      if (stat.isSymbolicLink()) {
+        if (++links > 40) throw new Error("Mailbox ancestor symlink resolution limit exceeded");
+        const link = fs.readlinkSync(target);
+        if (path.isAbsolute(link)) current = path.parse(link).root;
+        remaining = (path.isAbsolute(link) ? link.slice(current.length) : link).split(path.sep).concat(remaining);
+      } else {
+        if (!stat.isDirectory()) throw new Error("Unsafe mailbox ancestor directory");
+        current = target;
+        ancestors.add(current);
+      }
     }
     const owned = [file, path.join(directory, "assignment"), directory, root];
-    for (const target of [...owned, ...ancestors]) {
+    for (const target of [...owned, ...[...ancestors].reverse()]) {
       let fd: number;
       try { fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK
         | (target === file ? 0 : fs.constants.O_DIRECTORY)); }
