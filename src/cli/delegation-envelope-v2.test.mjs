@@ -447,3 +447,27 @@ test("existing v1 equality still rejects changed source/runtime/correlation", ()
     assert.throws(() => narrowDelegationEnvelope(v1, changed, NOW), error => error.issues.includes(`child ${key} must equal parent ${key}`));
   }
 });
+
+test("authority service registers exact ancestry and partitions sibling allocations before effects", async () => {
+  const { createDelegationAuthorityService } = await import('../../build/src/delegation-authority-service.js');
+  let ledger = null, allowed = true;
+  const service = createDelegationAuthorityService({ async transact(_id, body) {
+    const next = await body(ledger && structuredClone(ledger));
+    ledger = structuredClone(next.ledger); return next.result;
+  } }, { now: () => NOW, authorize: async () => allowed, confirmExecution: async () => allowed });
+  const { root, parent, child } = edgeFixture();
+  await service.issue(root);
+  await service.derive(root.authority_id, parent);
+  await service.derive(root.authority_id, child);
+  assert.equal((await service.admitEffect(root.authority_id, child.envelope_id, 'write')).envelope.envelope_id, child.envelope_id);
+  const sibling = { ...structuredClone(child), envelope_id: 'sibling', execution_id: 'sibling-execution', span_id: 'sibling-span' };
+  await assert.rejects(service.derive(root.authority_id, sibling), /aggregate_allocation_exhausted/);
+  assert.equal((await service.inspect(root.authority_id)).envelopes.length, 2);
+  await service.derive(root.authority_id, child);
+  allowed = false;
+  await assert.rejects(service.derive(root.authority_id, child), /host_authorization_refused/);
+  await assert.rejects(service.inspect(root.authority_id), /host_authorization_refused/);
+  allowed = true;
+  await service.cancel(root.authority_id);
+  await assert.rejects(service.admitEffect(root.authority_id, child.envelope_id, 'write'), /effect_refused/);
+});
