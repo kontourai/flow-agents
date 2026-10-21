@@ -441,7 +441,8 @@
         "src/delegation-group-local-file.ts",
         "src/delegation-authority-contract.ts",
         "src/delegation-envelope-v2.ts",
-        "src/multi-cursor-flow-orchestrator.ts"
+        "src/multi-cursor-flow-orchestrator.ts",
+        "src/delegation-dispatch.ts"
       ]
     },
     {

@@ -792,3 +792,4 @@ export * from "./delegation-group-local-file.js";
 
 export * from "./delegation-authority-contract.js";
 export * from "./delegation-envelope-v2.js";
+export * from "./delegation-dispatch.js";

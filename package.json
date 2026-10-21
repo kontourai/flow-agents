@@ -114,6 +114,10 @@
     "./delegation-envelope-v2": {
       "types": "./build/src/delegation-envelope-v2.d.ts",
       "import": "./build/src/delegation-envelope-v2.js"
+    },
+    "./delegation-dispatch": {
+      "types": "./build/src/delegation-dispatch.d.ts",
+      "import": "./build/src/delegation-dispatch.js"
     }
   },
   "repository": {

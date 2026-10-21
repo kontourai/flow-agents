@@ -16,6 +16,7 @@ these hooks are not a composed group executor or authenticated reservation servi
 | `@kontourai/flow-agents/delegation-group-local-file` | `createLocalFileDelegationGroupStore(artifactRoot)` |
 | `@kontourai/flow-agents/delegation-authority-contract` | Pure v2 root authority, execution grant and budget validators |
 | `@kontourai/flow-agents/delegation-envelope-v2` | Pure v2 envelope narrowing, digests and complete ancestry validation |
+| `@kontourai/flow-agents/delegation-dispatch` | Guarded Dispatch invocation with durable result retention and reported-usage settlement |
 
 The same APIs are exported at the package root. Package version and publication are separate from
 these source exports. Reference identities are opaque; none grants filesystem access.
@@ -219,3 +220,21 @@ Flow-owned DAG scheduling/join/gates, isolated writer lanes with integration own
 liveness/timeout/takeover and mailbox integration, authenticated host callbacks, exact Dispatch/Relay
 receipt reconciliation, and coordination efficacy/cost/wall-time evaluation. None is inferred from
 this ledger increment. Keep each next slice independently reviewable and serialize shared exports.
+
+## Dispatch accounting boundary
+
+`dispatchDelegation()` composes the published Dispatch authorization ledger with a host-owned
+`retainResult` callback. Every candidate requires worst-case token/cost capacity; the plan requires
+an authorization identity, invocation identity, and shared token/cost limits. Dispatch reserves before
+physical invocation and refuses an ambiguous replay rather than launching again. The host must
+validate the plan against authenticated authority and enforce the claimed runtime bounds.
+
+The wrapper awaits durable retention of each raw result before settlement. Retention failure stops
+fallback and leaves the reservation unresolved. Settlement requires provider-reported input tokens,
+output tokens and cost; absent values remain unknown. Actual cost replaces Dispatch's estimated cost
+at the ledger boundary. An inconsistent reported total is refused. The returned Dispatch receipt still
+contains Dispatch's estimates and is not the accounting authority or semantic acceptance evidence.
+
+These calls are not yet composed with group attempts, authority issuance, ancestor reservations,
+mailbox admission or effect fencing. Tests use the real temporary FileAuthorizationLedger and a
+controlled runtime; they do not establish live provider metering or confinement.
