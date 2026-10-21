@@ -523,7 +523,7 @@ test("post-rename fsync EIO makes reads and replay unavailable until file and di
   }
 });
 
-test("owned group paths stay private under umask 022 and reject hardlinks and foreign roots", async () => {
+test("owned group paths stay private under umask 022 and reject hardlinks and foreign roots", async (t) => {
   const oldMask = process.umask(0o022);
   try {
     const parent = makeFixtureDir("group-private-parent-");
@@ -550,10 +550,15 @@ test("owned group paths stay private under umask 022 and reject hardlinks and fo
     await assert.rejects(f.act(reserve()), code("unsafe_ledger_file"));
     assert.deepEqual(fs.readFileSync(peer), bytes);
     assert.equal(fs.statSync(peer).nlink, 2);
-    const foreign = "/var/empty";
-    assert.notEqual(fs.statSync(foreign).uid, process.getuid());
-    const before = fs.statSync(foreign).mode;
-    assert.throws(() => createLocalFileDelegationGroupStore(foreign), code("unsafe_store_directory"));
-    assert.equal(fs.statSync(foreign).mode, before);
+    await t.test("foreign root ownership is refused when an OS-owned root is available", (subtest) => {
+      const foreign = path.parse(parent).root;
+      const before = fs.statSync(foreign);
+      if (typeof process.getuid !== "function" || before.uid === process.getuid()) {
+        subtest.skip("No foreign-owned OS root available to this process");
+        return;
+      }
+      assert.throws(() => createLocalFileDelegationGroupStore(foreign), code("unsafe_store_directory"));
+      assert.equal(fs.statSync(foreign).mode, before.mode);
+    });
   } finally { process.umask(oldMask); }
 });
