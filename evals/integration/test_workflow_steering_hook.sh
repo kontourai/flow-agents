@@ -6,6 +6,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CURRENT_POINTER_HELPER="$ROOT/scripts/hooks/lib/current-pointer.js"
 
 TMPDIR_EVAL="$(mktemp -d)"
+# Authenticated workflow discovery precedes cwd-local routing, even for an ambient actor.
+# Own this file's global state so another session's stale locator cannot block fixture guidance.
+export XDG_STATE_HOME="$TMPDIR_EVAL/xdg-state"
 errors=0
 
 # #1180 PR 2: the SessionStart install-freshness advisory reads a durable registry cache under the
@@ -58,9 +61,9 @@ JSON
 # expect steering-demo's STATE/RESUME banner need a RESOLVED actor that legitimately owns
 # steering-demo -- a stable, explicit override plus its own per-actor current pointer (mirroring
 # workflow-sidecar.ts's real writeCurrent() dual-write via current-pointer.js's own
-# writePerActorCurrent). Only the specific invocations that need this pass FLOW_AGENTS_ACTOR below
-# -- every other invocation in this file is untouched and keeps resolving via whatever ambient
-# actor it always has (harmless: none of the untouched assertions depend on `current`).
+# writePerActorCurrent). Only the specific invocations that need this pass FLOW_AGENTS_ACTOR below.
+# Other invocations retain the ambient actor, scoped to this file's owned global-state fixture;
+# they must not discover a binding from the invoking session, even when their cwd has no current.
 STEERING_ACTOR="eval-workflow-steering-actor"
 CP_HELPER_ARG="$CURRENT_POINTER_HELPER" FLOW_AGENTS_DIR_ARG="$REPO/.kontourai/flow-agents" \
   SLUG_ARG="steering-demo" ACTOR_ARG="$STEERING_ACTOR" node - <<'NODE'
