@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
 import { delegationIdV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService, DelegationAdmissionError, type DelegationInvocationAmounts } from "./delegation-authority-service.js";
-import { executeAuthorizedDelegation, type DelegationExecutionHost } from "./delegation-execution.js";
+import { executeAuthorizedDelegation, executeAuthorizedDelegationAccountingV1, type DelegationExecutionHost, type DelegationExecutionAccountingHostV1 } from "./delegation-execution.js";
 
 export interface DelegationSyncReceipt {
   runId: string;
@@ -50,6 +50,19 @@ export async function syncDelegationContext(input: {
   maxOutputTokens: number;
   signal?: AbortSignal;
 }): Promise<DelegationSyncReceipt> {
+  return syncContext(input, executeAuthorizedDelegation);
+}
+
+export function syncDelegationContextAccountingV1(input: Omit<Parameters<typeof syncDelegationContext>[0], "host"> & {
+  host: DelegationExecutionAccountingHostV1 & { retainSyncReceipt(receipt: DelegationSyncReceipt): Promise<void> };
+}): Promise<DelegationSyncReceipt> {
+  return syncContext(input, executeAuthorizedDelegationAccountingV1);
+}
+
+async function syncContext<Host extends { retainSyncReceipt(receipt: DelegationSyncReceipt): Promise<void> }>(
+  input: Omit<Parameters<typeof syncDelegationContext>[0], "host"> & { host: Host },
+  execute: (input: Omit<Parameters<typeof executeAuthorizedDelegation>[0], "host"> & { host: Host }) => ReturnType<typeof executeAuthorizedDelegation> | ReturnType<typeof executeAuthorizedDelegationAccountingV1>,
+): Promise<DelegationSyncReceipt> {
   delegationIdV2(input.runId);
   if (typeof input.text !== "string" || Buffer.byteLength(input.text) > 64 * 1024) throw new Error("Context sync exceeds its text bound");
   const { envelope } = await input.service.admitEffect(input.authorityId, input.envelopeId, "context-sync");
@@ -69,7 +82,7 @@ export async function syncDelegationContext(input: {
     for (let attempt = 0; attempt < 2; attempt++) {
       input.signal?.throwIfAborted();
       attempts++;
-      const outcome = await executeAuthorizedDelegation({
+      const outcome = await execute({
         ...input,
         invocationId: `sync_${identity}_${attempt}`,
         onReserved: async () => { ownsInvocation = true; },

@@ -295,7 +295,7 @@ terminal accounting releases the active slot; actual spend remains charged. Conf
 its allocation is retained and closes further derivation, invocation admission and effect admission.
 Cancellation stops admission without claiming that existing invocations have terminated.
 
-These source package entry points are not yet published. The execution bridge and v2 group
+The underlying source entry points are exported in installed 9.3; that alone does not approve a provider. The execution bridge and v2 group
 controller compose authority reservations, Dispatch and group records as described below.
 Production host authentication and executable effect fencing remain host responsibilities.
 `admitEffect` returns a checked observation, not a transferable capability or permission to bypass
@@ -319,7 +319,44 @@ its runtime receipts; matching reference text and capability declarations alone 
 
 Raw results and thrown failures reach separate awaited host retention callbacks before Dispatch
 normalizes them. Retention failures and unknown usage keep holds. Successful usage reconciles into
-the authority ledger. A per-dimension overrun that Dispatch can settle returns `budget-exceeded`
+the authority ledger. Published 9.3 `DelegationDispatchOutcome`, `DelegationExecutionHost`,
+`dispatchDelegation()` and `executeAuthorizedDelegation()` retain their original contracts and
+Relay dollar bridge. Existing group, Flow and context-sync entrypoints keep that default.
+
+The additive source API is `dispatchDelegationAccountingV1()` and
+`executeAuthorizedDelegationAccountingV1()`. Its execution host explicitly declares
+`accountingProtocol: "retained-tariff-v1"`; `retainResult` returns
+`DelegationRetainedAccountingV1` (`inputTokens`, `outputTokens`, `costMicros`,
+`costBasis: "tariff-upper-bound"`), `null` for an unknown hold, or `undefined` to
+select the legacy Relay-USD bridge. It must durably retain raw evidence, tariff
+identity and cost basis before returning. This callback neither issues authority nor verifies billing.
+
+Dispatch's dollar ledger receives `delegationAccountingDollarsV1(micros)`, a
+conservative upward-rounded view. The authority ledger retains the original integer;
+there is no USD reverse conversion on this path. Reservation and settlement use the
+same helper. Direct dispatch callers must reserve sufficient headroom with it. Its
+domain is nonnegative safe integers through 10^12 micros. This per-amount guarantee
+does not prove exact conservative accumulation of arbitrary floating-point sums.
+
+`DelegationDispatchAccountingOutcomeV1` separates `accountedCostUsd` from optional
+`reportedCostUsd`. Exact tariffs leave reported dollars absent, with
+`costBasis: "tariff-upper-bound"`. Raw Relay results are preserved: an existing
+`usage.costUsd` remains raw provider evidence, but this accounting path neither
+fabricates it from the tariff nor uses it as the tariff's reported dollar cost. An unsettled attempt makes the outcome
+basis `"unknown"`; the accounted tally contains only settled amounts. It is not zero
+spend for held attempts. `null`, invalid measurements, failed retention or settlement
+preserve the appropriate holds. `undefined` keeps legacy measurement behavior.
+
+`createDelegationGroupControllerAccountingV1()` carries this protocol through its
+guarded execution host and both group and Flow outcome retention callbacks.
+`orchestrateDelegationFlowAccountingV1()` uses the existing Flow scheduler and durable
+claims; `syncDelegationContextAccountingV1()` keeps the existing bounded acknowledgement
+and receipt protocol. Their new host types accept the truthful accounting outcome.
+Admission, group journals and Flow readiness are shared with the default path, not reimplemented.
+These additive APIs are an unpublished candidate. The underlying 9.3 source exports
+and public pricing do not establish actual provider approval or Station adoption.
+
+A per-dimension overrun that Dispatch can settle returns `budget-exceeded`
 without a result. Combined-token or cost capacity overruns can instead make Dispatch refuse settlement;
 the bridge reconciles retained usage into authority, then preserves the settlement error. If authority
 reconciliation also fails, an aggregate error retains both failures and the original Dispatch cause. An abort request or thrown runtime error does not prove
@@ -400,7 +437,7 @@ The local store permanently binds an authority to one group within that store an
 record capacity. Cross-store custody, actual actor/liveness, launch confinement, physical cancellation,
 live assignment authorization and missing-output recovery remain host responsibilities. There is no takeover,
 route-back seat reexecution, compaction or automatic redispatch in this increment. These source APIs
-are not yet a published package or a Station group launch feature.
+are source APIs in installed 9.3, not evidence of an approved Station group launch feature.
 
 ## Group mailbox admission
 

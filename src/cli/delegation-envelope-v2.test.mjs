@@ -743,3 +743,52 @@ test(`context sync retains bounded receipt for ${scenario}`, async () => {
 });
 
 }
+
+
+for (const mode of ['exact', 'limit-exact', 'no-usd', 'unknown', 'invalid', 'invalid-basis', 'legacy']) {
+  test(`retained integer usage preserves ${mode} accounting independently of Relay dollars`, async () => {
+    const { executeAuthorizedDelegationAccountingV1 } = await import('../../build/src/delegation-execution.js');
+    const { createDelegationAuthorityService } = await import('../../build/src/delegation-authority-service.js');
+    const { createLocalFileDelegationAuthorityStore } = await import('../../build/src/delegation-authority-local-file.js');
+    const { FileAuthorizationLedger } = await import('@kontourai/dispatch');
+    const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-exact-retained-'));
+    try {
+      const root = rootAuthority();
+      root.budget.max_cost_micros = 1_000_000_000_000;
+      const parent = rootEnvelope(root), child = childOf(root, parent);
+      const service = createDelegationAuthorityService(createLocalFileDelegationAuthorityStore(directory), {
+        now: () => NOW, authorize: async () => true, confirmExecution: async () => true, confirmReconciliation: async () => true,
+      });
+      await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child);
+      const exact = { inputTokens: 2, outputTokens: 3, costMicros: mode === 'limit-exact' ? 1_000_000_000_000 : 123, costBasis: 'tariff-upper-bound' };
+      let retained = false;
+      const runtime = {
+        id: 'integer-usage-fixture',
+        capabilities: () => ({ structuredTools: true, outputTokenLimitFidelity: 'native', streaming: false, abort: true, usage: true }),
+        async invoke() { return { provider: 'fixture', model: 'fixture', outputText: 'result', toolCalls: [], usage: { inputTokens: 2, outputTokens: 3, ...(mode === 'no-usd' ? {} : { costUsd: mode === 'legacy' ? 0.000003 : exact.costMicros / 1_000_000 }) }, latencyMs: 0 }; },
+      };
+      const host = {
+        accountingProtocol: "retained-tariff-v1",
+        resolveRuntime: async () => ({ runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }),
+        invokeFenced: async (_envelope, _id, invoke) => invoke(),
+        retainFailure: async () => { throw new Error('unexpected invocation failure'); },
+        retainResult: async () => { retained = true; return mode === 'unknown' ? null : mode === 'invalid' ? { ...exact, costMicros: -1 } : mode === 'invalid-basis' ? { ...exact, costBasis: 'guessed' } : mode === 'legacy' ? undefined : exact; },
+      };
+      const input = { service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(directory, 'dispatch') }), authorityId: root.authority_id, envelopeId: child.envelope_id, invocationId: 'attempt', effect: 'write', request: { maxOutputTokens: 5, messages: [{ role: 'user', content: 'work' }] }, allocation: { inputTokens: 5, outputTokens: 5, costMicros: mode === 'exact' ? 123 : 1_000_000_000_000 } };
+      if (mode === 'invalid' || mode === 'invalid-basis' || mode === 'unknown') await assert.rejects(executeAuthorizedDelegationAccountingV1(input));
+      else {
+        const outcome = await executeAuthorizedDelegationAccountingV1(input);
+        assert.equal(outcome.outcome, 'succeeded');
+        assert.equal(outcome.costBasis, mode === 'legacy' ? 'provider-reported' : 'tariff-upper-bound');
+        assert.equal(outcome.reportedCostUsd, mode === 'legacy' ? 0.000003 : undefined);
+      }
+      assert.equal(retained, true);
+      const invocation = (await service.inspect(root.authority_id)).invocations[0];
+      if (mode === 'unknown' || mode === 'invalid' || mode === 'invalid-basis') assert.equal(invocation.usage, null);
+      else assert.deepEqual(invocation.usage, { inputTokens: exact.inputTokens, outputTokens: exact.outputTokens, costMicros: mode === 'legacy' ? 3 : exact.costMicros });
+      if (mode === 'invalid' || mode === 'invalid-basis') assert.equal(invocation.terminal, false);
+      if (mode === 'unknown') await assert.rejects(service.reserveInvocation(root.authority_id, child.envelope_id, 'cannot-release-unknown', input.allocation));
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  });
+}
