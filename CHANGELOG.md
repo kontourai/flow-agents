@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.3.0](https://github.com/kontourai/flow-agents/compare/v9.2.0...v9.3.0) (2026-10-21)
+
+
+### Features
+
+* **delegation:** add durable bounded group authority and execution ([#1535](https://github.com/kontourai/flow-agents/issues/1535)) ([d40f187](https://github.com/kontourai/flow-agents/commit/d40f1871def1d65bc6802b0b08bfcb8b2090feee))
+
 ## [9.2.0](https://github.com/kontourai/flow-agents/compare/v9.1.1...v9.2.0) (2026-10-18)
 
 
