@@ -371,6 +371,31 @@ test("a route-back is not evaluated until every admitted sibling callback has st
   assert.ok(run.state.gate_outcomes.some((outcome) => outcome.gate_id === "route-back-gate" && outcome.status === "route-back"));
 });
 
+function amendDefinition(cwd, runId, successorFile) {
+  execFileSync(process.execPath, ["--input-type=module", "-e", `
+    import fs from "node:fs";
+    import { amendRunDefinition, definitionDigest, definitionIdentity, flowRunHead, loadRun } from "@kontourai/flow";
+    const current = await loadRun(${JSON.stringify(runId)}, ${JSON.stringify(cwd)});
+    const successor = JSON.parse(fs.readFileSync(${JSON.stringify(successorFile)}, "utf8"));
+    await amendRunDefinition(${JSON.stringify(runId)}, {
+      cwd: ${JSON.stringify(cwd)},
+      definition: successor,
+      request: {
+        reason: "definition drift fixture",
+        expected_run_head: flowRunHead(current.state),
+        expected_definition: definitionIdentity(current.definition),
+        successor_digest: definitionDigest(successor),
+        authority: {
+          kind: "user_request",
+          actor: "definition-drift-test",
+          request_ref: "test:definition-drift",
+          requested_at: "2026-07-25T00:00:00.000Z"
+        }
+      }
+    });
+  `], { cwd: process.cwd(), stdio: "pipe" });
+}
+
 test("an authorized definition amendment between rounds fails closed and releases the drifted claim", async () => {
   const cwd = workspace();
   const runId = "multi-cursor-definition-drift";
@@ -390,29 +415,8 @@ test("an authorized definition amendment between rounds fails closed and release
     maxRounds: 3,
     identityFactory: (stepId) => {
       if (stepId !== "root" && !amended) {
+        amendDefinition(cwd, runId, successorFile);
         amended = true;
-        execFileSync(process.execPath, ["--input-type=module", "-e", `
-          import fs from "node:fs";
-          import { amendRunDefinition, definitionDigest, definitionIdentity, flowRunHead, loadRun } from "@kontourai/flow";
-          const current = await loadRun(${JSON.stringify(runId)}, ${JSON.stringify(cwd)});
-          const successor = JSON.parse(fs.readFileSync(${JSON.stringify(successorFile)}, "utf8"));
-          await amendRunDefinition(${JSON.stringify(runId)}, {
-            cwd: ${JSON.stringify(cwd)},
-            definition: successor,
-            request: {
-              reason: "definition drift fixture",
-              expected_run_head: flowRunHead(current.state),
-              expected_definition: definitionIdentity(current.definition),
-              successor_digest: definitionDigest(successor),
-              authority: {
-                kind: "user_request",
-                actor: "definition-drift-test",
-                request_ref: "test:definition-drift",
-                requested_at: "2026-07-25T00:00:00.000Z"
-              }
-            }
-          });
-        `], { cwd, stdio: "pipe" });
       }
       return identity(stepId);
     },
@@ -425,7 +429,9 @@ test("an authorized definition amendment between rounds fails closed and release
 
   assert.equal(amended, true);
   assert.deepEqual(executed, ["root"], "a claim under the amended definition must not reach the host");
-  assert.deepEqual((await loadRun(runId, cwd)).state.multi_cursor.active_claims, []);
+  const run = await loadRun(runId, cwd);
+  assert.equal(run.definition.version, "2");
+  assert.deepEqual(run.state.multi_cursor.active_claims, []);
 });
 
 test("a non-resource Flow claim error is never converted into deferred work", async () => {
@@ -854,4 +860,34 @@ test("slow renewal observation cannot suspend leases while an aborted host is st
   }), FlowMultiCursorOrchestrationError);
   assert.ok(confirmed);
   assertUnusedClaimsReleased(await loadRun(input.runId, input.cwd), 1);
+});
+
+test("a still-ready claim under an amended definition is released before host dispatch", async () => {
+  const cwd = workspace();
+  const runId = "claim-definition-drift";
+  const file = writeOneStepDefinition(cwd);
+  await startRun(file, { cwd, runId, params: { subject: "flow-agents#1113" } });
+  const successor = JSON.parse(fs.readFileSync(file, "utf8"));
+  successor.version = "2";
+  const successorFile = path.join(cwd, "successor.flow.json");
+  fs.writeFileSync(successorFile, JSON.stringify(successor));
+  let callbacks = 0;
+  await assert.rejects(orchestrateFlowMultiCursor({
+    cwd, runId, actor: { key: "scheduler-host", kind: "test" },
+    identityFactory: (stepId) => {
+      amendDefinition(cwd, runId, successorFile);
+      return identity(stepId);
+    },
+    execute: async () => { callbacks += 1; },
+  }), (error) => {
+    assert.ok(error instanceof FlowMultiCursorOrchestrationError);
+    assert.equal(error.observation.definition.version, "1");
+    assert.ok(error.observation.finalRunHead);
+    return true;
+  });
+  assert.equal(callbacks, 0);
+  const run = await loadRun(runId, cwd);
+  assert.equal(run.definition.version, "2");
+  assertUnusedClaimsReleased(run, 1);
+  assert.ok(run.state.multi_cursor.claim_history.some(({ action, reason }) => action === "released" && reason === "definition-identity-drift"));
 });
