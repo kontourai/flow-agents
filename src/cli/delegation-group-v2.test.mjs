@@ -18,10 +18,10 @@ const NOW = "2026-10-21T12:00:00.000Z", EXPIRY = "2026-10-22T12:00:00.000Z";
 const ref = id => ({ id, domain: "fixture-receipt", digest: `sha256:${createHash("sha256").update(id).digest("hex")}` });
 const fence = { id: "host-controller", generation: 3 };
 const allocation = { inputTokens: 5, outputTokens: 5, costMicros: 10 };
-function authorityFixture(flow) {
+function authorityFixture(flow, options = {}) {
   const ceiling = { allowed_tools: [], allowed_effects: ["read"], readable_resources: [], mutable_resources: [], posture: "report-only", approval: "requires_approval", escalation: "deny" };
   const budget = { remaining_depth: 3, max_total_children: 4, max_total_envelopes: 8, max_concurrent_children: 2,
-    max_runtime_ms: 60000, max_input_tokens: 1000, max_output_tokens: 1000, max_cost_micros: 1000, max_attempts: 4, expires_at: EXPIRY };
+    max_runtime_ms: 60000, max_input_tokens: 1000, max_output_tokens: 1000, max_cost_micros: 1000, max_attempts: 4, expires_at: options.rootExpiry ?? EXPIRY };
   const grants = ["first", "second"].map(step => ({ grant_id: `grant-${step}`,
     runtime: { runtime_receipt_ref: ref(`runtime-${step}`), model_receipt_ref: ref(`model-${step}`), required_capabilities: ["usage", "abort"] },
     source: { repository_id: "fixture", source_state_id: "exact-source", dirty_state_fingerprint: null, execution_worktree_id: `worktree-${step}`, source_admission_receipt: ref(`source-${step}`) },
@@ -41,7 +41,7 @@ function authorityFixture(flow) {
     budget: structuredClone(budget), continuation_ref: ref("continuation"), cancellation_ref: root.root_cancellation_ref };
   const child = { ...structuredClone(parent), envelope_id: "child", generation: 1, parent: delegationParentReferenceV2(parent),
     execution_id: "child-execution", span_id: "child-span", parent_span_id: "root-span", selected_grant_id: "grant-second", execution_binding: binding(grants[1]),
-    budget: { ...budget, remaining_depth: 2, max_total_envelopes: 3, max_attempts: 1, max_input_tokens: 100, max_output_tokens: 100, max_cost_micros: 100 } };
+    budget: { ...budget, remaining_depth: 2, max_total_envelopes: 3, max_attempts: 1, max_input_tokens: 100, max_output_tokens: 100, max_cost_micros: 100, expires_at: options.childExpiry ?? budget.expires_at } };
   return { root, envelopes: [parent, child] };
 }
 async function fixture(t, options = {}) {
@@ -57,7 +57,7 @@ async function fixture(t, options = {}) {
     flow = { runId: "group-flow-run", identity: definitionIdentity(definition) };
     await startRun(file, { cwd, runId: flow.runId, params: { subject: "fixture" } });
   }
-  const { root, envelopes } = authorityFixture(flow);
+  const { root, envelopes } = authorityFixture(flow, options);
   const state = { allowed: true, authorityAllowed: true, currentGeneration: 3, calls: 0, cancellations: 0, retained: [], outcomes: [], schedules: [], launches: [], fail: false, unknownUsage: false };
   const authorityHost = { now: () => NOW, authorize: async () => state.authorityAllowed, confirmExecution: async () => state.authorityAllowed, confirmReconciliation: async () => state.authorityAllowed };
   const openAuthority = () => createDelegationAuthorityService(createLocalFileDelegationAuthorityStore(cwd), authorityHost);
@@ -425,33 +425,67 @@ test("returned and cancelled groups require authenticated terminal/accounting pr
   assert.equal((await f.open().get("group")).terminal, "proven"); assert.equal(f.state.calls, 2);
 });
 
-test('mailbox validator binds current group seats and both live assignments before delivery', async t => {
+async function mailboxFixture(t, options = {}) {
   const { createDelegationGroupMailboxValidator } = await import('../../build/src/delegation-group-mailbox.js');
   const { createLocalFileDelegationMailbox } = await import('../../build/src/delegation-mailbox-local-file.js');
   const { createMailboxMessage } = await import('../../build/src/delegation-mailbox.js');
-  const f = await fixture(t);
+  const f = await fixture(t, options);
   const identity = seat => ({ groupId: 'group', groupGeneration: 1, controllerActorKey: 'host-controller', controllerGeneration: 3,
     memberId: seat.seatId, memberGeneration: seat.envelope.generation, assignmentId: `assignment-${seat.seatId}`, assignmentGeneration: 1, actorKey: `actor-${seat.seatId}` });
   const first = identity(f.spec.seats[0]), second = identity(f.spec.seats[1]);
   const live = new Map(f.spec.seats.map(seat => [seat.seatId, identity(seat)]));
-  let authenticated = first.actorKey;
-  const validateHost = createDelegationGroupMailboxValidator({ controller: f.controller, authority: f.service, host: {
-    authenticateCaller: async caller => caller.actorKey === authenticated,
-    withMembershipFence: async (_id, body) => body(),
-    resolveLiveMember: async (spec, seat) => ({ identity: live.get(seat.seatId), controller: spec.controller, envelope: seat.envelope }),
-  } });
-  const mailbox = createLocalFileDelegationMailbox({ artifactRoot: f.cwd, now: () => NOW, validateHost });
+  const state = { authenticated: first.actorKey, now: NOW, fenced: false, lookups: 0 };
+  const host = {
+    now: () => { assert.equal(state.fenced, true); return state.now; },
+    authenticateCaller: async caller => caller.actorKey === state.authenticated,
+    withMembershipFence: async (_id, body) => {
+      assert.equal(state.fenced, false); state.fenced = true;
+      try { return await body(); } finally { state.fenced = false; }
+    },
+    resolveLiveMember: async (spec, seat) => {
+      assert.equal(state.fenced, true); state.lookups++;
+      return { identity: live.get(seat.seatId), controller: spec.controller, envelope: seat.envelope };
+    },
+  };
+  const validateHost = createDelegationGroupMailboxValidator({ controller: f.controller, authority: f.service, host });
+  const mailbox = createLocalFileDelegationMailbox({ artifactRoot: f.cwd, now: () => state.now, validateHost });
   const message = createMailboxMessage({ schemaVersion: '1.0', messageId: 'message', operationId: 'operation', exchangeId: 'exchange', subjectId: 'flow-agents#1113', resourceScope: ['src/task.ts'],
     sender: first, recipient: second, correlation: { status: 'incomplete', reason: 'controlled host' }, kind: 'dependency_question', inReplyTo: null,
     createdAt: NOW, expiresAt: '2026-10-21T12:30:00.000Z', payload: { summary: 'Can you review?', evidenceRefs: [], outputRefs: [] } });
+  return { ...f, mailbox, validateHost, host, first, second, live, message, mailboxState: state };
+}
+
+test('mailbox validator binds current group seats and both live assignments before delivery', async t => {
+  const f = await mailboxFixture(t), { mailbox, first, second, live, message, mailboxState: state } = f;
   assert.equal((await mailbox.enqueue(message, first)).status, 'ok');
   live.set(second.memberId, { ...second, assignmentGeneration: 2 });
   assert.equal((await mailbox.deliver(message.operationId, first)).status, 'refused');
   live.set(second.memberId, second);
   assert.equal((await mailbox.deliver(message.operationId, first)).status, 'ok');
-  authenticated = second.actorKey;
+  state.authenticated = second.actorKey;
   assert.equal((await mailbox.inbox(second)).value.length, 1);
   await f.controller.cancel(f.command('cancel', 1));
   assert.equal((await mailbox.inbox(second)).status, 'refused');
+  assert.equal(f.state.calls, 0);
+});
+
+for (const boundary of ['root', 'child']) test(`mailbox refuses ${boundary} expiry at trusted host time despite historically valid authority`, async t => {
+  const expiresAt = '2026-10-21T12:10:00.000Z';
+  const f = await mailboxFixture(t, { [`${boundary}Expiry`]: expiresAt });
+  const { mailbox, message, first, second, mailboxState: state } = f;
+  assert.equal((await mailbox.enqueue(message, first)).status, 'ok');
+  assert.equal((await mailbox.deliver(message.operationId, first)).status, 'ok');
+  state.authenticated = second.actorKey;
+  assert.equal((await mailbox.inbox(second)).value.length, 1);
+  state.now = expiresAt;
+  // Historical inspection remains available and the message itself has not expired.
+  assert.equal((await f.openAuthority().inspect('root')).cancelled, false);
+  assert.ok(state.now < message.expiresAt);
+  state.authenticated = first.actorKey;
+  assert.equal((await mailbox.enqueue(message, first)).status, 'refused');
+  assert.equal((await mailbox.deliver(message.operationId, first)).status, 'refused');
+  state.authenticated = second.actorKey;
+  assert.equal((await mailbox.inbox(second)).status, 'refused');
+  assert.equal((await mailbox.acknowledge(message.operationId, second)).status, 'refused');
   assert.equal(f.state.calls, 0);
 });
