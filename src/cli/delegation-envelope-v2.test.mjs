@@ -707,7 +707,9 @@ test(`context sync retains bounded receipt for ${scenario}`, async () => {
       try { await syncDelegationContext(input); } catch (error) { failure = error; }
       assert.equal(failure?.receipt.status, 'acknowledged');
       assert.equal(calls, 2); failReceipt = false;
+      failure.receipt.status = 'incomplete';
       await failure.retryRetention(host);
+      assert.equal(receipts[0].status, 'acknowledged');
       assert.equal(receipts.length, 1); assert.equal(calls, 2); return;
     }
     const receipt = await syncDelegationContext(input);

@@ -21,13 +21,14 @@ export class DelegationSyncExecutionError extends Error {
 }
 
 export class DelegationSyncReceiptPersistenceError extends Error {
-  readonly receipt: DelegationSyncReceipt;
+  readonly #receipt: DelegationSyncReceipt;
+  get receipt(): DelegationSyncReceipt { return structuredClone(this.#receipt); }
   constructor(receipt: DelegationSyncReceipt, storageError: unknown, executionFailure?: { error: unknown }) {
     super("Delegation sync receipt persistence failed", { cause: executionFailure
       ? new AggregateError([storageError, executionFailure.error], "Sync execution and receipt persistence failed", { cause: executionFailure.error })
       : storageError });
     this.name = "DelegationSyncReceiptPersistenceError";
-    this.receipt = structuredClone(receipt);
+    this.#receipt = structuredClone(receipt);
   }
   /** Storage-only recovery: never redispatches a model invocation. */
   async retryRetention(host: { retainSyncReceipt(receipt: DelegationSyncReceipt): Promise<void> }): Promise<DelegationSyncReceipt> {
