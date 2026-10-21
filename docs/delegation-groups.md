@@ -330,3 +330,22 @@ and lifecycle ordering, not a required gate accepting returned artifacts. A deni
 authority invocation in that fixture. A host must still enforce assignment/source/worktree fences,
 actual tool effects, durable outputs and cancellation. Group records, mailbox authentication and the
 Station consumer are not yet connected to this wrapper.
+
+## Context acknowledgement in progress
+
+The source-only `syncDelegationContext()` uses explicit empty tool authority and the `context-sync`
+effect. It sends zero tools, bounds text to 64 KiB, and requires the exact response `ACK SYNC <run-id>`
+with zero returned tool calls. A SHA-256 binds each retained receipt to the supplied text. A wrong
+response permits one retry only after the first response completed and its usage reconciled. Unknown
+invocation/retention/accounting failures propagate without an automatic retry. Replay of the same
+invocation identity is refused by durable admission.
+
+The host retains the receipt and raw responses; callback delivery is not durable-storage proof.
+An acknowledgement is transport/protocol evidence, not understanding, tool confinement or a gate.
+The Station folded-context UI and production no-tools host remain unconnected. The current controlled
+fixture covers one wrong response followed by the exact acknowledgement, not live context recovery.
+
+The authority adapter also reserves 256 journal bytes for each unresolved usage record before
+admission. This covers its later canonical three-integer usage record without allowing unrelated
+ledger growth to consume settlement space. Boundary injection tests establish refusal before a new
+reservation, not a literal near-16-MiB storage or power-loss result.
