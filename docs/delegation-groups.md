@@ -403,9 +403,18 @@ the offline mailbox's required host seam. It authenticates the caller before gro
 a host membership fence while reading current group/authority state and resolving both participants'
 live assignments. Exact seat envelope generations/digests, controller binding, and every mailbox
 identity field must match. Group cancellation, authority cancellation and proven terminal groups refuse
-messages; stale assignment generations cannot deliver or read retained messages.
+worker messages; stale assignment generations cannot deliver or read retained messages. Trusted host
+time is sampled after live resolution and validates each participant's complete registered ancestry,
+including root/envelope expiry and exact grant bindings.
+
+Mailbox cancellation resolves the authenticated controller's own live identity independently of
+worker seats. This cleanup path can fence an offline journal after group/authority cancellation or
+expiry; it grants no execution authority. Workers cannot borrow a controller identity, and proven
+terminal groups still refuse cleanup.
 
 The host must implement actual caller authentication, current liveness, group generation and the
-membership/cancellation fence. A no-op fence or caller-supplied identity resolver does not enforce
+membership/cancellation fence through the subsequent mailbox read/commit. The validator callback
+ends before the mailbox store uses its decision; the callback alone is not atomic transport fencing.
+A no-op fence or caller-supplied identity resolver does not enforce
 those properties. This composition neither grants tool/filesystem access nor turns transport ACKs
 into acceptance. The real-store fixture uses controlled host identities, not deployed authentication.
