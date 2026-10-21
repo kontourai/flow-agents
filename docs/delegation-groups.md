@@ -292,3 +292,25 @@ Dispatch/group reservation composition, executable effect fencing, and productio
 capability or permission to bypass a host effect-time check. Real temporary-store tests establish
 reopen, allocation refusal, active-slot/unknown-usage holds, overrun retention, access refusal and persisted cancellation; they do not establish crash,
 power-loss, hostile-worker or live-provider enforcement.
+
+## Authority-bound execution in progress
+
+The source-only `executeAuthorizedDelegation()` bridge selects the exact registered runtime/model
+receipts and checks required capabilities, tool names and native output-token limiting before
+reservation. It requires an explicit output limit within the allocation. Public Dispatch validation
+runs with an already-aborted signal and no runtime or ledger, so incompatible plans cannot consume
+authority capacity. A pre-aborted caller likewise creates no reservation. Content-addressed tuples
+produce bounded Dispatch ids without restricting the service's canonical invocation ids.
+
+One call admits one physical attempt. Explicit retries require fresh invocation ids and consume
+new authority capacity. Authority reservation precedes Dispatch reservation; a second effect check
+precedes the host's launch fence. The host must enforce that fence across launch and authenticate
+its runtime receipts; matching reference text and capability declarations alone do not prove this.
+
+Raw results and thrown failures reach separate awaited host retention callbacks before Dispatch
+normalizes them. Retention failures and unknown usage keep holds. Successful usage reconciles into
+the authority ledger; per-input, per-output or cost overruns return `budget-exceeded` without a result
+while retaining the accounting observation. An abort request or thrown runtime error does not prove
+termination or known zero spend. Durable retention, actual confinement, input/cost ceilings and native
+cancellation fidelity still require production host evidence. No installed group executor or Station
+consumer is established by this controlled-runtime bridge test.
