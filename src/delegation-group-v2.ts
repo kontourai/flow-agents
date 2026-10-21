@@ -3,7 +3,7 @@ import { canonicalJson, type ModelInvocationRequest } from "@kontourai/relay";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
 import { definitionIdentity, loadRun, type FlowStepClaimActor } from "@kontourai/flow";
 import {
-  copyDelegationJsonV2, delegationDigestV2, delegationIdV2, delegationIntegerV2,
+  copyDelegationJsonV2, delegationDigestV2, delegationIdV2, delegationIntegerV2, delegationFlowDefinitionIdentityV2,
   delegationRecordV2, delegationReferenceV2, requireDelegationV2, type DelegationReferenceV2,
 } from "./delegation-authority-contract.js";
 import {
@@ -127,9 +127,7 @@ export function validateDelegationGroupSpecV2(value: unknown): DelegationGroupSp
     delegationRecordV2(topology, ["kind", "runId", "definition", "actor"]);
     requireDelegationV2(topology.kind === "flow", "unsupported_group_topology");
     delegationIdV2(topology.runId);
-    const d = delegationRecordV2(topology.definition, ["id", "version", "digest"]);
-    delegationIdV2(d.id); delegationIdV2(d.version);
-    requireDelegationV2(typeof d.digest === "string" && /^[a-f0-9]{64}$/.test(d.digest), "invalid_flow_digest");
+    delegationFlowDefinitionIdentityV2(topology.definition);
     const a = delegationRecordV2(topology.actor, ["key", ...(topology.actor.kind !== undefined ? ["kind"] : [])]);
     delegationIdV2(a.key); if (a.kind !== undefined) delegationIdV2(a.kind);
     requireDelegationV2(seats.every(s => s.stepId !== null) && new Set(seats.map(s => s.stepId)).size === seats.length, "invalid_group_steps");

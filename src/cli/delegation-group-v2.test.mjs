@@ -50,7 +50,7 @@ async function fixture(t, options = {}) {
   let flow;
   if (options.flow) {
     const expects = required => [{ id: "observation", kind: "trust.bundle", required, description: "Host must supply evidence", bundle_claim: { claimType: "fixture.report" } }];
-    const definition = { id: "group-flow", version: "1", execution: { mode: "multi-cursor", claim_contract_version: "1" },
+    const definition = { id: "group-flow", version: options.version ?? "1", execution: { mode: "multi-cursor", claim_contract_version: "1" },
       steps: [{ id: "first", next: null, mutable_resources: [] }, { id: "second", next: null, needs: ["first"], mutable_resources: [] }],
       gates: { first: { step: "first", expects: expects(options.required ?? false) }, second: { step: "second", expects: expects(false) } } };
     const file = path.join(cwd, "fixture.flow.json"); fs.writeFileSync(file, JSON.stringify(definition));
@@ -185,7 +185,7 @@ test("independent advisory execution retains raw dissent, commits before launch 
 });
 
 for (const required of [false, true]) test(`public Flow owns dependencies and gate evaluation (required evidence: ${required})`, async t => {
-  const f = await fixture(t, { flow: true, required });
+  const f = await fixture(t, { flow: true, required, version: "1.0.0+build.7" });
   const result = await f.controller.run(f.command("run", 1));
   const run = await loadRun(f.spec.topology.runId, f.cwd);
   assert.equal(f.state.calls, required ? 1 : 2);
