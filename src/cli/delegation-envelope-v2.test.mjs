@@ -532,9 +532,9 @@ test("authorized execution binds selected runtime, reserves before launch and re
     });
     const { root, parent, child } = edgeFixture();
     await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child);
-    let calls = 0, retained = null;
+    let calls = 0, retained = null, fail = false, overrun = false, failureRetained = false;
     const runtime = { id: 'selected-runtime', capabilities: () => ({ structuredTools: true, outputTokenLimitFidelity: 'native', streaming: false, abort: true, usage: true }),
-      async invoke() { calls++; return { provider: 'fixture', model: 'configured', outputText: 'child report', toolCalls: [], usage: { inputTokens: 2, outputTokens: 3, costUsd: 0.000004 }, latencyMs: 1 }; } };
+      async invoke() { calls++; if (fail) throw new Error('native failure'); return { provider: 'fixture', model: 'configured', outputText: 'child report', toolCalls: [], usage: { inputTokens: overrun ? 8 : 2, outputTokens: overrun ? 2 : 3, costUsd: 0.000004 }, latencyMs: 1 }; } };
     const host = {
       resolveRuntime: async () => ({ runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }),
       async invokeFenced(_envelope, id, launch) {
@@ -543,6 +543,7 @@ test("authorized execution binds selected runtime, reserves before launch and re
         return launch();
       },
       async retainResult(result) { retained = result.outputText; },
+      async retainFailure(error) { assert.equal(error.message, "native failure"); failureRetained = true; },
     };
     const input = { service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(rootPath, 'dispatch') }), authorityId: root.authority_id,
       envelopeId: child.envelope_id, invocationId: 'first', effect: 'write', request: { maxOutputTokens: 5, messages: [{ role: 'user', content: 'work' }] },
@@ -555,11 +556,22 @@ test("authorized execution binds selected runtime, reserves before launch and re
     await assert.rejects(executeAuthorizedDelegation({ ...input, request: { ...input.request, tools: [{ name: 'undeclared', inputSchema: {} }] } }), /runtime_authority_unsupported/);
     assert.equal(calls, 0);
     assert.equal((await service.inspect(root.authority_id)).invocations.length, 0);
+    await assert.rejects(executeAuthorizedDelegation({ ...input, allocation: { ...input.allocation, costMicros: 0 } }));
+    await assert.rejects(executeAuthorizedDelegation({ ...input, signal: AbortSignal.abort() }));
+    assert.equal((await service.inspect(root.authority_id)).invocations.length, 0);
     assert.equal((await executeAuthorizedDelegation(input)).outcome, 'succeeded');
     assert.equal(retained, 'child report');
     assert.deepEqual((await service.inspect(root.authority_id)).invocations[0].usage, { inputTokens: 2, outputTokens: 3, costMicros: 4 });
     await assert.rejects(executeAuthorizedDelegation(input), /invocation_already_reserved/);
     assert.equal(calls, 1);
+    fail = true;
+    await executeAuthorizedDelegation({ ...input, invocationId: 'attempt#failure' });
+    assert.equal(failureRetained, true);
+    fail = false; overrun = true;
+    const excess = await executeAuthorizedDelegation({ ...input, invocationId: 'x'.repeat(240) });
+    assert.equal(excess.outcome, 'budget-exceeded');
+    assert.equal(excess.result, undefined);
+    assert.equal((await service.inspect(root.authority_id)).invocations.at(-1).usage.inputTokens, 8);
   } finally { fs.rmSync(rootPath, { recursive: true, force: true }); }
 });
 
