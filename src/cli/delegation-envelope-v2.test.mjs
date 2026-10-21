@@ -610,3 +610,41 @@ for (const scenario of ['undefined-usage', 'array-allocation', 'expired-sibling'
     } finally { fs.rmSync(rootPath, { recursive: true, force: true }); }
   });
 }
+
+test('Flow execution composes real claims with registered authority and controlled runtime', async () => {
+  const { startRun, loadRun } = await import('@kontourai/flow');
+  const { FileAuthorizationLedger } = await import('@kontourai/dispatch');
+  const { createDelegationAuthorityService } = await import('../../build/src/delegation-authority-service.js');
+  const { createLocalFileDelegationAuthorityStore } = await import('../../build/src/delegation-authority-local-file.js');
+  const { orchestrateDelegationFlow } = await import('../../build/src/delegation-flow-execution.js');
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'delegation-flow-execution-'));
+  try {
+    const definition = { id: 'delegation-fixture', version: '1', execution: { mode: 'multi-cursor', claim_contract_version: '1' },
+      steps: [{ id: 'reader', next: null, mutable_resources: [] }], gates: { observation: { step: 'reader', expects: [{ id: 'optional', kind: 'trust.bundle', required: false, description: 'Optional fixture observation', bundle_claim: { claimType: 'fixture.optional' } }] } } };
+    const file = path.join(cwd, 'fixture.flow.json'); fs.writeFileSync(file, JSON.stringify(definition));
+    const runId = 'delegation-flow'; await startRun(file, { cwd, runId, params: { subject: 'flow-agents#1113' } });
+    const root = rootAuthority();
+    for (const grant of root.execution_grants) grant.flow_binding = { status: 'bound', flow_run_id: runId, definition: definitionIdentity(definition), flow_step_id: 'reader', gate_attempt: 1 };
+    const parent = rootEnvelope(root), child = childOf(root, parent);
+    const service = createDelegationAuthorityService(createLocalFileDelegationAuthorityStore(cwd), {
+      now: () => NOW, authorize: async () => true, confirmExecution: async () => true, confirmReconciliation: async () => true,
+    });
+    await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child);
+    const events = []; let calls = 0, recorded = 0;
+    const runtime = { id: 'selected', capabilities: () => ({ structuredTools: true, outputTokenLimitFidelity: 'native', streaming: false, abort: true, usage: true }),
+      async invoke() { calls++; assert.ok(events.includes('started')); return { provider: 'fixture', model: 'fixture', outputText: 'observation', toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, costUsd: 0.000001 }, latencyMs: 1 }; } };
+    const host = {
+      recordScheduleEvent: async (event) => { events.push(event.kind); }, confirmClaim: async (claim, envelope) => claim.step_id === envelope.execution_binding.flow_binding.flow_step_id,
+      prepareRequest: async () => ({ messages: [{ role: 'user', content: 'observe' }], maxOutputTokens: 5 }),
+      resolveRuntime: async () => ({ runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }),
+      invokeFenced: async (_envelope, _id, invoke) => invoke(), retainResult: async () => {}, retainFailure: async () => {},
+      recordMemberOutcome: async (_claim, _envelope, outcome) => { assert.equal(outcome.outcome, 'succeeded'); recorded++; },
+    };
+    await orchestrateDelegationFlow({ authorityId: root.authority_id, service, host, dispatchLedger: new FileAuthorizationLedger({ root: path.join(cwd, 'dispatch') }),
+      runId, actor: { key: 'fixture-host', kind: 'test' }, seats: [{ stepId: 'reader', envelopeId: child.envelope_id, effect: 'write', allocation: { inputTokens: 5, outputTokens: 5, costMicros: 10 } }], cwd, maxConcurrent: 1 });
+    assert.equal(calls, 1); assert.equal(recorded, 1);
+    assert.equal((await loadRun(runId, cwd)).state.status, 'completed');
+    assert.equal((await service.inspect(root.authority_id)).invocations[0].terminal, true);
+  } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
+});
