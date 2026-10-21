@@ -22,8 +22,10 @@ export class DelegationSyncExecutionError extends Error {
 
 export class DelegationSyncReceiptPersistenceError extends Error {
   readonly receipt: DelegationSyncReceipt;
-  constructor(receipt: DelegationSyncReceipt, cause: unknown) {
-    super("Delegation sync receipt persistence failed", { cause });
+  constructor(receipt: DelegationSyncReceipt, storageError: unknown, executionFailure?: { error: unknown }) {
+    super("Delegation sync receipt persistence failed", { cause: executionFailure
+      ? new AggregateError([storageError, executionFailure.error], "Sync execution and receipt persistence failed", { cause: executionFailure.error })
+      : storageError });
     this.name = "DelegationSyncReceiptPersistenceError";
     this.receipt = structuredClone(receipt);
   }
@@ -53,9 +55,14 @@ export async function syncDelegationContext(input: {
   if (envelope.execution_authority.allowed_tools.length !== 0) throw new Error("Context sync requires explicit no-tools execution authority");
   const contentDigest = `sha256:${createHash("sha256").update(input.text).digest("hex")}`;
   const identity = createHash("sha256").update(JSON.stringify([input.authorityId, input.envelopeId, input.runId, contentDigest])).digest("hex");
+  const prior = await input.service.inspect(input.authorityId);
+  if (prior.invocations.some((invocation) => invocation.invocationId === `sync_${identity}_0`)) {
+    throw new DelegationAdmissionError("invocation_already_reserved");
+  }
   let reason: DelegationSyncReceipt["reason"] = "execution_incomplete";
   let attempts = 0;
   let executionFailure: unknown;
+  let executionFailed = false;
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       input.signal?.throwIfAborted();
@@ -81,6 +88,7 @@ export async function syncDelegationContext(input: {
     }
   } catch (error) {
     if (attempts === 0 || (error instanceof DelegationAdmissionError && error.code === "invocation_already_reserved")) throw error;
+    executionFailed = true;
     executionFailure = error;
     reason = "execution_incomplete";
   }
@@ -89,7 +97,7 @@ export async function syncDelegationContext(input: {
     status: reason === "exact_ack" ? "acknowledged" : "incomplete", reason,
   };
   try { await input.host.retainSyncReceipt(structuredClone(receipt)); }
-  catch (error) { throw new DelegationSyncReceiptPersistenceError(receipt, error); }
-  if (executionFailure) throw new DelegationSyncExecutionError(structuredClone(receipt), executionFailure);
+  catch (error) { throw new DelegationSyncReceiptPersistenceError(receipt, error, executionFailed ? { error: executionFailure } : undefined); }
+  if (executionFailed) throw new DelegationSyncExecutionError(structuredClone(receipt), executionFailure);
   return receipt;
 }
