@@ -385,6 +385,20 @@ or missing invocation links remain conservatively unproven; no zero-usage infere
 
 The local store permanently binds an authority to one group within that store and escrows future
 record capacity. Cross-store custody, actual actor/liveness, launch confinement, physical cancellation,
-mailbox authorization and missing-output recovery remain host responsibilities. There is no takeover,
+live assignment authorization and missing-output recovery remain host responsibilities. There is no takeover,
 route-back seat reexecution, compaction or automatic redispatch in this increment. These source APIs
 are not yet a published package or a Station group launch feature.
+
+## Group mailbox admission
+
+The `delegation-group-mailbox` source entry exports `createDelegationGroupMailboxValidator()` for
+the offline mailbox's required host seam. It authenticates the caller before group lookup, then holds
+a host membership fence while reading current group/authority state and resolving both participants'
+live assignments. Exact seat envelope generations/digests, controller binding, and every mailbox
+identity field must match. Group cancellation, authority cancellation and proven terminal groups refuse
+messages; stale assignment generations cannot deliver or read retained messages.
+
+The host must implement actual caller authentication, current liveness, group generation and the
+membership/cancellation fence. A no-op fence or caller-supplied identity resolver does not enforce
+those properties. This composition neither grants tool/filesystem access nor turns transport ACKs
+into acceptance. The real-store fixture uses controlled host identities, not deployed authentication.

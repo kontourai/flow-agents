@@ -451,7 +451,8 @@
         "src/delegation-flow-execution.ts",
         "src/delegation-context-sync.ts",
         "src/delegation-group-v2.ts",
-        "src/delegation-group-v2-local-file.ts"
+        "src/delegation-group-v2-local-file.ts",
+        "src/delegation-group-mailbox.ts"
       ]
     },
     {

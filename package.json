@@ -154,6 +154,10 @@
     "./delegation-group-v2-local-file": {
       "types": "./build/src/delegation-group-v2-local-file.d.ts",
       "import": "./build/src/delegation-group-v2-local-file.js"
+    },
+    "./delegation-group-mailbox": {
+      "types": "./build/src/delegation-group-mailbox.d.ts",
+      "import": "./build/src/delegation-group-mailbox.js"
     }
   },
   "repository": {
