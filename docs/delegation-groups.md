@@ -1,12 +1,15 @@
 # Delegation groups: contract and durable ledger
 
-This is the first source increment of [#1113](https://github.com/kontourai/flow-agents/issues/1113).
-It provides a versioned coordination contract, deterministic projection, host service, and offline
-local-file ledger. It does **not** establish the epic's execution acceptance criteria or ship an
-executor, isolated writer enforcement, or installed-runtime group fixture. The mailbox is a separate
-offline transport primitive and is not yet composed with live group authorization. The separate
-Flow scheduler supports bounded admission, external cancellation, and awaited lifecycle observations;
-these hooks are not a composed group executor or authenticated reservation service.
+This source branch implements [#1113](https://github.com/kontourai/flow-agents/issues/1113) in
+separate v1 and v2 APIs. V1 retains the original report-only group ledger. V2 adds derived authority,
+allocation and invocation accounting, a durable group controller, Flow/advisory execution wrappers,
+mailbox admission and bounded context acknowledgement. Flow still owns readiness, dependencies and
+gate evaluation.
+
+Local composition tests do not establish production authentication, isolated writer enforcement,
+physical budget/cancellation fidelity, installed Station adoption or publication. Those acceptance
+obligations remain open. The sections from **V1 identity and authority** through **V1 verification**
+describe the compatibility API; later sections describe the additive v2 source APIs and their limits.
 
 ## Public entry points
 
@@ -23,11 +26,14 @@ these hooks are not a composed group executor or authenticated reservation servi
 | `@kontourai/flow-agents/delegation-execution` | Runtime receipt binding and authority-bound invocation |
 | `@kontourai/flow-agents/delegation-flow-execution` | Flow claim/execution composition |
 | `@kontourai/flow-agents/delegation-context-sync` | Bounded no-tools acknowledgement and receipt recovery |
+| `@kontourai/flow-agents/delegation-group-v2` | Durable v2 group controller and projection |
+| `@kontourai/flow-agents/delegation-group-v2-local-file` | Private host-owned group journal |
+| `@kontourai/flow-agents/delegation-group-mailbox` | Current group/assignment mailbox admission |
 
 The same APIs are exported at the package root. Package version and publication are separate from
 these source exports. Reference identities are opaque; none grants filesystem access.
 
-## Identity and authority
+## V1 identity and authority
 
 A group freezes its group id, parent envelope reference, common source, policy revision and digest,
 explicit topology, and 1–64 unique seats. Each seat names an independently preauthorized envelope id,
@@ -50,8 +56,8 @@ ceiling: a report-only coordinator can delegate a writer only within an explicit
 ceiling and selected grant. Root actor identifies the authorization principal. Exact parent digests,
 epochs, spans and complete ancestry are validated; subtree envelope limits include the envelope itself.
 Parsing and narrowing do not authenticate issuance, enforce aggregate fanout or reservations, check
-current revocation, or confine effects. The current group service still accepts only its v1 membership
-contract; v2 service composition remains unfinished. Metadata is not a compatibility bridge.
+current revocation, or confine effects. The compatibility group service accepts only v1 membership; the separate v2 controller composes
+the v2 authority service and execution wrappers described below. Metadata is not a compatibility bridge.
 
 Topology is either `independent` or an explicit Flow run/definition digest with seat step references.
 Flow definition identities retain their native bare 64-character hex digest; group references, policies,
@@ -65,7 +71,7 @@ step, actor, expiry, and empty mutable resources must also match. The host remai
 for authenticating that these are **current** observations under its execution fence. Caller-provided
 claim-shaped JSON alone is not a capability.
 
-## Transaction protocol
+## V1 transaction protocol
 
 Use `groupPolicyDigest()` over the policy excluding its `digest`, and `groupRequestDigest()` over the
 request excluding its `request_digest`. Both consume Relay's public canonical JSON/SHA-256 contract.
@@ -217,8 +223,8 @@ Real Flow 5.2.0 fixtures exercise `startRun`, `claimReadyStep`, `loadRun`,
 `projectReadyStepFrontier`, and `validateDurableStepClaim` through group admission. Precise fsync EIO
 injection over real temporary paths exercises pre-rename preservation and post-rename unavailable/read
 repair. These checks do not simulate power loss or establish hardware/filesystem crash guarantees.
-They are source diagnostics, not installed-runtime or live-provider acceptance. Flow 5.2.2 consumer
-qualification remains with the parent dependency-upgrade continuation.
+They are source diagnostics, not installed-runtime or live-provider acceptance. Flow remains pinned
+to canonical reducer version 5.2.0; a 5.2.2 trial failed the coordinator identity check and was reverted.
 
 The fresh-context continuation should start from #1113, `AGENTS.md`, this guide and the exact handoff
 commits. Remaining acceptance includes real three-member installed execution and parent/member tree,
@@ -246,8 +252,8 @@ internal receipt under `dispatchReceipt`. Cost overrun returns `budget-exceeded`
 reservations. Neither this sum nor the diagnostic Dispatch receipt establishes complete accounting
 for those failed attempts, physical cost enforcement, or semantic acceptance.
 
-These calls are not yet composed with group attempts, authority issuance, ancestor reservations,
-mailbox admission or effect fencing. Tests use the real temporary FileAuthorizationLedger and a
+The v2 execution bridge composes these calls with authority invocation holds and the group controller.
+Production host effect fencing and metering remain separate requirements. Tests use the real temporary FileAuthorizationLedger and a
 controlled runtime; they do not establish live provider metering or confinement.
 
 ## Offline mailbox
@@ -335,8 +341,9 @@ evidence operations to submit results; a successful model call does not satisfy 
 The controlled-runtime fixture uses an optional expectation, so its completed run proves composition
 and lifecycle ordering, not a required gate accepting returned artifacts. A denied claim produces no
 authority invocation in that fixture. A host must still enforce assignment/source/worktree fences,
-actual tool effects, durable outputs and cancellation. Group records, mailbox authentication and the
-Station consumer are not yet connected to this wrapper.
+actual tool effects, durable outputs and cancellation. The v2 controller composes group records and
+the mailbox validator checks group membership; production mailbox authentication and the Station
+consumer remain unqualified.
 
 ## Context acknowledgement in progress
 
