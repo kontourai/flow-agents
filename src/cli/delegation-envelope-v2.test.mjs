@@ -256,7 +256,7 @@ test("bound Flow grants preserve the published definition identity/run/step/gate
 });
 
 test("canonical POSIX filenames remain literal exact resources through schema and child admission", () => {
-  for (const path of ["src/routes/[id].tsx", "docs/design notes.md", "src/日本語.ts", "src/a+b.ts"]) {
+  for (const path of ["src/routes/[id].tsx", "docs/design notes.md", "src/日本語.ts", "src/a+b.ts", "src/\u2028/file.ts", "src/\u2029/file.ts"]) {
     const root = rootAuthority();
     const resources = [resource("worktree-b", path)];
     root.execution_grants[1].authority_ceiling.readable_resources = structuredClone(resources);
@@ -267,10 +267,37 @@ test("canonical POSIX filenames remain literal exact resources through schema an
     const parent = rootEnvelope(root), child = childOf(root, parent);
     assert.equal(schemaEnvelope(child), true, JSON.stringify(schemaEnvelope.errors));
     assert.equal(narrowDelegationEnvelopeV2(root, parent, child, NOW).execution_authority.mutable_resources[0].path, path);
-    for (const other of [path.split("/")[0], `${path}/child`, `${path}x`, path.replace("[id]", "123")].filter(other => other !== path)) {
+    for (const other of [path.split("/")[0], `${path}/child`, `${path}x`, path.replace("[id]", "123"), path.replace(/[\u2028\u2029]/u, " ")].filter(other => other !== path)) {
       const changed = structuredClone(child);
       changed.execution_authority.mutable_resources = [resource("worktree-b", other)];
       reject(() => narrowDelegationEnvelopeV2(root, parent, changed, NOW), "authority_widening:mutable_resources");
+    }
+  }
+});
+
+test("dot segments after Unicode line separators are refused by schemas and child admission", async t => {
+  for (const separator of ["\u2028", "\u2029"]) {
+    for (const path of [`src/${separator}/../../../escape`, `src/${separator}/./file`, `src/${separator}/.`, `src/${separator}/..`]) {
+      await t.test(`root schema refuses ${JSON.stringify(path)}`, () => {
+        const root = rootAuthority();
+        root.execution_grants[1].authority_ceiling.mutable_resources[0].path = path;
+        assert.equal(schemaRoot(root), false, JSON.stringify(schemaRoot.errors));
+      });
+      await t.test(`envelope schema refuses ${JSON.stringify(path)}`, () => {
+        const { child } = edgeFixture();
+        child.execution_authority.mutable_resources[0].path = path;
+        assert.equal(schemaEnvelope(child), false, JSON.stringify(schemaEnvelope.errors));
+      });
+      await t.test(`root runtime refuses ${JSON.stringify(path)}`, () => {
+        const root = rootAuthority();
+        root.execution_grants[1].authority_ceiling.mutable_resources[0].path = path;
+        reject(() => validateRootAuthorityV2(root), "invalid_resource_path");
+      });
+      await t.test(`child admission refuses ${JSON.stringify(path)}`, () => {
+        const { root, parent, child } = edgeFixture();
+        child.execution_authority.mutable_resources[0].path = path;
+        reject(() => narrowDelegationEnvelopeV2(root, parent, child, NOW), "invalid_resource_path");
+      });
     }
   }
 });

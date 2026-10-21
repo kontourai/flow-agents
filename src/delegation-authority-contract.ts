@@ -187,7 +187,8 @@ function resource(value: unknown): asserts value is DelegationResourceV2 {
   const r = delegationRecordV2(value, ["repository_id", "execution_worktree_id", "path"]);
   delegationIdV2(r.repository_id); delegationIdV2(r.execution_worktree_id);
   requireDelegationV2(typeof r.path === "string" && [...r.path].length <= 512 && (r.path === "."
-    || /^(?![A-Za-z]:)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^/\\\u0000-\u001f\u007f-\u009f]+(?:\/[^/\\\u0000-\u001f\u007f-\u009f]+)*$/.test(r.path)), "invalid_resource_path");
+    || (!/(?:^|\/)\.{1,2}(?:\/|$)/.test(r.path)
+      && /^(?![A-Za-z]:)[^/\\\u0000-\u001f\u007f-\u009f]+(?:\/[^/\\\u0000-\u001f\u007f-\u009f]+)*$/.test(r.path))), "invalid_resource_path");
 }
 export function delegationAuthorityV2(value: unknown): asserts value is DelegationAuthorityV2 {
   const r = delegationRecordV2(value, ["allowed_tools", "allowed_effects", "readable_resources", "mutable_resources", "posture", "approval", "escalation"]);
