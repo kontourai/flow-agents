@@ -795,3 +795,8 @@ export * from "./delegation-envelope-v2.js";
 export * from "./delegation-dispatch.js";
 export * from "./delegation-mailbox.js";
 export * from "./delegation-mailbox-local-file.js";
+export * from "./delegation-authority-service.js";
+export * from "./delegation-authority-local-file.js";
+export * from "./delegation-execution.js";
+export * from "./delegation-flow-execution.js";
+export * from "./delegation-context-sync.js";

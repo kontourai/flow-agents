@@ -18,6 +18,11 @@ these hooks are not a composed group executor or authenticated reservation servi
 | `@kontourai/flow-agents/delegation-authority-contract` | Pure v2 root authority, execution grant and budget validators |
 | `@kontourai/flow-agents/delegation-envelope-v2` | Pure v2 envelope narrowing, digests and complete ancestry validation |
 | `@kontourai/flow-agents/delegation-dispatch` | Guarded Dispatch invocation with durable result retention and reported-usage settlement |
+| `@kontourai/flow-agents/delegation-authority-service` | V2 issuance, allocation, invocation holds and reconciliation |
+| `@kontourai/flow-agents/delegation-authority-local-file` | Private host-owned authority storage |
+| `@kontourai/flow-agents/delegation-execution` | Runtime receipt binding and authority-bound invocation |
+| `@kontourai/flow-agents/delegation-flow-execution` | Flow claim/execution composition |
+| `@kontourai/flow-agents/delegation-context-sync` | Bounded no-tools acknowledgement and receipt recovery |
 
 The same APIs are exported at the package root. Package version and publication are separate from
 these source exports. Reference identities are opaque; none grants filesystem access.
@@ -287,7 +292,7 @@ terminal accounting releases the active slot; actual spend remains charged. Conf
 its allocation is retained and closes further derivation, invocation admission and effect admission.
 Cancellation stops admission without claiming that existing invocations have terminated.
 
-This increment is not yet a public package entry point or complete enforcement service. It lacks
+This increment has source package entry points, but is not yet published or a complete enforcement service. It lacks
 Dispatch/group reservation composition, executable effect fencing, and production host authentication. `admitEffect` returns a checked observation, not a transferable
 capability or permission to bypass a host effect-time check. Real temporary-store tests establish
 reopen, allocation refusal, active-slot/unknown-usage holds, overrun retention, access refusal and persisted cancellation; they do not establish crash,
@@ -295,7 +300,7 @@ power-loss, hostile-worker or live-provider enforcement.
 
 ## Authority-bound execution in progress
 
-The source-only `executeAuthorizedDelegation()` bridge selects the exact registered runtime/model
+The `delegation-execution` source entry point exports an `executeAuthorizedDelegation()` bridge selects the exact registered runtime/model
 receipts and checks required capabilities, tool names and native output-token limiting before
 reservation. It requires an explicit output limit within the allocation. Public Dispatch validation
 runs with an already-aborted signal and no runtime or ledger, so incompatible plans cannot consume
@@ -319,7 +324,7 @@ consumer is established by this controlled-runtime bridge test.
 
 ## Flow execution composition in progress
 
-The source-only `orchestrateDelegationFlow()` wrapper binds unique seats to registered envelopes and
+The `delegation-flow-execution` source entry point exports an `orchestrateDelegationFlow()` wrapper binds unique seats to registered envelopes and
 exact Flow run/step/definition identities. Flow supplies ready steps and claims; the wrapper awaits
 host lifecycle persistence and claim authentication before preparing or invoking a member. Invocation
 ids include the exact claim identity, preventing an interrupted claim from silently launching again.
@@ -335,7 +340,7 @@ Station consumer are not yet connected to this wrapper.
 
 ## Context acknowledgement in progress
 
-The source-only `syncDelegationContext()` uses explicit empty tool authority and the `context-sync`
+The `delegation-context-sync` source entry point exports `syncDelegationContext()`, which uses explicit empty tool authority and the `context-sync`
 effect. It sends zero tools, bounds text to 64 KiB, and requires the exact response `ACK SYNC <run-id>`
 with zero returned tool calls. A SHA-256 binds each retained receipt to the supplied text. A wrong
 response permits one retry only after the first response completed and its usage reconciled. Unknown

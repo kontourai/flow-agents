@@ -126,6 +126,26 @@
     "./delegation-mailbox-local-file": {
       "types": "./build/src/delegation-mailbox-local-file.d.ts",
       "import": "./build/src/delegation-mailbox-local-file.js"
+    },
+    "./delegation-authority-service": {
+      "types": "./build/src/delegation-authority-service.d.ts",
+      "import": "./build/src/delegation-authority-service.js"
+    },
+    "./delegation-authority-local-file": {
+      "types": "./build/src/delegation-authority-local-file.d.ts",
+      "import": "./build/src/delegation-authority-local-file.js"
+    },
+    "./delegation-execution": {
+      "types": "./build/src/delegation-execution.d.ts",
+      "import": "./build/src/delegation-execution.js"
+    },
+    "./delegation-flow-execution": {
+      "types": "./build/src/delegation-flow-execution.d.ts",
+      "import": "./build/src/delegation-flow-execution.js"
+    },
+    "./delegation-context-sync": {
+      "types": "./build/src/delegation-context-sync.d.ts",
+      "import": "./build/src/delegation-context-sync.js"
     }
   },
   "repository": {
