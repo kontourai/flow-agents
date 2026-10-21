@@ -613,6 +613,12 @@ test('mailbox authenticates before group lookup and samples time after live reso
 
 
 test('cancelled seats require explicit non-launch proof and zero ancestor invocations to become terminal', async t => {
+  const held = await fixture(t);
+  await held.service.reserveInvocation('root', held.spec.seats[0].envelope.id, 'unlinked-reservation', allocation);
+  await held.controller.cancel(held.command('cancel', 1));
+  const heldController = held.open({ confirmNotLaunched: async () => ref('incorrect-nonlaunch') });
+  await assert.rejects(heldController.recordNotLaunched({ ...held.command('not_launched', 3, 'refuse-held-seat'), seatId: 'seat-0' }), /unlaunched_authority_unconfirmed/);
+  assert.equal((await held.controller.get('group')).terminal, 'unproven');
   const f = await fixture(t);
   await f.controller.cancel(f.command('cancel', 1));
   const command = (seatId, revision) => ({ ...f.command('not_launched', revision, `not-launched-${seatId}`), seatId });

@@ -83,8 +83,9 @@ export interface DelegationGroupHostV2 {
   retainMemberOutcome(spec: DelegationGroupSpecV2, seat: DelegationGroupSeatV2, outcome: DelegationDispatchOutcome): Promise<Omit<GroupMemberObservationV2, "outcome">>;
   retainRunObservation(spec: DelegationGroupSpecV2, observation: unknown): Promise<DelegationReferenceV2>;
   retainRunFailure(spec: DelegationGroupSpecV2, error: unknown): Promise<DelegationReferenceV2>;
-  /** Authenticates physical termination of this exact invocation and its descendants, not a model's claim. */
+  /** Confirms this exact revoked seat never launched; absence of a ledger entry alone is insufficient. */
   confirmNotLaunched?(spec: DelegationGroupSpecV2, seat: DelegationGroupSeatV2): Promise<DelegationReferenceV2 | null>;
+  /** Authenticates physical termination of this exact invocation and its descendants, not a model's claim. */
   confirmTerminal?(spec: DelegationGroupSpecV2, seat: DelegationGroupSeatV2, invocation: DelegationInvocation, observation: GroupMemberObservationV2): Promise<DelegationReferenceV2 | null>;
   /** Request cancellation of these seats and descendants; acknowledgement is not terminal proof. */
   confirmDescendantCancellation?(spec: DelegationGroupSpecV2, command: GroupCommandV2): Promise<DelegationReferenceV2 | null>;
