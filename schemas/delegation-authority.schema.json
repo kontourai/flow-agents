@@ -1,0 +1,623 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority_id",
+    "authority_epoch",
+    "issuer_host_id",
+    "authenticated_principal_ref",
+    "authenticated_subject_ref",
+    "source_origin",
+    "execution_worktree_ids",
+    "execution_grants",
+    "delegation_ceiling",
+    "budget",
+    "revisions",
+    "root_trace",
+    "root_cancellation_ref"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "authority_id": {
+      "$ref": "#/$defs/id"
+    },
+    "authority_epoch": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000000000
+    },
+    "issuer_host_id": {
+      "$ref": "#/$defs/id"
+    },
+    "authenticated_principal_ref": {
+      "$ref": "#/$defs/reference"
+    },
+    "authenticated_subject_ref": {
+      "$ref": "#/$defs/reference"
+    },
+    "source_origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_id",
+        "worktree_id",
+        "source_state_id",
+        "dirty_state_fingerprint"
+      ],
+      "properties": {
+        "repository_id": {
+          "$ref": "#/$defs/id"
+        },
+        "worktree_id": {
+          "$ref": "#/$defs/id"
+        },
+        "source_state_id": {
+          "$ref": "#/$defs/id"
+        },
+        "dirty_state_fingerprint": {
+          "$ref": "#/$defs/fingerprint"
+        }
+      }
+    },
+    "execution_worktree_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/id"
+      }
+    },
+    "execution_grants": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/grant"
+      }
+    },
+    "delegation_ceiling": {
+      "$ref": "#/$defs/authority"
+    },
+    "budget": {
+      "$ref": "#/$defs/budget"
+    },
+    "revisions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "prompt",
+        "rubric"
+      ],
+      "properties": {
+        "policy": {
+          "$ref": "#/$defs/reference"
+        },
+        "prompt": {
+          "$ref": "#/$defs/reference"
+        },
+        "rubric": {
+          "$ref": "#/$defs/reference"
+        }
+      }
+    },
+    "root_trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_id",
+        "span_id"
+      ],
+      "properties": {
+        "trace_id": {
+          "$ref": "#/$defs/id"
+        },
+        "span_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "root_cancellation_ref": {
+      "$ref": "#/$defs/reference"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/flow-agents/delegation-authority/2.0.json",
+  "title": "Delegation root authority v2",
+  "$comment": "Structural schema only; validateRootAuthorityV2 additionally enforces credential detection, bounded JSON, source/catalogue binding and authority/budget semantics. Parsing never authenticates issuance or references.",
+  "$defs": {
+    "text": {
+      "allOf": [
+        {
+          "allOf": [
+            {
+              "type": "string"
+            },
+            {
+              "not": {
+                "anyOf": [
+                  {
+                    "pattern": "[A-Za-z][A-Za-z0-9+.-]*://[^\\s/?#@]*@"
+                  },
+                  {
+                    "pattern": "[Bb][Ee][Aa][Rr][Ee][Rr]\\s+"
+                  },
+                  {
+                    "pattern": "(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt][_-]?[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd])\\s*[:=]"
+                  },
+                  {
+                    "pattern": "(?:[Ss][Kk]|[Gg][Hh][OoPpRrSsUu]|[Nn][Pp][Mm]|[Pp][Yy][Pp][Ii]|[Hh][Ff])_[A-Za-z0-9_-]{8,}"
+                  },
+                  {
+                    "pattern": "[Gg][Ii][Tt][Hh][Uu][Bb]_[Pp][Aa][Tt]_[A-Za-z0-9_]{12,}"
+                  },
+                  {
+                    "pattern": "[Xx][Oo][Xx][BbAaPpRrSs]-[A-Za-z0-9-]{8,}"
+                  },
+                  {
+                    "pattern": "[Gg][Ll][Pp][Aa][Tt]-[A-Za-z0-9_-]{8,}"
+                  },
+                  {
+                    "pattern": "AKIA[A-Z0-9]{12,}"
+                  },
+                  {
+                    "pattern": "AIza[A-Za-z0-9_-]{20,}"
+                  },
+                  {
+                    "pattern": "[Yy][Aa]29\\.[A-Za-z0-9_-]{8,}"
+                  },
+                  {
+                    "pattern": "SG\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}"
+                  },
+                  {
+                    "pattern": "(?:[Ww][Hh][Ss][Ee][Cc]|[SsRrPp][Kk]_(?:[Ll][Ii][Vv][Ee]|[Tt][Ee][Ss][Tt]))_[A-Za-z0-9_-]{8,}"
+                  },
+                  {
+                    "pattern": "(?:^|[^A-Za-z0-9])[Ss][Kk]-(?:[Pp][Rr][Oo][Jj]-|[Aa][Nn][Tt]-)?[A-Za-z0-9_-]{8,}"
+                  },
+                  {
+                    "pattern": "[Ss][Qq]0(?:[Aa][Tt][Pp]|[Cc][Ss][Pp])-[A-Za-z0-9_-]{8,}"
+                  },
+                  {
+                    "pattern": "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^(?:[^\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])*$"
+        },
+        {
+          "not": {
+            "pattern": "[\\u0000-\\u001f\\u007f]"
+          }
+        }
+      ]
+    },
+    "id": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/text"
+        },
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@#/-]{0,254}$"
+        }
+      ]
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "maxLength": 71
+    },
+    "fingerprint": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/digest"
+        }
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^(?:(?:[0-9]{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8])))|(?:(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:00|0[48]|[2468][048]|[13579][26])00)-02-29))T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$"
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "domain",
+        "digest"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "domain": {
+          "$ref": "#/$defs/id"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_id",
+        "execution_worktree_id",
+        "path"
+      ],
+      "properties": {
+        "repository_id": {
+          "$ref": "#/$defs/id"
+        },
+        "execution_worktree_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/text"
+            },
+            {
+              "type": "string",
+              "maxLength": 512,
+              "pattern": "^(?:\\.|(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9._@-]+(?:/[A-Za-z0-9._@-]+)*)$"
+            }
+          ]
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_tools",
+        "allowed_effects",
+        "readable_resources",
+        "mutable_resources",
+        "posture",
+        "approval",
+        "escalation"
+      ],
+      "properties": {
+        "allowed_tools": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "allowed_effects": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "readable_resources": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resource"
+          }
+        },
+        "mutable_resources": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resource"
+          }
+        },
+        "posture": {
+          "enum": [
+            "report-only",
+            "writer"
+          ]
+        },
+        "approval": {
+          "enum": [
+            "automatic",
+            "requires_approval"
+          ]
+        },
+        "escalation": {
+          "enum": [
+            "deny",
+            "request"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "posture": {
+                "const": "report-only"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "mutable_resources": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_runtime_ms",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_cost_micros",
+        "max_attempts",
+        "remaining_depth",
+        "max_total_children",
+        "max_total_envelopes",
+        "max_concurrent_children",
+        "expires_at"
+      ],
+      "properties": {
+        "max_runtime_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "max_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "max_output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "max_cost_micros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "remaining_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32
+        },
+        "max_total_children": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "max_total_envelopes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "max_concurrent_children": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "expires_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_receipt_ref",
+        "model_receipt_ref",
+        "required_capabilities"
+      ],
+      "properties": {
+        "runtime_receipt_ref": {
+          "$ref": "#/$defs/reference"
+        },
+        "model_receipt_ref": {
+          "$ref": "#/$defs/reference"
+        },
+        "required_capabilities": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    },
+    "executionSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_id",
+        "source_state_id",
+        "dirty_state_fingerprint",
+        "execution_worktree_id",
+        "source_admission_receipt"
+      ],
+      "properties": {
+        "repository_id": {
+          "$ref": "#/$defs/id"
+        },
+        "source_state_id": {
+          "$ref": "#/$defs/id"
+        },
+        "dirty_state_fingerprint": {
+          "$ref": "#/$defs/fingerprint"
+        },
+        "execution_worktree_id": {
+          "$ref": "#/$defs/id"
+        },
+        "source_admission_receipt": {
+          "$ref": "#/$defs/reference"
+        }
+      }
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "digest"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/id"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "maxLength": 64
+        }
+      }
+    },
+    "flowBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "status": {
+              "const": "unbound"
+            },
+            "reason": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/text"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "flow_run_id",
+            "definition",
+            "flow_step_id",
+            "gate_attempt"
+          ],
+          "properties": {
+            "status": {
+              "const": "bound"
+            },
+            "flow_run_id": {
+              "$ref": "#/$defs/id"
+            },
+            "definition": {
+              "$ref": "#/$defs/definition"
+            },
+            "flow_step_id": {
+              "$ref": "#/$defs/id"
+            },
+            "gate_attempt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000
+            }
+          }
+        }
+      ]
+    },
+    "executionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime",
+        "source",
+        "flow_binding"
+      ],
+      "properties": {
+        "runtime": {
+          "$ref": "#/$defs/runtime"
+        },
+        "source": {
+          "$ref": "#/$defs/executionSource"
+        },
+        "flow_binding": {
+          "$ref": "#/$defs/flowBinding"
+        }
+      }
+    },
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant_id",
+        "runtime",
+        "source",
+        "flow_binding",
+        "authority_ceiling"
+      ],
+      "properties": {
+        "grant_id": {
+          "$ref": "#/$defs/id"
+        },
+        "runtime": {
+          "$ref": "#/$defs/runtime"
+        },
+        "source": {
+          "$ref": "#/$defs/executionSource"
+        },
+        "flow_binding": {
+          "$ref": "#/$defs/flowBinding"
+        },
+        "authority_ceiling": {
+          "$ref": "#/$defs/authority"
+        }
+      }
+    }
+  }
+}
