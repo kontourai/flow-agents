@@ -4,7 +4,11 @@ import { canonicalJson, type ModelInvocationRequest, type ModelInvocationResult,
 import type { DelegationEnvelopeV2 } from "./delegation-envelope-v2.js";
 import type { DelegationReferenceV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService, DelegationAdmissionError, type DelegationInvocationAmounts } from "./delegation-authority-service.js";
-import { dispatchDelegation, type DelegationDispatchOutcome } from "./delegation-dispatch.js";
+import {
+  dispatchDelegation, dispatchDelegationAccountingV1, delegationAccountingDollarsV1,
+  validateDelegationRetainedAccountingV1, type DelegationDispatchInput, type DelegationDispatchOutcome,
+  type DelegationDispatchAccountingOutcomeV1, type DelegationRetainedAccountingV1,
+} from "./delegation-dispatch.js";
 
 export interface DelegationExecutionHost {
   resolveRuntime(envelope: DelegationEnvelopeV2): Promise<{
@@ -31,6 +35,66 @@ export async function executeAuthorizedDelegation(input: {
   /** Awaited after durable reservation, before any physical dispatch. */
   onReserved?: () => Promise<void>;
 }): Promise<DelegationDispatchOutcome> {
+  return executeDelegation(input, legacyAccounting);
+}
+
+export interface DelegationExecutionAccountingHostV1 extends Omit<DelegationExecutionHost, "retainResult"> {
+  accountingProtocol: "retained-tariff-v1";
+  /** Retain raw evidence before returning exact integer usage. null holds unknown;
+   * undefined explicitly selects the legacy Relay dollar bridge. */
+  retainResult(result: ModelInvocationResult, envelope: DelegationEnvelopeV2, invocationId: string): Promise<DelegationRetainedAccountingV1 | null | void>;
+}
+
+type ExecutionInput<Host> = Omit<Parameters<typeof executeAuthorizedDelegation>[0], "host"> & { host: Host };
+export type DelegationExecutionAccountingInputV1 = ExecutionInput<DelegationExecutionAccountingHostV1>;
+type RetainedAccountingV1 = DelegationRetainedAccountingV1 | null | void;
+type ExecutionHost<Retained> = Omit<DelegationExecutionHost, "retainResult"> & {
+  retainResult(result: ModelInvocationResult, envelope: DelegationEnvelopeV2, invocationId: string): Promise<Retained>;
+};
+
+/** Explicit opt-in; provider-reported dollars remain absent for retained tariffs. */
+export async function executeAuthorizedDelegationAccountingV1(
+  input: DelegationExecutionAccountingInputV1,
+): Promise<DelegationDispatchAccountingOutcomeV1> {
+  if (input.host.accountingProtocol !== "retained-tariff-v1") throw new Error("Delegation accounting protocol required");
+  return executeDelegation(input, retainedAccountingV1);
+}
+
+interface ExecutionAccounting<Retained, Outcome> {
+  reservationDollars(micros: number): number;
+  validate(value: Retained): Retained;
+  amounts(result: ModelInvocationResult, retained: Retained): DelegationInvocationAmounts | null;
+  dispatch(input: Omit<DelegationDispatchInput, "retainResult"> & {
+    retainResult(result: ModelInvocationResult, runtimeId: string): Promise<Retained>;
+  }): Promise<Outcome>;
+  overrun(outcome: Outcome): Outcome;
+}
+function relayAmounts(result: ModelInvocationResult): DelegationInvocationAmounts | null {
+  const usage = result.usage;
+  const costMicros = usage.costUsd === undefined ? NaN : Math.ceil(usage.costUsd * 1_000_000);
+  return Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens) && Number.isSafeInteger(costMicros)
+    ? { inputTokens: usage.inputTokens!, outputTokens: usage.outputTokens!, costMicros } : null;
+}
+const legacyAccounting: ExecutionAccounting<void, DelegationDispatchOutcome> = {
+  reservationDollars: micros => micros / 1_000_000,
+  validate: value => value,
+  amounts: result => relayAmounts(result),
+  dispatch: dispatchDelegation,
+  overrun: outcome => ({ outcome: "budget-exceeded", dispatchReceipt: outcome.dispatchReceipt, reportedCostUsd: outcome.reportedCostUsd }),
+};
+const retainedAccountingV1: ExecutionAccounting<RetainedAccountingV1, DelegationDispatchAccountingOutcomeV1> = {
+  reservationDollars: delegationAccountingDollarsV1,
+  validate: value => value === undefined ? undefined : value === null ? null : validateDelegationRetainedAccountingV1(value),
+  amounts: (result, retained) => retained === undefined ? relayAmounts(result) : retained === null ? null
+    : { inputTokens: retained.inputTokens, outputTokens: retained.outputTokens, costMicros: retained.costMicros },
+  dispatch: dispatchDelegationAccountingV1,
+  overrun: ({ result: _result, ...outcome }) => ({ ...outcome, outcome: "budget-exceeded" }),
+};
+
+async function executeDelegation<Retained, Outcome>(
+  input: ExecutionInput<ExecutionHost<Retained>>,
+  accounting: ExecutionAccounting<Retained, Outcome>,
+): Promise<Outcome> {
   input = { ...input, request: structuredClone(input.request), allocation: structuredClone(input.allocation) };
   input.signal?.throwIfAborted();
   const { envelope } = await input.service.admitEffect(input.authorityId, input.envelopeId, input.effect);
@@ -58,7 +122,7 @@ export async function executeAuthorizedDelegation(input: {
     throw new DelegationAdmissionError("runtime_authority_unsupported");
   }
   const maxTokens = input.allocation.inputTokens + input.allocation.outputTokens;
-  const maxCostUsd = input.allocation.costMicros / 1_000_000;
+  const maxCostUsd = accounting.reservationDollars(input.allocation.costMicros);
   const digest = createHash("sha256").update(canonicalJson([input.authorityId, envelope.execution_id, input.invocationId])).digest("hex");
   const plan: ExecutionPlan = {
     schemaVersion: 1, role: "delegated-member", request: structuredClone(input.request),
@@ -72,7 +136,7 @@ export async function executeAuthorizedDelegation(input: {
   input.signal?.throwIfAborted();
   await input.service.reserveInvocation(input.authorityId, input.envelopeId, input.invocationId, input.allocation);
   await input.onReserved?.();
-  let observed: ModelInvocationResult | undefined;
+  let observed: { result: ModelInvocationResult; retained: Retained } | undefined;
   const runtime: ModelRuntime = {
     id: selected.runtime.id,
     capabilities: () => selected.runtime.capabilities(),
@@ -91,22 +155,22 @@ export async function executeAuthorizedDelegation(input: {
   };
   async function reconcileObserved(): Promise<boolean> {
     if (!observed) return false;
-    const usage = observed.usage;
-    const costMicros = usage.costUsd === undefined ? NaN : Math.ceil(usage.costUsd * 1_000_000);
-    const amounts = Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens) && Number.isSafeInteger(costMicros)
-      ? { inputTokens: usage.inputTokens!, outputTokens: usage.outputTokens!, costMicros } : null;
+    const amounts = accounting.amounts(observed.result, observed.retained);
     await input.service.reconcileInvocation(input.authorityId, input.invocationId, amounts, true);
     return amounts !== null && (amounts.inputTokens > input.allocation.inputTokens || amounts.outputTokens > input.allocation.outputTokens || amounts.costMicros > input.allocation.costMicros);
   }
-  let outcome: DelegationDispatchOutcome;
+  let outcome: Outcome;
   try {
-    outcome = await dispatchDelegation({
+    outcome = await accounting.dispatch({
       plan,
       runtimes: new Map([["selected", runtime]]), ledger: input.dispatchLedger,
       ...(input.signal ? { signal: input.signal } : {}),
       async retainResult(result) {
-        await input.host.retainResult(structuredClone(result), structuredClone(envelope), input.invocationId);
-        observed = structuredClone(result);
+        const retained = accounting.validate(await input.host.retainResult(
+          structuredClone(result), structuredClone(envelope), input.invocationId,
+        ));
+        observed = { result: structuredClone(result), retained };
+        return retained;
       },
     });
   } catch (error) {
@@ -119,7 +183,7 @@ export async function executeAuthorizedDelegation(input: {
     throw error;
   }
   if (await reconcileObserved()) {
-    return { outcome: "budget-exceeded", dispatchReceipt: outcome.dispatchReceipt, reportedCostUsd: outcome.reportedCostUsd };
+    return accounting.overrun(outcome);
   }
   return outcome;
 }

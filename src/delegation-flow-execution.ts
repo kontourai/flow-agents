@@ -4,9 +4,9 @@ import type { AuthorizationLedger } from "@kontourai/dispatch";
 import type { FlowDurableStepClaim, FlowStepClaimActor } from "@kontourai/flow";
 import { createDelegationAuthorityService, DelegationAdmissionError, type DelegationInvocationAmounts } from "./delegation-authority-service.js";
 import type { DelegationEnvelopeV2 } from "./delegation-envelope-v2.js";
-import { executeAuthorizedDelegation, type DelegationExecutionHost } from "./delegation-execution.js";
+import { executeAuthorizedDelegation, executeAuthorizedDelegationAccountingV1, type DelegationExecutionHost, type DelegationExecutionAccountingHostV1 } from "./delegation-execution.js";
 import { orchestrateFlowMultiCursor, type FlowScheduleEvent } from "./multi-cursor-flow-orchestrator.js";
-import type { DelegationDispatchOutcome } from "./delegation-dispatch.js";
+import type { DelegationDispatchOutcome, DelegationDispatchAccountingOutcomeV1 } from "./delegation-dispatch.js";
 
 export interface DelegationFlowSeat {
   stepId: string;
@@ -24,6 +24,18 @@ export interface DelegationFlowExecutionHost extends DelegationExecutionHost {
   recordMemberOutcome(claim: FlowDurableStepClaim, envelope: DelegationEnvelopeV2, outcome: DelegationDispatchOutcome): Promise<void>;
 }
 
+export interface DelegationFlowExecutionAccountingHostV1 extends Omit<DelegationFlowExecutionHost, "retainResult" | "recordMemberOutcome">, DelegationExecutionAccountingHostV1 {
+  recordMemberOutcome(claim: FlowDurableStepClaim, envelope: DelegationEnvelopeV2, outcome: DelegationDispatchAccountingOutcomeV1): Promise<void>;
+}
+
+type FlowInput<Host> = Omit<Parameters<typeof orchestrateDelegationFlow>[0], "host"> & { host: Host };
+type FlowHost<Outcome> = Omit<DelegationFlowExecutionHost, "retainResult" | "recordMemberOutcome"> & {
+  recordMemberOutcome(claim: FlowDurableStepClaim, envelope: DelegationEnvelopeV2, outcome: Outcome): Promise<void>;
+};
+export function orchestrateDelegationFlowAccountingV1(input: FlowInput<DelegationFlowExecutionAccountingHostV1>) {
+  return orchestrateFlow(input, executeAuthorizedDelegationAccountingV1);
+}
+
 /** Flow owns readiness, durable claims, dependencies and evaluation; this adds no DAG reducer. */
 export async function orchestrateDelegationFlow(input: {
   authorityId: string;
@@ -37,6 +49,13 @@ export async function orchestrateDelegationFlow(input: {
   maxConcurrent: number;
   signal?: AbortSignal;
 }) {
+  return orchestrateFlow(input, executeAuthorizedDelegation);
+}
+
+async function orchestrateFlow<Outcome extends { outcome: DelegationDispatchOutcome["outcome"] }, Host extends FlowHost<Outcome>>(
+  input: FlowInput<Host>,
+  execute: (input: Omit<Parameters<typeof executeAuthorizedDelegation>[0], "host"> & { host: Host }) => Promise<Outcome>,
+) {
   const seats = structuredClone(input.seats);
   if (seats.length < 1 || seats.length > 64 || new Set(seats.map((s) => s.stepId)).size !== seats.length
     || new Set(seats.map((s) => s.envelopeId)).size !== seats.length) throw new DelegationAdmissionError("invalid_flow_seats");
@@ -66,7 +85,7 @@ export async function orchestrateDelegationFlow(input: {
       const request = await input.host.prepareRequest(structuredClone(claim), structuredClone(envelope));
       signal.throwIfAborted();
       const invocationId = `flow_${createHash("sha256").update(canonicalJson([input.authorityId, envelope.execution_id, claim.claim_id])).digest("hex")}`;
-      const outcome = await executeAuthorizedDelegation({
+      const outcome = await execute({
         service: input.service, host: input.host, dispatchLedger: input.dispatchLedger,
         authorityId: input.authorityId, envelopeId: seat.envelopeId, invocationId,
         effect: seat.effect, allocation: seat.allocation, request, signal,

@@ -11,9 +11,9 @@ import {
   type DelegationEnvelopeV2, type RootAuthorityReferenceV2,
 } from "./delegation-envelope-v2.js";
 import { createDelegationAuthorityService, type DelegationInvocationAmounts, type DelegationInvocation } from "./delegation-authority-service.js";
-import { executeAuthorizedDelegation } from "./delegation-execution.js";
-import { orchestrateDelegationFlow, type DelegationFlowExecutionHost } from "./delegation-flow-execution.js";
-import type { DelegationDispatchOutcome } from "./delegation-dispatch.js";
+import { executeAuthorizedDelegation, executeAuthorizedDelegationAccountingV1 } from "./delegation-execution.js";
+import { orchestrateDelegationFlow, orchestrateDelegationFlowAccountingV1, type DelegationFlowExecutionHost, type DelegationFlowExecutionAccountingHostV1 } from "./delegation-flow-execution.js";
+import type { DelegationDispatchOutcome, DelegationDispatchAccountingOutcomeV1 } from "./delegation-dispatch.js";
 
 export type GroupControllerV2 = { id: string; generation: number };
 export type DelegationGroupSeatV2 = {
@@ -91,6 +91,32 @@ export interface DelegationGroupHostV2 {
   confirmDescendantCancellation?(spec: DelegationGroupSpecV2, command: GroupCommandV2): Promise<DelegationReferenceV2 | null>;
   requestDescendantCancellation(spec: DelegationGroupSpecV2): Promise<DelegationReferenceV2>;
 }
+export interface DelegationGroupAccountingHostV1 extends Omit<DelegationGroupHostV2, "executionHost" | "retainMemberOutcome"> {
+  executionHost(spec: DelegationGroupSpecV2): DelegationFlowExecutionAccountingHostV1;
+  retainMemberOutcome(spec: DelegationGroupSpecV2, seat: DelegationGroupSeatV2, outcome: DelegationDispatchAccountingOutcomeV1): Promise<Omit<GroupMemberObservationV2, "outcome">>;
+}
+
+type GroupInput<Host> = Omit<Parameters<typeof createDelegationGroupControllerV2>[0], "host"> & { host: Host };
+type GroupExecutionHost<Outcome> = Omit<DelegationFlowExecutionHost, "retainResult" | "recordMemberOutcome"> & {
+  recordMemberOutcome(claim: Parameters<DelegationFlowExecutionHost["recordMemberOutcome"]>[0], envelope: DelegationEnvelopeV2, outcome: Outcome): Promise<void>;
+};
+type GroupHost<Outcome, ExecutionHost> = Omit<DelegationGroupHostV2, "executionHost" | "retainMemberOutcome"> & {
+  executionHost(spec: DelegationGroupSpecV2): ExecutionHost;
+  retainMemberOutcome(spec: DelegationGroupSpecV2, seat: DelegationGroupSeatV2, outcome: Outcome): Promise<Omit<GroupMemberObservationV2, "outcome">>;
+};
+
+export function createDelegationGroupControllerAccountingV1(input: GroupInput<DelegationGroupAccountingHostV1>) {
+  return createController<DelegationDispatchAccountingOutcomeV1, DelegationFlowExecutionAccountingHostV1>(input, {
+    execute: executeAuthorizedDelegationAccountingV1,
+    orchestrate: orchestrateDelegationFlowAccountingV1,
+    wrap: (delegate, guarded) => ({
+      ...guarded,
+      accountingProtocol: delegate.accountingProtocol,
+      retainResult: (...args) => delegate.retainResult(...args),
+    }),
+  });
+}
+
 export const GROUP_V2_MAX_EVENTS = 512;
 export const GROUP_V2_MAX_BYTES = 32 * 1024 * 1024;
 const MAX_RECORD_BYTES = 32 * 1024;
@@ -270,6 +296,21 @@ export function createDelegationGroupControllerV2(input: {
   host: DelegationGroupHostV2;
   cwd?: string;
 }) {
+  return createController<DelegationDispatchOutcome, DelegationFlowExecutionHost>(input, {
+    execute: executeAuthorizedDelegation,
+    orchestrate: orchestrateDelegationFlow,
+    wrap: (delegate, guarded) => ({ ...guarded, retainResult: (...args) => delegate.retainResult(...args) }),
+  });
+}
+
+function createController<Outcome extends { outcome: DelegationDispatchOutcome["outcome"] }, Host extends GroupExecutionHost<Outcome>>(
+  input: GroupInput<GroupHost<Outcome, Host>>,
+  strategy: {
+    execute(input: Omit<Parameters<typeof executeAuthorizedDelegation>[0], "host"> & { host: Host }): Promise<Outcome>;
+    orchestrate(input: Omit<Parameters<typeof orchestrateDelegationFlow>[0], "host"> & { host: Host }): ReturnType<typeof orchestrateDelegationFlow>;
+    wrap(delegate: Host, guarded: GroupExecutionHost<Outcome>): Host;
+  },
+) {
   const { store, host, authorityService: service } = input;
   async function authorize(action: Parameters<DelegationGroupHostV2["authorize"]>[0]["action"], p: DelegationGroupProjectionV2 | null, c: GroupCommandV2 | null = null, groupId: string | null = null) {
     const reference = await host.authorize({ action, groupId: p?.spec.groupId ?? c?.groupId ?? groupId, spec: p ? structuredClone(p.spec) : c?.kind === "create" ? structuredClone(c.spec) : null,
@@ -440,13 +481,13 @@ export function createDelegationGroupControllerV2(input: {
           await append(spec.groupId, { kind: "member_pending", operationKey: c.operationKey, seatId: seat.seatId, claimId });
           options.signal?.throwIfAborted();
         };
-        const recordMember = async (seat: DelegationGroupSeatV2, outcome: DelegationDispatchOutcome) => {
+        const recordMember = async (seat: DelegationGroupSeatV2, outcome: Outcome) => {
           const retained = await host.retainMemberOutcome(structuredClone(spec), structuredClone(seat), structuredClone(outcome));
           const observed = { ...retained, outcome: outcome.outcome };
           observation(copyDelegationJsonV2(observed));
           await append(spec.groupId, { kind: "member_observed", operationKey: c.operationKey, seatId: seat.seatId, observation: observed });
         };
-        const execution: DelegationFlowExecutionHost = {
+        const execution = strategy.wrap(delegate, {
           resolveRuntime: async envelope => {
             const seat = spec.seats.find(s => s.envelope.id === envelope.envelope_id);
             requireDelegationV2(seat && envelope.generation === seat.envelope.generation
@@ -460,7 +501,6 @@ export function createDelegationGroupControllerV2(input: {
             await active(spec.groupId);
             return delegate.invokeFenced(envelope, id, invoke);
           },
-          retainResult: (...args) => delegate.retainResult(...args),
           retainFailure: (...args) => delegate.retainFailure(...args),
           recordScheduleEvent: async event => { await active(spec.groupId); return delegate.recordScheduleEvent(event); },
           confirmClaim: async (claim, envelope) => {
@@ -479,14 +519,14 @@ export function createDelegationGroupControllerV2(input: {
             await delegate.recordMemberOutcome(claim, envelope, outcome);
             await active(spec.groupId);
           },
-        };
+        });
         let result: unknown;
         if (spec.topology.kind === "flow") {
           const topology = spec.topology;
           const loaded = await loadRun(topology.runId, input.cwd);
           requireDelegationV2(same(definitionIdentity(loaded.definition), topology.definition), "group_flow_definition_mismatch");
           await active(spec.groupId);
-          result = await orchestrateDelegationFlow({ authorityId: spec.rootAuthorityRef.id, service, dispatchLedger: input.dispatchLedger,
+          result = await strategy.orchestrate({ authorityId: spec.rootAuthorityRef.id, service, dispatchLedger: input.dispatchLedger,
             host: execution, runId: topology.runId, actor: topology.actor, cwd: input.cwd,
             maxConcurrent: spec.policy.maxConcurrent, signal: options.signal,
             seats: spec.seats.map(s => ({ stepId: s.stepId!, envelopeId: s.envelope.id, effect: s.effect, allocation: s.allocation })),
@@ -503,7 +543,7 @@ export function createDelegationGroupControllerV2(input: {
                 const { envelope } = await service.admitEffect(spec.rootAuthorityRef.id, seat.envelope.id, seat.effect);
                 const request = await prepareRequest(structuredClone(spec), structuredClone(seat), structuredClone(envelope));
                 await active(spec.groupId);
-                const outcome = await executeAuthorizedDelegation({ service, host: execution, dispatchLedger: input.dispatchLedger,
+                const outcome = await strategy.execute({ service, host: execution, dispatchLedger: input.dispatchLedger,
                   authorityId: spec.rootAuthorityRef.id, envelopeId: seat.envelope.id,
                   invocationId: `group_${digest([spec.groupId, spec.controller, c.operationKey, seat.seatId])}`,
                   effect: seat.effect, allocation: seat.allocation, request, signal: options.signal });

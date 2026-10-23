@@ -46,6 +46,15 @@ job can increase its slot occupancy time; it does not change the two-slot peak.
 Changes that add a job or expand a reusable caller instead require a new
 participation and runner-width review.
 
+The delegation rounds public-contract check is a step in Source and Static,
+registered as `delegation-rounds-public-contract` in the baseline inventory and
+that lane. It runs the rounds owner tests with the shared unit-test state
+preload. It adds slot-2 occupancy, not a job, admission unit, or runner. The
+existing lane finalizer still determines success from its recorded checks;
+`continue-on-error` on an individual step does not turn a failed check into
+passing lane evidence. Current hosted duration must be measured separately;
+the earlier timing estimate below predates this additional step.
+
 The security scan, docs gate and Pages callees are pinned to shared-workflow
 commit `fd058ed6fcc780d60cc22e26d8c327281a197932`. Full Veritas readiness retains
 its existing `ea4c99c803a565f56cd18abbf9041f3467d1ee93` pin. Exact downloaded
