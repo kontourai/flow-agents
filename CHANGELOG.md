@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.4.0](https://github.com/kontourai/flow-agents/compare/v9.3.0...v9.4.0) (2026-10-23)
+
+
+### Features
+
+* **delegation:** add bounded rounds with retained tariff accounting ([#1543](https://github.com/kontourai/flow-agents/issues/1543)) ([cc7690a](https://github.com/kontourai/flow-agents/commit/cc7690a77e40eb8071ef34876650caa3dddb6f0e))
+
 ## [9.3.0](https://github.com/kontourai/flow-agents/compare/v9.2.0...v9.3.0) (2026-10-21)
 
 
