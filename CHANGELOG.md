@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.5.1](https://github.com/kontourai/flow-agents/compare/v9.5.0...v9.5.1) (2026-10-23)
+
+
+### Fixes
+
+* allow durable-step grants without legacy gate attempt ([#1547](https://github.com/kontourai/flow-agents/issues/1547)) ([5306a15](https://github.com/kontourai/flow-agents/commit/5306a1539ce3b165b1bb301d66e868e7f9978306))
+
 ## [9.5.0](https://github.com/kontourai/flow-agents/compare/v9.4.0...v9.5.0) (2026-10-23)
 
 
