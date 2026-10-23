@@ -133,6 +133,28 @@ This is the same code the CLI runs; importing it does not execute the CLI. The s
 
 **Future direction:** Durable workflow state should converge toward Kontour Resource Contracts with versioned identity, desired state, observed status, and condition summaries. That convergence should preserve local files and provider-backed records as first-class surfaces.
 
+## Delegation authority and bounded rounds
+
+The package exports separate `delegation-group-rounds` and
+`delegation-group-rounds-local-file` subpaths for checkpoint-authorized rounds
+and their durable local store. `delegation-authority-service-v3` and
+`delegation-authority-local-file-v3` add explicit authority renewal; the rounds
+controller explicitly adopts renewed authority. These additive modules preserve
+existing v2 entrypoints. The rounds controller composes
+Flow-owned scheduling rather than maintaining another ready-frontier model.
+
+Retained-tariff accounting is opt-in through the AccountingV1 entrypoints and
+`accountingProtocol: "retained-tariff-v1"` on rounds hosts. It preserves integer
+micros and their tariff basis; default entrypoints retain their existing
+provider-reported Relay-dollar behavior. Unknown usage retains its allocation.
+These contracts do not authenticate a consumer's runtime, source, credential,
+recipient session or custody-transfer receipt. Those facts and the physical
+launch fences remain the consuming host's responsibility. The
+[delegation guide](delegation-groups.md) specifies these boundaries, including
+storage-only synchronization finalization and fresh session-bound ACKs after
+renewal. Source exports and packed-package checks do not establish publication
+or a serving consumer.
+
 ## Local Workflow Roles
 
 Flow Agents workflows separate selection, planning, execution, critique, verification, evidence, release, and learning so each stage leaves inspectable state.
