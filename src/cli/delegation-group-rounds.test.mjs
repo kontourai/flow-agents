@@ -32,7 +32,7 @@ function authorityFixture(flow, options = {}) {
   const grants = steps.map(step => ({ grant_id: `grant-${step}`,
     runtime: { runtime_receipt_ref: ref(`runtime-${step}`), model_receipt_ref: ref(`model-${step}`), required_capabilities: ["usage", "abort"] },
     source: { repository_id: "fixture", source_state_id: "exact-source", dirty_state_fingerprint: null, execution_worktree_id: `worktree-${step}`, source_admission_receipt: ref(`source-${step}`) },
-    flow_binding: flow ? { status: "bound", flow_run_id: flow.runId, definition: flow.identity, flow_step_id: step, gate_attempt: 1 } : { status: "unbound", reason: "Independent advisory fixture" },
+    flow_binding: flow ? { status: "bound", flow_run_id: flow.runId, definition: flow.identity, flow_step_id: step } : { status: "unbound", reason: "Independent advisory fixture" },
     authority_ceiling: structuredClone(ceiling) }));
   const root = { schema_version: "2.0", authority_id: "root", authority_epoch: 1, issuer_host_id: "fixture-host",
     authenticated_principal_ref: ref("principal"), authenticated_subject_ref: ref("subject"),
@@ -570,7 +570,7 @@ test("Flow rounds: unassigned ready seats are never claimed and release authenti
   assert.deepEqual(claimableMultiCursorSteps(run.definition, run.state), ["second"]);
 });
 
-test("Flow rounds: route-back authorizes a fresh claim and paid attempt while prior unknown holds remain", async t => {
+test("Flow rounds: omitted legacy gate attempt supports route-back with fresh claims while prior unknown holds remain", async t => {
   const f = await fixture(t, { managedDefinition: managedDefinition("route"), maxRounds: 8 });
   const first = await f.controller.release(await flowRelease(f, "first", [invoke("seat-0")]));
   const original = first.projection.attempts[0]; await f.terminal(original.invocationId);

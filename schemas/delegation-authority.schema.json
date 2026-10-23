@@ -572,8 +572,7 @@
             "status",
             "flow_run_id",
             "definition",
-            "flow_step_id",
-            "gate_attempt"
+            "flow_step_id"
           ],
           "properties": {
             "status": {
@@ -589,6 +588,7 @@
               "$ref": "#/$defs/id"
             },
             "gate_attempt": {
+              "description": "Optional legacy host metadata; omit for durable-step multi-cursor rounds. Never current claim authority.",
               "type": "integer",
               "minimum": 0,
               "maximum": 1000000000000
