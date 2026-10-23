@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.5.0](https://github.com/kontourai/flow-agents/compare/v9.4.0...v9.5.0) (2026-10-23)
+
+
+### Features
+
+* finalize retained delegation cancellation requests explicitly ([#1545](https://github.com/kontourai/flow-agents/issues/1545)) ([adccc5c](https://github.com/kontourai/flow-agents/commit/adccc5c7e8a616ffb26f09b7bea4c895f5b7d34a))
+
 ## [9.4.0](https://github.com/kontourai/flow-agents/compare/v9.3.0...v9.4.0) (2026-10-23)
 
 
