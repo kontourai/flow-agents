@@ -545,7 +545,26 @@ There is no ambiguous-round repair, takeover or automatic resend API.
 
 Cancellation first commits closed admission across all rounds, then revokes the
 root and requests descendant cancellation. It does not prove physical termination
-or release unknown budget. Host responsibilities remain current caller/custody,
+or release unknown budget.
+
+A fresh `finalizeCancel({ kind: "finalizeCancel", groupId, operationKey,
+expectedRevision, controller, cancelOperationKey })` can close a pending
+cancellation after an interrupted effect window. It names the original cancel
+command, requires the current controller/revision and host authorization, and
+idempotently revokes root authority before calling the optional
+`host.confirmCancellation(spec, originalCancelCommand)` observation seam. That
+seam must read an independently retained request receipt for this exact original
+operation; it must not resend interrupts. A missing observation keeps the group
+pending and its invocations/unknown usage unchanged. An authorized host must
+separately make and durably retain any missing exact descendant cancellation
+requests before finalization can acknowledge them. Acknowledgement means
+requested, never physically terminated. Finalization and its receipt append are
+serialized by the group store; exact replay only reads the committed result.
+There is no automatic retry, provider invocation, budget refund or new root.
+The existing two cancellation-record allowance covers the original command and
+either its direct request receipt or this finalization event.
+
+Host responsibilities remain current caller/custody,
 cross-store root exclusivity, atomic physical launch fencing, descendant
 termination, and currentness when final results are fetched. The controlled
 nonbillable fixtures do not qualify a deployed host or real provider lifecycle.

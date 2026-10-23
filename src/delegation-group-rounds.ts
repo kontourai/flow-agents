@@ -60,7 +60,8 @@ export type RoundAttempt = {
 };
 export type AdoptAuthorityRenewalCommand = CommandBase & { kind: "adoptRenewal"; renewalOperationKey: string; authority: RootAuthorityReferenceV2 };
 export type FinalizeRoundsSyncCommand = CommandBase & { kind: "finalizeSync"; syncOperationKey: string; preparedDigest: string };
-export type DelegationRoundsAuthorizationCommand = DelegationRoundsCommand | FinalizeRoundsSyncCommand | AdoptAuthorityRenewalCommand;
+export type FinalizeRoundsCancelCommand = CommandBase & { kind: "finalizeCancel"; cancelOperationKey: string };
+export type DelegationRoundsAuthorizationCommand = DelegationRoundsCommand | FinalizeRoundsSyncCommand | AdoptAuthorityRenewalCommand | FinalizeRoundsCancelCommand;
 export type DelegationRoundsEventBody =
   | { kind: "command"; command: DelegationRoundsCommand; authorization: DelegationReferenceV2 }
   | { kind: "grant_adopted"; command: AdoptAuthorityRenewalCommand; authorization: DelegationReferenceV2; hostReceipt: DelegationReferenceV2;
@@ -73,7 +74,8 @@ export type DelegationRoundsEventBody =
   | { kind: "flow_evaluated"; operationKey: string; seatId: string; claimId: string; receipt: { reference: DelegationReferenceV2; settled: boolean; runHead: string } }
   | { kind: "observed"; invocationId: string; reference: DelegationReferenceV2 }
   | { kind: "returned"; operationKey: string }
-  | { kind: "cancel_requested"; reference: DelegationReferenceV2 };
+  | { kind: "cancel_requested"; reference: DelegationReferenceV2 }
+  | { kind: "cancel_finalized"; command: FinalizeRoundsCancelCommand; authorization: DelegationReferenceV2; reference: DelegationReferenceV2 };
 export type DelegationRoundsEvent = DelegationRoundsEventBody & { revision: number };
 export type DelegationRoundsJournal = { schemaVersion: "1.0"; groupId: string; events: DelegationRoundsEvent[] };
 export type DelegationRoundsProjection = {
@@ -93,7 +95,7 @@ export interface DelegationRoundsHost {
   /** Authenticate current caller/custody, immutable roster/policy and root exclusivity across stores.
    * For release, authorize this exact checkpoint, seat subset and all predecessor identities NOW.
    * A checkpoint reference does not authorize itself. Reads/replays must also authenticate. */
-  authorize(input: { action: "create" | "release" | "terminal" | "cancel" | "get" | "events" | "replay" | "execute" | "record" | "reappraise" | "authorizeRetry" | "sync" | "finalizeSync" | "adoptRenewal";
+  authorize(input: { action: "create" | "release" | "terminal" | "cancel" | "get" | "events" | "replay" | "execute" | "record" | "reappraise" | "authorizeRetry" | "sync" | "finalizeSync" | "adoptRenewal" | "finalizeCancel";
     groupId: string; current: DelegationRoundsProjection | null; command: DelegationRoundsAuthorizationCommand | null }): Promise<DelegationReferenceV2 | null>;
   executionHost(spec: DelegationRoundsSpec): DelegationRoundsExecutionHost;
   prepareRequest(spec: DelegationRoundsSpec, seat: RoundSeat, attempt: RoundAttempt, envelope: DelegationEnvelopeV2): Promise<ModelInvocationRequest>;
@@ -118,6 +120,9 @@ export interface DelegationRoundsHost {
     confirmTerminal(spec: DelegationRoundsSpec, seat: RoundSeat, invocation: DelegationInvocation, recipient: DelegationRecipientIdentity | null): Promise<DelegationReferenceV2 | null>;
   };
   requestDescendantCancellation(spec: DelegationRoundsSpec): Promise<DelegationReferenceV2>;
+  /** Observe an independently retained cancellation request for this exact original
+   * command. Never resend interrupts here; this proves a request, not termination. */
+  confirmCancellation?(spec: DelegationRoundsSpec, command: Extract<DelegationRoundsCommand, { kind: "cancel" }>): Promise<DelegationReferenceV2 | null>;
 }
 export const ROUNDS_MAX_EVENTS = 1024;
 export const ROUNDS_MAX_BYTES = 32 * 1024 * 1024;
@@ -219,6 +224,12 @@ function finalizeCommand(value: unknown): FinalizeRoundsSyncCommand {
   requireDelegationV2(r.kind === "finalizeSync", "rounds_command"); [r.groupId, r.operationKey, r.syncOperationKey].forEach(delegationIdV2);
   delegationIntegerV2(r.expectedRevision, ROUNDS_MAX_EVENTS); fence(r.controller); delegationDigestV2(r.preparedDigest);
   return r as FinalizeRoundsSyncCommand;
+}
+function finalizeCancelCommand(value: unknown): FinalizeRoundsCancelCommand {
+  const r = delegationRecordV2(copyDelegationJsonV2(value), ["kind", "groupId", "operationKey", "expectedRevision", "controller", "cancelOperationKey"]);
+  requireDelegationV2(r.kind === "finalizeCancel", "rounds_command"); [r.groupId, r.operationKey, r.cancelOperationKey].forEach(delegationIdV2);
+  delegationIntegerV2(r.expectedRevision, ROUNDS_MAX_EVENTS); fence(r.controller);
+  return r as FinalizeRoundsCancelCommand;
 }
 function hex(value: unknown): asserts value is string {
   requireDelegationV2(typeof value === "string" && /^[a-f0-9]{64}$/.test(value), "rounds_flow_hash");
@@ -325,6 +336,13 @@ export function projectDelegationRounds(journal: DelegationRoundsJournal): Deleg
           && e.prepared.flowHead === pending.command.flowHead && e.prepared.recipient.authority.id === p.spec.rootAuthorityRef.id
           && e.prepared.receipt.envelopeId === p.spec.seats.find(s => s.seatId === e.prepared.seatId)!.envelope.id, "rounds_prepared_sync_identity");
         pending.prepared = e.prepared;
+      } else if (e.kind === "cancel_finalized") {
+        delegationRecordV2(e, ["revision", "kind", "command", "authorization", "reference"]);
+        const c = finalizeCancelCommand(e.command); delegationReferenceV2(e.authorization); delegationReferenceV2(e.reference);
+        requireDelegationV2(!keys.has(c.operationKey) && c.expectedRevision === index && c.groupId === p.spec.groupId
+          && same(c.controller, p.spec.controller) && p.cancellation === "pending"
+          && journal.events.slice(0, index).some(prior => prior.kind === "command" && prior.command.kind === "cancel" && prior.command.operationKey === c.cancelOperationKey), "rounds_cancel_identity");
+        keys.add(c.operationKey); p.cancellation = "requested";
       } else if (e.kind === "sync_finalized") {
         delegationRecordV2(e, ["revision", "kind", "command", "authorization", "reference"]); delegationReferenceV2(e.authorization); delegationReferenceV2(e.reference);
         const c = finalizeCommand(e.command); requireDelegationV2(!keys.has(c.operationKey) && c.expectedRevision === index
@@ -542,6 +560,28 @@ export function createDelegationRoundsController(input: {
         });
         journal.events.push({ kind: "grant_adopted", revision: journal.events.length + 1, command: c, authorization,
           hostReceipt: epoch.renewal.authenticatedReceipt, previous: p.grants.authority, envelopes });
+        return { journal, result: { replayed: false, projection: projectDelegationRounds(journal) } };
+      });
+    },
+    async finalizeCancel(value: unknown) {
+      const c = finalizeCancelCommand(value); await authorize("finalizeCancel", c.groupId, null, c);
+      return store.transact(c.groupId, async journal => {
+        requireDelegationV2(journal, "rounds_missing"); const p = projectDelegationRounds(journal);
+        const authorization = await authorize("finalizeCancel", c.groupId, p, c);
+        const prior = journal.events.find(e => e.kind === "cancel_finalized" && e.command.operationKey === c.operationKey);
+        if (prior?.kind === "cancel_finalized") {
+          await authorize("replay", c.groupId, p, c); requireDelegationV2(same(prior.command, c), "rounds_intent_conflict");
+          return { journal, result: { replayed: true, projection: p } };
+        }
+        requireDelegationV2(c.expectedRevision === p.revision && same(c.controller, p.spec.controller), "rounds_revision_conflict");
+        const original = journal.events.find(e => e.kind === "command" && e.command.kind === "cancel" && e.command.operationKey === c.cancelOperationKey);
+        requireDelegationV2(p.cancellation === "pending" && original?.kind === "command" && original.command.kind === "cancel", "rounds_cancel_identity");
+        requireDelegationV2(host.confirmCancellation, "rounds_cancel_confirmation_required");
+        await service.cancel(p.spec.rootAuthorityRef.id);
+        const receipt = await host.confirmCancellation(structuredClone(p.spec), structuredClone(original.command));
+        requireDelegationV2(receipt, "rounds_cancel_confirmation_required"); delegationReferenceV2(receipt);
+        await authorize("finalizeCancel", c.groupId, p, c);
+        journal.events.push({ revision: journal.events.length + 1, kind: "cancel_finalized", command: c, authorization, reference: receipt });
         return { journal, result: { replayed: false, projection: projectDelegationRounds(journal) } };
       });
     },
