@@ -1157,3 +1157,52 @@ test("Accounting rounds: exact session ACK, paid Flow continuation and storage-o
   assert.ok(f.state.requests.every(r=>r.tools?.length===0||r.tools===undefined));
   assert.ok(f.state.sessionCalls.every(session=>session==="session-A"));
 });
+
+test("explicit cancel finalization observes retained requests after the authority-cancel window without repeating interrupts", async t => {
+  const f = await fixture(t, { v3: true });
+  f.state.unknown = true;
+  await f.controller.release(await f.release("unknown-before-cancel", ["seat-0"]));
+  const held = (await f.openAuthority().inspect("root")).invocations;
+  assert.equal(held.length, 1); assert.equal(held[0].usage, null);
+  const authorize = f.authorityHost.authorize;
+  let failCancel = true;
+  f.authorityHost.authorize = async (action, ...rest) => {
+    if (action === "cancel" && failCancel) throw Error("controlled authority-cancel window");
+    return authorize(action, ...rest);
+  };
+  const original = f.cmd("cancel", await f.controller.get(f.spec.groupId), "original-cancel");
+  await assert.rejects(f.open().cancel(original), /controlled authority-cancel window/);
+  failCancel = false;
+  const replay = await f.open().cancel(original);
+  assert.equal(replay.projection.cancellation, "pending");
+  assert.equal((await f.openAuthority().inspect("root")).cancelled, false);
+  const finalize = { ...f.cmd("cancel", replay.projection, "finalize-cancel"), kind: "finalizeCancel", cancelOperationKey: original.operationKey };
+  await assert.rejects(f.open().finalizeCancel(finalize), /rounds_cancel_confirmation_required/);
+  await assert.rejects(f.open().finalizeCancel({ ...finalize, expectedRevision: 0 }), /rounds_revision_conflict/);
+  await assert.rejects(f.open().finalizeCancel({ ...finalize, controller: { ...finalize.controller, generation: 2 } }), /rounds_revision_conflict/);
+  let observed = 0, retained = null;
+  f.host.confirmCancellation = async (spec, command) => {
+    observed++; assert.equal(spec.groupId, original.groupId); assert.deepEqual(command, original); return retained;
+  };
+  await assert.rejects(f.open().finalizeCancel({ ...finalize, cancelOperationKey: "foreign" }), /rounds_cancel_identity/);
+  assert.equal(observed, 0);
+  await assert.rejects(f.open().finalizeCancel(finalize), /rounds_cancel_confirmation_required/);
+  assert.equal((await f.openAuthority().inspect("root")).cancelled, true);
+  assert.equal((await f.controller.get(f.spec.groupId)).cancellation, "pending");
+  retained = ref("independently-retained-request");
+  const beforeConcurrent = observed;
+  const concurrent = await Promise.all([f.open().finalizeCancel(finalize), f.open().finalizeCancel(finalize)]);
+  assert.equal(concurrent.filter(result => !result.replayed).length, 1);
+  assert.equal(observed, beforeConcurrent + 1);
+  const done = concurrent.find(result => !result.replayed);
+  assert.equal(done.projection.cancellation, "requested");
+  assert.deepEqual((await f.openAuthority().inspect("root")).invocations, held);
+  const beforeReplay = observed;
+  assert.equal((await f.open().finalizeCancel(finalize)).replayed, true);
+  assert.equal(observed, beforeReplay);
+  await assert.rejects(f.open().finalizeCancel({ ...finalize, cancelOperationKey: "changed" }), /rounds_intent_conflict/);
+  f.state.allowed = false;
+  await assert.rejects(f.open().finalizeCancel(finalize), /rounds_host_authorization/);
+  assert.equal(f.state.cancels, 0); assert.equal(f.state.calls, 1);
+  assert.equal(done.projection.attempts.length, 1);
+});
