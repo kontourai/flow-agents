@@ -841,3 +841,27 @@ undefined and preserve any existing raw Relay cost field without inventing one.
 Storage-only sync finalization compares the retained integer accounting; it does
 not dispatch again or change its cost basis. These source contracts do not
 establish publication, Station adoption or actual provider billing.
+
+### Durable-step binding and legacy gate metadata
+
+For multi-cursor rounds, issue a bound v2 execution grant with `status: "bound"`,
+`flow_run_id`, the published `definition` identity, and `flow_step_id`. Omit
+`gate_attempt`: Flow has no per-seat gate-attempt value for this pre-claim grant.
+A gate route-back attempt describes a particular failed gate decision; it is not
+a durable-step claim identity or a general invocation counter.
+
+The optional `gate_attempt` field preserves existing host metadata. When present
+it must remain a non-negative safe integer within the contract bound, is hashed
+and matched exactly with the selected grant, and cannot change through renewal.
+It does not establish readiness, gate acceptance, or current execution authority.
+Existing serialized grants and their digests are unchanged. Consumers predating
+this optional-field contract reject omission; upgrade the published consumer
+before emitting grants without the field. The v1 envelope contract is unchanged.
+
+Rounds creation checks run, definition and step membership before any claim.
+Release uses Flow's current frontier and public durable claim admission. Each
+execution and final invocation fence validates the actual current claim, while
+continuations retain claim identities and require Flow-owned invalidation/retry
+transitions. Retry and evaluation-only releases acquire fresh claims without
+rewriting the immutable grant. Hosts must still authenticate claims at their
+actual effect boundary; this optional metadata supplies no replacement authority.

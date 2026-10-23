@@ -228,11 +228,25 @@ test("bound Flow grants preserve the published definition identity/run/step/gate
   assert.deepEqual(narrowDelegationEnvelopeV2(root, parent, child, NOW).execution_binding.flow_binding.definition, definition);
   for (const mutate of [
     f => { f.flow_run_id = "flow-run-b"; }, f => { f.flow_step_id = "other"; },
-    f => { f.gate_attempt++; }, f => { f.definition.digest = "f".repeat(64); },
+    f => { f.gate_attempt++; }, f => { delete f.gate_attempt; }, f => { f.definition.digest = "f".repeat(64); },
     f => { f.definition.version = "changed"; },
   ]) {
     const changed = structuredClone(child); mutate(changed.execution_binding.flow_binding);
     reject(() => narrowDelegationEnvelopeV2(root, parent, changed, NOW), "execution_grant_binding_mismatch");
+  }
+  // Legacy metadata remains exact when supplied; durable-step grants omit it.
+  const omittedRoot = structuredClone(root);
+  delete omittedRoot.execution_grants[1].flow_binding.gate_attempt;
+  assert.equal(schemaRoot(omittedRoot), true, JSON.stringify(schemaRoot.errors));
+  const omittedParent = rootEnvelope(omittedRoot), omittedChild = childOf(omittedRoot, omittedParent);
+  assert.equal(schemaEnvelope(omittedChild), true, JSON.stringify(schemaEnvelope.errors));
+  assert.equal(Object.hasOwn(narrowDelegationEnvelopeV2(omittedRoot, omittedParent, omittedChild, NOW).execution_binding.flow_binding, "gate_attempt"), false);
+  assert.notEqual(rootAuthorityDigestV2(omittedRoot), rootAuthorityDigestV2(root));
+  const inserted = structuredClone(omittedChild); inserted.execution_binding.flow_binding.gate_attempt = 0;
+  reject(() => narrowDelegationEnvelopeV2(omittedRoot, omittedParent, inserted, NOW), "execution_grant_binding_mismatch");
+  for (const [value, code] of [[undefined, "invalid_json_value"], [null, "invalid_integer"], [-1, "invalid_integer"], [-0, "invalid_json_number"], [0.5, "invalid_json_number"], ["1", "invalid_integer"], [1_000_000_000_001, "invalid_integer"]]) {
+    const invalid = structuredClone(root); invalid.execution_grants[1].flow_binding.gate_attempt = value;
+    reject(() => validateRootAuthorityV2(invalid), code);
   }
   for (const field of ["id", "version"]) {
     for (const [value, accepted] of [[" ", true], ["😀".repeat(128), true], ["a".repeat(128), true], ["a".repeat(129), false], ["😀".repeat(129), false], ["bad\u0085", false]]) {

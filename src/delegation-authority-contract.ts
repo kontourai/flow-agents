@@ -44,7 +44,11 @@ export type DelegationBudgetV2 = {
 };
 export type DelegationFlowBindingV2 =
   | { status: "unbound"; reason: string }
-  | { status: "bound"; flow_run_id: string; definition: PublishedFlowDefinitionIdentity; flow_step_id: string; gate_attempt: number };
+  | {
+    status: "bound"; flow_run_id: string; definition: PublishedFlowDefinitionIdentity; flow_step_id: string;
+    /** Legacy host metadata, not durable-step claim authority. Omit for multi-cursor rounds. */
+    gate_attempt?: number;
+  };
 export type DelegationExecutionBindingV2 = {
   runtime: {
     runtime_receipt_ref: DelegationReferenceV2;
@@ -245,9 +249,11 @@ export function delegationExecutionBindingV2(value: unknown): asserts value is D
     requireDelegationV2(typeof flow.reason === "string" && flow.reason.length > 0 && [...flow.reason].length <= 512
       && !/[\u0000-\u001f\u007f]/.test(flow.reason), "invalid_unbound_reason");
   } else {
-    const f = delegationRecordV2(flow, ["status", "flow_run_id", "definition", "flow_step_id", "gate_attempt"]);
+    const hasGateAttempt = flow !== null && typeof flow === "object" && Object.hasOwn(flow, "gate_attempt");
+    const f = delegationRecordV2(flow, ["status", "flow_run_id", "definition", "flow_step_id", ...(hasGateAttempt ? ["gate_attempt"] : [])]);
     requireDelegationV2(f.status === "bound", "invalid_flow_binding");
-    delegationIdV2(f.flow_run_id); delegationIdV2(f.flow_step_id); delegationIntegerV2(f.gate_attempt);
+    delegationIdV2(f.flow_run_id); delegationIdV2(f.flow_step_id);
+    if (hasGateAttempt) delegationIntegerV2(f.gate_attempt);
     delegationFlowDefinitionIdentityV2(f.definition);
   }
 }
