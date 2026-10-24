@@ -339,7 +339,7 @@
     "@kontourai/dispatch": "0.7.1",
     "@kontourai/flow": "5.2.2",
     "@kontourai/relay": "0.7.1",
-    "@kontourai/surface": "5.0.0",
+    "@kontourai/surface": "6.2.1",
     "@kontourai/survey": "8.2.0",
     "esbuild": "0.28.2"
   },
