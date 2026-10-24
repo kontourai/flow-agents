@@ -5,7 +5,7 @@ import type { AuthorizationLedger } from "@kontourai/dispatch";
 import {
   loadRun, definitionIdentity, flowRunHead, flowTransitionRef, claimableMultiCursorSteps,
   reopenMultiCursorStep, validateDurableStepClaim, type FlowDurableStepClaim,
-} from "@kontourai/flow";
+} from "./delegation-flow-bindings.js";
 import { requireDelegationV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService } from "./delegation-authority-service.js";
 import { executeRoundsDelegation } from "./delegation-rounds-accounting.js";
