@@ -706,12 +706,17 @@ test("installed coordinator admits the exact published Flow package and refuses 
   fs.writeFileSync(path.join(installRoot, "coordinator.mjs"), `${fs.readFileSync(COORDINATOR, "utf8")}\nexport { loadPinnedFlowReducer };\n`);
   const coordinator = await import(pathToFileURL(path.join(installRoot, "coordinator.mjs")).href);
   const admitted = await coordinator.loadPinnedFlowReducer();
-  assert.equal(admitted.pin.package_version, "5.2.0");
-  assert.equal(admitted.pin.release_commit, "f7d6a7f0cd57b02053dc7689567ea51375119754");
+  assert.equal(admitted.pin.package_version, "5.2.2");
+  assert.equal(admitted.pin.release_commit, "c1b1a983fb7dd89ade2937c6a8f943eda244d05b");
   const pinFile = path.join(installRoot, "flow-reducer-v1.json");
   const pin = JSON.parse(fs.readFileSync(pinFile, "utf8"));
   fs.writeFileSync(pinFile, JSON.stringify({ ...pin, package_version: "5.1.4" }));
   await assert.rejects(coordinator.loadPinnedFlowReducer(), /Flow reducer pin is invalid/);
+  fs.writeFileSync(pinFile, JSON.stringify(pin));
+  const metadataFile = path.join(installRoot, "flow-reducer/node_modules/@kontourai/flow/package.json");
+  const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
+  fs.writeFileSync(metadataFile, JSON.stringify({ ...metadata, version: "5.2.0" }));
+  await assert.rejects(coordinator.loadPinnedFlowReducer(), /installed Flow package does not match the pinned reducer package identity/);
 });
 
 async function createHermeticRecoveryFixture(runId = "exact-current-recovery") {

@@ -239,12 +239,16 @@ The tests reach public service operations over real temporary persistence/reopen
 separate-process admission contention, exclusive envelope ownership, conflicting replay, lost commit
 acknowledgement, ambiguous invocation, cancellation, missing/overrun accounting, all-terminal join,
 strict bounds and host capability refusals. Existing envelope v1 validation/narrowing stays unchanged.
-Real Flow 5.2.0 fixtures exercise `startRun`, `claimReadyStep`, `loadRun`,
+The initial Flow 5.2.0 fixtures exercise `startRun`, `claimReadyStep`, `loadRun`,
 `projectReadyStepFrontier`, and `validateDurableStepClaim` through group admission. Precise fsync EIO
 injection over real temporary paths exercises pre-rename preservation and post-rename unavailable/read
 repair. These checks do not simulate power loss or establish hardware/filesystem crash guarantees.
-They are source diagnostics, not installed-runtime or live-provider acceptance. Flow remains pinned
-to canonical reducer version 5.2.0; a 5.2.2 trial failed the coordinator identity check and was reverted.
+They are source diagnostics, not installed-runtime or live-provider acceptance. The package now pins
+Flow 5.2.2 alongside the privileged coordinator and its independently locked staged closure. A
+previous dependency-only trial failed the coordinator's 5.2.0 identity check; the migration updates
+the package/release pin and closure digest together while preserving the reducer's 1.3.8 identity.
+The installed lifecycle harness retains exact 5.2.2 admission and FIFO interoperability checks.
+This alignment does not establish a consuming host's shared-module composition or live execution.
 
 The fresh-context continuation should start from #1113, `AGENTS.md`, this guide and the exact handoff
 commits. Remaining acceptance includes real three-member installed execution and parent/member tree,

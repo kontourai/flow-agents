@@ -353,9 +353,24 @@ STOP_WS="$TMP/stop-workspace"
 STOP_SLUG="terminal-stop-run"
 STOP_LOG="$TMP/stop.economics.jsonl"
 STOP_FULL="$TMP/stop.full.jsonl"
+cat > "$TMP/delay-legacy-economics.sh" <<'BASH'
+if [[ "$0" == */economics-record.sh && "${1:-}" != "--flow-run-dir" ]]; then
+  sleep 2
+fi
+BASH
 if [[ -f "$STOP_CLI" ]] && setup_stop_binding "$STOP_WS" "$STOP_SLUG" \
   && complete_stop_binding "$STOP_WS" "$STOP_SLUG" \
-  && invoke_stop "$TELEMETRY" "$STOP_WS" "stop-terminal-one" "$STOP_LOG" "$STOP_FULL"; then
+  && BASH_ENV="$TMP/delay-legacy-economics.sh" invoke_stop "$TELEMETRY" "$STOP_WS" "stop-terminal-one" "$STOP_LOG" "$STOP_FULL"; then
+  # The two emitters finish independently; file existence only observes the first writer.
+  for _ in $(seq 1 100); do
+    if jq -e -s --arg slug "$STOP_SLUG" '
+      ([.[] | select(.producer_authority == "flow_run_record" and .run_id == $slug)] | length) == 1
+      and ([.[] | select(.producer_authority != "flow_run_record")] | length) >= 1
+    ' "$STOP_LOG" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.1
+  done
   terminal_count="$(jq -s --arg slug "$STOP_SLUG" '[.[] | select(.producer_authority == "flow_run_record" and .run_id == $slug)] | length' "$STOP_LOG" 2>/dev/null)"
   legacy_count="$(jq -s '[.[] | select(.producer_authority != "flow_run_record")] | length' "$STOP_LOG" 2>/dev/null)"
   [[ "$terminal_count" == "1" && "$legacy_count" -ge 1 ]] \
