@@ -688,8 +688,26 @@ claim is made.
 At creation declare `policy.maxSyncs` (0/default leaves the earlier compatibility
 profile; positive values up to 32 enable required synchronization). In the sync
 profile, every released seat, including the first release, needs a current
-acknowledged per-seat sync key. Existing groups without this profile do not meet
-the full continuation-sync goal.
+acknowledged per-seat sync key. This remains the default (`syncAdmission:
+"every-release"`, or omission). Existing groups without positive sync capacity
+do not meet the full continuation-sync goal.
+
+A host whose authenticated initial request already supplies source and
+instructions can explicitly create the immutable `syncAdmission:
+"initial-request"` policy. It permits an initial invoke selection for a seat with
+no previous admitted attempt and no sync exchange. Definite resource
+nonadmission does not create a physical recipient and retains that initial
+eligibility. Once a seat has an admitted attempt or any sync exchange, every
+release still requires its exact current acknowledged sync. Evaluation is never
+an initial invoke. Failed or unknown sync cannot fall back to the initial path.
+The option requires Flow topology and positive `maxSyncs`, changes no budgets,
+and cannot be added or changed on replay.
+
+`delegationRoundsSyncIdentity({command, authorityId, envelopeId})` names the
+operation-specific ACK token and the two bounded invocation IDs. The controller
+uses this same public derivation. Hosts may use it to join a durable pending
+command to a final physical reservation; names alone grant no execution, source,
+recipient, budget or Flow authority.
 
 `sync({ ..., checkpoint, flowHead, seatId, contextRef })` persists pending intent
 before invoking the existing public `syncDelegationContext`. The authenticated

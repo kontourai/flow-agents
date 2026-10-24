@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
-import { delegationIdV2 } from "./delegation-authority-contract.js";
+import { delegationIdV2, delegationDigestV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService, DelegationAdmissionError, type DelegationInvocationAmounts } from "./delegation-authority-service.js";
 import { executeAuthorizedDelegation, executeAuthorizedDelegationAccountingV1, type DelegationExecutionHost, type DelegationExecutionAccountingHostV1 } from "./delegation-execution.js";
 
@@ -37,6 +37,13 @@ export class DelegationSyncReceiptPersistenceError extends Error {
   }
 }
 
+/** Deterministic reservation names only; these strings grant no execution authority. */
+export function delegationContextSyncInvocationIds(authorityId: string, envelopeId: string, runId: string, contentDigest: string): readonly [string, string] {
+  [authorityId, envelopeId, runId].forEach(delegationIdV2); delegationDigestV2(contentDigest);
+  const identity = createHash("sha256").update(JSON.stringify([authorityId, envelopeId, runId, contentDigest])).digest("hex");
+  return [`sync_${identity}_0`, `sync_${identity}_1`];
+}
+
 /** Model acknowledgement only: this neither grants tools nor proves semantic understanding. */
 export async function syncDelegationContext(input: {
   service: ReturnType<typeof createDelegationAuthorityService>;
@@ -68,9 +75,9 @@ async function syncContext<Host extends { retainSyncReceipt(receipt: DelegationS
   const { envelope } = await input.service.admitEffect(input.authorityId, input.envelopeId, "context-sync");
   if (envelope.execution_authority.allowed_tools.length !== 0) throw new Error("Context sync requires explicit no-tools execution authority");
   const contentDigest = `sha256:${createHash("sha256").update(input.text).digest("hex")}`;
-  const identity = createHash("sha256").update(JSON.stringify([input.authorityId, input.envelopeId, input.runId, contentDigest])).digest("hex");
+  const invocationIds = delegationContextSyncInvocationIds(input.authorityId, input.envelopeId, input.runId, contentDigest);
   const prior = await input.service.inspect(input.authorityId);
-  if (prior.invocations.some((invocation) => invocation.invocationId === `sync_${identity}_0`)) {
+  if (prior.invocations.some((invocation) => invocation.invocationId === invocationIds[0])) {
     throw new DelegationAdmissionError("invocation_already_reserved");
   }
   let reason: DelegationSyncReceipt["reason"] = "execution_incomplete";
@@ -84,7 +91,7 @@ async function syncContext<Host extends { retainSyncReceipt(receipt: DelegationS
       attempts++;
       const outcome = await execute({
         ...input,
-        invocationId: `sync_${identity}_${attempt}`,
+        invocationId: invocationIds[attempt],
         onReserved: async () => { ownsInvocation = true; },
         effect: "context-sync",
         request: {

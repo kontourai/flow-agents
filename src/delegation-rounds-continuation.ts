@@ -5,12 +5,20 @@ import { canonicalJson } from "@kontourai/relay";
 import { delegationRecordV2, delegationIdV2, delegationIntegerV2, delegationDigestV2, requireDelegationV2, delegationReferenceV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService } from "./delegation-authority-service.js";
 import { bindRoundsRecipient, validateRecipientIdentity, type DelegationRecipientIdentity } from "./delegation-rounds-recipient.js";
-import { type DelegationSyncReceipt } from "./delegation-context-sync.js";
+import { delegationContextSyncInvocationIds, type DelegationSyncReceipt } from "./delegation-context-sync.js";
 import { syncRoundsDelegation } from "./delegation-rounds-accounting.js";
 import type { DelegationRoundsSpec, DelegationRoundsProjection, DelegationRoundsCommand, DelegationRoundsHost, DelegationRoundsEventBody, FinalizeRoundsSyncCommand } from "./delegation-group-rounds.js";
 
 type Continuation = Extract<DelegationRoundsCommand, {kind: "reappraise" | "authorizeRetry" | "sync"}>;
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
+/** Names the exact public sync operation; callers must still authenticate its durable command and reservation. */
+export function delegationRoundsSyncIdentity(input: { command: Pick<Extract<DelegationRoundsCommand, {kind: "sync"}>, "groupId" | "operationKey" | "seatId" | "contextRef">; authorityId: string; envelopeId: string }) {
+  const c = structuredClone(input.command);
+  [c.groupId, c.operationKey, c.seatId].forEach(delegationIdV2); delegationReferenceV2(c.contextRef);
+  const runId = `roundsync_${createHash("sha256").update(canonicalJson([c.groupId, c.operationKey, c.seatId, c.contextRef])).digest("hex")}`;
+  return { runId, invocationIds: delegationContextSyncInvocationIds(input.authorityId, input.envelopeId, runId, c.contextRef.digest) };
+}
+
 async function runFor(spec: DelegationRoundsSpec, head: string, cwd?: string) {
   requireDelegationV2(spec.topology.kind === "flow", "rounds_flow_required");
   const run = await loadRun(spec.topology.runId, cwd);
@@ -51,7 +59,7 @@ export async function runRoundsContinuation(input: {
     const { envelope } = await input.authorityService.admitEffect(spec.rootAuthorityRef.id, seat.envelope.id, "context-sync");
     const bound = await bindRoundsRecipient({ spec, seatId: seat.seatId, envelope, host, service: input.authorityService });
     const physical = bound.executionHost;
-    const syncId = `roundsync_${createHash("sha256").update(canonicalJson([spec.groupId, c.operationKey, c.seatId, c.contextRef])).digest("hex")}`;
+    const { runId: syncId } = delegationRoundsSyncIdentity({ command: c, authorityId: spec.rootAuthorityRef.id, envelopeId: seat.envelope.id });
     const terminalProofs: PreparedRoundsSync["terminalProofs"] = [], attempted: string[] = [];
     const priorRecipient = (id: string): DelegationRecipientIdentity | null => input.projection.attempts.find(a => a.invocationId === id)?.recipient
       ?? input.projection.continuations.find(r => r.prepared?.invocations.some(i => i.invocationId === id))?.prepared?.recipient ?? null;

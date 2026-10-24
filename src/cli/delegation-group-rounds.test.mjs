@@ -17,7 +17,7 @@ import { preparedRoundsSyncDigest } from "@kontourai/flow-agents/delegation-grou
 import { createDelegationAuthorityService } from "@kontourai/flow-agents/delegation-authority-service";
 import { createLocalFileDelegationAuthorityStore } from "@kontourai/flow-agents/delegation-authority-local-file";
 import { delegationEnvelopeDigestV2, delegationParentReferenceV2, rootAuthorityReferenceV2 } from "@kontourai/flow-agents/delegation-envelope-v2";
-import { createDelegationRoundsController, delegationRoundsCapacity, ROUNDS_MAX_BYTES, ROUNDS_MAX_EVENTS } from "@kontourai/flow-agents/delegation-group-rounds";
+import { createDelegationRoundsController, delegationRoundsSyncIdentity, delegationRoundsCapacity, ROUNDS_MAX_BYTES, ROUNDS_MAX_EVENTS } from "@kontourai/flow-agents/delegation-group-rounds";
 import { createLocalFileDelegationRoundsStore } from "@kontourai/flow-agents/delegation-group-rounds-local-file";
 import { executeAuthorizedDelegation } from "@kontourai/flow-agents/delegation-execution";
 import { orchestrateDelegationFlow } from "@kontourai/flow-agents/delegation-flow-execution";
@@ -102,7 +102,7 @@ async function fixture(t, options = {}) {
   const service = openAuthority(); await service.issue(root); for (const e of envelopes) await service.derive(root.authority_id, e);
   const spec = { schemaVersion: "1.0", groupId: "rounds-group", rootAuthorityRef: rootAuthorityReferenceV2(root),
     controller: { id: "controller", generation: 1 }, topology: options.managedDefinition ? { kind: "flow", runId: options.flow.runId, definition: options.flow.identity, actor: { key: "host", kind: "test" } } : { kind: "independent-advisory" },
-    policy: { reference: root.revisions.policy, maxRounds: options.maxRounds ?? 4, maxAttempts: options.groupAttempts ?? options.attempts ?? 6, maxConcurrent: options.maxConcurrent ?? 2, ...(options.managedDefinition ? { maxEvaluations: options.maxEvaluations ?? 8, ...(options.maxRecoveries === undefined ? {} : { maxRecoveries: options.maxRecoveries }), ...(options.contextSync ? { maxSyncs: options.maxSyncs ?? 8 } : {}), ...(options.v3 ? { maxRenewals: 4 } : {}) } : {}) },
+    policy: { reference: root.revisions.policy, maxRounds: options.maxRounds ?? 4, maxAttempts: options.groupAttempts ?? options.attempts ?? 6, maxConcurrent: options.maxConcurrent ?? 2, ...(options.managedDefinition ? { maxEvaluations: options.maxEvaluations ?? 8, ...(options.maxRecoveries === undefined ? {} : { maxRecoveries: options.maxRecoveries }), ...(options.contextSync ? { maxSyncs: options.maxSyncs ?? 8 } : {}), ...(options.syncAdmission === undefined ? {} : {syncAdmission: options.syncAdmission}), ...(options.v3 ? { maxRenewals: 4 } : {}) } : {}) },
     seats: envelopes.map((e, i) => ({ seatId: `seat-${i}`, envelope: { id: e.envelope_id, generation: e.generation, digest: delegationEnvelopeDigestV2(e) }, effect: "read", allocation: i === 0 ? options.allocation ?? allocation : allocation, ...(options.managedDefinition ? { stepId: options.managedDefinition.steps[i].id } : {}) })) };
   let counter = 0;
   function retain(value) {
@@ -198,7 +198,11 @@ async function fixture(t, options = {}) {
         const p = await controller.get(spec.groupId);
         assert.equal(p.cancellation, "none"); assert.ok(p.continuations.some(c => c.command.kind === "sync" && !c.receipt));
         const invocation = (await service.inspect("root")).invocations.find(i => i.invocationId === id);
-        assert.equal(invocation.envelopeId, envelope.envelope_id); state.launches.push(id); return launch();
+        assert.equal(invocation.envelopeId, envelope.envelope_id);
+        const pending = p.continuations.find(c => c.command.kind === "sync" && !c.receipt);
+        const identity = delegationRoundsSyncIdentity({ command: pending.command, authorityId: p.grants.authority.id, envelopeId: envelope.envelope_id });
+        assert.ok(identity.invocationIds.includes(id)); state.syncIdentities ??= []; state.syncIdentities.push(identity);
+        state.launches.push(id); return launch();
       } }),
     },
     flow: {
@@ -1205,4 +1209,60 @@ test("explicit cancel finalization observes retained requests after the authorit
   await assert.rejects(f.open().finalizeCancel(finalize), /rounds_host_authorization/);
   assert.equal(f.state.cancels, 0); assert.equal(f.state.calls, 1);
   assert.equal(done.projection.attempts.length, 1);
+});
+
+
+test("explicit initial-request sync policy permits only unattempted seat bootstrap; current ACK still gates continuation", async t => {
+  const f = await fixture(t, { managedDefinition: managedDefinition("blocked"), contextSync: true, syncAdmission: "initial-request", attempts: 12 });
+  const firstCommand = await flowRelease(f, "initial-paid", [invoke("seat-0")]);
+  const first = await f.controller.release(firstCommand);
+  assert.equal(f.state.calls, 1);
+  assert.equal(first.projection.continuations.length, 0);
+  assert.equal(first.projection.spec.policy.syncAdmission, "initial-request");
+  await f.terminal(first.projection.attempts[0].invocationId);
+  await externalEvidence(f);
+  const evaluation = { seatId: "seat-0", mode: "evaluate", invocationId: first.projection.attempts[0].invocationId };
+  await assert.rejects(f.controller.release(await flowRelease(f, "continued-without-ack", [evaluation])), /rounds_current_seat_sync_required/);
+  const synced = await seatSync(f, "seat-0", "current-ack", "Authenticated corrected context");
+  await f.controller.release(await flowRelease(f, "continued-evaluation", [{ ...evaluation, syncKey: synced.command.operationKey }]));
+  assert.equal(f.state.calls, 2);
+  const ledger = await f.service.inspect("root");
+  assert.ok(ledger.invocations.some(i => i.invocationId === f.state.syncIdentities[0].invocationIds[0]));
+  await f.controller.release(await flowRelease(f, "successor-initial", [invoke("seat-1")]));
+  assert.equal(f.state.calls, 3);
+  assert.equal((await loadRun(f.spec.topology.runId, f.cwd)).state.status, "completed");
+  const widened = structuredClone(f.create); widened.spec.policy.syncAdmission = "every-release";
+  await assert.rejects(f.controller.create(widened), /rounds_intent_conflict/);
+  assert.equal(f.state.calls, 3);
+});
+
+test("initial-request admission cannot bypass a failed sync exchange", async t => {
+  const f = await fixture(t, { managedDefinition: managedDefinition("parallel"), contextSync: true, syncAdmission: "initial-request", attempts: 12 });
+  f.state.badAck = true;
+  await assert.rejects(seatSync(f, "seat-0", "bad-initial-ack", "Facts"));
+  const calls = f.state.calls;
+  await assert.rejects(f.controller.release(await flowRelease(f, "initial-bypass", [invoke("seat-0")])), /rounds_current_seat_sync_required/);
+  assert.equal(f.state.calls, calls);
+});
+
+for (const {policy, maxSyncs} of [{policy: "unknown", maxSyncs: 1}, {policy: "initial-request", maxSyncs: 0}]) test(`sync admission policy is closed and requires declared positive sync capacity: ${policy}`, async t => {
+  await assert.rejects(fixture(t, { managedDefinition: managedDefinition("parallel"), contextSync: true, maxSyncs, syncAdmission: policy }), /rounds_sync_admission_policy/);
+});
+
+
+test("initial-request admission still requires exact current ACK before a paid route-back retry", async t => {
+  const f = await fixture(t, { managedDefinition: managedDefinition("route"), contextSync: true, syncAdmission: "initial-request", attempts: 12 });
+  const first = await f.controller.release(await flowRelease(f, "initial-first", [invoke("seat-0")]));
+  const firstAttempt = first.projection.attempts[0]; await f.terminal(firstAttempt.invocationId);
+  const second = await f.controller.release(await flowRelease(f, "initial-successor", [invoke("seat-1")]));
+  await f.terminal(second.projection.attempts.at(-1).invocationId);
+  const run = await loadRun(f.spec.topology.runId, f.cwd);
+  const route = run.state.transitions.find(t => t.type === "route_back"); assert.ok(route && route.limit_exceeded !== true);
+  const selection = invoke("seat-0", firstAttempt.invocationId, flowTransitionRef(route));
+  await assert.rejects(f.controller.release(await flowRelease(f, "unsynced-paid-retry", [selection])), /rounds_current_seat_sync_required/);
+  assert.equal(f.state.calls, 2);
+  const synced = await seatSync(f, "seat-0", "retry-context", "Current route-back facts");
+  const retried = await f.controller.release(await flowRelease(f, "paid-retry", [{ ...selection, syncKey: synced.command.operationKey }]));
+  assert.equal(f.state.calls, 4);
+  assert.equal(retried.projection.attempts.at(-1).previousInvocationId, firstAttempt.invocationId);
 });

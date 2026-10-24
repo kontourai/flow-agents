@@ -24,7 +24,7 @@ export type DelegationRoundsSpec = {
   schemaVersion: "1.0"; groupId: string; rootAuthorityRef: RootAuthorityReferenceV2;
   controller: { id: string; generation: number };
   topology: { kind: "independent-advisory" } | { kind: "flow"; runId: string; definition: FlowDefinitionIdentity; actor: FlowStepClaimActor };
-  policy: { reference: DelegationReferenceV2; maxRounds: number; maxAttempts: number; maxConcurrent: number; maxEvaluations?: number; maxRecoveries?: number; maxSyncs?: number; maxRenewals?: number };
+  policy: { reference: DelegationReferenceV2; maxRounds: number; maxAttempts: number; maxConcurrent: number; maxEvaluations?: number; maxRecoveries?: number; maxSyncs?: number; maxRenewals?: number; syncAdmission?: "every-release" | "initial-request" };
   seats: RoundSeat[];
 };
 export type RoundSelection = { seatId: string; previousInvocationId: string | null; mode?: "invoke"; retryRef?: string | null; nonadmissionOf?: string; syncKey?: string }
@@ -149,11 +149,13 @@ export function validateDelegationRoundsSpec(value: unknown): DelegationRoundsSp
   } else {
     delegationRecordV2(topology, ["kind"]); requireDelegationV2(topology.kind === "independent-advisory", "rounds_topology");
   }
-  const policy = delegationRecordV2(r.policy, ["reference", "maxRounds", "maxAttempts", "maxConcurrent", ...(topology.kind === "flow" ? ["maxEvaluations"] : []), ...((r.policy as {maxRecoveries?: unknown}).maxRecoveries === undefined ? [] : ["maxRecoveries"]), ...((r.policy as {maxSyncs?: unknown}).maxSyncs === undefined ? [] : ["maxSyncs"]), ...((r.policy as {maxRenewals?: unknown}).maxRenewals === undefined ? [] : ["maxRenewals"])]);
+  const policy = delegationRecordV2(r.policy, ["reference", "maxRounds", "maxAttempts", "maxConcurrent", ...(topology.kind === "flow" ? ["maxEvaluations"] : []), ...((r.policy as {maxRecoveries?: unknown}).maxRecoveries === undefined ? [] : ["maxRecoveries"]), ...((r.policy as {maxSyncs?: unknown}).maxSyncs === undefined ? [] : ["maxSyncs"]), ...((r.policy as {maxRenewals?: unknown}).maxRenewals === undefined ? [] : ["maxRenewals"]), ...((r.policy as {syncAdmission?: unknown}).syncAdmission === undefined ? [] : ["syncAdmission"])]);
   if (topology.kind === "flow") delegationIntegerV2(policy.maxEvaluations, 128);
   if (policy.maxRecoveries !== undefined) delegationIntegerV2(policy.maxRecoveries, 16);
   if (policy.maxSyncs !== undefined) delegationIntegerV2(policy.maxSyncs, 32);
   if (policy.maxRenewals !== undefined) delegationIntegerV2(policy.maxRenewals, 8);
+  if (policy.syncAdmission !== undefined) requireDelegationV2(topology.kind === "flow" && typeof policy.maxSyncs === "number" && policy.maxSyncs > 0
+    && (policy.syncAdmission === "every-release" || policy.syncAdmission === "initial-request"), "rounds_sync_admission_policy");
   requireDelegationV2(topology.kind === "flow" || (policy.maxRecoveries === undefined && policy.maxSyncs === undefined && policy.maxRenewals === undefined), "rounds_flow_policy_required");
   delegationReferenceV2(policy.reference);
   for (const [key, max] of [["maxRounds", 16], ["maxAttempts", 128], ["maxConcurrent", 64]] as const) {
@@ -676,7 +678,7 @@ export function createDelegationRoundsController(input: {
   };
 }
 
-export { preparedRoundsSyncDigest } from "./delegation-rounds-continuation.js";
+export { preparedRoundsSyncDigest, delegationRoundsSyncIdentity } from "./delegation-rounds-continuation.js";
 export type { PreparedRoundsSync } from "./delegation-rounds-continuation.js";
 export type { DelegationRecipientIdentity, ResolvedDelegationRecipient } from "./delegation-rounds-recipient.js";
 
