@@ -75,8 +75,11 @@ export async function validateFlowRoundRelease(p: DelegationRoundsProjection, c:
   requireDelegationV2(c.flowHead === flowRunHead(run.state), "rounds_flow_head_conflict");
   for (const selection of c.seats) {
     if ((p.spec.policy.maxSyncs ?? 0) > 0 || selection.syncKey !== undefined) {
+      const initialRequest = p.spec.policy.syncAdmission === "initial-request" && selection.mode === "invoke" && selection.syncKey === undefined
+        && p.attempts.filter(a => a.seatId === selection.seatId).every(a => a.admission === "not_admitted")
+        && !p.continuations.some(r => r.command.kind === "sync" && r.command.seatId === selection.seatId);
       const exchange = p.continuations.find(r => r.command.operationKey === selection.syncKey);
-      requireDelegationV2(exchange?.command.kind === "sync" && exchange.command.seatId === selection.seatId
+      requireDelegationV2(initialRequest || exchange?.command.kind === "sync" && exchange.command.seatId === selection.seatId
         && exchange.receipt?.acknowledged && exchange.receipt.flowHead === c.flowHead && exchange.afterRound === p.rounds.length, "rounds_current_seat_sync_required");
     }
     validateSelection(p, selection, run);
