@@ -1,5 +1,13 @@
 # Changelog
 
+## [9.5.2](https://github.com/kontourai/flow-agents/compare/v9.5.1...v9.5.2) (2026-10-24)
+
+
+### Fixes
+
+* **delegation:** reject incompatible Flow runtime composition ([#1549](https://github.com/kontourai/flow-agents/issues/1549)) ([c260eb8](https://github.com/kontourai/flow-agents/commit/c260eb8f800a0828bfaea4b8708ba0c130984858))
+* **deps:** align Flow 5.2.2 for shared runtime lock custody ([#1540](https://github.com/kontourai/flow-agents/issues/1540)) ([9eda499](https://github.com/kontourai/flow-agents/commit/9eda499f3ed785693b046893fd0bc50aaf68575e))
+
 ## [9.5.1](https://github.com/kontourai/flow-agents/compare/v9.5.0...v9.5.1) (2026-10-23)
 
 
