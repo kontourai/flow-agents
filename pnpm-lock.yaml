@@ -34,32 +34,32 @@ importers:
         version: 0.28.2
     devDependencies:
       '@kontourai/lookout':
-        specifier: 0.3.2
-        version: 0.3.2(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
+        specifier: 0.8.9
+        version: 0.8.9(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
       '@kontourai/traverse':
-        specifier: 0.19.1
-        version: 0.19.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
+        specifier: 5.0.3
+        version: 5.0.3(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
       '@kontourai/veritas':
-        specifier: 1.11.2
-        version: 1.11.2(@kontourai/survey@8.2.0(typescript@7.0.2))(zod@4.4.3)
+        specifier: 1.11.4
+        version: 1.11.4(@kontourai/survey@8.2.0(typescript@7.0.2))(zod@4.4.3)
       '@types/node':
-        specifier: ^26.1.1
-        version: 26.1.1
+        specifier: ^26.6.5
+        version: 26.6.5
       ajv:
         specifier: 8.20.0
         version: 8.20.0
       gcp-metadata:
-        specifier: 7.0.1
-        version: 7.0.1
+        specifier: 9.2.2
+        version: 9.2.2
       promptfoo:
         specifier: ^0.124.1
-        version: 0.124.1(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.4.3))(@slack/web-api@7.17.0(debug@4.3.4))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.1.1)(ibm-cloud-sdk-core@5.5.0)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10)
+        version: 0.124.1(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.4.3))(@slack/web-api@7.17.0(debug@4.3.4))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.6.5)(ibm-cloud-sdk-core@5.5.0)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
       yaml:
-        specifier: 2.9.0
-        version: 2.9.0
+        specifier: 2.9.1
+        version: 2.9.1
     optionalDependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.116.0
@@ -1132,11 +1132,6 @@ packages:
     resolution: {integrity: sha512-EiAd0KYVnysVy6I1lvW6vHoGTocLmG81HotMDsqJTIcqhMBImFAyojMs1qPqXrBnH/HpjrLI+yBlUSOzKtJwjw==}
     engines: {node: '>=22'}
 
-  '@kontourai/datum@0.3.0':
-    resolution: {integrity: sha512-wBMOZ72grkSwjXzt2soTykG2AUxitc29IsUb193KPcIChlVIvli/gQ0E1VDzMZGVi+AUQjFSl/zupIi66s4O0A==}
-    engines: {node: '>=22'}
-    hasBin: true
-
   '@kontourai/datum@0.8.0':
     resolution: {integrity: sha512-aP12EVopTRNEuYYPCLeNAXFpTcKUpMO46lQoGRDOQ6M/8p27745bZlpSCKAW6IFetu5aHhNmm2Tn/hWlOIe34Q==}
     engines: {node: '>=22'}
@@ -1163,15 +1158,6 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/forage@0.2.0':
-    resolution: {integrity: sha512-bIfTQIVOE3hXspN7O9CWggM3C2R1XfBNsxr4Do89gJ4imgPjNqJ8t4ttsjbf8c4WlnxkpOR/3UDZJeONF5rOPw==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      playwright: '>=1.40.0'
-    peerDependenciesMeta:
-      playwright:
-        optional: true
-
   '@kontourai/forage@0.4.1':
     resolution: {integrity: sha512-pQRUbAihTvhRIPiSCVqu1veWqjcu4aCEajmQ2YnL/JVL3we4SB1nysnzL6JerBovOKtpFuNGp3Ry6QdTJe0jXA==}
     engines: {node: '>=22'}
@@ -1181,8 +1167,17 @@ packages:
       playwright:
         optional: true
 
-  '@kontourai/lookout@0.3.2':
-    resolution: {integrity: sha512-MzzMfXO7TxekjOsDjpF2n6auWe+fSAupyvw0J2s85rxyo8nnZBNPF0RuBQdZ/mOTdhd0jmClUu3gqiVOpExiqA==}
+  '@kontourai/forage@1.0.1':
+    resolution: {integrity: sha512-sC7NQ57GjTk6CGiReCgxfG8EB4zFHkhZzXtTkNaisN2Fn4Ehi44a1YCaA1C8od6nvBxGE9eCcGJnWDnG5lhQ4A==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      playwright: '>=1.40.0'
+    peerDependenciesMeta:
+      playwright:
+        optional: true
+
+  '@kontourai/lookout@0.8.9':
+    resolution: {integrity: sha512-EU+K4rj8YCe8ig7gF2FuLUbOUnDV5sYFwlp1Rft/9a+a8pKjupf1MCcxs7WZgOByi2vFsEp5dyKmxf6UsLZ+UQ==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -1226,12 +1221,13 @@ packages:
       typescript:
         optional: true
 
-  '@kontourai/traverse@0.18.0':
-    resolution: {integrity: sha512-B7E5LfPcVNEOV0U4VDgf94C/sB/3DepJmld+rSYDOdaxB525wBKA8hmnX8Cfh2ML2/u07T+8T6IWy8PLj83wvw==}
+  '@kontourai/traverse@5.0.1':
+    resolution: {integrity: sha512-synKmVoM40sDmYMkbEGGK08Wf3Mooa1a1yStZMu2EVdo+MfavrIrgojPmzR+FKLKwqwsX1jLCIgkYxMO055QbQ==}
     engines: {node: '>=22'}
     peerDependencies:
       '@anthropic-ai/sdk': '>=0.20.0'
       '@google/genai': '>=1.0.0'
+      '@kontourai/relay': '>=0.1.0 <1'
       openai: '>=4.0.0'
       typescript: '>=5.0.0'
     peerDependenciesMeta:
@@ -1239,17 +1235,20 @@ packages:
         optional: true
       '@google/genai':
         optional: true
+      '@kontourai/relay':
+        optional: true
       openai:
         optional: true
       typescript:
         optional: true
 
-  '@kontourai/traverse@0.19.1':
-    resolution: {integrity: sha512-8o6UZAyn5UmFZdkamqQBVTanCzu2cesRVuzmMOb0GGrrKXCIUxFwCLnPOKZpeu3Sxh6w/JuJis/oLfKdbJszCQ==}
+  '@kontourai/traverse@5.0.3':
+    resolution: {integrity: sha512-skWOq4eJcQU4fieK/ck1ndZtzmVsgBL32SlAd58wCFirJtCyWl+ENskKQiJlFicNL/qVVtkYrHhawplgI6bydA==}
     engines: {node: '>=22'}
     peerDependencies:
       '@anthropic-ai/sdk': '>=0.20.0'
       '@google/genai': '>=1.0.0'
+      '@kontourai/relay': '>=0.1.0 <1'
       openai: '>=4.0.0'
       typescript: '>=5.0.0'
     peerDependenciesMeta:
@@ -1257,13 +1256,15 @@ packages:
         optional: true
       '@google/genai':
         optional: true
+      '@kontourai/relay':
+        optional: true
       openai:
         optional: true
       typescript:
         optional: true
 
-  '@kontourai/veritas@1.11.2':
-    resolution: {integrity: sha512-hneXxMe0kpwzzhF6d9Qu2OgBv3GlAbs/9IlIF4r72Y4YvNO2Dgofalz6/ZgL+xIh28emetN4PBdMTY1agzxMTw==}
+  '@kontourai/veritas@1.11.4':
+    resolution: {integrity: sha512-dy784VPkRki4kC2BZXwUVbomrhCAfxow85ty8JuWcPoHcf8G+Kg+mEzG59zZKfXgxlTo9LYp1WQsxt4O8NsuQg==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -1836,8 +1837,8 @@ packages:
   '@types/node@18.19.80':
     resolution: {integrity: sha512-kEWeMwMeIvxYkeg1gTc01awpwLbfMRZXdIhwRcakd/KlK53jmRC26LqcbIt7fnAQTu5GzlnWmzA3H6+l1u6xxQ==}
 
-  '@types/node@26.1.1':
-    resolution: {integrity: sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw==}
+  '@types/node@26.6.5':
+    resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
 
   '@types/pegjs@0.10.6':
     resolution: {integrity: sha512-eLYXDbZWXh2uxf+w8sXS8d6KSoXTswfps6fvCUuVAGN8eRpfe7h9eSRydxiSJvo9Bf+GzifsDOr9TMQlmJdmkw==}
@@ -2775,20 +2776,12 @@ packages:
   function-bind@1.1.2:
     resolution: {integrity: sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==}
 
-  gaxios@7.2.0:
-    resolution: {integrity: sha512-CUVb4wcYe+771XevyH6HtGmXFAGGKkIC3kswAP8Z1JCe0j80JMaTPZH930DWFrvo0atjh18Arc0pEyUCWa5bfg==}
-    engines: {node: '>=18'}
-
   gaxios@8.3.1:
     resolution: {integrity: sha512-h4/R7ay7JFXU5kmAkp/Y4Y4Vmm7m83tD579GUgfQQsRRGQ4TzSedyHla6XgTWohQuVffT3ldN4FF6uCqlRGaEA==}
     engines: {node: '>=22'}
 
-  gcp-metadata@7.0.1:
-    resolution: {integrity: sha512-UcO3kefx6dCcZkgcTGgVOTFb7b1LlQ02hY1omMjjrrBzkajRMCFgYOjs7J71WqnuG1k2b+9ppGL7FsOfhZMQKQ==}
-    engines: {node: '>=18'}
-
-  gcp-metadata@9.2.1:
-    resolution: {integrity: sha512-5/LvxarRKbGCA5LJ+ha2aV1iVm7/aALIW4PzeXnQR5dyXiNMWbeA4UOBnqERInLfH/xSFp0ZREcxodUzxhEw2Q==}
+  gcp-metadata@9.2.2:
+    resolution: {integrity: sha512-hlaHpCBoNCzoUjMnBZq0LbUiYqPAhXFaAgyNwQqwWU44TZIYJK3RD3o2wkNdvPs8nnUXqJjTudnodLJkLMBjow==}
     engines: {node: '>=22'}
 
   get-east-asian-width@1.6.0:
@@ -2822,10 +2815,6 @@ packages:
   google-auth-library@11.3.1:
     resolution: {integrity: sha512-mQS0R2Ev/DKkzuWSYtDeq15uhDeaWuT2qzLYqJ41LmooxVKHmn5ut3pc6dlHY6wfHW/D7FBmOYjAtkjaD1A7qA==}
     engines: {node: '>=22'}
-
-  google-logging-utils@1.1.3:
-    resolution: {integrity: sha512-eAmLkjDjAFCVXg7A1unxHsLf961m6y17QFqXqAXGj/gVkKFrEICfStRfwUlGNfeCEjNRa32JEWOUTlYXPyyKvA==}
-    engines: {node: '>=14'}
 
   google-logging-utils@2.1.0:
     resolution: {integrity: sha512-1R6uiq6XhXW2ZrcGtZpGgVDsYGzSmveVOn8Pp37qe1fbThHZ34e3t3eXj5mVu6PFSVx9fvB1KNVnYgVtq/BRcA==}
@@ -4015,8 +4004,8 @@ packages:
   undici-types@5.26.5:
     resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
 
-  undici-types@8.3.0:
-    resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
+  undici-types@8.9.0:
+    resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
   undici@6.29.1:
     resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
@@ -4147,6 +4136,11 @@ packages:
 
   yaml@2.9.0:
     resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
     engines: {node: '>= 14.6'}
     hasBin: true
 
@@ -5372,96 +5366,96 @@ snapshots:
 
   '@inquirer/ansi@2.0.9': {}
 
-  '@inquirer/checkbox@5.2.1(@types/node@26.1.1)':
+  '@inquirer/checkbox@5.2.1(@types/node@26.6.5)':
     dependencies:
       '@inquirer/ansi': 2.0.7
-      '@inquirer/core': 11.2.1(@types/node@26.1.1)
+      '@inquirer/core': 11.2.1(@types/node@26.6.5)
       '@inquirer/figures': 2.0.7
-      '@inquirer/type': 4.0.7(@types/node@26.1.1)
+      '@inquirer/type': 4.0.7(@types/node@26.6.5)
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
-  '@inquirer/confirm@6.1.1(@types/node@26.1.1)':
+  '@inquirer/confirm@6.1.1(@types/node@26.6.5)':
     dependencies:
-      '@inquirer/core': 11.2.1(@types/node@26.1.1)
-      '@inquirer/type': 4.0.7(@types/node@26.1.1)
+      '@inquirer/core': 11.2.1(@types/node@26.6.5)
+      '@inquirer/type': 4.0.7(@types/node@26.6.5)
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
-  '@inquirer/core@11.2.1(@types/node@26.1.1)':
+  '@inquirer/core@11.2.1(@types/node@26.6.5)':
     dependencies:
       '@inquirer/ansi': 2.0.7
       '@inquirer/figures': 2.0.7
-      '@inquirer/type': 4.0.7(@types/node@26.1.1)
+      '@inquirer/type': 4.0.7(@types/node@26.6.5)
       cli-width: 4.1.0
       fast-wrap-ansi: 0.2.2
       mute-stream: 3.0.0
       signal-exit: 4.1.0
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
-  '@inquirer/core@12.0.4(@types/node@26.1.1)':
+  '@inquirer/core@12.0.4(@types/node@26.6.5)':
     dependencies:
       '@inquirer/ansi': 2.0.9
       '@inquirer/figures': 2.0.9
-      '@inquirer/type': 4.2.0(@types/node@26.1.1)
+      '@inquirer/type': 4.2.0(@types/node@26.6.5)
       cli-width: 4.1.0
       fast-wrap-ansi: 0.2.2
       mute-stream: 3.0.0
       signal-exit: 4.1.0
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
-  '@inquirer/editor@5.2.2(@types/node@26.1.1)':
+  '@inquirer/editor@5.2.2(@types/node@26.6.5)':
     dependencies:
-      '@inquirer/core': 11.2.1(@types/node@26.1.1)
-      '@inquirer/external-editor': 3.0.3(@types/node@26.1.1)
-      '@inquirer/type': 4.0.7(@types/node@26.1.1)
+      '@inquirer/core': 11.2.1(@types/node@26.6.5)
+      '@inquirer/external-editor': 3.0.3(@types/node@26.6.5)
+      '@inquirer/type': 4.0.7(@types/node@26.6.5)
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
-  '@inquirer/external-editor@3.0.3(@types/node@26.1.1)':
+  '@inquirer/external-editor@3.0.3(@types/node@26.6.5)':
     dependencies:
       chardet: 2.1.1
       iconv-lite: 0.7.2
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
   '@inquirer/figures@2.0.7': {}
 
   '@inquirer/figures@2.0.9': {}
 
-  '@inquirer/input@5.1.2(@types/node@26.1.1)':
+  '@inquirer/input@5.1.2(@types/node@26.6.5)':
     dependencies:
-      '@inquirer/core': 11.2.1(@types/node@26.1.1)
-      '@inquirer/type': 4.0.7(@types/node@26.1.1)
+      '@inquirer/core': 11.2.1(@types/node@26.6.5)
+      '@inquirer/type': 4.0.7(@types/node@26.6.5)
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
-  '@inquirer/search@4.2.1(@types/node@26.1.1)':
+  '@inquirer/search@4.2.1(@types/node@26.6.5)':
     dependencies:
-      '@inquirer/core': 11.2.1(@types/node@26.1.1)
+      '@inquirer/core': 11.2.1(@types/node@26.6.5)
       '@inquirer/figures': 2.0.7
-      '@inquirer/type': 4.0.7(@types/node@26.1.1)
+      '@inquirer/type': 4.0.7(@types/node@26.6.5)
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
-  '@inquirer/select@5.2.1(@types/node@26.1.1)':
+  '@inquirer/select@5.2.1(@types/node@26.6.5)':
     dependencies:
       '@inquirer/ansi': 2.0.7
-      '@inquirer/core': 11.2.1(@types/node@26.1.1)
+      '@inquirer/core': 11.2.1(@types/node@26.6.5)
       '@inquirer/figures': 2.0.7
-      '@inquirer/type': 4.0.7(@types/node@26.1.1)
+      '@inquirer/type': 4.0.7(@types/node@26.6.5)
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
-  '@inquirer/type@4.0.7(@types/node@26.1.1)':
+  '@inquirer/type@4.0.7(@types/node@26.6.5)':
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
-  '@inquirer/type@4.2.0(@types/node@26.1.1)':
+  '@inquirer/type@4.2.0(@types/node@26.6.5)':
     optionalDependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
   '@keyv/serialize@1.1.1': {}
 
@@ -5477,8 +5471,6 @@ snapshots:
       - playwright
 
   '@kontourai/conduit@0.7.1': {}
-
-  '@kontourai/datum@0.3.0': {}
 
   '@kontourai/datum@0.8.0(playwright@1.61.0)':
     dependencies:
@@ -5506,22 +5498,23 @@ snapshots:
       - kerberos
       - supports-color
 
-  '@kontourai/forage@0.2.0(playwright@1.61.0)':
-    optionalDependencies:
-      playwright: 1.61.0
-
   '@kontourai/forage@0.4.1(playwright@1.61.0)':
     optionalDependencies:
       playwright: 1.61.0
 
-  '@kontourai/lookout@0.3.2(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)':
+  '@kontourai/forage@1.0.1(playwright@1.61.0)':
+    optionalDependencies:
+      playwright: 1.61.0
+
+  '@kontourai/lookout@0.8.9(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)':
     dependencies:
-      '@kontourai/datum': 0.3.0
-      '@kontourai/forage': 0.4.1(playwright@1.61.0)
-      '@kontourai/traverse': 0.18.0(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
+      '@kontourai/datum': 0.8.0(playwright@1.61.0)
+      '@kontourai/forage': 1.0.1(playwright@1.61.0)
+      '@kontourai/traverse': 5.0.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
     transitivePeerDependencies:
       - '@anthropic-ai/sdk'
       - '@google/genai'
+      - '@kontourai/relay'
       - canvas
       - openai
       - playwright
@@ -5571,33 +5564,35 @@ snapshots:
       - kerberos
       - supports-color
 
-  '@kontourai/traverse@0.18.0(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)':
+  '@kontourai/traverse@5.0.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)':
     dependencies:
-      '@kontourai/forage': 0.2.0(playwright@1.61.0)
+      '@kontourai/forage': 1.0.1(playwright@1.61.0)
       linkedom: 0.18.13
       turndown: 7.2.4
     optionalDependencies:
       '@anthropic-ai/sdk': 0.116.0(zod@4.4.3)
+      '@kontourai/relay': 0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))
       openai: 7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3)
       typescript: 7.0.2
     transitivePeerDependencies:
       - canvas
       - playwright
 
-  '@kontourai/traverse@0.19.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)':
+  '@kontourai/traverse@5.0.3(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/relay@0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3)))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)':
     dependencies:
-      '@kontourai/forage': 0.2.0(playwright@1.61.0)
+      '@kontourai/forage': 1.0.1(playwright@1.61.0)
       linkedom: 0.18.13
       turndown: 7.2.4
     optionalDependencies:
       '@anthropic-ai/sdk': 0.116.0(zod@4.4.3)
+      '@kontourai/relay': 0.7.1(@ai-sdk/provider@3.0.19)(@anthropic-ai/sdk@0.116.0(zod@4.4.3))
       openai: 7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3)
       typescript: 7.0.2
     transitivePeerDependencies:
       - canvas
       - playwright
 
-  '@kontourai/veritas@1.11.2(@kontourai/survey@8.2.0(typescript@7.0.2))(zod@4.4.3)':
+  '@kontourai/veritas@1.11.4(@kontourai/survey@8.2.0(typescript@7.0.2))(zod@4.4.3)':
     dependencies:
       '@kontourai/plumb': 0.2.0
       '@kontourai/surface': 2.17.0
@@ -6086,7 +6081,7 @@ snapshots:
 
   '@slack/logger@4.0.1':
     dependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
     optional: true
 
   '@slack/types@2.21.1':
@@ -6096,7 +6091,7 @@ snapshots:
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/types': 2.21.1
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
       '@types/retry': 0.12.0
       axios: 1.18.0(debug@4.3.4)
       eventemitter3: 5.0.4
@@ -6261,7 +6256,7 @@ snapshots:
 
   '@types/cors@2.8.19':
     dependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
   '@types/debug@4.1.12':
     dependencies:
@@ -6278,9 +6273,9 @@ snapshots:
       undici-types: 5.26.5
     optional: true
 
-  '@types/node@26.1.1':
+  '@types/node@26.6.5':
     dependencies:
-      undici-types: 8.3.0
+      undici-types: 8.9.0
 
   '@types/pegjs@0.10.6':
     optional: true
@@ -6303,7 +6298,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
@@ -6847,7 +6842,7 @@ snapshots:
   engine.io@6.6.11:
     dependencies:
       '@types/cors': 2.8.19
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
       '@types/ws': 8.18.1
       accepts: 1.3.8
       cookie: 0.7.2
@@ -7115,14 +7110,6 @@ snapshots:
 
   function-bind@1.1.2: {}
 
-  gaxios@7.2.0:
-    dependencies:
-      extend: 3.0.2
-      https-proxy-agent: 7.0.6
-      node-fetch: 3.3.2
-    transitivePeerDependencies:
-      - supports-color
-
   gaxios@8.3.1:
     dependencies:
       extend: 3.0.2
@@ -7131,15 +7118,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  gcp-metadata@7.0.1:
-    dependencies:
-      gaxios: 7.2.0
-      google-logging-utils: 1.1.3
-      json-bigint: 1.0.0
-    transitivePeerDependencies:
-      - supports-color
-
-  gcp-metadata@9.2.1:
+  gcp-metadata@9.2.2:
     dependencies:
       gaxios: 8.3.1
       google-logging-utils: 2.1.0
@@ -7202,14 +7181,12 @@ snapshots:
       base64-js: 1.5.1
       ecdsa-sig-formatter: 1.0.11
       gaxios: 8.3.1
-      gcp-metadata: 9.2.1
+      gcp-metadata: 9.2.2
       google-logging-utils: 2.1.0
       jws: 4.0.1
     transitivePeerDependencies:
       - supports-color
     optional: true
-
-  google-logging-utils@1.1.3: {}
 
   google-logging-utils@2.1.0: {}
 
@@ -7673,22 +7650,22 @@ snapshots:
       whatwg-url: 14.2.0
     optional: true
 
-  mongodb@7.7.0(@aws-sdk/credential-providers@3.1152.0)(gcp-metadata@9.2.1)(socks@2.8.10):
+  mongodb@7.7.0(@aws-sdk/credential-providers@3.1152.0)(gcp-metadata@9.2.2)(socks@2.8.10):
     dependencies:
       '@mongodb-js/saslprep': 1.6.1
       bson: 7.3.3
       mongodb-connection-string-url: 7.0.2
     optionalDependencies:
       '@aws-sdk/credential-providers': 3.1152.0
-      gcp-metadata: 9.2.1
+      gcp-metadata: 9.2.2
       socks: 2.8.10
     optional: true
 
-  mongoose@9.11.2(@aws-sdk/credential-providers@3.1152.0)(gcp-metadata@9.2.1)(socks@2.8.10):
+  mongoose@9.11.2(@aws-sdk/credential-providers@3.1152.0)(gcp-metadata@9.2.2)(socks@2.8.10):
     dependencies:
       '@standard-schema/spec': 1.1.0
       kareem: 3.4.1
-      mongodb: 7.7.0(@aws-sdk/credential-providers@3.1152.0)(gcp-metadata@9.2.1)(socks@2.8.10)
+      mongodb: 7.7.0(@aws-sdk/credential-providers@3.1152.0)(gcp-metadata@9.2.2)(socks@2.8.10)
       mpath: 0.9.0
       mquery: 6.0.0
       ms: 2.1.3
@@ -7718,14 +7695,14 @@ snapshots:
 
   mute-stream@3.0.0: {}
 
-  natural@8.1.1(@aws-sdk/credential-providers@3.1152.0)(@opentelemetry/api@1.9.1)(gcp-metadata@9.2.1)(socks@2.8.10):
+  natural@8.1.1(@aws-sdk/credential-providers@3.1152.0)(@opentelemetry/api@1.9.1)(gcp-metadata@9.2.2)(socks@2.8.10):
     dependencies:
       afinn-165: 2.0.2
       afinn-165-financialmarketnews: 3.0.0
       apparatus: 0.0.10
       dotenv: 17.4.2
       memjs: 1.3.2
-      mongoose: 9.11.2(@aws-sdk/credential-providers@3.1152.0)(gcp-metadata@9.2.1)(socks@2.8.10)
+      mongoose: 9.11.2(@aws-sdk/credential-providers@3.1152.0)(gcp-metadata@9.2.2)(socks@2.8.10)
       pg: 8.21.0
       redis: 5.12.1(@opentelemetry/api@1.9.1)
       safe-stable-stringify: 2.5.0
@@ -8080,18 +8057,18 @@ snapshots:
 
   promise-limit@2.7.0: {}
 
-  promptfoo@0.124.1(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.4.3))(@slack/web-api@7.17.0(debug@4.3.4))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.1.1)(ibm-cloud-sdk-core@5.5.0)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10):
+  promptfoo@0.124.1(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.4.3))(@slack/web-api@7.17.0(debug@4.3.4))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.6.5)(ibm-cloud-sdk-core@5.5.0)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10):
     dependencies:
       '@anthropic-ai/sdk': 0.128.0(zod@4.4.3)
       '@apidevtools/json-schema-ref-parser': 16.0.5(@types/json-schema@7.0.15)
       '@hono/node-server': 2.1.1(hono@4.13.13)
-      '@inquirer/checkbox': 5.2.1(@types/node@26.1.1)
-      '@inquirer/confirm': 6.1.1(@types/node@26.1.1)
-      '@inquirer/core': 12.0.4(@types/node@26.1.1)
-      '@inquirer/editor': 5.2.2(@types/node@26.1.1)
-      '@inquirer/input': 5.1.2(@types/node@26.1.1)
-      '@inquirer/search': 4.2.1(@types/node@26.1.1)
-      '@inquirer/select': 5.2.1(@types/node@26.1.1)
+      '@inquirer/checkbox': 5.2.1(@types/node@26.6.5)
+      '@inquirer/confirm': 6.1.1(@types/node@26.6.5)
+      '@inquirer/core': 12.0.4(@types/node@26.6.5)
+      '@inquirer/editor': 5.2.2(@types/node@26.6.5)
+      '@inquirer/input': 5.1.2(@types/node@26.6.5)
+      '@inquirer/search': 4.2.1(@types/node@26.6.5)
+      '@inquirer/select': 5.2.1(@types/node@26.6.5)
       '@libsql/client': 0.18.0
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/core': 2.11.0(@opentelemetry/api@1.9.1)
@@ -8123,7 +8100,7 @@ snapshots:
       fast-safe-stringify: 2.1.1
       fast-xml-parser: 5.9.0
       fastest-levenshtein: 1.0.16
-      gcp-metadata: 9.2.1
+      gcp-metadata: 9.2.2
       glob: 13.0.6
       http-z: 8.1.1
       istextorbinary: 9.5.0
@@ -8185,14 +8162,14 @@ snapshots:
       hono: 4.13.13
       ibm-cloud-sdk-core: 5.5.0
       jks-js: 1.1.7
-      natural: 8.1.1(@aws-sdk/credential-providers@3.1152.0)(@opentelemetry/api@1.9.1)(gcp-metadata@9.2.1)(socks@2.8.10)
+      natural: 8.1.1(@aws-sdk/credential-providers@3.1152.0)(@opentelemetry/api@1.9.1)(gcp-metadata@9.2.2)(socks@2.8.10)
       node-sql-parser: 5.4.0
       pdf-parse: 2.4.5
       pem: 1.14.8
       playwright: 1.61.0
       playwright-extra: 4.3.6(playwright-core@1.61.0)(playwright@1.61.0)
       read-excel-file: 9.3.12
-      sharp: 0.35.5(@types/node@26.1.1)
+      sharp: 0.35.5(@types/node@26.6.5)
     transitivePeerDependencies:
       - '@aws-sdk/client-rds-data'
       - '@aws-sdk/credential-provider-node'
@@ -8252,7 +8229,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.1
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
       long: 5.3.2
     optional: true
 
@@ -8475,7 +8452,7 @@ snapshots:
       '@img/sharp-win32-x64': 0.34.5
     optional: true
 
-  sharp@0.35.5(@types/node@26.1.1):
+  sharp@0.35.5(@types/node@26.6.5):
     dependencies:
       '@img/colour': 1.1.0
       detect-libc: 2.1.2
@@ -8506,7 +8483,7 @@ snapshots:
       '@img/sharp-win32-arm64': 0.35.5
       '@img/sharp-win32-ia32': 0.35.5
       '@img/sharp-win32-x64': 0.35.5
-      '@types/node': 26.1.1
+      '@types/node': 26.6.5
     optional: true
 
   shebang-command@2.0.0:
@@ -8776,7 +8753,7 @@ snapshots:
   undici-types@5.26.5:
     optional: true
 
-  undici-types@8.3.0: {}
+  undici-types@8.9.0: {}
 
   undici@6.29.1: {}
 
@@ -8882,6 +8859,8 @@ snapshots:
     optional: true
 
   yaml@2.9.0: {}
+
+  yaml@2.9.1: {}
 
   yoctocolors@2.1.2: {}
 
