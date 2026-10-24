@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { findPackageJSON } from "node:module";
-import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { loadRun, withRunMutationLock } from "@kontourai/flow";
 import { assertDelegationFlowRuntime } from "@kontourai/flow-agents/delegation-flow-runtime";
@@ -36,15 +36,26 @@ test("public runtime assertion refuses absent and non-function witnesses with it
 test("a genuine second module copy at the same Flow version is not runtime-compatible", async t => {
   const root = makeFixtureDir("flow-runtime-copy-");
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const manifestPath = fs.realpathSync(findPackageJSON("@kontourai/flow", import.meta.url));
+  const flowEntry = fs.realpathSync(fileURLToPath(import.meta.resolve("@kontourai/flow")));
+  let original = path.dirname(flowEntry);
+  while (!fs.existsSync(path.join(original, "package.json"))) {
+    const parent = path.dirname(original);
+    assert.notEqual(parent, original, "installed Flow manifest must be reachable");
+    original = parent;
+  }
+  const manifestPath = path.join(original, "package.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  const original = path.dirname(manifestPath);
+  assert.equal(manifest.name, "@kontourai/flow");
+  const fromFlow = createRequire(flowEntry);
   const copy = path.join(root, "node_modules", "@kontourai", "flow");
   fs.mkdirSync(copy, { recursive: true });
   fs.copyFileSync(manifestPath, path.join(copy, "package.json"));
   fs.cpSync(path.join(original, "dist"), path.join(copy, "dist"), { recursive: true });
   for (const name of Object.keys(manifest.dependencies ?? {})) {
-    const dependency = path.dirname(fs.realpathSync(findPackageJSON(name, pathToFileURL(manifestPath))));
+    const dependency = fromFlow.resolve.paths(name)
+      .map(directory => path.join(directory, name))
+      .find(directory => fs.existsSync(path.join(directory, "package.json")));
+    assert.ok(dependency, `installed Flow dependency ${name} must be reachable`);
     const link = path.join(copy, "node_modules", name);
     fs.mkdirSync(path.dirname(link), { recursive: true });
     fs.symlinkSync(dependency, link, process.platform === "win32" ? "junction" : "dir");
