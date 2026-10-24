@@ -819,6 +819,24 @@ previousAuthority, root, envelopes, hostReceipt })` requires:
   current host execution checks for every successor envelope and final receipt/
   expiry rechecks before commit.
 
+Renewal command version `3.0` requires identical envelope execution authority.
+Version `3.1` explicitly permits monotone narrowing of each envelope's
+`execution_authority`: tool/effect/resource lists may only lose entries, writer
+posture may become report-only, approval may become required, and escalation may
+become denied. Comparison is against the immediately preceding epoch, not the
+root ceiling; a removed permission cannot return through a later renewal.
+All other frozen fields and the same authenticated receipt, current execution,
+ancestry, revision and expiry checks still apply. Grant/delegation ceilings and
+required capabilities do not change. Version `3.0` remains usable after narrowing
+only when it preserves that narrowed authority exactly.
+
+The ledger format remains `3.0` and retains the explicit command version in each
+epoch proof. Older readers reject a `3.1` renewal proof; upgrade readers before
+writing it. Narrowing does not terminate already admitted work or prove native
+Session/tool enforcement. Hosts must enforce the successor at actual effect
+admission, and retain physical recipient identity independently of renewed source
+or runtime receipts. Group adoption and a fresh exact ACK remain separate steps.
+
 The service transaction appends the epoch and keeps every invocation, allocation,
 known cumulative usage, unknown hold and terminal state unchanged. New usage is
 charged against that cumulative state under the same immutable ceilings. Old
