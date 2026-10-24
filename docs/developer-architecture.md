@@ -6,7 +6,7 @@ title: Developer Architecture
 
 This guide is the local starting point for Flow Agents maintainers who need to understand how this repository coordinates with Flow, Surface, Veritas, and Builder Kit. It describes the architecture from the Flow Agents side only; product-specific runtime details remain in their owning products.
 
-**Package identity:** This source guide accompanies `@kontourai/flow-agents` version `9.5.2`, as declared in [`package.json`](../package.json). <!-- x-release-please-version -->
+**Package identity:** This source guide accompanies `@kontourai/flow-agents` version `9.6.0`, as declared in [`package.json`](../package.json). <!-- x-release-please-version -->
 
 Release Please updates this binding alongside package metadata through the
 `extra-files` entry in [`release-please-config.json`](../release-please-config.json).

@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.6.0](https://github.com/kontourai/flow-agents/compare/v9.5.2...v9.6.0) (2026-10-24)
+
+
+### Features
+
+* **delegation:** declare initial request sync admission ([#1551](https://github.com/kontourai/flow-agents/issues/1551)) ([39f5590](https://github.com/kontourai/flow-agents/commit/39f5590a19e705882743f577b1f85dce43b6f6b1))
+
 ## [9.5.2](https://github.com/kontourai/flow-agents/compare/v9.5.1...v9.5.2) (2026-10-24)
 
 
