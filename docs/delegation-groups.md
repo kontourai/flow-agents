@@ -25,6 +25,7 @@ describe the compatibility API; later sections describe the additive v2 source A
 | `@kontourai/flow-agents/delegation-authority-local-file` | Private host-owned authority storage |
 | `@kontourai/flow-agents/delegation-execution` | Runtime receipt binding and authority-bound invocation |
 | `@kontourai/flow-agents/delegation-flow-execution` | Flow claim/execution composition |
+| `@kontourai/flow-agents/delegation-flow-runtime` | Host-to-delegation Flow runtime reference compatibility check |
 | `@kontourai/flow-agents/delegation-context-sync` | Bounded no-tools acknowledgement and receipt recovery |
 | `@kontourai/flow-agents/delegation-group-v2` | Durable v2 group controller and projection |
 | `@kontourai/flow-agents/delegation-group-v2-local-file` | Private host-owned group journal |
@@ -32,6 +33,28 @@ describe the compatibility API; later sections describe the additive v2 source A
 
 The same APIs are exported at the package root. Package version and publication are separate from
 these source exports. Reference identities are opaque; none grants filesystem access.
+
+## Embedding a Flow runtime
+
+A host that also imports `@kontourai/flow` calls the synchronous
+`assertDelegationFlowRuntime({ loadRun, withRunMutationLock })` from
+`@kontourai/flow-agents/delegation-flow-runtime` before Flow-bound retention,
+issuance, claims or continuation effects. Supply the host's actual static public
+Flow imports, never request fields or wrappers. Both references must match the
+private Flow bindings used by delegation rounds and the multi-cursor scheduler.
+A mismatch throws `DelegationAdmissionError` with code
+`delegation_flow_runtime_mismatch`; no supplied function is invoked. There is no
+fallback, version/path inference, or transferable success token.
+
+Separate module copies can have different process-local lock registries even at
+the same version. This check rejects those mismatched references. Normal named
+re-exports and deduplicated bundles preserve reference identity; wrappers,
+independent chunks, HMR replacements or other realms can conservatively refuse.
+The assertion checks this trusted-host composition, not a hostile host or every
+possible bundler transformation. It is not universal kernel attestation,
+authority, a claim or provider qualification. Existing currency, budget and final
+claim fences remain required. An embedding must separately prove the check is
+used before effects and exercise its final installed/bundled Flow path.
 
 ## V1 identity and authority
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
-import { loadRun, definitionIdentity, flowRunHead, flowTransitionRef, evaluateRun, authorizeRetry } from "@kontourai/flow";
+import { loadRun, definitionIdentity, flowRunHead, flowTransitionRef, evaluateRun, authorizeRetry } from "./delegation-flow-bindings.js";
 import { canonicalJson } from "@kontourai/relay";
 import { delegationRecordV2, delegationIdV2, delegationIntegerV2, delegationDigestV2, requireDelegationV2, delegationReferenceV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService } from "./delegation-authority-service.js";

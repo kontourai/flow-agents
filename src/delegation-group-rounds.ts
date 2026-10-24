@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson, type ModelInvocationRequest } from "@kontourai/relay";
-import { type FlowDefinitionIdentity, type FlowStepClaimActor, type FlowDurableStepClaim, type FlowRetryAuthorizationRequest, validateRetryAuthorizationRequest } from "@kontourai/flow";
+import { type FlowDefinitionIdentity, type FlowStepClaimActor, type FlowDurableStepClaim, type FlowRetryAuthorizationRequest, validateRetryAuthorizationRequest } from "./delegation-flow-bindings.js";
 import { runDelegationFlowRound, validateFlowRoundRelease, validateFlowRoundCreation } from "./delegation-rounds-flow.js";
 import { finalizeRoundsSync, type PreparedRoundsSync, preparedRoundsSyncDigest, validatePreparedRoundsSync, runRoundsContinuation, validateRoundsContinuation } from "./delegation-rounds-continuation.js";
 import { authorityLineageReference, type AuthorityEpochV3 } from "./delegation-authority-service-v3.js";

@@ -16,7 +16,7 @@ import {
   type FlowDefinitionIdentity,
   type FlowStepClaimActor,
   type GateOutcome,
-} from "@kontourai/flow";
+} from "./delegation-flow-bindings.js";
 
 export type FlowScheduleEvent =
   | { kind: "recovered"; claimId: string; stepId: string }

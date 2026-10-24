@@ -153,6 +153,18 @@ retains refusal of stale pins and mismatched installed package versions. The
 integrities. This package alignment does not establish that a consumer loads
 one shared Flow module instance.
 
+Hosts that also call Flow import `assertDelegationFlowRuntime` from
+`@kontourai/flow-agents/delegation-flow-runtime` (also exported at the package
+root). Before retaining or issuing authority, claiming work or launching effects,
+they pass their actual `loadRun` and `withRunMutationLock` imports to the
+assertion. It compares both function references with the bindings used by Flow
+Agents in the same JavaScript realm and refuses a mismatch with
+`delegation_flow_runtime_mismatch`, without calling either supplied function.
+Separate module copies can have separate mutation-lock token registries even
+when their version strings match. Passing this check grants no execution
+authority; dependency alignment, publication and the consuming host's installed
+module composition still require their own verification.
+
 Retained-tariff accounting is opt-in through the AccountingV1 entrypoints and
 `accountingProtocol: "retained-tariff-v1"` on rounds hosts. It preserves integer
 micros and their tariff basis; default entrypoints retain their existing

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { canonicalJson, type ModelInvocationRequest } from "@kontourai/relay";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
-import { definitionIdentity, loadRun, type FlowStepClaimActor } from "@kontourai/flow";
+import { definitionIdentity, loadRun, type FlowStepClaimActor } from "./delegation-flow-bindings.js";
 import {
   copyDelegationJsonV2, delegationDigestV2, delegationIdV2, delegationIntegerV2, delegationFlowDefinitionIdentityV2,
   delegationRecordV2, delegationReferenceV2, requireDelegationV2, type DelegationReferenceV2,
