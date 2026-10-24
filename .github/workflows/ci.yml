@@ -207,7 +207,7 @@ jobs:
 
       - name: Upload CI evidence artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flow-agents-ci-source-and-static
           path: evals/results/ci-baseline/source-and-static/
@@ -399,7 +399,7 @@ jobs:
 
       - name: Upload CI evidence artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flow-agents-ci-workflow-contracts
           path: evals/results/ci-baseline/workflow-contracts/
@@ -684,7 +684,7 @@ jobs:
 
       - name: Upload CI evidence artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flow-agents-ci-runtime-and-kit
           path: evals/results/ci-baseline/runtime-and-kit/
@@ -867,7 +867,7 @@ jobs:
 
       - name: Upload CI evidence artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flow-agents-ci-integration-coverage
           path: evals/results/ci-baseline/integration-coverage/
@@ -935,7 +935,7 @@ jobs:
 
       - name: Upload CI evidence artifacts
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flow-agents-ci-usage-feedback
           path: evals/results/ci-baseline/usage-feedback/
