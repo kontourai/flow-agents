@@ -143,6 +143,16 @@ controller explicitly adopts renewed authority. These additive modules preserve
 existing v2 entrypoints. The rounds controller composes
 Flow-owned scheduling rather than maintaining another ready-frontier model.
 
+The package and privileged lifecycle coordinator both pin Flow 5.2.2. The
+coordinator's separate staged closure retains its complete npm lockfile and
+whole-closure digest; changing the package dependency alone cannot authorize a
+new reducer. A pin migration verifies the published release commit and reducer
+identity, updates the staged closure and exact admission check together, and
+retains refusal of stale pins and mismatched installed package versions. The
+5.2.2 migration preserves the reducer's 1.3.8 identity and existing dependency
+integrities. This package alignment does not establish that a consumer loads
+one shared Flow module instance.
+
 Retained-tariff accounting is opt-in through the AccountingV1 entrypoints and
 `accountingProtocol: "retained-tariff-v1"` on rounds hosts. It preserves integer
 micros and their tariff basis; default entrypoints retain their existing
