@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.7.0](https://github.com/kontourai/flow-agents/compare/v9.6.0...v9.7.0) (2026-10-25)
+
+
+### Features
+
+* **delegation:** permit authenticated monotone authority renewal ([#1553](https://github.com/kontourai/flow-agents/issues/1553)) ([0e1edf3](https://github.com/kontourai/flow-agents/commit/0e1edf30431c7485213014502843e922e680bc7a))
+
 ## [9.6.0](https://github.com/kontourai/flow-agents/compare/v9.5.2...v9.6.0) (2026-10-24)
 
 
