@@ -2,14 +2,14 @@ import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { canonicalJson } from "@kontourai/relay";
 import { createDelegationAuthorityService, validateDelegationAuthorityLedger, type DelegationAuthorityHost, type DelegationAuthorityLedger, type DelegationAuthorityStore, type DelegationInvocation } from "./delegation-authority-service.js";
-import { validateRootAuthorityV2, copyDelegationJsonV2, delegationRecordV2, delegationIdV2, delegationIntegerV2, delegationReferenceV2, requireDelegationV2, type RootAuthorityV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
+import { assertAuthorityNarrowingV2, validateRootAuthorityV2, copyDelegationJsonV2, delegationRecordV2, delegationIdV2, delegationIntegerV2, delegationReferenceV2, requireDelegationV2, type RootAuthorityV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
 import { validateDelegationEnvelopeV2, rootAuthorityReferenceV2, type DelegationEnvelopeV2 } from "./delegation-envelope-v2.js";
 
 export const AUTHORITY_V3_MAX_BYTES = 32 * 1024 * 1024;
 export const AUTHORITY_V3_EPOCH_BYTES = 1024 * 1024;
 export const AUTHORITY_V3_MAX_RENEWALS = 8;
 export type AuthorityRenewalCommandV3 = {
-  schemaVersion: "3.0"; authorityId: string; operationKey: string; expectedRevision: number;
+  schemaVersion: "3.0" | "3.1"; authorityId: string; operationKey: string; expectedRevision: number;
   previousAuthority: ReturnType<typeof rootAuthorityReferenceV2>;
   root: RootAuthorityV2; envelopes: DelegationEnvelopeV2[]; hostReceipt: DelegationReferenceV2;
 };
@@ -37,13 +37,14 @@ function stableRoot(root: RootAuthorityV2): unknown {
   const { source_origin, execution_grants: _grants, authority_epoch: _epoch, ...stable } = root;
   return { ...stable, source_origin: { repository_id: source_origin.repository_id, worktree_id: source_origin.worktree_id } };
 }
-function stableEnvelope(envelope: DelegationEnvelopeV2): unknown {
+function stableEnvelope(envelope: DelegationEnvelopeV2, allowNarrowing: boolean): unknown {
   const { root_authority_ref: _root, execution_binding: _binding, parent: _parent, ...stable } = envelope;
-  return { ...stable, parentId: envelope.parent?.id ?? null };
+  const { execution_authority, ...withoutAuthority } = stable;
+  return { ...(allowNarrowing ? withoutAuthority : { ...withoutAuthority, execution_authority }), parentId: envelope.parent?.id ?? null };
 }
 function renewal(value: unknown): AuthorityRenewalCommandV3 {
   const r = delegationRecordV2(copyDelegationJsonV2(value), ["schemaVersion", "authorityId", "operationKey", "expectedRevision", "previousAuthority", "root", "envelopes", "hostReceipt"]);
-  requireDelegationV2(r.schemaVersion === "3.0", "renewal_schema"); delegationIdV2(r.authorityId); delegationIdV2(r.operationKey); delegationIntegerV2(r.expectedRevision);
+  requireDelegationV2((r.schemaVersion === "3.0" || r.schemaVersion === "3.1"), "renewal_schema"); delegationIdV2(r.authorityId); delegationIdV2(r.operationKey); delegationIntegerV2(r.expectedRevision);
   r.root = validateRootAuthorityV2(r.root); delegationReferenceV2(r.hostReceipt);
   requireDelegationV2(Array.isArray(r.envelopes) && r.envelopes.length > 0, "renewal_envelopes_required");
   r.envelopes = r.envelopes.map(validateDelegationEnvelopeV2); return r as AuthorityRenewalCommandV3;
@@ -54,7 +55,12 @@ function validateTransition(previous: AuthorityEpochV3, next: AuthorityEpochV3) 
     && same(c.previousAuthority, rootAuthorityReferenceV2(previous.root)) && c.authorityId === previous.root.authority_id, "renewal_root_lineage_conflict");
   requireDelegationV2(next.envelopes.length === previous.envelopes.length
     && same(previous.root.execution_grants.map(g => [g.grant_id, g.authority_ceiling, g.flow_binding, g.source.repository_id, g.source.execution_worktree_id, g.runtime.required_capabilities]), next.root.execution_grants.map(g => [g.grant_id, g.authority_ceiling, g.flow_binding, g.source.repository_id, g.source.execution_worktree_id, g.runtime.required_capabilities])), "renewal_membership_or_authority_change");
-  for (const [i, envelope] of next.envelopes.entries()) requireDelegationV2(same(stableEnvelope(previous.envelopes[i]), stableEnvelope(envelope)), "renewal_envelope_lineage_conflict");
+  const allowNarrowing = c.schemaVersion === "3.1";
+  for (const [i, envelope] of next.envelopes.entries()) {
+    const prior = previous.envelopes[i];
+    requireDelegationV2(same(stableEnvelope(prior, allowNarrowing), stableEnvelope(envelope, allowNarrowing)), "renewal_envelope_lineage_conflict");
+    if (allowNarrowing) assertAuthorityNarrowingV2(envelope.execution_authority, prior.execution_authority);
+  }
   requireDelegationV2(next.renewal!.requestDigest === renewalDigest({ ...c, root: next.root, envelopes: next.envelopes })
     && same(c.hostReceipt, next.renewal!.authenticatedReceipt), "renewal_receipt_conflict");
 }

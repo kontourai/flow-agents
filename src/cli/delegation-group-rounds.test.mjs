@@ -26,7 +26,7 @@ const ref = id => ({ id, domain: "fixture-receipt", digest: `sha256:${createHash
 const allocation = { inputTokens: 5, outputTokens: 5, costMicros: 10 };
 function authorityFixture(flow, options = {}) {
   const steps = options.managedDefinition?.steps.map(s => s.id) ?? ["first", "second"];
-  const ceiling = { allowed_tools: [], allowed_effects: options.contextSync ? ["read", "context-sync"] : ["read"], readable_resources: [], mutable_resources: [], posture: "report-only", approval: "requires_approval", escalation: "deny" };
+  const ceiling = { allowed_tools: options.allowedTools ?? [], allowed_effects: options.contextSync ? ["read", "context-sync"] : ["read"], readable_resources: [], mutable_resources: [], posture: "report-only", approval: "requires_approval", escalation: "deny" };
   const budget = { remaining_depth: 3, max_total_children: 4, max_total_envelopes: steps.length > 2 ? 16 : 8, max_concurrent_children: 2,
     max_runtime_ms: 60000, max_input_tokens: 1000, max_output_tokens: 1000, max_cost_micros: 1000, max_attempts: options.attempts ?? 6, expires_at: options.rootExpiry ?? EXPIRY };
   const grants = steps.map(step => ({ grant_id: `grant-${step}`,
@@ -1010,6 +1010,47 @@ test("R3: public v3 renewal and group adoption preserve lineage spend unknown ho
   await assert.rejects(f.service.renew(cancelled), /renewal_admission_conflict/);
 });
 
+
+test("R3.1: authenticated tool removal persists without refund and cannot be re-expanded", async t => {
+  const f = await fixture(t, { v3: true, allowedTools: ["input-form"] });
+  await f.service.reserveInvocation("root", "child", "narrowing-unknown", allocation);
+  const before = await f.service.inspect("root");
+  let command = await successor(f, "remove-input-tool");
+  command.envelopes.find(e => e.envelope_id === "child").execution_authority.allowed_tools = [];
+  command = await approveHostRenewal(f, command);
+  await assert.rejects(f.service.renew(command), /renewal_envelope_lineage_conflict/);
+  assert.deepEqual(await f.service.inspect("root"), before);
+  command.schemaVersion = "3.1";
+  await assert.rejects(f.service.renew(command), /renewal_host_receipt_unconfirmed/);
+  for (const [field, change] of [
+    ["execution-id", e => { e.execution_id = "replacement-execution"; }],
+    ["allocation", e => { e.budget.max_input_tokens--; }],
+  ]) {
+    let changed = structuredClone(command);
+    change(changed.envelopes.find(e => e.envelope_id === "child"));
+    changed = await approveHostRenewal(f, changed, field);
+    await assert.rejects(f.service.renew(changed), /renewal_envelope_lineage_conflict/);
+    assert.deepEqual(await f.service.inspect("root"), before);
+  }
+  command = await approveHostRenewal(f, command, "narrowing");
+  assert.equal((await f.service.renew(command)).replayed, false);
+  const reopened = f.openAuthority(), narrowed = await reopened.inspect("root");
+  assert.deepEqual(narrowed.envelopes.find(e => e.envelope_id === "child").execution_authority.allowed_tools, []);
+  assert.deepEqual(narrowed.invocations, before.invocations);
+  assert.deepEqual(narrowed.origins, before.origins);
+  assert.deepEqual(narrowed.epochs[0], before.epochs[0]);
+  assert.deepEqual(narrowed.root.budget, before.root.budget);
+  assert.equal((await reopened.renew(command)).replayed, true);
+  let widening = await successor(f, "restore-input-tool");
+  widening.schemaVersion = "3.1";
+  widening.envelopes.find(e => e.envelope_id === "child").execution_authority.allowed_tools = ["input-form"];
+  widening = await approveHostRenewal(f, widening);
+  await assert.rejects(reopened.renew(widening), /authority_widening:allowed_tools/);
+  assert.deepEqual(await reopened.inspect("root"), narrowed);
+  let exact = await approveHostRenewal(f, await successor(f, "legacy-after-narrowing"));
+  await reopened.renew(exact);
+  assert.deepEqual((await reopened.inspect("root")).envelopes.find(e => e.envelope_id === "child").execution_authority.allowed_tools, []);
+});
 
 test("R3: session drift during request preparation cannot reach the paid runtime", async t => {
   const f = await fixture(t, { managedDefinition: managedDefinition("parallel"), contextSync: true, attempts: 12 });
