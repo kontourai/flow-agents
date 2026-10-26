@@ -1009,3 +1009,21 @@ intent replay and current authorization throughout its lease. Controlled tests
 exercise original-epoch recovery after renewal/cancellation/expiry for either or
 both held ledgers. They do not qualify a specific host's signatures, live provider
 billing, or Station's downstream recovery serving.
+
+### Checked continuation mutation admission
+
+Flow reappraisal and retry authorization require both host seams:
+`withContinuationMutation` serializes the host operation, and
+`acquireContinuationMutation` returns a Flow `FlowRunMutationLease` for the exact
+spec and command. The lease authenticates current source/operator authority and
+excludes relevant changes until release. It may borrow custody already held by
+the outer host operation; neither seam may acquire Flow's native ticket or
+re-enter a host lock it already holds.
+
+Flow Agents calls published Flow 5.3.0 `evaluateRunChecked` with the command's
+original expected head, or `authorizeRetryChecked` with the existing exact retry
+request. Flow acquires the host lease before its native lock and checks it through
+publication. An absent or denied lease refuses mutation. A head change while
+host admission waits refuses the original operation instead of evaluating the
+new head. Existing exact observational replays retain their read-only behavior.
+These operations grant no provider execution or additional capacity by themselves.

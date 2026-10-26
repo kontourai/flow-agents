@@ -11,7 +11,7 @@ import { setImmediate } from "node:timers/promises";
 import { FileAuthorizationLedger, AuthorizationPersistenceError } from "@kontourai/dispatch";
 import { canonicalJson } from "@kontourai/relay";
 import { delegationAccountingDollarsV1 } from "../../build/src/delegation-dispatch.js";
-import { definitionIdentity, startRun, loadRun, claimableMultiCursorSteps, claimReadyStep, evaluateClaimedStep, reopenMultiCursorStep, attachEvidence, flowRunHead, flowTransitionRef, authorizeRetry, releaseStepClaim } from "@kontourai/flow";
+import { definitionIdentity, startRun, loadRun, claimableMultiCursorSteps, claimReadyStep, evaluateClaimedStep, reopenMultiCursorStep, attachEvidence, flowRunHead, flowTransitionRef, authorizeRetry, releaseStepClaim, pauseRun, resumeRun } from "@kontourai/flow";
 import { createDelegationAuthorityServiceV3 } from "@kontourai/flow-agents/delegation-authority-service-v3";
 import { createLocalFileDelegationAuthorityStoreV3 } from "@kontourai/flow-agents/delegation-authority-local-file-v3";
 import { preparedRoundsSyncDigest } from "@kontourai/flow-agents/delegation-group-rounds";
@@ -217,6 +217,15 @@ async function fixture(t, options = {}) {
       } }),
     },
     flow: {
+      async acquireContinuationMutation() {
+        if (state.denyContinuationLease) throw new Error("controlled continuation lease refusal");
+        await state.onContinuationLease?.();
+        let active = true;
+        return {
+          assertCurrent() { assert.equal(active, true); assert.equal(state.allowed, true); },
+          release() { active = false; },
+        };
+      },
       async withContinuationMutation(_spec, _command, body) {
         // This fixture owns its unique run; serialize its explicitly routed recovery mutations.
         const prior = state.mutation ?? Promise.resolve(), result = prior.then(body);
@@ -635,7 +644,7 @@ test("Flow rounds: omitted legacy gate attempt supports route-back with fresh cl
 });
 
 
-test("Flow rounds: exhausted route requires public authorizeRetry before another paid claim", async t => {
+async function exhaustedRoundsFixture(t) {
   const f = await fixture(t, { managedDefinition: managedDefinition("route"), maxRounds: 8, attempts: 12, maxRecoveries: 4 });
   const a = (await f.controller.release(await flowRelease(f, "first", [invoke("seat-0")]))).projection.attempts.at(-1);
   await f.terminal(a.invocationId);
@@ -647,6 +656,12 @@ test("Flow rounds: exhausted route requires public authorizeRetry before another
   await f.controller.release(await flowRelease(f, "route-exhausts", [invoke("seat-1", b.invocationId, flowTransitionRef(route))]));
   run = await loadRun(f.spec.topology.runId, f.cwd); const claimedBlock = run.state.transitions.at(-1);
   assert.equal(claimedBlock.status, "blocked"); assert.equal(claimedBlock.type, undefined);
+  return { f, run, claimedBlock, next };
+}
+
+test("Flow rounds: exhausted route requires public authorizeRetry before another paid claim", async t => {
+  const { f, claimedBlock, next } = await exhaustedRoundsFixture(t);
+  let run = await loadRun(f.spec.topology.runId, f.cwd), route;
   const directAt = new Date().toISOString();
   await assert.rejects(authorizeRetry(f.spec.topology.runId, { cwd: f.cwd, request: {
     reason: "Direct claimed exhaustion probe", target_step: "first", blocked_transition_ref: flowTransitionRef(claimedBlock), expected_run_head: flowRunHead(run.state),
@@ -1449,3 +1464,50 @@ for (const partial of ["dispatch-held", "authority-held", "both-held", "overrun-
     assert.deepEqual({ calls: f.state.calls, reserves: f.state.reserveCalls, releases: f.state.releaseCalls ?? 0 }, counts);
   });
 }
+
+for (const kind of ["reappraise", "authorizeRetry"]) {
+  test(`Flow rounds checked ${kind} refuses denied host admission before Flow publication`, async t => {
+    const { f, claimedBlock } = await exhaustedRoundsFixture(t);
+    const reappraisal = await continuationCommand(f, "reappraise", "checked-reappraisal", {
+      gate: "second", blockedTransitionRef: flowTransitionRef(claimedBlock),
+    });
+    let command = reappraisal;
+    if (kind === "authorizeRetry") {
+      await f.controller.reappraise(reappraisal);
+      const run = await loadRun(f.spec.topology.runId, f.cwd);
+      command = await continuationCommand(f, "authorizeRetry", "checked-retry", { reappraisalKey: reappraisal.operationKey, request: {
+        reason: "Controlled checked retry", target_step: "first", blocked_transition_ref: flowTransitionRef(run.state.transitions.at(-1)),
+        expected_run_head: flowRunHead(run.state), authority: { kind: "operator_request", actor: "fixture-host",
+          request_ref: "controlled:checked-retry", requested_at: new Date().toISOString() },
+      } });
+    }
+    const before = flowRunHead((await loadRun(f.spec.topology.runId, f.cwd)).state);
+    const calls = f.state.calls;
+    f.state.denyContinuationLease = true;
+    await assert.rejects(f.controller[kind](command), /controlled continuation lease refusal/);
+    assert.equal(flowRunHead((await loadRun(f.spec.topology.runId, f.cwd)).state), before);
+    assert.equal(f.state.calls, calls);
+  });
+}
+
+test("Flow rounds checked reappraisal refuses a run head changed during host admission", async t => {
+  const { f, claimedBlock } = await exhaustedRoundsFixture(t);
+  const command = await continuationCommand(f, "reappraise", "competing-head-reappraisal", {
+    gate: "second", blockedTransitionRef: flowTransitionRef(claimedBlock),
+  });
+  let competingHead;
+  const transitions = (await loadRun(f.spec.topology.runId, f.cwd)).state.transitions.length;
+  f.state.onContinuationLease = async () => {
+    const authority = { kind: "operator_request", actor: "fixture-host", request_ref: "controlled:competing-head",
+      requested_at: new Date().toISOString() };
+    await pauseRun(f.spec.topology.runId, { cwd: f.cwd, reason: "Controlled competing mutation", authority });
+    await resumeRun(f.spec.topology.runId, { cwd: f.cwd, reason: "Controlled competing mutation", authority });
+    competingHead = flowRunHead((await loadRun(f.spec.topology.runId, f.cwd)).state);
+    assert.notEqual(competingHead, command.flowHead);
+  };
+  await assert.rejects(f.controller.reappraise(command), /flow.run_head.stale/);
+  const observed = await loadRun(f.spec.topology.runId, f.cwd);
+  assert.equal(flowRunHead(observed.state), competingHead);
+  assert.equal(observed.state.transitions.length, transitions);
+  assert.equal(f.state.calls, 4);
+});
