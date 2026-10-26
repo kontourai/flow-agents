@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # test_unit_helpers.sh — TypeScript-layer contract and CLI integration tests.
 #
-# Historically every assertion covering workflow-sidecar was black-box bash driving
-# the CLI. These node:test units exercise the pure projection/validation helpers
-# directly against the built JS — fast, deterministic, isolated — and complement
-# (do not replace) the bash evals.
+# This corpus includes pure contracts and process-heavy CLI integration fixtures.
+# It complements the shell evals and retains every src/cli test file.
 set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
