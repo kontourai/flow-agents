@@ -327,15 +327,15 @@
     "test:delegation-rounds": "npm run build --silent && node --test src/cli/delegation-group-rounds.test.mjs src/cli/delegation-flow-runtime.test.mjs"
   },
   "devDependencies": {
-    "@kontourai/lookout": "0.3.2",
-    "@kontourai/traverse": "0.19.1",
-    "@kontourai/veritas": "1.11.2",
-    "@types/node": "^26.1.1",
+    "@kontourai/lookout": "0.8.9",
+    "@kontourai/traverse": "5.0.3",
+    "@kontourai/veritas": "1.11.4",
+    "@types/node": "^26.6.5",
     "ajv": "8.20.0",
-    "gcp-metadata": "7.0.1",
+    "gcp-metadata": "9.2.2",
     "promptfoo": "^0.124.1",
     "typescript": "^7.0.2",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "dependencies": {
     "@kontourai/conduit": "0.7.1",
