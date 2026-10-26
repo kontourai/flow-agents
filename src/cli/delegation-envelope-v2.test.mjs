@@ -806,3 +806,72 @@ for (const mode of ['exact', 'limit-exact', 'no-usd', 'unknown', 'invalid', 'inv
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   });
 }
+
+for (const mode of ['retained', 'retention-failed', 'settlement-failed']) {
+  test(`actual Dispatch reservation retention precedes physical launch: ${mode}`, async () => {
+    const { executeAuthorizedDelegationAccountingV1 } = await import('../../build/src/delegation-execution.js');
+    const { createDelegationAuthorityService } = await import('../../build/src/delegation-authority-service.js');
+    const { createLocalFileDelegationAuthorityStore } = await import('../../build/src/delegation-authority-local-file.js');
+    const { FileAuthorizationLedger, AuthorizationPersistenceError } = await import('@kontourai/dispatch');
+    const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-dispatch-correlation-'));
+    try {
+      const { root, parent, child } = edgeFixture();
+      const service = createDelegationAuthorityService(createLocalFileDelegationAuthorityStore(directory), {
+        now: () => NOW, authorize: async () => true, confirmExecution: async () => true, confirmReconciliation: async () => true,
+      });
+      await service.issue(root); await service.derive(root.authority_id, parent); await service.derive(root.authority_id, child);
+      const ledger = new FileAuthorizationLedger({ root: path.join(directory, 'dispatch') });
+      let actual, retained, calls = 0, reservations = 0;
+      const readReservation = () => {
+        const file = fs.readdirSync(path.join(directory, 'dispatch')).find(name => name.endsWith('.json'));
+        return JSON.parse(fs.readFileSync(path.join(directory, 'dispatch', file), 'utf8')).reservations[actual.reservationId];
+      };
+      const dispatchLedger = {
+        async reserve(reservation) { reservations++; const result = await ledger.reserve(reservation); actual = structuredClone(reservation); return result; },
+        async settle(settlement) { if (mode === 'settlement-failed') throw new AuthorizationPersistenceError('controlled settlement failure', undefined, 'settle'); await ledger.settle(settlement); },
+        release: release => ledger.release(release),
+      };
+      const runtime = {
+        id: 'actual-reservation-fixture',
+        capabilities: () => ({ structuredTools: true, outputTokenLimitFidelity: 'native', streaming: false, abort: true, usage: true }),
+        async invoke() {
+          calls++;
+          assert.deepEqual(retained, actual);
+          assert.equal(readReservation().state, 'reserved');
+          return { provider: 'fixture', model: 'fixture', outputText: 'result', toolCalls: [], usage: { inputTokens: 2, outputTokens: 3 }, latencyMs: 0 };
+        },
+      };
+      const host = {
+        accountingProtocol: 'retained-tariff-v1',
+        resolveRuntime: async () => ({ runtime, runtimeReceipt: child.execution_binding.runtime.runtime_receipt_ref, modelReceipt: child.execution_binding.runtime.model_receipt_ref }),
+        invokeFenced: async (_e, _id, invoke) => invoke(),
+        retainFailure: async () => { throw new Error('unexpected provider failure'); },
+        retainResult: async () => ({ inputTokens: 2, outputTokens: 3, costMicros: 3, costBasis: 'tariff-upper-bound' }),
+        async retainDispatchReservation(reservation, envelope, invocationId) {
+          assert.deepEqual(reservation, actual);
+          assert.equal(envelope.execution_id, child.execution_id);
+          assert.equal(invocationId, 'correlated-attempt');
+          assert.equal(readReservation().state, 'reserved');
+          if (mode === 'retention-failed') throw new Error('controlled retention failure');
+          retained = structuredClone(reservation);
+          reservation.capacity.maxTokens = 999;
+        },
+      };
+      const execute = () => executeAuthorizedDelegationAccountingV1({ service, host, dispatchLedger,
+        authorityId: root.authority_id, envelopeId: child.envelope_id, invocationId: 'correlated-attempt', effect: 'write',
+        request: { maxOutputTokens: 5, messages: [{ role: 'user', content: 'work' }] },
+        allocation: { inputTokens: 5, outputTokens: 5, costMicros: 10 },
+      });
+      if (mode === 'retained') assert.equal((await execute()).outcome, 'succeeded');
+      else await assert.rejects(execute());
+      assert.equal(reservations, 1);
+      assert.equal(calls, mode === 'retention-failed' ? 0 : 1);
+      const invocation = (await service.inspect(root.authority_id)).invocations[0];
+      assert.equal(readReservation().state, mode === 'retained' ? 'settled' : 'reserved');
+      assert.equal(readReservation().capacity.maxTokens, 10);
+      assert.equal(invocation.terminal, mode !== 'retention-failed');
+      assert.deepEqual(invocation.usage, mode === 'retention-failed' ? null : { inputTokens: 2, outputTokens: 3, costMicros: 3 });
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  });
+}

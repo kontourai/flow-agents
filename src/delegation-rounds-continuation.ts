@@ -67,6 +67,7 @@ export async function runRoundsContinuation(input: {
       authorityId: spec.rootAuthorityRef.id, envelopeId: seat.envelope.id, runId: syncId, text, allocation: seat.allocation,
       maxOutputTokens: seat.allocation.outputTokens,
       host: { resolveRuntime: e => physical.resolveRuntime(e), retainResult: (r, e, id) => physical.retainResult(r, e, id),
+      retainDispatchReservation: physical.retainDispatchReservation?.bind(physical),
         retainFailure: (error, e, id) => physical.retainFailure(error, e, id),
         async invokeFenced(e, id, launch) {
           await input.authorize(); await runFor(spec, c.flowHead, input.cwd);

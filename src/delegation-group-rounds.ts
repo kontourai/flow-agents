@@ -655,6 +655,7 @@ export function createDelegationRoundsController(input: {
               envelopeId: seat.envelope.id, invocationId: attempt.invocationId, effect: seat.effect, allocation: seat.allocation, request,
               host: {
                 resolveRuntime: e => physical.resolveRuntime(e),
+                retainDispatchReservation: physical.retainDispatchReservation?.bind(physical),
                 retainResult: (r, e, id) => physical.retainResult(r, e, id),
                 retainFailure: (error, e, id) => physical.retainFailure(error, e, id),
                 async invokeFenced(envelope, id, launch) {

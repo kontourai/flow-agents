@@ -136,6 +136,11 @@ async function fixture(t, options = {}) {
       assert.equal(invocation?.terminal, false); assert.equal(invocation.envelopeId, envelope.envelope_id);
       state.launches.push(id); return launch();
     },
+    async retainDispatchReservation(reservation, envelope, invocationId) {
+      if (!options.captureDispatchReservations) return;
+      state.dispatchReservations ??= [];
+      state.dispatchReservations.push({ reservation: structuredClone(reservation), envelopeId: envelope.envelope_id, invocationId });
+    },
     async retainResult(result) {
       retain(result);
       if (options.retainedAccounting) return state.unknown ? null : {
@@ -184,6 +189,7 @@ async function fixture(t, options = {}) {
             runtimeReceipt: envelope.execution_binding.runtime.runtime_receipt_ref, modelReceipt: envelope.execution_binding.runtime.model_receipt_ref,
             sessionReceipt: ref(`session-receipt-${session}-${generation}`) },
           runtime: selected, retainResult: physical.retainResult, retainFailure: physical.retainFailure,
+          retainDispatchReservation: physical.retainDispatchReservation,
           async invokeFenced(e, id, launch) {
             assert.equal(state.session ?? "session-A", session); assert.equal(state.sessionGeneration ?? 1, generation);
             return id.startsWith("sync_") ? host.context.executionHost().invokeFenced(e, id, launch) : physical.invokeFenced(e, id, launch);
@@ -1184,7 +1190,7 @@ test("Accounting rounds: missing opt-in and unknown tariff retain full allocatio
 
 test("Accounting rounds: exact session ACK, paid Flow continuation and storage-only recovery preserve tariff basis", async t => {
   const f=await fixture(t,{managedDefinition:managedDefinition("blocked"),contextSync:true,attempts:12,
-    retainedAccounting:true,accountingProtocol:"retained-tariff-v1",tariffMicros:7});
+    retainedAccounting:true,accountingProtocol:"retained-tariff-v1",tariffMicros:7,captureDispatchReservations:true});
   f.state.continuationRetentionFailure=true;
   let original;const originalSync=f.controller.sync.bind(f.controller);f.controller.sync=command=>{original=command;return originalSync(command);};
   await assert.rejects(seatSync(f,"seat-0","tariff-sync","Retained exact context"));
@@ -1201,6 +1207,9 @@ test("Accounting rounds: exact session ACK, paid Flow continuation and storage-o
   assert.equal(outcome.costBasis,"tariff-upper-bound");assert.equal(outcome.reportedCostUsd,undefined);
   assert.ok(f.state.requests.every(r=>r.tools?.length===0||r.tools===undefined));
   assert.ok(f.state.sessionCalls.every(session=>session==="session-A"));
+  assert.deepEqual(f.state.dispatchReservations.map(r => r.invocationId), ledger.invocations.map(i => i.invocationId));
+  assert.equal(new Set(f.state.dispatchReservations.map(r => r.reservation.reservationId)).size, 2);
+  assert.ok(f.state.dispatchReservations.every(r => r.envelopeId === "parent" && r.reservation.capacity.attempts === 1));
 });
 
 test("explicit cancel finalization observes retained requests after the authority-cancel window without repeating interrupts", async t => {

@@ -928,3 +928,29 @@ continuations retain claim identities and require Flow-owned invalidation/retry
 transitions. Retry and evaluation-only releases acquire fresh claims without
 rewriting the immutable grant. Hosts must still authenticate claims at their
 actual effect boundary; this optional metadata supplies no replacement authority.
+
+### Retaining the actual Dispatch reservation
+
+An execution host may implement `retainDispatchReservation(reservation, envelope,
+invocationId)`. Flow Agents calls it after Dispatch has durably created the
+actual reservation and before any physical runtime invocation. Its detached
+arguments carry Dispatch's own authorization/invocation/reservation identities
+and original limits/capacity, alongside the original delegation envelope and
+Flow invocation ID. Hosts can retain that correlation with their signed
+admission and physical-turn evidence; these identifiers do not themselves grant
+execution or recovery authority.
+
+Retention failure leaves both reservations held and prevents provider launch.
+The existing `onReserved` callback still observes the earlier Flow authority
+reservation; it is not evidence that Dispatch reserved capacity. The new hook
+is forwarded through group, Flow-seat, context-sync and same-recipient paid
+continuation hosts. Existing hosts may omit it.
+
+A successfully retained result can still outlive failed Dispatch settlement.
+Flow authority may then have known usage while Dispatch remains held. Retaining
+the actual reservation makes that obligation recoverable through an owner API;
+it does not settle either ledger or provide an automatic recovery operation.
+Historical reservation lookup, checked dual-ledger recovery, retained original
+pricing evidence and downstream consumer qualification remain separate work.
+A failed or interrupted attempt must never be resent merely to reconstruct its
+reservation identity.

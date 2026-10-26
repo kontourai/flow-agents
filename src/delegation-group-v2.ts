@@ -502,6 +502,7 @@ function createController<Outcome extends { outcome: DelegationDispatchOutcome["
             return delegate.invokeFenced(envelope, id, invoke);
           },
           retainFailure: (...args) => delegate.retainFailure(...args),
+          retainDispatchReservation: delegate.retainDispatchReservation?.bind(delegate),
           recordScheduleEvent: async event => { await active(spec.groupId); return delegate.recordScheduleEvent(event); },
           confirmClaim: async (claim, envelope) => {
             await active(spec.groupId); return delegate.confirmClaim(claim, envelope);
