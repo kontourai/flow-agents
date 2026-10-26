@@ -21,6 +21,8 @@ source "$ROOT/evals/lib/node.sh"
 GATE="$ROOT/scripts/hooks/stop-goal-fit.js"
 
 export FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000
+unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID
+export CODEX_SESSION_ID=phase-map-fixture
 
 TMP="$(mktemp -d)"
 # Authenticated discovery precedes cwd-local fixtures; own its state for this eval.

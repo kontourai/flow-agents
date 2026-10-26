@@ -15,6 +15,7 @@ type Protocol = "retained-tariff-v1" | undefined;
 function legacyHost(host: DelegationRoundsExecutionHost): DelegationExecutionHost {
   return {
     resolveRuntime: e => host.resolveRuntime(e),
+    retainDispatchReservation: host.retainDispatchReservation?.bind(host),
     invokeFenced: (e, id, launch) => host.invokeFenced(e, id, launch),
     retainFailure: (error, e, id) => host.retainFailure(error, e, id),
     async retainResult(r, e, id) {

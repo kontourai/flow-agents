@@ -244,10 +244,10 @@ The initial Flow 5.2.0 fixtures exercise `startRun`, `claimReadyStep`, `loadRun`
 injection over real temporary paths exercises pre-rename preservation and post-rename unavailable/read
 repair. These checks do not simulate power loss or establish hardware/filesystem crash guarantees.
 They are source diagnostics, not installed-runtime or live-provider acceptance. The package now pins
-Flow 5.2.2 alongside the privileged coordinator and its independently locked staged closure. A
+Flow 5.3.0 alongside the privileged coordinator and its independently locked staged closure. A
 previous dependency-only trial failed the coordinator's 5.2.0 identity check; the migration updates
 the package/release pin and closure digest together while preserving the reducer's 1.3.8 identity.
-The installed lifecycle harness retains exact 5.2.2 admission and FIFO interoperability checks.
+The installed lifecycle harness retains exact 5.3.0 admission and FIFO interoperability checks.
 This alignment does not establish a consuming host's shared-module composition or live execution.
 
 The fresh-context continuation should start from #1113, `AGENTS.md`, this guide and the exact handoff
@@ -928,3 +928,102 @@ continuations retain claim identities and require Flow-owned invalidation/retry
 transitions. Retry and evaluation-only releases acquire fresh claims without
 rewriting the immutable grant. Hosts must still authenticate claims at their
 actual effect boundary; this optional metadata supplies no replacement authority.
+
+### Retaining the actual Dispatch reservation
+
+An execution host may implement `retainDispatchReservation(reservation, envelope,
+invocationId)`. Flow Agents calls it after Dispatch has durably created the
+actual reservation and before any physical runtime invocation. Its detached
+arguments carry Dispatch's own authorization/invocation/reservation identities
+and original limits/capacity, alongside the original delegation envelope and
+Flow invocation ID. Hosts can retain that correlation with their signed
+admission and physical-turn evidence; these identifiers do not themselves grant
+execution or recovery authority.
+
+Retention failure leaves both reservations held and prevents provider launch.
+The existing `onReserved` callback still observes the earlier Flow authority
+reservation; it is not evidence that Dispatch reserved capacity. The new hook
+is forwarded through group, Flow-seat, context-sync and same-recipient paid
+continuation hosts. Existing hosts may omit it.
+
+A successfully retained result can still outlive failed Dispatch settlement.
+Flow authority may then have known usage while Dispatch remains held. Retaining
+the actual reservation makes that obligation recoverable through an owner API;
+it does not settle either ledger or provide an automatic recovery operation.
+Historical reservation lookup, checked dual-ledger recovery, retained original
+pricing evidence and downstream consumer qualification remain separate work.
+A failed or interrupted attempt must never be resent merely to reconstruct its
+reservation identity.
+
+### Recovering both accounting ledgers
+
+`recoverAuthorizedDelegationAccountingV1` from
+`@kontourai/flow-agents/delegation-accounting-recovery` reconciles a retained
+physical invocation through the public V3 authority service and Dispatch's
+`RecoverableAuthorizationLedger`. It locates the invocation's original epoch,
+root, envelope and allocation. Flow Agents owns its authorization identity
+mapping; Dispatch supplies the actual existing reservation. Missing, ambiguous,
+released or tuple-mismatched reservations are refused. Hosts must not reproduce
+private reservation codecs or reserve again to discover an old identity.
+
+The actual reservation distinguishes the original legacy Relay dollar encoding
+from AccountingV1's upward reservation projection. Both are supported. The host
+returns `tariff-upper-bound` accounting only for an originally tariff-accounted
+effect, or `provider-reported` accounting with the original `reportedCostUsd` and
+its exact ceiling in integer micros. The latter also covers AccountingV1's
+explicit provider-dollar fallback. Recovery never derives original dollars by
+converting tariff micros backward or substitutes a new price basis for an old
+settlement.
+
+The host's `admitRecovery` authenticates the current operator and original
+physical-turn, wire, raw usage, tariff and qualification evidence. It durably
+retains the exact recovery intent before returning known integer accounting,
+a receipt reference and a lease. A reference alone does not authenticate itself.
+The lease must exclude relevant authority/source changes until release, including
+other processes where applicable. It must not acquire either native ledger lock.
+An expired execution profile or cancelled/latest renewed grant does not prevent
+accounting a historical effect; it also grants no new execution authority.
+Missing original pricing or terminal evidence must return unknown accounting or
+refuse admission, rather than reprice with the current profile.
+
+Recovery settles Dispatch through checked native publication, reconciles Flow
+through its existing original-epoch confirmation callback, then reads both owners.
+It refreshes Dispatch after host admission and refuses conflicting settled usage
+or a released reservation before mutating Flow, including on the overrun path.
+It returns `settled` only when their exact known usage and terminal states agree.
+A lost acknowledgement or interruption between writes leaves a recoverable
+partial outcome; these stores do not share an atomic transaction. Repeating the
+same recovery performs identical accounting writes and owner reads, never another
+provider invocation, runtime preparation, reservation, release or refund.
+
+Unknown usage returns `held` with `usage-unknown` without settlement. Known usage
+above an original allocation returns `held` with `usage-exceeds-reservation`;
+Flow retains the actual charge, and Dispatch remains reserved when its own
+capacity is exceeded. Recovery never clamps usage or raises the old capacity.
+Errors, including host lease release errors, may follow a committed write;
+inspect both owners before deciding what remains. A recovery receipt proves
+accounting observations, not answer acceptance or successful bounded execution.
+
+The host remains responsible for signed evidence retention, immutable recovery
+intent replay and current authorization throughout its lease. Controlled tests
+exercise original-epoch recovery after renewal/cancellation/expiry for either or
+both held ledgers. They do not qualify a specific host's signatures, live provider
+billing, or Station's downstream recovery serving.
+
+### Checked continuation mutation admission
+
+Flow reappraisal and retry authorization require both host seams:
+`withContinuationMutation` serializes the host operation, and
+`acquireContinuationMutation` returns a Flow `FlowRunMutationLease` for the exact
+spec and command. The lease authenticates current source/operator authority and
+excludes relevant changes until release. It may borrow custody already held by
+the outer host operation; neither seam may acquire Flow's native ticket or
+re-enter a host lock it already holds.
+
+Flow Agents calls published Flow 5.3.0 `evaluateRunChecked` with the command's
+original expected head, or `authorizeRetryChecked` with the existing exact retry
+request. Flow acquires the host lease before its native lock and checks it through
+publication. An absent or denied lease refuses mutation. A head change while
+host admission waits refuses the original operation instead of evaluating the
+new head. Existing exact observational replays retain their read-only behavior.
+These operations grant no provider execution or additional capacity by themselves.

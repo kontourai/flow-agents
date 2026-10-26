@@ -2,11 +2,13 @@
 export {
   FlowMultiCursorError,
   authorizeRetry,
+  authorizeRetryChecked,
   claimReadyStep,
   claimableMultiCursorSteps,
   definitionIdentity,
   evaluateClaimedStep,
   evaluateRun,
+  evaluateRunChecked,
   flowRunHead,
   flowTransitionRef,
   loadRun,
@@ -20,6 +22,7 @@ export {
   type FlowDefinitionIdentity,
   type FlowDurableStepClaim,
   type FlowRetryAuthorizationRequest,
+  type FlowRunMutationLease,
   type FlowStepClaimActor,
   type GateOutcome,
 } from "@kontourai/flow";

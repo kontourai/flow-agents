@@ -12,6 +12,8 @@
 #
 # Usage: run-cost.sh [--json]
 set -uo pipefail
+unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID
+export CODEX_SESSION_ID=run-cost-fixture
 
 EMIT_JSON=0
 [ "${1:-}" = "--json" ] && EMIT_JSON=1

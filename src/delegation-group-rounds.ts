@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalJson, type ModelInvocationRequest } from "@kontourai/relay";
-import { type FlowDefinitionIdentity, type FlowStepClaimActor, type FlowDurableStepClaim, type FlowRetryAuthorizationRequest, validateRetryAuthorizationRequest } from "./delegation-flow-bindings.js";
+import { type FlowDefinitionIdentity, type FlowStepClaimActor, type FlowDurableStepClaim, type FlowRetryAuthorizationRequest, type FlowRunMutationLease, validateRetryAuthorizationRequest } from "./delegation-flow-bindings.js";
 import { runDelegationFlowRound, validateFlowRoundRelease, validateFlowRoundCreation } from "./delegation-rounds-flow.js";
 import { finalizeRoundsSync, type PreparedRoundsSync, preparedRoundsSyncDigest, validatePreparedRoundsSync, runRoundsContinuation, validateRoundsContinuation } from "./delegation-rounds-continuation.js";
 import { authorityLineageReference, type AuthorityEpochV3 } from "./delegation-authority-service-v3.js";
@@ -106,8 +106,10 @@ export interface DelegationRoundsHost {
   /** Flow-specific authenticated boundary. Existing independent callers need not implement it. */
   flow?: {
     executionHost(spec: DelegationRoundsSpec): DelegationRoundsFlowExecutionHost;
-    /** Exclusive host custody over other Flow mutations; public evaluateRun lacks expected-head admission. */
+    /** Serialize host continuation operations without acquiring Flow's native ticket. */
     withContinuationMutation?<T>(spec: DelegationRoundsSpec, command: DelegationRoundsCommand, body: () => Promise<T>): Promise<T>;
+    /** Exclude relevant authority/source changes through checked Flow publication and ticket release. */
+    acquireContinuationMutation?(spec: DelegationRoundsSpec, command: DelegationRoundsCommand): Promise<FlowRunMutationLease>;
     confirmRetainedResult(spec: DelegationRoundsSpec, attempt: RoundAttempt, reference: DelegationReferenceV2): Promise<boolean>;
     retainEvaluation(spec: DelegationRoundsSpec, action: FlowRoundAction, receipt: unknown): Promise<DelegationReferenceV2>;
   };
@@ -493,7 +495,7 @@ export function createDelegationRoundsController(input: {
           }
         }
       } else if (c.kind === "reappraise" || c.kind === "authorizeRetry" || c.kind === "sync") {
-        requireDelegationV2(p && !ledger.cancelled && host.retainContinuation && (c.kind === "sync" || host.flow?.withContinuationMutation), "rounds_continuation_host_required");
+        requireDelegationV2(p && !ledger.cancelled && host.retainContinuation && (c.kind === "sync" || host.flow?.withContinuationMutation && host.flow.acquireContinuationMutation), "rounds_continuation_host_required");
         await validateRoundsContinuation(p, c, input.cwd);
         if (c.kind === "sync") {
           const seat = spec.seats.find(s => s.seatId === c.seatId); requireDelegationV2(seat && host.context, "rounds_sync_host_required");
@@ -655,6 +657,7 @@ export function createDelegationRoundsController(input: {
               envelopeId: seat.envelope.id, invocationId: attempt.invocationId, effect: seat.effect, allocation: seat.allocation, request,
               host: {
                 resolveRuntime: e => physical.resolveRuntime(e),
+                retainDispatchReservation: physical.retainDispatchReservation?.bind(physical),
                 retainResult: (r, e, id) => physical.retainResult(r, e, id),
                 retainFailure: (error, e, id) => physical.retainFailure(error, e, id),
                 async invokeFenced(envelope, id, launch) {

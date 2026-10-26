@@ -178,6 +178,7 @@ export async function runDelegationFlowRound(input: {
         effect: seat.effect, allocation: seat.allocation, request, signal,
         host: {
           resolveRuntime: e => paidHost.resolveRuntime(e), retainResult: (r, e, id) => paidHost.retainResult(r, e, id),
+          retainDispatchReservation: paidHost.retainDispatchReservation?.bind(paidHost),
           retainFailure: (error, e, id) => paidHost.retainFailure(error, e, id),
           async invokeFenced(e, id, launch) { await currentClaim(claim); return paidHost.invokeFenced(e, id, launch); },
         },

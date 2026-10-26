@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
-import { loadRun, definitionIdentity, flowRunHead, flowTransitionRef, evaluateRun, authorizeRetry } from "./delegation-flow-bindings.js";
+import { loadRun, definitionIdentity, flowRunHead, flowTransitionRef, evaluateRunChecked, authorizeRetryChecked } from "./delegation-flow-bindings.js";
 import { canonicalJson } from "@kontourai/relay";
 import { delegationRecordV2, delegationIdV2, delegationIntegerV2, delegationDigestV2, requireDelegationV2, delegationReferenceV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService } from "./delegation-authority-service.js";
@@ -67,6 +67,7 @@ export async function runRoundsContinuation(input: {
       authorityId: spec.rootAuthorityRef.id, envelopeId: seat.envelope.id, runId: syncId, text, allocation: seat.allocation,
       maxOutputTokens: seat.allocation.outputTokens,
       host: { resolveRuntime: e => physical.resolveRuntime(e), retainResult: (r, e, id) => physical.retainResult(r, e, id),
+      retainDispatchReservation: physical.retainDispatchReservation?.bind(physical),
         retainFailure: (error, e, id) => physical.retainFailure(error, e, id),
         async invokeFenced(e, id, launch) {
           await input.authorize(); await runFor(spec, c.flowHead, input.cwd);
@@ -110,8 +111,10 @@ export async function runRoundsContinuation(input: {
     const stepId = c.kind === "reappraise" ? run.definition.gates[c.gate]?.step : c.request.target_step;
     const seat = spec.seats.find(s => s.stepId === stepId); requireDelegationV2(seat, "rounds_unauthorized_seat");
     await input.authorityService.admitEffect(spec.rootAuthorityRef.id, seat.envelope.id, seat.effect);
-    return c.kind === "reappraise" ? evaluateRun(runId, { cwd: input.cwd, gate: c.gate })
-      : authorizeRetry(runId, { cwd: input.cwd, request: c.request });
+    requireDelegationV2(host.flow?.acquireContinuationMutation, "rounds_continuation_host_required");
+    const admission = { acquire: () => host.flow!.acquireContinuationMutation!(structuredClone(spec), structuredClone(c)) };
+    return c.kind === "reappraise" ? evaluateRunChecked(runId, { cwd: input.cwd, gate: c.gate, expectedRunHead: c.flowHead, admission })
+      : authorizeRetryChecked(runId, { cwd: input.cwd, request: c.request, admission });
   });
   const actual = await runFor(spec, flowRunHead(result.state), input.cwd);
   const transition = actual.state.transitions.at(-1);

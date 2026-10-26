@@ -1,7 +1,7 @@
 {
   "name": "@kontourai/flow-agents",
   "version": "9.7.0",
-  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
+  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows \u2014 a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi \u2014 with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
     "ai-agents",
@@ -178,6 +178,10 @@
     "./delegation-authority-local-file-v3": {
       "types": "./build/src/delegation-authority-local-file-v3.d.ts",
       "import": "./build/src/delegation-authority-local-file-v3.js"
+    },
+    "./delegation-accounting-recovery": {
+      "types": "./build/src/delegation-accounting-recovery.d.ts",
+      "import": "./build/src/delegation-accounting-recovery.js"
     }
   },
   "repository": {
@@ -266,7 +270,7 @@
     "knowledge:yaml:check": "node scripts/build-knowledge-yaml.mjs --check",
     "build": "npm run knowledge:yaml:check && tsc -p tsconfig.json && node build/src/cli.js capability-matrix --json-only && node build/src/tools/generate-install-identity.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:unit": "npm run build --silent && node build/src/cli.js build-bundles && node scripts/build-test-support.mjs && node --import ./src/cli/unit-test-state.mjs --test src/cli/*.test.mjs",
+    "test:unit": "npm run build --silent && node build/src/cli.js build-bundles && node scripts/build-test-support.mjs && node --import ./src/cli/unit-test-state.mjs --test --test-concurrency=4 src/cli/*.test.mjs",
     "validate:source": "npm run build --silent && node build/src/cli.js validate-source",
     "validate:artifacts": "npm run build --silent && node build/src/cli/validate-workflow-artifacts.js",
     "context-map": "npm run build --silent && node build/src/cli.js context-map",
@@ -336,8 +340,8 @@
   "dependencies": {
     "@kontourai/conduit": "0.7.1",
     "@kontourai/datum": "0.8.0",
-    "@kontourai/dispatch": "0.7.1",
-    "@kontourai/flow": "5.2.2",
+    "@kontourai/dispatch": "0.8.0",
+    "@kontourai/flow": "5.3.0",
     "@kontourai/relay": "0.7.1",
     "@kontourai/surface": "5.0.0",
     "@kontourai/survey": "8.2.0",

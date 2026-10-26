@@ -15,6 +15,7 @@ export type ResolvedDelegationRecipient = {
   identity: DelegationRecipientIdentity; runtime: ModelRuntime;
   retainResult: DelegationRoundsExecutionHost["retainResult"]; retainFailure: DelegationRoundsExecutionHost["retainFailure"];
   invokeFenced: DelegationRoundsExecutionHost["invokeFenced"];
+  retainDispatchReservation?: DelegationRoundsExecutionHost["retainDispatchReservation"];
 };
 export function validateRecipientIdentity(identity: DelegationRecipientIdentity): void {
   delegationRecordV2(identity, ["hostId", "recipientId", "generation", "executionId", "authority", "envelope", "runtimeReceipt", "modelReceipt", "sessionReceipt"]);
@@ -42,6 +43,7 @@ export async function bindRoundsRecipient(input: {
   if (input.expected) requireDelegationV2(canonicalJson(input.expected) === canonicalJson(identity), "rounds_recipient_changed_fresh_ack_required");
   return { identity, executionHost: {
     resolveRuntime: async () => ({ runtime: binding.runtime, runtimeReceipt: identity.runtimeReceipt, modelReceipt: identity.modelReceipt }),
+    retainDispatchReservation: binding.retainDispatchReservation?.bind(binding),
     retainResult: (r, e, id) => binding.retainResult(r, e, id), retainFailure: (error, e, id) => binding.retainFailure(error, e, id),
     async invokeFenced(e, id, launch) {
       const current = await host.recipient!.resolve(structuredClone(spec), structuredClone(seat), structuredClone(e));

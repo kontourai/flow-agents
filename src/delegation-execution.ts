@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { dispatch, AuthorizationPersistenceError, type ExecutionPlan, type AuthorizationLedger } from "@kontourai/dispatch";
+import { dispatchAuthorizationIdentity } from "./delegation-dispatch-identity.js";
+import { dispatch, AuthorizationPersistenceError, type ExecutionPlan, type AuthorizationLedger, type AuthorizationReservation } from "@kontourai/dispatch";
 import { canonicalJson, type ModelInvocationRequest, type ModelInvocationResult, type ModelRuntime } from "@kontourai/relay";
 import type { DelegationEnvelopeV2 } from "./delegation-envelope-v2.js";
 import type { DelegationReferenceV2 } from "./delegation-authority-contract.js";
@@ -18,6 +18,8 @@ export interface DelegationExecutionHost {
   invokeFenced(envelope: DelegationEnvelopeV2, invocationId: string, invoke: () => Promise<ModelInvocationResult>): Promise<ModelInvocationResult>;
   retainFailure(error: unknown, envelope: DelegationEnvelopeV2, invocationId: string): Promise<void>;
   retainResult(result: ModelInvocationResult, envelope: DelegationEnvelopeV2, invocationId: string): Promise<void>;
+  /** Retain the actual durable Dispatch reservation before any physical invocation. */
+  retainDispatchReservation?(reservation: AuthorizationReservation, envelope: DelegationEnvelopeV2, invocationId: string): Promise<void>;
 }
 
 /** One physical attempt. Explicit retries use a new invocation id and consume fresh capacity. */
@@ -32,7 +34,7 @@ export async function executeAuthorizedDelegation(input: {
   request: ModelInvocationRequest;
   allocation: DelegationInvocationAmounts;
   signal?: AbortSignal;
-  /** Awaited after durable reservation, before any physical dispatch. */
+  /** Awaited after Flow authority reservation, before Dispatch reserves or invokes. */
   onReserved?: () => Promise<void>;
 }): Promise<DelegationDispatchOutcome> {
   return executeDelegation(input, legacyAccounting);
@@ -123,12 +125,12 @@ async function executeDelegation<Retained, Outcome>(
   }
   const maxTokens = input.allocation.inputTokens + input.allocation.outputTokens;
   const maxCostUsd = accounting.reservationDollars(input.allocation.costMicros);
-  const digest = createHash("sha256").update(canonicalJson([input.authorityId, envelope.execution_id, input.invocationId])).digest("hex");
+  const identity = dispatchAuthorizationIdentity(input.authorityId, envelope.execution_id, input.invocationId);
   const plan: ExecutionPlan = {
     schemaVersion: 1, role: "delegated-member", request: structuredClone(input.request),
     candidates: [{ id: "selected-grant", runtimeId: "selected", worstCaseUsage: { maxTokens, maxCostUsd } }],
     budget: { maxAttempts: 1, maxTotalTokens: maxTokens, maxCostUsd },
-    authorization: { schemaVersion: 1, id: `auth_${digest}`, invocationId: `invoke_${digest}`,
+    authorization: { schemaVersion: 1, ...identity,
       limits: { maxAttempts: 1, maxTotalTokens: maxTokens, maxCostUsd } },
   };
   // Public Dispatch validation runs without a ledger or any possible invocation.
@@ -159,11 +161,26 @@ async function executeDelegation<Retained, Outcome>(
     await input.service.reconcileInvocation(input.authorityId, input.invocationId, amounts, true);
     return amounts !== null && (amounts.inputTokens > input.allocation.inputTokens || amounts.outputTokens > input.allocation.outputTokens || amounts.costMicros > input.allocation.costMicros);
   }
+  const dispatchLedger: AuthorizationLedger = {
+    async reserve(reservation) {
+      const result = await input.dispatchLedger.reserve(reservation);
+      if (result.status === "reserved" && input.host.retainDispatchReservation) {
+        try {
+          await input.host.retainDispatchReservation(structuredClone(reservation), structuredClone(envelope), input.invocationId);
+        } catch (error) {
+          throw new AuthorizationPersistenceError("Dispatch reservation retention failed", error, "recovery");
+        }
+      }
+      return result;
+    },
+    settle: settlement => input.dispatchLedger.settle(settlement),
+    release: release => input.dispatchLedger.release(release),
+  };
   let outcome: Outcome;
   try {
     outcome = await accounting.dispatch({
       plan,
-      runtimes: new Map([["selected", runtime]]), ledger: input.dispatchLedger,
+      runtimes: new Map([["selected", runtime]]), ledger: dispatchLedger,
       ...(input.signal ? { signal: input.signal } : {}),
       async retainResult(result) {
         const retained = accounting.validate(await input.host.retainResult(
