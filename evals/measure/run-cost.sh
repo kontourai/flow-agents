@@ -12,6 +12,7 @@
 #
 # Usage: run-cost.sh [--json]
 set -uo pipefail
+export CODEX_SESSION_ID=run-cost-fixture
 
 EMIT_JSON=0
 [ "${1:-}" = "--json" ] && EMIT_JSON=1
