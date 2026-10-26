@@ -6,6 +6,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CURRENT_POINTER_HELPER="$ROOT/scripts/hooks/lib/current-pointer.js"
 source "$ROOT/evals/lib/node.sh"
 
+# Foreground and background fixture calls belong to the same runtime session.
+export CLAUDE_CODE_SESSION_ID="sidecar-writer-fixture"
+
 TMPDIR_EVAL="$(mktemp -d)"
 errors=0
 
