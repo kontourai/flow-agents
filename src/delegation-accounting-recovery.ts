@@ -1,6 +1,6 @@
 import type { AuthorizationRecoveryAdmission, AuthorizationReservationSnapshot, RecoverableAuthorizationLedger } from "@kontourai/dispatch";
 import { canonicalJson } from "@kontourai/relay";
-import { delegationIdV2, delegationReferenceV2, requireDelegationV2, type RootAuthorityV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
+import { delegationIdV2, delegationReferenceV2, delegationIntegerV2, requireDelegationV2, type RootAuthorityV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
 import type { DelegationEnvelopeV2 } from "./delegation-envelope-v2.js";
 import type { DelegationInvocation } from "./delegation-authority-service.js";
 import type { createDelegationAuthorityServiceV3 } from "./delegation-authority-service-v3.js";
@@ -9,8 +9,13 @@ import { dispatchAuthorizationIdentity } from "./delegation-dispatch-identity.js
 
 type RecoveryLease = Awaited<ReturnType<AuthorizationRecoveryAdmission["acquire"]>>;
 type Authority = Pick<ReturnType<typeof createDelegationAuthorityServiceV3>, "inspect" | "reconcileInvocation">;
+export type DelegationRecoveryAccountingV1 = DelegationRetainedAccountingV1 | {
+  inputTokens: number; outputTokens: number; costMicros: number;
+  costBasis: "provider-reported"; reportedCostUsd: number;
+};
 export interface DelegationAccountingRecoveryObservationV1 {
   authorityId: string; invocationId: string; originEpoch: number;
+  reservationProtocol: "legacy-relay" | "retained-tariff-v1";
   root: RootAuthorityV2; envelope: DelegationEnvelopeV2;
   invocation: DelegationInvocation; reservation: AuthorizationReservationSnapshot;
 }
@@ -18,7 +23,7 @@ export interface DelegationAccountingRecoveryHostV1 {
   /** Authenticate original physical/tariff evidence and current operator authority;
    * durably retain this recovery intent, then exclude relevant changes until release. */
   admitRecovery(observation: DelegationAccountingRecoveryObservationV1): Promise<{
-    accounting: DelegationRetainedAccountingV1 | null;
+    accounting: DelegationRecoveryAccountingV1 | null;
     receipt: DelegationReferenceV2;
     lease: RecoveryLease;
   }>;
@@ -27,11 +32,21 @@ export type DelegationAccountingRecoveryResultV1 = {
   status: "settled" | "held";
   reason: "exact-settlement" | "usage-unknown" | "usage-exceeds-reservation";
   receipt: DelegationReferenceV2;
-  accounting: DelegationRetainedAccountingV1 | null;
+  accounting: DelegationRecoveryAccountingV1 | null;
   invocation: DelegationInvocation;
   reservation: AuthorizationReservationSnapshot;
 };
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
+function recoveryAccounting(value: DelegationRecoveryAccountingV1): DelegationRecoveryAccountingV1 {
+  if (value.costBasis === "tariff-upper-bound") return validateDelegationRetainedAccountingV1(value);
+  requireDelegationV2(value.costBasis === "provider-reported", "recovery_accounting_protocol_invalid");
+  const { inputTokens, outputTokens, costMicros, reportedCostUsd } = value;
+  [inputTokens, outputTokens, costMicros].forEach(v => delegationIntegerV2(v));
+  requireDelegationV2(Number.isSafeInteger(inputTokens + outputTokens) && typeof reportedCostUsd === "number"
+    && Number.isFinite(reportedCostUsd) && reportedCostUsd >= 0
+    && Math.ceil(reportedCostUsd * 1_000_000) === costMicros, "recovery_reported_cost_invalid");
+  return { inputTokens, outputTokens, costMicros, reportedCostUsd, costBasis: "provider-reported" };
+}
 function reservationTuple(value: AuthorizationReservationSnapshot) {
   return { authorizationId: value.authorizationId, invocationId: value.invocationId,
     reservationId: value.reservationId, limits: value.limits, capacity: value.capacity };
@@ -54,19 +69,24 @@ export async function recoverAuthorizedDelegationAccountingV1(input: {
   const identity = dispatchAuthorizationIdentity(authorityId, envelope.execution_id, invocationId);
   const totalTokens = invocation.allocation.inputTokens + invocation.allocation.outputTokens;
   requireDelegationV2(Number.isSafeInteger(totalTokens), "recovery_allocation_invalid");
-  const limits = { maxAttempts: 1, maxTotalTokens: totalTokens, maxCostUsd: delegationAccountingDollarsV1(invocation.allocation.costMicros) };
   const matches = await dispatchLedger.inspectInvocation({ authorizationId: identity.id, invocationId: identity.invocationId });
   requireDelegationV2(matches.length === 1, "recovery_reservation_missing_or_ambiguous");
   const reservation = structuredClone(matches[0]);
+  const protocols = (["legacy-relay", "retained-tariff-v1"] as const).filter(protocol => {
+    const maxCostUsd = protocol === "legacy-relay" ? invocation.allocation.costMicros / 1_000_000
+      : delegationAccountingDollarsV1(invocation.allocation.costMicros);
+    return same(reservation.limits, { maxAttempts: 1, maxTotalTokens: totalTokens, maxCostUsd })
+      && same(reservation.capacity, { attempts: 1, maxTokens: totalTokens, maxCostUsd });
+  });
   requireDelegationV2(reservation.authorizationId === identity.id && reservation.invocationId === identity.invocationId
-    && same(reservation.limits, limits) && same(reservation.capacity, { attempts: 1, maxTokens: totalTokens, maxCostUsd: limits.maxCostUsd })
-    && reservation.state !== "released", "recovery_reservation_mismatch");
+    && protocols.length === 1 && reservation.state !== "released", "recovery_reservation_mismatch");
+  const reservationProtocol = protocols[0];
   const admitted = await host.admitRecovery(structuredClone({ authorityId, invocationId, originEpoch: origin.epoch,
-    root: epoch.root, envelope, invocation, reservation }));
+    root: epoch.root, envelope, invocation, reservation, reservationProtocol }));
   const lease = admitted.lease;
   try {
     const receipt = structuredClone(admitted.receipt); delegationReferenceV2(receipt);
-    const accounting = admitted.accounting === null ? null : validateDelegationRetainedAccountingV1(admitted.accounting);
+    const accounting = admitted.accounting === null ? null : recoveryAccounting(admitted.accounting);
     const assertCurrent = () => requireDelegationV2(lease.assertCurrent() === undefined, "recovery_lease_invalid");
     assertCurrent();
     const current = await service.inspect(authorityId);
@@ -77,11 +97,19 @@ export async function recoverAuthorizedDelegationAccountingV1(input: {
       && same(current.epochs[origin.epoch].root, epoch.root)
       && same(current.epochs[origin.epoch].envelopes.find(e => e.envelope_id === invocation.envelopeId), envelope)
       && currentInvocation.envelopeId === invocation.envelopeId && same(currentInvocation.allocation, invocation.allocation), "recovery_origin_changed");
-    if (accounting === null) return { status: "held", reason: "usage-unknown", receipt, accounting, invocation: structuredClone(currentInvocation), reservation };
+    const currentReservations = await dispatchLedger.inspectInvocation({ authorizationId: identity.id, invocationId: identity.invocationId });
+    assertCurrent();
+    requireDelegationV2(currentReservations.length === 1 && same(reservationTuple(currentReservations[0]), reservationTuple(reservation))
+      && currentReservations[0].state !== "released", "recovery_reservation_changed");
+    const currentReservation = currentReservations[0];
+    if (accounting === null) return { status: "held", reason: "usage-unknown", receipt, accounting, invocation: structuredClone(currentInvocation), reservation: currentReservation };
+    requireDelegationV2(accounting.costBasis !== "tariff-upper-bound" || reservationProtocol === "retained-tariff-v1", "recovery_accounting_protocol_mismatch");
     const usage = { inputTokens: accounting.inputTokens, outputTokens: accounting.outputTokens, costMicros: accounting.costMicros };
     requireDelegationV2(currentInvocation.usage === null || same(currentInvocation.usage, usage), "recovery_accounting_conflict");
-    const dispatchUsage = { attempts: 1 as const, totalTokens: accounting.inputTokens + accounting.outputTokens, costUsd: delegationAccountingDollarsV1(accounting.costMicros) };
-    const dispatchOverrun = dispatchUsage.totalTokens > totalTokens || dispatchUsage.costUsd > limits.maxCostUsd;
+    const dispatchUsage = { attempts: 1 as const, totalTokens: accounting.inputTokens + accounting.outputTokens,
+      costUsd: accounting.costBasis === "provider-reported" ? accounting.reportedCostUsd : delegationAccountingDollarsV1(accounting.costMicros) };
+    requireDelegationV2(currentReservation.state !== "settled" || same(currentReservation.usage, dispatchUsage), "recovery_dispatch_accounting_conflict");
+    const dispatchOverrun = dispatchUsage.totalTokens > totalTokens || dispatchUsage.costUsd > currentReservation.capacity.maxCostUsd!;
     const overrun = dispatchOverrun || usage.inputTokens > invocation.allocation.inputTokens
       || usage.outputTokens > invocation.allocation.outputTokens || usage.costMicros > invocation.allocation.costMicros;
     if (!dispatchOverrun) {

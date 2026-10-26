@@ -1331,12 +1331,14 @@ test("initial-request admission still requires exact current ACK before a paid r
   assert.equal(retried.projection.attempts.at(-1).previousInvocationId, firstAttempt.invocationId);
 });
 
-for (const partial of ["dispatch-held", "authority-held", "both-held", "overrun-held"]) {
+for (const partial of ["dispatch-held", "authority-held", "both-held", "overrun-held", "legacy-relay-held", "provider-fallback-held", "concurrent-dispatch-settled"]) {
   test(`dual-ledger recovery reopens original evidence after renewal/cancel/expiry with no new invocation: ${partial}`, async t => {
     const { recoverAuthorizedDelegationAccountingV1 } = await import('../../build/src/delegation-accounting-recovery.js');
-    const f = await fixture(t, { v3: true, recoveryProbe: true, retainedAccounting: true,
-      accountingProtocol: "retained-tariff-v1", tariffMicros: partial === "overrun-held" ? 15 : 7, captureDispatchReservations: true });
-    const costMicros = partial === "overrun-held" ? 15 : 7;
+    const providerReported = partial === "legacy-relay-held" || partial === "provider-fallback-held";
+    const f = await fixture(t, { v3: true, recoveryProbe: true, retainedAccounting: !providerReported,
+      ...(partial === "legacy-relay-held" ? {} : { accountingProtocol: "retained-tariff-v1" }),
+      tariffMicros: partial === "overrun-held" ? 15 : 7, captureDispatchReservations: true });
+    const costMicros = providerReported ? 3 : partial === "overrun-held" ? 15 : 7;
     f.state.failDispatchSettlement = partial !== "authority-held";
     f.state.rejectReconciliation = partial !== "dispatch-held";
     const executed = await f.controller.release(await f.release("recover-original", ["seat-0"]));
@@ -1369,9 +1371,12 @@ for (const partial of ["dispatch-held", "authority-held", "both-held", "overrun-
       assert.equal(observation.reservation.reservationId, actual.reservationId);
       const bytes = fs.readFileSync(path.join(f.cwd, `${original.reference.id}.json`));
       assert.equal(`sha256:${createHash("sha256").update(bytes).digest("hex")}`, original.reference.digest);
-      const raw = JSON.parse(bytes), accounting = { inputTokens: raw.usage.inputTokens, outputTokens: raw.usage.outputTokens,
-        costMicros: partial === "overrun-held" ? (raw.usage.inputTokens + raw.usage.outputTokens) * 5
-          : raw.usage.inputTokens + raw.usage.outputTokens * 3, costBasis: "tariff-upper-bound" };
+      const raw = JSON.parse(bytes), accounting = providerReported
+        ? { inputTokens: raw.usage.inputTokens, outputTokens: raw.usage.outputTokens,
+          costMicros: Math.ceil(raw.usage.costUsd * 1_000_000), reportedCostUsd: raw.usage.costUsd, costBasis: "provider-reported" }
+        : { inputTokens: raw.usage.inputTokens, outputTokens: raw.usage.outputTokens,
+          costMicros: partial === "overrun-held" ? (raw.usage.inputTokens + raw.usage.outputTokens) * 5
+            : raw.usage.inputTokens + raw.usage.outputTokens * 3, costBasis: "tariff-upper-bound" };
       const intent = path.join(f.cwd, `recover-${invocationId}.json`);
       const intentBytes = canonicalJson({ authorityId: observation.authorityId, invocationId: observation.invocationId,
         originEpoch: observation.originEpoch, root: rootAuthorityReferenceV2(observation.root), envelope: observation.envelope,
@@ -1409,14 +1414,30 @@ for (const partial of ["dispatch-held", "authority-held", "both-held", "overrun-
         } } }), /recovery_accounting_conflict/);
       assert.equal((await openDispatch().inspectInvocation(lookup))[0].state, "reserved");
     }
+    if (partial === "authority-held" || partial === "concurrent-dispatch-settled") {
+      const confirm = f.authorityHost.confirmHistoricalReconciliation;
+      f.authorityHost.confirmHistoricalReconciliation = async () => true;
+      try {
+        await assert.rejects(recoverAuthorizedDelegationAccountingV1({ authorityId: "root", invocationId,
+          service: f.openAuthority(), dispatchLedger: recoveryLedger, host: { async admitRecovery(observation) {
+            const admitted = await host.admitRecovery(observation);
+            if (partial === "concurrent-dispatch-settled") await openDispatch().settleChecked({ reservation: actual,
+              usage: { attempts: 1, totalTokens: 3, costUsd: delegationAccountingDollarsV1(7) },
+              admission: { async acquire() { return { assertCurrent() {}, release() {} }; } } });
+            return { ...admitted, accounting: { ...admitted.accounting, costMicros: 15 } };
+          } } }));
+        assert.equal((await f.openAuthority().inspect("root")).invocations[0].usage, null);
+        assert.equal((await openDispatch().inspectInvocation(lookup))[0].usage.costUsd, delegationAccountingDollarsV1(7));
+      } finally { f.authorityHost.confirmHistoricalReconciliation = confirm; }
+    }
     const result = await recover();
     assert.equal(result.status, partial === "overrun-held" ? "held" : "settled");
     assert.deepEqual(result.invocation.usage, { inputTokens: 1, outputTokens: 2, costMicros });
     assert.equal(result.reservation.state, partial === "overrun-held" ? "reserved" : "settled");
     if (partial === "overrun-held") assert.equal(result.reason, "usage-exceeds-reservation");
-    else assert.deepEqual(result.reservation.usage, { attempts: 1, totalTokens: 3, costUsd: delegationAccountingDollarsV1(7) });
+    else assert.deepEqual(result.reservation.usage, { attempts: 1, totalTokens: 3, costUsd: providerReported ? 0.000003 : delegationAccountingDollarsV1(7) });
     assert.deepEqual(await recover(), result);
-    assert.equal(releases, partial === "both-held" ? 4 : 2);
+    assert.equal(releases, partial === "both-held" ? 4 : partial === "authority-held" || partial === "concurrent-dispatch-settled" ? 3 : 2);
     if (partial === "dispatch-held") {
       await assert.rejects(recoverAuthorizedDelegationAccountingV1({ authorityId: "root", invocationId,
         service: f.openAuthority(), dispatchLedger: recoveryLedger, host: { async admitRecovery(observation) {

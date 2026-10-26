@@ -966,6 +966,15 @@ mapping; Dispatch supplies the actual existing reservation. Missing, ambiguous,
 released or tuple-mismatched reservations are refused. Hosts must not reproduce
 private reservation codecs or reserve again to discover an old identity.
 
+The actual reservation distinguishes the original legacy Relay dollar encoding
+from AccountingV1's upward reservation projection. Both are supported. The host
+returns `tariff-upper-bound` accounting only for an originally tariff-accounted
+effect, or `provider-reported` accounting with the original `reportedCostUsd` and
+its exact ceiling in integer micros. The latter also covers AccountingV1's
+explicit provider-dollar fallback. Recovery never derives original dollars by
+converting tariff micros backward or substitutes a new price basis for an old
+settlement.
+
 The host's `admitRecovery` authenticates the current operator and original
 physical-turn, wire, raw usage, tariff and qualification evidence. It durably
 retains the exact recovery intent before returning known integer accounting,
@@ -979,6 +988,8 @@ refuse admission, rather than reprice with the current profile.
 
 Recovery settles Dispatch through checked native publication, reconciles Flow
 through its existing original-epoch confirmation callback, then reads both owners.
+It refreshes Dispatch after host admission and refuses conflicting settled usage
+or a released reservation before mutating Flow, including on the overrun path.
 It returns `settled` only when their exact known usage and terminal states agree.
 A lost acknowledgement or interruption between writes leaves a recoverable
 partial outcome; these stores do not share an atomic transaction. Repeating the
