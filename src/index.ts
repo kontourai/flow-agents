@@ -804,3 +804,5 @@ export * from "./delegation-context-sync.js";
 export * from "./delegation-group-v2.js";
 export * from "./delegation-group-v2-local-file.js";
 export * from "./delegation-group-mailbox.js";
+
+export * from "./delegation-accounting-recovery.js";

@@ -954,3 +954,47 @@ Historical reservation lookup, checked dual-ledger recovery, retained original
 pricing evidence and downstream consumer qualification remain separate work.
 A failed or interrupted attempt must never be resent merely to reconstruct its
 reservation identity.
+
+### Recovering both accounting ledgers
+
+`recoverAuthorizedDelegationAccountingV1` from
+`@kontourai/flow-agents/delegation-accounting-recovery` reconciles a retained
+physical invocation through the public V3 authority service and Dispatch's
+`RecoverableAuthorizationLedger`. It locates the invocation's original epoch,
+root, envelope and allocation. Flow Agents owns its authorization identity
+mapping; Dispatch supplies the actual existing reservation. Missing, ambiguous,
+released or tuple-mismatched reservations are refused. Hosts must not reproduce
+private reservation codecs or reserve again to discover an old identity.
+
+The host's `admitRecovery` authenticates the current operator and original
+physical-turn, wire, raw usage, tariff and qualification evidence. It durably
+retains the exact recovery intent before returning known integer accounting,
+a receipt reference and a lease. A reference alone does not authenticate itself.
+The lease must exclude relevant authority/source changes until release, including
+other processes where applicable. It must not acquire either native ledger lock.
+An expired execution profile or cancelled/latest renewed grant does not prevent
+accounting a historical effect; it also grants no new execution authority.
+Missing original pricing or terminal evidence must return unknown accounting or
+refuse admission, rather than reprice with the current profile.
+
+Recovery settles Dispatch through checked native publication, reconciles Flow
+through its existing original-epoch confirmation callback, then reads both owners.
+It returns `settled` only when their exact known usage and terminal states agree.
+A lost acknowledgement or interruption between writes leaves a recoverable
+partial outcome; these stores do not share an atomic transaction. Repeating the
+same recovery performs identical accounting writes and owner reads, never another
+provider invocation, runtime preparation, reservation, release or refund.
+
+Unknown usage returns `held` with `usage-unknown` without settlement. Known usage
+above an original allocation returns `held` with `usage-exceeds-reservation`;
+Flow retains the actual charge, and Dispatch remains reserved when its own
+capacity is exceeded. Recovery never clamps usage or raises the old capacity.
+Errors, including host lease release errors, may follow a committed write;
+inspect both owners before deciding what remains. A recovery receipt proves
+accounting observations, not answer acceptance or successful bounded execution.
+
+The host remains responsible for signed evidence retention, immutable recovery
+intent replay and current authorization throughout its lease. Controlled tests
+exercise original-epoch recovery after renewal/cancellation/expiry for either or
+both held ledgers. They do not qualify a specific host's signatures, live provider
+billing, or Station's downstream recovery serving.

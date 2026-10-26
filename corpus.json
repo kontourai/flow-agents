@@ -448,6 +448,8 @@
         "src/delegation-authority-service.ts",
         "src/delegation-authority-local-file.ts",
         "src/delegation-execution.ts",
+        "src/delegation-dispatch-identity.ts",
+        "src/delegation-accounting-recovery.ts",
         "src/delegation-flow-execution.ts",
         "src/delegation-context-sync.ts",
         "src/delegation-group-v2.ts",

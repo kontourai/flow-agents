@@ -8,8 +8,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { setImmediate } from "node:timers/promises";
-import { FileAuthorizationLedger } from "@kontourai/dispatch";
+import { FileAuthorizationLedger, AuthorizationPersistenceError } from "@kontourai/dispatch";
 import { canonicalJson } from "@kontourai/relay";
+import { delegationAccountingDollarsV1 } from "../../build/src/delegation-dispatch.js";
 import { definitionIdentity, startRun, loadRun, claimableMultiCursorSteps, claimReadyStep, evaluateClaimedStep, reopenMultiCursorStep, attachEvidence, flowRunHead, flowTransitionRef, authorizeRetry, releaseStepClaim } from "@kontourai/flow";
 import { createDelegationAuthorityServiceV3 } from "@kontourai/flow-agents/delegation-authority-service-v3";
 import { createLocalFileDelegationAuthorityStoreV3 } from "@kontourai/flow-agents/delegation-authority-local-file-v3";
@@ -77,7 +78,7 @@ async function fixture(t, options = {}) {
         && canonicalJson(receipt.runtime) === canonicalJson(envelope.execution_binding.runtime)
         && `sha256:${createHash("sha256").update(bytes).digest("hex")}` === envelope.execution_binding.source.source_admission_receipt.digest;
     },
-    confirmReconciliation: async () => state.allowed,
+    confirmReconciliation: async () => state.allowed && !state.rejectReconciliation,
     async confirmHistoricalReconciliation(invocation, root, envelope) {
       state.historicalChecks ??= []; state.historicalChecks.push({ invocation, root, envelope });
       return false; // This fixture has no later physical accounting evidence for an old unknown hold.
@@ -141,8 +142,12 @@ async function fixture(t, options = {}) {
       state.dispatchReservations ??= [];
       state.dispatchReservations.push({ reservation: structuredClone(reservation), envelopeId: envelope.envelope_id, invocationId });
     },
-    async retainResult(result) {
-      retain(result);
+    async retainResult(result, envelope, invocationId) {
+      const reference = retain(result);
+      if (options.recoveryProbe) {
+        state.retainedResults ??= [];
+        state.retainedResults.push({ reference, envelope: structuredClone(envelope), invocationId });
+      }
       if (options.retainedAccounting) return state.unknown ? null : {
         inputTokens: 1, outputTokens: 2, costMicros: options.tariffMicros ?? 3, costBasis: "tariff-upper-bound",
       };
@@ -232,8 +237,17 @@ async function fixture(t, options = {}) {
     async requestDescendantCancellation() { state.cancels++; if (state.cancelFailure) throw new Error("cancellation acknowledgement lost"); return retain({ cancelled: true }); },
   };
   const store = () => createLocalFileDelegationRoundsStore(cwd);
+  const dispatchLedger = new FileAuthorizationLedger({ root: path.join(cwd, "dispatch") });
+  const countedDispatchLedger = options.recoveryProbe ? {
+    async reserve(reservation) { state.reserveCalls = (state.reserveCalls ?? 0) + 1; return dispatchLedger.reserve(reservation); },
+    async settle(settlement) {
+      if (state.failDispatchSettlement) throw new AuthorizationPersistenceError("controlled settlement failure", undefined, "settle");
+      return dispatchLedger.settle(settlement);
+    },
+    async release(release) { state.releaseCalls = (state.releaseCalls ?? 0) + 1; return dispatchLedger.release(release); },
+  } : dispatchLedger;
   const open = () => createDelegationRoundsController({ store: store(), authorityService: openAuthority(), host,
-    dispatchLedger: new FileAuthorizationLedger({ root: path.join(cwd, "dispatch") }), cwd });
+    dispatchLedger: countedDispatchLedger, cwd });
   controller = open();
   const cmd = (kind, p, operationKey, fields = {}) => ({ kind, groupId: spec.groupId, operationKey, expectedRevision: p?.revision ?? 0, controller: structuredClone(spec.controller), ...fields });
   const create = cmd("create", null, "create", { spec });
@@ -1316,3 +1330,101 @@ test("initial-request admission still requires exact current ACK before a paid r
   assert.equal(f.state.calls, 4);
   assert.equal(retried.projection.attempts.at(-1).previousInvocationId, firstAttempt.invocationId);
 });
+
+for (const partial of ["dispatch-held", "authority-held", "both-held", "overrun-held"]) {
+  test(`dual-ledger recovery reopens original evidence after renewal/cancel/expiry with no new invocation: ${partial}`, async t => {
+    const { recoverAuthorizedDelegationAccountingV1 } = await import('../../build/src/delegation-accounting-recovery.js');
+    const f = await fixture(t, { v3: true, recoveryProbe: true, retainedAccounting: true,
+      accountingProtocol: "retained-tariff-v1", tariffMicros: partial === "overrun-held" ? 15 : 7, captureDispatchReservations: true });
+    const costMicros = partial === "overrun-held" ? 15 : 7;
+    f.state.failDispatchSettlement = partial !== "authority-held";
+    f.state.rejectReconciliation = partial !== "dispatch-held";
+    const executed = await f.controller.release(await f.release("recover-original", ["seat-0"]));
+    const invocationId = executed.projection.attempts[0].invocationId;
+    assert.equal(f.state.calls, 1);
+    const before = await f.service.inspect("root"), originalRoot = structuredClone(before.root);
+    const original = f.state.retainedResults.find(r => r.invocationId === invocationId);
+    assert.ok(original);
+    const actual = f.state.dispatchReservations.find(r => r.invocationId === invocationId).reservation;
+    const openDispatch = () => new FileAuthorizationLedger({ root: path.join(f.cwd, "dispatch") });
+    const lookup = { authorizationId: actual.authorizationId, invocationId: actual.invocationId };
+    assert.equal((await openDispatch().inspectInvocation(lookup))[0].state, partial === "authority-held" ? "settled" : "reserved");
+    assert.equal(before.invocations[0].usage === null, partial !== "dispatch-held");
+    f.state.rejectReconciliation = false;
+    const renewed = await approveHostRenewal(f, await successor(f, "recovery-new-epoch"));
+    await f.service.renew(renewed);
+    await f.service.cancel("root");
+    f.authorityHost.now = () => "9999-01-01T00:00:00.000Z";
+    f.physical.resolveRuntime = async () => { throw new Error("recovery must not construct a runtime"); };
+    f.authorityHost.confirmHistoricalReconciliation = async (invocation, root, envelope) => {
+      assert.deepEqual(root, originalRoot);
+      assert.deepEqual(envelope, original.envelope);
+      return invocation.invocationId === invocationId && canonicalJson(invocation.usage) === canonicalJson({ inputTokens: 1, outputTokens: 2, costMicros });
+    };
+    let releases = 0;
+    const host = { async admitRecovery(observation) {
+      assert.equal(observation.originEpoch, 0);
+      assert.deepEqual(observation.root, originalRoot);
+      assert.deepEqual(observation.envelope, original.envelope);
+      assert.equal(observation.reservation.reservationId, actual.reservationId);
+      const bytes = fs.readFileSync(path.join(f.cwd, `${original.reference.id}.json`));
+      assert.equal(`sha256:${createHash("sha256").update(bytes).digest("hex")}`, original.reference.digest);
+      const raw = JSON.parse(bytes), accounting = { inputTokens: raw.usage.inputTokens, outputTokens: raw.usage.outputTokens,
+        costMicros: partial === "overrun-held" ? (raw.usage.inputTokens + raw.usage.outputTokens) * 5
+          : raw.usage.inputTokens + raw.usage.outputTokens * 3, costBasis: "tariff-upper-bound" };
+      const intent = path.join(f.cwd, `recover-${invocationId}.json`);
+      const intentBytes = canonicalJson({ authorityId: observation.authorityId, invocationId: observation.invocationId,
+        originEpoch: observation.originEpoch, root: rootAuthorityReferenceV2(observation.root), envelope: observation.envelope,
+        allocation: observation.invocation.allocation, reservation: actual, accounting, evidence: original.reference });
+      if (fs.existsSync(intent)) assert.equal(fs.readFileSync(intent, "utf8"), intentBytes);
+      else fs.writeFileSync(intent, intentBytes, { flag: "wx", mode: 0o600 });
+      return { accounting, receipt: ref("durable-recovery-intent"), lease: {
+        assertCurrent() { assert.equal(f.state.allowed, true); }, release() { releases++; },
+      } };
+    } };
+    const counts = { calls: f.state.calls, reserves: f.state.reserveCalls, releases: f.state.releaseCalls ?? 0 };
+    const recoveryLedger = {
+      inspectInvocation: value => openDispatch().inspectInvocation(value),
+      settleChecked: value => openDispatch().settleChecked(value),
+      async reserve() { assert.fail("recovery cannot reserve"); },
+      async settle() { assert.fail("recovery must use checked settlement"); },
+      async release() { assert.fail("recovery cannot release"); },
+    };
+    const recover = () => recoverAuthorizedDelegationAccountingV1({ authorityId: "root", invocationId,
+      service: f.openAuthority(), dispatchLedger: recoveryLedger, host });
+    if (partial === "both-held") {
+      const unknown = await recoverAuthorizedDelegationAccountingV1({ authorityId: "root", invocationId,
+        service: f.openAuthority(), dispatchLedger: recoveryLedger, host: { async admitRecovery(observation) {
+          const admitted = await host.admitRecovery(observation);
+          return { ...admitted, accounting: null };
+        } } });
+      assert.equal(unknown.status, "held"); assert.equal(unknown.reason, "usage-unknown");
+      assert.equal((await openDispatch().inspectInvocation(lookup))[0].state, "reserved");
+      assert.equal((await f.openAuthority().inspect("root")).invocations[0].usage, null);
+      await assert.rejects(recoverAuthorizedDelegationAccountingV1({ authorityId: "root", invocationId,
+        service: f.openAuthority(), dispatchLedger: recoveryLedger, host: { async admitRecovery(observation) {
+          const admitted = await host.admitRecovery(observation);
+          await f.openAuthority().reconcileInvocation("root", invocationId, { inputTokens: 1, outputTokens: 2, costMicros: 7 }, true);
+          return { ...admitted, accounting: { ...admitted.accounting, costMicros: 8 } };
+        } } }), /recovery_accounting_conflict/);
+      assert.equal((await openDispatch().inspectInvocation(lookup))[0].state, "reserved");
+    }
+    const result = await recover();
+    assert.equal(result.status, partial === "overrun-held" ? "held" : "settled");
+    assert.deepEqual(result.invocation.usage, { inputTokens: 1, outputTokens: 2, costMicros });
+    assert.equal(result.reservation.state, partial === "overrun-held" ? "reserved" : "settled");
+    if (partial === "overrun-held") assert.equal(result.reason, "usage-exceeds-reservation");
+    else assert.deepEqual(result.reservation.usage, { attempts: 1, totalTokens: 3, costUsd: delegationAccountingDollarsV1(7) });
+    assert.deepEqual(await recover(), result);
+    assert.equal(releases, partial === "both-held" ? 4 : 2);
+    if (partial === "dispatch-held") {
+      await assert.rejects(recoverAuthorizedDelegationAccountingV1({ authorityId: "root", invocationId,
+        service: f.openAuthority(), dispatchLedger: recoveryLedger, host: { async admitRecovery(observation) {
+          const admitted = await host.admitRecovery(observation);
+          return { ...admitted, accounting: { ...admitted.accounting, costMicros: 8 } };
+        } } }), /recovery_accounting_conflict/);
+      assert.equal((await openDispatch().inspectInvocation(lookup))[0].usage.costUsd, delegationAccountingDollarsV1(7));
+    }
+    assert.deepEqual({ calls: f.state.calls, reserves: f.state.reserveCalls, releases: f.state.releaseCalls ?? 0 }, counts);
+  });
+}

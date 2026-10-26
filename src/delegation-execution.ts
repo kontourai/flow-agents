@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { dispatchAuthorizationIdentity } from "./delegation-dispatch-identity.js";
 import { dispatch, AuthorizationPersistenceError, type ExecutionPlan, type AuthorizationLedger, type AuthorizationReservation } from "@kontourai/dispatch";
 import { canonicalJson, type ModelInvocationRequest, type ModelInvocationResult, type ModelRuntime } from "@kontourai/relay";
 import type { DelegationEnvelopeV2 } from "./delegation-envelope-v2.js";
@@ -125,12 +125,12 @@ async function executeDelegation<Retained, Outcome>(
   }
   const maxTokens = input.allocation.inputTokens + input.allocation.outputTokens;
   const maxCostUsd = accounting.reservationDollars(input.allocation.costMicros);
-  const digest = createHash("sha256").update(canonicalJson([input.authorityId, envelope.execution_id, input.invocationId])).digest("hex");
+  const identity = dispatchAuthorizationIdentity(input.authorityId, envelope.execution_id, input.invocationId);
   const plan: ExecutionPlan = {
     schemaVersion: 1, role: "delegated-member", request: structuredClone(input.request),
     candidates: [{ id: "selected-grant", runtimeId: "selected", worstCaseUsage: { maxTokens, maxCostUsd } }],
     budget: { maxAttempts: 1, maxTotalTokens: maxTokens, maxCostUsd },
-    authorization: { schemaVersion: 1, id: `auth_${digest}`, invocationId: `invoke_${digest}`,
+    authorization: { schemaVersion: 1, ...identity,
       limits: { maxAttempts: 1, maxTotalTokens: maxTokens, maxCostUsd } },
   };
   // Public Dispatch validation runs without a ledger or any possible invocation.

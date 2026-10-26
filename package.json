@@ -1,7 +1,7 @@
 {
   "name": "@kontourai/flow-agents",
   "version": "9.7.0",
-  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows — a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
+  "description": "Flow Agents keeps coding agents on track with evidence-backed workflows \u2014 a Kontour product that applies Flow and Veritas process discipline as a portable layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, and pi \u2014 with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
     "ai-agents",
@@ -178,6 +178,10 @@
     "./delegation-authority-local-file-v3": {
       "types": "./build/src/delegation-authority-local-file-v3.d.ts",
       "import": "./build/src/delegation-authority-local-file-v3.js"
+    },
+    "./delegation-accounting-recovery": {
+      "types": "./build/src/delegation-accounting-recovery.d.ts",
+      "import": "./build/src/delegation-accounting-recovery.js"
     }
   },
   "repository": {
