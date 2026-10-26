@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.8.0](https://github.com/kontourai/flow-agents/compare/v9.7.0...v9.8.0) (2026-10-26)
+
+
+### Features
+
+* **delegation:** recover original accounting across Dispatch and Flow ([#1555](https://github.com/kontourai/flow-agents/issues/1555)) ([973cf3a](https://github.com/kontourai/flow-agents/commit/973cf3a24b4610d3cf1daec711121baa73f323f7))
+
 ## [9.7.0](https://github.com/kontourai/flow-agents/compare/v9.6.0...v9.7.0) (2026-10-25)
 
 
