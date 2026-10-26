@@ -244,10 +244,10 @@ The initial Flow 5.2.0 fixtures exercise `startRun`, `claimReadyStep`, `loadRun`
 injection over real temporary paths exercises pre-rename preservation and post-rename unavailable/read
 repair. These checks do not simulate power loss or establish hardware/filesystem crash guarantees.
 They are source diagnostics, not installed-runtime or live-provider acceptance. The package now pins
-Flow 5.2.2 alongside the privileged coordinator and its independently locked staged closure. A
+Flow 5.3.0 alongside the privileged coordinator and its independently locked staged closure. A
 previous dependency-only trial failed the coordinator's 5.2.0 identity check; the migration updates
 the package/release pin and closure digest together while preserving the reducer's 1.3.8 identity.
-The installed lifecycle harness retains exact 5.2.2 admission and FIFO interoperability checks.
+The installed lifecycle harness retains exact 5.3.0 admission and FIFO interoperability checks.
 This alignment does not establish a consuming host's shared-module composition or live execution.
 
 The fresh-context continuation should start from #1113, `AGENTS.md`, this guide and the exact handoff
