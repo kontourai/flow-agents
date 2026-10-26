@@ -8,6 +8,8 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/evals/lib/node.sh"
+unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID
+export CODEX_SESSION_ID=publication-owner-fixture
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
