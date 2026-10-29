@@ -460,6 +460,7 @@
         "src/delegation-rounds-flow.ts",
         "src/delegation-rounds-accounting.ts",
         "src/delegation-rounds-continuation.ts",
+        "src/delegation-continuation-receipt.ts",
         "src/delegation-rounds-recipient.ts",
         "src/delegation-authority-service-v3.ts",
         "src/delegation-authority-local-file-v3.ts"

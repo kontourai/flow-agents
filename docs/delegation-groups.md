@@ -244,10 +244,10 @@ The initial Flow 5.2.0 fixtures exercise `startRun`, `claimReadyStep`, `loadRun`
 injection over real temporary paths exercises pre-rename preservation and post-rename unavailable/read
 repair. These checks do not simulate power loss or establish hardware/filesystem crash guarantees.
 They are source diagnostics, not installed-runtime or live-provider acceptance. The package now pins
-Flow 5.3.0 alongside the privileged coordinator and its independently locked staged closure. A
+Flow 5.4.0 alongside the privileged coordinator and its independently locked staged closure. A
 previous dependency-only trial failed the coordinator's 5.2.0 identity check; the migration updates
 the package/release pin and closure digest together while preserving the reducer's 1.3.8 identity.
-The installed lifecycle harness retains exact 5.3.0 admission and FIFO interoperability checks.
+The installed lifecycle harness checks exact 5.4.0 admission and FIFO interoperability.
 This alignment does not establish a consuming host's shared-module composition or live execution.
 
 The fresh-context continuation should start from #1113, `AGENTS.md`, this guide and the exact handoff
@@ -1012,18 +1012,34 @@ billing, or Station's downstream recovery serving.
 
 ### Checked continuation mutation admission
 
-Flow reappraisal and retry authorization require both host seams:
-`withContinuationMutation` serializes the host operation, and
-`acquireContinuationMutation` returns a Flow `FlowRunMutationLease` for the exact
-spec and command. The lease authenticates current source/operator authority and
-excludes relevant changes until release. It may borrow custody already held by
-the outer host operation; neither seam may acquire Flow's native ticket or
-re-enter a host lock it already holds.
+Receipt-backed reappraisal and retry authorization require the host's
+`acquireContinuationPublication` seam. It acquires an outer lease before the
+final group transaction and holds current authorization, home and publication
+participants through the transaction's durable return and cleanup. Production
+also requires the execution-source participants. Its `flowAdmission` must lend
+a fresh child lease for each Flow call; releasing a child must not release the
+parent. Neither acquisition may own or re-enter Flow's native mutation ticket.
+The earlier callback-level mutation seams alone are insufficient.
 
-Flow Agents calls published Flow 5.3.0 `evaluateRunChecked` with the command's
-original expected head, or `authorizeRetryChecked` with the existing exact retry
-request. Flow acquires the host lease before its native lock and checks it through
-publication. An absent or denied lease refuses mutation. A head change while
-host admission waits refuses the original operation instead of evaluating the
-new head. Existing exact observational replays retain their read-only behavior.
-These operations grant no provider execution or additional capacity by themselves.
+Flow Agents uses the public Flow 5.4.0 checked-operation identity and receipt
+APIs. It binds the identity to the original command and effective journal prefix,
+and joins every receipt transition reference to the canonically loaded run. A
+unique requested-gate result is required. The retained observation contains the
+receipt and selected reference, not a copy of current transitions. The host must
+return the same immutable content-addressed reference for identical observation
+bytes, including after an uncertain publication.
+`loadContinuation(spec, reference)` reads the exact retained UTF-8 bytes. A
+producer that loses publication uses this metadata-only reader to authenticate
+the content digest, original command and prefix, receipt, result head and
+selected reference. Missing content or a mismatch refuses the replay; no new
+Flow lookup, retention, effect or event is performed for that loser.
+
+`finalizeContinuation` can close a pending reappraisal or retry authorization
+whose Flow operation committed but whose group receipt was lost. It authenticates
+current authority and reads the original checked receipt; it does not execute a
+Flow mutation, admit an effect, or grant retry authority. Missing or ambiguous
+proof refuses closure. An exact finalizer replay is authenticated and performs
+no additional retention or event; a different finalizer key cannot close an
+already completed operation. Cancellation does not turn metadata closure into
+permission for further execution. Concrete hosts must implement and verify all
+participants, including shutdown behavior, before enabling this seam.

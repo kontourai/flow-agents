@@ -706,8 +706,8 @@ test("installed coordinator admits the exact published Flow package and refuses 
   fs.writeFileSync(path.join(installRoot, "coordinator.mjs"), `${fs.readFileSync(COORDINATOR, "utf8")}\nexport { loadPinnedFlowReducer };\n`);
   const coordinator = await import(pathToFileURL(path.join(installRoot, "coordinator.mjs")).href);
   const admitted = await coordinator.loadPinnedFlowReducer();
-  assert.equal(admitted.pin.package_version, "5.3.0");
-  assert.equal(admitted.pin.release_commit, "2632ef7f12e084e9b47695d554f7052130ed4436");
+  assert.equal(admitted.pin.package_version, "5.4.0");
+  assert.equal(admitted.pin.release_commit, "bf2463c203de59d239b037051f6c63b9679b1843");
   const pinFile = path.join(installRoot, "flow-reducer-v1.json");
   const pin = JSON.parse(fs.readFileSync(pinFile, "utf8"));
   fs.writeFileSync(pinFile, JSON.stringify({ ...pin, package_version: "5.1.4" }));

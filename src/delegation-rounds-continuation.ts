@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
-import { loadRun, definitionIdentity, flowRunHead, flowTransitionRef, evaluateRunChecked, authorizeRetryChecked } from "./delegation-flow-bindings.js";
+import { loadRun, definitionIdentity, flowRunHead, flowTransitionRef } from "./delegation-flow-bindings.js";
 import { canonicalJson } from "@kontourai/relay";
 import { delegationRecordV2, delegationIdV2, delegationIntegerV2, delegationDigestV2, requireDelegationV2, delegationReferenceV2, type DelegationReferenceV2 } from "./delegation-authority-contract.js";
 import { createDelegationAuthorityService } from "./delegation-authority-service.js";
@@ -44,9 +44,8 @@ export async function validateRoundsContinuation(p: DelegationRoundsProjection, 
   } else requireDelegationV2(p.spec.seats.some(s => s.seatId === c.seatId), "rounds_unauthorized_seat");
 }
 export async function runRoundsContinuation(input: {
-  spec: DelegationRoundsSpec; command: Continuation; projection: DelegationRoundsProjection; authorityService: ReturnType<typeof createDelegationAuthorityService>;
+  spec: DelegationRoundsSpec; command: Extract<Continuation, {kind: "sync"}>; projection: DelegationRoundsProjection; authorityService: ReturnType<typeof createDelegationAuthorityService>;
   dispatchLedger: AuthorizationLedger; host: DelegationRoundsHost; cwd?: string;
-  mutate<T>(body: () => Promise<T>): Promise<T>;
   authorize(): Promise<void>; append(body: DelegationRoundsEventBody): Promise<unknown>;
 }): Promise<void> {
   const { spec, command: c, host } = input; requireDelegationV2(spec.topology.kind === "flow" && host.retainContinuation, "rounds_continuation_host_required");
@@ -105,25 +104,7 @@ export async function runRoundsContinuation(input: {
     });
     requireDelegationV2(receipt.status === "acknowledged", "rounds_sync_ack_required"); return;
   }
-  const runId = spec.topology.runId;
-  const result = await input.mutate(async () => {
-    const run = await runFor(spec, c.flowHead, input.cwd);
-    const stepId = c.kind === "reappraise" ? run.definition.gates[c.gate]?.step : c.request.target_step;
-    const seat = spec.seats.find(s => s.stepId === stepId); requireDelegationV2(seat, "rounds_unauthorized_seat");
-    await input.authorityService.admitEffect(spec.rootAuthorityRef.id, seat.envelope.id, seat.effect);
-    requireDelegationV2(host.flow?.acquireContinuationMutation, "rounds_continuation_host_required");
-    const admission = { acquire: () => host.flow!.acquireContinuationMutation!(structuredClone(spec), structuredClone(c)) };
-    return c.kind === "reappraise" ? evaluateRunChecked(runId, { cwd: input.cwd, gate: c.gate, expectedRunHead: c.flowHead, admission })
-      : authorizeRetryChecked(runId, { cwd: input.cwd, request: c.request, admission });
-  });
-  const actual = await runFor(spec, flowRunHead(result.state), input.cwd);
-  const transition = actual.state.transitions.at(-1);
-  requireDelegationV2(c.kind === "reappraise" ? transition?.type === "route_back" && transition.limit_exceeded === true
-    : transition?.type === "retry_authorized", "rounds_recovery_result_unproven");
-  const reference = await host.retainContinuation(structuredClone(spec), { kind: c.kind, outcomes: result.outcomes ?? null,
-    transition, flowHead: flowRunHead(result.state) });
-  await input.append({ kind: "continued", operationKey: c.operationKey, receipt: { reference, flowHead: flowRunHead(result.state),
-    transitionRef: flowTransitionRef(transition), acknowledged: false } });
+
 }
 
 /** An ACK is not model memory: retain and reintroduce the exact authenticated bytes on paid continuation. */
