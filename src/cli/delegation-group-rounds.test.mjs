@@ -165,6 +165,7 @@ async function fixture(t, options = {}) {
     ...(options.accountingProtocol ? {accountingProtocol: options.accountingProtocol} : {}),
     async authorize({ action, current, command }) {
       if (!state.allowed || current && current.spec.controller.generation !== 1) return null;
+      if (action === "replay" && state.denyReplayAuthorization) return null;
       if (action === "release" && state.denyCheckpoint === command?.checkpoint.id) return null;
       return ref(`authorized-${action}`);
     },
@@ -694,6 +695,92 @@ async function exhaustedRoundsFixture(t) {
   return { f, run, claimedBlock, next };
 }
 
+test("finalizer exact replay refuses missing retained winner bytes", async t => {
+  const { f, claimedBlock } = await exhaustedRoundsFixture(t);
+  const original = await continuationCommand(f, "reappraise", "replay-red", { gate: "second", blockedTransitionRef: flowTransitionRef(claimedBlock) });
+  f.state.continuationRetentionFailure = true;
+  await assert.rejects(f.controller.reappraise(original), /continuation receipt retention unavailable/);
+  f.state.continuationRetentionFailure = false;
+  const pending = await f.controller.get(f.spec.groupId);
+  const finalizer = f.cmd("finalizeContinuation", pending, "replay-red-final", { continuationOperationKey: original.operationKey });
+  const completed = await f.controller.finalizeContinuation(finalizer);
+  const winner = completed.projection.continuations.at(-1).receipt;
+  const file = path.join(f.cwd, `${winner.reference.id}.json`), bytes = fs.readFileSync(file);
+  const events = await f.controller.events(f.spec.groupId), head = flowRunHead((await loadRun(f.spec.topology.runId, f.cwd)).state);
+  const authorityBefore = await f.service.inspect("root");
+  const retains = f.state.continuationRetains.length, calls = f.state.calls;
+  const realAdmission = f.host.flow.acquireContinuationPublication;
+  f.host.flow.acquireContinuationPublication = async input => {
+    const lease = await realAdmission(input);
+    return { ...lease, flowAdmission: { acquire() { throw new Error("replay called Flow lookup or mutation"); } } };
+  };
+  f.host.executionHost = f.host.flow.executionHost = () => { throw new Error("replay resolved execution"); };
+  f.host.prepareRequest = () => { throw new Error("replay prepared execution"); };
+  const beforeLoads = f.state.continuationLoads ?? 0;
+  assert.equal((await f.open().finalizeContinuation(finalizer)).replayed, true);
+  assert.equal(f.state.continuationLoads, beforeLoads + 1);
+  fs.unlinkSync(file);
+  await assert.rejects(f.open().finalizeContinuation(finalizer), error => error.code === "rounds_continuation_winner_unavailable");
+  fs.writeFileSync(file, Buffer.concat([bytes, Buffer.from(" ")]));
+  await assert.rejects(f.open().finalizeContinuation(finalizer), error => error.code === "rounds_continuation_completion_conflict");
+  fs.writeFileSync(file, bytes);
+  const reader = f.host.loadContinuation;
+  delete f.host.loadContinuation;
+  await assert.rejects(f.open().finalizeContinuation(finalizer), error => error.code === "rounds_continuation_winner_unavailable");
+  f.host.loadContinuation = async (...args) => { const value = await reader(...args); f.state.denyReplayAuthorization = true; return value; };
+  await assert.rejects(f.open().finalizeContinuation(finalizer), /rounds_host_authorization/);
+  f.state.denyReplayAuthorization = false; f.host.loadContinuation = reader;
+  f.state.continuationReleaseFailure = true;
+  await assert.rejects(f.open().finalizeContinuation(finalizer), error => error.code === "rounds_continuation_publication_uncertain" && error.status === "published-cleanup-unknown");
+  f.state.continuationReleaseFailure = false;
+  assert.equal((await f.open().finalizeContinuation(finalizer)).replayed, true);
+  for (const mutate of [
+    receipt => { receipt.flowHead = "0".repeat(64); },
+    receipt => { receipt.transitionRef = "0".repeat(64); },
+    receipt => { receipt.reference.digest = `sha256:${"0".repeat(64)}`; },
+    receipt => { receipt.proof.receiptDigest = "0".repeat(64); },
+  ]) {
+    let transaction = 0; const durable = f.store();
+    const corruptStore = { transact(groupId, body) { return durable.transact(groupId, journal => {
+      if (++transaction === 2) mutate(journal.events.find(e => e.kind === "continuation_finalized").receipt);
+      return body(journal);
+    }); } };
+    await assert.rejects(f.openWithStore(corruptStore).finalizeContinuation(finalizer), error => error.code === "rounds_continuation_completion_conflict");
+  }
+  let faultTransaction = 0; const faultDurable = f.store();
+  const faultStore = { transact(groupId, body) { return faultDurable.transact(groupId, async journal => {
+    const result = await body(journal);
+    if (++faultTransaction === 2) throw new Error("controlled replay durable failure");
+    return result;
+  }); } };
+  await assert.rejects(f.openWithStore(faultStore).finalizeContinuation(finalizer), error =>
+    error.code === "rounds_continuation_publication_uncertain" && error.status === "publication-unknown"
+      && /controlled replay durable failure/.test(error.cause.message));
+  assert.deepEqual(await f.service.inspect("root"), authorityBefore);
+  let enter, proceed, transaction = 0;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const barrier = new Promise(resolve => { proceed = resolve; });
+  const durable = f.store();
+  const barrierStore = { transact(groupId, body) { return durable.transact(groupId, async journal => {
+    const result = await body(journal);
+    if (++transaction === 2) { enter(); await barrier; }
+    return result;
+  }); } };
+  const replay = f.openWithStore(barrierStore).finalizeContinuation(finalizer);
+  await Promise.race([entered, replay.then(() => { throw new Error("replay escaped publication barrier"); })]);
+  let competitorEntered = false;
+  const competitor = f.host.flow.acquireContinuationPublication().then(async lease => {
+    competitorEntered = true;
+    try { await f.service.cancel("root"); } finally { await lease.release(); }
+  });
+  await setImmediate(); assert.equal(competitorEntered, false); proceed();
+  assert.equal((await replay).replayed, true); await competitor;
+  assert.equal(competitorEntered, true); assert.equal((await f.service.inspect("root")).cancelled, true);
+  assert.equal(f.state.continuationRetains.length, retains); assert.equal(f.state.calls, calls);
+  assert.equal(flowRunHead((await loadRun(f.spec.topology.runId, f.cwd)).state), head);
+  assert.deepEqual(await f.controller.events(f.spec.groupId), events);
+});
+
 test("continuation finalizer closes a lost receipt without executing again and authenticates replay", async t => {
   const { f, claimedBlock } = await exhaustedRoundsFixture(t);
   const original = await continuationCommand(f, "reappraise", "lost-continuation", {
@@ -737,6 +824,33 @@ test("continuation finalizer closes a lost receipt without executing again and a
   const duplicate = { schemaVersion: "1.0", groupId: f.spec.groupId, events: structuredClone(events) };
   duplicate.events.push({ ...structuredClone(duplicate.events.find(e => e.kind === "continuation_finalized")), revision: events.length + 1 });
   assert.throws(() => projectDelegationRounds(duplicate), /rounds_operation|rounds_continuation_identity/);
+});
+
+test("concurrent identical finalizers authenticate the winner after outer acquisition", async t => {
+  const { f, claimedBlock } = await exhaustedRoundsFixture(t);
+  const original = await continuationCommand(f, "reappraise", "finalizer-race", { gate: "second", blockedTransitionRef: flowTransitionRef(claimedBlock) });
+  f.state.continuationRetentionFailure = true;
+  await assert.rejects(f.controller.reappraise(original), /continuation receipt retention unavailable/);
+  f.state.continuationRetentionFailure = false;
+  const pending = await f.controller.get(f.spec.groupId);
+  const finalizer = f.cmd("finalizeContinuation", pending, "finalizer-race-key", { continuationOperationKey: original.operationKey });
+  let enter, proceed, blocked = false;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const barrier = new Promise(resolve => { proceed = resolve; });
+  f.state.beforePublicationAcquire = async input => {
+    if (input?.action === "finalizeContinuation" && !blocked) { blocked = true; enter(); await barrier; }
+  };
+  const loser = f.open().finalizeContinuation(finalizer);
+  await Promise.race([entered, loser.then(() => { throw new Error("finalizer escaped barrier"); })]);
+  const winner = await f.open().finalizeContinuation(finalizer);
+  const events = await f.controller.events(f.spec.groupId), retains = f.state.continuationRetains.length;
+  const beforeLoads = f.state.continuationLoads ?? 0;
+  proceed();
+  assert.equal((await loser).replayed, true);
+  assert.equal(f.state.continuationLoads, beforeLoads + 1);
+  assert.equal(f.state.continuationRetains.length, retains);
+  assert.deepEqual(await f.controller.events(f.spec.groupId), events);
+  assert.equal(winner.replayed, false);
 });
 
 test("continuation finalizer recovers an authorizeRetry receipt without granting another retry", async t => {
@@ -850,11 +964,16 @@ test("cancellation preserves metadata-only closure of an already committed conti
   const canceled = await f.controller.get(f.spec.groupId);
   assert.equal(canceled.cancellation, "requested");
   const head = flowRunHead((await loadRun(f.spec.topology.runId, f.cwd)).state), calls = f.state.calls;
-  const result = await f.controller.finalizeContinuation(f.cmd("finalizeContinuation", canceled, "finalize-canceled", { continuationOperationKey: original.operationKey }));
+  const finalizer = f.cmd("finalizeContinuation", canceled, "finalize-canceled", { continuationOperationKey: original.operationKey });
+  const result = await f.controller.finalizeContinuation(finalizer);
   assert.equal(result.projection.cancellation, "requested");
   assert.equal(result.projection.continuations.at(-1).receipt.flowHead, head);
   assert.equal(f.state.calls, calls);
   assert.equal(flowRunHead((await loadRun(f.spec.topology.runId, f.cwd)).state), head);
+  const loads = f.state.continuationLoads ?? 0;
+  const replay = await f.open().finalizeContinuation(finalizer);
+  assert.equal(replay.replayed, true); assert.equal(replay.projection.cancellation, "requested");
+  assert.equal(f.state.continuationLoads, loads + 1); assert.equal(f.state.calls, calls);
 });
 
 test("Flow refuses amendment of an exhausted blocked run and finalizer keeps the original head", async t => {
