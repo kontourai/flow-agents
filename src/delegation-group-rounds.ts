@@ -625,19 +625,15 @@ export function createDelegationRoundsController(input: {
       const prior = finalizer && journal.events.find(e => e.kind === "continuation_finalized" && e.command.operationKey === finalizer.operationKey);
       if (prior && prior.kind === "continuation_finalized") {
         await authorize("replay", groupId, p, finalizer); requireDelegationV2(same(prior.command, finalizer), "rounds_intent_conflict");
-        return { journal, result: { replayed: true, projection: p, original } };
       }
       const pending = p.continuations.find(r => r.command.operationKey === key)!;
       if (pending.receipt) {
-        requireDelegationV2(!finalizer, "rounds_continuation_already_completed");
-        await authenticateWinner(original, pending.receipt);
-        return { journal, result: { replayed: true, projection: p, original } };
+        requireDelegationV2(!finalizer || prior, "rounds_continuation_already_completed");
       }
-      if (finalizer) requireDelegationV2(finalizer.expectedRevision === p.revision && same(finalizer.controller, p.spec.controller), "rounds_revision_conflict");
-      return { journal, result: { replayed: false, projection: p, original } };
+      if (finalizer && !prior) requireDelegationV2(finalizer.expectedRevision === p.revision && same(finalizer.controller, p.spec.controller), "rounds_revision_conflict");
+      return { journal, result: { original } };
     });
-    if (snapshot.replayed) return { replayed: true, projection: snapshot.projection };
-    requireDelegationV2(host.flow?.acquireContinuationPublication && host.retainContinuation, "rounds_continuation_publication_unavailable");
+    requireDelegationV2(host.flow?.acquireContinuationPublication, "rounds_continuation_publication_unavailable");
     const original = snapshot.original;
     const lease = await host.flow.acquireContinuationPublication({ ...structuredClone(original),
       action: finalizer ? "finalizeContinuation" : "produce", ...(finalizer ? { finalizerCommand: structuredClone(finalizer) } : {}) });
@@ -662,11 +658,18 @@ export function createDelegationRoundsController(input: {
         const prior = finalizer && journal.events.find(e => e.kind === "continuation_finalized" && e.command.operationKey === finalizer.operationKey);
         if (prior && prior.kind === "continuation_finalized") {
           await authorize("replay", groupId, p, finalizer); requireDelegationV2(same(prior.command, finalizer), "rounds_intent_conflict");
+          const winner = p.continuations.find(r => r.command.operationKey === key)?.receipt;
+          requireDelegationV2(winner, "rounds_continuation_identity");
+          await authenticateWinner(original, winner); current();
+          await authorize("replay", groupId, p, finalizer); current();
+          completionCallbackReturned = true;
           return { journal, result: { replayed: true, projection: p } };
         }
         const pending = p.continuations.find(r => r.command.operationKey === key)!;
         if (pending.receipt) {
           requireDelegationV2(!finalizer, "rounds_continuation_already_completed"); await authenticateWinner(original, pending.receipt); current();
+          await authorize(original.originalCommand.kind, groupId, p, original.originalCommand); current();
+          completionCallbackReturned = true;
           return { journal, result: { replayed: true, projection: p } };
         }
         if (finalizer) {
@@ -674,6 +677,7 @@ export function createDelegationRoundsController(input: {
           requireDelegationV2(!journal.events.some(e => "command" in e && e.command.operationKey === finalizer.operationKey), "rounds_operation");
         } else requireDelegationV2(p.cancellation === "none" && same(effectiveRoundsSpec(p), original.originalSpec), "rounds_cancelled_or_grant_changed");
         const spec = original.originalSpec, c = original.originalCommand;
+        requireDelegationV2(host.retainContinuation, "rounds_continuation_publication_unavailable");
         requireDelegationV2(spec.topology.kind === "flow", "rounds_flow_required");
         const operation = continuationOperation(spec, c, original.originalPrefixDigest);
         let receipt;

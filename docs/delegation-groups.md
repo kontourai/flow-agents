@@ -1038,7 +1038,9 @@ Flow lookup, retention, effect or event is performed for that loser.
 whose Flow operation committed but whose group receipt was lost. It authenticates
 current authority and reads the original checked receipt; it does not execute a
 Flow mutation, admit an effect, or grant retry authority. Missing or ambiguous
-proof refuses closure. An exact finalizer replay is authenticated and performs
+proof refuses closure. An exact finalizer replay reloads and authenticates the
+retained winner under the outer publication lease, rechecks current authority,
+and holds that lease through the durable transaction return. It performs
 no additional retention or event; a different finalizer key cannot close an
 already completed operation. Cancellation does not turn metadata closure into
 permission for further execution. Concrete hosts must implement and verify all
