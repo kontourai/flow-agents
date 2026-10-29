@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.9.0](https://github.com/kontourai/flow-agents/compare/v9.8.0...v9.9.0) (2026-10-29)
+
+
+### Features
+
+* **delegation:** finalize committed continuation receipts ([#1557](https://github.com/kontourai/flow-agents/issues/1557)) ([b76a111](https://github.com/kontourai/flow-agents/commit/b76a1114e121717e362b8214d3b9d35a9651e144))
+
 ## [9.8.0](https://github.com/kontourai/flow-agents/compare/v9.7.0...v9.8.0) (2026-10-26)
 
 
