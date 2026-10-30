@@ -40,9 +40,26 @@ export function parseKnowledgeLearningRegistry(value: unknown): KnowledgeLearnin
     const history = registry.receipts.filter(receipt => receipt.learningId === record.id);
     if (history.length !== record.revision || history[0]?.action !== "propose" || history.some((receipt, index) => receipt.revision !== index + 1)) fail();
     const receiptFor = (receiptId: unknown, action: string) => history.find(receipt => receipt.id === receiptId && receipt.action === action);
+    const evaluations = history.filter(receipt => receipt.action === "evaluate");
+    const decisions = history.filter(receipt => receipt.action === "approve" || receipt.action === "reject");
+    const activations = history.filter(receipt => receipt.action === "activate");
+    const effects = history.filter(receipt => receipt.action === "observe-effect");
+    const retirements = history.filter(receipt => receipt.action === "retire");
+    const supersessions = history.filter(receipt => receipt.action === "supersede");
+    if (history.filter(receipt => receipt.action === "propose").length !== 1 || history[0].at !== record.createdAt
+      || Boolean(record.evaluation) !== (evaluations.length > 0)
+      || Boolean(record.decision) !== (decisions.length === 1) || decisions.length > 1
+      || Boolean(record.activation) !== (activations.length === 1) || activations.length > 1
+      || Boolean(record.retirement) !== (retirements.length === 1) || retirements.length > 1
+      || Boolean(record.supersededBy) !== (supersessions.length === 1) || supersessions.length > 1
+      || retirements.length + supersessions.length > 1) fail();
+    if (decisions[0] && (!evaluations.at(-1) || evaluations.at(-1)!.revision >= decisions[0].revision)) fail();
+    if (activations[0] && (!decisions[0] || decisions[0].action !== "approve" || decisions[0].revision >= activations[0].revision)) fail();
+    if (effects.some(effect => !activations[0] || effect.revision <= activations[0].revision)) fail();
+    if ([...retirements, ...supersessions].some(receipt => receipt.revision !== record.revision)) fail();
     if (record.evaluation !== undefined) {
       const evaluation = object(record.evaluation, ["status", "evidence", "receiptId"]);
-      if (!["supported", "countered", "mixed", "inconclusive"].includes(String(evaluation.status)) || !Array.isArray(evaluation.evidence) || evaluation.evidence.length < 1 || evaluation.evidence.length > KNOWLEDGE_LEARNING_LIMITS.references || !receiptFor(evaluation.receiptId, "evaluate")) fail();
+      if (!["supported", "countered", "mixed", "inconclusive"].includes(String(evaluation.status)) || !Array.isArray(evaluation.evidence) || evaluation.evidence.length < 1 || evaluation.evidence.length > KNOWLEDGE_LEARNING_LIMITS.references || evaluation.receiptId !== evaluations.at(-1)?.id) fail();
       evaluation.evidence.forEach(assertKnowledgeLearningRef);
     }
     if (record.decision !== undefined) {
@@ -54,10 +71,10 @@ export function parseKnowledgeLearningRegistry(value: unknown): KnowledgeLearnin
       const decision = record.decision as KnowledgeLearningRecord["decision"];
       if (activation.revision !== record.contentRevision || canonicalJson(activation.targets) !== canonicalJson(record.proposal.targets) || decision?.status !== "approved" || !receiptFor(activation.receiptId, "activate")) fail();
     }
-    if (!Array.isArray(record.effects) || record.effects.length > KNOWLEDGE_LEARNING_LIMITS.references) fail();
-    for (const candidateEffect of record.effects) {
+    if (!Array.isArray(record.effects) || record.effects.length > KNOWLEDGE_LEARNING_LIMITS.references || record.effects.length !== effects.length) fail();
+    for (const [index, candidateEffect] of record.effects.entries()) {
       const effect = object(candidateEffect, ["assessment", "evidence", "receiptId"]);
-      if (!["supported", "countered", "unresolved"].includes(String(effect.assessment)) || !record.activation || !receiptFor(effect.receiptId, "observe-effect")) fail();
+      if (!["supported", "countered", "unresolved"].includes(String(effect.assessment)) || !record.activation || effect.receiptId !== effects[index].id) fail();
       assertKnowledgeLearningRef(effect.evidence);
     }
     if (record.retirement !== undefined) {
@@ -103,6 +120,12 @@ export function createLocalFileKnowledgeLearningStore(privateRoot: string): Know
       try { fs.mkdirSync(storage, { mode: 0o700 }); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
       directory(storage);
+      const parent = fs.openSync(root, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      try {
+        const current = fs.fstatSync(parent);
+        if (current.dev !== anchor.dev || current.ino !== anchor.ino) fail();
+        fs.fsyncSync(parent);
+      } finally { fs.closeSync(parent); }
       return withSubjectLockAsync(storage, "knowledge-learning-registry", async () => {
         const previous = read();
         const next = await operation(structuredClone(previous));
@@ -110,6 +133,7 @@ export function createLocalFileKnowledgeLearningStore(privateRoot: string): Know
         const bytes = `${canonicalJson(next.registry)}\n`;
         if (Buffer.byteLength(bytes) > KNOWLEDGE_LEARNING_LIMITS.bytes) throw new KnowledgeLearningError("capacity");
         directory(root); directory(storage);
+        next.assertCurrent();
         atomicWriteDurableFile(root, file, bytes, true);
         return next.result;
       });

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { syncBuiltinESMExports } from 'node:module';
 import { createKnowledgeLearningLifecycle } from '@kontourai/flow-agents/knowledge-learning';
 import { createLocalFileKnowledgeLearningStore } from '@kontourai/flow-agents/knowledge-learning-file';
 import { KnowledgeLearningError } from '@kontourai/flow-agents/knowledge-learning-contract';
@@ -27,7 +28,7 @@ function fixture(t) {
     readEvidence: async ref => { const value = refs.get(refKey(ref)); afterRead?.(); return value; },
   };
   const service = () => createKnowledgeLearningLifecycle(createLocalFileKnowledgeLearningStore(root), host);
-  return { root, service, refs, setAuthorized(value) { authorized = value; }, setMayDecide(value) { mayDecide = value; }, afterRead(value) { afterRead = value; } };
+  return { root, service, host, refs, setAuthorized(value) { authorized = value; }, setMayDecide(value) { mayDecide = value; }, afterRead(value) { afterRead = value; } };
 }
 const intent = (action, expectedRevision, extra = {}) => ({ intentId: `${action}-${expectedRevision}`, learningId: 'learning-1', scope, expectedRevision, action, ...extra });
 async function approve(service) {
@@ -106,4 +107,53 @@ test('intent JSON cannot carry host authority and unknown evidence never becomes
   await assert.rejects(f.service().apply({ ...intent('propose', 0, { proposal }), actorId: 'operator', mayDecide: true }), { code: 'invalid' });
   await assert.rejects(f.service().apply(intent('propose', 0, { proposal: { ...proposal, supporting: [{ ...source, revision: 'missing' }] } })), { code: 'restricted' });
   assert.deepEqual((await f.service().active(scope)).records, []);
+});
+
+
+test('retained retire receipt cannot be erased from materialized lifecycle state', async t => {
+  const f = fixture(t); await approve(f.service());
+  await f.service().apply(intent('activate', 3));
+  await f.service().apply(intent('retire', 4, { reason: 'Withdraw this guidance.' }));
+  const file = path.join(f.root, 'knowledge-learning', 'registry.json');
+  const registry = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete registry.records[0].retirement;
+  fs.writeFileSync(file, JSON.stringify(registry), { mode: 0o600 });
+  assert.deepEqual(await f.service().get(scope, 'learning-1'), { state: 'unavailable' });
+  assert.equal((await f.service().active(scope)).records.length, 0);
+});
+
+test('revocation after transaction callback settlement is checked at physical commit', async t => {
+  const f = fixture(t), store = createLocalFileKnowledgeLearningStore(f.root);
+  const delayed = { read: () => store.read(), transact: operation => store.transact(async registry => {
+    const result = await operation(registry);
+    queueMicrotask(() => f.setAuthorized(false));
+    return result;
+  }) };
+  const service = createKnowledgeLearningLifecycle(delayed, f.host);
+  await assert.rejects(service.apply(intent('propose', 0, { proposal })), { code: 'restricted' });
+  assert.equal(fs.existsSync(path.join(f.root, 'knowledge-learning', 'registry.json')), false);
+});
+
+test('new registry directory is durably linked before initial success or record publication', async t => {
+  const f = fixture(t), rootIdentity = fs.statSync(f.root), original = fs.fsyncSync;
+  fs.fsyncSync = descriptor => {
+    const identity = fs.fstatSync(descriptor);
+    if (identity.dev === rootIdentity.dev && identity.ino === rootIdentity.ino) throw new Error('injected parent sync failure');
+    original(descriptor);
+  };
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(f.service().apply(intent('propose', 0, { proposal })), /injected parent sync failure/);
+    assert.equal(fs.existsSync(path.join(f.root, 'knowledge-learning', 'registry.json')), false);
+  } finally { fs.fsyncSync = original; syncBuiltinESMExports(); }
+});
+
+
+test('active-set read batches one canonical snapshot and observes retirement on the next request', async t => {
+  const f = fixture(t); await approve(f.service()); await f.service().apply(intent('activate', 3));
+  const actual = createLocalFileKnowledgeLearningStore(f.root); let reads = 0;
+  const service = createKnowledgeLearningLifecycle({ read: async () => { reads += 1; return actual.read(); }, transact: operation => actual.transact(operation) }, f.host);
+  assert.equal((await service.active(scope)).records.length, 1); assert.equal(reads, 1);
+  await f.service().apply(intent('retire', 4, { reason: 'New policy' }));
+  assert.equal((await service.active(scope)).records.length, 0); assert.equal(reads, 2);
 });

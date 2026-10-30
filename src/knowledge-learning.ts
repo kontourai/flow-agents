@@ -9,7 +9,7 @@ import {
 
 export interface KnowledgeLearningStore {
   read(): Promise<KnowledgeLearningRegistry>;
-  transact<T>(operation: (registry: KnowledgeLearningRegistry) => Promise<{ registry: KnowledgeLearningRegistry; result: T }>): Promise<T>;
+  transact<T>(operation: (registry: KnowledgeLearningRegistry) => Promise<{ registry: KnowledgeLearningRegistry; result: T; assertCurrent(): void }>): Promise<T>;
 }
 /** Host functions derive authority from verified ingress; intent JSON supplies none. */
 export interface KnowledgeLearningHost {
@@ -42,6 +42,7 @@ export function createKnowledgeLearningLifecycle(store: KnowledgeLearningStore, 
       authority.assertCurrent();
       const registry = await store.read();
       const record = registry.records.find(entry => entry.id === id && sameScope(entry.proposal.scope, scope));
+      authority.assertCurrent();
       if (!record) return { state: "not-found" };
       await verifyEvidence(references(record), scope);
       authority.assertCurrent();
@@ -61,9 +62,11 @@ export function createKnowledgeLearningLifecycle(store: KnowledgeLearningStore, 
         const records: KnowledgeLearningRecord[] = [];
         let partial = false;
         for (const record of snapshot.records.filter(entry => sameScope(entry.proposal.scope, scope) && isKnowledgeLearningActive(entry))) {
-          const projection = await get(scope, record.id);
-          if (projection.state === "available" && projection.active) records.push(projection.record);
-          else partial = true;
+          try {
+            await verifyEvidence(references(record), scope);
+            authority.assertCurrent();
+            records.push(structuredClone(record));
+          } catch { partial = true; }
         }
         authority.assertCurrent();
         return { records, coverage: partial ? "partial" : "complete" };
@@ -84,7 +87,7 @@ export function createKnowledgeLearningLifecycle(store: KnowledgeLearningStore, 
         const prior = registry.receipts.find(receipt => receipt.intentId === intent.intentId);
         if (prior) {
           if (prior.requestDigest !== requestDigest || prior.actorId !== authority.actorId) throw new KnowledgeLearningError("conflict");
-          return { registry, result: structuredClone(prior) };
+          return { registry, result: structuredClone(prior), assertCurrent: () => authority.assertCurrent() };
         }
         if (registry.receipts.length >= KNOWLEDGE_LEARNING_LIMITS.receipts) throw new KnowledgeLearningError("capacity");
         let record = registry.records.find(entry => entry.id === intent.learningId);
@@ -138,7 +141,7 @@ export function createKnowledgeLearningLifecycle(store: KnowledgeLearningStore, 
         }
         authority.assertCurrent();
         registry.receipts.push(receipt);
-        return { registry, result: structuredClone(receipt) };
+        return { registry, result: structuredClone(receipt), assertCurrent: () => authority.assertCurrent() };
       });
     },
   };
