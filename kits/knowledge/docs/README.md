@@ -686,3 +686,10 @@ reusing its id is refused. If failure occurs after raw creation, the raw record
 remains; a rerun with a new id can create another capture. There is no automatic
 retry, rollback or resumption. Use a fresh workspace for experiments and inspect
 both the kit trace and `flow status <run-id> --format json --cwd <workspace>`.
+
+## Reviewed learning lifecycle
+
+[The versioned lifecycle API](learning-lifecycle.md) separates learning proposals,
+review, activation for context consumers, observed effects and retirement from
+ordinary Knowledge record storage status. It is exposed through the declared
+`knowledge.learning-lifecycle` adapter and public package exports.

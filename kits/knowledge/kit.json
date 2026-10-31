@@ -1,10 +1,12 @@
 {
   "schema_version": "1.0",
-  "observability_contribution": { "path": "kit-observability.contribution.json" },
+  "observability_contribution": {
+    "path": "kit-observability.contribution.json"
+  },
   "id": "knowledge",
   "name": "Knowledge Kit",
   "product_name": "Knowledge Kit",
-  "description": "A Flow Kit for durable, gated knowledge storage. Provides a store contract with defined record types, mutation operations, and provenance rules — plus a default adapter backed by markdown files, YAML frontmatter, wikilinks, and a graph index.",
+  "description": "A Flow Kit for durable, gated knowledge storage. Provides a store contract with defined record types, mutation operations, and provenance rules \u2014 plus a default adapter backed by markdown files, YAML frontmatter, wikilinks, and a graph index.",
   "first_party": true,
   "flows": [
     {
@@ -15,17 +17,17 @@
     {
       "id": "knowledge.ingest",
       "path": "flows/ingest.flow.json",
-      "description": "Ingest raw captures: capture → classify → route. Gate on classify requires category + type='raw' classification evidence per the store contract create op."
+      "description": "Ingest raw captures: capture \u2192 classify \u2192 route. Gate on classify requires category + type='raw' classification evidence per the store contract create op."
     },
     {
       "id": "knowledge.compile",
       "path": "flows/compile.flow.json",
-      "description": "Compile classified raws into durable notes: select-raws → compile → link. Gate on compile requires provenance refs to every consumed raw record."
+      "description": "Compile classified raws into durable notes: select-raws \u2192 compile \u2192 link. Gate on compile requires provenance refs to every consumed raw record."
     },
     {
       "id": "knowledge.synthesize",
       "path": "flows/synthesize.flow.json",
-      "description": "Synthesize compiled sources into concept summaries: detect-cluster → propose → evidence-gate → apply-or-reject. Mutation-gate policy: no summary mutates without an approved proposal carrying source refs; rejection leaves store untouched."
+      "description": "Synthesize compiled sources into concept summaries: detect-cluster \u2192 propose \u2192 evidence-gate \u2192 apply-or-reject. Mutation-gate policy: no summary mutates without an approved proposal carrying source refs; rejection leaves store untouched."
     },
     {
       "id": "knowledge.consolidate",
@@ -35,32 +37,32 @@
     {
       "id": "knowledge.retire",
       "path": "flows/retire.flow.json",
-      "description": "Retire implemented or obsolete records from the working set via gated lifecycle: identify → propose-retirement → evidence-gate → apply-or-reject. Evidence required: retirement rationale + implementedByRef (when targeting 'implemented' status) or supersededByRef (optional, for 'retired'). Rejection leaves record status byte-identical. Retired records remain fully queryable with provenance via includeRetired flag."
+      "description": "Retire implemented or obsolete records from the working set via gated lifecycle: identify \u2192 propose-retirement \u2192 evidence-gate \u2192 apply-or-reject. Evidence required: retirement rationale + implementedByRef (when targeting 'implemented' status) or supersededByRef (optional, for 'retired'). Rejection leaves record status byte-identical. Retired records remain fully queryable with provenance via includeRetired flag."
     },
     {
       "id": "knowledge.audit-freshness",
       "path": "flows/audit-freshness.flow.json",
-      "description": "Hygiene audit (optional, configurable): flag records past per-category staleness thresholds and propose archive/refresh for each. Read-only: collect → measure → flag-gate. Thresholds are per-category (dot-hierarchy longest-prefix, with optional default); a category with no threshold is skipped (opt-in). Each flag cites last-mutation (max of updated_at and latest mutation_log entry) + the threshold that fired + computed age. Forks no mutation path — the operator routes each flag through knowledge.retire (archive) or a fresh capture/compile (refresh)."
+      "description": "Hygiene audit (optional, configurable): flag records past per-category staleness thresholds and propose archive/refresh for each. Read-only: collect \u2192 measure \u2192 flag-gate. Thresholds are per-category (dot-hierarchy longest-prefix, with optional default); a category with no threshold is skipped (opt-in). Each flag cites last-mutation (max of updated_at and latest mutation_log entry) + the threshold that fired + computed age. Forks no mutation path \u2014 the operator routes each flag through knowledge.retire (archive) or a fresh capture/compile (refresh)."
     },
     {
       "id": "knowledge.canonicalize-category",
       "path": "flows/canonicalize-category.flow.json",
-      "description": "Hygiene audit (optional, configurable): audit category sprawl and propose flattening/retirement. Read-only: survey → assess → propose-gate. Flags three sprawl kinds (each independently toggleable): orphan-prefix (an intermediate prefix node holding no record directly, or a deep path carrying a single record → flatten), too-many-leaves (a parent fanning out past the configured leaf budget → regroup), implemented-active (a still-active record carrying an operator-supplied implemented-marker tag → retire). Every finding cites its evidence (the metric that fired + offending category/record ids). Forks no mutation path — the operator routes each finding through knowledge.retire (retire) or an update/recategorize (flatten/regroup)."
+      "description": "Hygiene audit (optional, configurable): audit category sprawl and propose flattening/retirement. Read-only: survey \u2192 assess \u2192 propose-gate. Flags three sprawl kinds (each independently toggleable): orphan-prefix (an intermediate prefix node holding no record directly, or a deep path carrying a single record \u2192 flatten), too-many-leaves (a parent fanning out past the configured leaf budget \u2192 regroup), implemented-active (a still-active record carrying an operator-supplied implemented-marker tag \u2192 retire). Every finding cites its evidence (the metric that fired + offending category/record ids). Forks no mutation path \u2014 the operator routes each finding through knowledge.retire (retire) or an update/recategorize (flatten/regroup)."
     },
     {
       "id": "knowledge.glossary-sync",
       "path": "flows/glossary-sync.flow.json",
-      "description": "Hygiene sync (optional, configurable): keep the glossary (concept records) in sync with the canonical docs that define those terms. Read-only by default: collect → extract → diff-gate → propose-gate. Surveys a configurable glossary source list (record ids and/or category selectors — opt-in), extracts term→definition entries via a pluggable extractor, and classifies each against existing concepts: gap (no concept) → propose a canonical definition; outdated (concept body drifted from the canonical, whitespace-insensitive) → propose the update; current → no-op. Each entry cites its source doc. With apply=true it enacts the plan through the existing concept-record ops (create → propose → apply for gaps; propose → apply for drift) with the canonical doc as proposer — forks no mutation path."
+      "description": "Hygiene sync (optional, configurable): keep the glossary (concept records) in sync with the canonical docs that define those terms. Read-only by default: collect \u2192 extract \u2192 diff-gate \u2192 propose-gate. Surveys a configurable glossary source list (record ids and/or category selectors \u2014 opt-in), extracts term\u2192definition entries via a pluggable extractor, and classifies each against existing concepts: gap (no concept) \u2192 propose a canonical definition; outdated (concept body drifted from the canonical, whitespace-insensitive) \u2192 propose the update; current \u2192 no-op. Each entry cites its source doc. With apply=true it enacts the plan through the existing concept-record ops (create \u2192 propose \u2192 apply for gaps; propose \u2192 apply for drift) with the canonical doc as proposer \u2014 forks no mutation path."
     },
     {
       "id": "knowledge.detect-contradictions",
       "path": "flows/detect-contradictions.flow.json",
-      "description": "Hygiene audit (optional, configurable): compare compiled records within a category and flag conflicting assertions with BOTH record ids. Read-only: collect → compare → flag-gate. Reuses the similarity adapter to scope comparisons to records about the same thing, then a pluggable contradiction fn (default: opposing-polarity heuristic) judges each similar pair. Auditing is opt-in per category. Each flag cites both record ids + shared category + the reason that fired. Forks no mutation path — the operator routes each flag through knowledge.retire (drop the stale assertion) or a fresh capture/compile/consolidate (reconcile)."
+      "description": "Hygiene audit (optional, configurable): compare compiled records within a category and flag conflicting assertions with BOTH record ids. Read-only: collect \u2192 compare \u2192 flag-gate. Reuses the similarity adapter to scope comparisons to records about the same thing, then a pluggable contradiction fn (default: opposing-polarity heuristic) judges each similar pair. Auditing is opt-in per category. Each flag cites both record ids + shared category + the reason that fired. Forks no mutation path \u2014 the operator routes each flag through knowledge.retire (drop the stale assertion) or a fresh capture/compile/consolidate (reconcile)."
     },
     {
       "id": "knowledge.hygiene-review",
       "path": "flows/hygiene-review.flow.json",
-      "description": "Hygiene orchestrator (#106 #5, closes the issue): a THIN, opt-in orchestrator over the four hygiene flows (audit-freshness, detect-contradictions, glossary-sync, canonicalize-category). orchestrate → review-gate. Runs each opted-in audit via its EXISTING flow-runner method + gates (reimplements no detection), folds their findings into one operator-facing review of proposed actions normalized to adopt / retire / merge, each citing its sourceFlow + the evidence its origin flow's gate already vouched. Read-only by default; forks NO propose→approve gate — the operator enacts each decision through the source flow's existing gated op (retire via knowledge.retire; adopt via capture/compile or glossary-sync apply; merge via update/recategorize). The only mutation it can trigger is glossary apply, delegated verbatim to knowledge.glossary-sync's propose→apply lineage (consume-never-fork)."
+      "description": "Hygiene orchestrator (#106 #5, closes the issue): a THIN, opt-in orchestrator over the four hygiene flows (audit-freshness, detect-contradictions, glossary-sync, canonicalize-category). orchestrate \u2192 review-gate. Runs each opted-in audit via its EXISTING flow-runner method + gates (reimplements no detection), folds their findings into one operator-facing review of proposed actions normalized to adopt / retire / merge, each citing its sourceFlow + the evidence its origin flow's gate already vouched. Read-only by default; forks NO propose\u2192approve gate \u2014 the operator enacts each decision through the source flow's existing gated op (retire via knowledge.retire; adopt via capture/compile or glossary-sync apply; merge via update/recategorize). The only mutation it can trigger is glossary apply, delegated verbatim to knowledge.glossary-sync's propose\u2192apply lineage (consume-never-fork)."
     },
     {
       "id": "knowledge.promote",
@@ -105,7 +107,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → exact-category or explicit-source decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) → read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire; glossarySync(options) → read-only-by-default glossary hygiene that extracts term→definition entries from a configurable list of canonical docs and classifies each against existing concepts (gap/outdated/current), optionally enacting gaps+drift through the existing concept-record create→propose→apply ops; detectContradictions(options) → read-only hygiene audit comparing compiled records within a category (similarity adapter scopes the comparison; pluggable contradiction fn judges each similar pair) returning flags that cite BOTH conflicting record ids + reason. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) \u2192 classified raw record; compile(rawIds[]) \u2192 compiled record with provenance links; synthesize(conceptId | topicSelector, options) \u2192 concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) \u2192 exact-category or explicit-source decision snapshot consolidation with supersede-not-delete; retire(recordId, options) \u2192 gated status lifecycle transition (active\u2192implemented\u2192retired) with working-set exclusion; auditFreshness(options) \u2192 read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) \u2192 read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire; glossarySync(options) \u2192 read-only-by-default glossary hygiene that extracts term\u2192definition entries from a configurable list of canonical docs and classifies each against existing concepts (gap/outdated/current), optionally enacting gaps+drift through the existing concept-record create\u2192propose\u2192apply ops; detectContradictions(options) \u2192 read-only hygiene audit comparing compiled records within a category (similarity adapter scopes the comparison; pluggable contradiction fn judges each similar pair) returning flags that cite BOTH conflicting record ids + reason. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -151,6 +153,11 @@
       "id": "knowledge.context-check-runner",
       "path": "context-check/index.js",
       "description": "Deterministic Context Check adapter for issue #1131: runContextCheck({repoRoot, input, proposalDir}) validates complete revision-bound input/result schemas, verifies raw Git revision identity while clearing inherited Git overrides and disabling replace/graft semantics, distinguishes neutral affected reconciliation from Surface trust, and writes only new no-follow owning-source proposals beneath an explicit private proposal directory."
+    },
+    {
+      "id": "knowledge.learning-lifecycle",
+      "path": "adapters/learning-lifecycle/index.mjs",
+      "description": "Versioned Knowledge learning lifecycle owner. Public projection and typed intents/receipts distinguish reviewed candidate/evaluation/decision/activation/effect/supersession/retirement from raw-record storage status. Uses host-derived current scope authority and exact source revisions; private transactional state and idempotent intent receipts survive lost replies."
     }
   ],
   "assets": [
@@ -184,7 +191,7 @@
     {
       "id": "knowledge.synthesis-suite",
       "path": "evals/synthesis/suite.test.js",
-      "description": "Eval cases for synthesize: AC1 (similar source → proposal not mutation), AC2 (rejection leaves concept byte-identical), AC3 (apply updates with provenance to all contributing sources), pluggable-similarity interface test, gate telemetry."
+      "description": "Eval cases for synthesize: AC1 (similar source \u2192 proposal not mutation), AC2 (rejection leaves concept byte-identical), AC3 (apply updates with provenance to all contributing sources), pluggable-similarity interface test, gate telemetry."
     },
     {
       "id": "knowledge.consolidation-suite",
@@ -194,7 +201,7 @@
     {
       "id": "knowledge.similarity-vector-suite",
       "path": "evals/similarity-vector/suite.test.js",
-      "description": "Eval cases for the vector similarity adapter: unit tests (cosineSimilarity math, injectable embed, threshold, fail-closed), drop-in proof (runner.synthesize with injected embed produces valid proposals), and live-gated tests (real ollama nomic-embed-text round-trip — skipped when ollama unavailable)."
+      "description": "Eval cases for the vector similarity adapter: unit tests (cosineSimilarity math, injectable embed, threshold, fail-closed), drop-in proof (runner.synthesize with injected embed produces valid proposals), and live-gated tests (real ollama nomic-embed-text round-trip \u2014 skipped when ollama unavailable)."
     },
     {
       "id": "knowledge.retirement-suite",
@@ -204,7 +211,7 @@
     {
       "id": "knowledge.entity-cards-suite",
       "path": "evals/entities/suite.test.js",
-      "description": "Eval cases for person/entity cards (issue #48): AC1-AC4 — entity extraction from Attendees lines, exact-match resolution, possible-duplicate detection, merge via propose/apply/reject (union aliases+backlinks, supersede duplicate), Obsidian people/ folder rendering, and extended contract suite (person type validity) on both adapters."
+      "description": "Eval cases for person/entity cards (issue #48): AC1-AC4 \u2014 entity extraction from Attendees lines, exact-match resolution, possible-duplicate detection, merge via propose/apply/reject (union aliases+backlinks, supersede duplicate), Obsidian people/ folder rendering, and extended contract suite (person type validity) on both adapters."
     },
     {
       "id": "knowledge.audit-freshness-suite",
@@ -214,12 +221,12 @@
     {
       "id": "knowledge.canonicalize-category-suite",
       "path": "evals/canonicalize-category/suite.test.js",
-      "description": "Eval cases for canonicalize-category (#106 hygiene #4): orphan-prefix detection (empty intermediate node + single-record deep path → flatten); too-many-leaves fan-out budget (boundary: count == budget not flagged, > budget flagged → regroup, lists the leaves); implemented-active (status:active + implemented-marker tag → retire, case-insensitive markers); every finding cites its metric + evidence + offending ids; each check is independently toggleable + opt-in (disabled check / empty markers → no findings); retired records excluded; read-only invariant (no record mutated); gate telemetry (survey-gate + propose-gate); module-level export."
+      "description": "Eval cases for canonicalize-category (#106 hygiene #4): orphan-prefix detection (empty intermediate node + single-record deep path \u2192 flatten); too-many-leaves fan-out budget (boundary: count == budget not flagged, > budget flagged \u2192 regroup, lists the leaves); implemented-active (status:active + implemented-marker tag \u2192 retire, case-insensitive markers); every finding cites its metric + evidence + offending ids; each check is independently toggleable + opt-in (disabled check / empty markers \u2192 no findings); retired records excluded; read-only invariant (no record mutated); gate telemetry (survey-gate + propose-gate); module-level export."
     },
     {
       "id": "knowledge.glossary-sync-suite",
       "path": "evals/glossary-sync/suite.test.js",
-      "description": "Eval cases for glossary-sync (#106 hygiene #3): default term extraction from canonical docs (bold/colon glossary lines); classification — gap (no concept), outdated (concept body drifted, whitespace-insensitive), current (matches); case/space-insensitive term matching within the resolved concept category; configurable source list (record id + category selector, opt-in empty list, unknown source rejected); pluggable term extractor; read-only-by-default invariant (no record mutated without apply); apply mode enacts gaps via create→propose→apply and drift via propose→apply with the canonical doc as proposer (consume-never-fork, proposes-link + mutation-log evidence); gate telemetry."
+      "description": "Eval cases for glossary-sync (#106 hygiene #3): default term extraction from canonical docs (bold/colon glossary lines); classification \u2014 gap (no concept), outdated (concept body drifted, whitespace-insensitive), current (matches); case/space-insensitive term matching within the resolved concept category; configurable source list (record id + category selector, opt-in empty list, unknown source rejected); pluggable term extractor; read-only-by-default invariant (no record mutated without apply); apply mode enacts gaps via create\u2192propose\u2192apply and drift via propose\u2192apply with the canonical doc as proposer (consume-never-fork, proposes-link + mutation-log evidence); gate telemetry."
     },
     {
       "id": "knowledge.detect-contradictions-suite",
@@ -229,17 +236,17 @@
     {
       "id": "knowledge.hygiene-review-suite",
       "path": "evals/hygiene-review/suite.test.js",
-      "description": "Eval cases for hygiene-review (#106 hygiene #5, closes the issue): opt-in orchestration (omitted audit block is skipped; empty review does nothing); each opted-in audit runs via its existing flow-runner method and its findings are collected verbatim (no detection reimplemented); proposals are normalized to adopt/retire/merge and each cites its sourceFlow + evidence; thin-orchestrator/consume-never-fork invariants — read-only by default mutates no record, no new gate is forked, the only mutation (glossary apply:true) is delegated to glossarySync's own gated propose→apply (verified via proposes-link + mutation-log on the resulting concept); sub-flow telemetry is folded in plus hygiene-review's own orchestrate-gate + review-gate; module-level export delegates to the runner."
+      "description": "Eval cases for hygiene-review (#106 hygiene #5, closes the issue): opt-in orchestration (omitted audit block is skipped; empty review does nothing); each opted-in audit runs via its existing flow-runner method and its findings are collected verbatim (no detection reimplemented); proposals are normalized to adopt/retire/merge and each cites its sourceFlow + evidence; thin-orchestrator/consume-never-fork invariants \u2014 read-only by default mutates no record, no new gate is forked, the only mutation (glossary apply:true) is delegated to glossarySync's own gated propose\u2192apply (verified via proposes-link + mutation-log on the resulting concept); sub-flow telemetry is folded in plus hygiene-review's own orchestrate-gate + review-gate; module-level export delegates to the runner."
     },
     {
       "id": "knowledge.provider-conformance-suite",
       "path": "providers/conformance/suite.test.js",
-      "description": "Conformance suite (issue #317, AC3): parameterized suite every knowledge store provider (markdown-vault, git-repo, work-item) must pass — read interface returns schema-valid nodes/edges with provenance, closed edge vocabulary, queryByType subset consistency, and proposeWrite returns a schema-valid 'proposed' proposal that mutates nothing (proposals-only)."
+      "description": "Conformance suite (issue #317, AC3): parameterized suite every knowledge store provider (markdown-vault, git-repo, work-item) must pass \u2014 read interface returns schema-valid nodes/edges with provenance, closed edge vocabulary, queryByType subset consistency, and proposeWrite returns a schema-valid 'proposed' proposal that mutates nothing (proposals-only)."
     },
     {
       "id": "knowledge.provider-health-pass-suite",
       "path": "providers/health/health-pass.test.js",
-      "description": "Health-pass suite (issue #317, AC1+AC2): the same health command over vault + git-repo providers yields schema-valid reports (AC1); a backlog pass over the work-item adapter driven by a seeded fixture flags a duplicate and a broken blocker link (AC2) — never the real board."
+      "description": "Health-pass suite (issue #317, AC1+AC2): the same health command over vault + git-repo providers yields schema-valid reports (AC1); a backlog pass over the work-item adapter driven by a seeded fixture flags a duplicate and a broken blocker link (AC2) \u2014 never the real board."
     },
     {
       "id": "knowledge.promote-suite",

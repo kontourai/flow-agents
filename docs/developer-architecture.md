@@ -133,6 +133,25 @@ This is the same code the CLI runs; importing it does not execute the CLI. The s
 
 **Future direction:** Durable workflow state should converge toward Kontour Resource Contracts with versioned identity, desired state, observed status, and condition summaries. That convergence should preserve local files and provider-backed records as first-class surfaces.
 
+## Knowledge learning lifecycle
+
+Native hosts consume the versioned `knowledge-learning-contract`,
+`knowledge-learning`, and `knowledge-learning-file` package subpaths. The
+Knowledge kit declares the matching `learning-lifecycle` adapter. The owner
+service retains proposals, evaluations, decisions, activation and effect
+observations as revisioned receipts; `list(scope)` exposes the scoped review
+queue without a consumer-maintained index. `active(scope)` exposes only guidance
+whose retained evidence and lifecycle remain available.
+
+The host supplies current authorization and exact evidence readers. The private
+local-file adapter publishes receipts and materialized state atomically under
+the existing subject lock, with a final authority fence. It refuses corrupt or
+incomplete history rather than reconstructing active guidance from raw Knowledge
+status. Activation registers guidance for context consumers; it does not install
+a Skill or establish consumption, deployment or a successful effect. See the
+[Knowledge lifecycle contract](../kits/knowledge/docs/learning-lifecycle.md) for
+limits, capacity and operator recovery.
+
 ## Delegation authority and bounded rounds
 
 The package exports separate `delegation-group-rounds` and
