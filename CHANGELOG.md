@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.10.0](https://github.com/kontourai/flow-agents/compare/v9.9.1...v9.10.0) (2026-10-31)
+
+
+### Features
+
+* **knowledge:** expose reviewed learning lifecycle with owner receipts ([#1565](https://github.com/kontourai/flow-agents/issues/1565)) ([245e093](https://github.com/kontourai/flow-agents/commit/245e0933bee4fb4c5acd5da9ed55323b49b33bde))
+
 ## [9.9.1](https://github.com/kontourai/flow-agents/compare/v9.9.0...v9.9.1) (2026-10-29)
 
 
