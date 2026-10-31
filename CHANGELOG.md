@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.9.1](https://github.com/kontourai/flow-agents/compare/v9.9.0...v9.9.1) (2026-10-29)
+
+
+### Fixes
+
+* **delegation:** authenticate retained finalizer replays under custody ([#1560](https://github.com/kontourai/flow-agents/issues/1560)) ([b6507b4](https://github.com/kontourai/flow-agents/commit/b6507b476955f67ef28123326511119d1e7245bc))
+
 ## [9.9.0](https://github.com/kontourai/flow-agents/compare/v9.8.0...v9.9.0) (2026-10-29)
 
 
