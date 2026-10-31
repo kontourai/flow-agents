@@ -19,7 +19,7 @@ import { preparedRoundsSyncDigest } from "@kontourai/flow-agents/delegation-grou
 import { createDelegationAuthorityService } from "@kontourai/flow-agents/delegation-authority-service";
 import { createLocalFileDelegationAuthorityStore } from "@kontourai/flow-agents/delegation-authority-local-file";
 import { delegationEnvelopeDigestV2, delegationParentReferenceV2, rootAuthorityReferenceV2 } from "@kontourai/flow-agents/delegation-envelope-v2";
-import { createDelegationRoundsController, delegationRoundsSyncIdentity, delegationRoundsCapacity, projectDelegationRounds, ROUNDS_MAX_BYTES, ROUNDS_MAX_EVENTS } from "@kontourai/flow-agents/delegation-group-rounds";
+import { createDelegationRoundsController, DelegationRoundsTransactionParentError, delegationRoundsSyncIdentity, delegationRoundsCapacity, projectDelegationRounds, ROUNDS_MAX_BYTES, ROUNDS_MAX_EVENTS } from "@kontourai/flow-agents/delegation-group-rounds";
 import { createLocalFileDelegationRoundsStore } from "@kontourai/flow-agents/delegation-group-rounds-local-file";
 import { executeAuthorizedDelegation } from "@kontourai/flow-agents/delegation-execution";
 import { orchestrateDelegationFlow } from "@kontourai/flow-agents/delegation-flow-execution";
@@ -293,10 +293,12 @@ async function fixture(t, options = {}) {
     dispatchLedger: countedDispatchLedger, cwd });
   const openWithStore = customStore => createDelegationRoundsController({ store: customStore, authorityService: openAuthority(), host,
     dispatchLedger: countedDispatchLedger, cwd });
+  const openWithOwner = (transactionOwner, customStore = store()) => createDelegationRoundsController({ store: customStore, authorityService: openAuthority(), host,
+    dispatchLedger: countedDispatchLedger, cwd, transactionOwner });
   controller = open();
   const cmd = (kind, p, operationKey, fields = {}) => ({ kind, groupId: spec.groupId, operationKey, expectedRevision: p?.revision ?? 0, controller: structuredClone(spec.controller), ...fields });
   const create = cmd("create", null, "create", { spec });
-  if (!options.flow || options.managedDefinition) await controller.create(create);
+  if ((!options.flow || options.managedDefinition) && !options.deferCreate) await controller.create(create);
   const release = async (key, seats) => {
     const p = await controller.get(spec.groupId);
     return cmd("release", p, key, { checkpoint: ref(key), seats: seats.map(seatId => ({ seatId, previousInvocationId: p.attempts.filter(a => a.seatId === seatId).at(-1)?.invocationId ?? null })) });
@@ -305,8 +307,275 @@ async function fixture(t, options = {}) {
     const p = await controller.get(spec.groupId);
     return controller.recordTerminal(cmd("terminal", p, `terminal-${p.revision}`, { invocationId }));
   };
-  return { cwd, state, spec, root, envelopes, service, openAuthority, controller, open, openWithStore, store, cmd, create, release, terminal, physical, host, authorityHost };
+  return { cwd, state, spec, root, envelopes, service, openAuthority, controller, open, openWithStore, openWithOwner, store, cmd, create, release, terminal, physical, host, authorityHost };
 }
+
+test("transaction owner: frozen public facades remain usable under a transaction owner", async t => {
+  const f = await fixture(t, { v3: true });
+  const frozenHost = Object.freeze({ ...f.host });
+  const frozenService = Object.freeze(f.openAuthority());
+  const baseline = createDelegationRoundsController({ store: f.store(), host: frozenHost,
+    authorityService: frozenService, dispatchLedger: new FileAuthorizationLedger({ root: path.join(f.cwd, "dispatch") }), cwd: f.cwd });
+  assert.equal((await baseline.get(f.spec.groupId)).spec.groupId, f.spec.groupId);
+  const outcomes = [];
+  for (const [kind, host, authorityService] of [["frozen-host", frozenHost, f.openAuthority()], ["frozen-service", f.host, frozenService]]) {
+    let releases = 0, stores = 0;
+    const owner = { async acquire() {
+      const durable = f.store();
+      return { host, authorityService, store: { transact(...args) { stores++; return durable.transact(...args); } },
+        assertCurrent() {}, async release() { releases++; } };
+    } };
+    let error;
+    try { await f.openWithOwner(owner).get(f.spec.groupId); } catch (cause) { error = cause; }
+    outcomes.push({ kind, stores, releases, errorName: error?.name, message: error?.message });
+    assert.equal(releases, 1, "scope cleanup must survive a facade error");
+  }
+  t.diagnostic(JSON.stringify({ legacyFrozenFacades: "PASS", providerCalls: f.state.calls, outcomes }));
+  assert.deepEqual(outcomes.map(result => result.errorName), [undefined, undefined], "valid frozen host/V3 facades must support public reads with an owner");
+});
+
+test("transaction owner supplies scoped host store and authority for public reads", async t => {
+  const f = await fixture(t, { v3: true }); let acquired = 0, scopedAuthorize = 0, released = 0;
+  const controller = f.openWithOwner({ async acquire() {
+    acquired++;
+    return { store: f.store(), host: { ...f.host, async authorize(input) { scopedAuthorize++; return f.host.authorize(input); } },
+      authorityService: f.openAuthority(), assertCurrent() {}, async release() { released++; } };
+  } });
+  await controller.get(f.spec.groupId);
+  assert.equal(acquired, 1); assert.equal(scopedAuthorize, 2); assert.equal(released, 1);
+});
+
+test("transaction expiry during host authorization prevents authority and store callbacks", async t => {
+  const f = await fixture(t, { v3: true }); let live = true, inspections = 0, stores = 0, releases = 0;
+  const owner = { async acquire() {
+    const service = f.openAuthority();
+    return { store: { async transact() { stores++; throw new Error("expired scope reached store"); } },
+      host: { ...f.host, async authorize(input) { const receipt = await f.host.authorize(input); live = false; return receipt; } },
+      authorityService: { ...service, async inspect(...args) { inspections++; return service.inspect(...args); } },
+      assertCurrent() { assert.ok(live, "expired transaction authorization"); }, async release() { releases++; live = false; } };
+  } };
+  await assert.rejects(f.openWithOwner(owner).get(f.spec.groupId), /expired transaction authorization/);
+  assert.equal(inspections, 0); assert.equal(stores, 0); assert.equal(releases, 1);
+});
+
+test("transaction scope expiry after authority admission cannot publish a Flow claim", { timeout: 20000 }, async t => {
+  const f = await fixture(t, { v3: true, managedDefinition: managedDefinition() });
+  let expired = false, releases = 0;
+  const owner = { async acquire({ action }) {
+    let live = true; const service = f.openAuthority();
+    return { store: f.store(), host: f.host,
+      authorityService: { ...service, async admitEffect(...args) {
+        const result = await service.admitEffect(...args);
+        if (action === "execute") { live = false; expired = true; }
+        return result;
+      } },
+      assertCurrent() { if (!live) throw new Error("SOL controlled transaction expiry after authority await"); },
+      async release() { releases++; live = false; } };
+  } };
+  const c = await flowRelease(f, "sol-expire-before-claim", [invoke("seat-0")]);
+  await assert.rejects(f.openWithOwner(owner).release(c), error => {
+    const messages = value => [value?.message, ...(value?.errors ?? []).flatMap(messages), ...(value?.cause ? messages(value.cause) : [])];
+    const all = messages(error); t.diagnostic(JSON.stringify({ errorMessages: all }));
+    return all.includes("SOL controlled transaction expiry after authority await");
+  });
+  const run = await loadRun(f.spec.topology.runId, f.cwd);
+  t.diagnostic(JSON.stringify({ expired, releases, providerCalls: f.state.calls, activeClaims: run.state.multi_cursor.active_claims.length,
+    claimHistory: run.state.multi_cursor.claim_history }));
+  assert.equal(expired, true); assert.equal(f.state.calls, 0);
+  assert.equal(run.state.multi_cursor.active_claims.length, 0, "scope expired before claim but a durable unowned claim was published");
+});
+
+test("Flow admission uses a transaction-owned V3 scope and releases it before provider work", async t => {
+  const f = await fixture(t, { v3: true, managedDefinition: managedDefinition(), maxRounds: 2 });
+  let active = false, inGroup = false, acquisitions = 0, releases = 0;
+  const trace = [], originalAuthorize = f.host.authorize;
+  f.host.authorize = async input => { assert.equal(inGroup, false, "captured host was used inside group"); return originalAuthorize(input); };
+  const transactionOwner = { async acquire({ action }) {
+    assert.equal(active, false); active = true; acquisitions++; trace.push(`home:${action}`);
+    const actual = f.openAuthority(), scopedService = { ...actual,
+      async inspect(...args) { assert.equal(active, true); trace.push("authority:inspect"); return actual.inspect(...args); },
+      async admitEffect(...args) { assert.equal(active, true); trace.push("authority:admit"); return actual.admitEffect(...args); } };
+    const durable = f.store();
+    return { authorityService: scopedService,
+      host: { ...f.host, async authorize(input) { assert.equal(active, true); trace.push("host:authorize"); return originalAuthorize(input); } },
+      store: { transact(groupId, body) { return durable.transact(groupId, async journal => {
+        assert.equal(active, true); inGroup = true; trace.push("group:body");
+        try { const next = await body(journal); assert.equal(active, true); return next; }
+        finally { inGroup = false; }
+      }); } },
+      assertCurrent() { assert.equal(active, true); }, async release() { assert.equal(active, true); active = false; releases++; trace.push("home:release"); } };
+  } };
+  f.state.onInvoke = async () => { assert.equal(active, false, "scope leaked into provider response"); trace.push("provider"); };
+  const controller = f.openWithOwner(transactionOwner);
+  const command = await flowRelease(f, "scoped-flow-release", [invoke("seat-0")]);
+  const result = await controller.release(command);
+  assert.equal(result.projection.attempts.length, 1); assert.equal(f.state.calls, 1);
+  assert.equal(active, false); assert.equal(acquisitions, releases);
+  assert.ok(trace.includes("home:execute")); assert.ok(trace.includes("authority:admit"));
+  assert.ok(trace.indexOf("home:release") < trace.indexOf("provider"));
+});
+
+test("transaction scope excludes a competing authority writer through durable store return", async t => {
+  const f = await fixture(t, { v3: true }); let tail = Promise.resolve(), active = false, enter, resume, savedCallback;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const barrier = new Promise(resolve => { resume = resolve; });
+  async function acquireWriter() {
+    const previous = tail; let unlock; tail = new Promise(resolve => { unlock = resolve; }); await previous;
+    assert.equal(active, false); active = true;
+    return async () => { assert.equal(active, true); active = false; unlock(); };
+  }
+  const owner = { async acquire() {
+    const release = await acquireWriter(), durable = f.store();
+    return { host: f.host, authorityService: f.openAuthority(),
+      store: { transact(id, body) { savedCallback = body; return durable.transact(id, async journal => {
+        const next = await body(journal); enter(); await barrier; assert.equal(active, true); return next;
+      }); } },
+      assertCurrent() { assert.equal(active, true); }, release };
+  } };
+  const reading = f.openWithOwner(owner).get(f.spec.groupId);
+  await Promise.race([entered, reading.then(() => { throw new Error("store returned before barrier"); })]);
+  let competitorEntered = false;
+  const competing = acquireWriter().then(async release => { competitorEntered = true; try { await f.service.cancel("root"); } finally { await release(); } });
+  await setImmediate(); assert.equal(competitorEntered, false); resume();
+  await reading; await competing; assert.equal(competitorEntered, true);
+  await assert.rejects(savedCallback(null), /rounds_transaction_scope_released/);
+  assert.equal((await f.service.inspect("root")).cancelled, true);
+});
+
+test("transaction owner prevents post-body sibling writer contention", async t => {
+  const f = await fixture(t, { v3: true }); let tail = Promise.resolve(), holder = null, competing;
+  async function acquire(name) {
+    const previous = tail; let unlock; tail = new Promise(resolve => { unlock = resolve; }); await previous;
+    assert.equal(holder, null); holder = name;
+    return async () => { assert.equal(holder, name); holder = null; unlock(); };
+  }
+  const durable = f.store();
+  const checkedStore = { transact(id, body) { return durable.transact(id, async journal => {
+    const next = await body(journal);
+    competing = acquire("sibling").then(async release => { try { await f.service.inspect("root"); } finally { await release(); } });
+    await setImmediate();
+    if (holder !== "owner") throw new Error("home writer busy: operationRan false");
+    return next;
+  }); } };
+  const owner = { async acquire() {
+    const release = await acquire("owner");
+    return { store: checkedStore, host: f.host, authorityService: f.openAuthority(),
+      assertCurrent() { assert.equal(holder, "owner"); }, release };
+  } };
+  try { await f.openWithOwner(owner, checkedStore).get(f.spec.groupId); }
+  finally { if (competing) await competing; }
+  assert.equal(holder, null);
+});
+
+test("transaction owner failures release scope and report publication uncertainty", async t => {
+  const f = await fixture(t, { v3: true }); let releases = 0;
+  const baseScope = () => ({ store: f.store(), host: f.host, authorityService: f.openAuthority(),
+    assertCurrent() {}, async release() { releases++; } });
+  await assert.rejects(f.openWithOwner({ async acquire() { throw new Error("controlled owner acquire failure"); } }).get(f.spec.groupId), /controlled owner acquire failure/);
+  assert.equal(releases, 0);
+  await assert.rejects(f.openWithOwner({ async acquire() { return { ...baseScope(), store: null }; } }).get(f.spec.groupId), /rounds_transaction_scope_invalid/);
+  assert.equal(releases, 1);
+  await assert.rejects(f.openWithOwner({ async acquire() { return { ...baseScope(), host: { ...f.host, async authorize() { return null; } } }; } }).get(f.spec.groupId), /rounds_host_authorization/);
+  assert.equal(releases, 2);
+  await assert.rejects(f.openWithOwner({ async acquire() { const scope = baseScope(); return { ...scope,
+    store: { transact(id, body) { return scope.store.transact(id, async journal => { await body(journal); throw new Error("controlled post-body failure"); }); } } }; } }).get(f.spec.groupId),
+  error => error.code === "rounds_transaction_uncertain" && error.status === "publication-unknown" && /controlled post-body failure/.test(error.cause.message));
+  assert.equal(releases, 3);
+  let current = true;
+  await assert.rejects(f.openWithOwner({ async acquire() { const scope = baseScope(); return { ...scope,
+    store: { transact(id, body) { return scope.store.transact(id, async journal => {
+      await body(journal); current = false;
+      throw new Error("controlled post-body currentness failure");
+    }); } },
+    assertCurrent() { if (!current) throw new Error("controlled post-body currentness failure"); } }; } }).get(f.spec.groupId),
+  error => error.code === "rounds_transaction_uncertain" && error.status === "publication-unknown" && /controlled post-body currentness failure/.test(error.cause.message));
+  assert.equal(releases, 4);
+  await assert.rejects(f.openWithOwner({ async acquire() { return { ...baseScope(), async release() { releases++; throw new Error("controlled scope release failure"); } }; } }).get(f.spec.groupId),
+  error => error.code === "rounds_transaction_uncertain" && error.status === "returned-cleanup-unknown" && /controlled scope release failure/.test(error.cause.message));
+  assert.equal(releases, 5);
+});
+
+test("owner-scoped create, reads, release, terminal and cancel use scoped facades", async t => {
+  const f = await fixture(t, { v3: true, deferCreate: true });
+  const actions = [], events = []; let active = false;
+  const owner = { async acquire({ action }) {
+    assert.equal(active, false); active = true; actions.push(action);
+    const actual = f.openAuthority(), authorize = f.host.authorize;
+    return { store: f.store(), host: { ...f.host, async authorize(input) { assert.equal(active, true); events.push(`host:${input.action}`); return authorize(input); },
+      async confirmTerminal(...args) { assert.equal(active, true); events.push("host:terminal"); return f.host.confirmTerminal(...args); } },
+      authorityService: { ...actual, async inspect(...args) { assert.equal(active, true); events.push("authority:inspect"); return actual.inspect(...args); },
+        async admitEffect(...args) { assert.equal(active, true); events.push("authority:admit"); return actual.admitEffect(...args); } },
+      assertCurrent() { assert.equal(active, true); }, async release() { assert.equal(active, true); active = false; } };
+  } };
+  const c = f.openWithOwner(owner);
+  await c.create(f.create);
+  const initial = await c.get(f.spec.groupId); await c.events(f.spec.groupId);
+  const released = await c.release(f.cmd("release", initial, "owned-release", { checkpoint: ref("owned-release"),
+    seats: [{ seatId: "seat-0", previousInvocationId: null }] }));
+  const p = await c.get(f.spec.groupId);
+  await c.recordTerminal(f.cmd("terminal", p, "owned-terminal", { invocationId: released.projection.attempts[0].invocationId }));
+  const beforeCancel = await c.get(f.spec.groupId);
+  await c.cancel(f.cmd("cancel", beforeCancel, "owned-cancel"));
+  for (const action of ["create", "get", "events", "release", "terminal", "cancel", "record"]) assert.ok(actions.includes(action), action);
+  assert.ok(events.includes("host:terminal")); assert.ok(events.includes("authority:admit")); assert.equal(active, false);
+});
+
+test("parallel Flow members do not hold or share a transaction scope while awaiting providers", { timeout: 30000 }, async t => {
+  const f = await fixture(t, { v3: true, managedDefinition: managedDefinition("parallel"), maxConcurrent: 2 });
+  let tail = Promise.resolve(), active = false, serial = 0, released = 0, reached;
+  const both = new Promise(resolve => { reached = resolve; }); let resume;
+  const barrier = new Promise(resolve => { resume = resolve; }); t.after(() => resume());
+  const scopeIds = new Set();
+  const owner = { async acquire() {
+    const previous = tail; let unlock; tail = new Promise(resolve => { unlock = resolve; }); await previous;
+    assert.equal(active, false); active = true; const id = ++serial; scopeIds.add(id); let live = true;
+    return { store: f.store(), host: f.host, authorityService: f.openAuthority(),
+      assertCurrent() { assert.ok(active && live); }, async release() { assert.ok(active && live); live = false; active = false; released++; unlock(); } };
+  } };
+  f.state.onInvoke = async () => { if (f.state.active === 2) reached(); await barrier; };
+  const command = await flowRelease(f, "scoped-parallel", [invoke("seat-0"), invoke("seat-1")]);
+  const running = f.openWithOwner(owner).release(command);
+  await Promise.race([both, running.then(() => { throw new Error("providers did not overlap"); })]);
+  assert.equal(f.state.active, 2); assert.ok(released > 0); assert.ok(scopeIds.size > 1);
+  resume(); await running;
+  assert.equal(f.state.peak, 2); assert.equal(active, false); assert.equal(released, serial);
+});
+
+test("a provider-held writer queues sibling metadata before the group lock without lending custody", { timeout: 30000 }, async t => {
+  const f = await fixture(t, { v3: true, managedDefinition: managedDefinition("parallel"), maxConcurrent: 2 });
+  let tail = Promise.resolve(), holder = null, serial = 0, groups = 0, first = true, entered, resume;
+  const providerHeld = new Promise(resolve => { entered = resolve; });
+  const barrier = new Promise(resolve => { resume = resolve; }); t.after(() => resume());
+  async function acquireWriter(id) {
+    const previous = tail; let unlock; tail = new Promise(resolve => { unlock = resolve; }); await previous;
+    assert.equal(holder, null); holder = id;
+    return async () => { assert.equal(holder, id); holder = null; unlock(); };
+  }
+  const owner = { async acquire() {
+    const id = `transaction-${++serial}`, release = await acquireWriter(id), durable = f.store();
+    return { host: f.host, authorityService: f.openAuthority(),
+      store: { transact(groupId, body) { return durable.transact(groupId, async journal => {
+        assert.equal(holder, id); groups++;
+        const next = await body(journal); assert.equal(holder, id); return next;
+      }); } }, assertCurrent() { assert.equal(holder, id); }, release };
+  } };
+  f.state.onInvoke = async () => {
+    if (!first) return; first = false;
+    const release = await acquireWriter("provider"); entered();
+    try { await barrier; } finally { await release(); }
+  };
+  const controller = f.openWithOwner(owner);
+  const command = await flowRelease(f, "provider-held-home", [invoke("seat-0"), invoke("seat-1")]);
+  const running = controller.release(command);
+  await Promise.race([providerHeld, running.then(() => { throw new Error("provider writer was never held"); })]);
+  const before = groups; let observed = false;
+  const sibling = controller.get(f.spec.groupId).then(value => { observed = true; return value; });
+  await setImmediate(); await setImmediate();
+  assert.equal(holder, "provider"); assert.equal(groups, before, "sibling acquired group while another owner held home");
+  assert.equal(observed, false);
+  resume(); await sibling; await running;
+  assert.equal(observed, true); assert.equal(holder, null); assert.equal(f.state.calls, 2);
+});
 
 test("first seat, explicit bounded fanout and same-seat retry survive durable reopen without reset or replay effects", async t => {
   const f = await fixture(t), first = await f.release("first", ["seat-0"]);
@@ -680,8 +949,8 @@ test("Flow rounds: omitted legacy gate attempt supports route-back with fresh cl
 });
 
 
-async function exhaustedRoundsFixture(t) {
-  const f = await fixture(t, { managedDefinition: managedDefinition("route"), maxRounds: 8, attempts: 12, maxRecoveries: 4 });
+async function exhaustedRoundsFixture(t, options = {}) {
+  const f = await fixture(t, { managedDefinition: managedDefinition("route"), maxRounds: 8, attempts: 12, maxRecoveries: 4, ...options });
   const a = (await f.controller.release(await flowRelease(f, "first", [invoke("seat-0")]))).projection.attempts.at(-1);
   await f.terminal(a.invocationId);
   const b = (await f.controller.release(await flowRelease(f, "route-1", [invoke("seat-1")]))).projection.attempts.at(-1);
@@ -694,6 +963,111 @@ async function exhaustedRoundsFixture(t) {
   assert.equal(claimedBlock.status, "blocked"); assert.equal(claimedBlock.type, undefined);
   return { f, run, claimedBlock, next };
 }
+
+test("transaction scope: child expiry during parent Flow admission must prevent publication", { timeout: 60000 }, async t => {
+  const { f, claimedBlock } = await exhaustedRoundsFixture(t, { v3: true });
+  const knownParents = new WeakSet(), acquireParent = f.host.flow.acquireContinuationPublication;
+  let acquiredChildren = 0, releasedChildren = 0, parentReleases = 0;
+  f.host.flow.acquireContinuationPublication = async input => {
+    const parent = await acquireParent(input);
+    const lease = { ...parent, flowAdmission: { async acquire() {
+      const child = await parent.flowAdmission.acquire(); acquiredChildren++;
+      return { assertCurrent: child.assertCurrent, async release() {
+        parent.assertCurrent(); await child.release(); releasedChildren++;
+      } };
+    } }, async release() { parentReleases++; await parent.release(); } };
+    knownParents.add(lease); return lease;
+  };
+  let expireChild, expired = false, parentCurrentAtExpiry = false, borrowed = 0, releases = 0;
+  const owner = { async acquire({ publicationLease }) {
+    if (publicationLease && !knownParents.has(publicationLease)) throw new DelegationRoundsTransactionParentError();
+    if (publicationLease) { publicationLease.assertCurrent(); borrowed++; }
+    let live = true;
+    if (publicationLease) expireChild = () => {
+      publicationLease.assertCurrent(); parentCurrentAtExpiry = true; live = false; expired = true;
+    };
+    return { store: f.store(), host: f.host, authorityService: f.openAuthority(),
+      assertCurrent() { if (!live) throw new Error("SOL narrow child expired during Flow admission"); publicationLease?.assertCurrent(); },
+      async release() { releases++; live = false; } };
+  } };
+  const original = await continuationCommand(f, "reappraise", "sol-child-expiry", { gate: "second", blockedTransitionRef: flowTransitionRef(claimedBlock) });
+  const before = await loadRun(f.spec.topology.runId, f.cwd), beforeCalls = f.state.calls;
+  const recordsBefore = before.state.checked_operation_ledger?.records.length ?? 0;
+  f.state.onContinuationLease = async () => { assert.equal(typeof expireChild, "function"); expireChild(); await setImmediate(); };
+  await assert.rejects(f.openWithOwner(owner).reappraise(original), /SOL narrow child expired during Flow admission/);
+  const after = await loadRun(f.spec.topology.runId, f.cwd), p = await f.controller.get(f.spec.groupId);
+  const recordsAfter = after.state.checked_operation_ledger?.records.length ?? 0;
+  t.diagnostic(JSON.stringify({ expired, parentCurrentAtExpiry, borrowed, releases, providerCallsDuringProbe: f.state.calls - beforeCalls,
+    recordsBefore, recordsAfter, headBefore: flowRunHead(before.state), headAfter: flowRunHead(after.state),
+    receiptInGroup: !!p.continuations.find(c => c.command.operationKey === original.operationKey)?.receipt }));
+  assert.equal(expired, true); assert.equal(parentCurrentAtExpiry, true); assert.equal(f.state.calls, beforeCalls);
+  assert.equal(recordsAfter, recordsBefore, "Flow published a checked operation after narrow transaction scope expired while parent remained current");
+  assert.equal(flowRunHead(after.state), flowRunHead(before.state));
+  assert.equal(p.continuations.find(c => c.command.operationKey === original.operationKey).receipt, null);
+  assert.equal(acquiredChildren, 1); assert.equal(releasedChildren, 1); assert.equal(parentReleases, 1);
+});
+
+test("continuation publication transaction borrows its exact parent and authenticates replay with scoped host", async t => {
+  const { f, claimedBlock } = await exhaustedRoundsFixture(t, { v3: true });
+  const parentStates = new WeakMap(), acquireParent = f.host.flow.acquireContinuationPublication;
+  f.host.flow.acquireContinuationPublication = async input => {
+    const parent = await acquireParent(input), state = { active: true };
+    const lease = { ...parent,
+      assertCurrent() { if (!state.active) throw new DelegationRoundsTransactionParentError(); return parent.assertCurrent(); },
+      async release() { if (!state.active) return; state.active = false; await parent.release(); } };
+    parentStates.set(lease, state); return lease;
+  };
+  let borrowed = 0, parentReleases = 0, scopedLoads = 0;
+  const owner = { async acquire({ publicationLease }) {
+    const state = publicationLease && parentStates.get(publicationLease);
+    if (publicationLease && (!state || !state.active)) throw new DelegationRoundsTransactionParentError();
+    if (state) borrowed++;
+    let active = true; const durable = f.store(), actualHost = f.host;
+    return { store: durable, authorityService: f.openAuthority(),
+      host: { ...actualHost, async loadContinuation(...args) { assert.ok(active && state?.active); scopedLoads++; return actualHost.loadContinuation(...args); } },
+      assertCurrent() { assert.ok(active); if (state) assert.equal(state.active, true); },
+      async release() { assert.ok(active); active = false; if (state) { assert.equal(state.active, true); parentReleases++; } } };
+  } };
+  const c = f.openWithOwner(owner);
+  const original = await continuationCommand(f, "reappraise", "scoped-parent", { gate: "second", blockedTransitionRef: flowTransitionRef(claimedBlock) });
+  f.state.continuationRetentionFailure = true;
+  await assert.rejects(c.reappraise(original), /continuation receipt retention unavailable/);
+  f.state.continuationRetentionFailure = false;
+  const pending = await c.get(f.spec.groupId), finalizer = f.cmd("finalizeContinuation", pending, "scoped-parent-finalizer", { continuationOperationKey: original.operationKey });
+  await c.finalizeContinuation(finalizer);
+  assert.equal((await c.finalizeContinuation(finalizer)).replayed, true);
+  assert.equal(scopedLoads, 1); assert.equal(borrowed, 3); assert.equal(parentReleases, 3);
+  const registeredAcquire = f.host.flow.acquireContinuationPublication;
+  f.host.flow.acquireContinuationPublication = async () => ({ assertCurrent() {}, flowAdmission: { acquire() { throw new Error("unexpected Flow admission"); } }, async release() {} });
+  await assert.rejects(c.finalizeContinuation(finalizer), error => error.code === "rounds_transaction_parent_unavailable");
+  const releasedParent = await registeredAcquire({}); await releasedParent.release();
+  f.host.flow.acquireContinuationPublication = async () => releasedParent;
+  await assert.rejects(c.finalizeContinuation(finalizer), error => error.code === "rounds_transaction_parent_unavailable");
+  f.host.flow.acquireContinuationPublication = registeredAcquire;
+  assert.equal((await c.finalizeContinuation(finalizer)).replayed, true);
+});
+
+test("transaction owner forwards frozen nested recipient methods with their private receiver", async t => {
+  const f = await fixture(t, { v3: true, managedDefinition: managedDefinition("parallel"), contextSync: true, attempts: 12 });
+  const sync = await seatSync(f, "seat-0", "frozen-recipient-sync", "Controlled frozen recipient context");
+  let nestedCalls = 0, scopes = 0, releases = 0;
+  class FrozenRecipient {
+    #delegate = f.host.recipient;
+    constructor() {
+      Object.defineProperty(this, "resolve", { value: this.resolve, enumerable: true, writable: false, configurable: false });
+      Object.freeze(this);
+    }
+    async resolve(...args) { nestedCalls++; return this.#delegate.resolve(...args); }
+  }
+  const recipient = new FrozenRecipient();
+  const owner = { async acquire() {
+    scopes++;
+    return { store: f.store(), authorityService: Object.freeze(f.openAuthority()), host: { ...f.host, recipient },
+      assertCurrent() {}, async release() { releases++; } };
+  } };
+  await f.openWithOwner(owner).release(await flowRelease(f, "frozen-recipient-release", [{ ...invoke("seat-0"), syncKey: sync.command.operationKey }]));
+  assert.ok(nestedCalls > 0); assert.equal(releases, scopes); assert.equal(f.state.calls, 2);
+});
 
 test("finalizer exact replay refuses missing retained winner bytes", async t => {
   const { f, claimedBlock } = await exhaustedRoundsFixture(t);
@@ -1427,6 +1801,28 @@ test("R3: storage-only sync finalization survives restart and performs no second
   assert.equal(f.state.calls, 2);
 });
 
+test("sync finalization uses transaction-scoped V3 host and authority", async t => {
+  const f = await fixture(t, { v3: true, managedDefinition: managedDefinition("parallel"), contextSync: true, attempts: 12 });
+  const text = "Scoped retained facts", contextRef = { id: "scoped-sync-context", domain: "fixture-context", digest: `sha256:${createHash("sha256").update(text).digest("hex")}` };
+  fs.writeFileSync(path.join(f.cwd, `${contextRef.id}.txt`), text, { mode: 0o600 });
+  f.state.continuationRetentionFailure = true;
+  const original = await continuationCommand(f, "sync", "scoped-lost-sync", { seatId: "seat-0", contextRef });
+  await assert.rejects(f.controller.sync(original), /sync receipt persistence failed/);
+  f.state.continuationRetentionFailure = false;
+  const p = await f.controller.get(f.spec.groupId), exchange = p.continuations[0];
+  const command = f.cmd("finalizeSync", p, "scoped-finalize-sync", { syncOperationKey: original.operationKey, preparedDigest: preparedRoundsSyncDigest(exchange.prepared) });
+  let retained = 0, inspected = 0, live = false;
+  const owner = { async acquire({ action }) {
+    assert.equal(action, "finalizeSync"); live = true; const actual = f.openAuthority();
+    return { store: f.store(), host: { ...f.host, async retainContinuation(...args) { assert.ok(live); retained++; return f.host.retainContinuation(...args); } },
+      authorityService: { ...actual, async inspect(...args) { assert.ok(live); inspected++; return actual.inspect(...args); } },
+      assertCurrent() { assert.ok(live); }, async release() { assert.ok(live); live = false; } };
+  } };
+  const result = await f.openWithOwner(owner).finalizeSync(command);
+  assert.equal(result.projection.continuations[0].receipt.acknowledged, true);
+  assert.equal(retained, 1); assert.ok(inspected > 0); assert.equal(live, false); assert.equal(f.state.calls, 1);
+});
+
 test("R3: ACK recipient replacement refuses paid launch and requires fresh session ACK", async t => {
   const f = await fixture(t, { managedDefinition: managedDefinition("parallel"), contextSync: true, attempts: 12 });
   const ackA = await seatSync(f, "seat-0", "r3-ack-A", "Session scoped facts");
@@ -1483,7 +1879,14 @@ test("R3: public v3 renewal and group adoption preserve lineage spend unknown ho
   assert.deepEqual(await f.service.inspect("root"), current);
   await assert.rejects(f.controller.release(await flowRelease(f, "r3-not-adopted", [invoke("seat-1")])), /rounds_grant_adoption_required/);
   const p = await f.controller.get(f.spec.groupId), adoption = f.cmd("adoptRenewal", p, "r3-adopt", { renewalOperationKey: command.operationKey, authority: rootAuthorityReferenceV2(command.root) });
-  await f.open().adoptRenewal(adoption);
+  let adoptionScopes = 0, adoptionInspections = 0;
+  const adoptionOwner = { async acquire({ action }) {
+    assert.equal(action, "adoptRenewal"); adoptionScopes++; let live = true; const actual = f.openAuthority();
+    return { store: f.store(), host: f.host, authorityService: { ...actual, async inspect(...args) { assert.ok(live); adoptionInspections++; return actual.inspect(...args); } },
+      assertCurrent() { assert.ok(live); }, async release() { assert.ok(live); live = false; } };
+  } };
+  await f.openWithOwner(adoptionOwner).adoptRenewal(adoption);
+  assert.equal(adoptionScopes, 1); assert.ok(adoptionInspections > 0);
   await f.open().release(await flowRelease(f, "r3-next", [invoke("seat-1")]));
   current = await f.service.inspect("root"); assert.equal(current.invocations.length, before.invocations.length + 1);
   assert.deepEqual(current.invocations.find(i => i.invocationId === "r3-unknown-old"), before.invocations.find(i => i.invocationId === "r3-unknown-old"));
