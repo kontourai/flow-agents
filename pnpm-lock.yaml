@@ -27,8 +27,8 @@ importers:
         specifier: 5.0.0
         version: 5.0.0
       '@kontourai/survey':
-        specifier: 8.2.0
-        version: 8.2.0(typescript@7.0.2)
+        specifier: 8.2.1
+        version: 8.2.1(typescript@7.0.2)
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
@@ -41,7 +41,7 @@ importers:
         version: 0.19.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(openai@7.34.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(undici@7.30.1)(ws@8.22.0)(zod@4.4.3))(playwright@1.61.0)(typescript@7.0.2)
       '@kontourai/veritas':
         specifier: 1.11.2
-        version: 1.11.2(@kontourai/survey@8.2.0(typescript@7.0.2))(zod@4.4.3)
+        version: 1.11.2(@kontourai/survey@8.2.1(typescript@7.0.2))(zod@4.4.3)
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
@@ -53,7 +53,7 @@ importers:
         version: 7.0.1
       promptfoo:
         specifier: ^0.124.1
-        version: 0.124.1(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.4.3))(@slack/web-api@7.17.0(debug@4.4.3))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.1.1)(ibm-cloud-sdk-core@5.5.0)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10)
+        version: 0.124.1(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.4.3))(@slack/web-api@7.17.0(debug@4.3.4))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.1.1)(ibm-cloud-sdk-core@5.5.0)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -1216,8 +1216,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/survey@8.2.0':
-    resolution: {integrity: sha512-7bDjdLKxR38POHumHzQXRS7nu6Ftu0nbwpCsnkEvOYL/xd8i8np94x+V3ftsd8tt4ZvNjbhdlf1tjZzFu8QfVQ==}
+  '@kontourai/survey@8.2.1':
+    resolution: {integrity: sha512-oQgnhhMjSG72kM+/z37jRqxWU7pqCrojiKO2OsuA1N64vdqQwjZ6u1eZliN3RhgDQEnPAZ1iUdH0ecBE4qeczw==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -1729,10 +1729,12 @@ packages:
   '@smithy/core@3.25.0':
     resolution: {integrity: sha512-TTD6el7tvKyafkXBf7XO3jLOE+qVxOTrLjp/fEGiV3BMfUHK/LfdYlQO9YgZvzxC7kqA3H/IhJXNqQgnbgjb7A==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/core@3.36.0':
     resolution: {integrity: sha512-3hJiwG1F5t1SoXqp/yOCmYXziyx7ZVqF63S5W6YU201e/qwVaHPex+E/3vvyY9a3ORq/b+BydeNZpP2saQ9X2g==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.4.0':
     resolution: {integrity: sha512-pPQmNdEvMJttv9z2kdYxoui83p/nr32zjMf0aMfmzmGmFEgKXUfy0vXiNg0fx4R5XLQzmJBLM9Wg0guEq2/q8A==}
@@ -5560,7 +5562,7 @@ snapshots:
       - kerberos
       - supports-color
 
-  '@kontourai/survey@8.2.0(typescript@7.0.2)':
+  '@kontourai/survey@8.2.1(typescript@7.0.2)':
     dependencies:
       '@kontourai/surface': 2.17.0
       '@modelcontextprotocol/server': 2.0.0
@@ -5597,7 +5599,7 @@ snapshots:
       - canvas
       - playwright
 
-  '@kontourai/veritas@1.11.2(@kontourai/survey@8.2.0(typescript@7.0.2))(zod@4.4.3)':
+  '@kontourai/veritas@1.11.2(@kontourai/survey@8.2.1(typescript@7.0.2))(zod@4.4.3)':
     dependencies:
       '@kontourai/plumb': 0.2.0
       '@kontourai/surface': 2.17.0
@@ -5608,7 +5610,7 @@ snapshots:
       hachure: 0.15.0
       picomatch: 4.0.7
     optionalDependencies:
-      '@kontourai/survey': 8.2.0(typescript@7.0.2)
+      '@kontourai/survey': 8.2.1(typescript@7.0.2)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - kerberos
@@ -6092,13 +6094,13 @@ snapshots:
   '@slack/types@2.21.1':
     optional: true
 
-  '@slack/web-api@7.17.0(debug@4.4.3)':
+  '@slack/web-api@7.17.0(debug@4.3.4)':
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/types': 2.21.1
       '@types/node': 26.1.1
       '@types/retry': 0.12.0
-      axios: 1.18.0(debug@4.4.3)
+      axios: 1.18.0(debug@4.3.4)
       eventemitter3: 5.0.4
       form-data: 4.0.6
       is-electron: 2.2.2
@@ -6461,17 +6463,6 @@ snapshots:
   axios@1.18.0(debug@4.3.4):
     dependencies:
       follow-redirects: 1.16.0(debug@4.3.4)
-      form-data: 4.0.6
-      https-proxy-agent: 5.0.1
-      proxy-from-env: 2.1.0
-    transitivePeerDependencies:
-      - debug
-      - supports-color
-    optional: true
-
-  axios@1.18.0(debug@4.4.3):
-    dependencies:
-      follow-redirects: 1.16.0(debug@4.4.3)
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -7092,11 +7083,6 @@ snapshots:
   follow-redirects@1.16.0(debug@4.3.4):
     optionalDependencies:
       debug: 4.3.4
-    optional: true
-
-  follow-redirects@1.16.0(debug@4.4.3):
-    optionalDependencies:
-      debug: 4.4.3
     optional: true
 
   form-data@4.0.6:
@@ -8096,7 +8082,7 @@ snapshots:
 
   promise-limit@2.7.0: {}
 
-  promptfoo@0.124.1(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.4.3))(@slack/web-api@7.17.0(debug@4.4.3))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.1.1)(ibm-cloud-sdk-core@5.5.0)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10):
+  promptfoo@0.124.1(@aws-sdk/credential-provider-node@3.972.86)(@aws-sdk/credential-providers@3.1152.0)(@huggingface/transformers@4.2.0)(@ibm-cloud/watsonx-ai@1.7.14)(@openai/agents@0.11.6(ws@8.22.0)(zod@4.4.3))(@slack/web-api@7.17.0(debug@4.3.4))(@smithy/hash-node@4.5.2)(@smithy/signature-v4@5.7.4)(@types/json-schema@7.0.15)(@types/node@26.1.1)(ibm-cloud-sdk-core@5.5.0)(pg@8.21.0)(playwright-extra@4.3.6(playwright-core@1.61.0)(playwright@1.61.0))(playwright@1.61.0)(socks@2.8.10):
     dependencies:
       '@anthropic-ai/sdk': 0.128.0(zod@4.4.3)
       '@apidevtools/json-schema-ref-parser': 16.0.5(@types/json-schema@7.0.15)
@@ -8195,7 +8181,7 @@ snapshots:
       '@openai/agents': 0.11.6(ws@8.22.0)(zod@4.4.3)
       '@openai/codex-sdk': 0.156.1
       '@opencode-ai/sdk': 1.19.1
-      '@slack/web-api': 7.17.0(debug@4.4.3)
+      '@slack/web-api': 7.17.0(debug@4.3.4)
       '@smithy/node-http-handler': 4.8.0
       google-auth-library: 11.3.1
       hono: 4.13.13
