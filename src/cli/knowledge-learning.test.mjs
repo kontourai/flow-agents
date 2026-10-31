@@ -157,3 +157,17 @@ test('active-set read batches one canonical snapshot and observes retirement on 
   await f.service().apply(intent('retire', 4, { reason: 'New policy' }));
   assert.equal((await service.active(scope)).records.length, 0); assert.equal(reads, 2);
 });
+
+
+test('owner queue discovers proposed and retired candidates without a consumer-owned index', async t => {
+  const f = fixture(t); await f.service().apply(intent('propose', 0, { proposal }));
+  let queue = await f.service().list(scope);
+  assert.equal(queue.coverage, 'complete'); assert.equal(queue.records.length, 1);
+  assert.equal(queue.records[0].record.id, 'learning-1'); assert.equal(queue.records[0].active, false);
+  await f.service().apply(intent('retire', 1, { reason: 'No longer a useful proposal.' }));
+  queue = await f.service().list(scope);
+  assert.equal(queue.records[0].record.retirement.reason, 'No longer a useful proposal.');
+  assert.equal(queue.records[0].receipts.length, 2);
+  f.refs.delete(refKey(source)); queue = await f.service().list(scope);
+  assert.deepEqual(queue, { records: [], coverage: 'partial' });
+});

@@ -4,7 +4,7 @@ import {
   KNOWLEDGE_LEARNING_LIMITS, KNOWLEDGE_LEARNING_VERSION,
   KnowledgeLearningError, assertKnowledgeLearningProposal, assertKnowledgeLearningRef, assertKnowledgeLearningScope, isKnowledgeLearningActive,
   type KnowledgeLearningAction, type KnowledgeLearningIntent, type KnowledgeLearningProjection,
-  type KnowledgeLearningReceipt, type KnowledgeLearningRecord, type KnowledgeLearningRef, type KnowledgeLearningRegistry, type KnowledgeLearningScope,
+  type KnowledgeLearningList, type KnowledgeLearningReceipt, type KnowledgeLearningRecord, type KnowledgeLearningRef, type KnowledgeLearningRegistry, type KnowledgeLearningScope,
 } from "./knowledge-learning-contract.js";
 
 export interface KnowledgeLearningStore {
@@ -51,26 +51,31 @@ export function createKnowledgeLearningLifecycle(store: KnowledgeLearningStore, 
       return { state: error instanceof KnowledgeLearningError && error.code === "restricted" ? "restricted" : "unavailable" };
     }
   }
+  async function readSet(scope: KnowledgeLearningScope, activeOnly: boolean): Promise<KnowledgeLearningList> {
+    assertKnowledgeLearningScope(scope);
+    try {
+      const authority = await host.authorize(scope, "read");
+      authority.assertCurrent();
+      const snapshot = await store.read();
+      const records: KnowledgeLearningList["records"] = [];
+      let partial = false;
+      for (const record of snapshot.records.filter(entry => sameScope(entry.proposal.scope, scope) && (!activeOnly || isKnowledgeLearningActive(entry)))) {
+        try {
+          await verifyEvidence(references(record), scope);
+          authority.assertCurrent();
+          records.push({ state: "available", record: structuredClone(record), receipts: snapshot.receipts.filter(receipt => receipt.learningId === record.id), active: isKnowledgeLearningActive(record) });
+        } catch { partial = true; }
+      }
+      authority.assertCurrent();
+      return { records, coverage: partial ? "partial" : "complete" };
+    } catch { return { records: [], coverage: "unavailable" }; }
+  }
   return {
     get,
+    list: (scope: KnowledgeLearningScope) => readSet(scope, false),
     async active(scope: KnowledgeLearningScope): Promise<{ records: KnowledgeLearningRecord[]; coverage: "complete" | "partial" | "unavailable" }> {
-      assertKnowledgeLearningScope(scope);
-      try {
-        const authority = await host.authorize(scope, "read");
-        authority.assertCurrent();
-        const snapshot = await store.read();
-        const records: KnowledgeLearningRecord[] = [];
-        let partial = false;
-        for (const record of snapshot.records.filter(entry => sameScope(entry.proposal.scope, scope) && isKnowledgeLearningActive(entry))) {
-          try {
-            await verifyEvidence(references(record), scope);
-            authority.assertCurrent();
-            records.push(structuredClone(record));
-          } catch { partial = true; }
-        }
-        authority.assertCurrent();
-        return { records, coverage: partial ? "partial" : "complete" };
-      } catch { return { records: [], coverage: "unavailable" }; }
+      const projected = await readSet(scope, true);
+      return { records: projected.records.map(item => item.record), coverage: projected.coverage };
     },
     async apply(intent: KnowledgeLearningIntent): Promise<KnowledgeLearningReceipt> {
       assertKnowledgeLearningScope(intent.scope);

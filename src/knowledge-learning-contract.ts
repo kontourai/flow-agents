@@ -61,6 +61,11 @@ export type KnowledgeLearningProjection =
   | { state: "available"; record: KnowledgeLearningRecord; receipts: KnowledgeLearningReceipt[]; active: boolean }
   | { state: "not-found" | "restricted" | "unavailable" };
 
+export interface KnowledgeLearningList {
+  records: Extract<KnowledgeLearningProjection, { state: "available" }>[];
+  coverage: "complete" | "partial" | "unavailable";
+}
+
 export class KnowledgeLearningError extends Error {
   constructor(readonly code: "invalid" | "restricted" | "stale" | "conflict" | "not-found" | "unavailable" | "capacity") {
     super(`Knowledge learning ${code}`);

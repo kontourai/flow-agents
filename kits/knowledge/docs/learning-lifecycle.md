@@ -16,7 +16,8 @@ rather than exposing its body or treating missing evidence as support.
 A proposal names its body, expected effect, scope, supporting/counter/conflict
 references and intended target consumers. Evaluation and decision are recorded
 separately. Approval does not activate a proposal: `activate` registers the
-approved exact content revision for the named target consumers. Consumers read
+approved exact content revision for the named target consumers. Review queues use `list(scope)` to discover proposed, rejected and retired
+entries under current scope authority without a private-store index. Consumers read
 `active(scope)` at their authorized execution boundary and record that exact
 revision when it contributes context. This registration does not install an
 executable Skill, publish an artifact, grant tool permissions or prove a target
