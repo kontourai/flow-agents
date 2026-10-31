@@ -5,6 +5,7 @@ import { type FlowDefinitionIdentity, type FlowStepClaimActor, type FlowDurableS
 import { runDelegationFlowRound, validateFlowRoundRelease, validateFlowRoundCreation } from "./delegation-rounds-flow.js";
 import { finalizeRoundsSync, type PreparedRoundsSync, preparedRoundsSyncDigest, validatePreparedRoundsSync, runRoundsContinuation, validateRoundsContinuation } from "./delegation-rounds-continuation.js";
 import { authorityLineageReference, type AuthorityEpochV3 } from "./delegation-authority-service-v3.js";
+import type { createDelegationAuthorityServiceV3 } from "./delegation-authority-service-v3.js";
 import { assertSyncedRecipient, type ResolvedDelegationRecipient, type DelegationRecipientIdentity, validateRecipientIdentity } from "./delegation-rounds-recipient.js";
 import type { AuthorizationLedger } from "@kontourai/dispatch";
 import {
@@ -97,6 +98,50 @@ export type DelegationRoundsProjection = {
 };
 export interface DelegationRoundsStore {
   transact<T>(groupId: string, body: (journal: DelegationRoundsJournal | null) => Promise<{ journal: DelegationRoundsJournal; result: T }>): Promise<T>;
+}
+export interface DelegationRoundsTransactionScope {
+  store: DelegationRoundsStore;
+  host: DelegationRoundsHost;
+  authorityService: ReturnType<typeof createDelegationAuthorityServiceV3>;
+  assertCurrent(): undefined;
+  release(): Promise<void>;
+}
+export interface DelegationRoundsTransactionOwner {
+  acquire(input: { groupId: string; action: Parameters<DelegationRoundsHost["authorize"]>[0]["action"];
+    command: DelegationRoundsAuthorizationCommand | null; publicationLease?: ContinuationPublicationLease }): Promise<DelegationRoundsTransactionScope>;
+}
+/** Keep lexical facades current across each awaited call, not only at callback return. */
+function currentTransactionFacade<T extends object>(facade: T, current: () => void): T;
+function currentTransactionFacade(facade: object, current: () => void): object {
+  // Frozen descriptors belong to the supplied facade, not our forwarding target.
+  const target: object = Object.create(facade);
+  return new Proxy(target, {
+    get(_target, key) {
+      current();
+      const member: unknown = Reflect.get(facade, key, facade);
+      if (typeof member === "function") return (...args: unknown[]) => {
+        current();
+        const result: unknown = Reflect.apply(member, facade, args);
+        if (result !== null && (typeof result === "object" || typeof result === "function")
+          && typeof Reflect.get(result, "then") === "function") {
+          return Promise.resolve(result).then(value => { current(); return value; });
+        }
+        current(); return result;
+      };
+      return member !== null && typeof member === "object" ? currentTransactionFacade(member, current) : member;
+    },
+  });
+}
+/** Owner refusal when a borrowed continuation parent is unknown or no longer held. */
+export class DelegationRoundsTransactionParentError extends Error {
+  readonly code = "rounds_transaction_parent_unavailable";
+  constructor() { super("rounds_transaction_parent_unavailable"); this.name = "DelegationRoundsTransactionParentError"; }
+}
+export class DelegationRoundsTransactionUncertainError extends AggregateError {
+  readonly code = "rounds_transaction_uncertain";
+  constructor(readonly status: "publication-unknown" | "returned-cleanup-unknown", errors: unknown[]) {
+    super(errors, `rounds_transaction_${status}`, { cause: errors[0] }); this.name = "DelegationRoundsTransactionUncertainError";
+  }
 }
 /** A durable publication or lease cleanup may have completed despite an error. */
 export class ContinuationPublicationUncertainError extends AggregateError {
@@ -503,11 +548,12 @@ export function delegationRoundsCapacity(journal: DelegationRoundsJournal): { ev
 
 export function createDelegationRoundsController(input: {
   store: DelegationRoundsStore; authorityService: ReturnType<typeof createDelegationAuthorityService>;
-  dispatchLedger: AuthorizationLedger; host: DelegationRoundsHost; cwd?: string;
+  dispatchLedger: AuthorizationLedger; host: DelegationRoundsHost; cwd?: string; transactionOwner?: DelegationRoundsTransactionOwner;
 }) {
   const { store, host, authorityService: service } = input;
   requireDelegationV2(host.accountingProtocol === undefined || host.accountingProtocol === "retained-tariff-v1", "rounds_accounting_protocol");
-  async function authorize(action: Parameters<DelegationRoundsHost["authorize"]>[0]["action"], groupId: string, p: DelegationRoundsProjection | null, c: DelegationRoundsAuthorizationCommand | null = null) {
+  function bindAuthorization(host: DelegationRoundsHost, service: ReturnType<typeof createDelegationAuthorityService>) {
+  return async function authorize(action: Parameters<DelegationRoundsHost["authorize"]>[0]["action"], groupId: string, p: DelegationRoundsProjection | null, c: DelegationRoundsAuthorizationCommand | null = null) {
     const receipt = await host.authorize({ action, groupId, current: p && structuredClone(p), command: c && structuredClone(c) });
     requireDelegationV2(receipt, "rounds_host_authorization");
     const ref = reference(receipt), spec = p?.spec ?? (c?.kind === "create" ? c.spec : null);
@@ -523,17 +569,48 @@ export function createDelegationRoundsController(input: {
       }
     }
     return ref;
+  }; }
+  const authorize = bindAuthorization(host, service);
+  async function transaction<T>(groupId: string, action: Parameters<DelegationRoundsHost["authorize"]>[0]["action"],
+    c: DelegationRoundsAuthorizationCommand | null, preauthorize: boolean,
+    body: (journal: DelegationRoundsJournal | null, context: { host: DelegationRoundsHost; service: ReturnType<typeof createDelegationAuthorityService>; authorize: typeof authorize; assertCurrent(): void }) => Promise<{ journal: DelegationRoundsJournal; result: T }>,
+    publicationLease?: ContinuationPublicationLease): Promise<T> {
+    const scope = input.transactionOwner && await input.transactionOwner.acquire({ groupId, action, command: c && structuredClone(c), ...(publicationLease ? { publicationLease } : {}) });
+    requireDelegationV2(!input.transactionOwner || scope, "rounds_transaction_scope_invalid");
+    let callbackReturned = false, storeReturned = false, active = true, failure: unknown;
+    const current = () => { if (scope) { requireDelegationV2(active, "rounds_transaction_scope_released"); requireDelegationV2(typeof scope.assertCurrent === "function" && scope.assertCurrent() === undefined, "rounds_transaction_scope_invalid"); } };
+    try {
+      if (scope) requireDelegationV2(scope.store && typeof scope.store.transact === "function" && scope.host && typeof scope.host.authorize === "function"
+        && scope.authorityService && typeof scope.authorityService.inspect === "function" && typeof scope.authorityService.admitEffect === "function"
+        && typeof scope.release === "function", "rounds_transaction_scope_invalid");
+      const scopedHost = scope ? currentTransactionFacade(scope.host, current) : host;
+      const scopedService = scope ? currentTransactionFacade(scope.authorityService, current) : service;
+      const scopedAuthorize = bindAuthorization(scopedHost, scopedService);
+      current(); if (preauthorize) await scopedAuthorize(action, groupId, null, c); current();
+      const result = await (scope ? scope.store : store).transact(groupId, async journal => {
+        current(); const next = await body(journal, { host: scopedHost, service: scopedService, authorize: scopedAuthorize, assertCurrent: current });
+        callbackReturned = true; current(); return next;
+      });
+      storeReturned = true; current(); return result;
+    } catch (error) {
+      failure = scope && callbackReturned ? new DelegationRoundsTransactionUncertainError(storeReturned ? "returned-cleanup-unknown" : "publication-unknown", [error]) : error;
+      throw failure;
+    } finally {
+      active = false;
+      if (scope) try { await scope.release(); } catch (error) {
+        throw new DelegationRoundsTransactionUncertainError(storeReturned ? "returned-cleanup-unknown" : "publication-unknown", failure === undefined ? [error] : [failure, error]);
+      }
+    }
   }
   async function get(groupId: string, action: "get" | "events" = "get") {
-    delegationIdV2(groupId); await authorize(action, groupId, null);
-    return store.transact(groupId, async journal => {
+    delegationIdV2(groupId);
+    return transaction(groupId, action, null, true, async (journal, { authorize }) => {
       const p = journal && projectDelegationRounds(journal); await authorize(action, groupId, p);
       requireDelegationV2(journal && p, "rounds_missing"); return { journal, result: { projection: p, journal } };
     });
   }
   async function begin(c: DelegationRoundsCommand) {
-    await authorize(c.kind, c.groupId, null, c);
-    return store.transact(c.groupId, async journal => {
+    return transaction(c.groupId, c.kind, c, true, async (journal, { authorize, host, service }) => {
       const p = journal && projectDelegationRounds(journal);
       const old = journal?.events.find(e => e.kind === "command" && e.command.operationKey === c.operationKey);
       if (old?.kind === "command") {
@@ -599,14 +676,14 @@ export function createDelegationRoundsController(input: {
     });
   }
   async function append(groupId: string, body: DelegationRoundsEventBody) {
-    return store.transact(groupId, async journal => {
+    return transaction(groupId, "record", null, false, async (journal, { authorize }) => {
       requireDelegationV2(journal, "rounds_missing"); await authorize("record", groupId, projectDelegationRounds(journal));
       journal.events.push({ ...body, revision: journal.events.length + 1 });
       return { journal, result: projectDelegationRounds(journal) };
     });
   }
-  async function completeContinuation(groupId: string, key: string, finalizer: FinalizeRoundsContinuationCommand | null) {
-    async function authenticateWinner(original: ReturnType<typeof continuationPrefix>, winner: NonNullable<RoundContinuation["receipt"]>) {
+  async function completeContinuation(groupId: string, key: string, finalizer: FinalizeRoundsContinuationCommand | null, producer?: ReceiptContinuationCommand) {
+    async function authenticateWinner(host: DelegationRoundsHost, original: ReturnType<typeof continuationPrefix>, winner: NonNullable<RoundContinuation["receipt"]>) {
       validateContinuationProof(original, winner.proof);
       if (!host.loadContinuation) throw new ContinuationWinnerError("rounds_continuation_winner_unavailable");
       let bytes: string;
@@ -618,7 +695,8 @@ export function createDelegationRoundsController(input: {
       catch (cause) { throw new ContinuationWinnerError("rounds_continuation_completion_conflict", cause); }
     }
     // Short authorized read releases the group owner BEFORE acquiring outer participants.
-    const snapshot = await store.transact(groupId, async journal => {
+    requireDelegationV2(finalizer || producer, "rounds_continuation_identity");
+    const snapshot = await transaction(groupId, finalizer?.kind ?? producer?.kind ?? "record", finalizer ?? producer ?? null, !!finalizer, async (journal, { authorize }) => {
       requireDelegationV2(journal, "rounds_missing");
       const p = projectDelegationRounds(journal), original = continuationPrefix(journal, key);
       await authorize(finalizer ? "finalizeContinuation" : original.originalCommand.kind, groupId, p, finalizer ?? original.originalCommand);
@@ -637,21 +715,34 @@ export function createDelegationRoundsController(input: {
     const original = snapshot.original;
     const lease = await host.flow.acquireContinuationPublication({ ...structuredClone(original),
       action: finalizer ? "finalizeContinuation" : "produce", ...(finalizer ? { finalizerCommand: structuredClone(finalizer) } : {}) });
-    const current = () => requireDelegationV2(lease.assertCurrent() === undefined, "rounds_continuation_lease_invalid");
+    const parentCurrent = () => requireDelegationV2(lease.assertCurrent() === undefined, "rounds_continuation_lease_invalid");
     const children = new Set<FlowRunMutationLease>();
-    const admission: FlowRunMutationAdmission = { async acquire() {
-      current(); const child = await lease.flowAdmission.acquire();
-      requireDelegationV2(child !== lease && !children.has(child), "rounds_continuation_lease_reentry"); children.add(child);
-      return { assertCurrent() { current(); requireDelegationV2(child.assertCurrent() === undefined, "rounds_continuation_lease_invalid"); return undefined; },
-        async release() { await child.release(); current(); } };
-    } };
+    function transactionAdmission(current: () => void): FlowRunMutationAdmission {
+      return { async acquire() {
+        current(); const child = await lease.flowAdmission.acquire();
+        // An alias is someone else's ownership: never release the parent or an old child.
+        requireDelegationV2(child !== lease && !children.has(child), "rounds_continuation_lease_reentry"); children.add(child);
+        try { current(); }
+        catch (error) {
+          // Flow has not received this child yet, so we must settle its acquisition.
+          try { await child.release(); }
+          catch (cleanup) { throw new ContinuationPublicationUncertainError("publication-unknown", [error, cleanup]); }
+          throw error;
+        }
+        return { assertCurrent() {
+          current(); requireDelegationV2(child.assertCurrent() === undefined, "rounds_continuation_lease_invalid"); current(); return undefined;
+        }, async release() { await child.release(); current(); } };
+      } };
+    }
     let publicationReturned = false;
     let completionCallbackReturned = false;
     let failure: unknown;
     try {
-      current();
-      const result = await store.transact(groupId, async journal => {
-        requireDelegationV2(journal, "rounds_missing");
+      parentCurrent();
+      const result = await transaction(groupId, finalizer ? "finalizeContinuation" : original.originalCommand.kind, finalizer ?? original.originalCommand, false, async (journal, { authorize, host, service, assertCurrent }) => {
+        const current = () => { assertCurrent(); parentCurrent(); };
+        const admission = transactionAdmission(current);
+        current(); requireDelegationV2(journal, "rounds_missing");
         const p = projectDelegationRounds(journal), freshOriginal = continuationPrefix(journal, key);
         const authorization = await authorize(finalizer ? "finalizeContinuation" : original.originalCommand.kind, groupId, p, finalizer ?? original.originalCommand);
         requireDelegationV2(same(original, freshOriginal), "rounds_continuation_prefix_conflict"); current();
@@ -660,14 +751,14 @@ export function createDelegationRoundsController(input: {
           await authorize("replay", groupId, p, finalizer); requireDelegationV2(same(prior.command, finalizer), "rounds_intent_conflict");
           const winner = p.continuations.find(r => r.command.operationKey === key)?.receipt;
           requireDelegationV2(winner, "rounds_continuation_identity");
-          await authenticateWinner(original, winner); current();
+          await authenticateWinner(host, original, winner); current();
           await authorize("replay", groupId, p, finalizer); current();
           completionCallbackReturned = true;
           return { journal, result: { replayed: true, projection: p } };
         }
         const pending = p.continuations.find(r => r.command.operationKey === key)!;
         if (pending.receipt) {
-          requireDelegationV2(!finalizer, "rounds_continuation_already_completed"); await authenticateWinner(original, pending.receipt); current();
+          requireDelegationV2(!finalizer, "rounds_continuation_already_completed"); await authenticateWinner(host, original, pending.receipt); current();
           await authorize(original.originalCommand.kind, groupId, p, original.originalCommand); current();
           completionCallbackReturned = true;
           return { journal, result: { replayed: true, projection: p } };
@@ -680,7 +771,7 @@ export function createDelegationRoundsController(input: {
         requireDelegationV2(host.retainContinuation, "rounds_continuation_publication_unavailable");
         requireDelegationV2(spec.topology.kind === "flow", "rounds_flow_required");
         const operation = continuationOperation(spec, c, original.originalPrefixDigest);
-        let receipt;
+        let receipt; current();
         if (finalizer) {
           // Metadata closure: no execution resolver, mutator, grant admission or retry.
           receipt = await readCheckedRunOperation(spec.topology.runId, { cwd: input.cwd, operation, admission });
@@ -715,9 +806,9 @@ export function createDelegationRoundsController(input: {
         const result = { journal, result: { replayed: false, projection: projectDelegationRounds(journal) } };
         completionCallbackReturned = true;
         return result;
-      });
+      }, lease);
       // Own host participants THROUGH durable serialize/fsync/publish/readback/unlock RETURN.
-      publicationReturned = true; current(); return result;
+      publicationReturned = true; parentCurrent(); return result;
     } catch (error) {
       failure = completionCallbackReturned ? new ContinuationPublicationUncertainError(
         publicationReturned ? "published-cleanup-unknown" : "publication-unknown", [error]) : error;
@@ -731,7 +822,7 @@ export function createDelegationRoundsController(input: {
     const c = command(value); requireDelegationV2(c.kind === kind, "rounds_command");
     requireDelegationV2(c.kind === "reappraise" || c.kind === "authorizeRetry" || c.kind === "sync", "rounds_command");
     const admitted = await begin(c); if (admitted.replayed) return admitted;
-    if (c.kind !== "sync") return completeContinuation(c.groupId, c.operationKey, null);
+    if (c.kind !== "sync") return completeContinuation(c.groupId, c.operationKey, null, c);
     const spec = effectiveRoundsSpec(admitted.projection);
     await runRoundsContinuation({ ...input, spec, command: c, projection: { ...admitted.projection, spec },
       authorize: async () => { const p = (await get(c.groupId)).projection; await authorize(c.kind, c.groupId, p, c); requireDelegationV2(p.cancellation === "none", "rounds_cancelled"); },
@@ -743,12 +834,11 @@ export function createDelegationRoundsController(input: {
   return {
     async finalizeContinuation(value: unknown) {
       const c = finalizeContinuationCommand(value);
-      await authorize("finalizeContinuation", c.groupId, null, c);
       return completeContinuation(c.groupId, c.continuationOperationKey, c);
     },
     async adoptRenewal(value: unknown) {
-      const c = adoptCommand(value); await authorize("adoptRenewal", c.groupId, null, c);
-      return store.transact(c.groupId, async journal => {
+      const c = adoptCommand(value);
+      return transaction(c.groupId, "adoptRenewal", c, true, async (journal, { authorize, service }) => {
         requireDelegationV2(journal, "rounds_missing"); const p = projectDelegationRounds(journal);
         const authorization = await authorize("adoptRenewal", c.groupId, p, c);
         const prior = journal.events.find(e => e.kind === "grant_adopted" && e.command.operationKey === c.operationKey);
@@ -770,8 +860,8 @@ export function createDelegationRoundsController(input: {
       });
     },
     async finalizeCancel(value: unknown) {
-      const c = finalizeCancelCommand(value); await authorize("finalizeCancel", c.groupId, null, c);
-      return store.transact(c.groupId, async journal => {
+      const c = finalizeCancelCommand(value);
+      return transaction(c.groupId, "finalizeCancel", c, true, async (journal, { authorize, host, service }) => {
         requireDelegationV2(journal, "rounds_missing"); const p = projectDelegationRounds(journal);
         const authorization = await authorize("finalizeCancel", c.groupId, p, c);
         const prior = journal.events.find(e => e.kind === "cancel_finalized" && e.command.operationKey === c.operationKey);
@@ -792,8 +882,8 @@ export function createDelegationRoundsController(input: {
       });
     },
     async finalizeSync(value: unknown) {
-      const c = finalizeCommand(value); await authorize("finalizeSync", c.groupId, null, c);
-      return store.transact(c.groupId, async journal => {
+      const c = finalizeCommand(value);
+      return transaction(c.groupId, "finalizeSync", c, true, async (journal, { authorize, host, service }) => {
         requireDelegationV2(journal, "rounds_missing"); const p = projectDelegationRounds(journal);
         await authorize("finalizeSync", c.groupId, p, c);
         const prior = journal.events.find(e => e.kind === "sync_finalized" && e.command.operationKey === c.operationKey);
@@ -831,12 +921,13 @@ export function createDelegationRoundsController(input: {
           get: async () => (await get(c.groupId)).projection,
           authorize: async action => { const p = (await get(c.groupId)).projection; await authorize(action, c.groupId, p, c); requireDelegationV2(p.cancellation === "none", "rounds_cancelled"); },
           append: body => append(c.groupId, body),
-          withAdmission: (stepId, body) => store.transact(c.groupId, async journal => {
+          withAdmission: (stepId, body) => transaction(c.groupId, "execute", c, false, async (journal, { authorize, service, assertCurrent }) => {
             requireDelegationV2(journal, "rounds_missing"); const p = projectDelegationRounds(journal);
             await authorize("execute", c.groupId, p, c); requireDelegationV2(p.cancellation === "none", "rounds_cancelled");
             const seat = spec.seats.find(s => s.stepId === stepId);
             requireDelegationV2(seat && c.seats.some(s => s.seatId === seat.seatId), "rounds_unreleased_step");
             await service.admitEffect(spec.rootAuthorityRef.id, seat.envelope.id, seat.effect);
+            assertCurrent();
             return { journal, result: await body() };
           }),
         });

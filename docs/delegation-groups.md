@@ -1012,6 +1012,30 @@ billing, or Station's downstream recovery serving.
 
 ### Checked continuation mutation admission
 
+The optional `transactionOwner` on `createDelegationRoundsController` acquires a
+fresh transaction scope before the group store transaction. Its scope supplies
+the store, host and public V3 authority service bound to the same host custody,
+plus synchronous currentness and asynchronous release. The controller uses those
+facades for authorization and authority work inside that transaction and keeps
+the scope until the store has completed durable publication, readback and unlock.
+Currentness is checked around scoped facade calls and after awaited authority
+admission, before a Flow claim or reopen callback can run. Checked continuation
+admission also combines transaction and parent currentness through child acquisition,
+Flow publication checks and child release; expiry during acquisition releases only
+that fresh child. It releases the scope
+before provider work. Frozen facades and private method receivers remain supported.
+Without an owner the existing host,
+store and authority service remain in use.
+
+For continuation publication, the controller passes the actual outer
+publication lease object to the owner. The host must privately authenticate that
+identity and lend a child scope without reacquiring or releasing the parent;
+unknown or released parents must refuse with `DelegationRoundsTransactionParentError`.
+Implementing this seam alone does not
+establish a host's continuation participants or shutdown custody. Scope release
+or post-callback publication failures report transaction uncertainty and retain
+their causes.
+
 Receipt-backed reappraisal and retry authorization require the host's
 `acquireContinuationPublication` seam. It acquires an outer lease before the
 final group transaction and holds current authorization, home and publication
