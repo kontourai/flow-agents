@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.11.0](https://github.com/kontourai/flow-agents/compare/v9.10.0...v9.11.0) (2026-10-31)
+
+
+### Features
+
+* **rounds:** compose transaction-scoped owners through durable publication ([#1566](https://github.com/kontourai/flow-agents/issues/1566)) ([5609566](https://github.com/kontourai/flow-agents/commit/560956698ef6c9ba84338b41825d76782499fb58))
+
 ## [9.10.0](https://github.com/kontourai/flow-agents/compare/v9.9.1...v9.10.0) (2026-10-31)
 
 
