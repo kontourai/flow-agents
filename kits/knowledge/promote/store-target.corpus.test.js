@@ -59,6 +59,7 @@ test('identical batch retries reuse receipts and changed content conflicts', { s
   assert.equal(settledReplay.review_state, 'not_observed');
   assert.equal((await store.getProposal(settledReplay.proposals[0])).state, 'rejected');
   await assert.rejects(runPromote({ ...options, store, candidates: [{ ...candidates[0], body: 'Changed' }, candidates[1]] }), (error) => error.code === 'REQUEST_KEY_CONFLICT');
+  await assert.rejects(runPromote({ ...options, store, candidates: [candidates[0], { ...candidates[1], category: 'Invalid Category!' }] }), (error) => error.code === 'MISSING_EVIDENCE' && error.failedCandidateIndex === 1 && error.completedProposals[0] === retried.proposals[0]);
   await assert.rejects(runPromote({ ...options, store, residue: { ...residue, provenance: { ...residue.provenance, transcriptRef: 'another-transcript.jsonl' } } }), (error) => error.code === 'REQUEST_KEY_CONFLICT');
   assert.equal((await store.listProposals({ state: 'pending' })).length, 1);
   assert.equal((await store.listByType('raw')).length, 0);
