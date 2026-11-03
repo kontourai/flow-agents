@@ -775,9 +775,47 @@ describe("review round 1 regressions (PR #1575)", () => {
     const nested = scrubResidueText(`cfg:\n  token: |\n    ${hidden}\n  description: KEEP_SIBLING\n  retries: 4`);
     assert.equal(nested.includes(hidden), false);
     assert.match(nested, /description: KEEP_SIBLING\n  retries: 4$/);
+    // an unmatched opening quote must not pair with a later assignment's quote and hide its key
+    const canary = ["Review", "Canary", "81dx94"].join("");
+    for (const input of [
+      `Please document password: "${"ordinary prose ".repeat(300)}API_TOKEN="${canary}" after`,
+      `password: "unterminated and then api_key='${canary}' tail`,
+      `note "${"words ".repeat(20)} password = '${canary}'`,
+    ]) {
+      const out = scrubResidueText(input);
+      assert.equal(out.includes(canary), false, input.slice(0, 40));
+      assert.equal(scrubResidueText(out), out, "idempotent");
+    }
     // a long quoted secret is still a secret: the scrub fails toward over-redaction
     const long = ["Long", "Secret"].join("").repeat(400);
     assert.equal(scrubResidueText(`api_key="${long}"`).includes("LongSecret"), false);
+  });
+
+  test("M6: no mix of stray quotes, labels and prose lets a quoted assignment value survive, and the scrub stays idempotent", () => {
+    let seed = 12345;
+    const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+    const pick = (list) => list[Math.floor(rnd() * list.length)];
+    const canary = ["zz", "canary", "zz"].join("");
+    const labels = ["password", "API_TOKEN", "token", "api_key", "client_secret", "Authorization"];
+    const noise = ['password: "', "token='", 'api_key = "', '"', "'", "stray ", "prose words ", "\n", "`", ", ", "{", "}", "- ", "x=1 "];
+    let checked = 0;
+    for (let n = 0; n < 4000; n += 1) {
+      let text = "";
+      for (let i = 0, parts = 1 + Math.floor(rnd() * 6); i < parts; i += 1) {
+        if (rnd() < 0.5) {
+          const quote = pick(['"', "'", ""]);
+          text += `${pick(labels)}${pick(["=", ": ", " = ", ":"])}${quote}${rnd() < 0.5 ? canary : `v${canary}`}${quote} `;
+        } else {
+          text += pick(noise);
+        }
+      }
+      if (!text.includes(canary)) continue;
+      const out = scrubResidueText(text);
+      assert.equal(out.includes(canary), false, JSON.stringify(text));
+      assert.equal(scrubResidueText(out), out, `not idempotent: ${JSON.stringify(text)}`);
+      checked += 1;
+    }
+    assert.ok(checked > 1000, `the generator must produce cases (${checked})`);
   });
 
   test("F6: Claude harness entries are excluded per record, for every message the record produced", () => {

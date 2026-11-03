@@ -76,6 +76,33 @@ function scrubBlockScalars(text) {
   }
   return out.join("\n");
 }
+// A secret-named key anywhere inside a span: `API_TOKEN=` / `"token":`.
+const EMBEDDED_ASSIGNMENT = new RegExp(`["']?\\b${SECRET_NAME}["']?\\s*[:=]`, "i");
+
+/**
+ * Redact the value of every secret-named assignment. A quoted value runs to the
+ * next matching quote, so an unmatched opening quote would otherwise pair with
+ * the opening quote of a later assignment and hide that assignment's key while
+ * leaving its value. When the span contains another secret-named key, redact
+ * only up to that key and let the next pass handle it.
+ */
+function scrubAssignments(text) {
+  const redact = (match, prefix) => {
+    const value = match.slice(prefix.length);
+    if (value[0] !== '"' && value[0] !== "'") return `${prefix}<SECRET>`;
+    const embedded = EMBEDDED_ASSIGNMENT.exec(value.slice(1));
+    // The space keeps the placeholder from fusing with the next key on the following pass.
+    return embedded ? `${prefix}<SECRET> ${value.slice(1 + embedded.index)}` : `${prefix}<SECRET>`;
+  };
+  let current = text;
+  for (let pass = 0; pass < 16; pass += 1) {
+    const next = current.replace(ASSIGNMENT, redact);
+    if (next === current) break;
+    current = next;
+  }
+  return current;
+}
+
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const POSIX_HOME = /(^|[^A-Za-z0-9._~-])\/(?:Users|home)\/[^/\s"'`<>]+/g;
 const WINDOWS_HOME = /\b[A-Z]:\\Users\\[^\\\s"'`<>]+/gi;
@@ -92,7 +119,7 @@ export function scrubResidueText(value) {
   text = text.replace(URL_CREDENTIAL, "$1<SECRET>$2");
   text = text.replace(BEARER, "$1<SECRET>");
   text = scrubBlockScalars(text);
-  text = text.replace(ASSIGNMENT, "$1<SECRET>");
+  text = scrubAssignments(text);
   text = text.replace(EMAIL, "<EMAIL>");
   text = text.replace(WINDOWS_HOME, "~");
   text = text.replace(POSIX_HOME, "$1~");
