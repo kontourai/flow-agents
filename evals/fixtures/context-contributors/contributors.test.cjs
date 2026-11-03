@@ -70,6 +70,7 @@ test('marker resolves when the bundle root itself is named context', t => {
  for (const file of ['scripts/package.json','scripts/hooks/lib/hook-flags.js','scripts/hooks/lib/context-contributors/profile-memory.js','kits/knowledge/memory-marker.js']) {
   const dest=path.join(bundle,file); fs.mkdirSync(path.dirname(dest),{recursive:true}); fs.copyFileSync(path.join(root,file),dest);
  }
- const profile=require(path.join(bundle,'scripts/hooks/lib/context-contributors/profile-memory.js'));
+ let profile;
+ assert.doesNotThrow(() => { profile=require(path.join(bundle,'scripts/hooks/lib/context-contributors/profile-memory.js')); }, 'marker must resolve inside the bundle');
  assert.match(profile.profileMemoryContributor('SessionStart',{},8192).text,/violet kestrel/);
 });
