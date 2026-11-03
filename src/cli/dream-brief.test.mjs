@@ -140,8 +140,10 @@ test("authority to replace: only a reviewed claim, in the same slot, by the same
   assert.deepEqual(values(rankItems([old, pending], { now: NOW_ISO })), ["PostgreSQL 15"], "the reviewed claim stays in the brief until the replacement is reviewed");
 
   const elsewhere = item({ subject: "db", property: "backup schedule", value: "nightly" });
-  const crossSlot = item({ ...slot, value: "x", posture: "retracted", supersedes: edge(elsewhere, "correction") });
-  assert.deepEqual(values(classifyCurrent([elsewhere, crossSlot]).current), ["nightly"], "an edge into another slot replaces nothing");
+  const crossSlot = item({ ...slot, value: "PostgreSQL 99", supersedes: edge(elsewhere) });
+  assert.deepEqual(values(classifyCurrent([elsewhere, crossSlot]).current), ["PostgreSQL 99", "nightly"], "an edge into another slot replaces nothing");
+  const crossRetraction = item({ ...slot, value: "nightly", posture: "retracted", supersedes: edge(elsewhere, "correction") });
+  assert.deepEqual(values(classifyCurrent([elsewhere, crossRetraction]).current), ["nightly"], "nor does a retraction aimed at another slot");
 
   const foreignRetraction = item({ ...slot, value: "PostgreSQL 15", posture: "retracted", speaker: "assistant", supersedes: edge(old, "correction") });
   assert.deepEqual(values(classifyCurrent([old, foreignRetraction]).current), ["PostgreSQL 15"], "someone else's retraction does not withdraw a claim");

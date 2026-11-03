@@ -292,7 +292,6 @@ export async function runDream(host, options = {}) {
         const withPeer = routeMemoryChange({ ...base, current: [peer] }, policy);
         return withPeer.outcome !== alone.outcome || withPeer.reasons.length !== alone.reasons.length;
       });
-      if (relevant.length === 0) return alone;
       if (relevant.length > MAX_RELEVANT_PEERS) report.claims.peers_capped += 1; // reported, never silent
       return routeMemoryChange({ ...base, current: relevant.slice(0, MAX_RELEVANT_PEERS) }, policy);
     };

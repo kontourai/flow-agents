@@ -893,3 +893,15 @@ test("an envelope over its byte bound is refused to encode, and a stored claim o
   const huge = { ...decide(ok), pad: "x".repeat(MAX_ENVELOPE_BYTES) };
   assert.throws(() => encodeEnvelope({ plan: [entry(ok)], index: 0, decision: huge, sitting }), (error) => error.code === "DREAM_PLAN_TOO_LARGE");
 });
+
+test("an over-size body of this run's own is refused without being parsed, even to name its format", async () => {
+  const { indexProposals, MAX_ENVELOPE_BYTES } = await import("../../kits/knowledge/dream/envelope.js");
+  const proposal = { id: "p1", state: "pending", proposer_id: "knowledge.dream", candidate: { category: "memory.claim", body: `{"dream":"1.1","pad":"${"x".repeat(MAX_ENVELOPE_BYTES)}"}` } };
+  const original = JSON.parse;
+  let parsed = 0;
+  JSON.parse = (...args) => { parsed += 1; return original(...args); };
+  try {
+    assert.throws(() => indexProposals([proposal], "knowledge.dream"), (error) => error.code === "DREAM_RECEIPT_CORRUPT" && !/format/.test(error.message));
+  } finally { JSON.parse = original; }
+  assert.equal(parsed, 0);
+});
