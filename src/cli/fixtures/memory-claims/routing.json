@@ -18,12 +18,21 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:a0dfd93e1e8db57cbc82660df768ea5dfc51e25ac50d2061ab2de19624574575",
+      "id": "sha256:58425b38b057f967752618db7e0ee75ce66c5045b3db22a8886aaf93cd45b4ff",
       "input": {
         "accumulation": {
           "candidateClaimIds": [],
           "gapCodes": [],
-          "outcome": "current"
+          "outcome": "current",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "primary database",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": [
+            "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c"
+          ]
         },
         "agreement": {
           "agreeing": 2,
@@ -98,12 +107,21 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:1deedaf9719e1021f8c614011d19fdcf0160dc44ff1bef6a64d73da0f8ad6813",
+      "id": "sha256:3bc2598b3052c043a2e83369015ce5ac6dc43ac860dfe5624954ba3c6e0b6020",
       "input": {
         "accumulation": {
           "candidateClaimIds": [],
           "gapCodes": [],
-          "outcome": "current"
+          "outcome": "current",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "on-call owner",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": [
+            "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb"
+          ]
         },
         "agreement": {
           "agreeing": 2,
@@ -178,12 +196,21 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:e09398851a7e4f314440cd8e6366414ab39b2135864ff518840ffbecdb09e8d3",
+      "id": "sha256:7b8bfa85235ea4f7518a6919d5f02391fb2ac65097574c9770619675447e7801",
       "input": {
         "accumulation": {
           "candidateClaimIds": [],
           "gapCodes": [],
-          "outcome": "current"
+          "outcome": "current",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "retry budget",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": [
+            "sha256:307e767875ca963e4c0e339eda5c98d14d81a463f7d3c68e33eed90f7fcebe02"
+          ]
         },
         "agreement": {
           "agreeing": 1,
@@ -270,7 +297,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:b447ea4717e2b5d97014fbd2b674800856230a8cf9138069835c147ced538d24",
+      "id": "sha256:c5e8f706eb8e2fe6eb7e8fb7228090f1b175e3db1d4a7ae61fd6054b059b6636",
       "input": {
         "accumulation": {
           "candidateClaimIds": [
@@ -281,7 +308,14 @@
             "contested-value",
             "supersession-pending"
           ],
-          "outcome": "contested"
+          "outcome": "contested",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "primary database",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": []
         },
         "agreement": {
           "agreeing": 2,
@@ -432,7 +466,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:98bcc8a28f78e28600572ba368e05eed51033e3e8da522f61daad941eebb7022",
+      "id": "sha256:652e4bdd592f05bb1061d6e2be4e5792307e605af58ef6305c91f60ba89ab85c",
       "input": {
         "accumulation": {
           "candidateClaimIds": [
@@ -442,7 +476,14 @@
           "gapCodes": [
             "contested-value"
           ],
-          "outcome": "contested"
+          "outcome": "contested",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "retry budget",
+            "subjectId": "widget service",
+            "subjectType": "service"
+          },
+          "supportingClaimIds": []
         },
         "agreement": {
           "agreeing": 2,
@@ -766,12 +807,21 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:ea05d2e6a60b2afc38f1e7ddc03bf98b30bffc224bd6ace20e7f1503dedd6cd6",
+      "id": "sha256:c2fa8aca8be7b426300005d5ec7bb2c0eff9d96f9c400ae1e8681c2be10230a6",
       "input": {
         "accumulation": {
           "candidateClaimIds": [],
           "gapCodes": [],
-          "outcome": "current"
+          "outcome": "current",
+          "slot": {
+            "claimType": "knowledge.memory-claim",
+            "fieldOrBehavior": "lead",
+            "subjectId": "platform team",
+            "subjectType": "team"
+          },
+          "supportingClaimIds": [
+            "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c"
+          ]
         },
         "agreement": {
           "agreeing": 1,

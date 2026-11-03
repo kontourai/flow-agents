@@ -17,9 +17,9 @@ import {
   currentProposedReviewItem, foldCandidateVerifications, reviewResourceApiVersion, runSupportVerifier,
   type CandidateVerification, type EntityProposal, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
-import { memoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
+import { memoryAccumulationFact, memoryAccumulationMembers, memoryAccumulationQuery, readMemoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
 import {
-  MemoryClaimError, assertMemoryClaim, foldMemoryText, memorySlotKey, readMemoryVisibility,
+  MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryFieldKey, memorySlotKey, readMemoryVisibility,
   type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
 } from "./memory-claims.js";
 
@@ -197,8 +197,12 @@ export interface MemoryClaimChange {
   current?: readonly MemoryClaim[];
   verifications?: readonly unknown[];
   agreement?: MemoryAgreement | null;
-  /** The part of the host's `projectAccumulation` result for this claim's slot; `memoryAccumulationFact` reads it. */
-  accumulation?: MemoryAccumulationFact | null;
+  /**
+   * The host's `projectAccumulation` result for this claim's slot, and (required with it) the query it answered:
+   * `memoryAccumulationFact` reads the pair, so a result for another slot is refused. Null or absent: not evaluated.
+   */
+  accumulation?: unknown;
+  accumulationQuery?: unknown;
   /** Visibility of the source the claim came from; null or absent is undeclared, which reads as sealed. */
   sourceVisibility?: MemoryVisibility | null;
 }
@@ -206,15 +210,35 @@ export interface MemoryEntityChange { type: "entity"; proposal: SurveyEntityProp
 export type MemoryChange = MemoryClaimChange | MemoryEntityChange;
 
 /**
- * The rival candidates a projection names must be among the claims the Kit was given for the slot. The visibility bounds, the
- * review item and the verification evidence are all built from those claims; a rival the Kit never saw would be silently
- * missing from every one of them, so the projection and the slot must agree.
+ * The claims that share `claim`'s slot, which is what bounds its visibility, what a verifier checks it against and what a
+ * review item pairs it with. Two things put a claim there:
+ *  - the raw slot: the same subject, claim type, property and qualifiers;
+ *  - the projection naming it, as a candidate or as support. Surface joins subjects an admitted identity mapping declares
+ *    equivalent, so a joined claim carries another raw subject and, with equal values, is named only as support.
+ * A claim the projection names must be a stated claim of the same claim type, property and qualifiers (the subject is the one
+ * dimension the mapping may change; the Kit cannot check the mapping itself, which is the host's authority), and must have been
+ * supplied: a member the Kit never saw would be missing from every bound built from the slot. The projection must also have
+ * answered for this claim's slot. More than `MAX_CURRENT_PER_SLOT` is refused, never cut short.
  */
-function boundFact(fact: MemoryAccumulationFact, claimId: string, slot: readonly MemoryClaim[]): MemoryAccumulationFact {
-  const known = new Set([claimId, ...slot.map(other => other.id)]);
-  const missing = fact.candidateClaimIds.filter(id => !known.has(id));
-  if (missing.length) throw new MemoryClaimError("invalid", `the projection names candidate(s) ${missing.join(", ")} that are not among the slot's current claims`);
-  return fact;
+export function memorySlotPeers(claim: MemoryClaim, current: readonly MemoryClaim[], fact?: MemoryAccumulationFact | null): MemoryClaim[] {
+  const slot = memorySlotKey(claim), field = memoryFieldKey(claim);
+  if (fact && canonicalJson(fact.slot) !== canonicalJson(memoryAccumulationQuery(claim, "1970-01-01T00:00:00Z").slot)) throw new MemoryClaimError("invalid", "the projection answered for another slot than this claim's");
+  const members = new Set(fact ? memoryAccumulationMembers(fact) : []);
+  const peers = new Map<string, MemoryClaim>();
+  for (const other of current) {
+    assertMemoryClaim(other);
+    if (other.id === claim.id) continue;
+    if (memorySlotKey(other) === slot) peers.set(other.id, other);
+    else if (members.has(other.id)) {
+      if (other.posture !== "stated" || memoryFieldKey(other) !== field) throw new MemoryClaimError("invalid", `the projection names claim ${other.id}, which is not a stated claim of this claim type, property and qualifiers`);
+      peers.set(other.id, other);
+    }
+  }
+  const missing = [...members].filter(id => id !== claim.id && !peers.has(id));
+  if (missing.length) throw new MemoryClaimError("invalid", `the projection names claim(s) ${missing.join(", ")} that are not among the slot's current claims`);
+  // Reading max + 1 and refusing: a silently truncated slot could hide the conflicting claim.
+  if (peers.size > MAX_CURRENT_PER_SLOT) throw new MemoryClaimError("invalid", `more than ${MAX_CURRENT_PER_SLOT} current claims in one slot`);
+  return [...peers.values()].sort((x, y) => x.id.localeCompare(y.id));
 }
 
 /** A claim's id ignores the order of its audiences and edges; so must the decision that embeds it, or one claim gets two decision ids. */
@@ -228,23 +252,15 @@ const SOURCE_BASELINE = "source";
 
 function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
   assertMemoryClaim(change.claim);
-  const slot = memorySlotKey(change.claim);
-  // The projection, not the raw subject, says who is in the slot: Surface joins subjects an admitted identity mapping
-  // declares equivalent, so a rival it names can carry a different raw subject. Those rivals are part of the slot here
-  // too, or their visibility would bound nothing and the review item would pair the claim with nobody.
-  const fact = change.accumulation ? memoryAccumulationFact(change.accumulation) : null;
-  const named = new Set(fact?.candidateClaimIds ?? []);
-  const current = (change.current ?? []).filter(other => { assertMemoryClaim(other); return other.id !== change.claim.id && (memorySlotKey(other) === slot || named.has(other.id)); });
-  // Reading max + 1 and refusing: a silently truncated slot could hide the conflicting claim.
-  if (current.length > MAX_CURRENT_PER_SLOT) throw new MemoryClaimError("invalid", `more than ${MAX_CURRENT_PER_SLOT} current claims in one slot`);
   if (change.agreement != null && !agreementWellFormed(change.agreement)) throw new MemoryClaimError("invalid", "agreement needs integer passes >= 1 and 0 <= agreeing <= passes");
-  const { applicable } = foldCandidateVerifications({ candidateId: memoryProposedCandidateId(change.claim.id), value: change.claim.value }, change.verifications ?? []);
+  const fact = change.accumulation ? memoryAccumulationFact(change.accumulation, change.accumulationQuery) : null;
   // Everything order-dependent is sorted here, so the decision id does not depend on the order inputs arrive in.
-  const ordered = [...current].sort((x, y) => x.id.localeCompare(y.id)).map(canonicalOrder);
+  const ordered = memorySlotPeers(change.claim, change.current ?? [], fact).map(canonicalOrder);
+  const { applicable } = foldCandidateVerifications({ candidateId: memoryProposedCandidateId(change.claim.id), value: change.claim.value }, change.verifications ?? []);
   return {
     type: "claim", claim: canonicalOrder(change.claim), current: ordered, verifications: [...applicable],
     agreement: change.agreement ?? null,
-    accumulation: fact ? boundFact(fact, change.claim.id, ordered) : null,
+    accumulation: fact,
     baselines: [
       { ref: SOURCE_BASELINE, visibility: readMemoryVisibility(change.sourceVisibility) ?? null },
       ...ordered.map(other => ({ ref: other.id, visibility: other.visibility ?? null })),
@@ -295,12 +311,21 @@ function assertStoredInputShape(input: MemoryRoutingInput): void {
   if (input.type !== "claim") bad("unknown input type");
   if (!Array.isArray(input.current) || !Array.isArray(input.verifications)) bad("current and verifications must be lists");
   if (input.agreement !== null && (typeof input.agreement !== "object" || !agreementWellFormed(input.agreement))) bad("agreement is malformed");
+  let fact: MemoryAccumulationFact | null = null;
   if (input.accumulation !== null) {
-    try { memoryAccumulationFact(input.accumulation); } catch { bad("accumulation is not a projection result"); }
-    // memoryAccumulationFact also sorts; a stored fact must already be in that form, or the id would not be stable.
-    if (canonicalJson(memoryAccumulationFact(input.accumulation)) !== canonicalJson(input.accumulation)) bad("accumulation is not in canonical form");
-    const known = new Set([input.claim.id, ...input.current.map(other => other.id)]);
-    if (input.accumulation.candidateClaimIds.some(id => !known.has(id))) bad("accumulation names a candidate that is not among the current claims");
+    try { fact = readMemoryAccumulationFact(input.accumulation); } catch { bad("accumulation is not a projection result"); }
+    // The reader also sorts; a stored fact must already be in that form, or the id would not be stable.
+    if (canonicalJson(fact) !== canonicalJson(input.accumulation)) bad("accumulation is not in canonical form");
+  }
+  // The stored `current` must be exactly the claim's slot peers: nothing foreign, nothing dropped, within the bound, and the
+  // projection (if any) answering for this claim's slot and naming only stated claims of its property.
+  try {
+    assertMemoryClaim(input.claim);
+    const peers = memorySlotPeers(input.claim, input.current, fact);
+    if (canonicalJson(peers.map(other => other.id)) !== canonicalJson([...input.current].map(other => other.id).sort((x, y) => x.localeCompare(y)))) bad("current holds a claim that is not in the claim's slot");
+  } catch (error) {
+    if (error instanceof MemoryClaimError && /^Memory claim invalid: stored routing input/.test(error.message)) throw error;
+    bad(error instanceof Error ? error.message : "slot membership is malformed");
   }
   if (!Array.isArray(input.baselines) || !input.baselines.every(base => base && typeof base.ref === "string" && base.ref && (base.visibility === null || readMemoryVisibility(base.visibility) !== undefined))) bad("baselines are malformed");
   // The peers' baselines are re-derivable from the embedded claims; a stored input may not drop one to clear a widening.
@@ -344,10 +369,11 @@ export function recomputeMemoryRouting(decision: MemoryRoutingDecision): Routing
 }
 
 /** Runs a Survey support verifier on the claim against the same-slot claims it may contradict. Undefined when there is nothing to check against. */
-export async function verifyMemoryClaimAgainstCurrent(claim: MemoryClaim, current: readonly MemoryClaim[], verifier: SupportVerifier, options?: RunSupportVerifierOptions): Promise<CandidateVerification | undefined> {
-  const slot = memorySlotKey(claim);
-  const evidence = current.filter(other => other.posture === "stated" && other.id !== claim.id && memorySlotKey(other) === slot)
-    .sort((x, y) => x.id.localeCompare(y.id)).slice(0, 8)
+export async function verifyMemoryClaimAgainstCurrent(claim: MemoryClaim, current: readonly MemoryClaim[], verifier: SupportVerifier, options?: RunSupportVerifierOptions, accumulation?: MemoryAccumulationFact | null): Promise<CandidateVerification | undefined> {
+  // The same membership routing uses: pass the fact `memoryAccumulationFact` read, and a claim joined through an admitted
+  // identity mapping is checked against too.
+  const evidence = memorySlotPeers(claim, current, accumulation).filter(other => other.posture === "stated")
+    .slice(0, 8)
     .map(other => ({ id: other.id, excerpt: other.source.excerpt, locator: other.source.locator, context: `${other.subject.label ?? other.subject.id}: ${other.property}` }));
   if (evidence.length === 0) return undefined;
   return runSupportVerifier(verifier, { candidateId: memoryProposedCandidateId(claim.id), value: claim.value, evidence }, options);

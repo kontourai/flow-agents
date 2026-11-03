@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { jsonSnapshot, jsonSnapshotList, MAX_SNAPSHOT_DEPTH, MAX_SNAPSHOT_NODES } from "@kontourai/flow-agents/memory-json";
+import { jsonSnapshot, jsonSnapshotList, ownEntries, ownField, MAX_SNAPSHOT_DEPTH, MAX_SNAPSHOT_NODES } from "@kontourai/flow-agents/memory-json";
 import { MemoryClaimError } from "@kontourai/flow-agents/memory-claims";
 
 const refuses = (value, pattern, name) => assert.throws(() => jsonSnapshot(value, "t"), error => error instanceof MemoryClaimError && pattern.test(error.message), name);
@@ -76,21 +76,38 @@ test("a list is read by index: a custom .map, a hole or a subclass cannot change
   assert.deepEqual(jsonSnapshotList(undefined, "t"), [], "absent is empty");
 });
 
-test("a Proxy is copied through its descriptors once, to a stable snapshot", () => {
-  let reads = 0;
-  const target = { a: 1 };
-  const proxy = new Proxy(target, { get(t, k) { reads++; return reads > 1 ? "changed" : t[k]; } });
-  assert.deepEqual(jsonSnapshot(proxy, "t"), { a: 1 }, "descriptors, not property gets, are what is read");
+test("a Proxy is refused wherever it appears: no trap list can make one safe to read", () => {
+  const traps = {
+    "a pass-through proxy": new Proxy({ a: 1 }, {}),
+    "a proxied list": new Proxy([{ a: 1 }], {}),
+    "a list whose ownKeys and length hide its only entry": new Proxy([{ keep: "current" }], { ownKeys: () => ["length"], get: (t, key, r) => key === "length" ? 0 : Reflect.get(t, key, r) }),
+    "an object whose descriptor trap drops a field": new Proxy({ candidateId: "c", status: "x" }, { getOwnPropertyDescriptor: (t, key) => key === "candidateId" ? undefined : Reflect.getOwnPropertyDescriptor(t, key) }),
+    "a list whose length changes while read": new Proxy([{ a: 1 }], (() => { let reads = 0; return { get(t, key, r) { if (key === "length") return ++reads === 1 ? 1 : 0; return Reflect.get(t, key, r); } }; })()),
+  };
+  for (const [name, proxy] of Object.entries(traps)) {
+    refuses(proxy, /Proxy/, name);
+    refuses({ nested: [proxy] }, /Proxy/, `${name}, nested`);
+    assert.throws(() => jsonSnapshotList(Array.isArray(proxy) ? proxy : [proxy], "t"), MemoryClaimError, `${name} as a list`);
+  }
 });
 
-test("a list whose length changes while it is read is refused, not recorded as the shorter list", () => {
-  let reads = 0;
-  const target = [{ a: 1 }];
-  const proxy = new Proxy(target, { get(t, key, receiver) { if (key === "length") return ++reads === 1 ? 1 : 0; return Reflect.get(t, key, receiver); } });
-  assert.throws(() => jsonSnapshotList(proxy, "t"), MemoryClaimError, "length 1, then 0");
-  let reads2 = 0;
-  const growing = new Proxy([{ a: 1 }], { get(t, key, receiver) { if (key === "length") return ++reads2 === 1 ? 1 : 2; return Reflect.get(t, key, receiver); } });
-  assert.throws(() => jsonSnapshotList(growing, "t"), MemoryClaimError, "length 1, then 2");
+test("ownField and ownEntries run nothing the caller defined: a getter, a Proxy or an overridden method is refused", () => {
+  assert.equal(ownField({ a: 1 }, "a", "t"), 1);
+  assert.equal(ownField({ a: 1 }, "missing", "t"), undefined);
+  assert.equal(ownField(undefined, "a", "t"), undefined);
+  assert.equal(ownField(Object.create({ a: 1 }), "a", "t"), undefined, "an inherited value is not the object's own");
+  assert.throws(() => ownField({ get a() { return 1; } }, "a", "t"), MemoryClaimError);
+  assert.throws(() => ownField(new Proxy({ a: 1 }, {}), "a", "t"), MemoryClaimError);
+  assert.throws(() => ownField(7, "a", "t"), MemoryClaimError);
+  assert.deepEqual(ownEntries([1, { a: 2 }], "t"), [1, { a: 2 }]);
+  assert.deepEqual(ownEntries(undefined, "t"), []);
+  const overridden = [1, 2]; overridden.map = () => [];
+  assert.throws(() => ownEntries(overridden, "t"), MemoryClaimError, "an own `map` is an extra key");
+  assert.throws(() => ownEntries(new Proxy([1], {}), "t"), MemoryClaimError);
+  assert.throws(() => ownEntries(Object.defineProperty([0], 0, { get() { return 1; } }), "t"), MemoryClaimError, "an accessor entry");
+  assert.throws(() => ownEntries(new Array(2), "t"), MemoryClaimError, "holes");
+  assert.throws(() => ownEntries("x", "t"), MemoryClaimError);
+  assert.throws(() => ownEntries(null, "t"), MemoryClaimError);
 });
 
 test("null is not an empty list: only an absent list is", () => {

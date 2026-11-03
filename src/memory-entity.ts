@@ -9,11 +9,9 @@
  * anything. This module returns plain data, so it needs no Survey import; pass its result to Survey.
  */
 import { MemoryClaimError, type MemoryClaim } from "./memory-claims.js";
-import { jsonSnapshot } from "./memory-json.js";
+import { jsonSnapshot, ownEntries, ownField } from "./memory-json.js";
 
 const isOperation = (value: unknown): boolean => typeof value === "string" && (["merge", "split", "alias", "same-as", "related-to"].includes(value) || /^domain:\S+$/.test(value));
-
-const asList = (value: unknown): any[] => (Array.isArray(value) ? value : []);
 
 /** Survey's `EntityOperation`. */
 export type MemoryEntityOperation = "merge" | "split" | "alias" | "same-as" | "related-to" | `domain:${string}`;
@@ -68,17 +66,23 @@ export function memoryEntityProposalInput(request: {
 }): MemoryEntityProposalInput {
   // Survey's createEntityProposal needs lossless JSON (no NaN, undefined, accessors or cycles). Take, once, only the fields
   // that go into the proposal: a claim's own value is not among them, so a value Survey would never see cannot make the
-  // emitter refuse a request Survey would accept. Everything below validates this copy, which is what is handed over.
+  // emitter refuse a request Survey would accept. The fields are chosen with `ownField` / `ownEntries`, which run nothing the
+  // caller defined (no overridden `map`, no getter, no Proxy trap): choosing them by property access first would let an object
+  // answer one thing here and another when it is snapshotted. Everything below validates the copy, which is what is handed over.
+  const field = (record: unknown, key: string) => ownField(record, key, `entity proposal input ${key}`);
   const input = jsonSnapshot({
-    revision: request?.revision, proposer: request?.proposer, policy: request?.policy,
-    candidates: asList(request?.candidates).map(candidate => ({
-      operation: candidate?.operation, subjects: candidate?.subjects, confidenceComponents: candidate?.confidenceComponents,
-      claims: asList(candidate?.claims).map(entry => ({ stance: entry?.stance, id: entry?.claim?.id, ref: entry?.claim?.source?.ref, observedAt: entry?.claim?.source?.observedAt, locator: entry?.claim?.source?.locator, excerpt: entry?.claim?.source?.excerpt })),
+    revision: field(request, "revision"), proposer: field(request, "proposer"), policy: field(request, "policy"),
+    candidates: ownEntries(field(request, "candidates"), "entity proposal input candidates").map(candidate => ({
+      operation: field(candidate, "operation"), subjects: field(candidate, "subjects"), confidenceComponents: field(candidate, "confidenceComponents"),
+      claims: ownEntries(field(candidate, "claims"), "entity candidate claims").map(entry => {
+        const claim = field(entry, "claim"), source = field(claim, "source");
+        return { stance: field(entry, "stance"), id: field(claim, "id"), ref: field(source, "ref"), observedAt: field(source, "observedAt"), locator: field(source, "locator"), excerpt: field(source, "excerpt") };
+      }),
     })),
-    checksums: request?.checksums,
+    checksums: field(request, "checksums"),
   }, "entity proposal input") as unknown as {
     revision: string; proposer: MemoryEntityProposalInput["proposer"]; policy: MemoryEntityProposalInput["policy"]; checksums: Record<string, string>;
-    candidates: { operation: MemoryEntityOperation; subjects: [{ type: string; id: string }, { type: string; id: string }]; confidenceComponents: Record<string, number>; claims: { stance: MemoryEntityEvidence["stance"]; id: string; ref: string; observedAt: string; locator: string; excerpt: string }[] }[];
+    candidates: { operation: MemoryEntityOperation; subjects: [{ type: string; id: string }, { type: string; id: string }]; confidenceComponents?: Record<string, number>; claims: { stance: MemoryEntityEvidence["stance"]; id: string; ref: string; observedAt: string; locator: string; excerpt: string }[] }[];
   };
   // Survey makes the same demands; refuse here so the Kit never hands it (or records) what it would reject.
   for (const [label, value] of [["revision", input.revision], ["proposer id", input.proposer?.id], ["policy id", input.policy?.id], ["policy revision", input.policy?.revision]] as const) {
@@ -98,6 +102,8 @@ export function memoryEntityProposalInput(request: {
       if (a.type === b.type && a.id === b.id) throw new MemoryClaimError("invalid", "an entity candidate needs two different subjects");
       if (candidate.claims.length === 0) throw new MemoryClaimError("invalid", "an entity candidate needs the claims that ground it");
       if (!isOperation(candidate.operation)) throw new MemoryClaimError("invalid", "an entity candidate needs one of Survey's operations");
+      // Survey demands an object here (not null, not a list); an absent one is filled in as empty. Nothing is coerced.
+      if (candidate.confidenceComponents !== undefined && (candidate.confidenceComponents === null || typeof candidate.confidenceComponents !== "object" || Array.isArray(candidate.confidenceComponents))) throw new MemoryClaimError("invalid", "confidence components must be an object");
       for (const [key, score] of Object.entries(candidate.confidenceComponents ?? {})) {
         if (!key.trim() || typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) throw new MemoryClaimError("invalid", `confidence component ${key} must be a number from 0 to 1`);
       }
@@ -118,7 +124,7 @@ export function memoryEntityProposalInput(request: {
       if (new Set(evidence.map(item => item.id)).size !== evidence.length) throw new MemoryClaimError("invalid", "a claim grounds an entity candidate once");
       return {
         subjects: [{ subjectType: a.type, subjectId: a.id }, { subjectType: b.type, subjectId: b.id }],
-        operation: candidate.operation, evidence, confidenceComponents: { ...candidate.confidenceComponents },
+        operation: candidate.operation, evidence, confidenceComponents: { ...(candidate.confidenceComponents ?? {}) },
       };
     }),
   };

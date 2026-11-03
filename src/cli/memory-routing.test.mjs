@@ -8,6 +8,7 @@ import {
   buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState,
 } from "@kontourai/survey/review-workbench";
 import { memoryClaim, readMemoryVisibility } from "@kontourai/flow-agents/memory-claims";
+import { memoryAccumulationQuery } from "@kontourai/flow-agents/memory-accumulation";
 import {
   DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, memoryVisibilityWithin, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
   memoryReviewItemName, presentMemoryClaims, recomputeMemoryRouting, routeMemoryChange, routeMemoryChanges, verifyMemoryClaimAgainstCurrent,
@@ -26,9 +27,14 @@ const base = {
 const make = (overrides = {}) => memoryClaim({ ...base, ...overrides });
 const AGREED = { passes: 2, agreeing: 2 };
 /** What Surface's projection says: one current value, or a contest among the named candidates. */
-const CURRENT = { outcome: "current", candidateClaimIds: [], gapCodes: [] };
-const contested = (...args) => { const gaps = Array.isArray(args.at(-1)) ? args.pop() : ["contested-value"]; return { outcome: "contested", candidateClaimIds: [...args].sort(), gapCodes: [...gaps].sort() }; };
-const change = (claim, extra = {}) => ({ type: "claim", claim, agreement: AGREED, accumulation: claim.posture === "stated" ? CURRENT : null, ...extra });
+const CURRENT = { outcome: "current", candidateClaimIds: [], supportingClaimIds: [], gapCodes: [] };
+const contested = (...args) => { const gaps = Array.isArray(args.at(-1)) ? args.pop() : ["contested-value"]; return { outcome: "contested", candidateClaimIds: [...args].sort(), supportingClaimIds: [], gapCodes: [...gaps].sort() }; };
+/** The query the host ran for a claim's slot; routing reads a projection result only together with it. */
+const queryFor = claim => memoryAccumulationQuery(claim, "2026-11-02T00:00:00Z");
+const change = (claim, extra = {}) => {
+  const out = { type: "claim", claim, agreement: AGREED, accumulation: claim.posture === "stated" ? CURRENT : null, ...extra };
+  return out.accumulation && !out.accumulationQuery ? { ...out, accumulationQuery: queryFor(claim) } : out;
+};
 const verification = (claim, result, value = claim.value, verifierId = "stub") => buildCandidateVerification({
   input: { candidateId: memoryProposedCandidateId(claim.id), value, evidence: [{ id: "e1", excerpt: "evidence", locator: "chars:0-1" }] },
   verifier: { id: verifierId, version: "1", method: "deterministic" },
@@ -82,14 +88,14 @@ const RULE_CASES = {
   "contested-by-accumulation": {
     routes: () => { const claim = make({ value: "PostgreSQL 16" }); return change(claim, { current: [current], accumulation: contested(claim.id, current.id) }); },
     alsoRoutes: [
-      ["Surface could give no unique answer for the slot: an invalid projection, whoever its candidates are", () => change(make({ value: "PostgreSQL 16" }), { current: [current], accumulation: { outcome: "invalid", reason: "identity-unresolved", candidateClaimIds: [], gapCodes: ["identity-unresolved"] } })],
+      ["Surface could give no unique answer for the slot: an invalid projection, whoever its candidates are", () => change(make({ value: "PostgreSQL 16" }), { current: [current], accumulation: { outcome: "invalid", reason: "identity-unresolved", candidateClaimIds: [], supportingClaimIds: [], gapCodes: ["identity-unresolved"] } })],
       ["a replacement Surface has not yet accepted: both candidates stay until a reviewer verifies the successor", () => change(replacing, { current: [current], accumulation: contested(replacing.id, current.id, ["contested-value", "supersession-pending"]) })],
       ["no projection was run and there is another stated claim in the slot: nothing supports calling it uncontested", () => change(make({ value: "PostgreSQL 16" }), { current: [current], accumulation: null })],
     ],
     passes: [
       ["Surface projects one current value", () => change(make({ value: "PostgreSQL 16" }), { current: [current], accumulation: CURRENT })],
       ["Surface accepted the replacement: reviewed and admitted, the slot is current", () => change(replacing, { current: [current], accumulation: CURRENT })],
-      ["Surface has no answer, for a reason that is not a contest", () => change(make(), { accumulation: { outcome: "none", reason: "withdrawn", candidateClaimIds: [], gapCodes: [] } })],
+      ["Surface has no answer, for a reason that is not a contest", () => change(make(), { accumulation: { outcome: "none", reason: "withdrawn", candidateClaimIds: [], supportingClaimIds: [], gapCodes: [] } })],
       ["a contest the claim is not part of: it was excluded as superseded or withdrawn", () => change(make({ value: "PostgreSQL 16" }), { current: [current, otherPeer], accumulation: contested(current.id, otherPeer.id) })],
       ["a plan is never a candidate for the slot, so it is never contested", () => { const plan = make({ posture: "proposed", value: "PostgreSQL 16" }); return change(plan, { current: [current], accumulation: contested(plan.id, current.id) }); }],
       ["a what-if is never contested, projection or none", () => change(make({ posture: "hypothetical", value: "PostgreSQL 16" }), { current: [current], accumulation: null })],
@@ -210,7 +216,7 @@ test("recomputation detects an edited outcome, an edited input, a changed policy
 
   // The projection fact is an input: editing it from "contested" to "current" changes what the rules read, and the outcome with it.
   const edited = plain(routed);
-  edited.input.accumulation = { outcome: "current", candidateClaimIds: [], gapCodes: [] };
+  edited.input.accumulation = { ...edited.input.accumulation, outcome: "current", candidateClaimIds: [], gapCodes: [] };
   const editedCheck = recomputeMemoryRouting(edited);
   assert.equal(editedCheck.ok, false);
   assert.match(editedCheck.mismatches.join("\n"), /outcome: recorded routed, recomputed proposed/);
@@ -661,11 +667,11 @@ test("the Kit's visibility order agrees with Surface's meetVisibility on every p
 
 test("the projection fact is validated and put in canonical form at the door, so one situation has one decision id", () => {
   const claim = make({ value: "PostgreSQL 16" });
-  const a = routeMemoryChange(change(claim, { current: [current], accumulation: { outcome: "contested", candidateClaimIds: [current.id, claim.id], gapCodes: ["contested-value", "supersession-pending"] } }));
-  const b = routeMemoryChange(change(claim, { current: [current], accumulation: { outcome: "contested", candidateClaimIds: [claim.id, current.id], gapCodes: ["supersession-pending", "contested-value"], supportingClaimIds: ["ignored"], pendingEventIds: [] } }));
+  const a = routeMemoryChange(change(claim, { current: [current], accumulation: { outcome: "contested", candidateClaimIds: [current.id, claim.id], supportingClaimIds: [], gapCodes: ["contested-value", "supersession-pending"] } }));
+  const b = routeMemoryChange(change(claim, { current: [current], accumulation: { outcome: "contested", candidateClaimIds: [claim.id, current.id], supportingClaimIds: [], gapCodes: ["supersession-pending", "contested-value"], extraneous: ["ignored"], pendingEventIds: [] } }));
   assert.equal(a.id, b.id);
   assert.deepEqual(a.input.accumulation.candidateClaimIds, [...a.input.accumulation.candidateClaimIds].sort());
-  for (const bad of [{}, { outcome: "current" }, { outcome: "maybe", candidateClaimIds: [], gapCodes: [] }, { outcome: "current", candidateClaimIds: [1], gapCodes: [] }, "contested"]) {
+  for (const bad of [{}, { outcome: "current" }, { outcome: "maybe", candidateClaimIds: [], supportingClaimIds: [], gapCodes: [] }, { outcome: "current", candidateClaimIds: [1], supportingClaimIds: [], gapCodes: [] }, "contested"]) {
     assert.throws(() => routeMemoryChange(change(claim, { accumulation: bad })), /accumulation projection result/, JSON.stringify(bad));
   }
 });
@@ -678,10 +684,29 @@ test("a stored decision whose projection fact was edited or is not canonical is 
   const rehash = d => { d.id = `sha256:${createHash("sha256").update(canonicalJson({ input: d.input, policy: d.policy })).digest("hex")}`; return d; };
   for (const [what, edit] of [["not an object", d => { d.input.accumulation = "contested"; }], ["an unknown outcome", d => { d.input.accumulation.outcome = "maybe"; }],
     ["candidates not a list", d => { d.input.accumulation.candidateClaimIds = "x"; }], ["unsorted candidates", d => { d.input.accumulation.candidateClaimIds.reverse(); }], ["missing", d => { delete d.input.accumulation; }],
-    ["an extra field", d => { d.input.accumulation.supportingClaimIds = []; }]]) {
+    ["an extra field", d => { d.input.accumulation.extraneous = []; }], ["a missing slot", d => { delete d.input.accumulation.slot; }], ["a slot for another claim", d => { d.input.accumulation.slot.subjectId = "someone else"; }], ["a member that is not in the slot", d => { d.input.accumulation.supportingClaimIds = ["sha256:" + "e".repeat(64)]; }]]) {
     const d = rehash((() => { const copy = plain(routed); edit(copy); return copy; })());
     const check = recomputeMemoryRouting(d);
     assert.equal(check.ok, false, what);
     assert.match(check.mismatches.join("\n"), /stored routing input: accumulation|stored routing input/, what);
   }
+});
+
+// --- review round 7 ---------------------------------------------------------------------------------------------------------
+
+test("the 64-claim bound holds at the door and in a stored decision, and is refused rather than truncated", () => {
+  const claim = make({ value: "PostgreSQL 16" });
+  const peers = n => Array.from({ length: n }, (_, i) => make({ value: `v${i}`, source: { ...base.source, ref: `peer-${i}` } }));
+  assert.equal(routeMemoryChange(change(claim, { current: peers(64), accumulation: null })).input.current.length, 64);
+  assert.throws(() => routeMemoryChange(change(claim, { current: peers(65), accumulation: null })), /more than 64 current claims/);
+  // A stored decision with 65 peers, baselines to match and the digest recomputed, is refused too.
+  const stored = plain(routeMemoryChange(change(claim, { current: peers(64), accumulation: null })));
+  const extra = make({ value: "v64", source: { ...base.source, ref: "peer-64" } });
+  stored.input.current.push(plain(extra)); stored.input.current.sort((x, y) => x.id.localeCompare(y.id));
+  stored.input.baselines = [stored.input.baselines[0], ...stored.input.current.map(other => ({ ref: other.id, visibility: other.visibility ?? null }))];
+  Object.assign(stored, evaluateMemoryRouting(stored.input, stored.policy));
+  stored.id = `sha256:${createHash("sha256").update(canonicalJson({ input: stored.input, policy: stored.policy })).digest("hex")}`;
+  const check = recomputeMemoryRouting(stored);
+  assert.equal(check.ok, false);
+  assert.match(check.mismatches.join("\n"), /more than 64 current claims/);
 });

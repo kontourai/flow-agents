@@ -39,8 +39,15 @@ export type MemoryAccumulationQuery = AccumulationQuery;
 export interface MemoryAccumulationFact {
   outcome: "current" | "contested" | "invalid" | "none";
   reason?: string;
+  /** The slot the projection was asked about (the query's), so a result for one slot cannot be read as another's. */
+  slot: MemoryAccumulationQuery["slot"];
   /** The claims that are candidates for the slot's value. A contest names every one of them. */
   candidateClaimIds: string[];
+  /**
+   * The claims that support the slot's current value. Surface joins subjects an admitted identity mapping declares equivalent,
+   * so with equal values the slot is `current`, nobody is a candidate, and this list is the only place the joined claims appear.
+   */
+  supportingClaimIds: string[];
   gapCodes: string[];
 }
 
@@ -143,16 +150,47 @@ function ownData(record: object, key: string): unknown {
   return descriptor && "value" in descriptor ? descriptor.value : undefined;
 }
 
-/** Reads the fact out of a `projectAccumulation` result, or throws: a result that does not look like one is not a fact. */
-export function memoryAccumulationFact(result: unknown): MemoryAccumulationFact {
-  const refuse = (): never => { throw new MemoryClaimError("invalid", "not an accumulation projection result: it needs an outcome, candidateClaimIds and gapCodes"); };
+/** Every claim the projection names for the slot, as a candidate or as support. These, not the raw subject, say who is in the slot. */
+export const memoryAccumulationMembers = (fact: Pick<MemoryAccumulationFact, "candidateClaimIds" | "supportingClaimIds">): string[] => [...new Set([...fact.candidateClaimIds, ...fact.supportingClaimIds])].sort();
+
+/** The slot of a query the Kit could have built: four non-blank names and optional qualifiers, under the one value policy it knows. */
+function readQuerySlot(query: unknown): MemoryAccumulationQuery["slot"] {
+  const refuse = (): never => { throw new MemoryClaimError("invalid", "the projection's query is needed to read its result: a slot and the single-json-v1 value policy"); };
+  if (!query || typeof query !== "object" || ownData(query, "valuePolicy") !== "single-json-v1") return refuse();
+  const raw = ownData(query, "slot");
+  if (!raw || typeof raw !== "object") return refuse();
+  const slot = jsonSnapshot(raw, "query slot") as Record<string, unknown>;
+  const names = ["subjectType", "subjectId", "fieldOrBehavior", "claimType"].map(key => slot[key]);
+  if (names.some(name => typeof name !== "string" || !name.trim())) return refuse();
+  const qualifiers = slot.qualifiers;
+  if (qualifiers !== undefined && (typeof qualifiers !== "object" || qualifiers === null || Array.isArray(qualifiers) || Object.values(qualifiers).some(value => typeof value !== "string"))) return refuse();
+  const [subjectType, subjectId, fieldOrBehavior, claimType] = names as string[];
+  return { subjectType, subjectId, fieldOrBehavior, claimType, ...(qualifiers ? { qualifiers: qualifiers as Record<string, string> } : {}) };
+}
+
+/**
+ * Reads the fact out of a `projectAccumulation` result and the query it answered, or throws: a result that does not look like
+ * one is not a fact, and one without its query cannot be told apart from a result for another slot.
+ */
+export function memoryAccumulationFact(result: unknown, query: unknown): MemoryAccumulationFact {
+  return factFrom(result, readQuerySlot(query));
+}
+
+/** Reads a fact that was already read (or stored) back into canonical form, or throws. Its slot is part of it. */
+export function readMemoryAccumulationFact(fact: unknown): MemoryAccumulationFact {
+  if (!fact || typeof fact !== "object") return factFrom(fact, undefined as never);
+  return factFrom(fact, readQuerySlot({ slot: ownData(fact, "slot"), valuePolicy: "single-json-v1" }));
+}
+
+function factFrom(result: unknown, slot: MemoryAccumulationQuery["slot"]): MemoryAccumulationFact {
+  const refuse = (): never => { throw new MemoryClaimError("invalid", "not an accumulation projection result: it needs an outcome, candidateClaimIds, supportingClaimIds and gapCodes"); };
   if (!result || typeof result !== "object") return refuse();
   // Each field is read once, as data (Surface's result is a plain object), so what is checked is what is returned.
   const outcome = ownData(result, "outcome"), reason = ownData(result, "reason");
-  const candidates = readStrings(ownData(result, "candidateClaimIds")), gaps = readStrings(ownData(result, "gapCodes"));
-  if (typeof outcome !== "string" || !OUTCOMES.includes(outcome) || !candidates || !gaps) return refuse();
+  const candidates = readStrings(ownData(result, "candidateClaimIds")), supporting = readStrings(ownData(result, "supportingClaimIds")), gaps = readStrings(ownData(result, "gapCodes"));
+  if (typeof outcome !== "string" || !OUTCOMES.includes(outcome) || !candidates || !supporting || !gaps) return refuse();
   const distinct = [...new Set(candidates)].sort();
   // A contest is between at least two candidates: Surface reports `contested` only when they hold different values.
   if (outcome === "contested" && distinct.length < 2) throw new MemoryClaimError("invalid", "a contested projection names at least two candidates");
-  return { outcome: outcome as MemoryAccumulationFact["outcome"], ...(typeof reason === "string" ? { reason } : {}), candidateClaimIds: distinct, gapCodes: [...new Set(gaps)].sort() };
+  return { outcome: outcome as MemoryAccumulationFact["outcome"], ...(typeof reason === "string" ? { reason } : {}), slot, candidateClaimIds: distinct, supportingClaimIds: [...new Set(supporting)].sort(), gapCodes: [...new Set(gaps)].sort() };
 }

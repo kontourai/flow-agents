@@ -1,12 +1,14 @@
 /**
  * A strict deep copy of plain JSON data, taken once, so that what is validated is exactly what is recorded.
  *
- * Refuses anything JSON would change or drop: accessors (a getter can answer differently the next time it is read),
+ * Refuses anything JSON would change or drop: Proxies (they answer every question as they like, and can answer differently
+ * each time), accessors (a getter can answer differently the next time it is read),
  * non-finite numbers and `-0`, `undefined` list entries, holes, symbols, functions, bigints, class instances, array
  * subclasses, extra keys on arrays, cycles, and the key `__proto__` (assigning it sets a prototype instead of a field,
  * so a value validated through an inherited property would vanish when serialised). Lists are read by index, never
  * through methods the caller controls. Bounded in size and depth: over the bound is refused, never cut short.
  */
+import { types } from "node:util";
 import { MemoryClaimError } from "./memory-claims.js";
 
 export const MAX_SNAPSHOT_NODES = 20_000;
@@ -24,14 +26,15 @@ export function jsonSnapshot(value: unknown, label: string): unknown {
       return item;
     }
     if (typeof item !== "object") return bad(`a ${typeof item} cannot be recorded as JSON`);
+    // A Proxy answers every question (its keys, its descriptors, its length) as it likes, and can answer differently each time, so
+    // no list of checks makes one safe to read. It is refused, not defended against.
+    if (types.isProxy(item)) return bad("a Proxy cannot be recorded");
     if (ancestors.has(item)) return bad("a cycle cannot be recorded");
     if (depth >= MAX_SNAPSHOT_DEPTH) return bad("too deep to record"); // containers nest at most MAX_SNAPSHOT_DEPTH levels
     ancestors.add(item);
     try {
       if (Array.isArray(item)) {
         if (Object.getPrototypeOf(item) !== Array.prototype) return bad("an array subclass cannot be recorded");
-        // The length is read once and checked again at the end: a list whose length changes while it is being read (a Proxy,
-        // say) would otherwise be recorded as a shorter list with no sign that anything was dropped.
         const length = item.length;
         if (length > MAX_SNAPSHOT_NODES) return bad("too large to record");
         if (Object.getOwnPropertySymbols(item).length || Object.keys(item).length !== length) return bad("a list with extra keys, symbols or holes cannot be recorded");
@@ -42,7 +45,6 @@ export function jsonSnapshot(value: unknown, label: string): unknown {
           if (descriptor.value === undefined) return bad("an undefined list entry cannot be recorded");
           out.push(walk(descriptor.value, depth + 1, ancestors));
         }
-        if (item.length !== length || out.length !== length) return bad("a list changed while it was being read");
         return out;
       }
       const prototype = Object.getPrototypeOf(item);
@@ -61,6 +63,36 @@ export function jsonSnapshot(value: unknown, label: string): unknown {
     }
   };
   return walk(value, 0, new Set());
+}
+
+/**
+ * One own data property of a caller's object, or undefined when it has none. For choosing the fields to snapshot before there
+ * is a snapshot: nothing the caller defined runs (no getter, no inherited value, no Proxy trap). A getter or a Proxy is refused.
+ */
+export function ownField(record: unknown, key: string, label: string): unknown {
+  if (record === undefined || record === null) return undefined;
+  if (typeof record !== "object") throw new MemoryClaimError("invalid", `${label}: expected an object`);
+  if (types.isProxy(record)) throw new MemoryClaimError("invalid", `${label}: a Proxy cannot be read`);
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  if (!descriptor) return undefined;
+  if (!("value" in descriptor)) throw new MemoryClaimError("invalid", `${label}: ${key} is an accessor, which cannot be read`);
+  return descriptor.value;
+}
+
+/** The entries of a caller's list, read by index with the same refusals as `jsonSnapshot`, without calling any of its methods. */
+export function ownEntries(value: unknown, label: string): unknown[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new MemoryClaimError("invalid", `${label}: expected a list`);
+  if (types.isProxy(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new MemoryClaimError("invalid", `${label}: expected a plain list`);
+  const length = value.length;
+  if (length > MAX_SNAPSHOT_NODES || Object.getOwnPropertySymbols(value).length || Object.keys(value).length !== length) throw new MemoryClaimError("invalid", `${label}: a list with extra keys, symbols or holes, or too long, cannot be read`);
+  const out: unknown[] = [];
+  for (let index = 0; index < length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (!descriptor || !("value" in descriptor)) throw new MemoryClaimError("invalid", `${label}: a hole or accessor in a list cannot be read`);
+    out.push(descriptor.value);
+  }
+  return out;
 }
 
 /** Snapshots a list a caller handed in, reading it by index. A value that is not a list is refused. */
