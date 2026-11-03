@@ -369,8 +369,10 @@ evidence needs `reconciliation_recorded_at` by `known_at`, and a `verified_at` a
 anchor a TTL. The authority text itself is read at the pinned revision, not as of `known_at`: pin the
 revision that existed at the knowledge cut. No wall clock is read: `now` is explicit and also the instant
 freshness is judged at; `expires_at`/`ttl_seconds` govern freshness only, never world validity. Full slot
-identity, cardinality, and the admission policy for who may supersede whom are not modelled (see the
-decision record). `status` is the status **as of the stated instants** and the result echoes them, so a
+identity, cardinality, `contested` outcomes, and the admission policy for who may supersede whom are not
+modelled: Surface's accumulation projection (`projectAccumulation`) would own them but needs a
+host-protected authority snapshot a Git manifest cannot supply, so consuming it is tracked in
+kontourai/flow-agents#1586 (see the decision record). `status` is the status **as of the stated instants** and the result echoes them, so a
 predecessor read at a `valid_at` before its succession, or a `known_at` before its successor was recorded,
 is `current` with a reason saying exactly why. A superseded claim is never `current` for a reader who can
 see a successor that is recorded, in effect and on the same slot.

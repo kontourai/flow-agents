@@ -58,6 +58,15 @@ a supersession edge has its own recording time and must join one slot (`slot`), 
   commit is the only custody of the recording time and of the edge, which the manifest owner
   authors. Surface's shapes are design vectors until Hachure accepts them (hachure-org/spec#34);
   the manifest fields are this kit's, not a portable bundle extension.
+- **The accumulation projection is not consumed yet.** Surface's `projectAccumulation` (kontourai/surface#359,
+  main `b7d932b`) is the canonical current, superseded and contested projection, but it accepts a replacement
+  only with a host-protected authority snapshot (claim owner bindings, admitted verification events,
+  replacement grants) and receiver observations, which Surface says callers must not construct from unsigned
+  bundle fields. A Git claim manifest supplies none of them: measured against `b7d932b`, a manifest-shaped
+  supersession with no host authority projects as `contested` with the edge `pending`. So this kit admits
+  edges itself (recording time, slot, kind, interval) and hands only the admitted edges to Surface's visibility
+  view. That local admission is a stopgap, not a second derivation to keep, and `contested` is not reported.
+  Consuming the projection is tracked in kontourai/flow-agents#1586.
 - **Freshness is Surface's.** Expiry resolves through `claimIntrinsicExpiry` (`expiresAt` wins;
   `ttlSeconds` anchors on a verification at or before `known_at`, else recording) and a claim is stale when `now > expiry`,
   checked against Surface's own `reapplyVerifiedFreshness` at the boundary. A stale claim that would
