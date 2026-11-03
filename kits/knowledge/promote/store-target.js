@@ -5,7 +5,11 @@
  */
 
 import path from "node:path";
+import { readFileSync } from "node:fs";
+import { validate } from "../providers/lib/schema-validate.js";
 import { createHash } from "node:crypto";
+
+const RESIDUE_SCHEMA = JSON.parse(readFileSync(new URL("../schemas/knowledge/residue.schema.json", import.meta.url), "utf8"));
 
 /** @typedef {Pick<import('@kontourai/corpus-store').KnowledgeStoreCreateProposals, 'proposeCreate'>} CreateProposalStore */
 
@@ -24,7 +28,9 @@ function required(value, label) {
  *   rootName: string, write?: boolean}} options
  */
 export async function proposeMemory({ residue, candidates, proposerId, store, registerRoot, root, rootName, write = true }) {
-  if (residue?.source !== 'runtime-session' || residue.complete !== true) throw new Error('store target requires a complete runtime-session residue');
+  if (!validate(residue, RESIDUE_SCHEMA).valid || residue?.source !== 'runtime-session' || residue.complete !== true) {
+    throw new Error('store target requires a schema-valid complete runtime-session residue');
+  }
   const sessionId = required(residue.provenance?.sessionId, 'sessionId');
   const transcriptRef = required(residue.provenance?.transcriptRef, 'transcriptRef');
   const sittingId = required(residue.sittingId, 'sittingId');

@@ -830,7 +830,7 @@ ordinary Knowledge record storage status. It is exposed through the declared
 ### Memory create proposals (Corpus #40)
 
 The explicit `runPromote({ target: "store", ... })` path accepts a complete
-`runtime-session` residue from #669 and already-distilled candidates with
+schema-valid `runtime-session` residue from #669 and already-distilled candidates with
 `title`, `body`, and `category`. The host supplies its authorized absolute
 `root`, a `registerRoot(name, root)` function, and a Corpus store constructed
 for that same root with host-owned locking and coordination. The host supplies

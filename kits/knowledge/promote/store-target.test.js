@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { snapshotDir } from './lib.js';
-import { runPromote } from './index.js';
+import { ingestFromSource, runPromote } from './index.js';
 
-// Produced by #669 ingestRuntimeSessions from its Codex rollout fixture.
+// Produced by #669 ingestRuntimeSessions from its runtime rollout fixture.
 const residue = JSON.parse(fs.readFileSync(new URL('./fixtures/runtime-residue-669.json', import.meta.url)));
 const candidates = [{ title: 'A learning', body: 'Distilled content', category: 'memory.learning' }];
 function setup() {
@@ -40,6 +40,10 @@ test('missing provenance, incomplete sittings and invalid candidates fail before
     { residue: { ...residue, provenance: { ...residue.provenance, sessionId: '' } } },
     { residue: { ...residue, provenance: { ...residue.provenance, transcriptRef: '' } } },
     { residue: { ...residue, complete: false } },
+    { residue: { ...residue, contentHash: 'invalid' } },
+    { residue: { ...residue, provenance: { ...residue.provenance, harness: 'unknown' } } },
+    { residue: { ...residue, turns: [] } },
+    { residue: { ...residue, extra: true } },
     { candidates: [{ ...candidates[0], body: '' }] },
     { root: 'relative' },
   ]) {
@@ -132,4 +136,28 @@ test('explicit repo-docs matches the default result and output bytes', async () 
     globalThis.Date = RealDate;
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+
+test('runtime producer output passes the merged residue contract and reaches the store target', async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wi2-runtime-producer-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const transcriptRoot = path.join(base, 'sessions');
+  fs.mkdirSync(transcriptRoot);
+  const transcript = path.join(transcriptRoot, 'rollout.jsonl');
+  fs.copyFileSync(fileURLToPath(new URL('./fixtures/runtime/codex-rollout.jsonl', import.meta.url)), transcript);
+  const event = {
+    schema_version: '0.3.0', timestamp: '1793455200000', session_id: 'telemetry-session', event_id: 'event', event_type: 'stop',
+    agent: { name: 'dev', runtime: 'codex', version: 'fixture' },
+    install_identity: { package_version: 'fixture', content_fingerprint: 'fixture', source: 'fixture' },
+    hook: { event_name: 'Stop', runtime_session_id: 'runtime-session', turn_id: '', transcript_path: transcript, model: '', source: '', stop_hook_active: false, last_assistant_message: '', raw_input: null },
+  };
+  const telemetryFile = path.join(base, 'telemetry.jsonl');
+  fs.writeFileSync(telemetryFile, `${JSON.stringify(event)}\n`);
+  const ingested = ingestFromSource('runtime-session', { telemetryFile, transcriptRoots: [transcriptRoot], now: Date.parse('2026-11-01T00:00:00.000Z') });
+  assert.ok(ingested.residues.length > 0, 'producer must yield a sitting');
+  const sitting = ingested.residues[0];
+  const { calls, opts } = setup();
+  await runPromote({ ...opts, residue: sitting });
+  assert.deepEqual(JSON.parse(calls[1][1].provenance.note), { session_id: sitting.provenance.sessionId, transcript_ref: sitting.provenance.transcriptRef, sitting_id: sitting.sittingId });
 });
