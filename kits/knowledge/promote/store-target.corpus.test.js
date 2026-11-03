@@ -55,6 +55,7 @@ test('identical batch retries reuse receipts and changed content conflicts', { s
   assert.equal((await store.listProposals({ state: 'pending' })).length, 2);
   assert.deepEqual((await runPromote({ ...options, store })).proposals, retried.proposals);
   await assert.rejects(runPromote({ ...options, store, candidates: [{ ...candidates[0], body: 'Changed' }, candidates[1]] }), (error) => error.code === 'REQUEST_KEY_CONFLICT');
+  await assert.rejects(runPromote({ ...options, store, residue: { ...residue, provenance: { ...residue.provenance, transcriptRef: 'another-transcript.jsonl' } } }), (error) => error.code === 'REQUEST_KEY_CONFLICT');
   assert.equal((await store.listProposals({ state: 'pending' })).length, 2);
   assert.equal((await store.listByType('raw')).length, 0);
 });

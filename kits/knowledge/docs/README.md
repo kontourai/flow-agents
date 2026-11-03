@@ -710,9 +710,8 @@ this requirement. The host protocol is tracked in
 [#753](https://github.com/kontourai/flow-agents/issues/753).
 
 Each candidate is sent through `proposeCreate(candidate, proposerId, evidence,
-{ requestKey })`. The opaque key hashes the session ID, transcript reference,
-sitting ID and candidate position; it contains no source text. Replaying the
-same ordered batch returns the original proposal IDs. Changed content at an
+{ requestKey })`. The opaque key hashes the sitting ID and candidate position; it contains no source text. Replaying the
+same ordered batch returns the original proposal IDs. Changed content or provenance at an
 occupied position is refused as `REQUEST_KEY_CONFLICT`.
 The candidate provenance note encodes the session ID, transcript reference,
 and sitting ID pending the structured provenance contract in

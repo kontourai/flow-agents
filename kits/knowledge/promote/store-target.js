@@ -48,9 +48,9 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
   await registerRoot(rootName, root);
   const proposals = [];
   for (const [index, candidate] of prepared.entries()) {
-    // Identity excludes candidate content: changed content at the same position
+    // Identity excludes candidate content and mutable provenance: changes at the same position
     // must conflict, not mint a new proposal. Corpus owns durable deduplication.
-    const requestKey = `knowledge.promote:${createHash('sha256').update(JSON.stringify([sessionId, transcriptRef, sittingId, index])).digest('hex')}`;
+    const requestKey = `knowledge.promote:${createHash('sha256').update(JSON.stringify([sittingId, index])).digest('hex')}`;
     try {
       const id = await store.proposeCreate(candidate, proposerId, { agent: proposerId, proposal: 'Create distilled memory candidate' }, { requestKey });
       proposals.push(id);
