@@ -1277,12 +1277,13 @@ test("strictest routing record wins whatever the order: a routed record is never
     const shown = presentMemoryClaims([claim], { routing: order, reviewDecisions: [agentEdit] }).presented[0];
     assert.deepEqual([shown.review.routing, shown.review.label, shown.value], ["routed", "in-review", "PostgreSQL 16"], order.map(r => r.outcome).join(","));
   }
-  // Two routed records for one claim: their reasons are all reported.
-  const lowAgreement = routeMemoryChange(change(claim, { current: [peer], accumulation: contested(claim.id, peer.id), agreement: { passes: 2, agreeing: 1 } }));
-  assert.ok(lowAgreement.reasons.some(r => r.rule === "low-extraction-agreement") && !routed.reasons.some(r => r.rule === "low-extraction-agreement"));
-  const both = presentMemoryClaims([claim], { routing: [routed, lowAgreement] }).presented[0].review.reasons;
-  assert.deepEqual([...both].sort(), [...new Set([...rulesOf(routed), ...rulesOf(lowAgreement)])].sort(), "the union of the records' reasons");
-  assert.ok(both.includes("low-extraction-agreement") && both.includes("contested-by-accumulation"));
+  // Two routed records for one claim with DISJOINT reasons: all of them are reported, whichever record comes last.
+  const onlyLowAgreement = routeMemoryChange(change(claim, { agreement: { passes: 2, agreeing: 1 }, accumulation: null }));
+  assert.deepEqual([rulesOf(onlyLowAgreement), rulesOf(routed).includes("low-extraction-agreement")], [["low-extraction-agreement"], false], "the premise: the two records share no reason");
+  for (const order of [[routed, onlyLowAgreement], [onlyLowAgreement, routed]]) {
+    const reasons = presentMemoryClaims([claim], { routing: order }).presented[0].review.reasons;
+    assert.deepEqual([...reasons].sort(), [...new Set([...rulesOf(routed), "low-extraction-agreement"])].sort(), "the union of the records' reasons, in either order");
+  }
 });
 
 test("review time: events are the deciding reviewer's by their own kind as well as by actor, and a legacy event with no actor stays", () => {

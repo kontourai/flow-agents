@@ -1125,3 +1125,11 @@ test("a stored decision's reviewer kind is validated the way Survey will: human,
   await rawAttach(other, "route-gate", MEMORY_REVIEW_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [decision("robot")], events: [] });
   await assert.rejects(readMemoryReviewRecords("run-1", other), /reviewerKind is human, agent or rule/);
 });
+
+test("a stored decision's inferred flag is Survey's boolean: anything else is refused, and either boolean is accepted as data", async t => {
+  const cwd = await workspace(t);
+  const decision = inferred => ({ ...decisionFixture(1), metadata: { name: `d-${String(inferred)}` }, spec: { ...decisionFixture(1).spec, reviewerKind: "human", reviewerKindInferred: inferred } });
+  for (const bad of ["true", 1, 0, null, [], {}]) await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [decision(bad)] }), /reviewerKindInferred is true or false/, JSON.stringify(bad));
+  for (const ok of [true, false]) await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [decision(ok)] });
+  assert.equal((await readMemoryReviewRecords("run-1", cwd)).decisions.length, 2);
+});
