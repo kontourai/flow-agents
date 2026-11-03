@@ -1974,8 +1974,7 @@ for producer review: their own content may reproduce erased content and is not
 automatically scrubbed. This follows Surface's producer-owned erasure boundary.
 
 The host must rebuild or invalidate each content-bearing projection before it
-serves it again, including compiled briefs, indexes, and the `knowledge_context`
-and `knowledge_search` MCP read paths where provided. Host-built projections,
+serves it again, including any compiled briefs and indexes. Host-built projections,
 backups, snapshots, and migration manifests are outside Corpus Store's purge
 transaction. Corpus also documents an interrupted-write journal window containing
 before-images until recovery; purge is not a secure-erasure guarantee. A completed
