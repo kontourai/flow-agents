@@ -11,10 +11,13 @@
  */
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
+import { canonicalClaimKey } from "@kontourai/surface";
 // Type-only: proves the schema below is an ordinary Traverse TargetFieldSchema without a runtime dependency.
 import type { TargetFieldSchema } from "@kontourai/traverse";
 
 export const MEMORY_CLAIM_VERSION = "1.0" as const;
+/** The claim type the Kit assigns. A slot includes it (Surface knowledge-accumulation decision); other producers supply their own. */
+export const MEMORY_CLAIM_TYPE = "knowledge.memory-claim" as const;
 export const MEMORY_CLAIM_POSTURES = ["stated", "proposed", "hypothetical", "retracted"] as const;
 export type MemoryClaimPosture = (typeof MEMORY_CLAIM_POSTURES)[number];
 
@@ -41,9 +44,18 @@ export interface MemoryClaim {
   /** `sha256:` digest of the claim's identity fields; recomputed on read. */
   id: string;
   subject: { type: string; id: string; label?: string };
+  /** Surface's `claimType`. Part of the slot. */
+  claimType: string;
+  /** Surface's `fieldOrBehavior`. */
   property: string;
+  /** Surface canonical qualifiers; part of the slot. */
+  qualifiers?: Record<string, string>;
   value: unknown;
-  /** Half-open interval `[from, until)`; absent bounds are unbounded. */
+  /**
+   * Half-open interval `[from, until)` of when the value held in the world; absent bounds are
+   * unbounded. `until` is exclusive, unlike the inclusive `validUntil` of Surface's authority
+   * trace, and is not `expiresAt` (freshness).
+   */
   validTime?: { from?: string; until?: string };
   speaker: string;
   source: MemoryClaimSource;
@@ -81,7 +93,7 @@ const TARGET_FIELDS = [
   { path: "claims[].speaker", type: "string", inferenceType: "explicit", description: "Who asserted it, as the text names them. Omit when the speaker of the turn is the one asserting." },
   { path: "claims[].posture", type: "enum", required: true, enumValues: [...MEMORY_CLAIM_POSTURES], inferenceType: "inferred", description: "stated: asserted as true now. proposed: suggested as a plan or decision not yet in effect. hypothetical: conditional, 'if' or 'what if'. retracted: the speaker withdraws an earlier assertion." },
   { path: "claims[].validFrom", type: "date", inferenceType: "inferred", description: "ISO 8601 instant the value starts to hold in the world, only when the text says or clearly implies it. Never today's date by default." },
-  { path: "claims[].validUntil", type: "date", inferenceType: "inferred", description: "ISO 8601 instant the value stops holding, only when the text says so." },
+  { path: "claims[].validUntil", type: "date", inferenceType: "inferred", description: "ISO 8601 instant the value stops holding (exclusive: it does not hold at this instant), only when the text says so." },
   { path: "claims[].replacesPrior", type: "boolean", inferenceType: "inferred", description: "True only when the speaker presents this value as replacing an earlier value of the same property ('we moved to', 'it is now'), not merely stating a value." },
 ] satisfies TargetFieldSchema[];
 
@@ -97,16 +109,20 @@ export function foldMemoryText(text: string): string {
   return text.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-export const memoryValuesEqual = (a: unknown, b: unknown): boolean =>
-  typeof a === "string" && typeof b === "string" ? foldMemoryText(a) === foldMemoryText(b) : canonicalJson(a) === canonicalJson(b);
+/** Structural JSON equality, the semantics the Surface knowledge-accumulation decision assumes. Case and spacing are values. */
+export const memoryValuesEqual = (a: unknown, b: unknown): boolean => canonicalJson(a) === canonicalJson(b);
 
-/** Properties are slots: the same fold on both sides makes 'Primary DB ' and 'primary db' one slot. */
-export const memorySlotKey = (claim: Pick<MemoryClaim, "subject" | "property">): string =>
-  canonicalJson([foldMemoryText(claim.subject.type), foldMemoryText(claim.subject.id), foldMemoryText(claim.property)]);
+/**
+ * The slot a claim competes in: Surface's `canonicalClaimKey` (subject type and id, field, qualifiers) with
+ * `claimType` added, as the knowledge-accumulation decision specifies. Surface owns the normalisation.
+ */
+export const memorySlotKey = (claim: Pick<MemoryClaim, "subject" | "property" | "claimType" | "qualifiers">): string =>
+  canonicalJson([claim.claimType.trim().toLowerCase(), canonicalClaimKey({ subjectType: claim.subject.type, subjectId: claim.subject.id, fieldOrBehavior: claim.property, ...(claim.qualifiers ? { qualifiers: claim.qualifiers } : {}) })]);
 
-/** Parses an instant; undefined when it is not one. */
+const INSTANT = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
+/** Parses an ISO 8601 date or zoned date-time (a bare date is midnight UTC); undefined for anything else, including prose Date.parse would guess at. */
 export function memoryInstant(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
+  if (value === undefined || !INSTANT.test(value)) return undefined;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : undefined;
 }
@@ -127,11 +143,13 @@ type IdentityFields = Omit<MemoryClaim, "id" | "source"> & { source: { ref: stri
 function identityDigest(claim: MemoryClaim): string {
   const identity: IdentityFields = {
     schema_version: claim.schema_version,
-    subject: { type: foldMemoryText(claim.subject.type), id: foldMemoryText(claim.subject.id) },
-    property: foldMemoryText(claim.property),
-    value: typeof claim.value === "string" ? foldMemoryText(claim.value) : claim.value,
+    subject: { type: claim.subject.type, id: claim.subject.id },
+    claimType: claim.claimType,
+    property: claim.property,
+    ...(claim.qualifiers ? { qualifiers: claim.qualifiers } : {}),
+    value: claim.value,
     ...(claim.validTime ? { validTime: claim.validTime } : {}),
-    speaker: foldMemoryText(claim.speaker),
+    speaker: claim.speaker,
     posture: claim.posture,
     ...(claim.supersedes ? { supersedes: [...claim.supersedes].sort((x, y) => x.claimId.localeCompare(y.claimId)) } : {}),
     ...(claim.audience ? { audience: [...new Set(claim.audience)].sort() } : {}),
@@ -149,7 +167,7 @@ export function memoryClaim(fields: Omit<MemoryClaim, "id" | "schema_version">):
 
 const nonEmpty = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-const KNOWN_KEYS = new Set(["schema_version", "id", "subject", "property", "value", "validTime", "speaker", "source", "posture", "supersedes", "audience"]);
+const KNOWN_KEYS = new Set(["schema_version", "id", "subject", "claimType", "property", "qualifiers", "value", "validTime", "speaker", "source", "posture", "supersedes", "audience"]);
 
 /** Validates a claim read from anywhere and checks that its id is the digest of its content. */
 export function assertMemoryClaim(value: unknown): asserts value is MemoryClaim {
@@ -158,7 +176,8 @@ export function assertMemoryClaim(value: unknown): asserts value is MemoryClaim 
   if (value.schema_version !== MEMORY_CLAIM_VERSION) throw new MemoryClaimError("invalid", "unsupported schema_version");
   const { subject, source } = value;
   if (!isObject(subject) || !nonEmpty(subject.type) || !nonEmpty(subject.id)) throw new MemoryClaimError("invalid", "subject needs a type and id");
-  if (!nonEmpty(value.property) || !nonEmpty(value.speaker)) throw new MemoryClaimError("invalid", "property and speaker are required");
+  if (!nonEmpty(value.property) || !nonEmpty(value.speaker) || !nonEmpty(value.claimType)) throw new MemoryClaimError("invalid", "claimType, property and speaker are required");
+  if (value.qualifiers !== undefined && (!isObject(value.qualifiers) || !Object.values(value.qualifiers).every(item => typeof item === "string"))) throw new MemoryClaimError("invalid", "qualifiers must map names to strings");
   if (!("value" in value) || value.value === undefined) throw new MemoryClaimError("invalid", "value is required");
   if (value.posture === undefined) throw new MemoryClaimError("posture-missing", "every claim carries its posture");
   if (!(MEMORY_CLAIM_POSTURES as readonly unknown[]).includes(value.posture)) throw new MemoryClaimError("invalid", "unknown posture");
@@ -240,7 +259,7 @@ function assemble(fields: Record<string, ExtractionProposalLike>, context: Assem
   for (const [name, key] of [["validFrom", "from"], ["validUntil", "until"]] as const) {
     const raw = text(name);
     if (raw === undefined) continue;
-    if (memoryInstant(raw) === undefined) throw new MemoryClaimError("invalid", `${name} is not an instant`);
+    if (memoryInstant(raw) === undefined) throw new MemoryClaimError("invalid", `${name} is not an ISO 8601 instant`);
     validTime[key] = raw;
   }
   const hasTime = validTime.from !== undefined || validTime.until !== undefined;
@@ -249,6 +268,7 @@ function assemble(fields: Record<string, ExtractionProposalLike>, context: Assem
   const subjectType = text("subjectType") ?? "other";
   const base = {
     subject: { type: subjectType, id: foldMemoryText(subject), label: subject },
+    claimType: MEMORY_CLAIM_TYPE,
     property,
     value: anchor.candidateValue,
     ...(hasTime ? { validTime } : {}),
@@ -271,8 +291,10 @@ function assemble(fields: Record<string, ExtractionProposalLike>, context: Assem
  * plain claim, so a conflicting value is never silently relabelled a succession.
  */
 function supersessionEdges(draft: Omit<MemoryClaim, "id" | "schema_version" | "supersedes"> & { replacesPrior: boolean }, current: readonly MemoryClaim[]): MemoryClaimSupersession[] {
-  const slot = memorySlotKey(draft as Pick<MemoryClaim, "subject" | "property">);
-  const sameSlot = current.filter(claim => claim.posture === "stated" && memorySlotKey(claim) === slot);
+  const slot = memorySlotKey(draft as Pick<MemoryClaim, "subject" | "property" | "claimType" | "qualifiers">);
+  // A claim may revise its own speaker's earlier claim. Replacing someone else's needs an authority decision the
+  // Kit cannot make, so that stays a plain claim and routing sees the conflict (Surface: a third party's edge is pending).
+  const sameSlot = current.filter(claim => claim.posture === "stated" && memorySlotKey(claim) === slot && claim.speaker === draft.speaker);
   const edges: MemoryClaimSupersession[] = [];
   if (draft.posture === "retracted") {
     for (const claim of sameSlot) if (memoryValuesEqual(claim.value, draft.value)) edges.push({ claimId: claim.id, kind: "correction", reason: "the speaker retracted this assertion" });
@@ -324,6 +346,13 @@ export function formatSittingForExtraction(turns: readonly DistillTurn[]): { con
 export const DEFAULT_DISTILL_PASSES = 2;
 
 /**
+ * Two claims are the same finding for agreement when they share a slot, a posture and a value up to case and
+ * spacing. Identity (`id`) is stricter: a different spelling is a different claim, but not a different finding.
+ */
+const agreementKey = (claim: MemoryClaim): string =>
+  canonicalJson([memorySlotKey(claim), claim.posture, typeof claim.value === "string" ? foldMemoryText(claim.value) : claim.value]);
+
+/**
  * Runs `passes` independent extractions over one sitting and assembles the
  * claims they agree or disagree on. A claim found by any pass is proposed;
  * `agreement` records how many passes found it, which routing reads.
@@ -346,7 +375,7 @@ export async function distillMemoryClaims(input: {
   };
   const request: MemoryExtractionRequest = { content, contentType: "text", sourceRef: input.sitting.sittingId, targetSchema: MEMORY_CLAIM_TARGET_SCHEMA, guidance: MEMORY_CLAIM_GUIDANCE };
 
-  const found = new Map<string, { claim: MemoryClaim; passes: Set<number> }>();
+  const found = new Map<string, { claim: MemoryClaim; passes: Set<number> }>(); // by agreementKey
   const rejected: DistillResult["rejected"] = [], warnings: string[] = [];
   for (let pass = 0; pass < passes; pass++) {
     let result: ExtractionResultLike;
@@ -361,11 +390,12 @@ export async function distillMemoryClaims(input: {
     const assembled = assembleMemoryClaims(result, { sourceRef: input.sitting.sittingId, locate, current: input.current, audience: input.audience });
     rejected.push(...assembled.rejected.map(item => ({ ...item, pass })));
     for (const claim of assembled.claims) {
-      const entry = found.get(claim.id) ?? { claim, passes: new Set<number>() };
+      const key = agreementKey(claim);
+      const entry = found.get(key) ?? { claim, passes: new Set<number>() };
       entry.passes.add(pass);
-      found.set(claim.id, entry);
+      found.set(key, entry);
     }
   }
   const claims = [...found.values()].map(entry => entry.claim);
-  return { claims, agreement: Object.fromEntries([...found].map(([id, entry]) => [id, { passes, agreeing: entry.passes.size }])), rejected, warnings };
+  return { claims, agreement: Object.fromEntries([...found.values()].map(entry => [entry.claim.id, { passes, agreeing: entry.passes.size }])), rejected, warnings };
 }

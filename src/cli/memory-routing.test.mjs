@@ -18,7 +18,7 @@ const validateMetrics = ajv.compile(readJson(SCHEMAS, "memory-run-metrics.schema
 const plain = value => JSON.parse(JSON.stringify(value));
 
 const base = {
-  subject: { type: "service", id: "widget service", label: "widget service" }, property: "primary database", value: "PostgreSQL 15", speaker: "user", posture: "stated",
+  subject: { type: "service", id: "widget service", label: "widget service" }, claimType: "knowledge.memory-claim", property: "primary database", value: "PostgreSQL 15", speaker: "user", posture: "stated",
   source: { ref: "claude-code:s:0", locator: "chars:0-40", excerpt: "The widget service uses PostgreSQL 15.", observedAt: "2026-10-28T09:00:00.000Z", role: "user" },
 };
 const make = (overrides = {}) => memoryClaim({ ...base, ...overrides });
@@ -54,11 +54,20 @@ const RULE_CASES = {
   },
   "conflicting-current-values": {
     routes: () => change(make({ value: "PostgreSQL 16" }), { current: [current] }),
+    alsoRoutes: [
+      ["values that differ only in case are different values: equality is structural JSON", () => change(make({ value: "postgresql 15" }), { current: [current] })],
+      ["a field differing only in case is the same slot, because Surface lower-cases it", () => change(make({ property: "Primary Database", value: "PostgreSQL 16" }), { current: [current] })],
+      ["an edge to a claim that is not in the slot replaces nothing", () => change(make({ value: "PostgreSQL 16", supersedes: [{ claimId: make({ value: "elsewhere" }).id, kind: "succession", reason: "r" }] }), { current: [current] })],
+      ["a structured value is compared structurally", () => change(make({ value: { version: 16 } }), { current: [make({ value: { version: 15 } })] })],
+    ],
     passes: [
-      ["the same value (case and spacing aside)", () => change(make({ value: "postgresql  15" }), { current: [current] })],
+      ["the same value", () => change(make({ value: "PostgreSQL 15" }), { current: [current] })],
+      ["the same structured value, keys in another order", () => change(make({ value: { a: 1, b: 2 } }), { current: [make({ value: { b: 2, a: 1 } })] })],
       ["valid times that do not overlap", () => change(make({ value: "PostgreSQL 16", validTime: { from: "2026-12-01" } }), { current: [make({ validTime: { until: "2026-12-01" } })] })],
       ["a property declared multi-valued", () => change(make({ value: "PostgreSQL 16" }), { current: [current] }), { multiValued: ["primary database"] }],
       ["another slot", () => change(make({ property: "backup database", value: "PostgreSQL 16" }), { current: [current] })],
+      ["another claimType: the slot includes it", () => change(make({ claimType: "other.claim", value: "PostgreSQL 16" }), { current: [current] })],
+      ["another qualifier: the slot includes them", () => change(make({ qualifiers: { environment: "staging" }, value: "PostgreSQL 16" }), { current: [current] })],
       ["a current claim that was only hypothetical", () => change(make({ value: "PostgreSQL 16" }), { current: [make({ posture: "hypothetical" })] })],
       ["a new claim that is only hypothetical", () => change(make({ value: "PostgreSQL 16", posture: "hypothetical" }), { current: [current] })],
       ["a value the new claim explicitly replaces", () => change(replacing, { current: [current] })],

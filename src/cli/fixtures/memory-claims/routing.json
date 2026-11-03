@@ -9,7 +9,7 @@
   },
   "sitting0": [
     {
-      "changeId": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+      "changeId": "sha256:7d93ef8b47c8a6d042f790577ed7f484086caa878cb6f7ffe22580ea6d629606",
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
@@ -18,7 +18,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:22c1ed76170b1dbea084fdcc76edb2eb489a13b861ed686a6885337592cf41c1",
+      "id": "sha256:62a2d8e736f558418b528d0cb914459a8fb7a64e6ab409d8926fe4d78a8e51d7",
       "input": {
         "agreement": {
           "agreeing": 2,
@@ -33,7 +33,8 @@
           }
         ],
         "claim": {
-          "id": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:7d93ef8b47c8a6d042f790577ed7f484086caa878cb6f7ffe22580ea6d629606",
           "posture": "stated",
           "property": "primary database",
           "schema_version": "1.0",
@@ -74,7 +75,7 @@
       "schema_version": "1.0"
     },
     {
-      "changeId": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+      "changeId": "sha256:f2be01b83419e95f3e698d9a8fffb4a49b55d0740d10933afd3a88a09b2c121d",
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
@@ -83,7 +84,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:fec4eb410b9493942ba8f6dc1220dc0591a3a7167229a26d92b94223421c3d79",
+      "id": "sha256:7ceec51600db3661585f4d077e4ba3740e99ec003700e585b1600e32a92cf7e5",
       "input": {
         "agreement": {
           "agreeing": 2,
@@ -98,7 +99,8 @@
           }
         ],
         "claim": {
-          "id": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:f2be01b83419e95f3e698d9a8fffb4a49b55d0740d10933afd3a88a09b2c121d",
           "posture": "stated",
           "property": "on-call owner",
           "schema_version": "1.0",
@@ -139,7 +141,7 @@
       "schema_version": "1.0"
     },
     {
-      "changeId": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b",
+      "changeId": "sha256:eeccef35095d70541059f64586cf4eb7b141d35cf90322add7d34d35a959237e",
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
@@ -148,7 +150,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:b617238399caf97bfa97a95e1763adfbbaa3075d994646b444aa3512e3921b20",
+      "id": "sha256:c6b3ed2222c8c9e35abfbb342c715e666d1f0f194b45512c596f85eeeff8d91d",
       "input": {
         "agreement": {
           "agreeing": 1,
@@ -163,7 +165,8 @@
           }
         ],
         "claim": {
-          "id": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b",
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:eeccef35095d70541059f64586cf4eb7b141d35cf90322add7d34d35a959237e",
           "posture": "stated",
           "property": "retry budget",
           "schema_version": "1.0",
@@ -216,7 +219,7 @@
   ],
   "sitting1": [
     {
-      "changeId": "sha256:e946f30308f494e2a5b62673b401a387fa34fd38d2831253d233cda3a31063e5",
+      "changeId": "sha256:048a244cd3b0b7f64b89ddb57397f32ba7e1c1dc5dd1f8cd454f3768815a3593",
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
@@ -225,7 +228,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:7da8bf5eacf08c919523b4d7f94ba3349a8e3bcff75137c0d3b7dfbf3767ce2e",
+      "id": "sha256:5660ff9e97cb86144a2febe4448d4aa9d2cc8059a942ef82f3c0c0d3149ac927",
       "input": {
         "agreement": {
           "agreeing": 2,
@@ -240,11 +243,12 @@
           },
           {
             "audience": null,
-            "ref": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e"
+            "ref": "sha256:7d93ef8b47c8a6d042f790577ed7f484086caa878cb6f7ffe22580ea6d629606"
           }
         ],
         "claim": {
-          "id": "sha256:e946f30308f494e2a5b62673b401a387fa34fd38d2831253d233cda3a31063e5",
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:048a244cd3b0b7f64b89ddb57397f32ba7e1c1dc5dd1f8cd454f3768815a3593",
           "posture": "stated",
           "property": "primary database",
           "schema_version": "1.0",
@@ -264,7 +268,7 @@
           },
           "supersedes": [
             {
-              "claimId": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+              "claimId": "sha256:7d93ef8b47c8a6d042f790577ed7f484086caa878cb6f7ffe22580ea6d629606",
               "kind": "succession",
               "reason": "the speaker presented the value as replacing the earlier one"
             }
@@ -276,7 +280,8 @@
         },
         "current": [
           {
-            "id": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+            "claimType": "knowledge.memory-claim",
+            "id": "sha256:7d93ef8b47c8a6d042f790577ed7f484086caa878cb6f7ffe22580ea6d629606",
             "posture": "stated",
             "property": "primary database",
             "schema_version": "1.0",
@@ -320,7 +325,7 @@
             "subjectType": "service",
             "supersedes": [
               {
-                "claimId": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+                "claimId": "sha256:7d93ef8b47c8a6d042f790577ed7f484086caa878cb6f7ffe22580ea6d629606",
                 "kind": "succession"
               }
             ]
@@ -331,7 +336,7 @@
       "schema_version": "1.0"
     },
     {
-      "changeId": "sha256:ec4ac3dbad396c995e10180e3cd5963756dd6652ca89ee504e982808ac66417e",
+      "changeId": "sha256:777ee4511631381fad4db992680122f4928629e730c4dd9d61498f8b3efcf60f",
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
@@ -340,7 +345,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:08924a284cfd83f58ebc9f6e368001380b70fa83976b8354b7b4ce860fef1b3d",
+      "id": "sha256:78634aaba218220a0015f39beaa825c3064daf3185ac31c436f86ba630faa8af",
       "input": {
         "agreement": {
           "agreeing": 2,
@@ -355,11 +360,12 @@
           },
           {
             "audience": null,
-            "ref": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b"
+            "ref": "sha256:eeccef35095d70541059f64586cf4eb7b141d35cf90322add7d34d35a959237e"
           }
         ],
         "claim": {
-          "id": "sha256:ec4ac3dbad396c995e10180e3cd5963756dd6652ca89ee504e982808ac66417e",
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:777ee4511631381fad4db992680122f4928629e730c4dd9d61498f8b3efcf60f",
           "posture": "stated",
           "property": "retry budget",
           "schema_version": "1.0",
@@ -381,7 +387,8 @@
         },
         "current": [
           {
-            "id": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b",
+            "claimType": "knowledge.memory-claim",
+            "id": "sha256:eeccef35095d70541059f64586cf4eb7b141d35cf90322add7d34d35a959237e",
             "posture": "stated",
             "property": "retry budget",
             "schema_version": "1.0",
@@ -423,7 +430,7 @@
           "detail": {
             "with": [
               {
-                "claimId": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b",
+                "claimId": "sha256:eeccef35095d70541059f64586cf4eb7b141d35cf90322add7d34d35a959237e",
                 "value": "5 attempts per request"
               }
             ]
@@ -434,7 +441,7 @@
       "schema_version": "1.0"
     },
     {
-      "changeId": "sha256:20c5ce1b814012ded9f8fefc200f23d791c2089c200ca092c96df84d30b6f6ce",
+      "changeId": "sha256:46f7710b791d2b354c3e83f48093c03647571951f68ea68bc91022ffad938e73",
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
@@ -443,7 +450,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:81fbf9ba386cdf30bea8011fdd3c7c04db906c314dac98b5b338d50871787b72",
+      "id": "sha256:314b74dc2162d2b0d6877ec23b4bd6a0f2941d1b81a4c432887f9b501715e279",
       "input": {
         "agreement": {
           "agreeing": 2,
@@ -458,11 +465,12 @@
           },
           {
             "audience": null,
-            "ref": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e"
+            "ref": "sha256:f2be01b83419e95f3e698d9a8fffb4a49b55d0740d10933afd3a88a09b2c121d"
           }
         ],
         "claim": {
-          "id": "sha256:20c5ce1b814012ded9f8fefc200f23d791c2089c200ca092c96df84d30b6f6ce",
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:46f7710b791d2b354c3e83f48093c03647571951f68ea68bc91022ffad938e73",
           "posture": "retracted",
           "property": "on-call owner",
           "schema_version": "1.0",
@@ -482,7 +490,7 @@
           },
           "supersedes": [
             {
-              "claimId": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+              "claimId": "sha256:f2be01b83419e95f3e698d9a8fffb4a49b55d0740d10933afd3a88a09b2c121d",
               "kind": "correction",
               "reason": "the speaker retracted this assertion"
             }
@@ -491,7 +499,8 @@
         },
         "current": [
           {
-            "id": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+            "claimType": "knowledge.memory-claim",
+            "id": "sha256:f2be01b83419e95f3e698d9a8fffb4a49b55d0740d10933afd3a88a09b2c121d",
             "posture": "stated",
             "property": "on-call owner",
             "schema_version": "1.0",
@@ -532,7 +541,7 @@
       "schema_version": "1.0"
     },
     {
-      "changeId": "sha256:df34bdff6aa6fa50283a698aad46f11f46c4806dd1494f63ac64e24a3a0f5214",
+      "changeId": "sha256:7c8401f1c288568d270d25728262e82a1398cdec21069ff2cb2c930d80abb0db",
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
@@ -541,7 +550,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:2616600be959ef6e11cae745aced1bcbb17d5202a7903d3cae3f1581c48fc0f7",
+      "id": "sha256:4f4289a16e4eae436b3fbc8bf8666f0bbda5eee37895647ae18e17dc8b915b14",
       "input": {
         "agreement": {
           "agreeing": 2,
@@ -556,7 +565,8 @@
           }
         ],
         "claim": {
-          "id": "sha256:df34bdff6aa6fa50283a698aad46f11f46c4806dd1494f63ac64e24a3a0f5214",
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:7c8401f1c288568d270d25728262e82a1398cdec21069ff2cb2c930d80abb0db",
           "posture": "hypothetical",
           "property": "sharding technology",
           "schema_version": "1.0",
@@ -597,7 +607,7 @@
       "schema_version": "1.0"
     },
     {
-      "changeId": "sha256:8d3f2a471b061ee728f62ed977ae8772b360f5c031b36f3667770b38a6c37172",
+      "changeId": "sha256:d03be2fe12d2f01601964827977a6168383836cadd35f1083f4cc125d1b504a3",
       "changeType": "claim",
       "evaluated": [
         "contradicted-by-verification",
@@ -606,7 +616,7 @@
         "low-extraction-agreement",
         "visibility-widening"
       ],
-      "id": "sha256:0c283213f7eca51155101a4ac28ac77699060bca8e0d7d1ef918bbb95e26e8a9",
+      "id": "sha256:740aace92f8f7a9f15a7e61225bc974f83f1baf54dfa8d88e0496ac72d6530db",
       "input": {
         "agreement": {
           "agreeing": 1,
@@ -621,7 +631,8 @@
           }
         ],
         "claim": {
-          "id": "sha256:8d3f2a471b061ee728f62ed977ae8772b360f5c031b36f3667770b38a6c37172",
+          "claimType": "knowledge.memory-claim",
+          "id": "sha256:d03be2fe12d2f01601964827977a6168383836cadd35f1083f4cc125d1b504a3",
           "posture": "stated",
           "property": "lead",
           "schema_version": "1.0",

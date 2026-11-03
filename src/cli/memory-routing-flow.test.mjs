@@ -19,7 +19,7 @@ const HOST_FLOW = {
 };
 
 const base = {
-  subject: { type: "service", id: "widget service", label: "widget service" }, property: "primary database", value: "PostgreSQL 15", speaker: "user", posture: "stated",
+  subject: { type: "service", id: "widget service", label: "widget service" }, claimType: "knowledge.memory-claim", property: "primary database", value: "PostgreSQL 15", speaker: "user", posture: "stated",
   source: { ref: "claude-code:s:0", locator: "chars:0-40", excerpt: "The widget service uses PostgreSQL 15.", observedAt: "2026-10-28T09:00:00.000Z" },
 };
 const make = overrides => memoryClaim({ ...base, ...overrides });

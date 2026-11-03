@@ -2,13 +2,14 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://flow-agents.dev/schemas/knowledge/memory-claim.schema.json",
   "title": "Knowledge Memory Claim",
-  "description": "One immutable, identified assertion distilled from a conversation or record: subject, property, value, valid time, speaker/source and epistemic posture as typed fields. `posture` is how the speaker asserted it (stated / proposed / hypothetical / retracted); it is not the claim's review state, which is derived from its routing decision and any Survey review (see memory-routing-decision.schema.json). `id` is the sha256 digest of the claim's content (case-folded subject, property, value and speaker; valid time; posture; supersedes; audience; source.ref), recomputed on read. The evidence fields (source.locator, excerpt, observedAt, role, extractor) are not part of identity, so two extraction passes that find the same fact find the same claim. A revision is a new claim with a new id. Field names follow the Surface knowledge-accumulation decision (subject type/id, property slot, half-open valid time, supersedes edges). Those edge and interval shapes are proposed there pending Hachure; this schema carries them as caller-owned fields and is not a Hachure bundle.",
+  "description": "One immutable, identified assertion distilled from a conversation or record: subject, property, value, valid time, speaker/source and epistemic posture as typed fields. `posture` is how the speaker asserted it (stated / proposed / hypothetical / retracted); it is not the claim's review state, which is derived from its routing decision and any Survey review (see memory-routing-decision.schema.json). Field names follow the Surface knowledge-accumulation decision (kontourai/surface@7486c6d, docs/decisions/knowledge-accumulation.md): a subject is a (type, id) reference; a property slot is the subject plus `claimType`, `property` (Surface's `fieldOrBehavior`) and canonical `qualifiers`; `validTime` is a half-open interval [from, until) that is neither Surface's inclusive authority-trace `validUntil` nor `expiresAt` freshness; `supersedes` edges are `correction` or `succession` with a reason. Those interval and edge shapes are proposed there pending Hachure, so this schema carries them as caller-owned fields and is not a Hachure bundle. `id` is the sha256 digest of the claim's content (subject, claimType, property, qualifiers, value, validTime, speaker, posture, supersedes, audience, source.ref), recomputed on read; values compare by structural JSON equality, so a different spelling is a different claim. The evidence fields (source.locator, excerpt, observedAt, role, extractor) are not part of identity. A revision is a new claim with a new id.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "id",
     "subject",
+    "claimType",
     "property",
     "value",
     "speaker",
@@ -45,9 +46,22 @@
         }
       }
     },
+    "claimType": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Surface's claimType. The Kit assigns knowledge.memory-claim."
+    },
     "property": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Surface's fieldOrBehavior."
+    },
+    "qualifiers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Surface canonical qualifiers; part of the slot. The extractor does not produce them yet, so slots are coarser than Surface's and conflict more readily."
     },
     "value": {
       "description": "Any JSON value. Equality is structural JSON equality."
@@ -55,7 +69,7 @@
     "validTime": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Half-open interval [from, until) of when the assertion says the value held in the world. Absent bounds are unbounded; an absent validTime asserts no bound.",
+      "description": "Half-open interval [from, until) of when the assertion says the value held in the world. Absent bounds are unbounded; an absent validTime asserts no bound. Instants are ISO 8601 dates or zoned date-times; an empty or unparseable interval is rejected, never guessed.",
       "properties": {
         "from": {
           "type": "string",

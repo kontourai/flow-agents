@@ -1,29 +1,30 @@
 {
   "agreement": {
-    "sha256:20c5ce1b814012ded9f8fefc200f23d791c2089c200ca092c96df84d30b6f6ce": {
+    "sha256:048a244cd3b0b7f64b89ddb57397f32ba7e1c1dc5dd1f8cd454f3768815a3593": {
       "agreeing": 2,
       "passes": 2
     },
-    "sha256:8d3f2a471b061ee728f62ed977ae8772b360f5c031b36f3667770b38a6c37172": {
+    "sha256:46f7710b791d2b354c3e83f48093c03647571951f68ea68bc91022ffad938e73": {
+      "agreeing": 2,
+      "passes": 2
+    },
+    "sha256:777ee4511631381fad4db992680122f4928629e730c4dd9d61498f8b3efcf60f": {
+      "agreeing": 2,
+      "passes": 2
+    },
+    "sha256:7c8401f1c288568d270d25728262e82a1398cdec21069ff2cb2c930d80abb0db": {
+      "agreeing": 2,
+      "passes": 2
+    },
+    "sha256:d03be2fe12d2f01601964827977a6168383836cadd35f1083f4cc125d1b504a3": {
       "agreeing": 1,
-      "passes": 2
-    },
-    "sha256:df34bdff6aa6fa50283a698aad46f11f46c4806dd1494f63ac64e24a3a0f5214": {
-      "agreeing": 2,
-      "passes": 2
-    },
-    "sha256:e946f30308f494e2a5b62673b401a387fa34fd38d2831253d233cda3a31063e5": {
-      "agreeing": 2,
-      "passes": 2
-    },
-    "sha256:ec4ac3dbad396c995e10180e3cd5963756dd6652ca89ee504e982808ac66417e": {
-      "agreeing": 2,
       "passes": 2
     }
   },
   "claims": [
     {
-      "id": "sha256:e946f30308f494e2a5b62673b401a387fa34fd38d2831253d233cda3a31063e5",
+      "claimType": "knowledge.memory-claim",
+      "id": "sha256:048a244cd3b0b7f64b89ddb57397f32ba7e1c1dc5dd1f8cd454f3768815a3593",
       "posture": "stated",
       "property": "primary database",
       "schema_version": "1.0",
@@ -43,7 +44,7 @@
       },
       "supersedes": [
         {
-          "claimId": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+          "claimId": "sha256:7d93ef8b47c8a6d042f790577ed7f484086caa878cb6f7ffe22580ea6d629606",
           "kind": "succession",
           "reason": "the speaker presented the value as replacing the earlier one"
         }
@@ -54,7 +55,8 @@
       "value": "PostgreSQL 16"
     },
     {
-      "id": "sha256:ec4ac3dbad396c995e10180e3cd5963756dd6652ca89ee504e982808ac66417e",
+      "claimType": "knowledge.memory-claim",
+      "id": "sha256:777ee4511631381fad4db992680122f4928629e730c4dd9d61498f8b3efcf60f",
       "posture": "stated",
       "property": "retry budget",
       "schema_version": "1.0",
@@ -75,7 +77,8 @@
       "value": "8 attempts per request"
     },
     {
-      "id": "sha256:20c5ce1b814012ded9f8fefc200f23d791c2089c200ca092c96df84d30b6f6ce",
+      "claimType": "knowledge.memory-claim",
+      "id": "sha256:46f7710b791d2b354c3e83f48093c03647571951f68ea68bc91022ffad938e73",
       "posture": "retracted",
       "property": "on-call owner",
       "schema_version": "1.0",
@@ -95,7 +98,7 @@
       },
       "supersedes": [
         {
-          "claimId": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+          "claimId": "sha256:f2be01b83419e95f3e698d9a8fffb4a49b55d0740d10933afd3a88a09b2c121d",
           "kind": "correction",
           "reason": "the speaker retracted this assertion"
         }
@@ -103,7 +106,8 @@
       "value": "Maya Chen"
     },
     {
-      "id": "sha256:df34bdff6aa6fa50283a698aad46f11f46c4806dd1494f63ac64e24a3a0f5214",
+      "claimType": "knowledge.memory-claim",
+      "id": "sha256:7c8401f1c288568d270d25728262e82a1398cdec21069ff2cb2c930d80abb0db",
       "posture": "hypothetical",
       "property": "sharding technology",
       "schema_version": "1.0",
@@ -124,7 +128,8 @@
       "value": "Citus"
     },
     {
-      "id": "sha256:8d3f2a471b061ee728f62ed977ae8772b360f5c031b36f3667770b38a6c37172",
+      "claimType": "knowledge.memory-claim",
+      "id": "sha256:d03be2fe12d2f01601964827977a6168383836cadd35f1083f4cc125d1b504a3",
       "posture": "stated",
       "property": "lead",
       "schema_version": "1.0",

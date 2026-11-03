@@ -258,7 +258,7 @@ const candidateBase = (claim: MemoryClaim, rank: number) => ({
   source: { sourceRef: claim.source.ref, kind: "agent-utterance" as const, observedAt: claim.source.observedAt },
   locator: { scheme: "text-span" as const, locator: claim.source.locator, excerpt: claim.source.excerpt },
   extraction: { target: `${claim.subject.id}.${claim.property}`, ...(claim.source.extractor ? { extractor: claim.source.extractor } : {}) },
-  claimTarget: { claimId: claim.id, subjectType: claim.subject.type, subjectId: claim.subject.id, facet: "memory", claimType: "knowledge.memory-claim", fieldOrBehavior: claim.property, impactLevel: "medium" as const },
+  claimTarget: { claimId: claim.id, subjectType: claim.subject.type, subjectId: claim.subject.id, facet: "memory", claimType: claim.claimType, fieldOrBehavior: claim.property, impactLevel: "medium" as const },
 });
 
 /**

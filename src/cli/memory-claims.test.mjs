@@ -139,6 +139,9 @@ test("supersedes edges are only drawn where all of the evidence is present", asy
   const planned = memoryClaim({ ...old, posture: "proposed" });
   assert.equal(assembleOne({ ...WIDGET, value: "PostgreSQL 16", validFrom: "2026-10-30", replacesPrior: true }, { current: [planned] }).claims[0].supersedes, undefined);
 
+  // A claim revises its own speaker's earlier claim; replacing someone else's needs an authority decision the Kit cannot make.
+  assert.equal(edges({ value: "PostgreSQL 16", validFrom: "2026-10-30", replacesPrior: true, speaker: "Maya Chen" }), undefined, "another speaker's claim is not replaced by an edge");
+
   const retract = fields => assembleOne({ subject: "widget service", subjectType: "service", property: "on-call owner", posture: "retracted", ...fields }, { current }).claims[0].supersedes;
   assert.deepEqual(retract({ value: "Maya Chen" })?.map(edge => [edge.claimId, edge.kind]), [[owner.id, "correction"]], "the control");
   assert.equal(retract({ value: "Someone Else" }), undefined, "retracting a value nobody held corrects nothing");
@@ -181,6 +184,9 @@ test("an incomplete, postureless, ungrounded or malformed group is rejected with
     "unknown posture": { ...good, posture: "certain" },
     "no value": { ...good, value: undefined },
     "bad valid time": { ...good, validFrom: "next tuesday" },
+    "a date Date.parse would guess at": { ...good, validFrom: "Oct 30 2026" },
+    "a year alone": { ...good, validFrom: "2026" },
+    "a date-time without a zone": { ...good, validFrom: "2026-10-30T10:00:00" },
     "empty interval": { ...good, validFrom: "2026-10-30", validUntil: "2026-10-01" },
   };
   for (const [name, bad] of Object.entries(cases)) {
@@ -201,6 +207,28 @@ test("two proposals for one field of one claim keep the first, the provider's pr
     proposal("claims[].subject", "svc"), proposal("claims[].property", "p"), proposal("claims[].value", "first"), proposal("claims[].value", "second"), proposal("claims[].posture", "stated"),
   ] }, { sourceRef: "s", locate: () => ({ observedAt: "2026-01-01T00:00:00.000Z" }) });
   assert.equal(claims[0].value, "first");
+});
+
+test("identity is exact: a value, property or subject that differs only in case is a different claim with a different id", async () => {
+  const { earlier } = await fixtureClaims();
+  const claim = earlier.result.claims[0];
+  for (const changed of [{ value: "postgresql 15" }, { property: "Primary Database" }, { speaker: "User" }, { claimType: "other" }, { qualifiers: { environment: "prod" } }]) {
+    assert.notEqual(memoryClaim({ ...claim, ...changed }).id, claim.id, JSON.stringify(changed));
+  }
+  assert.equal(memoryClaim({ ...claim, audience: ["b", "a"] }).id, memoryClaim({ ...claim, audience: ["a", "b"] }).id, "audience is a set");
+});
+
+test("the slot is Surface's canonical claim key plus claimType", async () => {
+  const { memorySlotKey } = await import("@kontourai/flow-agents/memory-claims");
+  const { canonicalClaimKey } = await import("@kontourai/surface");
+  const { earlier } = await fixtureClaims();
+  const claim = earlier.result.claims[0];
+  const surface = canonicalClaimKey({ subjectType: claim.subject.type, subjectId: claim.subject.id, fieldOrBehavior: claim.property });
+  assert.ok(memorySlotKey(claim).includes(JSON.stringify(surface).slice(1, -1)), "built from Surface's key, not a parallel one");
+  assert.equal(memorySlotKey({ ...claim, property: "  PRIMARY DATABASE " }), memorySlotKey(claim), "Surface lower-cases and trims the field");
+  assert.notEqual(memorySlotKey({ ...claim, claimType: "other" }), memorySlotKey(claim));
+  assert.notEqual(memorySlotKey({ ...claim, qualifiers: { environment: "prod" } }), memorySlotKey(claim));
+  assert.notEqual(memorySlotKey({ ...claim, subject: { ...claim.subject, id: claim.subject.id.toUpperCase() } }), memorySlotKey(claim), "Surface preserves subject-id case");
 });
 
 test("claim ids bind content, not evidence: re-finding a fact elsewhere in the sitting is the same claim, a changed value is not", async () => {
