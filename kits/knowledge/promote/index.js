@@ -31,7 +31,8 @@ export {
   commitRuntimeCursor,
   DEFAULT_IDLE_GAP_MS,
 } from "./runtime-session.js";
-export { INJECTED_MEMORY_OPEN, INJECTED_MEMORY_CLOSE, HARNESS_TAGS } from "./runtime-transcript.js";
+export { INJECTED_MEMORY_OPEN, INJECTED_MEMORY_CLOSE } from "../memory-marker.js";
+export { HARNESS_TAGS } from "./runtime-transcript.js";
 export { scrubResidueText } from "./runtime-redaction.js";
 export { distill } from "./distill.js";
 export { link } from "./link.js";

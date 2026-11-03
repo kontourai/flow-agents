@@ -24,15 +24,12 @@
 
 import { createClaudeCodeImporter, createCodexImporter, detectFormat } from "@kontourai/ferry";
 
+import { INJECTED_MEMORY_CLOSE, INJECTED_MEMORY_OPEN } from "../memory-marker.js";
 import { claudeHarnessEntryIds, codexDeveloperPartKeys, codexSessionMeta, partKey } from "./runtime-ferry-shims.js";
 
-/**
- * Wrapper the injection slice (#672) must place around any memory it injects
- * into a session. Ingest strips every block between these markers (and, for an
- * unterminated block, everything after the opening marker in that text block).
- */
-export const INJECTED_MEMORY_OPEN = "<flow-agents-injected-memory>";
-export const INJECTED_MEMORY_CLOSE = "</flow-agents-injected-memory>";
+// The marker lives in a dependency-free module so #672's hook path can import
+// it without this file's Ferry import; re-exported here for existing callers.
+export { INJECTED_MEMORY_OPEN, INJECTED_MEMORY_CLOSE };
 
 /**
  * Harness-injected tags removed (with their content) from user/assistant text.

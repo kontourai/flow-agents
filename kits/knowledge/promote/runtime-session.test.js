@@ -7,6 +7,7 @@
  * fragments here, so no detector-shaped literal is committed.
  */
 
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -509,6 +510,32 @@ describe("AC3 deterministic redaction scrub", () => {
 });
 
 describe("injected-memory marker", () => {
+  test("the marker module is dependency-free and its names and values are stable", () => {
+    const markerFile = path.join(KIT, "memory-marker.js");
+    const hooks = path.join(os.tmpdir(), `marker-hooks-${process.pid}.mjs`);
+    fs.writeFileSync(
+      hooks,
+      "export async function resolve(s, c, n) { console.error('RESOLVE ' + s); return n(s, c); }\n",
+    );
+    const bootstrap = `import { register } from "node:module"; register(${JSON.stringify(`file://${hooks}`)});`;
+    const child = spawnSync(
+      process.execPath,
+      ["--import", `data:text/javascript,${encodeURIComponent(bootstrap)}`, "--input-type=module", "-e",
+        `import(${JSON.stringify(`file://${markerFile}`)}).then((m) => console.log(JSON.stringify(m)))`],
+      { encoding: "utf8" },
+    );
+    fs.rmSync(hooks);
+    assert.equal(child.status, 0, child.stderr);
+    assert.deepEqual(JSON.parse(child.stdout), {
+      INJECTED_MEMORY_OPEN: "<flow-agents-injected-memory>",
+      INJECTED_MEMORY_CLOSE: "</flow-agents-injected-memory>",
+    });
+    const resolved = child.stderr.split("\n").filter((l) => l.startsWith("RESOLVE "));
+    assert.ok(resolved.length >= 1, "resolve hook must have observed the import");
+    assert.deepEqual(resolved.filter((l) => !l.endsWith("memory-marker.js")), [], "marker module must import nothing");
+    assert.equal(INJECTED_MEMORY_OPEN, "<flow-agents-injected-memory>");
+  });
+
   test("closed and unterminated injected-memory blocks are removed before residue", () => {
     assert.equal(
       stripInjectedContent(`before ${INJECTED_MEMORY_OPEN}memory${INJECTED_MEMORY_CLOSE} after`),
