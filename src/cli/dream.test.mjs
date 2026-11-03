@@ -1048,11 +1048,30 @@ test("report counters are per claim: a claim proposed uncontested and routed on 
 });
 
 test("the mapper is given every claim a replacement points at, not only the slot's", async (t) => {
-  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const vis = { kind: "restricted", audiences: ["user:owner"] };
+  const base = { subject: { type: "service", id: "other", label: "other" }, claimType: "knowledge.memory-claim", speaker: "user", posture: "stated", visibility: vis };
+  const target = memoryClaim({ ...base, property: "old thing", value: "v1", source: { ref: "sitting:t", locator: "chars:0-1", excerpt: "t", observedAt: "2026-10-01T00:00:00.000Z" } });
+  // B sits in the same slot as the claim this run will make, and replaces `target`, which lives in ANOTHER slot.
+  const slotOfRun = { subject: { type: "service", id: "ledger service", label: "ledger service" }, property: "rounding mode" };
+  const successor = memoryClaim({ ...base, ...slotOfRun, value: "something", source: { ref: "sitting:s", locator: "chars:0-2", excerpt: "s", observedAt: "2026-10-02T00:00:00.000Z" }, supersedes: [{ claimId: target.id, kind: "succession", reason: "the speaker said it replaces the earlier value" }], validTime: { from: "2026-10-02T00:00:00Z" } });
+  let n = 0;
+  for (const claim of [target, successor]) {
+    const entry = { claim, agreement: { passes: 2, agreeing: 2 }, project: null };
+    const decision = routeMemoryChange({ type: "claim", claim, current: [], agreement: entry.agreement, sourceVisibility: vis });
+    await store.proposeCreate({ title: `seed ${n}`, category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: `seed:${n++}`, contentHash: "h", visibilityKey: visibilityKey(vis) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
+  }
   const seen = [];
-  await runDream({ ...host, project: async (request) => { seen.push(request); return { outcome: "current", candidateClaimIds: request.claims.map((c) => c.id), gapCodes: [] }; } }, runOptions(ws, { onStage: () => {} }));
-  assert.ok(seen.length > 0);
-  for (const request of seen) assert.ok(request.claims.every((claim) => claim.metadata.memory));
-  assert.equal((await store.listProposals()).length, 2);
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), {
+    project: async (request) => { seen.push(request); return { outcome: "current", candidateClaimIds: request.claims.map((c) => c.id), gapCodes: [] }; },
+  });
+  const report = await runDream(host, runOptions(ws, { visibility: vis }));
+  assert.equal(report.status, "success");
+  const withEdge = seen.find((request) => request.claims.some((claim) => claim.id === successor.id));
+  assert.ok(withEdge, "the host was asked about the slot that holds the replacement; the mapper was not starved of its target");
+  assert.ok(withEdge.claims.some((claim) => claim.id === target.id), "and the replaced claim travelled with its successor");
 });
