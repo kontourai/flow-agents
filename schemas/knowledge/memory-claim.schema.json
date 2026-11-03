@@ -171,7 +171,7 @@
         "type": "string",
         "minLength": 1
       },
-      "description": "Principals allowed to see the claim. Absent means it inherits its source's audience; omission never widens."
+      "description": "Principals allowed to see the claim. Absent means it inherits its source's audience; the visibility-widening rule checks the requested or inherited audience against the source and the current claims in the slot."
     }
   }
 }

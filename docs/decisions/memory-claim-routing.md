@@ -41,7 +41,7 @@ memory; every other piece stays with its owner.
   (`kontourai/surface#204`, design merged at `7486c6d`; slot identity uses Surface's
   `canonicalClaimKey` plus `claimType`, values compare by structural JSON equality, and
   `validTime` is half-open); entity merge and split review is Survey's
-  (`kontourai/survey#243`); the visibility lattice is Surface's
+  (`kontourai/survey#243`, whose `EntityProposal` the Kit reads by structure); the visibility lattice is Surface's
   (`kontourai/surface#350`). The Kit takes the current claims and an opaque entity
   proposal reference as input, and compares audiences by set inclusion until the
   lattice exists.
