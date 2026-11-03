@@ -153,6 +153,23 @@ id is the sitting's working-directory name. Nothing else decides scope.
   markers are removed from every entry, because #672's reader drops the whole file if any
   entry has one.
 
+## Invocation contract (what a host scheduler calls)
+
+This is the surface a host scheduler (Station's hosted scheduler, station#4484) binds to. It is
+pinned by `src/cli/dream-host.test.mjs`, so changing it breaks a test.
+
+| What | Name |
+|---|---|
+| Flow id | `knowledge.dream` (`kits/knowledge/flows/dream.flow.json`) |
+| Kit adapter id | `knowledge.dream-runner` (`kits/knowledge/dream/index.js`) |
+| Library call | `runDream(host, options)`, exported from `kits/knowledge/dream/index.js`; resolves to the run report |
+| Command | `node kits/knowledge/dream/cli.js run --config <abs> [--dry-run] [--trigger NAME]`; prints the report as one JSON line |
+| Exit codes | 0 ran (success, noop, dry-run), 1 failed, 2 disabled or misconfigured, 3 blocked telemetry, 75 another run holds the lock |
+| Report | `schema_version: "1.0"`, written to `<dreamDir>/reports/<run_id>.json`; `status` is `success`, `noop`, `dry-run`, `blocked` or `failed` |
+| Stage names | `ingest`, `distill`, `route`, `propose`, `receipt`, `publish`, `brief`, `report`, `cursor` (passed to `options.onStage`) |
+
+`options.trigger` is recorded in the report and nothing else, so a scheduler can name itself.
+
 ## Turning it on
 
 Nothing is on by default. A host (Station's scheduler is the hosted path,

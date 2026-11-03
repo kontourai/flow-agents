@@ -354,3 +354,27 @@ test("this repo's own scheduler wiring: no boo recipe, launchd job, cron entry o
   assert.ok(!/\bboo\b\s+(add|run|enable)|launchctl|crontab/.test(sources));
   assert.ok(fileURLToPath(import.meta.url));
 });
+
+test("the invocation contract a host scheduler binds to is pinned: ids, exports, report fields, statuses", async (t) => {
+  const index = await import("../../kits/knowledge/dream/index.js");
+  for (const name of ["runDream", "defaultDreamDir", "loadDreamConfig", "handleTrigger", "createRoleRuntime", "extractForRuntime"]) assert.equal(typeof index[name], "function", name);
+  const kit = JSON.parse(fs.readFileSync(path.join(KIT, "kit.json"), "utf8"));
+  assert.ok(kit.flows.some((flow) => flow.id === "knowledge.dream"));
+  assert.equal(kit.adapters.find((adapter) => adapter.id === "knowledge.dream-runner").path, "dream/index.js");
+  assert.ok(kit.assets.some((asset) => asset.id === "knowledge.dream-cli" && asset.path === "dream/cli.js"));
+
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const host = hostFor(ws, noApplyStore(new FakeCorpusStore(ws.memoryRoot)), await scriptedExtract());
+  const report = await index.runDream(host, runOptions(ws, { trigger: "station-scheduler" }));
+  assert.deepEqual(Object.keys(report).sort(), [
+    "brief_excluded", "briefs", "claims", "cursor", "dry_run", "finished_at", "ingest", "metrics", "obsolete_briefs_removed", "receipts",
+    "redaction_hits", "review_items", "run_id", "schema_version", "sittings", "started_at", "status", "trigger", "unreadable_proposals",
+  ]);
+  assert.equal(report.schema_version, "1.0");
+  assert.equal(report.trigger, "station-scheduler");
+  assert.deepEqual(Object.keys(report.sittings).sort(), ["deferred_incomplete", "deferred_over_cap", "distilled", "resumed", "reused", "seen"]);
+  assert.deepEqual(Object.keys(report.claims).sort(), ["created", "distilled", "rejected", "reused", "routed", "truncated", "uncontested"]);
+  assert.ok(["success", "noop", "dry-run", "blocked", "failed"].includes(report.status));
+  assert.ok(fs.existsSync(path.join(ws.dreamDir, "reports", `${report.run_id}.json`)));
+});

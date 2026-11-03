@@ -10,9 +10,7 @@ import { runDream } from "../../kits/knowledge/dream/run.js";
 import { FakeCorpusStore, hostFor, noApplyStore, runOptions, scriptedExtract, workspace } from "./dream-support.mjs";
 
 const entry = process.env.CORPUS_STORE_ENTRY;
-// corpus#40's amendment renames apply/reject to applyCreate/rejectCreate; the #42 head may still carry the old names.
-const applyCreate = (store, ...args) => (store.applyCreate ? store.applyCreate(...args) : store.apply(...args));
-const skip = entry ? false : "set CORPUS_STORE_ENTRY to a built @kontourai/corpus-store (corpus#42) to run";
+const skip = entry ? false : "set CORPUS_STORE_ENTRY to a built @kontourai/corpus-store (corpus main at f81d86f, from corpus#42) to run";
 
 async function realStore(ws) {
   const { KitDefaultStoreAdapter, standaloneFileMutationLock } = await import(pathToFileURL(entry).href);
@@ -36,8 +34,8 @@ test("real Corpus: the run proposes, a replay is a no-op, and only a distinct re
   assert.equal((await runDream(host, runOptions(ws))).status, "noop");
   assert.equal((await store.listProposals()).length, 2);
 
-  await assert.rejects(() => applyCreate(store, proposals[0].id, "knowledge.dream"), (error) => error.code === "SELF_APPROVAL", "Corpus itself refuses the distiller approving its own proposal");
-  const recordId = await applyCreate(store, proposals[0].id, "a-human-reviewer");
+  await assert.rejects(() => store.applyCreate(proposals[0].id, "knowledge.dream"), (error) => error.code === "SELF_APPROVAL", "Corpus itself refuses the distiller approving its own proposal");
+  const recordId = await store.applyCreate(proposals[0].id, "a-human-reviewer");
   const report = await runDream(host, runOptions(ws));
   assert.equal(report.brief_excluded.self_approved, 0);
   const brief = JSON.parse(fs.readFileSync(ws.briefs(), "utf8"));
@@ -90,7 +88,7 @@ test("the in-test store has the proposal shape the real store writes", { skip },
   const fakeId = await fake.proposeCreate(candidate, "knowledge.dream", evidence);
   const shape = (proposal) => Object.keys(proposal).sort();
   assert.deepEqual(shape(await fake.getProposal(fakeId)), shape(await real.getProposal(realId)));
-  const realRecord = await real.get(await applyCreate(real, realId, "reviewer"));
+  const realRecord = await real.get(await real.applyCreate(realId, "reviewer"));
   assert.deepEqual(shape((await fake.getProposal(fakeId))), shape(await real.getProposal(realId)).filter((key) => key !== "reviewer_id" && key !== "decided_at" && key !== "record_id"));
   assert.ok(realRecord.mutation_log.some((entryLog) => entryLog.op === "apply-create" && entryLog.evidence.proposal_id === realId));
 });
