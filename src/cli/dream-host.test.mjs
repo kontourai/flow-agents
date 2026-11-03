@@ -103,6 +103,8 @@ function writeConfig(ws, extra = {}) {
   const host = hostModule(ws.root, `
     import { FakeCorpusStore, scriptedExtract } from ${JSON.stringify(path.resolve(import.meta.dirname, "dream-support.mjs"))};
     export async function createDreamHost({ config, dryRun }) {
+      // Like a real store opener, this creates its root unless it has been told it is a dry run.
+      if (!dryRun) (await import("node:fs")).mkdirSync(${JSON.stringify(ws.memoryRoot)}, { recursive: true });
       const store = new FakeCorpusStore(${JSON.stringify(ws.memoryRoot)});
       return { store, extract: await scriptedExtract(), registerRoot() {}, publish() {}, dryRun, root: ${JSON.stringify(ws.memoryRoot)}, rootName: "memory" };
     }

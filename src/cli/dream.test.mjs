@@ -505,3 +505,44 @@ test("lock: no two owners, whatever interleaves creation; a half-written or unre
   fs.writeFileSync(file, JSON.stringify({ pid: process.pid, started_at: 1, token: "ancient" }));
   assert.throws(() => acquireDreamLock(file), (error) => error.code === "DREAM_LOCKED");
 });
+
+test("another proposer's plan for the same sitting is not this run's plan: it is ignored, and the sitting is still extracted", async (t) => {
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: (c) => (c.includes("banker's rounding") ? [{ quote: "I switched to banker's rounding on the total.", subject: "svc theirs", subjectType: "service", property: "mode", value: "theirs", posture: "stated" }] : []) } });
+  t.after(ws.cleanup);
+  await runDream(host, runOptions(ws, { proposerId: "the-other-dreamer" }));
+  fs.rmSync(ws.cursorFile);
+  const ours = await scriptedExtract({ claimsOf: (c) => (c.includes("banker's rounding") ? [{ quote: "I switched to banker's rounding on the total.", subject: "svc ours", subjectType: "service", property: "mode", value: "ours", posture: "stated" }] : []) });
+  const report = await runDream({ ...host, extract: ours }, runOptions(ws));
+  assert.equal(report.status, "success");
+  assert.ok(ours.calls.length > 0, "this proposer had no plan for the sitting, so it asked the model");
+  const mine = (await store.listProposals()).filter((p) => p.proposer_id === "knowledge.dream").map((p) => JSON.parse(p.candidate.body).claim.value);
+  assert.deepEqual(mine, ["ours"], "it proposed its own claim, not the other proposer's plan");
+});
+
+test("a stored routing decision that was edited and re-sealed is still refused: the decision must follow from its own input", async (t) => {
+  const { planDigest } = await import("../../kits/knowledge/dream/envelope.js");
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
+  t.after(ws.cleanup);
+  await runDream(host, runOptions(ws));
+  fs.rmSync(ws.cursorFile);
+  const [first] = await store.listProposals();
+  const body = JSON.parse(first.candidate.body);
+  // An attacker who knows the format keeps every digest consistent and only changes the outcome.
+  body.decision = { ...body.decision, outcome: "routed" };
+  body.plan[body.sitting.index] = { claim: body.claim, agreement: body.agreement, decision: body.decision, project: body.project };
+  body.sitting.planDigest = planDigest(body.plan);
+  fs.writeFileSync(`${store.dir}/${first.id}.json`, JSON.stringify({ ...first, candidate: { ...first.candidate, body: JSON.stringify(body) } }));
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.code === "DREAM_RECEIPT_CORRUPT" && error.proposalId === first.id);
+});
+
+test("a sitting that yields more than 32 claims proposes 32 and counts the rest", async (t) => {
+  const many = (content) => (content.includes("banker's rounding")
+    ? Array.from({ length: 40 }, (_, i) => ({ quote: "I switched to banker's rounding on the total.", subject: `svc ${String(i).padStart(2, "0")}`, subjectType: "service", property: "mode", value: `v${i}`, posture: "stated" }))
+    : []);
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: many } });
+  t.after(ws.cleanup);
+  const report = await runDream(host, runOptions(ws));
+  assert.equal((await store.listProposals()).length, 32);
+  assert.equal(report.claims.truncated, 8);
+  assert.equal(report.claims.distilled, 32);
+});
