@@ -721,8 +721,11 @@ referenced Claude Code project JSONL or Codex rollout. Then it:
 - scrubs the text, cwd, branch and transcript ref deterministically (`scrubResidueText`). Provider
   tokens, JWTs, private keys, URL credentials and secret-named assignments
   become `<SECRET>`, emails become `<EMAIL>`, and home directories become `~`.
-  No model is involved, so transcript text cannot argue its way past the scrub. The scrub fails toward over-redaction: a
-  quoted value runs to the next matching quote, however far.
+  No model is involved, so transcript text cannot argue its way past the scrub. The scrub fails toward over-redaction and is linear in the
+  input: a quoted secret value is extended over any further secret-named keys
+  inside it, an unmatched quote redacts to the end of its line, and a
+  non-whitespace run longer than 256 characters (base64, minified code) is
+  replaced whole with `<BLOB>`.
 
 Ownership boundaries:
 

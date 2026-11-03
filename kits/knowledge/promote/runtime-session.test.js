@@ -805,7 +805,10 @@ describe("review round 1 regressions (PR #1575)", () => {
       for (let i = 0, parts = 1 + Math.floor(rnd() * 6); i < parts; i += 1) {
         if (rnd() < 0.5) {
           const quote = pick(['"', "'", ""]);
-          text += `${pick(labels)}${pick(["=", ": ", " = ", ":"])}${quote}${rnd() < 0.5 ? canary : `v${canary}`}${quote} `;
+          const inner = rnd() < 0.3 ? `prefix ${pick(labels)}=abcd ` : "";
+          // an unquoted value ends at whitespace, so only a quoted one can hold several words
+          const body = rnd() < 0.5 || !quote ? canary : `two words ${canary}`;
+          text += `${pick(labels)}${pick(["=", ": ", " = ", ":"])}${quote}${quote ? inner : ""}${body}${quote} `;
         } else {
           text += pick(noise);
         }
@@ -817,6 +820,58 @@ describe("review round 1 regressions (PR #1575)", () => {
       checked += 1;
     }
     assert.ok(checked > 1000, `the generator must produce cases (${checked})`);
+  });
+
+  test("M6: a quoted secret that contains other secret-named keys is redacted whole, whatever the quoting", () => {
+    const tail = ["R4", "Canary", "Tail987"].join("");
+    for (const input of [
+      `password="prefix token=abcd ${tail}"`,
+      `password='prefix token="abcd ${tail}"'`,
+      `{"password": "prefix token=abcd ${tail}", "x": 1}`,
+      `password="prefix\r\ntoken=abcd ${tail}"\r\nnext=1`,
+      `password: "stray ${"prose ".repeat(300)}api_key="two words ${tail}" after`,
+    ]) {
+      const out = scrubResidueText(input);
+      assert.equal(out.includes(tail), false, input.slice(0, 50));
+      assert.equal(scrubResidueText(out), out, "idempotent");
+    }
+    // a long chain of unmatched quotes cannot leave the final secret behind
+    const chain = `${'password:"'.repeat(20000)}${tail}"`;
+    const chained = scrubResidueText(chain);
+    assert.equal(chained.includes(tail), false);
+    assert.equal(scrubResidueText(chained), chained);
+    assert.equal(scrubResidueText('x="1" password="ok" y="2"'), 'x="1" password=<SECRET> y="2"');
+    // `Bearer <word>` must not eat a key name that follows it
+    const bearerKey = ["hunter2", "hunter2"].join("");
+    assert.equal(scrubResidueText(`Bearer password: "${bearerKey}"`).includes(bearerKey), false);
+    // unterminated quote: the rest of the line is redacted, the next line is not
+    assert.equal(scrubResidueText('password: "oops no close\nnext line stays'), 'password: <SECRET>\nnext line stays');
+    // an escaped quote does not close the value
+    assert.equal(scrubResidueText('{"password": "a\\"b secret tail", "k": 1}'), '{"password": <SECRET>, "k": 1}');
+  });
+
+  test("the scrub is linear on pathological runs, and a data blob is replaced whole", () => {
+    const inputs = {
+      "a-": "a-".repeat(80000),
+      "a.": "a.".repeat(80000),
+      "eyJ-": "eyJ-".repeat(40000),
+      "sk-": "sk-".repeat(60000),
+      "http-ish": "a://b:".repeat(30000),
+      "BEGIN": "-----BEGIN PRIVATE KEY-----\n".repeat(8000),
+      "token_ in quotes": `password="${"token_".repeat(30000)}"`,
+      "stray quotes": 'password:"'.repeat(30000),
+    };
+    for (const [name, input] of Object.entries(inputs)) {
+      const started = process.hrtime.bigint();
+      const out = scrubResidueText(input);
+      const ms = Number(process.hrtime.bigint() - started) / 1e6;
+      assert.ok(ms < 3000, `${name}: ${ms.toFixed(0)} ms for ${input.length} bytes`);
+      assert.equal(scrubResidueText(out), out, `${name}: idempotent`);
+    }
+    assert.equal(scrubResidueText(`before ${"A".repeat(2000)} after`), "before <BLOB> after");
+    assert.equal(scrubResidueText(`k ${"A".repeat(256)} z`), `k ${"A".repeat(256)} z`);
+    const pem = ["-----BEGIN RSA ", "PRIVATE KEY-----\nMIIBOgIBAAJB\n-----END RSA ", "PRIVATE KEY-----"].join("");
+    assert.equal(scrubResidueText(`a ${pem} b`), "a <SECRET> b");
   });
 
   test("F6: Claude harness entries are excluded per record, for every message the record produced", () => {
