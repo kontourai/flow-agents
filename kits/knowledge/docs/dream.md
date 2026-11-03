@@ -55,6 +55,12 @@ steps of `flows/dream.flow.json`, each with a gate.
 
 ## Replay safety, and what is not here
 
+**A brief is a derived view of one snapshot.** Each run reads the store's proposals once, judges them, and
+writes the briefs; the store has no read transaction, so a claim another writer adds while the run is
+between that read and the brief write is not in that run's verdict. It is picked up by the next run, which
+re-derives the briefs from the store, so the window is one run. The same holds for a review decision that
+lands mid-run.
+
 The cursor is committed last, and the report is written before it, so any failure leaves
 the cursor where it was and the next run repeats the work. Nothing fallible runs after the
 commit (the follow-up report rewrite is best-effort, and the report already on disk names
@@ -174,12 +180,12 @@ id is the sitting's working-directory name. Nothing else decides scope.
   reviewer's value, and a claim rejected in review contests nothing; a hypothetical or retracted claim asserts nothing about the present.
   A plan (`proposed` posture) neither contests nor is contested. This is a local stand-in for
   Surface's accumulation projection (surface#359), which owns "which claims are current", is
-  merged but unpublished, and needs host-supplied admission decisions. See
+  published in Surface 6.3.0, and needs host-supplied admission decisions. See
   [#1584](https://github.com/kontourai/flow-agents/issues/1584).
 - **Where the contest fact comes from.** #1571 routes on a projection fact (`contested-by-
   accumulation`) and compares no values itself; Surface's `projectAccumulation` is meant to produce
   it, run by a host that holds the custody it needs (observations with digests and an authority
-  snapshot). It is merged but unpublished, and this run holds no custody, so there is no seam for it
+  snapshot). It is published in Surface 6.3.0, but this run holds no custody, so there is no seam for it
   here yet: **the dream produces the fact itself** with `classifyCurrent`, the local stand-in
   (`gapCodes: ["dream-stand-in"]` in every stored fact says so), computed over the values review has
   left. There is one verdict function, but it is given different claims at different moments: routing

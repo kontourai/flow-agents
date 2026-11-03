@@ -1002,6 +1002,7 @@ test("report counters are per claim: every proposed claim has exactly one outcom
   const { ws, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf: clash } });
   t.after(ws.cleanup);
   const report = await runDream(host, runOptions(ws));
+  assert.equal(report.claims.contested_routed, 0, "both were routed when proposed, so the backfill leaves them alone instead of routing them a second time");
   assert.equal(report.claims.routed + report.claims.uncontested, report.claims.created, "one outcome per proposed claim");
   assert.equal(host.published.at(-1).decisions.length, report.claims.created, "and one decision per claim goes to publish");
 });

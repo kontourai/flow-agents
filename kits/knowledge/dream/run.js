@@ -278,7 +278,7 @@ export async function runDream(host, options = {}) {
     reslot();
 
     // The contest fact for a claim's slot, in the shape #1571 routes on (Surface's accumulation projection result).
-    // Surface's projection is merged but unpublished and needs custody this run does not hold, so the fact comes from
+    // Surface's projection (published in 6.3.0) needs custody this run does not hold, so the fact comes from
     // `classifyCurrent`, the stand-in that applies the same slot rules locally, over the values review has left
     // (kontourai/flow-agents#1584). There is one verdict function: routing, the review-queue backfill and the brief all
     // use it, so they agree by construction.

@@ -126,9 +126,9 @@ const overlap = (x, y) => x === null || y === null || (x.from < y.until && y.fro
  * Values are read as the reviewer left them: pass items whose `claim.value` is the value a
  * Survey correction presents (see `effectiveItems`), so a corrected claim contests as what it now says.
  *
- * TEMPORARY: Surface's accumulation projection (kontourai/surface#359) owns "which
- * claims are current" and is merged but unpublished (6.2.1 has no accumulation module),
- * and it needs host-supplied custody and admission decisions this run does not have.
+ * TEMPORARY: Surface's accumulation projection (kontourai/surface#359, published in 6.3.0) owns
+ * "which claims are current", and it needs host-supplied custody and admission decisions this
+ * run does not have.
  * This applies the same slot rules locally. Replace it with the projection:
  * kontourai/flow-agents#1584.
  *
