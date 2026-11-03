@@ -352,7 +352,7 @@ export const DEFAULT_DISTILL_PASSES = 2;
  * disagree on a start date disagree. Only spelling is forgiven; identity (`id`) is stricter still.
  */
 const agreementKey = (claim: MemoryClaim): string =>
-  canonicalJson([memorySlotKey(claim), claim.posture, foldMemoryText(claim.speaker), claim.validTime ? [memoryInstant(claim.validTime.from) ?? null, memoryInstant(claim.validTime.until) ?? null] : null, (claim.supersedes ?? []).map(edge => [edge.claimId, edge.kind]).sort(), typeof claim.value === "string" ? foldMemoryText(claim.value) : claim.value]);
+  canonicalJson([memorySlotKey(claim), claim.posture, foldMemoryText(claim.speaker), claim.validTime ?? null, (claim.supersedes ?? []).map(edge => [edge.claimId, edge.kind]).sort(), typeof claim.value === "string" ? foldMemoryText(claim.value) : claim.value]);
 
 /**
  * Runs `passes` independent extractions over one sitting and assembles the
