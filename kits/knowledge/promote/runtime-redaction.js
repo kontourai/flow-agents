@@ -26,10 +26,16 @@ const SECRET_WORDS = new Set([
 ]);
 const SECRET_WORD_PAIRS = new Set(["api key", "access key", "private key", "connection string"]);
 
-/** `my_api_token_2`, `Client-Secret`, `PASSWORD`: a key with a secret word between plain segments. */
+/** `my_api_token_2`, `Client-Secret`, `accessToken`, `PASSWORD`: a key with a secret word among its segments. */
 function isSecretName(identifier) {
-  const segments = identifier.toLowerCase().split(/[_-]/);
-  if (segments.some((segment) => segment === "")) return false;
+  // Empty segments (`--password`, `foo--token`) are separators, not part of the key.
+  // camelCase (`accessToken`, `clientSecret`) splits like snake_case; `PASSWORD2` is `password`.
+  const segments = identifier
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[_-]/)
+    .map((segment) => segment.replace(/[0-9]+$/, ""))
+    .filter((segment) => segment !== "");
   for (let i = 0; i < segments.length; i += 1) {
     if (SECRET_WORDS.has(segments[i]) || (i + 1 < segments.length && SECRET_WORD_PAIRS.has(`${segments[i]} ${segments[i + 1]}`))) {
       return true;
@@ -54,7 +60,7 @@ const SECRET_PATTERNS = [
 const URL_CREDENTIAL = /\b([a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s/]+(@)/gi;
 const BEARER = /\b(bearer\s+)[A-Za-z0-9._~+/-]{8,}=*/gi;
 // YAML block scalar header: `token: |`, `"token": >-`, `- token: |2 # note`.
-const BLOCK_SCALAR_HEADER = /^([ \t]*(?:-[ \t]+)?)(["']?)([A-Za-z0-9_-]{1,256})\2[ \t]*:[ \t]*[|>][0-9+-]*[ \t]*(?:#.*)?$/;
+const BLOCK_SCALAR_HEADER = /^([ \t]*(?:-[ \t]+)?)(["']?)([A-Za-z0-9_.-]{1,256})\2[ \t]*:[ \t]*[|>][0-9+-]*[ \t]*(?:#.*)?$/;
 
 /**
  * Replace the body of every secret-named YAML block scalar. The body is the
@@ -68,7 +74,8 @@ function scrubBlockScalars(text) {
   for (let i = 0; i < lines.length; i += 1) {
     const header = BLOCK_SCALAR_HEADER.exec(lines[i].replace(/\r$/, ""));
     out.push(lines[i]);
-    if (!header || !isSecretName(header[3])) continue;
+    // `db.password: |`: any dotted part may be the secret-named one.
+    if (!header || !header[3].split(".").some(isSecretName)) continue;
     const keyIndent = header[1].length;
     let last = i;
     for (let j = i + 1; j < lines.length; j += 1) {
@@ -85,6 +92,10 @@ function scrubBlockScalars(text) {
   return out.join("\n");
 }
 const PLACEHOLDER = "<SECRET>";
+// `Bearer `/`Basic ` and every whitespace character after it (sticky: matches only at lastIndex).
+const SCHEME = /(?:bearer|basic)\s+/iy;
+// What may follow a complete value: end of text, whitespace, or a value terminator.
+const VALUE_END = /[\s"',;}]/;
 const IDENTIFIER = /[A-Za-z0-9_-]+/g;
 const WHITESPACE = /\s/;
 
@@ -110,13 +121,15 @@ function assignmentValue(text, identifierEnd) {
   if (text[i] !== ":" && text[i] !== "=") return null;
   i += 1;
   while (i < text.length && WHITESPACE.test(text[i])) i += 1;
-  const scheme = /^(?:bearer|basic)\s+/i.exec(text.slice(i, i + 12));
-  if (scheme) i += scheme[0].length;
+  SCHEME.lastIndex = i;
+  if (SCHEME.test(text)) i = SCHEME.lastIndex;
   if (text[i] === '"' || text[i] === "'") return { start: i, end: closingQuoteEnd(text, text[i], i + 1) };
-  if (text.startsWith(PLACEHOLDER, i)) {
-    // Already redacted. Taking only the placeholder keeps a following key from being
-    // read as part of this value on a second pass, so the scrub is idempotent.
-    return { start: i, end: i + PLACEHOLDER.length };
+  const afterPlaceholder = i + PLACEHOLDER.length;
+  if (text.startsWith(PLACEHOLDER, i) && (afterPlaceholder === text.length || VALUE_END.test(text[afterPlaceholder]))) {
+    // Already redacted, and nothing glued to it. Taking only the placeholder keeps a following
+    // key from being read as part of this value on a second pass, so the scrub is idempotent.
+    // `<SECRET>tail` is not this case: the whole run is the value.
+    return { start: i, end: afterPlaceholder };
   }
   let end = i;
   while (end < text.length && !WHITESPACE.test(text[end]) && !`"',;}`.includes(text[end])) end += 1;
@@ -148,7 +161,10 @@ function scrubAssignments(text) {
       const nested = assignmentValue(text, inner.index + inner[0].length);
       if (nested !== null && nested.end > end) end = nested.end;
     }
-    out += `${text.slice(copied, value.start)}${PLACEHOLDER}`;
+    // A separator when the next character is not a value terminator, so the placeholder can
+    // never fuse with what follows it (which a second pass would read as one longer value).
+    const glued = end < text.length && !VALUE_END.test(text[end]);
+    out += `${text.slice(copied, value.start)}${PLACEHOLDER}${glued ? " " : ""}`;
     copied = end;
     IDENTIFIER.lastIndex = end;
   }
@@ -202,12 +218,16 @@ function scrubPrivateKeys(text) {
  * @returns {string}
  */
 export function scrubResidueText(value) {
-  let text = replaceBlobs(String(value ?? ""));
+  let text = String(value ?? "");
+  // Structural stages first, while the syntax they depend on is intact. All are linear.
   text = scrubPrivateKeys(text);
-  for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, "<SECRET>");
-  text = text.replace(URL_CREDENTIAL, "$1<SECRET>$2");
   text = scrubBlockScalars(text);
   text = scrubAssignments(text);
+  // The remaining stages are regexes that backtrack quadratically on a long run, so a data blob
+  // is replaced whole before they see it.
+  text = replaceBlobs(text);
+  for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, "<SECRET>");
+  text = text.replace(URL_CREDENTIAL, "$1<SECRET>$2");
   // After assignments: `Bearer <8+ chars>` must not swallow a key name like `Bearer password: "..."`.
   text = text.replace(BEARER, "$1<SECRET>");
   text = text.replace(EMAIL, "<EMAIL>");

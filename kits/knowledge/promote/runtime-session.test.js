@@ -797,7 +797,7 @@ describe("review round 1 regressions (PR #1575)", () => {
     const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
     const pick = (list) => list[Math.floor(rnd() * list.length)];
     const canary = ["zz", "canary", "zz"].join("");
-    const labels = ["password", "API_TOKEN", "token", "api_key", "client_secret", "Authorization"];
+    const labels = ["password", "API_TOKEN", "token", "api_key", "client_secret", "Authorization", "--password", "x-api-key", "my-api-key_2", "accessToken", "PASSWORD2"];
     const noise = ['password: "', "token='", 'api_key = "', '"', "'", "stray ", "prose words ", "\n", "`", ", ", "{", "}", "- ", "x=1 "];
     let checked = 0;
     for (let n = 0; n < 4000; n += 1) {
@@ -848,6 +848,33 @@ describe("review round 1 regressions (PR #1575)", () => {
     assert.equal(scrubResidueText('password: "oops no close\nnext line stays'), 'password: <SECRET>\nnext line stays');
     // an escaped quote does not close the value
     assert.equal(scrubResidueText('{"password": "a\\"b secret tail", "k": 1}'), '{"password": <SECRET>, "k": 1}');
+  });
+
+  test("M6: every key spelling and value framing the scrub supports hides its value, and the scrub stays idempotent", () => {
+    const canary = ["Ingest", "Delta", "Canary987"].join("");
+    const keys = ["password", "API_TOKEN", "my-api-key_2", "x-api-key", "client_secret", "Authorization", "--password", "--api-key", "-token", "foo--password", "auth_token", "refresh-token", "accessToken", "secretKey", "PASSWORD2", "db.password"];
+    const frames = [
+      (k) => `${k}=${canary}`, (k) => `${k}: ${canary}`, (k) => `"${k}": "${canary}"`, (k) => `${k} = '${canary}'`,
+      (k) => `export ${k}=${canary}`, (k) => `-H "${k}: Bearer ${canary}"`, (k) => `?${k}=${canary}&x=1`,
+      (k) => `{"a":{"${k}":"${canary}"}}`, (k) => `${k}:\n  ${canary}`,
+      (k) => `${k}: Basic${" ".repeat(8)}${canary}`, (k) => `${k}: Basic\t\t${canary}`,
+      (k) => `${k}="${"a".repeat(300)} ${canary}"`, (k) => `${k} = "${"a".repeat(300)} ${canary}"`,
+      (k) => `${k}: | #${"b".repeat(300)}\n  ${canary}\nnext: kept`,
+      (k) => `${k}=<SECRET>${canary}`, (k) => `${k}=ghp_${"A".repeat(25)}:${canary}`,
+    ];
+    for (const frame of frames) {
+      for (const key of keys) {
+        const input = frame(key);
+        const out = scrubResidueText(input);
+        assert.equal(out.includes(canary), false, `${key} / ${input.slice(0, 40)}`);
+        assert.equal(scrubResidueText(out), out, `idempotent: ${key} / ${input.slice(0, 40)}`);
+      }
+    }
+    // a placeholder glued to the next key stays apart from it
+    const glued = scrubResidueText('{password: ""password: "}');
+    assert.equal(scrubResidueText(glued), glued);
+    // not secret-named: left alone
+    assert.equal(scrubResidueText("max_tokens: 4096 bypass=value tokenizer=fast"), "max_tokens: 4096 bypass=value tokenizer=fast");
   });
 
   test("the scrub is linear on pathological runs, and a data blob is replaced whole", () => {
