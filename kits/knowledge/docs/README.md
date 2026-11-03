@@ -833,3 +833,14 @@ set `CORPUS_STORE_ENTRY` to its absolute `dist/index.js` before running
 variable the test reports skipped; it does not claim Corpus interoperability.
 Set `KNOWLEDGE_HOST_ROOT` to a checkout of the host as well to exercise
 its registry and MCP server in an isolated temporary XDG home.
+
+## Memory claims and routed review
+
+[The memory claim contract](memory-claims.md) defines the claim shape handed to Traverse as
+a caller-owned schema, the routed-review policy that sends only contradictions,
+consequential supersessions, entity changes, low-agreement extractions and visibility
+widenings to Survey review, the Flow evidence that makes each routing decision
+recomputable, and the per-run metrics. Uncontested claims are recorded as `proposed`,
+recallable and labelled unreviewed; `presentMemoryClaims` never shows a claim without
+its posture. It is exposed through the declared `knowledge.memory-claims` adapter and
+the `memory-claims`, `memory-routing` and `memory-routing-flow` package exports.

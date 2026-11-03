@@ -158,6 +158,11 @@
       "id": "knowledge.learning-lifecycle",
       "path": "adapters/learning-lifecycle/index.mjs",
       "description": "Versioned Knowledge learning lifecycle owner. Public projection and typed intents/receipts distinguish reviewed candidate/evaluation/decision/activation/effect/supersession/retirement from raw-record storage status. Uses host-derived current scope authority and exact source revisions; private transactional state and idempotent intent receipts survive lost replies."
+    },
+    {
+      "id": "knowledge.memory-claims",
+      "path": "adapters/memory-claims/index.mjs",
+      "description": "Memory claim schema and routed-review policy for distilled memory (#1571). The claim schema (subject, property, value, valid time, speaker/source, epistemic posture) is a caller-owned Traverse target schema; distillMemoryClaims turns Traverse proposals into schema-valid claims. Uncontested claims are recorded as proposed; contradiction, consequential supersession, entity merge/split, low extraction agreement and visibility widening route to Survey review. Each decision embeds its input and policy and is recorded as Flow evidence so routing is recomputable; per-run metrics report proposed count, routed share, reviewer decisions and review time."
     }
   ],
   "assets": [
