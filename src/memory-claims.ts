@@ -99,7 +99,7 @@ export function readAudienceList(value: unknown): string[] | undefined {
 /**
  * Reads a visibility from untrusted data for a CLAIM: exactly one of the two forms and nothing else, or undefined. This is
  * stricter than Surface's total reader (which ignores extra keys) because a claim that carries something else is malformed,
- * not merely narrow; `memoryVisibilityWithin` uses the lenient reading when it only needs an order.
+ * not merely narrow; the order (`memoryVisibilityWithin`) is Surface's own total `meetVisibility`.
  */
 export function readMemoryVisibility(value: unknown): MemoryVisibility | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;

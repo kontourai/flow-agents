@@ -42,18 +42,16 @@ memory; every other piece stays with its owner.
   read, and is recorded as Flow evidence. Recomputation reports an edited outcome, a
   changed policy, or a rule set that has drifted.
 - **Consume, do not fork.** Whether a slot is contested is Surface's: the contradiction rule fires on
-  `projectAccumulation`'s `contested` outcome (`kontourai/surface#359`, merged at `b7d932b`), run by the
+  `projectAccumulation`'s `contested` outcome (surface@6.3.0), run by the
   host, and the Kit compares no values itself. Slot identity uses Surface's `canonicalClaimKey` plus
   `claimType` (`#204`, design at `7486c6d`), values compare by structural JSON equality, and `validTime`
   is half-open. Consequence: until a reviewer verifies a successor and the host admits it, Surface keeps both
   candidates, so an unreviewed replacement is contested and routes; a replacement is auto-recorded as
   `proposed` only after that admission. The visibility
-  lattice is Surface's (`kontourai/surface#350`, merged at `18e3570`): a claim's `visibility`
-  has Surface's form and the Kit's order is Surface's meet. Entity merge and split review is
-  Survey's (`kontourai/survey#243`, merged at `da1e74c`): the Kit emits `EntityProposalInput`
-  and routes the proposal, and Survey builds the item and records the outcome. Neither is in a
-  published release, so the Kit holds two thin stand-ins (`memoryVisibilityWithin`,
-  `SurveyEntityProposalLike`), pinned by tests and to be deleted when the packages are bumped.
+  lattice is Surface's (surface@6.3.0): a claim's `visibility` has Surface's form and the widening rule calls
+  Surface's `meetVisibility`. Entity merge and split review is Survey's (survey@8.3.0): the Kit emits
+  `EntityProposalInput` and routes the proposal, and Survey builds the item and records the outcome. Both packages
+  are pinned to the released versions; the Kit holds no copy of either contract.
 
 ## Consequences
 

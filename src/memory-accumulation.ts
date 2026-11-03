@@ -7,30 +7,16 @@
  * becomes a Surface claim, and the one fact it reads back (`outcome`, which candidates, which gaps).
  *
  * Contradiction routing reads that fact (`contested-by-accumulation`); the Kit does not compare values itself.
- * Surface's package is not yet published with the projection, so none of it is imported here: the shapes below are
- * structural mirrors of the parts read, pinned by fixtures that were produced by running the real projection.
+ * The claim and query shapes are Surface's own (surface@6.3.0); the Kit does not import `projectAccumulation` because the host
+ * runs it. What the Kit reads back is pinned by fixtures that were produced by running the real projection, and a test
+ * replays them through the pinned release.
  */
+import type { AccumulationClaim, AccumulationQuery } from "@kontourai/surface";
 import { MemoryClaimError, memoryInstant, readMemoryVisibility, type MemoryClaim } from "./memory-claims.js";
 import { jsonSnapshot } from "./memory-json.js";
 
-/** Surface's `AccumulationClaim` (a `Claim` plus the provisional `validTime` and `supersedes`), as the Kit fills it. */
-export interface MemoryAccumulationClaim {
-  id: string;
-  subjectType: string;
-  subjectId: string;
-  facet: string;
-  claimType: string;
-  fieldOrBehavior: string;
-  qualifiers?: Record<string, string>;
-  value: unknown;
-  status: "proposed";
-  createdAt: string;
-  updatedAt: string;
-  impactLevel: "medium";
-  validTime?: { from?: string; until?: string };
-  supersedes?: { claimId: string; kind: "correction" | "succession"; reason: string }[];
-  metadata: { visibility?: "public" | { audiences: string[] }; memory: { speaker: string; source: MemoryClaim["source"] } };
-}
+/** Surface's `AccumulationClaim` (a `Claim` plus the provisional `validTime` and `supersedes`), which is what the Kit fills. */
+export type MemoryAccumulationClaim = AccumulationClaim;
 
 /** Surface refuses a slot whose id or claim type has surrounding whitespace, or any slot field blank; say so here rather than inside the projection. */
 function assertSlotFields(claim: Pick<MemoryClaim, "subject" | "claimType" | "property">): void {
@@ -47,11 +33,7 @@ const utc = (text: string, what: string): string => {
 };
 
 /** Surface's `AccumulationQuery` for the slot of a claim. */
-export interface MemoryAccumulationQuery {
-  slot: { subjectType: string; subjectId: string; fieldOrBehavior: string; claimType: string; qualifiers?: Record<string, string> };
-  now: string;
-  valuePolicy: "single-json-v1";
-}
+export type MemoryAccumulationQuery = AccumulationQuery;
 
 /** The part of `projectAccumulation`'s result the Kit reads. */
 export interface MemoryAccumulationFact {

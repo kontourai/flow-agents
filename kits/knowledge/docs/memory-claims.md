@@ -14,9 +14,9 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 | The model call | The host. `distillMemoryClaims` takes an `extract` function; bind it to Traverse's `extract()` and a provider. |
 | Claim shape, routing policy, run metrics | This Kit. |
 | Support verification, review items, reviewer decisions | Survey. |
-| Which claims are current in a slot, whether it is contested, supersession over time | Surface (`projectAccumulation`, merged in surface#359 at `b7d932b`, unreleased). The host runs it (it needs observations with custody and an authority snapshot the Kit does not hold); the Kit maps its claims in (`memoryAccumulationClaims`, which carries every claim a replacement chain reaches and gives one claim one Surface claim: edges in id order, instants as the UTC date-times Surface parses for years 0000-9999, and the claim\'s JSON content copied so an undefined field and an absent one are the same; a subject id or claim type with surrounding whitespace, or a blank slot field, is refused because Surface refuses that slot), reads the result back (`memoryAccumulationFact`) and routes on it. The design is [Surface's knowledge-accumulation decision](https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md). The Kit still takes the current claims as input, for the visibility bounds and the review item. |
-| Entity merge, split and alias review | Survey (`kontourai/survey#243`, merged in survey#358). The Kit emits proposals in Survey's `EntityProposalInput` and routes them to its review. |
-| Visibility lattice | Surface ([Surface derived visibility](https://github.com/kontourai/surface/blob/18e3570636cdb5f9e73d38d9274a2bcd1dc04b9f/docs/decisions/derived-visibility.md), merged in surface#356). A claim's `visibility` is Surface's form and the Kit's order is Surface's meet. |
+| Which claims are current in a slot, whether it is contested, supersession over time | Surface (`projectAccumulation`, surface@6.3.0). The host runs it (it needs observations with custody and an authority snapshot the Kit does not hold); the Kit maps its claims in (`memoryAccumulationClaims`, which carries every claim a replacement chain reaches and gives one claim one Surface claim: edges in id order, instants as the UTC date-times Surface parses for years 0000-9999, and the claim\'s JSON content copied so an undefined field and an absent one are the same; a subject id or claim type with surrounding whitespace, or a blank slot field, is refused because Surface refuses that slot), reads the result back (`memoryAccumulationFact`) and routes on it. The design is [Surface's knowledge-accumulation decision](https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md). The Kit still takes the current claims as input, for the visibility bounds and the review item. |
+| Entity merge, split and alias review | Survey (entity review, survey@8.3.0). The Kit emits proposals in Survey's `EntityProposalInput` and routes them to its review. |
+| Visibility lattice | Surface ([Surface derived visibility](https://github.com/kontourai/surface/blob/18e3570636cdb5f9e73d38d9274a2bcd1dc04b9f/docs/decisions/derived-visibility.md), surface@6.3.0). A claim's `visibility` is Surface's form and the Kit's order is Surface's own `meetVisibility`, called, not restated. |
 | Gates and evidence | Flow. |
 
 ## The claim
@@ -218,17 +218,14 @@ consumed here, and `presentMemoryClaims` does not apply it.
 - Writing claims to the personal store (`#670`) and the dream pipeline's use of them
   (`#671`). Claims are returned and recorded as evidence; staging into a store is the
   next lane.
-- Importing Surface's visibility lattice and Survey's entity review. Both are merged (surface#356,
-  survey#358) but in no published release (npm has Surface 6.2.1 and Survey 8.2.1; this package pins 5.0.0
-  and 8.2.0). Until they ship, the Kit holds two thin stand-ins and nothing else of theirs:
-  `memoryVisibilityWithin`, one function stating Surface's order, and `SurveyEntityProposalLike`, a structural
-  type for the part of `EntityProposal` it reads. Tests pin the first against Surface's own meet vectors and,
-  as soon as the installed Surface exports `meetVisibility`, against the real function; the second against a
-  proposal made by Survey's `createEntityProposal`. Delete both when the packages are bumped.
+- Anything newer than the pinned releases. This package pins `@kontourai/surface` 6.3.0 and `@kontourai/survey`
+  8.3.0 (exact versions, as released on npm). The Kit calls Surface's `meetVisibility` for the widening rule, takes
+  Survey's `EntityProposal` as the type it reads, and fills Surface's own `AccumulationClaim` and
+  `AccumulationQuery`. Tests replay Surface's meet vectors and a 37 x 37 grid of good and malformed visibilities
+  through the pinned release, and run Survey's `createEntityProposal` over the emitter's output.
 - Running Surface's projection. It needs custody (observations with digests and authenticated publishers) and an
   authority snapshot (owners, event admissions, replacement grants) that only the host holds, so the host runs
-  `projectAccumulation` and the Kit reads the result. Surface's package does not export it yet (surface#359 is merged,
-  unreleased); `src/cli/fixtures/memory-claims/accumulation.json` holds results from the real function at `b7d932b`, run
-  over claims the Kit mapped, in three states: nothing reviewed, a conflict and a replacement, and the same after a
+  `projectAccumulation` and the Kit reads the result. `src/cli/fixtures/memory-claims/accumulation.json` holds results
+  from the real function, run over claims the Kit mapped, and a test replays them through the pinned Surface, in three states: nothing reviewed, a conflict and a replacement, and the same after a
   reviewer verified every claim and the host admitted those verifications.
 - A Flow gate that requires this evidence.
