@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { runPromote } from './index.js';
+import { snapshotDir } from './lib.js';
 
 // Set CORPUS_STORE_ENTRY to the installed packed-branch entry until npm publish.
 test('Corpus stages an unreviewed proposal without a working-set record', { skip: !process.env.CORPUS_STORE_ENTRY }, async (t) => {
@@ -43,6 +44,7 @@ test('the host registry exposes the authorized root through the real MCP server'
   const sentinel = path.join(curated, 'records', 'sentinel.txt');
   fs.writeFileSync(sentinel, 'curated unchanged');
   registerRoot('ops', curated, env);
+  const curatedBefore = snapshotDir(curated);
   const store = new KitDefaultStoreAdapter({ storeRoot: root, coordinationDirectory: path.join(tmp, 'coord'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock });
   await runPromote({ target: 'store', residue, candidates: [{ title: 'Memory', body: 'Fixture', category: 'memory.learning' }], root, store, proposerId: 'fixture-agent', registerRoot: (name, value) => registerRoot(name, value, env) });
   const child = spawn(process.execPath, [path.join(ops, 'scripts/knowledge-mcp/index.mjs')], { cwd: tmp, env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -71,7 +73,7 @@ test('the host registry exposes the authorized root through the real MCP server'
     assert.equal(roots.find((entry) => entry.name === 'memory')?.path, root);
     assert.equal(roots.find((entry) => entry.name === 'memory')?.exists, true);
     assert.equal(roots.find((entry) => entry.name === 'ops')?.path, curated);
-    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'curated unchanged');
+    assert.deepEqual(snapshotDir(curated), curatedBefore);
   } finally {
     child.stdin.end();
     await exited;
