@@ -61,8 +61,30 @@ export interface MemoryClaim {
   source: MemoryClaimSource;
   posture: MemoryClaimPosture;
   supersedes?: MemoryClaimSupersession[];
-  /** Principals who may see the claim. Absent inherits the source's audience. */
-  audience?: string[];
+  /**
+   * Who may see the claim, in Surface's visibility lattice (kontourai/surface#350). Absent is not "inherits" and not
+   * "everyone": it reads as sealed, the narrowest element, so omission cannot widen access. `distillMemoryClaims`
+   * stamps the sitting's visibility on every claim it makes.
+   */
+  visibility?: MemoryVisibility;
+}
+
+/**
+ * Surface's `Visibility` (kontourai/surface src/visibility.ts, merged in #356, not yet in a published release): `public`
+ * is widest; `restricted` names the audiences that may see it, opaque strings the owning store resolves; `restricted`
+ * with none is sealed. A structural mirror of the data shape, so a claim needs no translation when Surface publishes it.
+ */
+export type MemoryVisibility = { kind: "public" } | { kind: "restricted"; audiences: string[] };
+
+/** Reads a visibility from untrusted data. Anything that is not exactly one of the two forms is undefined. */
+export function readMemoryVisibility(value: unknown): MemoryVisibility | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { kind, audiences, ...rest } = value as Record<string, unknown>;
+  if (Object.keys(rest).length) return undefined;
+  if (kind === "public") return audiences === undefined ? { kind: "public" } : undefined;
+  if (kind !== "restricted" || !Array.isArray(audiences) || audiences.length > 1024) return undefined;
+  if (!audiences.every(audience => typeof audience === "string" && audience !== "")) return undefined;
+  return { kind: "restricted", audiences: [...new Set(audiences as string[])].sort() };
 }
 
 export class MemoryClaimError extends Error {
@@ -153,7 +175,7 @@ function identityDigest(claim: MemoryClaim): string {
   const canonical = {
     ...content,
     ...(content.supersedes ? { supersedes: [...content.supersedes].sort((x, y) => x.claimId.localeCompare(y.claimId)) } : {}),
-    ...(content.audience ? { audience: [...new Set(content.audience)].sort() } : {}),
+    ...(content.visibility ? { visibility: readMemoryVisibility(content.visibility) ?? content.visibility } : {}),
   };
   return `sha256:${createHash("sha256").update(canonicalJson(canonical)).digest("hex")}`;
 }
@@ -167,7 +189,7 @@ export function memoryClaim(fields: Omit<MemoryClaim, "id" | "schema_version">):
 
 const nonEmpty = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
-const KNOWN_KEYS = new Set(["schema_version", "id", "subject", "claimType", "property", "qualifiers", "value", "validTime", "speaker", "source", "posture", "supersedes", "audience"]);
+const KNOWN_KEYS = new Set(["schema_version", "id", "subject", "claimType", "property", "qualifiers", "value", "validTime", "speaker", "source", "posture", "supersedes", "visibility"]);
 
 /** Validates a claim read from anywhere and checks that its id is the digest of its content. */
 export function assertMemoryClaim(value: unknown): asserts value is MemoryClaim {
@@ -182,7 +204,7 @@ export function assertMemoryClaim(value: unknown): asserts value is MemoryClaim 
   if (value.posture === undefined) throw new MemoryClaimError("posture-missing", "every claim carries its posture");
   if (!(MEMORY_CLAIM_POSTURES as readonly unknown[]).includes(value.posture)) throw new MemoryClaimError("invalid", "unknown posture");
   if (!isObject(source) || !["ref", "locator", "excerpt", "observedAt"].every(key => nonEmpty(source[key]))) throw new MemoryClaimError("invalid", "source needs ref, locator, excerpt and observedAt");
-  if (value.audience !== undefined && (!Array.isArray(value.audience) || !value.audience.every(nonEmpty))) throw new MemoryClaimError("invalid", "audience must be a list of principals");
+  if (value.visibility !== undefined && readMemoryVisibility(value.visibility) === undefined) throw new MemoryClaimError("invalid", "visibility must be public or restricted to named audiences");
   if (value.supersedes !== undefined && (!Array.isArray(value.supersedes) || value.supersedes.length === 0 || !value.supersedes.every(edge =>
     isObject(edge) && /^sha256:[0-9a-f]{64}$/.test(String(edge.claimId)) && (edge.kind === "correction" || edge.kind === "succession") && nonEmpty(edge.reason)))) {
     throw new MemoryClaimError("invalid", "supersedes edges need a claim id, kind and reason");
@@ -210,7 +232,8 @@ export interface AssembleContext {
   locate(locator: string): { observedAt: string; role?: "user" | "assistant" } | undefined;
   /** Claims already current, so a claim that replaces or retracts one carries a supersedes edge to it. */
   current?: readonly MemoryClaim[];
-  audience?: string[];
+  /** The visibility of the source; stamped on every claim made from it. */
+  visibility?: MemoryVisibility;
 }
 export interface RejectedProposalGroup { index: number; reason: string }
 
@@ -242,6 +265,8 @@ export function assembleMemoryClaims(result: ExtractionResultLike, context: Asse
   }
   return { claims, rejected };
 }
+
+const failVisibility = (): never => { throw new MemoryClaimError("invalid", "visibility must be public or restricted to named audiences"); };
 
 function assemble(fields: Record<string, ExtractionProposalLike>, context: AssembleContext): MemoryClaim {
   const text = (name: string) => {
@@ -279,7 +304,7 @@ function assemble(fields: Record<string, ExtractionProposalLike>, context: Assem
       observedAt: located.observedAt, ...(located.role ? { role: located.role } : {}), ...(anchor.extractor ? { extractor: anchor.extractor } : {}),
     },
     posture: posture as MemoryClaimPosture,
-    ...(context.audience ? { audience: context.audience } : {}),
+    ...(context.visibility ? { visibility: readMemoryVisibility(context.visibility) ?? failVisibility() } : {}),
   };
   const supersedes = supersessionEdges({ ...base, replacesPrior: fields.replacesPrior?.candidateValue === true }, context.current ?? []);
   return memoryClaim({ ...base, ...(supersedes.length ? { supersedes } : {}) });
@@ -364,7 +389,8 @@ export async function distillMemoryClaims(input: {
   extract: MemoryExtract;
   passes?: number;
   current?: readonly MemoryClaim[];
-  audience?: string[];
+  /** The sitting's visibility. Without it the claims are sealed (see `MemoryClaim.visibility`). */
+  visibility?: MemoryVisibility;
 }): Promise<DistillResult> {
   const passes = input.passes ?? DEFAULT_DISTILL_PASSES;
   if (!Number.isInteger(passes) || passes < 1 || passes > 8) throw new MemoryClaimError("invalid", "passes must be an integer from 1 to 8");
@@ -389,7 +415,7 @@ export async function distillMemoryClaims(input: {
     }
     if (result.error) warnings.push(`pass ${pass + 1} reported: ${result.error}`);
     warnings.push(...(result.warnings ?? []).map(warning => `pass ${pass + 1}: ${warning}`));
-    const assembled = assembleMemoryClaims(result, { sourceRef: input.sitting.sittingId, locate, current: input.current, audience: input.audience });
+    const assembled = assembleMemoryClaims(result, { sourceRef: input.sitting.sittingId, locate, current: input.current, visibility: input.visibility });
     rejected.push(...assembled.rejected.map(item => ({ ...item, pass })));
     for (const claim of assembled.claims) {
       const key = agreementKey(claim);

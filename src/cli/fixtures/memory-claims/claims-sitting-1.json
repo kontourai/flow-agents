@@ -1,22 +1,22 @@
 {
   "agreement": {
-    "sha256:2d5f85f46e56d3d2b0e7de9a79809d6529026f6a786149cd3241b1d7dbfc36e0": {
+    "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c": {
       "agreeing": 2,
       "passes": 2
     },
-    "sha256:2e3e54aaec9179cabe7171ff11de9865dbeaf53a005e60c0c066d023629ffb65": {
+    "sha256:38ae6607b0b8241de84370217179fddb13a5b352faa0f2970c023536c992ba10": {
       "agreeing": 2,
       "passes": 2
     },
-    "sha256:9cba6934d5916821fe5fa9cc2ed8475ecbb2f9c5e902cd2f62ad3d3272bb6de7": {
+    "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd": {
       "agreeing": 2,
       "passes": 2
     },
-    "sha256:a1a3140211b121922ae06d7d568eb80f8e341957aa5455be6cc12fb346c24733": {
+    "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c": {
       "agreeing": 1,
       "passes": 2
     },
-    "sha256:c01986a6a52309de5be412a7431def9aacd3f1a1cf910768825f110c6404473e": {
+    "sha256:ed6ab984be69638e48b319194044e042256a15e2c2eeba588e08ee130db0dd40": {
       "agreeing": 2,
       "passes": 2
     }
@@ -24,7 +24,7 @@
   "claims": [
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:9cba6934d5916821fe5fa9cc2ed8475ecbb2f9c5e902cd2f62ad3d3272bb6de7",
+      "id": "sha256:2cd91d7a9af2466a48bf9243bea8ce78c545809475e01ddae4de4bf0aef0134c",
       "posture": "stated",
       "property": "primary database",
       "schema_version": "1.0",
@@ -44,7 +44,7 @@
       },
       "supersedes": [
         {
-          "claimId": "sha256:e5b3f02afbbfa07b66a3b4e198a3ca2dd014b381ac86f20cfbd812f2ccad5876",
+          "claimId": "sha256:505810142b088bb8d021ff64a938daf3d7f5b81651bbbf22bdb25e0e43e6e51c",
           "kind": "succession",
           "reason": "the speaker presented the value as replacing the earlier one"
         }
@@ -52,11 +52,17 @@
       "validTime": {
         "from": "2026-10-30T00:00:00.000Z"
       },
-      "value": "PostgreSQL 16"
+      "value": "PostgreSQL 16",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:2e3e54aaec9179cabe7171ff11de9865dbeaf53a005e60c0c066d023629ffb65",
+      "id": "sha256:6218c8857c5d610301bf4753f8ec4c8423c55fa98069917b5eb191a9ee8c81dd",
       "posture": "stated",
       "property": "retry budget",
       "schema_version": "1.0",
@@ -74,11 +80,17 @@
         "label": "widget service",
         "type": "service"
       },
-      "value": "8 attempts per request"
+      "value": "8 attempts per request",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:2d5f85f46e56d3d2b0e7de9a79809d6529026f6a786149cd3241b1d7dbfc36e0",
+      "id": "sha256:38ae6607b0b8241de84370217179fddb13a5b352faa0f2970c023536c992ba10",
       "posture": "retracted",
       "property": "on-call owner",
       "schema_version": "1.0",
@@ -98,16 +110,22 @@
       },
       "supersedes": [
         {
-          "claimId": "sha256:e11334e44332ae7753e778a2cb9c1cfda988e4aec79f84bb64294adb361bb2a0",
+          "claimId": "sha256:092ee113df87cb77e248ed9a4e589af22bb8d9e08deebf38cf2f167480a4dfcb",
           "kind": "correction",
           "reason": "the speaker retracted this assertion"
         }
       ],
-      "value": "Maya Chen"
+      "value": "Maya Chen",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:c01986a6a52309de5be412a7431def9aacd3f1a1cf910768825f110c6404473e",
+      "id": "sha256:ed6ab984be69638e48b319194044e042256a15e2c2eeba588e08ee130db0dd40",
       "posture": "hypothetical",
       "property": "sharding technology",
       "schema_version": "1.0",
@@ -125,11 +143,17 @@
         "label": "widget service",
         "type": "service"
       },
-      "value": "Citus"
+      "value": "Citus",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:a1a3140211b121922ae06d7d568eb80f8e341957aa5455be6cc12fb346c24733",
+      "id": "sha256:a6056a9d2c5499f2c1624755286f572a09c33ec7f8e5ec901cc92a47eb97f88c",
       "posture": "stated",
       "property": "lead",
       "schema_version": "1.0",
@@ -147,7 +171,13 @@
         "label": "platform team",
         "type": "team"
       },
-      "value": "Priya Rao"
+      "value": "Priya Rao",
+      "visibility": {
+        "audiences": [
+          "user:fixture"
+        ],
+        "kind": "restricted"
+      }
     }
   ]
 }

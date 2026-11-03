@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://flow-agents.dev/schemas/knowledge/memory-claim.schema.json",
   "title": "Knowledge Memory Claim",
-  "description": "One immutable, identified assertion distilled from a conversation or record: subject, property, value, valid time, speaker/source and epistemic posture as typed fields. `posture` is how the speaker asserted it (stated / proposed / hypothetical / retracted); it is not the claim's review state, which is derived from its routing decision and any Survey review (see memory-routing-decision.schema.json). Field names follow the Surface knowledge-accumulation decision (kontourai/surface@7486c6d, docs/decisions/knowledge-accumulation.md): a subject is a (type, id) reference; a property slot is the subject plus `claimType`, `property` (Surface's `fieldOrBehavior`) and canonical `qualifiers`; `validTime` is a half-open interval [from, until) that is neither Surface's inclusive authority-trace `validUntil` nor `expiresAt` freshness; `supersedes` edges are `correction` or `succession` with a reason. Those interval and edge shapes are proposed there pending Hachure, so this schema carries them as caller-owned fields and is not a Hachure bundle. `id` is the sha256 digest of every other field, provenance included (sets are ordered first), recomputed on read; the same id means the same content, so an edited excerpt or timestamp is a different claim. Values compare by structural JSON equality, so a different spelling is a different claim. A revision is a new claim with a new id.",
+  "description": "One immutable, identified assertion distilled from a conversation or record: subject, property, value, valid time, speaker/source and epistemic posture as typed fields. `posture` is how the speaker asserted it (stated / proposed / hypothetical / retracted); it is not the claim's review state, which is derived from its routing decision and any Survey review (see memory-routing-decision.schema.json). Field names follow the Surface knowledge-accumulation decision (kontourai/surface@7486c6d, docs/decisions/knowledge-accumulation.md): a subject is a (type, id) reference; a property slot is the subject plus `claimType`, `property` (Surface's `fieldOrBehavior`) and canonical `qualifiers`; `validTime` is a half-open interval [from, until) that is neither Surface's inclusive authority-trace `validUntil` nor `expiresAt` freshness; `supersedes` edges are `correction` or `succession` with a reason. Those interval and edge shapes are proposed there pending Hachure, so this schema carries them as caller-owned fields and is not a Hachure bundle. `id` is the sha256 digest of every other field, provenance included (audience sets are ordered first), recomputed on read; the same id means the same content, so an edited excerpt or timestamp is a different claim. Values compare by structural JSON equality, so a different spelling is a different claim. A revision is a new claim with a new id.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -165,13 +165,43 @@
         }
       }
     },
-    "audience": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
-      "description": "Principals allowed to see the claim. Absent means it inherits its source's audience; the visibility-widening rule checks the requested or inherited audience against the source and the current claims in the slot."
+    "visibility": {
+      "description": "Surface's visibility lattice (kontourai/surface src/visibility.ts, surface#356): public, or restricted to named audiences (opaque strings the owning store resolves). Restricted with none is sealed. Absent reads as sealed, never as inherited or public, so omission cannot widen access; the distill step stamps the sitting's visibility on every claim.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "public"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "audiences"
+          ],
+          "properties": {
+            "kind": {
+              "const": "restricted"
+            },
+            "audiences": {
+              "type": "array",
+              "maxItems": 1024,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

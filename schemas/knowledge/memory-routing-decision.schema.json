@@ -144,26 +144,63 @@
                 "additionalProperties": false,
                 "required": [
                   "ref",
-                  "audience"
+                  "visibility"
                 ],
                 "properties": {
                   "ref": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "description": "`source`, or the id of a current claim in the slot."
                   },
-                  "audience": {
-                    "type": [
-                      "array",
-                      "null"
+                  "visibility": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "description": "Surface's visibility lattice (kontourai/surface src/visibility.ts, surface#356): public, or restricted to named audiences (opaque strings the owning store resolves). Restricted with none is sealed.",
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "kind"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "const": "public"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "kind",
+                              "audiences"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "const": "restricted"
+                              },
+                              "audiences": {
+                                "type": "array",
+                                "maxItems": 1024,
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
                     ],
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "description": "Null when the baseline's audience is unknown."
+                    "description": "Null when the bound declares none, which reads as sealed."
                   }
                 }
-              }
+              },
+              "description": "What the claim's visibility must stay within: its source, and every current claim in its slot."
             }
           }
         },

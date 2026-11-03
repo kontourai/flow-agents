@@ -33,7 +33,7 @@ test("the claim schema is an ordinary caller-owned Traverse TargetFieldSchema wi
   assert.equal(byPath["claims[].posture"].type, "enum");
   assert.equal(byPath["claims[].validFrom"].type, "date");
   for (const required of ["subject", "property", "value", "posture"]) assert.equal(byPath[`claims[].${required}`].required, true);
-  // The extractor is never asked for visibility: an audience is the host's, not a model's.
+  // The extractor is never asked for visibility: who may see a claim is the host's decision, not a model's.
   assert.equal(schema.some(field => /audience|visib/i.test(field.path)), false);
   assert.deepEqual([...MEMORY_CLAIM_POSTURES], byPath["claims[].posture"].enumValues);
 });
@@ -265,7 +265,8 @@ test("identity is exact: a value, property or subject that differs only in case 
   for (const changed of [{ value: "postgresql 15" }, { property: "Primary Database" }, { speaker: "User" }, { claimType: "other" }, { qualifiers: { environment: "prod" } }]) {
     assert.notEqual(memoryClaim({ ...claim, ...changed }).id, claim.id, JSON.stringify(changed));
   }
-  assert.equal(memoryClaim({ ...claim, audience: ["b", "a"] }).id, memoryClaim({ ...claim, audience: ["a", "b"] }).id, "audience is a set");
+  assert.equal(memoryClaim({ ...claim, visibility: { kind: "restricted", audiences: ["b", "a"] } }).id, memoryClaim({ ...claim, visibility: { kind: "restricted", audiences: ["a", "b"] } }).id, "audiences are a set");
+  assert.notEqual(memoryClaim({ ...claim, visibility: { kind: "public" } }).id, memoryClaim({ ...claim, visibility: { kind: "restricted", audiences: [] } }).id, "public and sealed are different claims");
 });
 
 test("the slot is Surface's canonical claim key plus claimType", async () => {

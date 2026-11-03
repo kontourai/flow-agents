@@ -17,8 +17,8 @@ import {
   type CandidateVerification, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
 import {
-  MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryIntervalsOverlap, memorySlotKey, memoryValuesEqual,
-  type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture,
+  MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryIntervalsOverlap, memorySlotKey, memoryValuesEqual, readMemoryVisibility,
+  type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
 } from "./memory-claims.js";
 
 export const MEMORY_ROUTING_VERSION = "1.0" as const;
@@ -47,7 +47,8 @@ export const DEFAULT_MEMORY_ROUTING_POLICY: Readonly<MemoryRoutingPolicy> = Obje
   version: MEMORY_ROUTING_VERSION, minPasses: 2, minAgreement: 1, multiValued: [], consequential: { properties: [], subjectTypes: [] },
 });
 
-export interface MemoryAudienceBaseline { ref: string; /** Null when the audience is unknown. */ audience: string[] | null }
+/** A bound a claim's visibility must stay within. Null is undeclared, which Surface reads as sealed. */
+export interface MemoryVisibilityBaseline { ref: string; visibility: MemoryVisibility | null }
 export interface MemoryClaimRoutingInput {
   type: "claim";
   claim: MemoryClaim;
@@ -57,7 +58,7 @@ export interface MemoryClaimRoutingInput {
   verifications: CandidateVerification[];
   /** Null when no extraction passes were measured. */
   agreement: MemoryAgreement | null;
-  baselines: MemoryAudienceBaseline[];
+  baselines: MemoryVisibilityBaseline[];
 }
 export interface MemoryEntityRoutingInput {
   type: "entity";
@@ -102,7 +103,19 @@ const rule = <T extends MemoryRoutingInput>(id: MemoryRoutingRuleId, appliesTo: 
   ({ id, appliesTo, check: check as RoutingRule["check"] });
 
 const agreementWellFormed = (a: MemoryAgreement): boolean => Number.isInteger(a.passes) && Number.isInteger(a.agreeing) && a.passes >= 1 && a.agreeing >= 0 && a.agreeing <= a.passes;
-const subset = (inner: readonly string[], outer: readonly string[]): boolean => inner.every(principal => outer.includes(principal));
+const SEALED: MemoryVisibility = { kind: "restricted", audiences: [] };
+/**
+ * Whether `inner` is no more visible than `outer` in Surface's lattice: `meetVisibility(inner, outer)` equals `inner`.
+ * Surface's `meetVisibility` is merged (surface#356) but not in a published release, so this is the one place the Kit
+ * states the order. It is checked against Surface's own meet vectors, and against the real function as soon as the
+ * installed Surface has one. Undeclared or unreadable is sealed, as in Surface: omission never widens.
+ */
+export function memoryVisibilityWithin(inner: MemoryVisibility | null | undefined, outer: MemoryVisibility | null | undefined): boolean {
+  const a = readMemoryVisibility(inner) ?? SEALED, b = readMemoryVisibility(outer) ?? SEALED;
+  if (b.kind === "public") return true;
+  if (a.kind === "public") return false;
+  return a.audiences.every(audience => b.audiences.includes(audience));
+}
 const listed = (names: string[], name: string) => names.some(entry => entry === "*" || foldMemoryText(entry) === foldMemoryText(name));
 /** Same-slot stated claims the new claim is not explicitly replacing. */
 const asserted = (input: MemoryClaimRoutingInput) => input.current.filter(other => other.posture === "stated" && memorySlotKey(other) === memorySlotKey(input.claim));
@@ -140,23 +153,11 @@ export const MEMORY_ROUTING_RULES: readonly RoutingRule[] = [
     return undefined;
   }),
   rule<MemoryClaimRoutingInput>("visibility-widening", "claim", input => {
-    // What the claim would be visible to: the audience it asks for, else the one it inherits from its source.
-    const source = input.baselines.find(base => base.ref === SOURCE_BASELINE);
-    const requested = input.claim.audience ?? null;
-    const effective = requested ?? source?.audience ?? null;
-    const wider: string[] = [];
-    // Asking for more than the source allows widens; so does asking when the source's audience is unknown.
-    if (requested && (!source?.audience || !subset(requested, source.audience))) wider.push(SOURCE_BASELINE);
-    // Whatever it is visible to must also fit inside every current claim in its slot. A peer with an undeclared
-    // audience fails closed for a claim that asks for one: omission is not "everyone". A claim that merely inherits
-    // its source's audience is compared with the peers that declare one, since an undeclared peer gives nothing to
-    // compare with and a host that records no audiences would otherwise route everything. An unknown effective
-    // audience cannot be shown to fit inside a declared one.
-    for (const base of input.baselines) {
-      if (base.ref === SOURCE_BASELINE) continue;
-      if (!base.audience ? requested !== null : !effective || !subset(effective, base.audience)) wider.push(base.ref);
-    }
-    return wider.length ? { requested, effective, widerThan: wider } : undefined;
+    // The claim must be no more visible than its source, nor than any current claim in its slot (the slot would
+    // otherwise become visible to people who could not see it before). Undeclared is sealed on every side, so a claim
+    // with no visibility cannot widen anything, and a bound with none admits only a sealed claim.
+    const wider = input.baselines.filter(base => !memoryVisibilityWithin(input.claim.visibility, base.visibility)).map(base => base.ref);
+    return wider.length ? { visibility: input.claim.visibility ?? null, widerThan: wider } : undefined;
   }),
 ];
 
@@ -194,16 +195,16 @@ export interface MemoryClaimChange {
   current?: readonly MemoryClaim[];
   verifications?: readonly unknown[];
   agreement?: MemoryAgreement | null;
-  /** Audience of the source the claim came from; null or absent is unknown. */
-  sourceAudience?: readonly string[] | null;
+  /** Visibility of the source the claim came from; null or absent is undeclared, which reads as sealed. */
+  sourceVisibility?: MemoryVisibility | null;
 }
 export interface MemoryEntityChange { type: "entity"; proposal: SurveyEntityProposalLike }
 export type MemoryChange = MemoryClaimChange | MemoryEntityChange;
 
-/** A claim's id ignores the order of its audience and edges; so must the decision that embeds it, or one claim gets two decision ids. */
+/** A claim's id ignores the order of its audiences and edges; so must the decision that embeds it, or one claim gets two decision ids. */
 const canonicalOrder = (claim: MemoryClaim): MemoryClaim => ({
   ...claim,
-  ...(claim.audience ? { audience: [...new Set(claim.audience)].sort() } : {}),
+  ...(claim.visibility ? { visibility: readMemoryVisibility(claim.visibility) ?? claim.visibility } : {}),
   ...(claim.supersedes ? { supersedes: [...claim.supersedes].sort((x, y) => x.claimId.localeCompare(y.claimId)) } : {}),
 });
 const MAX_CURRENT_PER_SLOT = 64;
@@ -223,8 +224,8 @@ function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
     type: "claim", claim: canonicalOrder(change.claim), current: ordered, verifications: [...applicable],
     agreement: change.agreement ?? null,
     baselines: [
-      { ref: SOURCE_BASELINE, audience: change.sourceAudience ? [...new Set(change.sourceAudience)].sort() : null },
-      ...ordered.map(other => ({ ref: other.id, audience: other.audience ? [...other.audience] : null })),
+      { ref: SOURCE_BASELINE, visibility: readMemoryVisibility(change.sourceVisibility) ?? null },
+      ...ordered.map(other => ({ ref: other.id, visibility: other.visibility ?? null })),
     ],
   };
 }
@@ -272,10 +273,10 @@ function assertStoredInputShape(input: MemoryRoutingInput): void {
   if (input.type !== "claim") bad("unknown input type");
   if (!Array.isArray(input.current) || !Array.isArray(input.verifications)) bad("current and verifications must be lists");
   if (input.agreement !== null && (typeof input.agreement !== "object" || !agreementWellFormed(input.agreement))) bad("agreement is malformed");
-  if (!Array.isArray(input.baselines) || !input.baselines.every(base => base && typeof base.ref === "string" && base.ref && (base.audience === null || stringList(base.audience)))) bad("baselines are malformed");
+  if (!Array.isArray(input.baselines) || !input.baselines.every(base => base && typeof base.ref === "string" && base.ref && (base.visibility === null || readMemoryVisibility(base.visibility) !== undefined))) bad("baselines are malformed");
   // The peers' baselines are re-derivable from the embedded claims; a stored input may not drop one to clear a widening.
   const peers = input.baselines.filter(base => base.ref !== SOURCE_BASELINE);
-  const expected = input.current.map(other => ({ ref: other.id, audience: other.audience ? [...other.audience] : null }));
+  const expected = input.current.map(other => ({ ref: other.id, visibility: other.visibility ?? null }));
   if (input.baselines.filter(base => base.ref === SOURCE_BASELINE).length !== 1 || canonicalJson(peers) !== canonicalJson(expected)) bad("baselines do not match the embedded current claims");
 }
 
