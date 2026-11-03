@@ -1014,31 +1014,54 @@ describe("Living Context: review round 3 regressions (#1572)", () => {
     remove(repo);
   });
 
-  test("an unreadable duplicate never decides a visible claim's answer, in either file order", async () => {
+  test("conflicting hidden copies of an id on a visible claim's chain make it unverifiable, in any file order, never current", async () => {
     const hidden = { visibility: { audiences: ["auditor"] } };
     const publicEdge = { supersession_visibility: "public" };
     const normalise = (value) => JSON.stringify(value).replaceAll(/[0-9a-f]{40}/g, "<commit>");
-    const outcome = async (claims, overrides = {}) => {
-      const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims });
-      const request = input(revision, { claim_ids: ["a"], ...overrides });
-      const result = run(repo, revision, { claim_ids: ["a"], ...overrides });
+    const outcome = async (claims, extraRoot) => {
+      const files = extraRoot ? { "knowledge/other.json": JSON.stringify({ readers: ["engineer", "auditor"], claims: extraRoot }) } : {};
+      const { repo, revision } = seededRepo({ readers: ["engineer", "auditor"], claims }, { docs: { "d.md": "Claim a.\nClaim z.\n" }, extraFiles: files });
+      const roots = [{ id: "r0", provider: "git-repo", manifest_path: "knowledge/claims.json" }, ...(extraRoot ? [{ id: "r1", provider: "git-repo", manifest_path: "knowledge/other.json" }] : [])];
+      const request = input(revision, { claim_ids: ["a"], knowledge_roots: roots });
+      const result = runLivingContext({ repoRoot: repo, input: request, write: false });
       const answer = await answerLivingContext({ repoRoot: repo, input: request });
       remove(repo);
-      return { result: normalise({ ...result, written: undefined }), status: recallOf(result, "a").status, answered: answer.answers[0].outcome };
+      return { json: normalise({ ...result, written: undefined }), entry: recallOf(result, "a"), answered: answer.answers[0].outcome };
     };
-    const chain = (extra) => [mk("a", edge("h")), ...extra, mk("z", {})];
     const through = { ...hidden, ...edge("z"), ...publicEdge };
+    const chain = (extra) => [mk("a", edge("h")), ...extra, mk("z", {})];
     const baseline = await outcome(chain([mk("h", through)]));
-    assert.equal(baseline.status, "superseded");
-    for (const [label, copies] of [
-      ["conflicting copy first", [mk("h", { ...hidden, slot: "other" }), mk("h", through)]],
-      ["conflicting copy last", [mk("h", through), mk("h", { ...hidden, slot: "other" })]],
-      ["untimed copy first", [mk("h", { ...hidden, recorded_at: undefined }), mk("h", through)]],
-    ]) {
-      const actual = await outcome(chain(copies));
-      assert.equal(actual.status, "superseded", label);
+    assert.equal(baseline.entry.status, "superseded");
+    const variants = [
+      ["conflicting copy first", chain([mk("h", { ...hidden, slot: "other" }), mk("h", through)])],
+      ["conflicting copy last", chain([mk("h", through), mk("h", { ...hidden, slot: "other" })])],
+      ["an exact twin", chain([mk("h", through), mk("h", through)])],
+      ["a hidden cycle formed by the copies (a -> h -> z -> h, plus h -> a)", [mk("a", edge("h")), mk("h", through), mk("h", { ...hidden, ...edge("a"), ...publicEdge }), mk("z", edge("h"))]],
+    ];
+    const results = [];
+    for (const [label, claims] of variants) {
+      const actual = await outcome(claims);
+      assert.equal(actual.entry.status, "unverifiable", label);
+      assert.deepEqual(actual.entry.reasons, ["supersession_ambiguous"], label);
       assert.equal(actual.answered, "abstained", label);
-      assert.equal(actual.result, baseline.result, `${label}: the visible output is identical to the repo without the extra copy`);
+      results.push(actual.json);
+    }
+    assert.equal(results[0], results[1], "the answer does not depend on file order");
+    assert.equal(results[0], results[2], "nor on whether the copies differ");
+    const acrossRoots = await outcome(chain([mk("h", through)]), [mk("h", { ...hidden, slot: "other" })]);
+    assert.equal(acrossRoots.entry.status, "unverifiable");
+    assert.equal(acrossRoots.answered, "abstained");
+  });
+
+  test("a hidden duplicate that no visible claim's chain reaches changes nothing, in any position", async () => {
+    const hidden = { visibility: { audiences: ["auditor"] } };
+    const normalise = (value) => JSON.stringify(value).replaceAll(/[0-9a-f]{40}/g, "<commit>");
+    const body = async (claims) => { const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims }); const result = run(repo, revision, { claim_ids: ["a", "z"] }); remove(repo); return normalise({ ...result, written: undefined }); };
+    const core = [mk("a", edge("z")), mk("z", {})];
+    const baseline = await body(core);
+    for (const extra of [[mk("q", hidden), mk("q", { ...hidden, slot: "other" })], [mk("q", { ...hidden, ...edge("a") }), mk("q", hidden)]]) {
+      assert.equal(await body([...extra, ...core]), baseline, "first");
+      assert.equal(await body([...core, ...extra]), baseline, "last");
     }
   });
 

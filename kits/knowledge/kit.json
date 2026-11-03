@@ -276,7 +276,7 @@
     {
       "id": "knowledge.living-context-suite",
       "path": "context-check/living-context.test.js",
-      "description": "Living Context contract suite (issue #1131): missing/blank/unknown reader refused at every root before any claim is parsed, hidden/absent/not-yet-known indistinguishable by id, Surface per-viewer supersession (a successor the reader cannot see leaves the predecessor current with no trace; a visible, recorded, same-slot, in-effect successor never does, including with hidden or future duplicates), edge visibility, valid-time and knowledge-time as-of, Surface freshness boundary, per-result reasons, whole-result budget boundaries, Survey support-verification abstention (thin support, throwing/timing-out/malformed verifier, unreadable/empty/oversized evidence, required verifier), result-validator consistency, and proposals-only containment."
+      "description": "Living Context contract suite (issue #1131): missing/blank/unknown reader refused at every root before any claim is parsed, hidden/absent/not-yet-known indistinguishable by id, Surface per-viewer supersession (a successor the reader cannot see leaves the predecessor current with no trace; a visible, recorded, same-slot, in-effect successor along an edge the reader may see never does; an ambiguous hidden id on the chain makes it unverifiable in any file order), edge visibility, valid-time and knowledge-time as-of, Surface freshness boundary, per-result reasons, whole-result budget boundaries, Survey support-verification abstention (thin support, throwing/timing-out/malformed verifier, unreadable/empty/oversized evidence, required verifier), result-validator consistency, and proposals-only containment."
     }
   ],
   "skills": [

@@ -263,7 +263,8 @@
               "stale_at_as_of",
               "supersession_slot_mismatch",
               "correction_interval_excludes_valid_at",
-              "supersession_cycle"
+              "supersession_cycle",
+              "supersession_ambiguous"
             ]
           }
         },
@@ -347,7 +348,8 @@
               "stale_at_as_of",
               "supersession_slot_mismatch",
               "correction_interval_excludes_valid_at",
-              "supersession_cycle"
+              "supersession_cycle",
+              "supersession_ambiguous"
             ]
           }
         },
@@ -433,7 +435,8 @@
               "stale_at_as_of",
               "supersession_slot_mismatch",
               "correction_interval_excludes_valid_at",
-              "supersession_cycle"
+              "supersession_cycle",
+              "supersession_ambiguous"
             ]
           }
         },
@@ -482,7 +485,8 @@
               "stale_at_as_of",
               "supersession_slot_mismatch",
               "correction_interval_excludes_valid_at",
-              "supersession_cycle"
+              "supersession_cycle",
+              "supersession_ambiguous"
             ]
           }
         }

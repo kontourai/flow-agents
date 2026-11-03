@@ -193,7 +193,7 @@ export function validateLivingContextResult(result) {
     }
     if (Array.isArray(recall?.reasons)) {
       const has = (code) => recall.reasons.includes(code);
-      const unverifiableCodes = ["knowledge_time_unknown", "supersession_cycle", "supersession_time_unknown", "succession_boundary_unknown", "supersession_slot_mismatch", "declared_unverifiable", "stale_at_as_of"];
+      const unverifiableCodes = ["knowledge_time_unknown", "supersession_cycle", "supersession_time_unknown", "succession_boundary_unknown", "supersession_slot_mismatch", "supersession_ambiguous", "declared_unverifiable", "stale_at_as_of"];
       if (recall.status === "current" && (!has("current_at_as_of") || has("superseded_by_known_successor") || unverifiableCodes.some(has))) errors.push(`$/recalls/${index}: reasons contradict a current status`);
       if (recall.status === "superseded" && !(recall.reasons.length === 1 && has("superseded_by_known_successor"))) errors.push(`$/recalls/${index}: reasons contradict a superseded status`);
       if (recall.status === "unverifiable" && recall.reason === undefined && (has("current_at_as_of") || has("superseded_by_known_successor") || !unverifiableCodes.some(has))) errors.push(`$/recalls/${index}: reasons contradict an unverifiable status`);
@@ -241,7 +241,7 @@ function indexClaims(manifests, ctx) {
   const copies = new Map();
   for (const claim of manifests.flatMap((manifest) => manifest.claims)) copies.set(claim.id, [...(copies.get(claim.id) ?? []), claim]);
   const byId = new Map();
-  const hiddenCopies = new Map();
+  const ambiguous = new Set();
   for (const [id, group] of copies) {
     // A reader's view of an id is built only from copies they may see: a hidden copy never changes their answer
     // and cannot be observed, and never discards a visible one.
@@ -251,15 +251,13 @@ function indexClaims(manifests, ctx) {
     if (entitled.length === 1) byId.set(id, entitled[0]);
     // Visible but not yet known: the reader's own claim, which stays unknown at known_at.
     else if (seen.length > 0) byId.set(id, seen[0]);
-    else {
-      // Every copy is hidden. They are structure only (a chain may collapse through them) and may disagree. No copy
-      // is privileged by file order: they are combined fail-closed in evaluateSupersession, where an edge counts if
-      // any copy supplies it, so a conflicting hidden copy can add supersession but never remove it.
-      byId.set(id, group[0]);
-      if (group.length > 1) hiddenCopies.set(id, group);
-    }
+    // Every copy hidden and they conflict: no copy can stand for the id, and no combination of them is safe (a union
+    // can create a hidden cycle that makes Surface drop a real supersession). The id is ambiguous and is left out of
+    // the structure; a visible claim whose chain reaches it cannot be answered (see reachesAmbiguous).
+    else if (group.length > 1) ambiguous.add(id);
+    else byId.set(id, group[0]);
   }
-  return { byId, hiddenCopies };
+  return { byId, ambiguous };
 }
 
 const viewerOf = (ctx) => ({ audiences: [ctx.reader] });
@@ -301,23 +299,41 @@ function edgeState(claim, successor, ctx) {
  * to a viewer who may see its successor, chains through hidden claims collapse, and a cycle leaves its claims
  * unresolved. The edge's own visibility is that of the claim record that carries it (the predecessor).
  */
-function evaluateSupersession(byId, hiddenCopies, ctx) {
+function evaluateSupersession(byId, ambiguous, ctx) {
   const visibilityByClaimId = new Map();
   for (const claim of byId.values()) if (isKnown(claim, ctx)) visibilityByClaimId.set(claim.id, claim.extension.visibility);
   const states = new Map();
   const edges = [];
-  // Sources include every hidden copy of an all-hidden id; targets are judged against every such copy.
-  const sources = [...byId.values(), ...[...hiddenCopies.values()].flatMap((group) => group.filter((copy) => copy !== byId.get(copy.id)))];
-  for (const claim of sources) {
+  for (const claim of byId.values()) {
     if (claim.superseded_by === undefined) continue;
-    const targets = hiddenCopies.get(claim.superseded_by) ?? [byId.get(claim.superseded_by)];
-    const judged = targets.map((successor) => ({ successor, state: edgeState(claim, successor, ctx) }));
-    const chosen = judged.find((entry) => entry.state.state === "active") ?? judged[0];
-    if (!states.has(claim.id) || chosen.state.state === "active") states.set(claim.id, { ...chosen.state, successor: chosen.successor });
-    if (chosen.state.state === "active") edges.push({ predecessorId: claim.id, successorId: chosen.successor.id, visibility: claim.extension.supersessionVisibility });
+    const successor = byId.get(claim.superseded_by);
+    const state = edgeState(claim, successor, ctx);
+    states.set(claim.id, { ...state, successor });
+    if (state.state === "active") edges.push({ predecessorId: claim.id, successorId: successor.id, visibility: claim.extension.supersessionVisibility });
   }
   const view = Surface.viewerSupersessionView({ visibilityByClaimId, edges, viewer: viewerOf(ctx) });
-  return { view, states };
+  return { view, states, ambiguous, byId };
+}
+
+/**
+ * Whether following this claim's recorded, visible edges through hidden claims reaches an ambiguous id. Such a claim
+ * cannot be called current (the edge it might have is unknowable) or superseded (nothing can stand for the successor),
+ * so it is unverifiable. This tells the reader only that their own claim's chain is unresolvable.
+ */
+function reachesAmbiguous(claim, supersession, ctx) {
+  const { byId, ambiguous } = supersession;
+  const seen = new Set([claim.id]);
+  for (let current = claim; ;) {
+    const next = current.superseded_by;
+    const recordedAt = current.extension.supersessionRecordedAt;
+    if (next === undefined || recordedAt === undefined || recordedAt > ctx.knownAt || !edgeVisible(current, ctx)) return false;
+    if (ambiguous.has(next)) return true;
+    const target = byId.get(next);
+    // Dangling, or a claim the reader can see: ordinary handling applies from here.
+    if (!target || isVisible(target, ctx) || seen.has(next)) return false;
+    seen.add(next);
+    current = target;
+  }
 }
 
 /** What a non-active edge says about a visible claim. Only a successor this reader may see can explain anything. */
@@ -430,6 +446,7 @@ function recallFor(claim, input, changedSurfaces, byId, supersession, ctx, revis
   // Knowledge time first: an unknown instant is indeterminate and is never guessed (Surface).
   if (claim.extension.recordedAt === undefined) return entry("unverifiable", ["knowledge_time_unknown"]);
   const { view } = supersession;
+  if (reachesAmbiguous(claim, supersession, ctx)) return entry("unverifiable", ["supersession_ambiguous"]);
   // A cycle among claims this reader can see selects no winner.
   if (view.unresolvedClaimIds.includes(claim.id)) return entry("unverifiable", ["supersession_cycle"]);
   // The stored status is never served as is: supersession is whatever Surface's view of this reader says, so a
@@ -478,8 +495,8 @@ export function deriveLivingContext({ repoRoot, input }) {
   // Phase one admits the reader at every root before phase two parses a single claim of any root.
   const documents = input.knowledge_roots.map((knowledgeRoot) => readManifestDocument(resolvedRoot, revision, knowledgeRoot, extension));
   const manifests = documents.map((document, index) => normalizeManifestClaims(document, input.knowledge_roots[index], extension));
-  const { byId, hiddenCopies } = indexClaims(manifests, ctx);
-  const supersession = evaluateSupersession(byId, hiddenCopies, ctx);
+  const { byId, ambiguous } = indexClaims(manifests, ctx);
+  const supersession = evaluateSupersession(byId, ambiguous, ctx);
   const requestedIds = orderedRequestIds(input, byId, changedSurfaces, ctx);
 
   const candidates = requestedIds.map((claimId) => {
