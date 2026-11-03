@@ -37,6 +37,7 @@ import {
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
 import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, classifyCurrent, effectiveItems, isSealed, writeBriefs } from "./brief.js";
 import { memorySlotKey } from "@kontourai/flow-agents/memory-claims";
+import { memoryAccumulationQuery } from "../adapters/memory-claims/index.mjs";
 import { canonicalJson } from "@kontourai/relay";
 
 import { MAX_CLAIM_BYTES, boundFact, fitPlan, indexProposals, verifyEntry, visibilityKey } from "./envelope.js";
@@ -290,9 +291,10 @@ export async function runDream(host, options = {}) {
       const fromPlan = siblings.filter((other) => !seen.has(other.id) && memorySlotKey(other) === slot).map((other) => ({ claim: other, state: "pending" }));
       const { views, byView } = effectiveItems([...peers, ...fromPlan, { claim, state: "pending" }], reviewDecisions);
       const contested = classifyCurrent(views, policy).contested.map((view) => byView.get(view).claim.id).sort();
-      return contested.includes(claim.id)
-        ? { outcome: "contested", candidateClaimIds: contested, gapCodes: ["dream-stand-in"] }
-        : { outcome: "current", candidateClaimIds: [claim.id], gapCodes: ["dream-stand-in"] };
+      // A projection RESULT, as #1571 reads one (it adds the slot from the query we pass beside it).
+      return contested.includes(claim.id) && contested.length > 1
+        ? { outcome: "contested", candidateClaimIds: contested, supportingClaimIds: [], gapCodes: ["dream-stand-in"] }
+        : { outcome: "current", candidateClaimIds: [claim.id], supportingClaimIds: [], gapCodes: ["dream-stand-in"] };
     };
 
     // Which peers belong in a decision: the rivals the fact names (the review item shows the pair) and any peer the claim
@@ -314,7 +316,7 @@ export async function runDream(host, options = {}) {
       const rivalIds = candidates.filter((peer) => canonicalJson(peer.value) !== mine).map((peer) => peer.id);
       const { fact: accumulation, cut } = boundFact(given ?? factFor(claim, siblings), claim.id, rivalIds);
       if (cut > 0) report.claims.facts_truncated += 1;
-      const base = { type: "claim", claim, agreement, accumulation, sourceVisibility: options.visibility ?? null };
+      const base = { type: "claim", claim, agreement, accumulation, accumulationQuery: accumulation ? memoryAccumulationQuery(claim, startedAt) : undefined, sourceVisibility: options.visibility ?? null };
       const named = new Set(accumulation?.candidateClaimIds ?? []);
       const rivalsFirst = (list) => [...list].sort((a, b) => (canonicalJson(a.value) !== mine) === (canonicalJson(b.value) !== mine) ? 0 : canonicalJson(a.value) !== mine ? -1 : 1);
       const required = rivalsFirst(candidates.filter((peer) => named.has(peer.id)));
@@ -418,7 +420,7 @@ export async function runDream(host, options = {}) {
       // The fact is the brief's own verdict, built from the claims the brief judged: those the brief verified (an applied
       // claim whose record is retired or not the proposal's is not among them), over the values review has left. A fresh
       // look at the store would see claims the brief excluded, and could clear a contest the brief is holding back.
-      const given = { outcome: "contested", candidateClaimIds: [...contestedBySlot.get(memorySlotKey(item.claim))].sort(), gapCodes: ["dream-stand-in"] };
+      const given = { outcome: "contested", candidateClaimIds: [...contestedBySlot.get(memorySlotKey(item.claim))].sort(), supportingClaimIds: [], gapCodes: ["dream-stand-in"] };
       const decision = route(item.claim, item.agreement, [], given);
       if (decision.outcome === "routed") {
         decisions.push(decision);
