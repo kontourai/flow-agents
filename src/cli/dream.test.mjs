@@ -926,6 +926,9 @@ test("a projection fact is bounded before it is stored: thousands of candidates 
   const exact = boundFact({ outcome: "contested", candidateClaimIds: [mine], gapCodes: Array.from({ length: 17 }, (_, i) => `g${String(i).padStart(2, "0")}`) }, mine);
   assert.deepEqual(exact.fact.gapCodes.filter((code) => code.startsWith("truncated:")), ["truncated:0ids:2gaps"], "17 codes into 16 slots with one for the note drops two originals");
   assert.equal(exact.cut, 2);
+  const edge = boundFact({ outcome: "invalid", reason: "r".repeat(121), candidateClaimIds: [mine], gapCodes: ["g".repeat(120), "h".repeat(121)] }, mine);
+  assert.equal(edge.fact.reason.length, 120, "the string bound is exactly MAX_FACT_STRING characters");
+  assert.deepEqual(edge.fact.gapCodes.map((code) => code.length).sort((a, b) => a - b), [120, 120], "a 120-character code is kept whole; a 121-character one is cut to 120");
   const long = boundFact({ outcome: "invalid", reason: "r".repeat(5 * 1024 * 1024), candidateClaimIds: [mine], gapCodes: ["g".repeat(5 * 1024 * 1024)] }, mine);
   assert.ok(Buffer.byteLength(JSON.stringify(long.fact)) < 2048, "strings are bounded as well as counts");
   assert.ok(Buffer.byteLength(JSON.stringify(fact)) < 4096);
@@ -992,7 +995,7 @@ test("a contest that a Survey edit created reaches the review queue: the verdict
   }
 });
 
-test("report counters are per claim: a claim proposed uncontested and routed on a later look counts once, as routed", async (t) => {
+test("report counters are per claim: every proposed claim has exactly one outcome and one published decision", async (t) => {
   const clash = (content) => (content.includes("banker's rounding")
     ? ["half up", "half even"].map((value) => ({ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding", value, posture: "stated" }))
     : []);
@@ -1106,4 +1109,42 @@ test("review's rejection and correction are seen when routing: a rival the revie
   assert.equal((await scenario("half up", "accept-proposed")).outcome, "routed", "an accepted rival that disagrees contests");
   assert.equal((await scenario("banker's rounding", "accept-proposed", "half up")).outcome, "routed", "a peer that agreed until the reviewer corrected it now disagrees");
   assert.equal((await scenario("banker's rounding", "accept-proposed")).outcome, "proposed", "and an agreeing peer, uncorrected, contests nothing");
+});
+
+test("a contest the brief verified reaches the review queue though routing saw an applied replacement the brief cannot trust", async (t) => {
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const vis = { kind: "restricted", audiences: ["user:owner"] };
+  const base = { subject: { type: "service", id: "ledger service", label: "ledger service" }, claimType: "knowledge.memory-claim", property: "rounding mode", speaker: "user", posture: "stated", visibility: vis };
+  const source = (n) => ({ ref: `sitting:s${n}`, locator: `chars:0-${n}`, excerpt: `e${n}`, observedAt: "2026-10-01T00:00:00.000Z" });
+  const scenario = async (breakSettlement) => {
+    const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+    t.after(ws.cleanup);
+    const store = new FakeCorpusStore(ws.memoryRoot);
+    const a = memoryClaim({ ...base, value: "A", source: source(1) });
+    const b = memoryClaim({ ...base, value: "B", source: source(2), supersedes: [{ claimId: a.id, kind: "succession", reason: "the speaker said it replaces the earlier value" }], validTime: { from: "2026-10-02T00:00:00Z" } });
+    const c = memoryClaim({ ...base, value: "B", source: source(3) });
+    const ids = {};
+    for (const [name, claim] of [["a", a], ["b", b], ["c", c]]) {
+      const entry = { claim, agreement: { passes: 2, agreeing: 2 }, project: null };
+      const decision = routeMemoryChange({ type: "claim", claim, current: [], agreement: entry.agreement, sourceVisibility: vis });
+      ids[name] = await store.proposeCreate({ title: name, category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: `seed:${name}`, contentHash: "h", visibilityKey: visibilityKey(vis) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
+    }
+    const recordId = await store.applyCreate(ids.b, "a-human-reviewer");
+    if (breakSettlement === "retired") store.retire(recordId);
+    if (breakSettlement === "unbound") store.records.set(recordId, { ...store.records.get(recordId), mutation_log: [] });
+    const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf: () => [] }));
+    host.published.length = 0;
+    const report = await runDream(host, runOptions(ws, { visibility: vis }));
+    return { report, published: host.published };
+  };
+  // Control: B is a verified, applied replacement of A, so A is superseded and B and C agree: nothing is contested.
+  const fine = await scenario(null);
+  assert.equal(fine.report.brief_excluded.contested, 0);
+  for (const broken of ["retired", "unbound"]) {
+    const out = await scenario(broken);
+    assert.equal(out.report.brief_excluded.contested, 2, `${broken}: the brief cannot trust B, so A and C contest`);
+    assert.equal(out.report.claims.contested_routed, 2, `${broken}: and both reach the review queue`);
+    assert.equal(out.published.at(-1).reviewItems.length, 2);
+  }
 });

@@ -182,14 +182,28 @@ id is the sitting's working-directory name. Nothing else decides scope.
   snapshot). It is merged but unpublished, and this run holds no custody, so there is no seam for it
   here yet: **the dream produces the fact itself** with `classifyCurrent`, the local stand-in
   (`gapCodes: ["dream-stand-in"]` in every stored fact says so), computed over the values review has
-  left. There is one verdict function. Routing, the review-queue backfill and the brief all use it,
-  so they agree by construction. Replacing it with the real projection, and adding a host seam for
+  left. There is one verdict function, but it is given different claims at different moments: routing
+  asks it about the claim, the stored peers (including applied ones whose settlement the brief later
+  fails to verify) and the plan's siblings; the brief asks it about the claims it has verified. So the
+  review-queue backfill is handed the brief's own verdict, which makes the queue and the brief agree
+  for every claim the backfill covers. Routing a claim at proposal time can be more cautious than the
+  brief (it sees unverified peers); it is never less cautious about a verified contest, because the
+  backfill reconciles it on the same run. The backfill covers *pending* claims. Two claims that are both
+  already applied and disagree are held back from the brief and counted in `brief_excluded.contested`,
+  but a reviewer already decided on each, so they are not re-queued. Replacing it with the real projection, and adding a host seam for
   that, is [#1584](https://github.com/kontourai/flow-agents/issues/1584). A fact stored in a
   decision is bounded to the claim, its rivals and 17 ids, 16 gap codes of at most 120 characters,
   and a `truncated:` code saying what was cut (`claims.facts_truncated`); the claim stays a
   candidate, so the outcome is the same. A plan's claims are peers of one another and of the stored
   claims, each once; a decision embeds at most 16 peers (the rivals first, then any peer the claim
   would be wider than), and `claims.peers_capped` counts each time more were left out.
+- **Eligibility (the quarantine).** An `applied` proposal is eligible when its record is active and is
+  the record Corpus made from it: the record's `apply-create` entry names the proposal and the record body
+  is the proposal's. A settlement that points at some other record is excluded as `unverified`; one the
+  distiller approved itself as `self_approved`; a retired record as `inactive`. A `pending` proposal is
+  eligible only with `includeUnreviewed: true`, and only if routing left it `proposed`; it is then
+  labelled unreviewed. A `pending` claim routing sent to review waits for the review. A `rejected` one
+  never appears.
 - **Rank** = confidence × recency × scope. Confidence is `0.55 + 0.45 × agreement` for an
   applied claim and `0.5 × agreement` for a pending one, where agreement is the share of
   extraction passes that found the claim, so review always outranks agreement. Recency is

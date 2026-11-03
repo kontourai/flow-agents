@@ -301,7 +301,7 @@ export async function runDream(host, options = {}) {
     // fits (`boundFact`) and the named rivals travel first. Beyond the caps the outcome is unchanged (one rival is enough
     // to route, and the claim stays a candidate); each cut is counted so it is never silent.
     const MAX_RELEVANT_PEERS = 16;
-    const route = (claim, agreement, siblings = []) => {
+    const route = (claim, agreement, siblings = [], given = null) => {
       const slot = memorySlotKey(claim);
       const byId = new Map();
       // Stored peers and the plan's siblings overlap on a resumed plan; each claim is one peer.
@@ -312,7 +312,7 @@ export async function runDream(host, options = {}) {
       const candidates = [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const mine = canonicalJson(claim.value);
       const rivalIds = candidates.filter((peer) => canonicalJson(peer.value) !== mine).map((peer) => peer.id);
-      const { fact: accumulation, cut } = boundFact(factFor(claim, siblings), claim.id, rivalIds);
+      const { fact: accumulation, cut } = boundFact(given ?? factFor(claim, siblings), claim.id, rivalIds);
       if (cut > 0) report.claims.facts_truncated += 1;
       const base = { type: "claim", claim, agreement, accumulation, sourceVisibility: options.visibility ?? null };
       const named = new Set(accumulation?.candidateClaimIds ?? []);
@@ -406,12 +406,16 @@ export async function runDream(host, options = {}) {
     const { items, excluded } = await briefItems(store, latest, proposerId);
     const { views, byView } = effectiveItems(items, reviewDecisions);
     const contestedNow = classifyCurrent(views, policy).contested.map((view) => byView.get(view));
+    const contestedBySlot = new Map();
+    for (const item of contestedNow) contestedBySlot.set(memorySlotKey(item.claim), [...(contestedBySlot.get(memorySlotKey(item.claim)) ?? []), item.claim.id]);
     const alreadyRouted = new Set(decisions.filter((decision) => decision.outcome === "routed").map((decision) => decision.changeId));
     for (const item of contestedNow) {
       if (item.state !== "pending" || alreadyRouted.has(item.claim.id)) continue;
-      // `route` asks the same verdict function the brief just used, over the same values, so a contest that a reviewer's
-      // edit created (which no stored value shows) is routed as the contest it is.
-      const decision = route(item.claim, item.agreement);
+      // The fact is the brief's own verdict, built from the claims the brief judged: those the brief verified (an applied
+      // claim whose record is retired or not the proposal's is not among them), over the values review has left. A fresh
+      // look at the store would see claims the brief excluded, and could clear a contest the brief is holding back.
+      const given = { outcome: "contested", candidateClaimIds: [...contestedBySlot.get(memorySlotKey(item.claim))].sort(), gapCodes: ["dream-stand-in"] };
+      const decision = route(item.claim, item.agreement, [], given);
       if (decision.outcome === "routed") {
         decisions.push(decision);
         report.claims.contested_routed += 1;
