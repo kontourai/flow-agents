@@ -524,3 +524,18 @@ test("the claim-count limit is exact: 20,000 claims are returned, 20,001 are ref
   assert.equal((await run([5000, 5000, 5000, 5000])).claims.length, 20_000);
   await assert.rejects(run([5000, 5000, 5000, 5001]), /yielded 20001 claims over 4 passes/);
 });
+
+test("the memory text the Knowledge kit ships names no harness: an install for another runtime rewrites such names and then reports drift", () => {
+  // `init --runtime codex` rewrites a harness name in installed text, so a kit file that names one makes `workflow doctor` report
+  // drift on that runtime's installs. Fixtures and tests are not shipped; the contract, the adapter and the schemas are.
+  const root = path.resolve(import.meta.dirname, "..", "..");
+  const shipped = [
+    "kits/knowledge/docs/memory-claims.md",
+    ...fs.readdirSync(path.join(root, "kits/knowledge/adapters/memory-claims")).map(name => `kits/knowledge/adapters/memory-claims/${name}`),
+    ...fs.readdirSync(path.join(root, "kits/knowledge/schemas/knowledge")).filter(name => name.startsWith("memory-")).map(name => `kits/knowledge/schemas/knowledge/${name}`),
+  ];
+  assert.ok(shipped.length >= 5, "the premise: the scan sees the contract, the adapter and the three schemas");
+  const harness = /\b(claude|codex|opencode|kiro|copilot|gemini)\b/i;
+  const offenders = shipped.flatMap(file => fs.readFileSync(path.join(root, file), "utf8").split("\n").map((line, index) => ({ file, line: index + 1, text: line })).filter(item => harness.test(item.text)));
+  assert.deepEqual(offenders.map(item => `${item.file}:${item.line}`), []);
+});
