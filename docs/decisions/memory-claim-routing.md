@@ -34,7 +34,9 @@ memory; every other piece stays with its owner.
   `memoryReviewerKind`, until Survey releases the field (kontourai/survey#359): a missing, unknown, non-text, inherited or nested
   value is not human. Unknown routing is treated as routed. Two readings are mine and open to correction: an agent's rejection
   does not withhold a claim either (the rule says an agent may not change it, and rejecting is a change), and a claim routing did not
-  flag still takes any reviewer, since it has no review item to be gated.
+  flag still takes any reviewer, since it has no review item to be gated. That exception is earned, not assumed: it applies only when
+  the record saying the claim was not flagged recomputes (review 15 showed that taking the outcome from unvalidated context let a
+  forged `proposed` waive the human requirement). Review time counts only the deciding reviewer's own events.
 - **Unmeasured is not agreed, and unknown is not safe, with one deliberate exception.**
   Too few extraction passes route to review, and a visibility Surface cannot read is sealed, never open.
   Malformed agreement counts and a projection fact that is not well formed are refused at the entry points

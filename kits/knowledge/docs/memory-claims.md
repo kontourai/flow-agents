@@ -131,7 +131,10 @@ That covers every routed claim: a contradiction, a consequential supersession, a
 low-agreement claim. An outcome from an `agent` or `rule` reviewer, or from a reviewer whose kind is not attested, may *annotate*
 the item and must not change it: the claim stays `proposed` and routed, whatever the outcome says (accept, correct, or reject: an
 agent cannot withhold a claim either). A claim routing did not flag stays `proposed` until reviewed, and any reviewer's decision
-applies to it. A claim whose routing is not known (no routing record is passed to recall) is **treated as routed**, so unknown fails
+applies to it, **but only if the record that says it was not flagged is one the Kit's own rules reproduce** (`recomputeMemoryRouting`):
+that record is what waives the human requirement, so it is earned. A record with an edited outcome, an outcome the Kit does not define,
+or one that does not recompute is skipped as if it had not been passed, and a claim with no usable routing record is treated as routed.
+When a claim has several records the strictest (routed) stands, whatever order they come in. A claim whose routing is not known (no routing record is passed to recall) is **treated as routed**, so unknown fails
 closed. Among the human decisions on an item the latest by instant stands; a later agent decision never displaces an earlier human
 one, and an earlier agent decision never blocks a later human one.
 
@@ -144,7 +147,7 @@ Survey will refuse it. When Survey releases the field, the shim is the function 
 `spec.reviewerKind`, routed claims stay unpromoted until it is repointed, and nothing is promoted wrongly, so survey#359 is not a
 MERGE-AFTER for this change. `memoryReviewOutcome(decision, itemName)` only says what a decision *means* (confirm, correct, reject, hold) and does not look at who made it: a host that acts on it directly asks `memoryDecisionMayPromote` first. `memoryDecisionMayPromote(decision, {routed})` (exported by the adapter with `memoryReviewerKind`) is the check a host makes before passing a decision to
 Survey's `entityOutcomeFromDecision` (entity review is Survey's; the Kit does not call it). Each routed claim's review item carries the
-label `memory.reviewer: human-required`, so a workbench can show what the item needs. Recall reports the annotations it ignored
+label `memory.reviewer: human-required`, so a workbench can show what the item needs. Review time is the deciding reviewer's own: session events tagged `agent` or `rule`, or by another actor than the decision's, are not borrowed as its time (Survey names decisions per session, so a name can recur). Recall reports the annotations it ignored
 (`review.annotations`) and metrics count them (`reviewer.annotated`); an item with only annotations is `pending`.
 
 ### Data the Kit records is plain data

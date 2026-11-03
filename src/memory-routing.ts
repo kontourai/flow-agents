@@ -559,6 +559,17 @@ export function memoryDecisionMayPromote(decision: ReviewDecision, options: { ro
 }
 
 /**
+ * Whether a routing record can be believed when it says a change was NOT routed. That claim is the one that waives the human
+ * requirement, so it is the one that must be earned: the record has to be a decision the Kit's own rules reproduce
+ * (`recomputeMemoryRouting`), with an outcome the Kit defines. A record that says `routed` needs no check, because believing it only
+ * tightens. Anything else (an edited outcome, an outcome the Kit does not define, a record that does not recompute) is not a waiver.
+ */
+function believedUnrouted(decision: MemoryRoutingDecision): boolean {
+  if (decision.outcome !== "proposed") return false;
+  try { return recomputeMemoryRouting(decision).ok; } catch { return false; }
+}
+
+/**
  * The decision that stands for one review item, and how many decisions only annotated it. Among the decisions that may change the
  * claim, the latest by instant (`11:00+02:00` is earlier than `10:00Z`, whatever the text says; a tie keeps the later array entry).
  * On a routed claim a later agent decision never displaces an earlier human one, and a human one is displaced only by a later human one.
@@ -600,7 +611,17 @@ export interface MemoryRunMetrics {
 }
 
 /** Selection-to-submission seconds for a decision, or undefined when the events do not show both. */
-function reviewDwell(decision: ReviewDecision, itemName: string, events: readonly ReviewSessionEvent[]): number | undefined {
+function reviewDwell(decision: ReviewDecision, itemName: string, allEvents: readonly ReviewSessionEvent[]): number | undefined {
+  // Survey names decisions per session, so a name can recur across sessions, and an agent's session can reuse a human's decision name.
+  // Only the events of the reviewer who made THIS decision are its time: not an agent's or a rule's (by the event's own kind), and not
+  // another actor's (when the decision names its actor). An event that names neither is a legacy event and stays.
+  const decider = (decision.spec.actor as { id?: unknown } | undefined)?.id;
+  const events = allEvents.filter(event => {
+    const kind = memoryReviewerKind(event as unknown as ReviewDecision);
+    if (kind === "agent" || kind === "rule") return false;
+    const actor = (event.spec.actor as { id?: unknown } | undefined)?.id;
+    return typeof decider !== "string" || actor === undefined || actor === decider;
+  });
   // The submission of THIS decision. Sequence numbers are per session, so across sessions the latest submission by
   // time is the one; the sequence only orders submissions within one session.
   const submitted = events.filter(event => event.spec.eventType === "decision-submitted" && event.spec.reviewItemName === itemName
@@ -633,7 +654,11 @@ export function deriveMemoryRunMetrics(input: { runId: string; decisions: readon
   const reviewDecisions = ownEntries(ownField(input, "reviewDecisions", "metrics input"), "metrics input reviewDecisions", MAX_HISTORY_ENTRIES) as ReviewDecision[];
   const reviewEvents = ownEntries(ownField(input, "reviewEvents", "metrics input"), "metrics input reviewEvents", MAX_HISTORY_ENTRIES) as ReviewSessionEvent[];
   const byItem = groupByItem(reviewDecisions);
-  const routedNames = new Set(routed.map(reviewItemNameOf)), unroutedNames = new Set(decisions.filter(decision => decision.outcome !== "routed").map(reviewItemNameOf));
+  const routedNames = new Set(routed.map(reviewItemNameOf));
+  // An item is known to be unrouted only if the run's own record of it says so AND that record recomputes: the claim is what waives
+  // the human requirement, so it is earned. Checked only for items a reviewer has decided, not for every uncontested decision.
+  const notRouted = new Map(decisions.filter(decision => decision.outcome !== "routed").map(decision => [reviewItemNameOf(decision), decision] as const));
+  const knownUnrouted = (name: string): boolean => { const record = notRouted.get(name); return record !== undefined && believedUnrouted(record); };
   const counts = { confirmed: 0, corrected: 0, rejected: 0, held: 0 };
   const matched = new Set<string>();
   let seconds = 0, timed = 0, annotated = 0, unmatched = 0;
@@ -641,7 +666,7 @@ export function deriveMemoryRunMetrics(input: { runId: string; decisions: readon
     // On a routed item a human decision stands and an agent's or rule's (or an unattested one) annotates it and leaves it pending.
     // An item routing found nothing to flag takes any reviewer; an item no change of this run made is not known to be unrouted, so
     // it takes only a human.
-    const settled = settle(made, routedNames.has(name) ? true : unroutedNames.has(name) ? false : undefined);
+    const settled = settle(made, routedNames.has(name) ? true : knownUnrouted(name) ? false : undefined);
     annotated += settled.annotated;
     if (!routedNames.has(name)) { if (settled.made) unmatched++; continue; } // a decision for an item no routed change made
     if (!settled.made) continue;
@@ -698,12 +723,23 @@ export function presentMemoryClaims(claims: readonly unknown[], context: { routi
   // another to the presentation would otherwise print a claim with no posture. A claim that cannot be copied is withheld.
   // From each routing decision recall reads four small fields (what was decided, for which claim, and the rule names), so those
   // are all it takes: copying a whole decision would refuse one the Kit legitimately produced (a large value and 64 peers).
-  const routingByClaim = new Map<string, { outcome: unknown; reasons: string[] }>();
+  // Per claim, what recall may believe about its routing. A record that says `routed` is believed as it stands. A record that says
+  // the claim was NOT routed is believed only if it recomputes (`believedUnrouted`), because that is what waives the human
+  // requirement; any other outcome, or a record that does not recompute, is unknown, and unknown is treated as routed. When a claim
+  // has several records the strictest one stands, whatever order they come in.
+  const routingByClaim = new Map<string, { outcome: "routed" | "proposed"; reasons: string[] }>();
   for (const decision of ownEntries(ownField(context, "routing", "recall context"), "recall routing")) {
     const changeType = ownField(decision, "changeType", "recall routing decision"), changeId = ownField(decision, "changeId", "recall routing decision");
     if (changeType !== "claim" || typeof changeId !== "string") continue;
-    const reasons = ownEntries(ownField(decision, "reasons", "recall routing decision"), "recall routing reasons").map(reason => ownField(reason, "rule", "recall routing reason"));
-    routingByClaim.set(changeId, { outcome: ownField(decision, "outcome", "recall routing decision"), reasons: reasons.filter((rule): rule is string => typeof rule === "string") });
+    const reasons = ownEntries(ownField(decision, "reasons", "recall routing decision"), "recall routing reasons").map(reason => ownField(reason, "rule", "recall routing reason")).filter((rule): rule is string => typeof rule === "string");
+    const outcome = ownField(decision, "outcome", "recall routing decision");
+    const earlier = routingByClaim.get(changeId);
+    if (outcome === "routed") { routingByClaim.set(changeId, { outcome: "routed", reasons: earlier?.outcome === "routed" ? [...new Set([...earlier.reasons, ...reasons])] : reasons }); continue; }
+    if (earlier) continue; // a routed record is the stricter; a second unflagged one adds nothing
+    // A record that does not recompute is not evidence of anything, so it is skipped as if it had not been passed: the claim's
+    // routing is then unknown, which is treated as routed.
+    const full = jsonSnapshot(decision, "recall routing decision", DECISION_BOUNDS) as MemoryRoutingDecision;
+    if (believedUnrouted(full)) routingByClaim.set(changeId, { outcome: "proposed", reasons });
   }
   const decisionsByItem = groupByItem(jsonSnapshotEach(ownField(context, "reviewDecisions", "recall context"), "recall reviewDecisions") as ReviewDecision[]);
   const presented: PresentedMemoryClaim[] = [], withheld: WithheldMemoryClaim[] = [];

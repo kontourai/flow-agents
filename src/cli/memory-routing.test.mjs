@@ -1164,3 +1164,75 @@ test("the Knowledge kit's adapter exposes the human-reviewer rule: the shim and 
   assert.equal(adapter.memoryDecisionMayPromote, memoryDecisionMayPromote);
   for (const name of ["presentMemoryClaims", "deriveMemoryRunMetrics", "buildMemoryReviewItem", "routeMemoryChange", "memoryReviewOutcome"]) assert.equal(typeof adapter[name], "function", name);
 });
+
+// --- review 15: the exception for an unflagged claim is only as good as the routing record that grants it ----------------------------
+
+test("a routing record that says 'not routed' is believed only if it recomputes: a forged or edited one cannot waive the human requirement", () => {
+  const { claim, decision, item } = routedClaim();
+  const agentEdit = decide(item, "agent", "accept-proposed", "2026-11-02T10:00:00.000Z", "PostgreSQL 99");
+  const recall = routing => presentMemoryClaims([claim], { routing, reviewDecisions: [agentEdit] }).presented[0];
+  assert.equal(recall([decision]).review.label, "in-review", "the genuine routed record: the agent annotates");
+  // The genuine record with its outcome changed to proposed: it no longer recomputes.
+  const forged = { ...plain(decision), outcome: "proposed" };
+  assert.equal(recomputeMemoryRouting(forged).ok, false, "the premise");
+  const shown = recall([forged]);
+  // The forged record is not evidence of anything, so the claim's routing is not known (shown as not evaluated), unknown is treated as
+  // routed, and the agent's edit is an annotation: nothing is promoted and the value is the extracted one.
+  assert.deepEqual([shown.review.label, shown.review.routing, shown.value, shown.review.annotations], ["unreviewed", "not-evaluated", "PostgreSQL 16", 1], "a forged 'proposed' waives nothing");
+  // An outcome the Kit does not define is not a waiver either.
+  for (const outcome of ["weird", "", null, undefined, 7, "Proposed"]) assert.deepEqual([recall([{ ...plain(decision), outcome }]).review.label, recall([{ ...plain(decision), outcome }]).value], ["unreviewed", "PostgreSQL 16"], `outcome ${JSON.stringify(outcome)}`);
+  // A genuine routed record next to an appended forged one: the stricter record stands.
+  assert.equal(recall([decision, forged]).review.label, "in-review");
+  assert.equal(recall([forged, decision]).review.label, "in-review");
+  // A routing record for another claim says nothing about this one.
+  const other = routeMemoryChange(change(make({ value: "x", property: "other property" }), { accumulation: null }));
+  assert.deepEqual([recall([other]).review.label, recall([other]).value], ["unreviewed", "PostgreSQL 16"], "no record for this claim: unknown, treated as routed");
+  // And the genuine unflagged record still waives it: the exception exists and works.
+  const unflagged = make({ value: "PostgreSQL 17", property: "third property" });
+  const unrouted = routeMemoryChange(change(unflagged, { accumulation: null }));
+  assert.equal(recomputeMemoryRouting(unrouted).ok, true);
+  const name = memoryReviewItemName(unflagged.id);
+  const raw = { apiVersion: "survey.kontourai.io/v1alpha1", kind: "ReviewDecision", metadata: { name: "d" }, spec: { reviewItemName: name, candidateId: `${name}.proposed`, status: "verified", reviewedAt: "2026-11-02T10:00:00.000Z", reviewerKind: "agent" } };
+  assert.equal(presentMemoryClaims([unflagged], { routing: [unrouted], reviewDecisions: [raw] }).presented[0].review.label, "confirmed");
+  // An unflagged record whose claim was swapped for another no longer recomputes, so it grants nothing for either claim.
+  const swapped = { ...plain(unrouted), changeId: claim.id };
+  assert.equal(presentMemoryClaims([claim], { routing: [swapped], reviewDecisions: [agentEdit] }).presented[0].value, "PostgreSQL 16", "nothing is promoted by it");
+});
+
+test("metrics: a routing record that says 'not routed' is believed only if it recomputes", () => {
+  const { decision, item } = routedClaim();
+  const forged = { ...plain(decision), outcome: "proposed" };
+  const agent = decide(item, "agent");
+  // The item's own routed record is replaced by a forged 'proposed' one (a later record for a change stands): the agent's decision must not count as a reviewed unmatched item.
+  const m = deriveMemoryRunMetrics({ runId: "r", decisions: [forged], reviewDecisions: [agent] });
+  assert.deepEqual([m.reviewer.unmatched, m.reviewer.annotated], [0, 1], "an unverifiable 'proposed' is not a waiver");
+});
+
+test("review time is the human decision's own: another session's events under a reused decision name are not borrowed", () => {
+  const { decision, item } = routedClaim();
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" } } };
+  const events = (kind, actor, session, start, end) => [
+    { kind: "ReviewSessionEvent", metadata: { name: `${session}-a` }, spec: { sessionName: session, sequence: 1, eventType: "item-selected", occurredAt: start, reviewItemName: item.metadata.name, ...(kind ? { reviewerKind: kind } : {}), ...(actor ? { actor: { id: actor } } : {}) } },
+    { kind: "ReviewSessionEvent", metadata: { name: `${session}-b` }, spec: { sessionName: session, sequence: 2, eventType: "decision-submitted", occurredAt: end, reviewItemName: item.metadata.name, reviewDecisionName: "decision-1", ...(kind ? { reviewerKind: kind } : {}), ...(actor ? { actor: { id: actor } } : {}) } },
+  ];
+  const seconds = (reviewEvents) => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents }).reviewSeconds;
+  const agentEvents = events("agent", "agent:bot", "agent-session", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z");
+  assert.equal(seconds(agentEvents), null, "events tagged as an agent's give a human decision no review time");
+  assert.equal(seconds(events("rule", undefined, "rule-session", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z")), null);
+  assert.equal(seconds(events(undefined, "agent:bot", "other-session", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z")), null, "untagged events by a different actor are not the reviewer's");
+  assert.equal(seconds(events("human", "person:reviewer", "human-session", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")), 20, "the human's own events are the time");
+  assert.equal(seconds(events(undefined, "person:reviewer", "legacy-session", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")), 20, "a legacy event by the same actor still counts");
+  assert.equal(seconds([...agentEvents, ...events("human", "person:reviewer", "human-session", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")]), 20, "mixed: only the human's");
+  assert.equal(seconds([]), null);
+});
+
+test("the metrics schema holds `annotated` to what it means: required, a whole number, never negative", () => {
+  const { decision } = routedClaim();
+  const good = deriveMemoryRunMetrics({ runId: "r", decisions: [decision] });
+  assert.equal(validateMetrics(good), true, JSON.stringify(validateMetrics.errors));
+  const without = plain(good); delete without.reviewer.annotated;
+  assert.equal(validateMetrics(without), false, "required");
+  for (const bad of [-1, 1.5, "1", null]) assert.equal(validateMetrics({ ...plain(good), reviewer: { ...good.reviewer, annotated: bad } }), false, `annotated ${JSON.stringify(bad)}`);
+  assert.equal(validateMetrics({ ...plain(good), reviewer: { ...good.reviewer, annotated: 0 } }), true);
+  assert.equal(validateMetrics({ ...plain(good), reviewer: { ...good.reviewer, annotated: 3 } }), true);
+});
