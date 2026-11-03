@@ -74,3 +74,14 @@ test('marker resolves when the bundle root itself is named context', t => {
  assert.doesNotThrow(() => { profile=require(path.join(bundle,'scripts/hooks/lib/context-contributors/profile-memory.js')); }, 'marker must resolve inside the bundle');
  assert.match(profile.profileMemoryContributor('SessionStart',{},8192).text,/violet kestrel/);
 });
+
+test('invalid, oversized, symlinked and non-fitting briefs contribute nothing', t => {
+ const { temp, brief } = setup(t);
+ assert.equal(profileMemoryContributor('SessionStart',{},10),null, 'framing must fit');
+ fs.unlinkSync(brief); assert.equal(profileMemoryContributor('SessionStart',{},8192),null, 'missing brief');
+ fs.writeFileSync(brief,'{invalid'); assert.equal(profileMemoryContributor('SessionStart',{},8192),null, 'malformed JSON');
+ fs.writeFileSync(brief,Buffer.from([0xff,0xfe])); assert.equal(profileMemoryContributor('SessionStart',{},8192),null, 'invalid UTF-8');
+ fs.writeFileSync(brief,JSON.stringify({version:2,entries:['wrong version']})); assert.equal(profileMemoryContributor('SessionStart',{},8192),null, 'unknown version');
+ fs.writeFileSync(brief,JSON.stringify({version:1,entries:['x'.repeat(33000)]})); assert.equal(profileMemoryContributor('SessionStart',{},8192),null, 'oversized file');
+ const target=path.join(temp,'target.json'); fs.writeFileSync(target,JSON.stringify({version:1,entries:['symlink target']})); fs.unlinkSync(brief); fs.symlinkSync(target,brief); assert.equal(profileMemoryContributor('SessionStart',{},8192),null, 'final symlink');
+});
