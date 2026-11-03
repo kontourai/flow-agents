@@ -76,14 +76,23 @@ test('empty candidates are a no-op without registration', async () => {
   const result = await runPromote({ ...opts, candidates: [] });
   assert.deepEqual(result, { root: 'memory', posture: 'noop', proposals: [] });
   assert.deepEqual(calls, []);
+  const preview = await runPromote({ ...opts, candidates: [], write: false });
+  assert.equal(preview.posture, 'preview');
+  assert.deepEqual(calls, []);
 });
 
 test('unknown targets and store output directories are refused before effects', async () => {
   const { calls, opts } = setup();
   const fixture = fileURLToPath(new URL('./fixtures/', import.meta.url));
-  await assert.rejects(runPromote({ ...opts, target: 'unexpected', sessionDir: path.join(fixture, 'session'), repoRoot: path.join(fixture, 'repo'), write: false }), /unknown promote target/);
-  await assert.rejects(runPromote({ ...opts, outDir: '/somewhere' }), /outDir.*repo-docs/);
+  await assert.rejects(runPromote({ target: 'unexpected', sessionDir: path.join(fixture, 'session'), repoRoot: path.join(fixture, 'repo'), write: false }), /unknown promote target/);
+  for (const target of ['', null, 0, false]) {
+    await assert.rejects(runPromote({ target, sessionDir: path.join(fixture, 'session'), repoRoot: path.join(fixture, 'repo'), write: false }), /unknown promote target/);
+  }
+  for (const outDir of ['/somewhere', '']) {
+    await assert.rejects(runPromote({ ...opts, outDir }), /outDir.*repo-docs/);
+  }
   await assert.rejects(runPromote({ ...opts, rootName: undefined }), /rootName/);
+  await assert.rejects(runPromote({ target: 'repo-docs', sessionDir: path.join(fixture, 'session'), repoRoot: path.join(fixture, 'repo'), root: '/unexpected' }), /root.*store target/);
   assert.deepEqual(calls, []);
 });
 
