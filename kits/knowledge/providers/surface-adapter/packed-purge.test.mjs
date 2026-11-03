@@ -202,25 +202,25 @@ for (const [profile, KitAdapter] of [["default", DefaultKnowledgeStore], ["vault
           { code: "PURGED" }, "related tombstone link must be refused",
         );
         const attempts = [
-          () => legacy.update(id, { body: "reintroduced" }, { agent: "test" }),
-          () => legacy.link(id, [{ target_id: other, kind: "related" }], { agent: "test" }),
-          () => legacy.link(survivor, [{ target_id: id, kind: "source" }], { agent: "test" }),
-          () => legacy.update(survivor, { links: [{ target_id: id, kind: "source" }] }, { agent: "test" }),
-          () => legacy.create({ type: "raw", title: "new", body: "new", category: "private",
-            provenance: { agent: "test", source_ids: [id] } }),
-          () => legacy.create({ id, type: "raw", title: "new", body: "new", category: "private",
-            provenance: { agent: "test" } }),
-          () => legacy.propose(id, survivor, { agent: "test", proposal: "change" }),
-          () => legacy.propose(survivor, id, { agent: "test", proposal: "change" }),
-          () => legacy.apply(id, survivor, { agent: "test", new_body: "new", rationale: "change" }),
-          () => legacy.apply(survivor, id, { agent: "test", new_body: "new", rationale: "change" }),
-          () => legacy.reject(id, survivor, { agent: "test", reason: "no" }),
-          () => legacy.reject(survivor, id, { agent: "test", reason: "no" }),
-          () => legacy.supersede(survivor, [id], { agent: "test", rationale: "change" }),
-          () => legacy.supersede(id, [survivor], { agent: "test", rationale: "change" }),
-          () => legacy.retire(id, "retired", { agent: "test", rationale: "change" }),
+          ["update tombstone", () => legacy.update(id, { body: "reintroduced" }, { agent: "test" })],
+          ["link from tombstone", () => legacy.link(id, [{ target_id: other, kind: "related" }], { agent: "test" })],
+          ["source link to tombstone", () => legacy.link(survivor, [{ target_id: id, kind: "source" }], { agent: "test" })],
+          ["update with erased source", () => legacy.update(survivor, { links: [{ target_id: id, kind: "source" }] }, { agent: "test" })],
+          ["create with erased source", () => legacy.create({ type: "raw", title: "new", body: "new", category: "private",
+            provenance: { agent: "test", source_ids: [id] } })],
+          ["reuse erased id", () => legacy.create({ id, type: "raw", title: "new", body: "new", category: "private",
+            provenance: { agent: "test" } })],
+          ["propose to tombstone", () => legacy.propose(id, survivor, { agent: "test", proposal: "change" })],
+          ["propose from tombstone", () => legacy.propose(survivor, id, { agent: "test", proposal: "change" })],
+          ["apply to tombstone", () => legacy.apply(id, survivor, { agent: "test", new_body: "new", rationale: "change" })],
+          ["apply from tombstone", () => legacy.apply(survivor, id, { agent: "test", new_body: "new", rationale: "change" })],
+          ["reject on tombstone", () => legacy.reject(id, survivor, { agent: "test", reason: "no" })],
+          ["reject from tombstone", () => legacy.reject(survivor, id, { agent: "test", reason: "no" })],
+          ["supersede tombstone", () => legacy.supersede(survivor, [id], { agent: "test", rationale: "change" })],
+          ["supersede from tombstone", () => legacy.supersede(id, [survivor], { agent: "test", rationale: "change" })],
+          ["retire tombstone", () => legacy.retire(id, "retired", { agent: "test", rationale: "change" })],
         ];
-        for (const attempt of attempts) await assert.rejects(attempt, { code: "PURGED" });
+        for (const [label, attempt] of attempts) await assert.rejects(attempt, { code: "PURGED" }, label);
         assert.deepEqual(bytes(), beforeAttempts, "refused legacy mutations must not write records or indexes");
         assert.equal((await store.get(id)).body, "");
       } else {
