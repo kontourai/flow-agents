@@ -1,0 +1,66 @@
+[
+  {
+    "source": "runtime-session",
+    "sittingId": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+    "contentHash": "sha256:e9dfb54a0f3113aa83d7efc718fa2035ed9b627cbd11e205af80e5b9af342940",
+    "complete": true,
+    "provenance": {
+      "harness": "claude-code",
+      "sessionId": "7c1e2d3f-0000-4000-8000-00000000a1b2",
+      "transcriptRef": "projects/widget-service/7c1e2d3f-0000-4000-8000-00000000a1b2.jsonl",
+      "cwd": "~/dev/widget-service",
+      "gitBranch": "main",
+      "startedAt": "2026-10-28T09:00:00.000Z",
+      "endedAt": "2026-10-28T09:02:30.000Z"
+    },
+    "turns": [
+      {
+        "role": "user",
+        "text": "The widget service uses PostgreSQL 15 as its primary database.",
+        "at": "2026-10-28T09:00:00.000Z"
+      },
+      {
+        "role": "assistant",
+        "text": "Noted. I will keep that in mind for the migration work.",
+        "at": "2026-10-28T09:00:04.000Z"
+      },
+      {
+        "role": "user",
+        "text": "Maya Chen owns the on-call rotation for the widget service.\n\nOur retry budget is 5 attempts per request.",
+        "at": "2026-10-28T09:01:10.000Z"
+      }
+    ]
+  },
+  {
+    "source": "runtime-session",
+    "sittingId": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+    "contentHash": "sha256:55d8b15888efa6457d0aa967e249b121fd7d60d723677daf254c31747143c1ce",
+    "complete": true,
+    "provenance": {
+      "harness": "claude-code",
+      "sessionId": "7c1e2d3f-0000-4000-8000-00000000a1b2",
+      "transcriptRef": "projects/widget-service/7c1e2d3f-0000-4000-8000-00000000a1b2.jsonl",
+      "cwd": "~/dev/widget-service",
+      "gitBranch": "main",
+      "startedAt": "2026-10-30T14:00:00.000Z",
+      "endedAt": "2026-10-30T14:06:40.000Z"
+    },
+    "turns": [
+      {
+        "role": "user",
+        "text": "Update: the widget service moved to PostgreSQL 16 as its primary database, effective 2026-10-30.",
+        "at": "2026-10-30T14:00:00.000Z"
+      },
+      {
+        "role": "assistant",
+        "text": "Understood, PostgreSQL 16 is now the primary database.",
+        "at": "2026-10-30T14:00:06.000Z"
+      },
+      {
+        "role": "user",
+        "text": "Actually the retry budget is 8 attempts per request.\n\nMaya Chen no longer owns the on-call rotation for the widget service, drop that.\n\nIf we ever shard the database we would probably use Citus.\n\nPriya Rao leads the platform team.",
+        "at": "2026-10-30T14:02:00.000Z"
+      }
+    ]
+  }
+]

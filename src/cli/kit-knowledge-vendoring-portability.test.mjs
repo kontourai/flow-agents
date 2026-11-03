@@ -14,6 +14,9 @@ const KNOWLEDGE_SCHEMA_FILES = [
   "context-check-result.schema.json",
   "edge.schema.json",
   "health-report.schema.json",
+  "memory-claim.schema.json",
+  "memory-routing-decision.schema.json",
+  "memory-run-metrics.schema.json",
   "node.schema.json",
   "proposal.schema.json",
 ];

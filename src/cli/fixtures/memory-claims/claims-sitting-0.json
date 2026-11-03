@@ -1,0 +1,81 @@
+{
+  "agreement": {
+    "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e": {
+      "agreeing": 2,
+      "passes": 2
+    },
+    "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b": {
+      "agreeing": 1,
+      "passes": 2
+    },
+    "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e": {
+      "agreeing": 2,
+      "passes": 2
+    }
+  },
+  "claims": [
+    {
+      "id": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+      "posture": "stated",
+      "property": "primary database",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+        "extractor": "scripted-replay",
+        "locator": "chars:32-94",
+        "observedAt": "2026-10-28T09:00:00.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "value": "PostgreSQL 15"
+    },
+    {
+      "id": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+      "posture": "stated",
+      "property": "on-call owner",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+        "extractor": "scripted-replay",
+        "locator": "chars:220-279",
+        "observedAt": "2026-10-28T09:01:10.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "value": "Maya Chen"
+    },
+    {
+      "id": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b",
+      "posture": "stated",
+      "property": "retry budget",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "Our retry budget is 5 attempts per request.",
+        "extractor": "scripted-replay",
+        "locator": "chars:280-323",
+        "observedAt": "2026-10-28T09:01:10.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "value": "5 attempts per request"
+    }
+  ]
+}

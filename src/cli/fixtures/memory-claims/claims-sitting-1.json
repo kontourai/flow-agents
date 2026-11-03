@@ -1,0 +1,148 @@
+{
+  "agreement": {
+    "sha256:20c5ce1b814012ded9f8fefc200f23d791c2089c200ca092c96df84d30b6f6ce": {
+      "agreeing": 2,
+      "passes": 2
+    },
+    "sha256:8d3f2a471b061ee728f62ed977ae8772b360f5c031b36f3667770b38a6c37172": {
+      "agreeing": 1,
+      "passes": 2
+    },
+    "sha256:df34bdff6aa6fa50283a698aad46f11f46c4806dd1494f63ac64e24a3a0f5214": {
+      "agreeing": 2,
+      "passes": 2
+    },
+    "sha256:e946f30308f494e2a5b62673b401a387fa34fd38d2831253d233cda3a31063e5": {
+      "agreeing": 2,
+      "passes": 2
+    },
+    "sha256:ec4ac3dbad396c995e10180e3cd5963756dd6652ca89ee504e982808ac66417e": {
+      "agreeing": 2,
+      "passes": 2
+    }
+  },
+  "claims": [
+    {
+      "id": "sha256:e946f30308f494e2a5b62673b401a387fa34fd38d2831253d233cda3a31063e5",
+      "posture": "stated",
+      "property": "primary database",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "Update: the widget service moved to PostgreSQL 16 as its primary database, effective 2026-10-30.",
+        "extractor": "scripted-replay",
+        "locator": "chars:32-128",
+        "observedAt": "2026-10-30T14:00:00.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "supersedes": [
+        {
+          "claimId": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+          "kind": "succession",
+          "reason": "the speaker presented the value as replacing the earlier one"
+        }
+      ],
+      "validTime": {
+        "from": "2026-10-30"
+      },
+      "value": "PostgreSQL 16"
+    },
+    {
+      "id": "sha256:ec4ac3dbad396c995e10180e3cd5963756dd6652ca89ee504e982808ac66417e",
+      "posture": "stated",
+      "property": "retry budget",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "Actually the retry budget is 8 attempts per request.",
+        "extractor": "scripted-replay",
+        "locator": "chars:253-305",
+        "observedAt": "2026-10-30T14:02:00.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "value": "8 attempts per request"
+    },
+    {
+      "id": "sha256:20c5ce1b814012ded9f8fefc200f23d791c2089c200ca092c96df84d30b6f6ce",
+      "posture": "retracted",
+      "property": "on-call owner",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "Maya Chen no longer owns the on-call rotation for the widget service, drop that.",
+        "extractor": "scripted-replay",
+        "locator": "chars:306-386",
+        "observedAt": "2026-10-30T14:02:00.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "supersedes": [
+        {
+          "claimId": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+          "kind": "correction",
+          "reason": "the speaker retracted this assertion"
+        }
+      ],
+      "value": "Maya Chen"
+    },
+    {
+      "id": "sha256:df34bdff6aa6fa50283a698aad46f11f46c4806dd1494f63ac64e24a3a0f5214",
+      "posture": "hypothetical",
+      "property": "sharding technology",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "If we ever shard the database we would probably use Citus.",
+        "extractor": "scripted-replay",
+        "locator": "chars:387-445",
+        "observedAt": "2026-10-30T14:02:00.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "widget service",
+        "label": "widget service",
+        "type": "service"
+      },
+      "value": "Citus"
+    },
+    {
+      "id": "sha256:8d3f2a471b061ee728f62ed977ae8772b360f5c031b36f3667770b38a6c37172",
+      "posture": "stated",
+      "property": "lead",
+      "schema_version": "1.0",
+      "source": {
+        "excerpt": "Priya Rao leads the platform team.",
+        "extractor": "scripted-replay",
+        "locator": "chars:446-480",
+        "observedAt": "2026-10-30T14:02:00.000Z",
+        "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+        "role": "user"
+      },
+      "speaker": "user",
+      "subject": {
+        "id": "platform team",
+        "label": "platform team",
+        "type": "team"
+      },
+      "value": "Priya Rao"
+    }
+  ]
+}

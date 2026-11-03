@@ -194,6 +194,18 @@
     "./knowledge-learning-file": {
       "types": "./build/src/knowledge-learning-file.d.ts",
       "import": "./build/src/knowledge-learning-file.js"
+    },
+    "./memory-claims": {
+      "types": "./build/src/memory-claims.d.ts",
+      "import": "./build/src/memory-claims.js"
+    },
+    "./memory-routing": {
+      "types": "./build/src/memory-routing.d.ts",
+      "import": "./build/src/memory-routing.js"
+    },
+    "./memory-routing-flow": {
+      "types": "./build/src/memory-routing-flow.d.ts",
+      "import": "./build/src/memory-routing-flow.js"
     }
   },
   "repository": {

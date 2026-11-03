@@ -1,0 +1,675 @@
+{
+  "policy": {
+    "consequential": {
+      "properties": [
+        "primary database"
+      ],
+      "subjectTypes": []
+    }
+  },
+  "sitting0": [
+    {
+      "changeId": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "conflicting-current-values",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:22c1ed76170b1dbea084fdcc76edb2eb489a13b861ed686a6885337592cf41c1",
+      "input": {
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "audience": [
+              "user:fixture"
+            ],
+            "ref": "source"
+          }
+        ],
+        "claim": {
+          "id": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+          "posture": "stated",
+          "property": "primary database",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+            "extractor": "scripted-replay",
+            "locator": "chars:32-94",
+            "observedAt": "2026-10-28T09:00:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "PostgreSQL 15"
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "proposed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "conflicting-current-values",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:fec4eb410b9493942ba8f6dc1220dc0591a3a7167229a26d92b94223421c3d79",
+      "input": {
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "audience": [
+              "user:fixture"
+            ],
+            "ref": "source"
+          }
+        ],
+        "claim": {
+          "id": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+          "posture": "stated",
+          "property": "on-call owner",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+            "extractor": "scripted-replay",
+            "locator": "chars:220-279",
+            "observedAt": "2026-10-28T09:01:10.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "Maya Chen"
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "proposed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "conflicting-current-values",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:b617238399caf97bfa97a95e1763adfbbaa3075d994646b444aa3512e3921b20",
+      "input": {
+        "agreement": {
+          "agreeing": 1,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "audience": [
+              "user:fixture"
+            ],
+            "ref": "source"
+          }
+        ],
+        "claim": {
+          "id": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b",
+          "posture": "stated",
+          "property": "retry budget",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Our retry budget is 5 attempts per request.",
+            "extractor": "scripted-replay",
+            "locator": "chars:280-323",
+            "observedAt": "2026-10-28T09:01:10.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "5 attempts per request"
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "routed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [
+        {
+          "detail": {
+            "agreeing": 1,
+            "minAgreement": 1,
+            "passes": 2,
+            "reason": "disagreement"
+          },
+          "rule": "low-extraction-agreement"
+        }
+      ],
+      "schema_version": "1.0"
+    }
+  ],
+  "sitting1": [
+    {
+      "changeId": "sha256:e946f30308f494e2a5b62673b401a387fa34fd38d2831253d233cda3a31063e5",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "conflicting-current-values",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:7da8bf5eacf08c919523b4d7f94ba3349a8e3bcff75137c0d3b7dfbf3767ce2e",
+      "input": {
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "audience": [
+              "user:fixture"
+            ],
+            "ref": "source"
+          },
+          {
+            "audience": null,
+            "ref": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e"
+          }
+        ],
+        "claim": {
+          "id": "sha256:e946f30308f494e2a5b62673b401a387fa34fd38d2831253d233cda3a31063e5",
+          "posture": "stated",
+          "property": "primary database",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Update: the widget service moved to PostgreSQL 16 as its primary database, effective 2026-10-30.",
+            "extractor": "scripted-replay",
+            "locator": "chars:32-128",
+            "observedAt": "2026-10-30T14:00:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "supersedes": [
+            {
+              "claimId": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+              "kind": "succession",
+              "reason": "the speaker presented the value as replacing the earlier one"
+            }
+          ],
+          "validTime": {
+            "from": "2026-10-30"
+          },
+          "value": "PostgreSQL 16"
+        },
+        "current": [
+          {
+            "id": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+            "posture": "stated",
+            "property": "primary database",
+            "schema_version": "1.0",
+            "source": {
+              "excerpt": "The widget service uses PostgreSQL 15 as its primary database.",
+              "extractor": "scripted-replay",
+              "locator": "chars:32-94",
+              "observedAt": "2026-10-28T09:00:00.000Z",
+              "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "role": "user"
+            },
+            "speaker": "user",
+            "subject": {
+              "id": "widget service",
+              "label": "widget service",
+              "type": "service"
+            },
+            "value": "PostgreSQL 15"
+          }
+        ],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "routed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [
+        {
+          "detail": {
+            "property": "primary database",
+            "subjectType": "service",
+            "supersedes": [
+              {
+                "claimId": "sha256:04b79ab0e19aa05de74bc24ae9088ad6bdfebc80a72b9123f19e6db1846fb18e",
+                "kind": "succession"
+              }
+            ]
+          },
+          "rule": "consequential-supersession"
+        }
+      ],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:ec4ac3dbad396c995e10180e3cd5963756dd6652ca89ee504e982808ac66417e",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "conflicting-current-values",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:08924a284cfd83f58ebc9f6e368001380b70fa83976b8354b7b4ce860fef1b3d",
+      "input": {
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "audience": [
+              "user:fixture"
+            ],
+            "ref": "source"
+          },
+          {
+            "audience": null,
+            "ref": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b"
+          }
+        ],
+        "claim": {
+          "id": "sha256:ec4ac3dbad396c995e10180e3cd5963756dd6652ca89ee504e982808ac66417e",
+          "posture": "stated",
+          "property": "retry budget",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Actually the retry budget is 8 attempts per request.",
+            "extractor": "scripted-replay",
+            "locator": "chars:253-305",
+            "observedAt": "2026-10-30T14:02:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "8 attempts per request"
+        },
+        "current": [
+          {
+            "id": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b",
+            "posture": "stated",
+            "property": "retry budget",
+            "schema_version": "1.0",
+            "source": {
+              "excerpt": "Our retry budget is 5 attempts per request.",
+              "extractor": "scripted-replay",
+              "locator": "chars:280-323",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "role": "user"
+            },
+            "speaker": "user",
+            "subject": {
+              "id": "widget service",
+              "label": "widget service",
+              "type": "service"
+            },
+            "value": "5 attempts per request"
+          }
+        ],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "routed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [
+        {
+          "detail": {
+            "with": [
+              {
+                "claimId": "sha256:54573db614785cd9d158ee3ae07b4df971692da73369a06c7a4174ad43aa2d2b",
+                "value": "5 attempts per request"
+              }
+            ]
+          },
+          "rule": "conflicting-current-values"
+        }
+      ],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:20c5ce1b814012ded9f8fefc200f23d791c2089c200ca092c96df84d30b6f6ce",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "conflicting-current-values",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:81fbf9ba386cdf30bea8011fdd3c7c04db906c314dac98b5b338d50871787b72",
+      "input": {
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "audience": [
+              "user:fixture"
+            ],
+            "ref": "source"
+          },
+          {
+            "audience": null,
+            "ref": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e"
+          }
+        ],
+        "claim": {
+          "id": "sha256:20c5ce1b814012ded9f8fefc200f23d791c2089c200ca092c96df84d30b6f6ce",
+          "posture": "retracted",
+          "property": "on-call owner",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Maya Chen no longer owns the on-call rotation for the widget service, drop that.",
+            "extractor": "scripted-replay",
+            "locator": "chars:306-386",
+            "observedAt": "2026-10-30T14:02:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "supersedes": [
+            {
+              "claimId": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+              "kind": "correction",
+              "reason": "the speaker retracted this assertion"
+            }
+          ],
+          "value": "Maya Chen"
+        },
+        "current": [
+          {
+            "id": "sha256:5cbeab3240e39af0e5a423a58ca507f00b8081b145c3bb002218605a0cab310e",
+            "posture": "stated",
+            "property": "on-call owner",
+            "schema_version": "1.0",
+            "source": {
+              "excerpt": "Maya Chen owns the on-call rotation for the widget service.",
+              "extractor": "scripted-replay",
+              "locator": "chars:220-279",
+              "observedAt": "2026-10-28T09:01:10.000Z",
+              "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:0",
+              "role": "user"
+            },
+            "speaker": "user",
+            "subject": {
+              "id": "widget service",
+              "label": "widget service",
+              "type": "service"
+            },
+            "value": "Maya Chen"
+          }
+        ],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "proposed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:df34bdff6aa6fa50283a698aad46f11f46c4806dd1494f63ac64e24a3a0f5214",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "conflicting-current-values",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:2616600be959ef6e11cae745aced1bcbb17d5202a7903d3cae3f1581c48fc0f7",
+      "input": {
+        "agreement": {
+          "agreeing": 2,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "audience": [
+              "user:fixture"
+            ],
+            "ref": "source"
+          }
+        ],
+        "claim": {
+          "id": "sha256:df34bdff6aa6fa50283a698aad46f11f46c4806dd1494f63ac64e24a3a0f5214",
+          "posture": "hypothetical",
+          "property": "sharding technology",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "If we ever shard the database we would probably use Citus.",
+            "extractor": "scripted-replay",
+            "locator": "chars:387-445",
+            "observedAt": "2026-10-30T14:02:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "widget service",
+            "label": "widget service",
+            "type": "service"
+          },
+          "value": "Citus"
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "proposed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [],
+      "schema_version": "1.0"
+    },
+    {
+      "changeId": "sha256:8d3f2a471b061ee728f62ed977ae8772b360f5c031b36f3667770b38a6c37172",
+      "changeType": "claim",
+      "evaluated": [
+        "contradicted-by-verification",
+        "conflicting-current-values",
+        "consequential-supersession",
+        "low-extraction-agreement",
+        "visibility-widening"
+      ],
+      "id": "sha256:0c283213f7eca51155101a4ac28ac77699060bca8e0d7d1ef918bbb95e26e8a9",
+      "input": {
+        "agreement": {
+          "agreeing": 1,
+          "passes": 2
+        },
+        "baselines": [
+          {
+            "audience": [
+              "user:fixture"
+            ],
+            "ref": "source"
+          }
+        ],
+        "claim": {
+          "id": "sha256:8d3f2a471b061ee728f62ed977ae8772b360f5c031b36f3667770b38a6c37172",
+          "posture": "stated",
+          "property": "lead",
+          "schema_version": "1.0",
+          "source": {
+            "excerpt": "Priya Rao leads the platform team.",
+            "extractor": "scripted-replay",
+            "locator": "chars:446-480",
+            "observedAt": "2026-10-30T14:02:00.000Z",
+            "ref": "claude-code:7c1e2d3f-0000-4000-8000-00000000a1b2:1",
+            "role": "user"
+          },
+          "speaker": "user",
+          "subject": {
+            "id": "platform team",
+            "label": "platform team",
+            "type": "team"
+          },
+          "value": "Priya Rao"
+        },
+        "current": [],
+        "type": "claim",
+        "verifications": []
+      },
+      "outcome": "routed",
+      "policy": {
+        "consequential": {
+          "properties": [
+            "primary database"
+          ],
+          "subjectTypes": []
+        },
+        "minAgreement": 1,
+        "minPasses": 2,
+        "multiValued": [],
+        "version": "1.0"
+      },
+      "reasons": [
+        {
+          "detail": {
+            "agreeing": 1,
+            "minAgreement": 1,
+            "passes": 2,
+            "reason": "disagreement"
+          },
+          "rule": "low-extraction-agreement"
+        }
+      ],
+      "schema_version": "1.0"
+    }
+  ]
+}
