@@ -30,9 +30,9 @@ memory; every other piece stays with its owner.
   decisions but routes on neither, so the policy is the Kit's.
 - **Unmeasured is not agreed, and unknown is not safe, with one deliberate exception.**
   Too few extraction passes route to review, and a visibility Surface cannot read is sealed, never open.
-  Malformed agreement counts and malformed intervals are refused at the entry points
-  (`routeMemoryChange`, claim construction); the pure rules, which also run over stored inputs, read them
-  as unmeasured or as overlapping, so a stored record cannot use them to clear a rule. Visibility
+  Malformed agreement counts and a projection fact that is not well formed are refused at the entry points
+  (`routeMemoryChange`); the pure rules, which also run over stored inputs, read a malformed agreement count
+  as unmeasured, and recomputation refuses a stored fact that is not in canonical form. Visibility
   follows Surface's derived-visibility record: undeclared is sealed, a claim is bounded by the meet
   of its inputs, and omission cannot widen. One default goes the other way on purpose: with no
   `consequential` list the policy routes no supersession as consequential, because the Kit cannot

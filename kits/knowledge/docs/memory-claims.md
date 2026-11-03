@@ -14,7 +14,7 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 | The model call | The host. `distillMemoryClaims` takes an `extract` function; bind it to Traverse's `extract()` and a provider. |
 | Claim shape, routing policy, run metrics | This Kit. |
 | Support verification, review items, reviewer decisions | Survey. |
-| Which claims are current in a slot, whether it is contested, supersession over time | Surface (`projectAccumulation`, merged in surface#359 at `b7d932b`, unreleased). The host runs it (it needs observations with custody and an authority snapshot the Kit does not hold); the Kit maps its claims in (`memoryAccumulationClaims`), reads the result back (`memoryAccumulationFact`) and routes on it. The design is [Surface's knowledge-accumulation decision](https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md). The Kit still takes the current claims as input, for the visibility bounds and the review item. |
+| Which claims are current in a slot, whether it is contested, supersession over time | Surface (`projectAccumulation`, merged in surface#359 at `b7d932b`, unreleased). The host runs it (it needs observations with custody and an authority snapshot the Kit does not hold); the Kit maps its claims in (`memoryAccumulationClaims`, which carries every claim a replacement chain reaches, in one canonical form, with instants as the UTC date-times Surface parses), reads the result back (`memoryAccumulationFact`) and routes on it. The design is [Surface's knowledge-accumulation decision](https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md). The Kit still takes the current claims as input, for the visibility bounds and the review item. |
 | Entity merge, split and alias review | Survey (`kontourai/survey#243`, merged in survey#358). The Kit emits proposals in Survey's `EntityProposalInput` and routes them to its review. |
 | Visibility lattice | Surface ([Surface derived visibility](https://github.com/kontourai/surface/blob/18e3570636cdb5f9e73d38d9274a2bcd1dc04b9f/docs/decisions/derived-visibility.md), merged in surface#356). A claim's `visibility` is Surface's form and the Kit's order is Surface's meet. |
 | Gates and evidence | Flow. |
@@ -85,11 +85,11 @@ also becomes a Survey review item that a person decides. Review never blocks rec
 | Rule | Routes when |
 |---|---|
 | `contradicted-by-verification` | A Survey support-verification record bound to this claim's value says `contradicted`. A record for a different value does not apply. An abstention (timeout, malformed, error) is neither a pass nor a fail and does not route by itself. |
-| `contested-by-accumulation` | Surface's accumulation projection (`projectAccumulation`, surface#359), run by the host for the claim's slot, returned `contested` and the claim is one of its candidates; or it returned `invalid` (identity unresolved, a replacement cycle, missing lineage: no unique answer). The Kit compares no values, no valid times and no edges itself. Surface keeps both candidates when it has not accepted a replacement, so an unreviewed succession is contested until a reviewer verifies the successor and the host's authority admits that verification; after that the projection returns `current` and this rule does not fire. A `stated` claim only: a plan or a what-if is never a candidate. With no projection passed, a claim is routed if the slot holds another stated claim ("not evaluated") and is not if it is alone. A property listed in `policy.multiValued` is not projected, because Surface has one value policy. |
+| `contested-by-accumulation` | Surface's accumulation projection (`projectAccumulation`, surface#359), run by the host for the claim's slot, returned `contested` and the claim is one of its candidates; or it returned `invalid` (identity unresolved, a replacement cycle, missing lineage: no unique answer). The Kit compares no values, no valid times and no edges itself. Surface keeps both candidates when it has not accepted a replacement, so an unreviewed succession is normally contested until a reviewer verifies the successor and the host's authority admits that verification; after that the projection returns `current` and this rule does not fire. (Normally, not always: a predecessor that has expired, or a replacement carrying the same value, can project `current` earlier. The projection decides.) A retraction is not a candidate and is not mapped: for the projection to exclude a retracted claim the host has to construct and admit a valid `revoked` event for it; mapping the retraction alone changes nothing there. A `stated` claim only: a plan or a what-if is never a candidate. With no projection passed, a claim is routed if the slot holds another stated claim ("not evaluated") and is not if it is alone. A property listed in `policy.multiValued` is not projected, because Surface has one value policy. A projection that names a rival which is not among the `current` claims passed with it is refused, because the visibility bounds, the review item and the verification evidence are all built from those claims. A contest names at least two candidates. |
 | `consequential-supersession` | A claim carries a `supersedes` edge and its property or subject type is in `policy.consequential` (`"*"` matches all). Retractions count. Empty by default, so a host that has not said what is consequential routes none; set it. |
 | `entity-identity-change` | Any Survey entity proposal (`merge`, `split`, `alias`, and also `same-as`, `related-to` and `domain:*`, which Survey reviews the same way). They always go to review; no similarity score promotes an identity. The change is Survey's own `EntityProposal`, read by structure; the decision records its id, operations and subjects. |
 | `low-extraction-agreement` | Fewer than `minPasses` passes were measured, or fewer than `minAgreement` of them produced the claim. Unmeasured is not agreed. |
-| `visibility-widening` | The claim's visibility is not within a bound, in Surface's order (`meet(claim, bound) == claim`). The bounds are its source's visibility and the visibility of every current claim in its slot, so the slot never becomes visible to someone who could not see it before. Undeclared is sealed on every side: a claim with no visibility can never widen anything, and a bound with none admits only a sealed claim, so a claim that declares a visibility fails closed against an undeclared source or peer. A host that declares nothing anywhere has nothing routed here and nothing visible. |
+| `visibility-widening` | The claim's visibility is not within a bound, in Surface's order (`meet(claim, bound) == claim`). The bounds are its source's visibility and the visibility of every current claim in its slot, so the slot does not become visible to someone who could not see the claims the host gave as current. A current claim the host did not pass is not a bound. Undeclared is sealed on every side: a claim with no visibility can never widen anything, and a bound with none admits only a sealed claim, so a claim that declares a visibility fails closed against an undeclared source or peer. A host that declares nothing anywhere has nothing routed here and nothing visible. |
 
 `hypothetical` and `proposed` claims are never candidates for a slot: they assert nothing about the present. They cannot carry a
 `supersedes` edge either: the claim shape refuses one. They are still subject to agreement and visibility.
@@ -198,18 +198,18 @@ through this function or enforce the same rule.
 
 ## Storing proposed claims
 
-Not built here. Per the decision recorded on `kontourai/corpus#40`, a `proposed` claim is
-stored with the store's `proposeCreate` as a pending create proposal. `applyCreate` creates the record
-and needs a reviewer distinct from the proposer, which is where a routed claim's Survey decision lands;
-`rejectCreate` keeps the proposal as rejected with a rationale (the amendment on the issue renamed the
-verbs from `apply` and `reject`). `proposeCreate` is not on corpus `main` (corpus#42, `feat/40-create-proposals`, is open),
-so this Kit does not call it or assume its input shape.
+Not built here. Per the decision on `kontourai/corpus#40` (implemented in corpus#42, merged to corpus `main`,
+`KnowledgeStoreCreateProposals`), a `proposed` claim is staged with `proposeCreate(candidate, proposerId, evidence)`
+as a `pending` create proposal: no record exists until `applyCreate(proposalId, reviewerId)`, which needs a reviewer
+distinct from the proposer (`SELF_APPROVAL` otherwise) and is where a routed claim's Survey decision lands.
+`rejectCreate(proposalId, reviewerId, rationale)` keeps the proposal as `rejected`. The verbs are `applyCreate` and
+`rejectCreate`, distinct from the concept-proposal `apply` and `reject`. This Kit does not call them: mapping a claim
+onto `CreateInput` (type, title, body, category, provenance) is the store target's work (#670), not this PR's.
 
-One consequence needs deciding before recall is wired: that decision keeps pending
-proposals out of the default working set and ordinary reads, but a `proposed` claim must
-stay recallable (review never blocks recall). A recall path therefore has to read the
-explicit proposals query filtered to `pending` and present the result through
-`presentMemoryClaims`, or the store has to offer a labelled read. The injected-memory
+One consequence needs deciding before recall is wired: that contract keeps pending proposals out of the working set
+and ordinary reads (`listProposals` is the explicit query), but a `proposed` claim must stay recallable (review never
+blocks recall). A recall path therefore has to read `listProposals` filtered to `pending` and present the result
+through `presentMemoryClaims`, or the store has to offer a labelled read. The injected-memory
 marker (`kits/knowledge/memory-marker.js`, `#669`) wraps what recall injects; it is not
 consumed here, and `presentMemoryClaims` does not apply it.
 
