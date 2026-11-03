@@ -147,7 +147,7 @@
     {
       "id": "knowledge.promote-runner",
       "path": "promote/index.js",
-      "description": "Executable logic for the knowledge.promote sub-flow (issue #313): runPromote({sessionDir, repoRoot, provenance}) runs ingest -> distill -> link -> health and writes DRAFT proposals ONLY under <session>/proposals/. Builds on the #317 knowledge-store provider interface (git-repo provider as the shared registry reader; provider-agnostic duplicate-detection health verb) and validates every draft decision delta against the Corpus decision-record format before proposing. Proposals-only by construction; never mutates docs/, CONTEXT.md, or any path outside the session dir."
+      "description": "Executable logic for the knowledge.promote sub-flow (issue #313): runPromote({sessionDir, repoRoot, provenance}) runs ingest -> distill -> link -> health and writes DRAFT proposals ONLY under <session>/proposals/. Builds on the #317 knowledge-store provider interface (git-repo provider as the shared registry reader; provider-agnostic duplicate-detection health verb) and validates every draft decision delta against the Corpus decision-record format before proposing. Proposals-only by construction; never mutates docs/, CONTEXT.md, or any path outside the session dir. Also exports ingestFromSource with the workflow-sidecar and runtime-session residue sources (#669, schemas/knowledge/residue.schema.json); runtime-session returns scrubbed sitting residues plus a candidate cursor and writes nothing."
     },
     {
       "id": "knowledge.context-check-runner",
@@ -257,6 +257,11 @@
       "id": "knowledge.promote-suite",
       "path": "promote/promote.test.js",
       "description": "Eval cases for the knowledge.promote sub-flow (issue #313): AC1 (a real-modeled completed session dir yields >=1 schema-valid draft decision delta with PR/merge-SHA/session-archive provenance, validated against the Kit's decision-record validator, which is itself checked against Corpus's decision-record conformance vectors); AC2 (a seeded-contradiction registry fixture yields a duplicate-detection report naming BOTH topics + a schema-valid merge-repair proposal naming a merge target; a resolved supersede/merge pair is not re-flagged); AC3 (filesystem diff proves zero writes outside the session/proposal dir); R1 (the FlowDefinition exports every gate claim so a parent uses_flow step resolves it)."
+    },
+    {
+      "id": "knowledge.runtime-session-residue-suite",
+      "path": "promote/runtime-session.test.js",
+      "description": "Eval cases for unified agentic memory WI-1 (#669): AC1 workflow-sidecar residue pinned byte-identical to the pre-#669 ingestSession output and both sources validated by the residue schema; AC2 synthetic project-transcript JSONL and rollout fixtures for both supported runtimes (real record shapes) yield user/assistant-text sittings with provenance while tool results, sidechains, meta entries, harness tags and the injected-memory block are dropped, and the candidate cursor never passes a drifted, malformed or partial line; AC3 seeded secret, email and home-path canaries never reach residue, including one the transcript asks the distiller to keep."
     },
     {
       "id": "knowledge.context-check-suite",

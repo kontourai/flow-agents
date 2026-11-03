@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/knowledge/residue.schema.json",
+  "title": "Knowledge Residue",
+  "description": "Input residue for Knowledge distillation (#669). Exactly one variant: workflow-sidecar residue (the existing ingestSession shape, unchanged) or runtime-session residue (one scrubbed sitting of a Claude Code or Codex conversation with provenance). Residue is candidate input, not evidence, policy or instruction authority.",
+  "oneOf": [
+    { "$ref": "#/$defs/workflowSidecarResidue" },
+    { "$ref": "#/$defs/runtimeSessionResidue" }
+  ],
+  "$defs": {
+    "workflowSidecarResidue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionDir",
+        "sessionMarkdown",
+        "slug",
+        "repo",
+        "status",
+        "phase",
+        "planSummary",
+        "definitionOfDone",
+        "decisions",
+        "learnings",
+        "evidence",
+        "critiqueSummary",
+        "transcriptRefs",
+        "touchedFiles"
+      ],
+      "properties": {
+        "sessionDir": { "type": "string", "minLength": 1 },
+        "sessionMarkdown": { "type": ["string", "null"] },
+        "slug": { "type": "string", "minLength": 1 },
+        "repo": { "type": ["string", "null"] },
+        "status": { "type": ["string", "null"] },
+        "phase": { "type": ["string", "null"] },
+        "planSummary": { "type": "string" },
+        "definitionOfDone": { "type": "string" },
+        "decisions": { "type": "array", "items": { "type": "object" } },
+        "learnings": { "type": "array", "items": { "type": "object" } },
+        "evidence": { "type": ["object", "null"] },
+        "critiqueSummary": { "type": ["object", "null"] },
+        "transcriptRefs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "touchedFiles": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "runtimeSessionResidue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "sittingId", "contentHash", "complete", "provenance", "turns"],
+      "properties": {
+        "source": { "const": "runtime-session" },
+        "sittingId": {
+          "type": "string",
+          "pattern": "^(claude-code|codex):[^:]+:(0|[1-9][0-9]*)$"
+        },
+        "contentHash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "complete": { "type": "boolean" },
+        "provenance": { "$ref": "#/$defs/runtimeProvenance" },
+        "turns": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/turn" } }
+      }
+    },
+    "runtimeProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness", "sessionId", "transcriptRef", "cwd", "gitBranch", "startedAt", "endedAt"],
+      "properties": {
+        "harness": { "enum": ["claude-code", "codex"] },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "transcriptRef": {
+          "description": "Transcript path relative to the host-authorized root it was read from.",
+          "type": "string",
+          "minLength": 1
+        },
+        "cwd": { "type": ["string", "null"] },
+        "gitBranch": { "type": ["string", "null"] },
+        "startedAt": { "type": "string", "minLength": 1 },
+        "endedAt": { "type": "string", "minLength": 1 }
+      }
+    },
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "text", "at"],
+      "properties": {
+        "role": { "enum": ["user", "assistant"] },
+        "text": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
