@@ -714,3 +714,9 @@ error from `proposeCreate` is indeterminate: the error carries already returned
 proposal IDs and the failed candidate index so the caller can reconcile before
 any retry. `write: false` prepares candidates without registering or writing.
 The create-proposal API and its package release are upstream dependencies.
+
+Until the Corpus package is published, the packed-branch integration test is
+opt-in: install the packed `@kontourai/corpus-store` in a scratch directory and
+set `CORPUS_STORE_ENTRY` to its absolute `dist/index.js` before running
+`node --test kits/knowledge/promote/store-target.corpus.test.js`. Without that
+variable the test reports skipped; it does not claim Corpus interoperability.

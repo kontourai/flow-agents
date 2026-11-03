@@ -6,14 +6,9 @@
 
 import path from "node:path";
 
-/**
- * @typedef {{type: 'raw', title: string, body: string, category: string,
- *   provenance: {agent: string, session_id: string, note: string}}} Candidate
- * @typedef {{agent: string, proposal: string}} ProposalEvidence
- * @typedef {{proposeCreate(candidate: Candidate, proposerId: string,
- *   evidence: ProposalEvidence): Promise<string>}} CreateProposalStore
- */
+/** @typedef {Pick<import('@kontourai/corpus-store').KnowledgeStoreCreateProposals, 'proposeCreate'>} CreateProposalStore */
 
+/** @param {unknown} value @param {string} label @returns {string} */
 function required(value, label) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`store target requires ${label}`);
   return value;
@@ -23,11 +18,11 @@ function required(value, label) {
  * Stage already-distilled candidates from a #669 runtime sitting. Extraction is
  * the caller's responsibility; a transcript is never treated as a proposal.
  *
- * @param {{residue: object, candidates: object[], proposerId: string,
- *   store: CreateProposalStore, registerRoot: function, root: string,
+ * @param {{residue: {source: string, complete: boolean, sittingId: string, provenance: {sessionId: string, transcriptRef: string}}, candidates: {title: string, body: string, category: string}[], proposerId: string,
+ *   store: CreateProposalStore, registerRoot: (name: string, root: string) => unknown, root: string,
  *   rootName?: string, write?: boolean}} options
  */
-export async function proposeMemory({ residue, candidates, proposerId, store, registerRoot, root, rootName = 'memory', write = true } = {}) {
+export async function proposeMemory({ residue, candidates, proposerId, store, registerRoot, root, rootName = 'memory', write = true }) {
   if (residue?.source !== 'runtime-session' || residue.complete !== true) throw new Error('store target requires a complete runtime-session residue');
   const sessionId = required(residue.provenance?.sessionId, 'sessionId');
   const transcriptRef = required(residue.provenance?.transcriptRef, 'transcriptRef');
@@ -39,6 +34,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
   if (!store || typeof store.proposeCreate !== 'function') throw new Error('store target requires a Corpus create-proposal store');
   if (typeof registerRoot !== 'function') throw new Error('store target requires host root registration');
   const provenance = { session_id: sessionId, transcript_ref: transcriptRef, sitting_id: sittingId };
+  /** @type {import('@kontourai/corpus-store').CreateInput[]} */
   const prepared = candidates.map((item) => ({
     type: 'raw',
     title: required(item?.title, 'candidate title'),
@@ -54,10 +50,7 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
       const id = await store.proposeCreate(candidate, proposerId, { agent: proposerId, proposal: 'Create distilled memory candidate' });
       proposals.push(id);
     } catch (cause) {
-      const error = new Error('Corpus proposal outcome is unconfirmed; do not retry without reconciliation', { cause });
-      error.completedProposals = proposals;
-      error.failedCandidateIndex = proposals.length;
-      throw error;
+      throw Object.assign(new Error('Corpus proposal outcome is unconfirmed; do not retry without reconciliation', { cause }), { completedProposals: proposals, failedCandidateIndex: proposals.length });
     }
   }
   return { root: rootName, posture: 'proposed', proposals };
