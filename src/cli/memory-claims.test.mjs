@@ -514,3 +514,13 @@ test("a sitting that yields more claims than one request carries is refused whol
   const ok = await distillMemoryClaims({ sitting, passes: 7, extract });
   assert.equal(ok.claims.length, 18_900, "and the largest the limit admits is returned");
 });
+
+test("the claim-count limit is exact: 20,000 claims are returned, 20,001 are refused", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const at = (name, candidateValue, index) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [index], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  const batch = (pass, count) => ({ proposals: Array.from({ length: count }, (_, i) => [at("subject", `service ${pass}-${i}`, i), at("subjectType", "service", i), at("property", "primary database", i), at("value", `v${pass}-${i}`, i), at("posture", "stated", i)]).flat() });
+  const run = counts => { let pass = 0; return distillMemoryClaims({ sitting, passes: counts.length, extract: async () => batch(pass, counts[pass++]) }); };
+  assert.equal((await run([5000, 5000, 5000, 5000])).claims.length, 20_000);
+  await assert.rejects(run([5000, 5000, 5000, 5001]), /yielded 20001 claims over 4 passes/);
+});

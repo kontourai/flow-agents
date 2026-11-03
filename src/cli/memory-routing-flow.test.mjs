@@ -946,6 +946,15 @@ test("a hand-built decision the Kit could not have produced is not recomputable:
   const check = recomputeMemoryRouting(handBuilt);
   assert.equal(check.ok, false);
   assert.match(check.mismatches.join("\n"), /embedded claim.*too large/);
+  // A peer is held to the claim budget too, not only the claim being routed.
+  const peerOversize = make({ value: { list: Array.from({ length: 21_000 }, (_, i) => i) }, source: { ...base.source, ref: "peer" } });
+  const peerCase = routeMemoryChange({ type: "claim", claim: make({ value: "PostgreSQL 16" }), current: [make({ property: "primary database", value: "other", source: { ...base.source, ref: "peer" } })], agreement: { passes: 2, agreeing: 2 } });
+  const withPeer = JSON.parse(JSON.stringify(peerCase));
+  withPeer.input.current = [JSON.parse(JSON.stringify(peerOversize))];
+  withPeer.input.baselines = [withPeer.input.baselines[0], { ref: peerOversize.id, visibility: peerOversize.visibility ?? null }];
+  Object.assign(withPeer, evaluateMemoryRoutingFor(rehash(withPeer)));
+  rehash(withPeer);
+  assert.match(recomputeMemoryRouting(withPeer).mismatches.join("\n"), /embedded claim.*too large/, "an oversize peer");
   const small = make({ value: "PostgreSQL 16" });
   const ordinary = routeMemoryChange({ type: "claim", claim: small, agreement: { passes: 2, agreeing: 2 } });
   const evidence = Array.from({ length: 2_100 }, (_, i) => ({ id: `e${i}`, excerpt: "evidence", locator: "chars:0-1" }));
