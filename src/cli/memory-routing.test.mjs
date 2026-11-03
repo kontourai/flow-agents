@@ -353,6 +353,18 @@ test("metrics: proposed count, routed share, reviewer decisions and review time,
   assert.equal(actual, expected, "metrics.json drifted; rerun with UPDATE_MEMORY_FIXTURES=1 and review the diff");
 });
 
+test("when a reviewer changes their mind the later decision stands, whatever order the decisions arrive in", async () => {
+  const { second } = await endToEnd();
+  const decision = byProperty(second, "retry budget");
+  const item = buildMemoryReviewItem(decision);
+  const rejected = buildReviewDecisionsFromSession(reviewSession(item, { decision: "keep-current", reviewedAt: "2026-11-02T10:00:00.000Z" }));
+  const confirmed = buildReviewDecisionsFromSession(reviewSession(item, { decision: "accept-proposed", reviewedAt: "2026-11-02T11:00:00.000Z" }));
+  for (const order of [[...rejected, ...confirmed], [...confirmed, ...rejected]]) {
+    const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: order });
+    assert.deepEqual([metrics.reviewer.confirmed, metrics.reviewer.rejected, metrics.reviewer.decisions, metrics.reviewer.pending], [1, 0, 1, 0]);
+  }
+});
+
 test("a held decision is a reviewer decision with no resolution: not pending, not a defect caught", async () => {
   const { second } = await endToEnd();
   const decision = byProperty(second, "lead");
