@@ -1,4 +1,5 @@
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
 import assert from "node:assert/strict";
@@ -1057,6 +1058,23 @@ test("the reviewer kind is read strictly, and anything that is not exactly human
   assert.equal(memoryReviewerKind(actorOnly), "unattested", "the field is on the decision, not nested where an actor could assert it");
   assert.equal(memoryReviewerKind(null), "unattested");
   assert.equal(memoryReviewerKind({}), "unattested");
+  // An inferred kind is a default for an unlabelled reviewer, not an attestation (Survey: a consumer that requires a human checks
+  // reviewerKind === "human" and reviewerKindInferred === false). Only `false`, or the flag's absence on a stored decision, is attested.
+  const flagged = inferred => ({ ...decide(item, "human"), spec: { ...decide(item, "human").spec, reviewerKindInferred: inferred } });
+  assert.equal(memoryReviewerKind(flagged(false)), "human", "attested, said so");
+  for (const inferred of [true, "true", "false", 1, 0, null, [], {}]) {
+    assert.equal(memoryReviewerKind(flagged(inferred)), "unattested", `inferred ${JSON.stringify(inferred)}`);
+    assert.equal(memoryDecisionMayPromote(flagged(inferred)), false, `inferred ${JSON.stringify(inferred)} cannot promote`);
+  }
+  const projected = inferred => ({ ...decide(item, "human"), metadata: { name: "d", survey: { reviewerKind: "human", reviewerKindInferred: inferred } } });
+  assert.equal(memoryReviewerKind(projected(false)), "human");
+  assert.equal(memoryReviewerKind(projected(true)), "unattested", "the flag under metadata.survey (a projection) counts too");
+  assert.equal(memoryReviewerKind(projected("yes")), "unattested");
+  const inheritedFlag = decide(item, "human"); inheritedFlag.spec = Object.create({ reviewerKindInferred: true }, Object.getOwnPropertyDescriptors(inheritedFlag.spec));
+  assert.equal(memoryReviewerKind(inheritedFlag), "human", "an inherited flag is not the decision's own, as an inherited kind is not");
+  const flaggedAgent = { ...decide(item, "agent"), spec: { ...decide(item, "agent").spec, reviewerKindInferred: false } };
+  assert.equal(memoryReviewerKind(flaggedAgent), "agent", "the flag cannot change a kind into another");
+  assert.equal(memoryDecisionMayPromote(flagged(true), { routed: false }), true, "an unflagged claim takes any reviewer, inferred or not");
   assert.equal(memoryDecisionMayPromote(decide(item, "human")), true);
   assert.equal(memoryDecisionMayPromote(decide(item, "agent")), false);
   assert.equal(memoryDecisionMayPromote(decide(item, "agent"), { routed: false }), true, "a claim routing did not flag takes any reviewer");
@@ -1235,4 +1253,70 @@ test("the metrics schema holds `annotated` to what it means: required, a whole n
   for (const bad of [-1, 1.5, "1", null]) assert.equal(validateMetrics({ ...plain(good), reviewer: { ...good.reviewer, annotated: bad } }), false, `annotated ${JSON.stringify(bad)}`);
   assert.equal(validateMetrics({ ...plain(good), reviewer: { ...good.reviewer, annotated: 0 } }), true);
   assert.equal(validateMetrics({ ...plain(good), reviewer: { ...good.reviewer, annotated: 3 } }), true);
+});
+
+test("a human decision marked inferred does not promote a routed claim, through recall and metrics", () => {
+  const { claim, decision, item } = routedClaim();
+  const inferredHuman = { ...decide(item, "human"), spec: { ...decide(item, "human").spec, reviewerKindInferred: true } };
+  const shown = presentMemoryClaims([claim], { routing: [decision], reviewDecisions: [inferredHuman] }).presented[0];
+  assert.deepEqual([shown.review.label, shown.review.annotations], ["in-review", 1]);
+  const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [inferredHuman] }).reviewer;
+  assert.deepEqual([metrics.confirmed, metrics.pending, metrics.annotated], [0, 1, 1]);
+  const attested = { ...decide(item, "human"), spec: { ...decide(item, "human").spec, reviewerKindInferred: false } };
+  assert.equal(presentMemoryClaims([claim], { routing: [decision], reviewDecisions: [attested] }).presented[0].review.label, "confirmed");
+});
+
+test("strictest routing record wins whatever the order: a routed record is never overwritten by a later genuine unflagged one", () => {
+  const claim = make({ value: "PostgreSQL 16" }), peer = make();
+  const routed = routeMemoryChange(change(claim, { current: [peer], accumulation: contested(claim.id, peer.id) }));
+  const unflagged = routeMemoryChange(change(claim, { accumulation: null }));
+  assert.deepEqual([routed.outcome, unflagged.outcome, recomputeMemoryRouting(unflagged).ok], ["routed", "proposed", true], "the premise: two genuine records for one claim");
+  const item = buildMemoryReviewItem(routed);
+  const agentEdit = decide(item, "agent", "accept-proposed", "2026-11-02T10:00:00.000Z", "PostgreSQL 99");
+  for (const order of [[routed, unflagged], [unflagged, routed]]) {
+    const shown = presentMemoryClaims([claim], { routing: order, reviewDecisions: [agentEdit] }).presented[0];
+    assert.deepEqual([shown.review.routing, shown.review.label, shown.value], ["routed", "in-review", "PostgreSQL 16"], order.map(r => r.outcome).join(","));
+  }
+  // Two routed records for one claim: their reasons are all reported.
+  const lowAgreement = routeMemoryChange(change(claim, { current: [peer], accumulation: contested(claim.id, peer.id), agreement: { passes: 2, agreeing: 1 } }));
+  assert.ok(lowAgreement.reasons.some(r => r.rule === "low-extraction-agreement") && !routed.reasons.some(r => r.rule === "low-extraction-agreement"));
+  const both = presentMemoryClaims([claim], { routing: [routed, lowAgreement] }).presented[0].review.reasons;
+  assert.deepEqual([...both].sort(), [...new Set([...rulesOf(routed), ...rulesOf(lowAgreement)])].sort(), "the union of the records' reasons");
+  assert.ok(both.includes("low-extraction-agreement") && both.includes("contested-by-accumulation"));
+});
+
+test("review time: events are the deciding reviewer's by their own kind as well as by actor, and a legacy event with no actor stays", () => {
+  const { decision, item } = routedClaim();
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" } } };
+  const pair = (kind, actor, session, start, end) => ["item-selected", "decision-submitted"].map((eventType, index) => ({ kind: "ReviewSessionEvent", metadata: { name: `${session}-${index}` },
+    spec: { sessionName: session, sequence: index + 1, eventType, occurredAt: index ? end : start, reviewItemName: item.metadata.name, ...(index ? { reviewDecisionName: "decision-1" } : {}), ...(kind ? { reviewerKind: kind } : {}), ...(actor ? { actor: { id: actor } } : {}) } }));
+  const seconds = events => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents: events }).reviewSeconds;
+  // With no actor on the events, only their own kind can exclude them.
+  assert.equal(seconds(pair("agent", undefined, "a", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z")), null, "agent-tagged, no actor");
+  assert.equal(seconds(pair("rule", undefined, "r", "2026-11-02T09:00:00.000Z", "2026-11-02T09:00:30.000Z")), null, "rule-tagged, no actor");
+  assert.equal(seconds(pair("human", undefined, "h", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")), 20, "human-tagged, no actor");
+  assert.equal(seconds(pair(undefined, undefined, "l", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")), 20, "a legacy event with neither kind nor actor stays");
+});
+
+test("against the real Survey builders: the decisions and events its workbench stamps are the ones the shim reads", async t => {
+  // Survey 8.4.0 (kontourai/survey#360) stamps `reviewerKind` from the session snapshot onto decisions and events. Until it is the
+  // installed version this skips; `MEMORY_SURVEY_MODULE=<build of survey@5387632>/dist/src/review-workbench/review-workbench.js` runs it today.
+  const workbench = await import(process.env.MEMORY_SURVEY_MODULE ? pathToFileURL(process.env.MEMORY_SURVEY_MODULE).href : "@kontourai/survey/review-workbench");
+  const { item } = routedClaim();
+  const session = extra => ({ ...workbench.initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: "accept-proposed" }, ...extra });
+  if (workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "agent" }))[0].spec.reviewerKind === undefined) { t.skip("the installed Survey predates reviewerKind (survey#360, ships in 8.4.0)"); return; }
+  for (const kind of ["human", "agent", "rule"]) {
+    const [made] = workbench.buildReviewDecisionsFromSession(session({ reviewerKind: kind }));
+    assert.equal(memoryReviewerKind(made), kind, `decision, ${kind}`);
+    assert.equal(memoryDecisionMayPromote(made), kind === "human");
+    for (const event of workbench.buildReviewSessionEvents(session({ reviewerKind: kind }), "s1")) assert.equal(event.spec.reviewerKind, kind, `event, ${kind}`);
+  }
+  const [legacy] = workbench.buildReviewDecisionsFromSession(session({}));
+  assert.equal(memoryReviewerKind(legacy), "unattested", "a session that attests nothing: an inferred kind, which is not human");
+  assert.throws(() => workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "robot" })), /reviewerKind must be one of human, agent, rule/);
+  // And the full path: a decision Survey stamped as an agent's leaves a routed claim in review.
+  const { claim, decision } = routedClaim();
+  const agentMade = workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "agent" }));
+  assert.equal(presentMemoryClaims([claim], { routing: [decision], reviewDecisions: agentMade }).presented[0].review.label, "in-review");
+  assert.equal(presentMemoryClaims([claim], { routing: [decision], reviewDecisions: workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "human" })) }).presented[0].review.label, "confirmed");
 });

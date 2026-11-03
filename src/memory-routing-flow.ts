@@ -473,6 +473,8 @@ function assertReviewDecision(value: unknown): void {
 /** Survey refuses an unknown `reviewerKind` (survey#359); so does the Kit. Absent is allowed: it reads as not human. */
 function assertReviewerKind(spec: Record<string, unknown>): void {
   if (spec.reviewerKind !== undefined && (typeof spec.reviewerKind !== "string" || !["human", "agent", "rule"].includes(spec.reviewerKind))) bad(`a reviewerKind is human, agent or rule: ${String(spec.reviewerKind)}`);
+  // The inferred flag is Survey's, computed on a projection; where it is carried at all it is a boolean, and only `false` is an attestation.
+  if (spec.reviewerKindInferred !== undefined && typeof spec.reviewerKindInferred !== "boolean") bad(`a reviewerKindInferred is true or false: ${String(spec.reviewerKindInferred)}`);
 }
 /** The shape of a Survey ReviewSessionEvent the review-time figure reads. */
 function assertReviewEvent(value: unknown): void {

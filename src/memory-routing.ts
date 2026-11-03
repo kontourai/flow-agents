@@ -528,21 +528,38 @@ const instantOf = (text: string | undefined): number => { const ms = text === un
 export type MemoryReviewerKind = "human" | "agent" | "rule" | "unattested";
 const REVIEWER_KINDS: readonly string[] = ["human", "agent", "rule"];
 
+/** One own data property, read as data (no getter, nothing inherited), or undefined. */
+const ownValue = (record: unknown, key: string): unknown => {
+  if (!record || typeof record !== "object") return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  return descriptor && "value" in descriptor ? descriptor.value : undefined;
+};
+
 /**
- * SHIM for kontourai/survey#359. Survey is adding `reviewerKind: "human" | "agent" | "rule"` to review outcomes and decisions: asserted
- * by the host that authenticated the reviewer, never by the reviewer, and absent on records made before it existed. Survey 8.3.0
- * does not have it, so until a release does this is the one place the Kit reads it: the decision's own `spec.reviewerKind`, as data.
- * It fails closed. A missing field, an unknown value, a value that is not text, or one that is only inherited reads as `unattested`,
- * and `unattested` is not human: it can annotate a routed claim and cannot promote it. When Survey releases the field, this is the
- * function to repoint (if it lands somewhere other than `spec.reviewerKind`, routed claims stay unpromoted until it is; nothing is
- * promoted wrongly).
+ * SHIM for the host-attested reviewer kind (kontourai/survey#360, merged as 5387632; it ships in Survey 8.4.0, which is not on npm yet).
+ * Survey adds `reviewerKind: "human" | "agent" | "rule"` to review outcomes, decisions and session events: asserted by the host that
+ * authenticated the reviewer, never by the reviewer, and absent on records made before it existed. Survey 8.3.0 does not have it, so
+ * until 8.4.0 is installed this is the one place the Kit reads it: the decision's own `spec.reviewerKind`, as data (verified against a
+ * build of 5387632: that is where Survey's workbench builders put it, on decisions and on events). When 8.4.0 is the installed
+ * Survey, replace the local kind list below with Survey's `REVIEWER_KINDS` / `isReviewerKind`.
+ *
+ * It fails closed. A missing field (a record made before the kind existed: Survey's projection would call that an INFERRED kind), an
+ * unknown value, a value that is not text, or one that is only inherited reads as `unattested`, and `unattested` is not human: it
+ * can annotate a routed claim and cannot promote it. A kind that Survey marks inferred is not an attestation either (Survey's own
+ * rule for a consumer that requires a human is `reviewerKind === "human"` and `reviewerKindInferred === false`): a
+ * `reviewerKindInferred` that is present and not exactly `false`, on the decision's `spec` or under `metadata.survey`, makes the kind
+ * `unattested`. On a stored decision the flag is normally absent and the kind present means attested.
  */
 export function memoryReviewerKind(decision: ReviewDecision): MemoryReviewerKind {
-  const spec = (decision as { spec?: unknown } | null)?.spec;
+  const spec = ownValue(decision, "spec");
   if (!spec || typeof spec !== "object") return "unattested";
-  const descriptor = Object.getOwnPropertyDescriptor(spec, "reviewerKind");
-  const kind = descriptor && "value" in descriptor ? descriptor.value : undefined;
-  return typeof kind === "string" && REVIEWER_KINDS.includes(kind) ? kind as MemoryReviewerKind : "unattested";
+  const kind = ownValue(spec, "reviewerKind");
+  if (typeof kind !== "string" || !REVIEWER_KINDS.includes(kind)) return "unattested";
+  const survey = ownValue(ownValue(decision, "metadata"), "survey");
+  for (const inferred of [ownValue(spec, "reviewerKindInferred"), ownValue(survey, "reviewerKindInferred")]) {
+    if (inferred !== undefined && inferred !== false) return "unattested";
+  }
+  return kind as MemoryReviewerKind;
 }
 
 /**
