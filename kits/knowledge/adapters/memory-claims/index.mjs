@@ -10,6 +10,6 @@ export {
 } from '@kontourai/flow-agents/memory-routing';
 export {
   MEMORY_METRICS_EVIDENCE_KIND, MEMORY_REVIEW_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND,
-  readLatestMemoryMetrics, readMemoryMetricsEvidence, readMemoryReviewRecords, readMemoryRoutingDecisions, readMemoryRoutingEvidence, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
+  canonicalRunPath, readLatestMemoryMetrics, readMemoryMetricsEvidence, readMemoryReviewRecords, readMemoryRoutingDecisions, readMemoryRoutingEvidence, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
 } from '@kontourai/flow-agents/memory-routing-flow';
 export { memoryEntityProposalInput } from '@kontourai/flow-agents/memory-entity';

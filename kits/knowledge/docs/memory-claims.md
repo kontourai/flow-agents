@@ -28,7 +28,7 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 | `subject` | `{type, id, label}`, Surface's `(subjectType, subjectId)`. `id` is the lower-cased label until entity review says otherwise. |
 | `claimType`, `property`, `qualifiers` | Surface's `claimType`, `fieldOrBehavior` and canonical qualifiers. With the subject they are the *slot* a claim competes in. The slot key is Surface's own `canonicalClaimKey` with `claimType` added, as the decision specifies. The extractor does not produce qualifiers yet, so slots are coarser than Surface's and conflict more readily. |
 | `value` | What is asserted. Values compare by structural JSON equality, so a different spelling is a different value. |
-| `validTime` | Half-open `[from, until)` of when the value held in the world, per the Surface decision. `until` is exclusive; it is not Surface's inclusive authority-trace `validUntil`, and not `expiresAt` (freshness). An absent bound is unbounded; an absent `validTime` asserts no bound. Instants must be ISO 8601 dates or zoned date-times that exist on the calendar (`2026-02-30` is refused); the Kit stores them as UTC instants, so two spellings of one instant are one value. An empty or unparseable interval is rejected, never guessed. |
+| `validTime` | Half-open `[from, until)` of when the value held in the world, per the Surface decision. `until` is exclusive; it is not Surface's inclusive authority-trace `validUntil`, and not `expiresAt` (freshness). An absent bound is unbounded; an absent `validTime` asserts no bound. Instants must be ISO 8601 dates or zoned date-times that exist on the calendar (`2026-02-30` is refused); the distill step stores them as UTC instants to millisecond precision (a finer fraction is refused, not dropped), so two spellings of one instant are one value there. A claim built directly with `memoryClaim` keeps the spelling it was given, and a different spelling is a different claim. An empty or unparseable interval is rejected, never guessed. |
 | `speaker`, `source` | Who asserted it, and where it is grounded: source ref, `chars:<start>-<end>` locator, the verbatim excerpt, the instant of the turn, and its role. The Kit derives `source` from Traverse's verified provenance and the turn the locator falls in; the model does not supply it. |
 | `posture` | How the speaker asserted it: `stated`, `proposed`, `hypothetical` or `retracted`. It is a typed field, not a text prefix. |
 | `supersedes` | Edges to the current claims this one replaces (`succession`) or retracts (`correction`). |
@@ -60,7 +60,7 @@ extractions (default 2), assembles Traverse's proposals into claims, and returns
   slot, posture and value up to case and spacing (identity is stricter). A pass that
   failed counts as a pass that did not agree;
 - `rejected`, each incomplete, postureless, ungrounded or malformed group with its
-  reason. A group the extractor produced is either a claim or a reported rejection. Two
+  reason. A group the extractor produced is either a claim or a reported rejection, and proposals for a claim field that carry no claim index are reported together as one rejection. Two
   passes that disagree on what a claim says (value, posture, speaker, valid time) yield
   two claims, each found by one pass; a Traverse proposal that Traverse itself dropped
   (for example an excerpt not found in the text) reaches the Kit only as Traverse's warning.
@@ -91,8 +91,8 @@ also becomes a Survey review item that a person decides. Review never blocks rec
 | `low-extraction-agreement` | Fewer than `minPasses` passes were measured, or fewer than `minAgreement` of them produced the claim. Unmeasured is not agreed. |
 | `visibility-widening` | The claim's visibility is not within a bound, in Surface's order (`meet(claim, bound) == claim`). The bounds are its source's visibility and the visibility of every current claim in its slot, so the slot never becomes visible to someone who could not see it before. Undeclared is sealed on every side: a claim with no visibility can never widen anything, and a bound with none admits only a sealed claim, so a claim that declares a visibility fails closed against an undeclared source or peer. A host that declares nothing anywhere has nothing routed here and nothing visible. |
 
-`hypothetical` and `proposed` claims never conflict and never supersede: they assert
-nothing about the present. They are still subject to agreement and visibility.
+`hypothetical` and `proposed` claims never conflict: they assert nothing about the present. They cannot carry a
+`supersedes` edge either: the claim shape refuses one. They are still subject to agreement and visibility.
 
 Defaults: `minPasses: 2`, `minAgreement: 1`, `multiValued: []`, `consequential` empty. The Surface
 decision requires cardinality and value equality to be explicit versioned inputs: here
@@ -109,7 +109,7 @@ are pure; there is no clock and no model call.
 
 ### Review items
 
-`runMemoryRouting` does the whole run: it decides each change, records the decisions and the metrics as one serialised unit, then hands each routed claim's review item to the host's queue (`publish(item, idempotencyKey)`; the key is the decision id, which does not depend on the order of a claim's audiences or edges, so a retry is a no-op). Decisions are recorded before anything is queued; if the queue fails, the decisions are already recorded and a retry publishes again with the same keys. `published` lists only items the queue accepted. `buildMemoryReviewItem(decision)` returns the Survey `ReviewItem` for a routed claim:
+`runMemoryRouting` does the whole run: it decides each change, records the decisions and the metrics as one serialised unit, then hands each routed claim's review item to the host's queue (`publish(item, idempotencyKey)`). The key is the decision id, which does not depend on the order of a claim's audiences or edges, and is the same on a retry; a retry is a no-op only if the host's queue deduplicates on that key, which the Kit cannot enforce. Decisions are recorded before anything is queued; if the queue fails, the decisions are already recorded and a retry publishes again with the same keys. `published` lists only items the queue accepted. `buildMemoryReviewItem(decision)` returns the Survey `ReviewItem` for a routed claim:
 a current/proposed pair when the decision names a current claim it conflicts with or
 replaces, otherwise one proposed candidate. Run a Survey `SupportVerifier` against the
 review candidate with `verifyMemoryClaimAgainstCurrent`, so Survey's workbench shows
@@ -132,10 +132,14 @@ decisions, and `recordMemoryMetricsEvidence` the run's metrics, to a gate of a F
 run the host owns, as custom-kind evidence (`memory.routing-decisions`,
 `memory.run-metrics`). A decision that does not recompute is refused before anything
 is attached. Re-attaching the same content returns the existing entry; new metrics
-supersede the earlier entry. Both hold within one process. Flow's run lock is not
+supersede the earlier entry; recording routing decisions refreshes the run's metrics in the
+same serialised unit, so metrics never describe fewer decisions than the run holds. All of
+that holds within one process, for callers that reach the run through a directory that exists
+(an alias made later for a directory that did not exist yet is resolved through its nearest
+existing ancestor). Metrics are as fresh as the last write that went through these functions. Flow's run lock is not
 re-entrant, so the check and the attach cannot share it: two processes racing can leave a
 duplicate routing batch (readers dedupe by decision id) or two live metrics entries
-(`readLatestMemoryMetrics` takes the last). Neither loses or corrupts evidence. An atomic
+(`readLatestMemoryMetrics` takes the last), and metrics written by one process can be stale-last against another's decisions until the next refresh. Neither loses or corrupts evidence. An atomic
 conditional attach is a Flow feature ([kontourai/flow#295](https://github.com/kontourai/flow/issues/295)). `recomputeRecordedMemoryRouting(runId)` reads the stored
 files back (refusing any whose digest no longer matches) and recomputes every decision.
 
@@ -162,10 +166,16 @@ this evidence. It is recorded and recomputable, not gated.
   many. It is an upper bound on attention and is `null`, never estimated, without events;
 - `reviewSecondsPerCaughtDefect`.
 
-The latest decision for an item stands, and a change routed twice in one run counts once, with its later decision.
+The latest decision for an item stands, by instant (`11:00+02:00` is before `10:00Z`; an exact tie keeps the later
+entry; a decision with an unreadable time never beats one with a time), and a change routed twice in one run counts
+once, with its later decision. Only a `verified` or `assumed` decision confirms; `proposed` (the workbench's
+"could not confirm") and anything Survey does not define is held. Review time is the dwell of the session that
+submitted that decision, found by the decision's name and the latest submission by instant (sequence numbers are
+per session, so they only order submissions within one); a submission that does not name the decision is not its time.
 Call it again as review happens; `pending` falls and the review figures fill in. In a Flow run the review state
-(Survey decisions and session events) is itself recorded as evidence (`memory.review-record`) the first time it is
-passed in, and metrics are always derived from everything recorded, so a later call that passes none, an identical
+(Survey decisions and session events) is validated first (a malformed record is refused before anything is attached,
+because evidence that breaks every later refresh cannot be removed), then recorded once as evidence
+(`memory.review-record`; a repeat, in a batch or across batches, is not recorded again), and metrics are derived from everything recorded, so a later call that passes none, an identical
 retry of `runMemoryRouting` or a new batch, still counts the review already recorded instead of overwriting it. This is not Survey's `deriveOversightMetrics`:
 that reports decision pace and override rate across all decisions in a window, and
 its inter-decision gap is not time spent on an item.
