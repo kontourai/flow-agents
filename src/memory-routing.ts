@@ -18,7 +18,7 @@ import {
   type CandidateVerification, type EntityProposal, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
 import { memoryAccumulationFact, memoryAccumulationMembers, readMemoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
-import { MAX_DECISION_NODES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
+import { MAX_DECISION_DEPTH, MAX_DECISION_NODES, MAX_HISTORY_ENTRIES, MAX_PEERS, MAX_VERIFICATIONS, MAX_VERIFICATION_NODES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
 import {
   MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryFieldKey, memorySlotKey, readMemoryVisibility,
   type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
@@ -257,7 +257,9 @@ const canonicalOrder = (claim: MemoryClaim): MemoryClaim => ({
   ...(claim.visibility ? { visibility: readMemoryVisibility(claim.visibility) ?? claim.visibility } : {}),
   ...(claim.supersedes ? { supersedes: [...claim.supersedes].sort((x, y) => x.claimId.localeCompare(y.claimId)) } : {}),
 });
-const MAX_CURRENT_PER_SLOT = 64;
+const MAX_CURRENT_PER_SLOT = MAX_PEERS;
+/** The bounds for copying one routing decision (see memory-json.ts: derived from the claim, peer and verification bounds). */
+export const DECISION_BOUNDS = { maxNodes: MAX_DECISION_NODES, maxDepth: MAX_DECISION_DEPTH } as const;
 const SOURCE_BASELINE = "source";
 
 function claimInput(request: MemoryClaimChange): MemoryClaimRoutingInput {
@@ -266,7 +268,10 @@ function claimInput(request: MemoryClaimChange): MemoryClaimRoutingInput {
   const field = (key: string) => ownField(request, key, `routing change ${key}`);
   const claim = jsonSnapshot(field("claim"), "routing change claim") as MemoryClaim;
   const currentClaims = jsonSnapshotEach(field("current"), "routing change current") as MemoryClaim[];
-  const verifications = jsonSnapshotEach(field("verifications"), "routing change verifications");
+  const verificationList = ownEntries(field("verifications"), "routing change verifications");
+  // Reading max + 1 and refusing, like the peers: a decision carries a bounded number of bounded records, so it stays copyable.
+  if (verificationList.length > MAX_VERIFICATIONS) throw new MemoryClaimError("invalid", `more than ${MAX_VERIFICATIONS} verification records`);
+  const verifications = verificationList.map((record, index) => jsonSnapshot(record, `routing change verifications[${index}]`, { maxNodes: MAX_VERIFICATION_NODES }));
   const agreementInput = field("agreement"), sourceInput = field("sourceVisibility");
   const agreement = agreementInput == null ? null : jsonSnapshot(agreementInput, "routing change agreement") as MemoryAgreement;
   // A source visibility that cannot be copied as plain data (a hole, a getter, a Proxy) is unreadable, and unreadable is
@@ -335,6 +340,7 @@ function assertStoredInputShape(input: MemoryRoutingInput): void {
   }
   if (input.type !== "claim") bad("unknown input type");
   if (!Array.isArray(input.current) || !Array.isArray(input.verifications)) bad("current and verifications must be lists");
+  if (input.verifications.length > MAX_VERIFICATIONS) bad(`more than ${MAX_VERIFICATIONS} verification records`);
   if (input.agreement !== null && (typeof input.agreement !== "object" || !agreementWellFormed(input.agreement))) bad("agreement is malformed");
   let fact: MemoryAccumulationFact | null = null;
   if (input.accumulation !== null) {
@@ -370,7 +376,7 @@ export function recomputeMemoryRouting(request: MemoryRoutingDecision): RoutingR
   const mismatches: string[] = [];
   try {
     // Copied once, so every check below reads the data the next one does.
-    const decision = jsonSnapshot(request, "routing decision", { maxNodes: MAX_DECISION_NODES }) as MemoryRoutingDecision;
+    const decision = jsonSnapshot(request, "routing decision", DECISION_BOUNDS) as MemoryRoutingDecision;
     if (decision.schema_version !== MEMORY_ROUTING_VERSION) throw new MemoryClaimError("invalid", "unsupported schema_version");
     const policy = normalizeMemoryRoutingPolicy(decision.policy);
     if (canonicalJson(policy) !== canonicalJson(decision.policy)) mismatches.push("policy is not in normalised form");
@@ -430,7 +436,7 @@ const candidateBase = (claim: MemoryClaim, rank: number) => ({
  */
 export function buildMemoryReviewItem(request: MemoryRoutingDecision): ReviewItem | undefined {
   // Copied once: the check below and the item built after it read the same data, not an object that answers twice.
-  const decision = jsonSnapshot(request, "routing decision", { maxNodes: MAX_DECISION_NODES }) as MemoryRoutingDecision;
+  const decision = jsonSnapshot(request, "routing decision", DECISION_BOUNDS) as MemoryRoutingDecision;
   if (decision.outcome !== "routed" || decision.input?.type !== "claim") return undefined;
   // The item is built from the decision's embedded claim, so a decision that no longer recomputes (an edited value under the old
   // claim id, say) must not become a candidate the reviewer sees under that id.
@@ -531,13 +537,13 @@ function reviewDwell(decision: ReviewDecision, itemName: string, events: readonl
 export function deriveMemoryRunMetrics(input: { runId: string; decisions: readonly MemoryRoutingDecision[]; reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): MemoryRunMetrics {
   // A change is decided once per run. If it was routed again (say, with more current claims), the later decision
   // stands; counting both would count one claim, and its one review, twice.
-  const decisions = [...new Map((ownEntries(ownField(input, "decisions", "metrics input"), "metrics input decisions") as MemoryRoutingDecision[]).map(decision => [decision.changeId, decision] as const)).values()];
+  const decisions = [...new Map((ownEntries(ownField(input, "decisions", "metrics input"), "metrics input decisions", MAX_HISTORY_ENTRIES) as MemoryRoutingDecision[]).map(decision => [decision.changeId, decision] as const)).values()];
   const routed = decisions.filter(decision => decision.outcome === "routed");
   const routedByRule: Record<string, number> = {};
   for (const decision of routed) for (const reason of decision.reasons) routedByRule[reason.rule] = (routedByRule[reason.rule] ?? 0) + 1;
 
-  const reviewDecisions = ownEntries(ownField(input, "reviewDecisions", "metrics input"), "metrics input reviewDecisions") as ReviewDecision[];
-  const reviewEvents = ownEntries(ownField(input, "reviewEvents", "metrics input"), "metrics input reviewEvents") as ReviewSessionEvent[];
+  const reviewDecisions = ownEntries(ownField(input, "reviewDecisions", "metrics input"), "metrics input reviewDecisions", MAX_HISTORY_ENTRIES) as ReviewDecision[];
+  const reviewEvents = ownEntries(ownField(input, "reviewEvents", "metrics input"), "metrics input reviewEvents", MAX_HISTORY_ENTRIES) as ReviewSessionEvent[];
   const latest = latestDecisions(reviewDecisions);
   const counts = { confirmed: 0, corrected: 0, rejected: 0, held: 0 };
   const matched = new Set<string>();

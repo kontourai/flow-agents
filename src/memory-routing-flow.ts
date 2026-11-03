@@ -17,10 +17,10 @@ import path from "node:path";
 import { attachEvidence, loadRun, type FlowEvidenceEntry } from "@kontourai/flow";
 import { canonicalJson } from "@kontourai/relay";
 import { MemoryClaimError } from "./memory-claims.js";
-import { MAX_DECISION_NODES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
+import { MAX_HISTORY_ENTRIES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
 import type { ReviewDecision, ReviewItem, ReviewSessionEvent, ReviewSessionEventType } from "@kontourai/survey";
 import {
-  MEMORY_ROUTING_VERSION, buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChanges,
+  DECISION_BOUNDS, MEMORY_ROUTING_VERSION, buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChanges,
   type MemoryChange, type MemoryRoutingDecision, type MemoryRoutingPolicy, type MemoryRunMetrics, type SurveyEntityProposal,
 } from "./memory-routing.js";
 
@@ -60,6 +60,18 @@ function locationOf(input: unknown): Location {
   };
   const cwd = text("cwd", false);
   return { runId: text("runId", true)!, gate: text("gate", true)!, ...(cwd !== undefined ? { cwd } : {}) };
+}
+
+/**
+ * How many routing decisions, review decisions and review events one run may hold in all. The default is the most the Kit will
+ * derive figures from; a host may lower it. A request that would take a run past it is refused before anything is written,
+ * so a run cannot be left holding history its own figures can no longer be derived from.
+ */
+function historyLimit(request: unknown): number {
+  const value = ownField(request, "maxHistoryEntries", "memory routing request maxHistoryEntries");
+  if (value === undefined) return MAX_HISTORY_ENTRIES;
+  if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > MAX_HISTORY_ENTRIES) throw new MemoryClaimError("invalid", `maxHistoryEntries must be an integer from 1 to ${MAX_HISTORY_ENTRIES}`);
+  return value as number;
 }
 
 // Flow's run lock is not re-entrant, so check-then-attach cannot run inside it. Within one process the two steps are
@@ -119,8 +131,10 @@ async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceE
  * does not double-record.
  */
 export async function recordMemoryRoutingEvidence(request: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
-  const input = { ...locationOf(request), decisions: jsonSnapshotEach(ownField(request, "decisions", "memory routing request decisions"), "routing decisions", { maxNodes: MAX_DECISION_NODES }) as unknown as MemoryRoutingDecision[] };
+  const input = { ...locationOf(request), decisions: jsonSnapshotEach(ownField(request, "decisions", "memory routing request decisions"), "routing decisions", DECISION_BOUNDS) as unknown as MemoryRoutingDecision[] };
+  const limit = historyLimit(request);
   return (await serialized(input, async () => {
+    await assertRoom(input, limit, { decisionIds: input.decisions.map(decision => decision.id) });
     const recorded = await recordRouting(input);
     // Metrics are derived from what is recorded, so recording refreshes them in the same unit. It does so even when the
     // routing batch was already there: a retry after a failure between the two writes must repair the metrics, not
@@ -129,7 +143,11 @@ export async function recordMemoryRoutingEvidence(request: Location & { decision
     return recorded;
   })).entry;
 }
-async function recordRouting(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<{ entry: FlowEvidenceEntry; created: boolean }> {
+async function recordRouting(input: Location & { decisions: readonly MemoryRoutingDecision[] }, supersede?: string[]): Promise<{ entry: FlowEvidenceEntry; created: boolean }> {
+  if (!supersede) {
+    await readDerivableDecisions(input.runId, input.cwd); // stored state first: nothing is added to a run whose figures cannot be derived
+    await readReview(input.runId, input.cwd);
+  }
   for (const decision of input.decisions) {
     const check = recomputeMemoryRouting(decision);
     if (!check.ok) throw new MemoryClaimError("invalid", `routing decision ${decision.id} does not recompute: ${check.mismatches.join("; ")}`);
@@ -138,8 +156,30 @@ async function recordRouting(input: Location & { decisions: readonly MemoryRouti
   if (new Set(ids).size !== ids.length) throw new MemoryClaimError("invalid", "a batch names the same routing decision twice");
   const record: MemoryRoutingRecord = { schema_version: MEMORY_ROUTING_VERSION, runId: input.runId, decisions: [...input.decisions] };
   const digest = sha256(bytesOf(record));
-  const existing = (await liveEntries(input, MEMORY_ROUTING_EVIDENCE_KIND)).find(entry => entry.sha256 === digest);
-  return existing ? { entry: existing, created: false } : { entry: await attachJson(input, MEMORY_ROUTING_EVIDENCE_KIND, record), created: true };
+  const existing = supersede ? undefined : (await liveEntries(input, MEMORY_ROUTING_EVIDENCE_KIND)).find(entry => entry.sha256 === digest);
+  return existing ? { entry: existing, created: false } : { entry: await attachJson(input, MEMORY_ROUTING_EVIDENCE_KIND, record, supersede), created: true };
+}
+
+/**
+ * The way out of a run whose stored routing evidence cannot be derived from (a record that no longer recomputes, or two
+ * records that disagree about one decision): attach a corrected record that supersedes the named live routing records. The
+ * originals stay in the manifest as the audit trail; figures are derived from the live records only. The corrected decisions
+ * must each recompute, and the named records must be this run's live routing records on `gate`, or nothing is attached.
+ * An empty `decisions` quarantines the named records without replacing them.
+ */
+export async function supersedeMemoryRoutingEvidence(request: Location & { supersedes: readonly string[]; decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
+  const where = locationOf(request);
+  const supersedes = ownEntries(ownField(request, "supersedes", "memory routing request supersedes"), "memory routing request supersedes") as string[];
+  const decisions = jsonSnapshotEach(ownField(request, "decisions", "memory routing request decisions"), "routing decisions", DECISION_BOUNDS) as unknown as MemoryRoutingDecision[];
+  if (supersedes.length === 0 || supersedes.some(id => typeof id !== "string" || !id) || new Set(supersedes).size !== supersedes.length) throw new MemoryClaimError("invalid", "name the live routing records to supersede, once each");
+  return (await serialized(where, async () => {
+    const live = new Set((await liveEntries(where, MEMORY_ROUTING_EVIDENCE_KIND)).map(entry => entry.id));
+    const missing = supersedes.filter(id => !live.has(id));
+    if (missing.length) throw new MemoryClaimError("invalid", `not live routing records of this run on gate ${where.gate}: ${missing.join(", ")}`);
+    const recorded = await recordRouting({ ...where, decisions }, supersedes);
+    await refreshMetrics(where);
+    return recorded;
+  })).entry;
 }
 
 /**
@@ -159,14 +199,21 @@ export async function recordMemoryMetricsEvidence(request: Location & { metrics:
     if (canonicalJson(derived) === canonicalJson(input.metrics)) return recordMetrics(input);
     // A retry after a lost reply: these exact figures were recorded earlier and have since been superseded by newer review state.
     // The entry that holds them is the answer (nothing is written, so nothing stale becomes live); anything else is refused.
-    const earlier = (await readMemoryMetricsEvidence(input.runId, input.cwd)).find(entry => canonicalJson(entry.value) === canonicalJson(input.metrics));
-    const recorded = earlier && (await recordedEntries(input, MEMORY_METRICS_EVIDENCE_KIND)).find(entry => entry.id === earlier.evidenceId);
-    if (recorded) return recorded;
+    // Only this gate's entries are candidates, chosen before the figures are compared: another gate's matching entry is never the
+    // answer, and a matching entry on this gate is not hidden by an earlier one elsewhere.
+    const ours = new Map((await recordedEntries(input, MEMORY_METRICS_EVIDENCE_KIND)).map(entry => [entry.id, entry] as const));
+    const earlier = (await readMemoryMetricsEvidence(input.runId, input.cwd)).find(entry => ours.has(entry.evidenceId) && canonicalJson(entry.value) === canonicalJson(input.metrics));
+    if (earlier) return ours.get(earlier.evidenceId)!;
     throw new MemoryClaimError("invalid", "metrics are not what the evidence recorded for the run derives; refresh them instead of recording figures computed elsewhere");
   });
 }
 async function recordMetrics(input: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
   if (input.metrics.runId !== input.runId) throw new MemoryClaimError("invalid", "metrics belong to a different run");
+  // One gate holds a run's metrics. With two, "this gate's live entry" and "the run's latest figures" are different things, and a
+  // reuse on one gate would silently disagree with `readLatestMemoryMetrics`.
+  const run = await loadRun(input.runId, input.cwd);
+  const elsewhere = (run.manifest.evidence as FlowEvidenceEntry[]).find(entry => entry.requested_kind === MEMORY_METRICS_EVIDENCE_KIND && entry.gate_id !== input.gate);
+  if (elsewhere) throw new MemoryClaimError("invalid", `this run's metrics are recorded on gate ${elsewhere.gate_id}; one gate holds a run's metrics, so they are not also recorded on ${input.gate}`);
   const digest = sha256(bytesOf(input.metrics));
   const live = await liveEntries(input, MEMORY_METRICS_EVIDENCE_KIND);
   return live.find(entry => entry.sha256 === digest) ?? attachJson(input, MEMORY_METRICS_EVIDENCE_KIND, input.metrics, live.map(entry => entry.id));
@@ -194,13 +241,25 @@ export async function readLatestMemoryMetrics(runId: string, cwd?: string): Prom
   return (await readMemoryMetricsEvidence(runId, cwd)).filter(entry => !entry.superseded).at(-1);
 }
 
-/** Every routing decision recorded for a run, across batches, once each, in the order recorded. */
+/**
+ * Every decision in the run's routing records, in the order recorded, repeats included (each is a payload that was stored).
+ * Figures, the recomputation report and the room check read the LIVE records: a record that cannot be derived from is
+ * recovered by attaching a corrected one that supersedes it, and the superseded record stays in the manifest as the audit trail.
+ */
+async function storedDecisions(runId: string, cwd?: string, live = true): Promise<{ evidenceId: string; decision: MemoryRoutingDecision }[]> {
+  const out: { evidenceId: string; decision: MemoryRoutingDecision }[] = [];
+  for (const { evidenceId, superseded, value } of await readMemoryRoutingEvidence(runId, cwd)) {
+    if (live && superseded) continue;
+    for (const decision of value.decisions) out.push({ evidenceId, decision });
+  }
+  return out;
+}
+
+/** Every routing decision recorded for a run, across batches, once each (the first record of an id), in the order recorded. */
 export async function readMemoryRoutingDecisions(runId: string, cwd?: string): Promise<MemoryRoutingDecision[]> {
   const seen = new Set<string>();
   const decisions: MemoryRoutingDecision[] = [];
-  for (const { value } of await readMemoryRoutingEvidence(runId, cwd)) {
-    for (const decision of value.decisions) if (!seen.has(decision.id)) { seen.add(decision.id); decisions.push(decision); }
-  }
+  for (const { decision } of await storedDecisions(runId, cwd, false)) if (!seen.has(decision.id)) { seen.add(decision.id); decisions.push(decision); }
   return decisions;
 }
 
@@ -210,13 +269,19 @@ export async function readMemoryRoutingDecisions(runId: string, cwd?: string): P
  * are never derived from a record that disagrees with them (`recomputeRecordedMemoryRouting` reports such a record instead).
  */
 async function readDerivableDecisions(runId: string, cwd?: string): Promise<MemoryRoutingDecision[]> {
-  for (const { value } of await readMemoryRoutingEvidence(runId, cwd)) {
+  for (const { superseded, value } of await readMemoryRoutingEvidence(runId, cwd)) {
+    if (superseded) continue;
     if (value.schema_version !== MEMORY_ROUTING_VERSION || value.runId !== runId) throw new MemoryClaimError("invalid", "a routing record belongs to another run or an unsupported version");
   }
-  const decisions = await readMemoryRoutingDecisions(runId, cwd);
-  for (const decision of decisions) {
+  // Every stored payload is checked, repeats included, before repeats are collapsed: a second record that reuses a decision's id
+  // with a wrong outcome would otherwise be dropped unread. (A decision's id is the digest of its input and policy, so two payloads
+  // with one id that both recompute are the same decision.)
+  const seen = new Set<string>();
+  const decisions: MemoryRoutingDecision[] = [];
+  for (const { decision } of await storedDecisions(runId, cwd)) {
     const check = recomputeMemoryRouting(decision);
     if (!check.ok) throw new MemoryClaimError("invalid", `recorded routing decision ${decision.id} does not recompute, so no figures are derived from it: ${check.mismatches.join("; ")}`);
+    if (!seen.has(decision.id)) { seen.add(decision.id); decisions.push(decision); }
   }
   return decisions;
 }
@@ -227,13 +292,14 @@ async function readDerivableDecisions(runId: string, cwd?: string): Promise<Memo
  * no longer follows from its input is returned as a mismatch.
  */
 export async function recomputeRecordedMemoryRouting(runId: string, cwd?: string): Promise<{ decisions: number; mismatches: { decisionId: string; mismatches: string[] }[] }> {
-  const decisions = await readMemoryRoutingDecisions(runId, cwd);
   const mismatches: { decisionId: string; mismatches: string[] }[] = [];
-  for (const decision of decisions) {
+  const ids = new Set<string>();
+  for (const { decision } of await storedDecisions(runId, cwd)) {
+    ids.add(decision.id); // every stored payload is checked, repeats included
     const check = recomputeMemoryRouting(decision);
     if (!check.ok) mismatches.push({ decisionId: decision.id, mismatches: check.mismatches });
   }
-  return { decisions: decisions.length, mismatches };
+  return { decisions: ids.size, mismatches };
 }
 
 /** The host's review queue. Survey leaves queue storage to the host; the key makes a retried publish a no-op. */
@@ -281,7 +347,9 @@ export async function runMemoryRouting(request: Location & {
   const decisions = routeMemoryChanges(changes, policyInput === undefined ? undefined : jsonSnapshot(policyInput, "routing policy") as Partial<MemoryRoutingPolicy>);
   // Review input is validated before the first write: a bad one must not leave routing recorded behind a refusal.
   const review = prepareReview(request);
+  const limit = historyLimit(request);
   const { routing, metrics } = await serialized(input, async () => {
+    await assertRoom(input, limit, { decisionIds: decisions.map(decision => decision.id), review });
     const recorded = await recordRouting({ runId: input.runId, gate: input.gate, cwd: input.cwd, decisions });
     return { routing: recorded.entry, metrics: await refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review }) };
   });
@@ -316,8 +384,8 @@ function prepareReview(input: ReviewInput): PreparedReview {
 }
 
 /** Records review state not yet recorded. A decision or event already in the run's evidence is not recorded twice. */
-async function recordReview(input: Location & { review: PreparedReview }): Promise<void> {
-  const known = await readReview(input.runId, input.cwd);
+/** The part of `review` the run does not already hold (a repeat of recorded state, or inside the batch, is not new). */
+function freshReview(known: { decisions: readonly object[]; events: readonly object[] }, review: PreparedReview): { decisions: ReviewDecision[]; events: ReviewSessionEvent[] } {
   const seen = new Set([...known.decisions, ...known.events].map(item => canonicalJson(item)));
   const fresh = <T extends object>(items: readonly T[]): T[] => items.filter(item => {
     const key = canonicalJson(item);
@@ -325,7 +393,26 @@ async function recordReview(input: Location & { review: PreparedReview }): Promi
     seen.add(key); // a repeat inside this batch is a repeat too
     return true;
   });
-  const decisions = fresh(input.review.decisions), events = fresh(input.review.events);
+  return { decisions: fresh(review.decisions), events: fresh(review.events) };
+}
+
+/** Refuses, before anything is written, a request that would take the run past `limit` of any kind of history. */
+async function assertRoom(where: Location, limit: number, adding: { decisionIds?: readonly string[]; review?: PreparedReview }): Promise<void> {
+  if (adding.decisionIds) {
+    const held = new Set((await storedDecisions(where.runId, where.cwd)).map(stored => stored.decision.id));
+    for (const id of adding.decisionIds) held.add(id);
+    if (held.size > limit) throw new MemoryClaimError("invalid", `this run would hold ${held.size} routing decisions, over its limit of ${limit}; nothing was recorded`);
+  }
+  if (adding.review) {
+    const known = await readReview(where.runId, where.cwd), fresh = freshReview(known, adding.review);
+    if (known.decisions.length + fresh.decisions.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review decisions; nothing was recorded`);
+    if (known.events.length + fresh.events.length > limit) throw new MemoryClaimError("invalid", `this run would hold more than ${limit} review events; nothing was recorded`);
+  }
+}
+
+async function recordReview(input: Location & { review: PreparedReview }): Promise<void> {
+  const known = await readReview(input.runId, input.cwd);
+  const { decisions, events } = freshReview(known, input.review);
   if (decisions.length === 0 && events.length === 0) return;
   const record: MemoryReviewRecord = { schema_version: MEMORY_ROUTING_VERSION, runId: input.runId, decisions, events };
   await attachJson(input, MEMORY_REVIEW_EVIDENCE_KIND, record);
@@ -365,6 +452,10 @@ async function readReview(runId: string, cwd?: string): Promise<{ decisions: Rev
 export const readMemoryReviewRecords = (runId: string, cwd?: string) => readReview(runId, cwd);
 
 async function refreshMetrics(input: Location & { review?: PreparedReview }): Promise<FlowEvidenceEntry> {
+  // What is already stored must be something figures can be derived from, before this call writes anything: a request that
+  // adds a record and then fails to derive over the run would leave a decision recorded and the figures describing fewer.
+  await readDerivableDecisions(input.runId, input.cwd);
+  await readReview(input.runId, input.cwd);
   if (input.review) await recordReview({ runId: input.runId, gate: input.gate, cwd: input.cwd, review: input.review });
   const decisions = await readDerivableDecisions(input.runId, input.cwd);
   const review = await readReview(input.runId, input.cwd);
@@ -381,5 +472,9 @@ async function refreshMetrics(input: Location & { review?: PreparedReview }): Pr
 export async function refreshMemoryRunMetrics(request: Location & ReviewInput): Promise<FlowEvidenceEntry> {
   const input = locationOf(request);
   const review = prepareReview(request); // before anything is written, and before waiting for the run
-  return serialized(input, () => refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review }));
+  const limit = historyLimit(request);
+  return serialized(input, async () => {
+    await assertRoom(input, limit, { review });
+    return refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review });
+  });
 }

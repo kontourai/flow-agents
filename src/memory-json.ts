@@ -11,21 +11,34 @@
 import { types } from "node:util";
 import { MemoryClaimError } from "./memory-claims.js";
 
+// The bounds are written here once and the larger ones are derived from the smaller, so that what the Kit produces is always
+// something its own readers accept: a claim is checked against the claim bounds when it is assembled, and a routing decision
+// (which embeds a claim, its peers and its verification records) is bounded by their sum, not by the claim's own bound.
+/** JSON values in one claim, one review decision or event, or one extraction-pass proposal list entry. */
 export const MAX_SNAPSHOT_NODES = 20_000;
+/** Levels of nesting in one claim. */
 export const MAX_SNAPSHOT_DEPTH = 32;
-/**
- * A routing decision embeds its claim and up to 64 peers, each of which may hold a value of `MAX_SNAPSHOT_NODES`, so the
- * bound for one decision is the sum, not the single-claim bound: a decision the Kit produced must be copyable.
- */
-export const MAX_DECISION_NODES = 1_500_000;
+/** Other claims one claim is checked against (and so embedded with in its routing decision). */
+export const MAX_PEERS = 64;
+/** Support-verification records one routing decision carries. A record embeds the claim's value (Survey binds it to the value), so one holds a claim's worth plus its own fields. */
+export const MAX_VERIFICATIONS = 16;
+export const MAX_VERIFICATION_NODES = MAX_SNAPSHOT_NODES + 2_000;
+/** Entries in one request list, and in the history a run keeps (decisions, review decisions, review events). */
+export const MAX_RUN_LIST = 20_000;
+/** What a run may accumulate across requests (decisions, review decisions, review events), and the default cap `maxHistoryEntries` lowers. */
+export const MAX_HISTORY_ENTRIES = 1_000_000;
+/** A routing decision: the claim and its peers, the verification records, and a fixed envelope (policy, baselines, projection fact). */
+export const MAX_DECISION_NODES = (MAX_PEERS + 1) * MAX_SNAPSHOT_NODES + MAX_VERIFICATIONS * MAX_VERIFICATION_NODES + 20_000;
+/** A claim sits a few levels down in a decision and in an extraction response, so those nest a few levels deeper than a claim. */
+export const MAX_DECISION_DEPTH = MAX_SNAPSHOT_DEPTH + 8;
 /** One extraction pass's response: many proposals, each with a value and provenance. */
 export const MAX_EXTRACTION_RESULT_NODES = 250_000;
 
-export interface SnapshotOptions { maxNodes?: number }
+export interface SnapshotOptions { maxNodes?: number; maxDepth?: number }
 
 export function jsonSnapshot(value: unknown, label: string, options: SnapshotOptions = {}): unknown {
   const bad = (what: string): never => { throw new MemoryClaimError("invalid", `${label}: ${what}`); };
-  const maxNodes = options.maxNodes ?? MAX_SNAPSHOT_NODES;
+  const maxNodes = options.maxNodes ?? MAX_SNAPSHOT_NODES, maxDepth = options.maxDepth ?? MAX_SNAPSHOT_DEPTH;
   let nodes = 0;
   const walk = (item: unknown, depth: number, ancestors: Set<object>): unknown => {
     if (++nodes > maxNodes) return bad("too large to record");
@@ -40,7 +53,7 @@ export function jsonSnapshot(value: unknown, label: string, options: SnapshotOpt
     // no list of checks makes one safe to read. It is refused, not defended against.
     if (types.isProxy(item)) return bad("a Proxy cannot be recorded");
     if (ancestors.has(item)) return bad("a cycle cannot be recorded");
-    if (depth >= MAX_SNAPSHOT_DEPTH) return bad("too deep to record"); // containers nest at most MAX_SNAPSHOT_DEPTH levels
+    if (depth >= maxDepth) return bad("too deep to record"); // containers nest at most maxDepth levels
     ancestors.add(item);
     try {
       if (Array.isArray(item)) {
@@ -90,13 +103,13 @@ export function ownField(record: unknown, key: string, label: string): unknown {
 }
 
 /** The entries of a caller's list, read by index with the same refusals as `jsonSnapshot`, without calling any of its methods. */
-export function ownEntries(value: unknown, label: string): unknown[] {
+export function ownEntries(value: unknown, label: string, maxLength: number = MAX_RUN_LIST): unknown[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new MemoryClaimError("invalid", `${label}: expected a list`);
   if (types.isProxy(value)) throw new MemoryClaimError("invalid", `${label}: a Proxy cannot be read`);
   if (Object.getPrototypeOf(value) !== Array.prototype) throw new MemoryClaimError("invalid", `${label}: expected a plain list`);
   const length = value.length;
-  if (length > MAX_SNAPSHOT_NODES || Object.getOwnPropertySymbols(value).length || Object.keys(value).length !== length) throw new MemoryClaimError("invalid", `${label}: a list with extra keys, symbols or holes, or too long, cannot be read`);
+  if (length > maxLength || Object.getOwnPropertySymbols(value).length || Object.keys(value).length !== length) throw new MemoryClaimError("invalid", `${label}: a list with extra keys, symbols or holes, or too long, cannot be read`);
   const out: unknown[] = [];
   for (let index = 0; index < length; index++) {
     const descriptor = Object.getOwnPropertyDescriptor(value, index);

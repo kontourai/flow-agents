@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
 import { canonicalClaimKey } from "@kontourai/surface";
-import { MAX_EXTRACTION_RESULT_NODES, jsonSnapshot, jsonSnapshotEach, ownField } from "./memory-json.js";
+import { MAX_DECISION_DEPTH, MAX_EXTRACTION_RESULT_NODES, jsonSnapshot, jsonSnapshotEach, ownField } from "./memory-json.js";
 // Type-only: proves the schema below is an ordinary Traverse TargetFieldSchema without a runtime dependency.
 import type { TargetFieldSchema } from "@kontourai/traverse";
 
@@ -216,7 +216,7 @@ function identityDigest(claim: MemoryClaim): string {
   return `sha256:${createHash("sha256").update(canonicalJson(canonical)).digest("hex")}`;
 }
 
-/** Builds a claim and assigns its id. Does not validate; use `assertMemoryClaim` for that. */
+/** Builds a claim and assigns its id. Does not validate or copy (a trusted-data constructor); use `assertMemoryClaim` for that. */
 export function memoryClaim(fields: Omit<MemoryClaim, "id" | "schema_version">): MemoryClaim {
   const claim = { schema_version: MEMORY_CLAIM_VERSION, id: "", ...fields } as MemoryClaim;
   claim.id = identityDigest(claim);
@@ -227,7 +227,7 @@ const nonEmpty = (value: unknown): value is string => typeof value === "string" 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const KNOWN_KEYS = new Set(["schema_version", "id", "subject", "claimType", "property", "qualifiers", "value", "validTime", "speaker", "source", "posture", "supersedes", "visibility"]);
 
-/** Validates a claim read from anywhere and checks that its id is the digest of its content. */
+/** Validates a claim and checks that its id is the digest of its content. Reads the claim as given: copy untrusted data first. */
 export function assertMemoryClaim(value: unknown): asserts value is MemoryClaim {
   if (!isObject(value)) throw new MemoryClaimError("invalid", "not an object");
   for (const key of Object.keys(value)) if (!KNOWN_KEYS.has(key)) throw new MemoryClaimError("invalid", `unknown field ${key}`);
@@ -278,8 +278,12 @@ const FIELD = /^claims\[\]\.(\w+)$/;
 
 /**
  * Groups one extraction's proposals into claims, one per array index. A group
- * that is incomplete, ungrounded, or malformed is rejected with its reason and
- * is never proposed; the caller sees the rejection.
+ * that is incomplete, ungrounded, malformed, or too large to route is rejected with its
+ * reason and is never proposed; the caller sees the rejection.
+ *
+ * Trusted-data precondition: this, `memoryClaim` and `assertMemoryClaim` are constructors and validators for data the caller
+ * owns; they read it as given and do not copy it. The entry points that take data from elsewhere (`distillMemoryClaims`,
+ * `routeMemoryChange`, `presentMemoryClaims`, the evidence recorders) copy it as plain JSON first.
  */
 export function assembleMemoryClaims(result: ExtractionResultLike, context: AssembleContext): { claims: MemoryClaim[]; rejected: RejectedProposalGroup[] } {
   const groups = new Map<number, Record<string, ExtractionProposalLike>>();
@@ -299,7 +303,11 @@ export function assembleMemoryClaims(result: ExtractionResultLike, context: Asse
   if (unindexed) rejected.push({ index: -1, reason: `${unindexed} claim field proposal(s) carry no claim index and cannot be grouped` });
   for (const [index, fields] of [...groups].sort((x, y) => x[0] - y[0])) {
     try {
-      claims.push(assemble(fields, context));
+      const claim = assemble(fields, context);
+      // A claim the Kit could not then copy (too large, too deep, not plain data) could not be routed or presented either; it is
+      // rejected here, with the reason, instead of being returned as a claim nothing downstream will accept.
+      try { jsonSnapshot(claim, "claim"); } catch (error) { throw new MemoryClaimError("invalid", `the claim cannot be routed or presented: ${error instanceof Error ? error.message : String(error)}`); }
+      claims.push(claim);
     } catch (error) {
       rejected.push({ index, reason: error instanceof MemoryClaimError ? error.message : String(error) });
     }
@@ -465,7 +473,7 @@ export async function distillMemoryClaims(input: {
     try {
       // The response is copied as plain JSON the moment it arrives: an extractor that reuses and edits an object it returned
       // (or hands back a getter) cannot change a proposal after it has been checked and while it is being stored.
-      result = jsonSnapshot(await extract(request), `pass ${pass + 1} extraction result`, { maxNodes: MAX_EXTRACTION_RESULT_NODES }) as ExtractionResultLike;
+      result = jsonSnapshot(await extract(request), `pass ${pass + 1} extraction result`, { maxNodes: MAX_EXTRACTION_RESULT_NODES, maxDepth: MAX_DECISION_DEPTH }) as ExtractionResultLike;
     } catch (error) {
       warnings.push(`pass ${pass + 1} failed: ${error instanceof Error ? error.message : String(error)}`);
       continue;

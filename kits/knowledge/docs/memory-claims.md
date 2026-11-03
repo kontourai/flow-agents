@@ -128,20 +128,39 @@ Detecting which subjects to propose is the host's (or a later lane's) candidate 
 
 Everything the Kit validates and then records or presents is read once and copied as plain JSON, and the copy is what is
 validated and used: a routing change (claim, current claims, verifications, agreement, entity proposal), a run or evidence
-request, review input, a distill request (the sitting is copied before extraction starts, so claims name the source
-reference and times the model was given), the claims recall presents, and the claims the accumulation mapper and the
-verifier read, and each extraction pass's response as it arrives (an extractor that reuses and edits an object it returned cannot
-change a claim after it was checked; a response that is not plain data is a failed pass, reported as a warning). The Kit refuses what JSON would change or drop or what could answer differently the next time it is read:
-accessors, `-0`, holes, class instances and array subclasses, cycles, a `__proto__` key, anything over a size or depth bound,
-and **any Proxy** (a Proxy answers every question as it likes, so no list of checks makes one safe; it is refused, not
-defended against). Request fields are chosen with selectors that run nothing the caller defined (no getter, no overridden
-`map`, no trap). Recall takes only the few small fields it shows from a routing decision rather than copying the whole decision.
-The bounds are per item, not per list: 20,000 JSON nodes for a claim or a review decision, 1,500,000 for a routing decision (it
-embeds a claim and up to 64 peers), 250,000 for one extraction response, and 20,000 entries in any list (so a sitting of more
-than 20,000 turns is refused, not cut short). Two deliberate exceptions to refusing: a recall claim that cannot be copied is *withheld and reported*, and a
-`sourceVisibility` that cannot be copied is recorded as undeclared, which reads as sealed (it can only make a claim route, never
-widen it). The entity emitter requires `confidenceComponents` to be an object (or absent), as Survey does. The Kit is stricter
-than Survey in one place: `-0` is refused, because it does not survive JSON.
+request, review input, a distill request (the sitting is copied before extraction starts, so claims name the source reference
+and times the model was given), each extraction pass's response as it arrives (an extractor that reuses and edits an object it
+returned cannot change a claim after it was checked; a response that is not plain data is a failed pass, reported as a warning),
+the claims recall presents, and the claims the accumulation mapper and the verifier read. The Kit refuses what JSON would change or
+drop or what could answer differently the next time it is read: accessors, `-0`, holes, class instances and array subclasses,
+cycles, a `__proto__` key, anything over a size or depth bound, and **any Proxy** (a Proxy answers every question as it likes, so
+no list of checks makes one safe; it is refused, not defended against). Request fields are chosen with selectors that run nothing
+the caller defined (no getter, no overridden `map`, no trap). Recall takes only the few small fields it shows from a routing
+decision rather than copying the whole decision. Two deliberate exceptions to refusing: a recall claim that cannot be copied is
+*withheld and reported*, and a `sourceVisibility` that cannot be copied is recorded as undeclared, which reads as sealed (it can
+only make a claim route, never widen it). The entity emitter requires `confidenceComponents` to be an object (or absent), as
+Survey does. The Kit is stricter than Survey in one place: `-0` is refused, because it does not survive JSON.
+
+`memoryClaim`, `assertMemoryClaim` and `assembleMemoryClaims` are the exception to copying: they are constructors and validators for
+data the caller owns, read as given, and need a trusted-data precondition. The entry points that take data from elsewhere copy first.
+
+**What the Kit produces, it can read back.** The bounds are written once (`src/memory-json.ts`) and the larger are derived from the
+smaller, so an artifact the Kit makes is never one its own readers refuse:
+
+| Bound | Value |
+|---|---|
+| JSON values in one claim, review decision or review event | 20,000, nested at most 32 deep |
+| Peers a claim is checked against | 64 (more is refused, not cut short) |
+| Support-verification records on one decision | 16, each up to a claim's worth of values (a record embeds the claim's value) |
+| One routing decision | `(64 + 1) x 20,000 + 16 x 22,000 + 20,000` values, nested at most 40 deep (a claim sits a few levels down) |
+| One extraction response | 250,000 values |
+| One request list | 20,000 entries (a sitting of more than 20,000 turns is refused) |
+| What one run holds across requests | 1,000,000 routing decisions, review decisions and review events each; a host may lower it with `maxHistoryEntries` |
+
+`assembleMemoryClaims` rejects, with the reason, a claim that exceeds the claim bounds, so `distillMemoryClaims` never returns one
+that routing or recall would refuse. A request that would take a run past its history limit is refused before anything is written.
+Each bound is per item: there is no aggregate budget for a whole request or a whole batch, and no byte budget for strings. A host
+that accepts untrusted workloads needs those limits itself. The largest decision the Kit can produce copies in well under a second.
 
 ## Flow evidence
 
@@ -150,24 +169,34 @@ decisions, and `recordMemoryMetricsEvidence` the run's metrics, to a gate of a F
 run the host owns, as custom-kind evidence (`memory.routing-decisions`,
 `memory.run-metrics`). A decision that does not recompute is refused before anything
 is attached. Re-attaching the same content returns the existing entry; new metrics
-supersede the earlier entry. `recordMemoryMetricsEvidence` records only figures equal to what the run's recorded evidence derives
+supersede the earlier entry. **One gate holds a run's metrics** (a second is refused), so "this gate's live entry" and the run's
+latest figures cannot disagree. `recordMemoryMetricsEvidence` records only figures equal to what the run's recorded evidence derives
 (a stale snapshot, or figures computed elsewhere, is refused rather than allowed to supersede the correct ones), and
-`refreshMemoryRunMetrics` is how figures are brought up to date. Retrying figures that were recorded earlier and have since been
-superseded returns the entry that holds them and writes nothing. A digest only proves a file is the one recorded, so what is read
-back is checked before figures are derived from it: a routing record must belong to the run and be a known version, and every
-decision in it must still recompute (otherwise no figures are derived; `recomputeRecordedMemoryRouting` reports the bad
-decision); a review decision needs its kind, a name, the item it decides, a status Survey defines and a time; a review event
-needs its kind, a session, an integer sequence, one of Survey's event types and a time. Those are shape checks, not a full Survey
-validation; recording routing decisions refreshes the run's metrics in the
-same serialised unit, so metrics never describe fewer decisions than the run holds. All of
-that holds within one process, for callers that reach the run through a directory that exists
-(an alias made later for a directory that did not exist yet is resolved through its nearest
-existing ancestor). Metrics are as fresh as the last write that went through these functions. Flow's run lock is not
-re-entrant, so the check and the attach cannot share it: two processes racing can leave a
-duplicate routing batch (readers dedupe by decision id) or two live metrics entries
-(`readLatestMemoryMetrics` takes the last), and metrics written by one process can be stale-last against another's decisions until the next refresh. Neither loses or corrupts evidence. An atomic
-conditional attach is a Flow feature ([kontourai/flow#295](https://github.com/kontourai/flow/issues/295)). `recomputeRecordedMemoryRouting(runId)` reads the stored
-files back (refusing any whose digest no longer matches) and recomputes every decision.
+`refreshMemoryRunMetrics` is how figures are brought up to date. Retrying figures that this gate recorded earlier and that have
+since been superseded returns the entry that holds them and writes nothing; another gate's entry is never the answer.
+
+A digest only proves a file is the one recorded, so what is read back is checked before figures are derived from it, and every
+stored payload is checked (a second record that reuses a decision's id is checked too, not collapsed away unread). A routing record
+must belong to the run and be a known version, and every decision in it must still recompute; a review decision needs its kind, a
+name, the item it decides, a status Survey defines and a time; a review event needs its kind, a session, an integer sequence, one
+of Survey's event types and a time. Those are shape checks, not a full Survey validation. `refreshMemoryRunMetrics`,
+`recordMemoryRoutingEvidence` and `runMemoryRouting` check that what is already stored can be derived from **before they write
+anything**, so a request cannot add a record to a run and then fail to derive over it; recording routing decisions refreshes the
+run's metrics in the same serialised unit.
+
+If stored routing evidence is bad (a record that no longer recomputes), every request on that run is refused, which is the point:
+no figures are derived from evidence that disagrees with its own rules. The way out is `supersedeMemoryRoutingEvidence({supersedes,
+decisions})`, which attaches a corrected record (or, with no decisions, none) that supersedes the named live routing records.
+Figures, the recomputation report and the room check read the live records; the superseded record stays in the manifest as the audit
+trail. `recomputeRecordedMemoryRouting(runId)` reads the stored files back (refusing any whose digest no longer matches), recomputes
+every live payload, repeats included, and names the bad ones.
+
+All of that holds within one process, for callers that reach the run through a directory that exists (an alias made later for a
+directory that did not exist yet is resolved through its nearest existing ancestor). Flow's run lock is not re-entrant, so the check
+and the attach cannot share it: two processes racing can leave a duplicate routing batch (readers dedupe by decision id) or two live
+metrics entries (`readLatestMemoryMetrics` takes the last), and metrics written by one process can be stale-last against another's
+decisions until the next refresh. Neither loses or corrupts evidence. An atomic conditional attach is a Flow feature
+([kontourai/flow#295](https://github.com/kontourai/flow/issues/295)).
 
 One evidence entry holds a batch of decisions rather than one entry per decision,
 because a run decides hundreds of changes and each entry is a locked manifest write.

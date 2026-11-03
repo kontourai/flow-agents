@@ -7,7 +7,7 @@ import { memoryClaim } from "@kontourai/flow-agents/memory-claims";
 import { buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import {
   MEMORY_METRICS_EVIDENCE_KIND, MEMORY_REVIEW_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND, readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence,
-  canonicalRunPath, readLatestMemoryMetrics, readMemoryReviewRecords, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
+  canonicalRunPath, readLatestMemoryMetrics, readMemoryReviewRecords, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting, supersedeMemoryRoutingEvidence,
 } from "@kontourai/flow-agents/memory-routing-flow";
 import { attachEvidence } from "@kontourai/flow";
 import { canonicalJson } from "@kontourai/relay";
@@ -664,4 +664,122 @@ test("one decision larger than a single claim's bound is recorded and read back:
   await recordMemoryRoutingEvidence({ ...where(cwd), decisions: [decision] });
   assert.deepEqual((await readMemoryRoutingDecisions("run-1", cwd)).map(d => d.id), [decision.id]);
   assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 1);
+});
+
+// --- review round 11 --------------------------------------------------------------------------------------------------------
+
+async function twoGateWorkspace(t) {
+  const cwd = makeFixtureDir("memory-routing-flow-two-");
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const gate = HOST_FLOW.gates["route-gate"];
+  const flow = { ...HOST_FLOW, gates: { "route-gate": gate, "other-gate": { ...gate } } };
+  const definition = path.join(cwd, "host.flow.json");
+  fs.writeFileSync(definition, JSON.stringify(flow));
+  await startRun(definition, { cwd, runId: "run-1" });
+  return cwd;
+}
+const rawAttach = async (cwd, gate, kind, body, name = "raw.json") => { const file = path.join(cwd, name); fs.writeFileSync(file, JSON.stringify(body)); return attachEvidence("run-1", { cwd, gate, file, kind }); };
+const syntheticEvents = (from, count) => Array.from({ length: count }, (_, i) => ({ kind: "ReviewSessionEvent", apiVersion: "v1", metadata: { name: `event-${from + i}` }, spec: { sessionName: "s", sequence: from + i, eventType: "item-selected", occurredAt: "2026-11-02T10:00:00.000Z", reviewItemName: "x" } }));
+
+test("review history accumulates across requests past a single request's list bound, and the next request still works", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: syntheticEvents(0, 10000) });
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: syntheticEvents(10000, 10001) });
+  assert.equal((await readMemoryReviewRecords("run-1", cwd)).events.length, 20001, "the premise: more than any one request could carry");
+  await refreshMemoryRunMetrics({ ...where(cwd) });
+  const run = await runMemoryRouting({ ...where(cwd), changes: MORE() });
+  assert.equal(run.metrics.id, (await readLatestMemoryMetrics("run-1", cwd)).evidenceId);
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 4, "and the new decision is in the live figures");
+});
+
+test("a request that would take a run past its history limit is refused before anything is written", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  const count = async kind => (await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.requested_kind === kind).length;
+  await assert.rejects(recordMemoryRoutingEvidence({ ...where(cwd), decisions, maxHistoryEntries: 2 }), /would hold 3 routing decisions, over its limit of 2/);
+  assert.equal(await count(MEMORY_ROUTING_EVIDENCE_KIND), 0, "nothing recorded");
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions, maxHistoryEntries: 3 });
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: syntheticEvents(0, 3), maxHistoryEntries: 3 });
+  const before = await count(MEMORY_REVIEW_EVIDENCE_KIND);
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: syntheticEvents(0, 3), maxHistoryEntries: 3 }); // what is already held is not new
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions, maxHistoryEntries: 3 });
+  assert.equal(await count(MEMORY_REVIEW_EVIDENCE_KIND), before, "and sending it again records nothing");
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: syntheticEvents(3, 1), maxHistoryEntries: 3 }), /more than 3 review events/);
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: MORE(), reviewEvents: syntheticEvents(3, 1), maxHistoryEntries: 3 }), /more than 3 review events|would hold 4 routing decisions/);
+  assert.equal(await count(MEMORY_REVIEW_EVIDENCE_KIND), before, "no review state recorded");
+  assert.equal((await readMemoryRoutingDecisions("run-1", cwd)).length, 3, "and no decision recorded behind the refusal");
+  const decision = { kind: "ReviewDecision", metadata: { name: "d" }, spec: { reviewItemName: "i", status: "rejected", reviewedAt: "2026-11-02T10:00:00.000Z" } };
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [1, 2, 3].map(n => ({ ...decision, metadata: { name: `d${n}` } })), maxHistoryEntries: 3 });
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [{ ...decision, metadata: { name: "d4" } }], maxHistoryEntries: 3 }), /more than 3 review decisions/);
+  for (const bad of [0, -1, 1.5, "x", 2_000_000]) await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), maxHistoryEntries: bad }), /maxHistoryEntries must be an integer/, String(bad));
+});
+
+test("a second record that reuses a decision's id with a wrong outcome is checked, not collapsed away unread", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  const wrong = { ...decisions[1], outcome: "proposed", reasons: [] };
+  await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [wrong] });
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd) }), /does not recompute/);
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: MORE() }), /does not recompute/, "and nothing more is recorded on top of it");
+  const report = await recomputeRecordedMemoryRouting("run-1", cwd);
+  assert.deepEqual(report.mismatches.map(item => item.decisionId), [decisions[1].id], "the report names the bad payload even though its id was seen");
+  assert.equal(report.decisions, 3);
+});
+
+test("a stored routing record of another run is refused before figures are derived", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-2", decisions: [decisions[0]] });
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd) }), /another run or an unsupported version/);
+});
+
+test("a run with bad stored routing evidence is recovered by superseding it, and the original stays as the audit trail", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  const first = await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  const bad = await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [{ ...decisions[1], outcome: "proposed", reasons: [] }] });
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd) }), /does not recompute/);
+  await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: ["no-such-record"], decisions }), /not live routing records/);
+  await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [bad.id], decisions: [{ ...decisions[1], outcome: "proposed", reasons: [] }] }), /does not recompute/, "the replacement is held to the same rule");
+  await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [], decisions }), /name the live routing records/);
+  const fixed = await supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [bad.id], decisions: [] });
+  assert.ok(fixed.id);
+  const stored = await readMemoryRoutingEvidence("run-1", cwd);
+  assert.deepEqual(stored.map(entry => [entry.evidenceId, entry.superseded]), [[first.id, false], [bad.id, true], [fixed.id, false]], "the bad record is still there, superseded");
+  assert.deepEqual((await recomputeRecordedMemoryRouting("run-1", cwd)).mismatches, [], "the report reads the live records");
+  await refreshMemoryRunMetrics({ ...where(cwd) });
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 3);
+  await runMemoryRouting({ ...where(cwd), changes: MORE() });
+});
+
+test("one gate holds a run's metrics, and a retry never returns another gate's entry", async t => {
+  const cwd = await twoGateWorkspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), gate: "other-gate" }), /metrics are recorded on gate route-gate/);
+  const stale = deriveMemoryRunMetrics({ runId: "run-1", decisions: [] });
+  await rawAttach(cwd, "other-gate", MEMORY_METRICS_EVIDENCE_KIND, stale);
+  await assert.rejects(recordMemoryMetricsEvidence({ ...where(cwd), metrics: stale }), /not what the evidence/, "figures that only another gate holds are not the answer");
+  // Where the gate holds them itself, the retry finds them even if another gate's entry matches first.
+  const own = await twoGateWorkspace(t);
+  await recordMemoryRoutingEvidence({ ...where(own), decisions });
+  const early = (await readLatestMemoryMetrics("run-1", own)).value;
+  await refreshMemoryRunMetrics({ ...where(own), ...rejection(buildMemoryReviewItem(decisions[1]), 4) });
+  const same = await rawAttach(own, "other-gate", MEMORY_METRICS_EVIDENCE_KIND, early);
+  const answer = await recordMemoryMetricsEvidence({ ...where(own), metrics: early });
+  assert.equal(answer.gate_id, "route-gate");
+  assert.notEqual(answer.id, same.id);
+});
+
+test("review state is copied per item: a long list of small items is not over a whole-list budget", async t => {
+  const cwd = await workspace(t);
+  const decision = n => ({ kind: "ReviewDecision", apiVersion: "v1", metadata: { name: `d${n}` }, spec: { reviewItemName: `i${n}`, status: "rejected", reviewedAt: "2026-11-02T10:00:00.000Z", candidateId: `c${n}`, note: "n" } });
+  const decisionsList = Array.from({ length: 2500 }, (_, n) => decision(n));
+  assert.ok(JSON.stringify(decisionsList).length / 11 > 20000 * 1, "the premise: far more than 20,000 JSON values in one list");
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: decisionsList, reviewEvents: syntheticEvents(0, 2500) });
+  const stored = await readMemoryReviewRecords("run-1", cwd);
+  assert.deepEqual([stored.decisions.length, stored.events.length], [2500, 2500]);
 });

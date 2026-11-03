@@ -456,3 +456,46 @@ test("an extraction response larger than one claim's bound is accepted: a long s
   assert.deepEqual(result.warnings, []);
   assert.equal(result.claims.length, 700);
 });
+
+// --- review round 11 --------------------------------------------------------------------------------------------------------
+
+test("a proposal the Kit could not route or present is rejected where it is assembled, with the reason, not returned as a claim", () => {
+  const quote = "x";
+  const group = fields => Object.entries({ subject: "widget service", subjectType: "service", property: "primary database", posture: "stated", ...fields })
+    .map(([name, candidateValue]) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" }));
+  const assemble = fields => assembleMemoryClaims({ proposals: group(fields) }, { sourceRef: "s", locate: () => ({ observedAt: "2026-11-01T00:00:00.000Z", role: "user" }) });
+  const ok = assemble({ value: Array.from({ length: 19000 }, (_, i) => i) });
+  assert.equal(ok.claims.length, 1, "a large value within the bound is a claim");
+  const huge = assemble({ value: Array.from({ length: 21000 }, (_, i) => i) });
+  assert.deepEqual(huge.claims, []);
+  assert.match(huge.rejected[0].reason, /cannot be routed or presented.*too large/);
+  let deep = "leaf"; for (let i = 0; i < 40; i++) deep = { a: deep };
+  const tooDeep = assemble({ value: deep });
+  assert.deepEqual(tooDeep.claims, []);
+  assert.match(tooDeep.rejected[0].reason, /cannot be routed or presented.*too deep/);
+});
+
+test("a long sitting's extraction can return a claim the Kit then refuses: distill reports it as rejected, with no warnings hidden", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const at = (name, candidateValue) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  const proposals = [at("subject", "widget service"), at("subjectType", "service"), at("property", "primary database"), at("posture", "stated"), at("value", Array.from({ length: 21000 }, (_, i) => i))];
+  const result = await distillMemoryClaims({ sitting, passes: 1, extract: async () => ({ proposals }) });
+  assert.deepEqual(result.claims, []);
+  assert.equal(result.rejected.length, 1);
+  assert.match(result.rejected[0].reason, /too large/);
+});
+
+test("a value nested as deep as a claim may be survives the extraction response that carries it, which nests a few levels deeper", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const nest = n => { let v = "leaf"; for (let i = 0; i < n; i++) v = { a: v }; return v; };
+  const at = (name, candidateValue) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" });
+  const fields = value => [at("subject", "widget service"), at("subjectType", "service"), at("property", "primary database"), at("posture", "stated"), at("value", value)];
+  const ok = await distillMemoryClaims({ sitting, passes: 1, extract: async () => ({ proposals: fields(nest(30)) }) });
+  assert.deepEqual(ok.warnings, [], "no pass failed");
+  assert.equal(ok.claims.length, 1, "30 levels is within a claim's bound");
+  const over = await distillMemoryClaims({ sitting, passes: 1, extract: async () => ({ proposals: fields(nest(33)) }) });
+  assert.deepEqual(over.claims, []);
+  assert.match(over.rejected[0].reason, /too deep/);
+});
