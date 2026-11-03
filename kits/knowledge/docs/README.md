@@ -296,17 +296,20 @@ node --test kits/knowledge/context-check/context-check.test.js
 ### Living Context recall contract (Context Check 1.1)
 
 **`knowledge.living-context`** extends the Context Check recall without changing `1.0`: the
-`1.0` flow, schemas and `runContextCheck` are byte-compatible, and `runContextCheck` refuses a
-`1.1` input rather than running it under `1.0` rules. The `1.1` entry points live in
-`context-check/living-context.js` (recall and reconciliation) and
-`context-check/living-context-answer.js` (the answer step); loading `index.js` still needs no
-Surface or Survey package. Schemas:
+`1.0` flow and its schemas are unchanged, and `runContextCheck` refuses a `1.1` input rather than
+running it under `1.0` rules. (The shared Knowledge schema validator now ignores inherited object
+property names, so a `1.0` input carrying an undeclared `constructor`, `toString`, `__proto__`
+or `hasOwnProperty` key is now rejected; every other `1.0` input behaves as before.) The `1.1` entry
+points live in `context-check/living-context.js` (recall and reconciliation) and
+`context-check/living-context-answer.js` (the answer step); loading `index.js` still needs no Surface
+or Survey package, but the `1.1` modules need `@kontourai/surface` with the derived-visibility exports
+(Surface 6.3.0 or later, kontourai/surface#350) and `@kontourai/survey`. Schemas:
 [`living-context-input`](../schemas/knowledge/living-context-input.schema.json) and
 [`living-context-result`](../schemas/knowledge/living-context-result.schema.json).
 
 ```js
 import { runLivingContext } from "./context-check/living-context.js";
-import { answerLivingContext } from "./context-check/living-context-answer.js";
+import { answerLivingContext, createLineSupportVerifier } from "./context-check/living-context-answer.js";
 
 const input = {
   schema_version: "1.1",
@@ -320,46 +323,60 @@ const input = {
   knowledge_roots: [{ id: "repository-decisions", provider: "git-repo", manifest_path: "knowledge/claims.json" }]
 };
 const recall = runLivingContext({ repoRoot, input, proposalDir });   // evidence only
-const answer = await answerLivingContext({ repoRoot, input });       // separate, abstaining step
+const answer = await answerLivingContext({                           // separate, abstaining step
+  repoRoot, input, verifier: createLineSupportVerifier()             // a verifier is required; inject a model or human one in production
+});
 ```
 
 **Identity is required and fails closed.** A missing or blank `reader` is `READER_IDENTITY_REQUIRED`;
 a reader that every selected root does not list under its manifest `readers` is
-`UNKNOWN_READER_IDENTITY`. Both are refused before any claim is parsed and before any file is written.
-Context Check does not authenticate: the host supplies an identity it has authenticated, and Context
-Check only refuses one it does not recognise. A claim is visible only to the readers in its
-`visibility` list; a claim with no `visibility` is visible to no one, and a malformed claim that does
-not list the reader is dropped without an error, so a parse error never describes a hidden claim
-(error text for duplicates and cycles names no claim id). Asked for by id, a hidden, absent, or
-not-yet-known claim returns the same plain `no_answer`; a default scan never names a claim that is
-hidden or recorded after `known_at`. Residual disclosure, accepted and stated: when a visible
-claim's recorded successor is hidden from the reader, the visible claim becomes `unverifiable`
-(`successor_not_visible_or_unresolved`), which shows that something the reader cannot read bears
-on it, though never what. Reconciliation and proposals cover only claims the reader may see.
+`UNKNOWN_READER_IDENTITY`. The reader is admitted at every selected root before a single claim of any
+root is parsed, and before any file is written. Context Check does not authenticate: the host supplies
+an identity it has authenticated, and Context Check only refuses one it does not recognise.
+
+**Visibility is Surface's.** A claim's `visibility` is written in Surface's declared forms: `"public"`
+or `{ "audiences": ["maintainer"] }` (the reader id is the audience label). It is read with
+`readDeclaredVisibility` and enforced with `visibilityAllows`; anything undeclared or unreadable, a bare
+array included, is sealed and visible to no one. Per-viewer supersession is `viewerSupersessionView`
+(kontourai/surface#350): an edge applies only to a viewer who may see its successor, so **a successor the
+reader cannot see leaves the predecessor `current` for them, with no trace of it** (the result is
+identical to one where no successor exists), chains through hidden claims collapse to the nearest visible
+successor, and a cycle among visible claims leaves them `unverifiable` (`supersession_cycle`). An edge
+carries its own visibility (`supersession_visibility`, by default that of the claim that carries it); an
+unreadable one is sealed and the edge is followed for no one. A malformed claim that Surface says the
+reader may not see, or that was recorded after `known_at`, is dropped without an error, so a parse error
+never describes it; an entitled reader's error names the claim, never its array position. A duplicate id
+is an error only when every copy is visible to the reader. Asked for by id, a hidden, absent, or
+not-yet-known claim returns the same plain `no_answer`; a default scan never names one. Reconciliation
+and proposals cover only claims the reader may see. Stated limits: admission of an edge uses the times and
+slot of both ends, so a hidden claim's times can decide whether a chain through it collapses, though never
+what the reader is shown; and a dangling pointer is indistinguishable from a hidden successor.
 
 **As-of on two time axes**, with the semantics of Surface's knowledge-accumulation decision
-(kontourai/surface#204, merged as Surface `7486c6d`): `known_at` is knowledge time, filtered on the manifest's
-`recorded_at` (the receiver-recorded instant, never a claim's own authored time), and `valid_at`
-is valid time, a half-open `[from, until)` interval from `valid_time` (an absent bound is
-unbounded and asserts nothing about perpetual truth). A supersession edge is its own observation: it
-counts only once the claim's `supersession_recorded_at` and its successor's `recorded_at` are at or
-before `known_at` (untimed is indeterminate, never guessed), and both ends must declare the same
-`slot` or the edge is inert and the claim `unverifiable`. A `succession` takes effect at the
-successor's `valid_time.from`; a `correction` (the default) applies within the successor's valid
-interval, throughout when it has none. Contradiction evidence needs `reconciliation_recorded_at`
-by `known_at`, and a `verified_at` after `known_at` cannot anchor a TTL. The authority text itself is
-read at the pinned revision, not as of `known_at`: pin the revision that existed at the knowledge cut. No wall clock is read: `now` is
-explicit and also the instant freshness is judged at; `expires_at`/`ttl_seconds` govern freshness only, never world validity. Slot identity, cardinality, and the admission policy for who may supersede whom are not modelled (see the decision record). `status` is the status **as of the stated
-instants** and the result echoes them, so a predecessor read at a `valid_at` before its
-succession, or a `known_at` before its successor was recorded, is `current` with a reason saying
-exactly why. A superseded claim is never `current` at a successor that is known and in effect, and
-a successor the reader cannot see makes it `unverifiable` rather than `current`, without naming it.
+(kontourai/surface#204, merged as Surface `7486c6d`): `known_at` is knowledge time, filtered on the
+manifest's `recorded_at` (the receiver-recorded instant, never a claim's own authored time), and `valid_at`
+is valid time, a half-open `[from, until)` interval from `valid_time` (an absent bound is unbounded and
+asserts nothing about perpetual truth). A supersession edge is its own observation: it is admitted only
+once the claim's `supersession_recorded_at` and its successor's `recorded_at` are at or before
+`known_at` (untimed is indeterminate, never guessed, and makes a claim whose visible successor is untimed
+`unverifiable`), and both ends must declare the same `slot` or the edge is inert and the claim
+`unverifiable`. A `succession` takes effect at the successor's `valid_time.from`; a `correction` (the
+default) applies within the successor's valid interval, throughout when it has none. Contradiction
+evidence needs `reconciliation_recorded_at` by `known_at`, and a `verified_at` after `known_at` cannot
+anchor a TTL. The authority text itself is read at the pinned revision, not as of `known_at`: pin the
+revision that existed at the knowledge cut. No wall clock is read: `now` is explicit and also the instant
+freshness is judged at; `expires_at`/`ttl_seconds` govern freshness only, never world validity. Full slot
+identity, cardinality, and the admission policy for who may supersede whom are not modelled (see the
+decision record). `status` is the status **as of the stated instants** and the result echoes them, so a
+predecessor read at a `valid_at` before its succession, or a `known_at` before its successor was recorded,
+is `current` with a reason saying exactly why. A superseded claim is never `current` for a reader who can
+see a successor that is recorded, in effect and on the same slot.
 
 **Reasons, not just rank.** Every recall carries `matched_signals`, `freshness` (Surface's
 claim-intrinsic `expiresAt`/`ttlSeconds`, judged `now > expiry` exactly as Surface does; a stale
 claim is `unverifiable`), `review_posture` (`proposed` unless the manifest names a reviewer),
 `supersession_chain` (only edges this reader may see, whose ends were recorded by `known_at`), and
-`reasons`. A requested `claim_ids` list keeps its own order; a default scan lists claims that
+`reasons`. The sparse plain `no_answer` entry carries none of these by design: it must say nothing. A requested `claim_ids` list keeps its own order; a default scan lists claims that
 intersect the change first, then by id. Order is the only ranking, and the reasons say why each
 result is there.
 

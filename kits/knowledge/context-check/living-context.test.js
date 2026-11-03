@@ -14,7 +14,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { validateCandidateVerification } from "@kontourai/survey";
 
-import { runLivingContext, deriveLivingContext, validateLivingContextInput, validateLivingContextResult, estimateTokens } from "./living-context.js";
+import { runLivingContext, assertSurfaceVisibility, deriveLivingContext, validateLivingContextInput, validateLivingContextResult, estimateTokens } from "./living-context.js";
 import { observeRepositoryChange, DEFAULT_MAX_CHANGED_PATHS } from "./observe-change.js";
 import { reapplyVerifiedFreshness } from "@kontourai/surface";
 import { answerLivingContext as answerWith, createLineSupportVerifier, MAX_EVIDENCE_BYTES } from "./living-context-answer.js";
@@ -117,7 +117,7 @@ describe("Living Context: identity is required and fails closed", () => {
   });
 
   test("an unknown identity is refused even when it is named in a claim's visibility list", () => {
-    const manifest = withClaim("clean-control", (claim) => { claim.visibility.push("stranger"); });
+    const manifest = withClaim("clean-control", (claim) => { claim.visibility.audiences.push("stranger"); });
     const { repo, revision } = seededRepo(manifest);
     assert.throws(() => runLivingContext({ repoRoot: repo, input: input(revision, { reader: "stranger" }), write: false }), (cause) => cause.code === "UNKNOWN_READER_IDENTITY");
     remove(repo);
@@ -178,14 +178,39 @@ describe("Living Context: a superseded claim is never presented as current", () 
     remove(repo);
   });
 
-  test("a successor hidden from the reader never leaves the predecessor as current and never names the successor", () => {
+  test("a successor the reader cannot see leaves the predecessor current for them, with no trace (Surface per-viewer supersession)", () => {
     const { repo, revision } = seededRepo();
-    const engineer = recallOf(runLivingContext({ repoRoot: repo, input: input(revision, { claim_ids: ["hidden-successor-predecessor"] }), write: false }), "hidden-successor-predecessor");
-    assert.equal(engineer.status, "unverifiable");
-    assert.deepEqual(engineer.reasons, ["successor_not_visible_or_unresolved"]);
-    assert.ok(!JSON.stringify(engineer).includes("auditor-only-successor"), "the hidden successor must not leak");
+    const engineer = runLivingContext({ repoRoot: repo, input: input(revision, { claim_ids: ["hidden-successor-predecessor"] }), write: false });
+    const entry = recallOf(engineer, "hidden-successor-predecessor");
+    assert.equal(entry.status, "current");
+    assert.deepEqual(entry.reasons, ["current_at_as_of"]);
+    assert.ok(!JSON.stringify(engineer).includes("auditor-only-successor"), "the hidden successor must not appear anywhere in the result");
+    assert.ok(!("superseded_by" in entry));
+    const withoutEdge = withClaim("hidden-successor-predecessor", (claim) => { delete claim.superseded_by; delete claim.supersession_kind; delete claim.supersession_recorded_at; claim.status = "current"; });
+    const second = seededRepo(withoutEdge);
+    const baseline = runLivingContext({ repoRoot: second.repo, input: input(second.revision, { claim_ids: ["hidden-successor-predecessor"] }), write: false });
+    const sameModuloCommit = (value) => JSON.stringify(value).replaceAll(/[0-9a-f]{40}/g, "<commit>");
+    assert.equal(sameModuloCommit(recallOf(baseline, "hidden-successor-predecessor")), sameModuloCommit(entry), "the result is identical to one where no successor exists");
+    remove(second.repo);
     const auditor = recallOf(runLivingContext({ repoRoot: repo, input: input(revision, { reader: "auditor", claim_ids: ["hidden-successor-predecessor"] }), write: false }), "hidden-successor-predecessor");
     assert.equal(auditor.status, "superseded");
+    assert.equal(auditor.superseded_by, "auditor-only-successor");
+    remove(repo);
+  });
+
+  test("a chain through a hidden claim collapses to the nearest visible successor", () => {
+    const mk = (id, extra) => ({ id, claim: `Claim ${id}.`, status: "current", authority: { path: "d.md", citation: "c" }, owning_source: { owner: "o", path: "d.md" }, affected_surfaces: ["src/x.js"], visibility: { audiences: ["engineer"] }, recorded_at: "2026-01-01T00:00:00Z", slot: "s", ...extra });
+    const edge = { supersession_kind: "correction", supersession_recorded_at: "2026-01-02T00:00:00Z" };
+    const manifest = { readers: ["engineer", "auditor"], claims: [
+      mk("a", { ...edge, status: "superseded", superseded_by: "h" }),
+      mk("h", { ...edge, status: "superseded", superseded_by: "c", visibility: { audiences: ["auditor"] }, supersession_visibility: { audiences: ["engineer", "auditor"] } }),
+      mk("c", {}),
+    ] };
+    const { repo, revision } = seededRepo(manifest, { docs: { "d.md": "x\n" } });
+    const entry = recallOf(runLivingContext({ repoRoot: repo, input: input(revision, { claim_ids: ["a"] }), write: false }), "a");
+    assert.equal(entry.status, "superseded");
+    assert.equal(entry.superseded_by, "c");
+    assert.ok(!JSON.stringify(entry).includes('"h"'));
     remove(repo);
   });
 
@@ -283,19 +308,17 @@ describe("Living Context: as-of on valid time and knowledge time", () => {
     }
   });
 
-  test("supersession self edges and cycles are refused without naming claim ids", () => {
-    for (const mutate of [
-      (claim) => { claim.status = "superseded"; claim.superseded_by = "clean-control"; },
-      (claim, manifest) => {
-        claim.status = "superseded"; claim.superseded_by = "new-limit";
-        const next = manifest.claims.find((item) => item.id === "new-limit");
-        next.status = "superseded"; next.superseded_by = "clean-control";
-      },
-    ]) {
-      const { repo, revision } = seededRepo(withClaim("clean-control", mutate));
-      assert.throws(() => runLivingContext({ repoRoot: repo, input: input(revision), write: false }), (cause) => cause.code === "INVALID_CLAIM_MANIFEST" && !/clean-control|new-limit/.test(cause.message));
-      remove(repo);
-    }
+  test("a cycle among claims the reader can see selects no winner; a cycle through a hidden claim changes nothing", () => {
+    const mk = (id, extra) => ({ id, claim: `Claim ${id}.`, status: "current", authority: { path: "d.md", citation: "c" }, owning_source: { owner: "o", path: "d.md" }, affected_surfaces: ["src/x.js"], visibility: { audiences: ["engineer"] }, recorded_at: "2026-01-01T00:00:00Z", slot: "s", ...extra });
+    const edge = (to) => ({ status: "superseded", superseded_by: to, supersession_kind: "correction", supersession_recorded_at: "2026-01-02T00:00:00Z" });
+    const run = (claims) => { const { repo, revision } = seededRepo({ readers: ["engineer"], claims }, { docs: { "d.md": "x\n" } }); const result = runLivingContext({ repoRoot: repo, input: input(revision, { claim_ids: claims.map((claim) => claim.id) }), write: false }); remove(repo); return result; };
+    const self = run([mk("a", edge("a"))]);
+    assert.deepEqual([recallOf(self, "a").status, recallOf(self, "a").reasons], ["unverifiable", ["supersession_cycle"]]);
+    const two = run([mk("a", edge("b")), mk("b", edge("a")), mk("c", {})]);
+    assert.deepEqual(["a", "b"].map((id) => recallOf(two, id).reasons[0]), ["supersession_cycle", "supersession_cycle"]);
+    assert.equal(recallOf(two, "c").status, "current");
+    const hidden = run([mk("a", edge("h")), mk("h", { ...edge("a"), visibility: { audiences: ["auditor"] } })]);
+    assert.equal(recallOf(hidden, "a").status, "current", "a cycle that exists only through a hidden claim must not change what the reader sees");
   });
 
   test("freshness uses Surface's expiry rule: expiresAt wins, ttl anchors on verification, expiry itself is still fresh", () => {
@@ -405,7 +428,7 @@ describe("Living Context: abstention is a separate step backed by Survey support
     const counting = { id: "spy", version: "1", method: "deterministic", async verify() { calls += 1; return { result: "supported" }; } };
     const answer = await answerLivingContext({
       repoRoot: repo,
-      input: input(revision, { claim_ids: ["superseded-context-contract", "stale-claim", "auditor-only", "hidden-successor-predecessor"] }),
+      input: input(revision, { claim_ids: ["superseded-context-contract", "stale-claim", "auditor-only"] }),
       verifier: counting,
     });
     assert.equal(calls, 0, "only a current recall is ever sent to a verifier");
@@ -413,7 +436,6 @@ describe("Living Context: abstention is a separate step backed by Survey support
       ["superseded-context-contract", "abstained", "not_current"],
       ["stale-claim", "abstained", "not_current"],
       ["auditor-only", "abstained", "no_answer"],
-      ["hidden-successor-predecessor", "abstained", "not_current"],
     ]);
     assert.equal(answer.verdict, "not_verified");
     const dropped = await answerLivingContext({ repoRoot: repo, input: input(revision, { claim_ids: ["clean-control", "current-context-contract"], budget: { max_tokens: 1 } }), verifier: counting });
@@ -619,21 +641,29 @@ describe("Living Context: review round 1 regressions (#1572)", () => {
 
   test("the reader is refused before any claim is parsed", () => {
     const manifest = clone(fixture);
-    manifest.claims = [{ visibility: ["engineer"], not: "a claim" }, 7, null];
+    manifest.claims = [{ visibility: { audiences: ["engineer"] }, not: "a claim" }, 7, null];
     const { repo, revision } = seededRepo(manifest, { docs: {} });
     assert.equal(failure(repo, revision, { reader: "stranger" }).code, "UNKNOWN_READER_IDENTITY");
     assert.equal(failure(repo, revision).code, "INVALID_CLAIM_MANIFEST", "a recognised reader reaches claim parsing, where an unlisted malformed claim is dropped and a listed one is reported");
     remove(repo);
   });
 
-  test("a duplicate claim id error never names the id", () => {
-    const manifest = clone(fixture);
-    manifest.claims.push(clone(manifest.claims.find((claim) => claim.id === "auditor-only")));
-    const { repo, revision } = seededRepo(manifest);
-    const cause = failure(repo, revision);
-    assert.equal(cause.code, "DUPLICATE_CLAIM_ID");
-    assert.ok(!cause.message.includes("auditor-only"));
-    remove(repo);
+  test("a duplicate id is observable only when every copy is visible to the reader", () => {
+    const hiddenDuplicate = clone(fixture);
+    hiddenDuplicate.claims.push(clone(hiddenDuplicate.claims.find((claim) => claim.id === "auditor-only")));
+    const first = seededRepo(hiddenDuplicate);
+    assert.equal(failure(first.repo, first.revision), undefined, "a collision among hidden claims is invisible");
+    assert.equal(recallOf(run(first.repo, first.revision, { claim_ids: ["auditor-only"] }), "auditor-only").reason, "no_answer");
+    assert.equal(failure(first.repo, first.revision, { reader: "auditor" })?.code, "DUPLICATE_CLAIM_ID", "an entitled reader is told");
+    remove(first.repo);
+    const mixed = clone(fixture);
+    const copy = clone(mixed.claims.find((claim) => claim.id === "clean-control"));
+    copy.visibility = { audiences: ["auditor"] };
+    mixed.claims.push(copy);
+    const second = seededRepo(mixed);
+    assert.equal(failure(second.repo, second.revision), undefined, "one visible and one hidden copy must not reveal the hidden one");
+    assert.equal(recallOf(run(second.repo, second.revision, { claim_ids: ["clean-control"] }), "clean-control").reason, "no_answer");
+    remove(second.repo);
   });
 
   test("a verification after known_at cannot anchor a TTL", () => {
@@ -667,7 +697,7 @@ describe("Living Context: review round 1 regressions (#1572)", () => {
     const { repo, revision } = seededRepo();
     const early = recallOf(run(repo, revision, { claim_ids: ["hidden-successor-predecessor"], as_of: { now: NOW, known_at: "2025-12-01T00:00:00Z", valid_at: NOW } }), "hidden-successor-predecessor");
     assert.equal(early.status, "current");
-    assert.deepEqual(early.reasons, ["successor_not_known_at_as_of", "current_at_as_of"]);
+    assert.deepEqual(early.reasons, ["current_at_as_of"], "no reason may mention a successor the reader cannot see");
     remove(repo);
   });
 
@@ -761,3 +791,129 @@ describe("Living Context: review round 1 regressions (#1572)", () => {
   });
 });
 
+describe("Living Context: review round 2 regressions (#1572)", () => {
+  const run = (repo, revision, overrides = {}) => runLivingContext({ repoRoot: repo, input: input(revision, overrides), write: false });
+  const failure = (repo, revision, overrides = {}) => { try { run(repo, revision, overrides); } catch (cause) { return cause; } return undefined; };
+  const mk = (id, extra) => ({ id, claim: `Claim ${id}.`, status: "current", authority: { path: "d.md", citation: "c" }, owning_source: { owner: "o", path: "d.md" }, affected_surfaces: ["src/x.js"], visibility: { audiences: ["engineer"] }, recorded_at: "2026-01-01T00:00:00Z", slot: "s", ...extra });
+  const seed = (manifest, files = {}) => seededRepo(manifest, { docs: { "d.md": "x\n" }, extraFiles: files });
+
+  test("a visibility Surface cannot read is sealed, so a malformed claim carrying it stays silent", () => {
+    for (const visibility of [["engineer", "engineer"], { audiences: ["engineer", 7] }, { audiences: [] }, "engineer", 7, { kind: "public" }]) {
+      const manifest = { readers: ["engineer"], claims: [mk("ok", {}), { ...mk("secret", {}), visibility, SECRET_PROJECT: 1 }] };
+      const { repo, revision } = seed(manifest);
+      assert.equal(failure(repo, revision), undefined, JSON.stringify(visibility));
+      remove(repo);
+    }
+    const listed = seed({ readers: ["engineer"], claims: [{ ...mk("secret", {}), SECRET_PROJECT: 1 }] });
+    assert.equal(failure(listed.repo, listed.revision).code, "INVALID_CLAIM_MANIFEST", "a claim Surface says the reader may see reports its own error");
+    remove(listed.repo);
+  });
+
+  test("a public claim is visible to every recognised reader, and an unrecognised one is still refused", () => {
+    const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [mk("open", { visibility: "public" })] });
+    for (const reader of ["engineer", "auditor"]) assert.equal(recallOf(run(repo, revision, { reader, claim_ids: ["open"] }), "open").status, "current");
+    assert.equal(failure(repo, revision, { reader: "stranger" }).code, "UNKNOWN_READER_IDENTITY");
+    remove(repo);
+  });
+
+  test("a malformed claim recorded after known_at is silent; one recorded by then reports its own error", () => {
+    const bad = (recorded_at) => seed({ readers: ["engineer"], claims: [mk("ok", {}), { ...mk("later", { recorded_at }), SECRET_FUTURE_DETAIL: 1 }] });
+    const future = bad("2030-01-01T00:00:00Z");
+    assert.equal(failure(future.repo, future.revision), undefined);
+    remove(future.repo);
+    const known = bad("2026-02-01T00:00:00Z");
+    const cause = failure(known.repo, known.revision);
+    assert.equal(cause.code, "INVALID_CLAIM_MANIFEST");
+    assert.match(cause.message, /claim 'later'/);
+    remove(known.repo);
+  });
+
+  test("diagnostics name the claim, never its array position, so hidden entries cannot be counted", () => {
+    const messages = [0, 3].map((hidden) => {
+      const hiddenClaims = Array.from({ length: hidden }, (_, index) => ({ ...mk(`hidden-${index}`, { visibility: { audiences: ["auditor"] } }), junk: index }));
+      const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [...hiddenClaims, { ...mk("own", {}), junk: 1 }] });
+      const cause = failure(repo, revision);
+      remove(repo);
+      return cause.message;
+    });
+    assert.equal(messages[0], messages[1]);
+    assert.ok(!/claims\[/.test(messages[0]));
+  });
+
+  test("the reader is admitted at every root before any claim of any root is parsed", () => {
+    const a = { readers: ["engineer"], claims: [{ visibility: { audiences: ["engineer"] }, SECRET_ROOT_A: 1 }] };
+    const b = { readers: ["auditor"], claims: [] };
+    const { repo, revision } = seededRepo(fixture, { docs: {}, extraFiles: { "knowledge/a.json": JSON.stringify(a), "knowledge/b.json": JSON.stringify(b) } });
+    const roots = (...paths) => paths.map((manifest_path, index) => ({ id: `r${index}`, provider: "git-repo", manifest_path }));
+    for (const order of [["knowledge/a.json", "knowledge/b.json"], ["knowledge/b.json", "knowledge/a.json"]]) {
+      assert.equal(failure(repo, revision, { knowledge_roots: roots(...order) }).code, "UNKNOWN_READER_IDENTITY", order.join(" then "));
+    }
+    remove(repo);
+  });
+
+  test("an unknown reader named on a malformed claim is refused as an unknown reader, never as a parse error", () => {
+    const { repo, revision } = seed({ readers: ["engineer"], claims: [{ ...mk("x", { visibility: { audiences: ["stranger"] } }), SECRET_UNKNOWN_READER: 1 }] });
+    const cause = failure(repo, revision, { reader: "stranger" });
+    assert.equal(cause.code, "UNKNOWN_READER_IDENTITY");
+    assert.ok(!cause.message.includes("SECRET_UNKNOWN_READER"));
+    remove(repo);
+  });
+
+  test("a multi-hop correction whose first edge is outside its interval leaves the head current and returns a valid result", () => {
+    const edge = { status: "superseded", supersession_kind: "correction", supersession_recorded_at: "2026-01-02T00:00:00Z" };
+    const manifest = { readers: ["engineer"], claims: [
+      mk("a", { ...edge, superseded_by: "b" }),
+      mk("b", { ...edge, superseded_by: "c", valid_time: { from: "2026-03-01T00:00:00Z", until: "2026-04-01T00:00:00Z" } }),
+      mk("c", {}),
+    ] };
+    const { repo, revision } = seed(manifest);
+    const at = (valid_at) => recallOf(run(repo, revision, { claim_ids: ["a", "b", "c"], as_of: { now: NOW, valid_at } }), "a");
+    const before = at("2026-02-01T00:00:00Z");
+    assert.equal(before.status, "current");
+    assert.deepEqual(before.supersession_chain.map((link) => [link.claim_id, link.relation, link.active]), [["a", "self", undefined], ["b", "superseded_by", false]], "the chain stops at the inactive edge");
+    assert.equal(at("2026-03-15T00:00:00Z").status, "superseded");
+    remove(repo);
+  });
+
+  test("a dangling successor is indistinguishable from a hidden one: the claim is simply current", () => {
+    const base = (successor) => seed({ readers: ["engineer"], claims: [mk("a", { status: "superseded", superseded_by: successor, supersession_kind: "correction", supersession_recorded_at: "2026-01-02T00:00:00Z" })] });
+    const dangling = base("nowhere");
+    const entry = recallOf(run(dangling.repo, dangling.revision, { claim_ids: ["a"] }), "a");
+    assert.equal(entry.status, "current");
+    assert.deepEqual(entry.reasons, ["current_at_as_of"]);
+    remove(dangling.repo);
+  });
+
+  test("an edge's visibility is an explicit decision: unreadable means sealed, so the edge is not followed for anyone", () => {
+    const edge = { status: "superseded", superseded_by: "b", supersession_kind: "correction", supersession_recorded_at: "2026-01-02T00:00:00Z" };
+    const status = (supersession_visibility) => {
+      const { repo, revision } = seed({ readers: ["engineer"], claims: [mk("a", { ...edge, ...(supersession_visibility === undefined ? {} : { supersession_visibility }) }), mk("b", {})] });
+      const entry = recallOf(run(repo, revision, { claim_ids: ["a"] }), "a");
+      remove(repo);
+      return entry.status;
+    };
+    assert.equal(status(undefined), "superseded", "by default the edge is as visible as the claim that carries it");
+    assert.equal(status({ audiences: ["engineer"] }), "superseded");
+    assert.equal(status({ audiences: ["auditor"] }), "current");
+    assert.equal(status("sealed-by-typo"), "current");
+  });
+
+  test("the result validator rejects freshness and reasons that contradict the status", () => {
+    const { repo, revision } = seededRepo();
+    const result = run(repo, revision, { claim_ids: ["current-context-contract", "superseded-context-contract"] });
+    const forge = (mutate) => { const copy = clone(result); mutate(copy); copy.budget.used_tokens = copy.recalls.reduce((sum, recall) => sum + estimateTokens(recall), 0); return validateLivingContextResult(copy).join(" "); };
+    assert.equal(validateLivingContextResult(result).length, 0);
+    const current = (copy) => copy.recalls.find((recall) => recall.status === "current");
+    const superseded = (copy) => copy.recalls.find((recall) => recall.status === "superseded");
+    assert.match(forge((copy) => { current(copy).freshness.expires_at = "2000-01-01T00:00:00.000Z"; }), /freshness\.stale must equal/);
+    assert.match(forge((copy) => { current(copy).freshness.stale = true; delete current(copy).freshness.expires_at; }), /cannot be stale without an expiry/);
+    assert.match(forge((copy) => { current(copy).reasons = ["superseded_by_known_successor"]; }), /reasons contradict a current status/);
+    assert.match(forge((copy) => { superseded(copy).reasons = ["current_at_as_of"]; }), /reasons contradict a superseded status/);
+    remove(repo);
+  });
+
+  test("a Surface without derived visibility is refused by name instead of failing at module load", () => {
+    assert.throws(() => assertSurfaceVisibility({ claimIntrinsicExpiry() {} }), (cause) => cause.code === "SURFACE_VISIBILITY_UNAVAILABLE" && /6\.3\.0/.test(cause.message) && /viewerSupersessionView/.test(cause.message));
+    assert.doesNotThrow(() => assertSurfaceVisibility());
+  });
+});

@@ -120,6 +120,14 @@ function normalizedAuthority(authority, field) {
  * `extension` is `{ manifestKeys: Set, parseManifest(parsed, manifestPath), claimKeys: Set, parseClaim(claim, prefix) }`.
  */
 export function readManifestAtRevision(repoRoot, revision, root, extension) {
+  return normalizeManifestClaims(readManifestDocument(repoRoot, revision, root, extension), root, extension);
+}
+
+/**
+ * Phase one: read the manifest document and admit it (for 1.1, refuse an unrecognised reader) without
+ * parsing a single claim. The 1.1 flow runs this for every selected root before phase two for any root.
+ */
+export function readManifestDocument(repoRoot, revision, root, extension) {
   const manifestPath = safeRelativePath(root.manifest_path, "knowledge_roots[].manifest_path");
   const bytes = git(repoRoot, ["show", "--no-ext-diff", "--no-textconv", "--format=", `${revision}:${manifestPath}`]);
   let parsed;
@@ -130,17 +138,27 @@ export function readManifestAtRevision(repoRoot, revision, root, extension) {
   }
   // Manifest-level admission (for 1.1: refuse an unrecognised reader) runs before any claim is parsed.
   const manifestExtension = extension?.parseManifest ? extension.parseManifest(parsed, manifestPath) : undefined;
+  return { parsed, extension: manifestExtension, manifestPath };
+}
+
+/** Phase two: normalize the claims of an admitted manifest document. */
+export function normalizeManifestClaims(document, root, extension) {
+  const { parsed, manifestPath } = document;
   const claims = [];
   parsed.claims.forEach((claim, index) => {
     try {
       claims.push(normalizeClaim(claim, root, manifestPath, index, extension));
     } catch (cause) {
-      // A claim the caller is not entitled to see must not disclose its content through a parse error.
-      if (extension?.isHiddenFromCaller?.(claim)) return;
+      // Under an extension a malformed claim the caller is not entitled to (not visible to them, or not yet
+      // known) is dropped before it can describe itself in an error. A well-formed hidden claim is kept: the
+      // caller's view needs it to collapse supersession chains that pass through it. Diagnostics for an entitled
+      // caller name the claim's own id, never a position, so hidden entries cannot be counted.
+      if (extension?.isUnavailableToCaller?.(claim)) return;
+      if (extension && cause.code === "INVALID_CLAIM_MANIFEST") throw error("INVALID_CLAIM_MANIFEST", cause.message.replace(/claims\[\d+\]/, `claim '${typeof claim?.id === "string" ? claim.id.slice(0, 80) : "(no id)"}'`));
       throw cause;
     }
   });
-  return { claims, extension: manifestExtension, manifestPath };
+  return { claims, extension: document.extension, manifestPath };
 }
 
 function readClaimsAtRevision(repoRoot, revision, root) {

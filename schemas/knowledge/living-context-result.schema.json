@@ -255,7 +255,6 @@
               "superseded_by_known_successor",
               "successor_not_known_at_as_of",
               "succession_not_effective_at_valid_at",
-              "successor_not_visible_or_unresolved",
               "supersession_time_unknown",
               "succession_boundary_unknown",
               "knowledge_time_unknown",
@@ -263,7 +262,8 @@
               "declared_unverifiable",
               "stale_at_as_of",
               "supersession_slot_mismatch",
-              "correction_interval_excludes_valid_at"
+              "correction_interval_excludes_valid_at",
+              "supersession_cycle"
             ]
           }
         },
@@ -339,7 +339,6 @@
               "superseded_by_known_successor",
               "successor_not_known_at_as_of",
               "succession_not_effective_at_valid_at",
-              "successor_not_visible_or_unresolved",
               "supersession_time_unknown",
               "succession_boundary_unknown",
               "knowledge_time_unknown",
@@ -347,7 +346,8 @@
               "declared_unverifiable",
               "stale_at_as_of",
               "supersession_slot_mismatch",
-              "correction_interval_excludes_valid_at"
+              "correction_interval_excludes_valid_at",
+              "supersession_cycle"
             ]
           }
         },
@@ -425,7 +425,6 @@
               "superseded_by_known_successor",
               "successor_not_known_at_as_of",
               "succession_not_effective_at_valid_at",
-              "successor_not_visible_or_unresolved",
               "supersession_time_unknown",
               "succession_boundary_unknown",
               "knowledge_time_unknown",
@@ -433,7 +432,8 @@
               "declared_unverifiable",
               "stale_at_as_of",
               "supersession_slot_mismatch",
-              "correction_interval_excludes_valid_at"
+              "correction_interval_excludes_valid_at",
+              "supersession_cycle"
             ]
           }
         },
@@ -474,7 +474,6 @@
               "superseded_by_known_successor",
               "successor_not_known_at_as_of",
               "succession_not_effective_at_valid_at",
-              "successor_not_visible_or_unresolved",
               "supersession_time_unknown",
               "succession_boundary_unknown",
               "knowledge_time_unknown",
@@ -482,7 +481,8 @@
               "declared_unverifiable",
               "stale_at_as_of",
               "supersession_slot_mismatch",
-              "correction_interval_excludes_valid_at"
+              "correction_interval_excludes_valid_at",
+              "supersession_cycle"
             ]
           }
         }

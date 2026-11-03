@@ -3,7 +3,9 @@
  *
  * Extends the revision-bound Context Check with the recall contract from kontourai/flow-agents#1131:
  *   - as-of on valid time and knowledge time, aligned with the Surface knowledge-accumulation decision;
- *   - a required reader identity that fails closed (unknown, missing, or unlisted claims are never widened);
+ *   - a required reader identity that fails closed (unknown, missing, or undeclared visibility is never widened);
+ *     visibility and per-viewer supersession are Surface's (`readDeclaredVisibility`, `visibilityAllows`,
+ *     `viewerSupersessionView`, kontourai/surface#350), not a local rule;
  *   - per-result reasons (matched signals, freshness, review posture, supersession chain, status reasons);
  *   - an explicit token budget where whole results are kept or dropped and never truncated.
  *
@@ -17,10 +19,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { claimIntrinsicExpiry } from "@kontourai/surface";
+import * as Surface from "@kontourai/surface";
 import { validate } from "../providers/lib/schema-validate.js";
 import {
-  error, isIdentity, safeRelativePath, resolveRevisionBoundRepository, readManifestAtRevision,
+  error, isIdentity, safeRelativePath, resolveRevisionBoundRepository, readManifestDocument, normalizeManifestClaims,
   authorityAtRevision, retrievalProvenance, reconciliationFor, proposalFor, writeResult,
 } from "./index.js";
 
@@ -30,7 +32,18 @@ const RESULT_SCHEMA = JSON.parse(fs.readFileSync(path.join(__dirname, "../schema
 const INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 const SUPERSESSION_KINDS = new Set(["correction", "succession"]);
 const REVIEW_POSTURES = new Set(["proposed", "reviewed"]);
-const CLAIM_KEYS = ["visibility", "recorded_at", "valid_time", "supersession_kind", "expires_at", "ttl_seconds", "verified_at", "review", "supersession_recorded_at", "reconciliation_recorded_at", "slot"];
+const CLAIM_KEYS = ["visibility", "recorded_at", "valid_time", "supersession_kind", "expires_at", "ttl_seconds", "verified_at", "review", "supersession_recorded_at", "reconciliation_recorded_at", "supersession_visibility", "slot"];
+
+const SURFACE_EXPORTS = ["claimIntrinsicExpiry", "readDeclaredVisibility", "sealedVisibility", "viewerSupersessionView", "visibilityAllows"];
+
+/**
+ * Per-viewer visibility is Surface's (kontourai/surface#350). A Surface without it cannot be substituted by a local rule,
+ * so a missing export is an explicit refusal naming the requirement, not a cryptic module-load failure.
+ */
+export function assertSurfaceVisibility(surface = Surface) {
+  const missing = SURFACE_EXPORTS.filter((name) => typeof surface?.[name] !== "function");
+  if (missing.length) throw error("SURFACE_VISIBILITY_UNAVAILABLE", `Living Context needs @kontourai/surface 6.3.0 or later (derived visibility, kontourai/surface#350); missing: ${missing.join(", ")}`);
+}
 
 /** A real UTC calendar instant: rejects shape violations and day rollover such as 2026-02-31. */
 export function parseInstant(value, field) {
@@ -56,25 +69,33 @@ function parseValidTime(value, field) {
   return { from, until };
 }
 
+/** The declared visibility of a raw manifest claim, read by Surface; anything unreadable or undeclared is sealed. */
+function declaredVisibility(rawClaim) {
+  const declaration = Surface.readDeclaredVisibility({ metadata: { visibility: plainObject(rawClaim) ? rawClaim.visibility : undefined } });
+  return declaration.state === "declared" ? declaration.visibility : Surface.sealedVisibility();
+}
+
 /** Manifest extension for one reader: the reader is admitted (or refused) before any claim is parsed. */
-const extensionFor = (reader) => Object.freeze({
-  manifestKeys: new Set(["readers"]),
-  claimKeys: new Set(CLAIM_KEYS),
-  // A claim that does not list this reader as a viewer is hidden from them even if it is malformed.
-  isHiddenFromCaller: (claim) => !(plainObject(claim) && Array.isArray(claim.visibility) && claim.visibility.includes(reader)),
-  parseManifest(parsed, manifestPath) {
-    const readers = parsed.readers === undefined ? [] : parsed.readers;
-    if (!Array.isArray(readers) || readers.some((entry) => !isIdentity(entry)) || new Set(readers).size !== readers.length) {
-      throw error("INVALID_CLAIM_MANIFEST", `${manifestPath}: readers must be a unique array of non-blank identities`);
-    }
-    if (!readers.includes(reader)) throw error("UNKNOWN_READER_IDENTITY", "reader identity is not recognised by every selected Knowledge root");
-    return { readers: new Set(readers) };
-  },
-  parseClaim(claim, prefix) {
-    const visibility = claim.visibility === undefined ? [] : claim.visibility;
-    if (!Array.isArray(visibility) || visibility.some((reader) => !isIdentity(reader)) || new Set(visibility).size !== visibility.length) {
-      throw error("INVALID_CLAIM_MANIFEST", `${prefix}.visibility must be a unique array of reader identities`);
-    }
+const extensionFor = (reader, knownAtMs) => {
+  const viewer = { audiences: [reader] };
+  return Object.freeze({
+    manifestKeys: new Set(["readers"]),
+    claimKeys: new Set(CLAIM_KEYS),
+    // Not visible to this reader (by Surface's own decision), or recorded after known_at: it may not describe itself in an error.
+    isUnavailableToCaller: (rawClaim) => {
+      if (!Surface.visibilityAllows(declaredVisibility(rawClaim), viewer)) return true;
+      try { return parseInstant(rawClaim.recorded_at, "recorded_at") > knownAtMs; } catch { return false; }
+    },
+    parseManifest(parsed, manifestPath) {
+      const readers = parsed.readers === undefined ? [] : parsed.readers;
+      if (!Array.isArray(readers) || readers.some((entry) => !isIdentity(entry)) || new Set(readers).size !== readers.length) {
+        throw error("INVALID_CLAIM_MANIFEST", `${manifestPath}: readers must be a unique array of non-blank identities`);
+      }
+      if (!readers.includes(reader)) throw error("UNKNOWN_READER_IDENTITY", "reader identity is not recognised by every selected Knowledge root");
+      return { readers: new Set(readers) };
+    },
+    parseClaim(claim, prefix) {
+      const visibility = declaredVisibility(claim);
     const recordedAt = claim.recorded_at === undefined ? undefined : parseInstant(claim.recorded_at, `${prefix}.recorded_at`);
     const validTime = claim.valid_time === undefined ? undefined : parseValidTime(claim.valid_time, `${prefix}.valid_time`);
     if (claim.supersession_kind !== undefined && (!SUPERSESSION_KINDS.has(claim.supersession_kind) || claim.superseded_by === undefined)) {
@@ -101,12 +122,16 @@ const extensionFor = (reader) => Object.freeze({
       review = { posture: claim.review.posture };
     }
     return {
-      visibility: new Set(visibility),
+      visibility,
       recordedAt,
       recordedAtIso: claim.recorded_at,
       validTime,
       supersessionKind: claim.supersession_kind ?? "correction",
       supersessionRecordedAt,
+      // Who may see that this claim is superseded (the edge record). Surface requires an explicit decision per edge;
+      // absent, it is the visibility of the claim record that carries it, since reading that record shows the pointer.
+      // Written but unreadable, it is sealed: the edge is then never followed for anyone.
+      supersessionVisibility: claim.supersession_visibility === undefined ? visibility : declaredVisibility({ visibility: claim.supersession_visibility }),
       reconciliationRecordedAt,
       slot: claim.slot,
       expiresAt: claim.expires_at,
@@ -116,7 +141,8 @@ const extensionFor = (reader) => Object.freeze({
       review,
     };
   },
-});
+  });
+};
 
 /** Validate a Living Context (1.1) input through its shared JSON schema plus the real-instant check. */
 export function validateLivingContextInput(input) {
@@ -151,6 +177,18 @@ export function validateLivingContextResult(result) {
   }
   for (const [index, recall] of result.recalls.entries()) {
     if (recall?.status === "current" && recall.freshness?.stale === true) errors.push(`$/recalls/${index}: a stale recall must not be current`);
+    if (plainObject(recall?.freshness)) {
+      const { as_of: asOf, expires_at: expiresAt, stale } = recall.freshness;
+      if (expiresAt === undefined && stale === true) errors.push(`$/recalls/${index}: freshness cannot be stale without an expiry`);
+      if (expiresAt !== undefined && stale !== (Date.parse(asOf) > Date.parse(expiresAt))) errors.push(`$/recalls/${index}: freshness.stale must equal as_of > expires_at`);
+    }
+    if (Array.isArray(recall?.reasons)) {
+      const has = (code) => recall.reasons.includes(code);
+      const unverifiableCodes = ["knowledge_time_unknown", "supersession_cycle", "supersession_time_unknown", "succession_boundary_unknown", "supersession_slot_mismatch", "declared_unverifiable", "stale_at_as_of"];
+      if (recall.status === "current" && (!has("current_at_as_of") || has("superseded_by_known_successor") || unverifiableCodes.some(has))) errors.push(`$/recalls/${index}: reasons contradict a current status`);
+      if (recall.status === "superseded" && !(recall.reasons.length === 1 && has("superseded_by_known_successor"))) errors.push(`$/recalls/${index}: reasons contradict a superseded status`);
+      if (recall.status === "unverifiable" && recall.reason === undefined && (has("current_at_as_of") || has("superseded_by_known_successor") || !unverifiableCodes.some(has))) errors.push(`$/recalls/${index}: reasons contradict an unverifiable status`);
+    }
     if (Array.isArray(recall?.supersession_chain)) {
       const self = recall.supersession_chain.filter((link) => link.relation === "self");
       if (self.length !== 1 || self[0].claim_id !== recall.claim_id) errors.push(`$/recalls/${index}: the supersession chain must contain this claim exactly once as self`);
@@ -190,89 +228,133 @@ function buildContext(input) {
   };
 }
 
-function indexClaims(manifests) {
+function indexClaims(manifests, ctx) {
+  const copies = new Map();
+  for (const claim of manifests.flatMap((manifest) => manifest.claims)) copies.set(claim.id, [...(copies.get(claim.id) ?? []), claim]);
   const byId = new Map();
-  for (const claim of manifests.flatMap((manifest) => manifest.claims)) {
-    // The message names no id: a duplicate may involve a claim this reader cannot see.
-    if (byId.has(claim.id)) throw error("DUPLICATE_CLAIM_ID", "a claim id appears more than once across the selected Knowledge roots");
-    byId.set(claim.id, claim);
-  }
-  // Self edges and cycles cannot select a winner (Surface decision); refuse the whole manifest set without naming ids.
-  for (const claim of byId.values()) {
-    const seen = new Set([claim.id]);
-    for (let next = claim.superseded_by; next !== undefined; next = byId.get(next)?.superseded_by) {
-      if (seen.has(next)) throw error("INVALID_CLAIM_MANIFEST", "supersession edges must be acyclic and may not be self edges");
-      seen.add(next);
-    }
+  for (const [id, group] of copies) {
+    if (group.length === 1) { byId.set(id, group[0]); continue; }
+    // An id that two claims share is ambiguous and is served to no one. The reader is told only when every copy
+    // is one they may see: a collision that involves a hidden claim must not be observable.
+    if (group.every((claim) => isVisible(claim, ctx))) throw error("DUPLICATE_CLAIM_ID", `claim id '${id}' appears more than once across the selected Knowledge roots`);
   }
   return byId;
 }
 
-const isVisible = (claim, ctx) => claim.extension.visibility.has(ctx.reader);
+const viewerOf = (ctx) => ({ audiences: [ctx.reader] });
+const isVisible = (claim, ctx) => Surface.visibilityAllows(claim.extension.visibility, viewerOf(ctx));
+/** Known at known_at: recorded by then, or not yet timed (an untimed claim is indeterminate, not absent). */
+const isKnown = (claim, ctx) => !(claim.extension.recordedAt !== undefined && claim.extension.recordedAt > ctx.knownAt);
 
-/** State of the supersession edge claim -> successor, judged only on what this reader may see and know at the as-of instants. */
-function edgeState(claim, byId, ctx) {
+/**
+ * State of the supersession edge claim -> successor at the as-of instants, from the observations alone.
+ * Only `active` edges are replacements; every other state explains why an edge is not followed.
+ */
+function edgeState(claim, successor, ctx) {
   if (claim.superseded_by === undefined) return { state: "none" };
-  // The edge is an observation with its own recording time, read from this (visible) claim, so it is judged
-  // before the successor: an edge not yet recorded at known_at must not let a hidden successor change the answer.
+  // The edge is an observation with its own recording time, read from the carrying (predecessor) claim.
   const edgeRecordedAt = claim.extension.supersessionRecordedAt;
   if (edgeRecordedAt === undefined) return { state: "unknown_time" };
   if (edgeRecordedAt > ctx.knownAt) return { state: "not_known" };
-  const successor = byId.get(claim.superseded_by);
-  if (!successor || !isVisible(successor, ctx)) return { state: "hidden" };
-  if (successor.extension.recordedAt === undefined) return { state: "unknown_time", successor };
-  if (successor.extension.recordedAt > ctx.knownAt) return { state: "not_known", successor };
-  // A replacement joins one property slot (Surface); a cross-slot or unslotted edge is inert and the claim is not served.
-  if (claim.extension.slot === undefined || claim.extension.slot !== successor.extension.slot) return { state: "slot_mismatch", successor };
+  if (!successor) return { state: "unresolved" };
+  if (successor.extension.recordedAt === undefined) return { state: "unknown_time" };
+  if (successor.extension.recordedAt > ctx.knownAt) return { state: "not_known" };
+  // A replacement joins one property slot (Surface); a cross-slot or unslotted edge is inert.
+  if (claim.extension.slot === undefined || claim.extension.slot !== successor.extension.slot) return { state: "slot_mismatch" };
   const kind = claim.extension.supersessionKind;
   if (kind === "correction") {
     // A correction says the old assertion was wrong for the corrected interval: the successor's valid interval.
     const interval = successor.extension.validTime;
     const inside = !interval || ((interval.from === undefined || ctx.validAt >= interval.from) && (interval.until === undefined || ctx.validAt < interval.until));
-    return { state: inside ? "active" : "inactive", successor, kind };
+    return { state: inside ? "active" : "inactive", kind };
   }
   const from = successor.extension.validTime?.from;
-  if (from === undefined) return { state: "unknown_boundary", successor, kind };
-  return { state: from <= ctx.validAt ? "active" : "inactive", successor, kind };
+  if (from === undefined) return { state: "unknown_boundary", kind };
+  return { state: from <= ctx.validAt ? "active" : "inactive", kind };
 }
 
-function supersessionChain(claim, byId, ctx) {
-  const links = [];
+/**
+ * Per-viewer supersession (kontourai/surface#350). Edges admitted at the as-of instants (time, slot, kind) are
+ * handed to Surface's `viewerSupersessionView`, which alone decides what this reader may see: an edge applies only
+ * to a viewer who may see its successor, chains through hidden claims collapse, and a cycle leaves its claims
+ * unresolved. The edge's own visibility is that of the claim record that carries it (the predecessor).
+ */
+function evaluateSupersession(byId, ctx) {
+  const visibilityByClaimId = new Map();
+  for (const claim of byId.values()) if (isKnown(claim, ctx)) visibilityByClaimId.set(claim.id, claim.extension.visibility);
+  const states = new Map();
+  const edges = [];
+  for (const claim of byId.values()) {
+    if (claim.superseded_by === undefined) continue;
+    const successor = byId.get(claim.superseded_by);
+    const state = edgeState(claim, successor, ctx);
+    states.set(claim.id, { ...state, successor });
+    if (state.state === "active") edges.push({ predecessorId: claim.id, successorId: successor.id, visibility: claim.extension.supersessionVisibility });
+  }
+  const view = Surface.viewerSupersessionView({ visibilityByClaimId, edges, viewer: viewerOf(ctx) });
+  return { view, states };
+}
+
+/** What a non-active edge says about a visible claim. Only a successor this reader may see can explain anything. */
+function edgeAnnotation(claim, supersession, ctx) {
+  const state = supersession.states.get(claim.id);
+  if (!state || state.state === "active" || !state.successor || !isVisible(state.successor, ctx)) return {};
+  switch (state.state) {
+    case "unknown_time": return { unverifiable: "supersession_time_unknown" };
+    case "unknown_boundary": return { unverifiable: "succession_boundary_unknown" };
+    case "slot_mismatch": return { unverifiable: "supersession_slot_mismatch" };
+    case "not_known": return { note: "successor_not_known_at_as_of" };
+    case "inactive": return { note: state.kind === "correction" ? "correction_interval_excludes_valid_at" : "succession_not_effective_at_valid_at" };
+    default: return {};
+  }
+}
+
+function supersessionChain(claim, byId, supersession, ctx) {
+  const { view, states } = supersession;
+  const listed = (candidate) => candidate && isVisible(candidate, ctx) && isKnown(candidate, ctx);
+  const kindOf = (id) => byId.get(id)?.extension.supersessionKind;
+  const direct = (fromId, toId) => states.get(fromId)?.successor?.id === toId && states.get(fromId).state === "active";
   const forward = [];
-  for (let current = claim, guard = 0; current.superseded_by !== undefined && guard < byId.size; guard += 1) {
-    const edge = edgeState(current, byId, ctx);
-    // Only edges this reader may see and that were known at known_at belong in the chain.
-    if (edge.state !== "active" && edge.state !== "inactive") break;
-    forward.push({ claim_id: edge.successor.id, relation: "superseded_by", kind: edge.kind, active: edge.state === "active" });
-    current = edge.successor;
+  const seen = new Set([claim.id]);
+  for (let current = claim.id; ;) {
+    const next = view.supersededBy[current]?.[0];
+    if (next !== undefined && !seen.has(next)) {
+      seen.add(next);
+      forward.push({ claim_id: next, relation: "superseded_by", ...(direct(current, next) ? { kind: kindOf(current) } : {}), active: true });
+      current = next;
+      continue;
+    }
+    const state = states.get(current);
+    if (state?.state === "inactive" && listed(state.successor)) forward.push({ claim_id: state.successor.id, relation: "superseded_by", kind: state.kind, active: false });
+    break;
   }
   const backward = [];
-  const seen = new Set([claim.id]);
-  let frontier = [claim];
+  const reached = new Set([claim.id]);
+  let frontier = [claim.id];
   while (frontier.length) {
     const next = [];
     for (const target of frontier) {
-      for (const candidate of [...byId.values()].filter((item) => item.superseded_by === target.id).sort((a, b) => a.id.localeCompare(b.id))) {
-        if (seen.has(candidate.id) || !isVisible(candidate, ctx)) continue;
-        if (candidate.extension.recordedAt === undefined || candidate.extension.recordedAt > ctx.knownAt) continue;
-        const edge = edgeState(candidate, byId, ctx);
-        if (!["active", "inactive"].includes(edge.state)) continue;
-        seen.add(candidate.id);
-        backward.unshift({ claim_id: candidate.id, relation: "supersedes", kind: edge.kind, active: edge.state === "active" });
-        next.push(candidate);
+      for (const candidate of [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))) {
+        if (reached.has(candidate.id) || !listed(candidate) || candidate.extension.recordedAt === undefined) continue;
+        const active = view.supersededBy[candidate.id]?.includes(target);
+        const state = states.get(candidate.id);
+        const inactive = state?.state === "inactive" && state.successor?.id === target;
+        if (!active && !inactive) continue;
+        reached.add(candidate.id);
+        backward.unshift({ claim_id: candidate.id, relation: "supersedes", ...(active && direct(candidate.id, target) || inactive ? { kind: kindOf(candidate.id) } : {}), active: Boolean(active) });
+        next.push(candidate.id);
       }
     }
     frontier = next;
   }
-  links.push(...backward, { claim_id: claim.id, relation: "self" }, ...forward);
-  return links;
+  return [...backward, { claim_id: claim.id, relation: "self" }, ...forward];
 }
 
 function freshnessFor(claim, ctx) {
   // Surface resolves the intrinsic window (expiresAt wins; ttlSeconds is anchored on verification, else recording).
   // A verification after known_at has not happened yet at that knowledge instant and cannot anchor a TTL.
   const verifiedAt = claim.extension.verifiedAtMs !== undefined && claim.extension.verifiedAtMs <= ctx.knownAt ? claim.extension.verifiedAt : undefined;
-  const expiryMs = claimIntrinsicExpiry(
+  const expiryMs = Surface.claimIntrinsicExpiry(
     { verifiedAt, createdAt: claim.extension.recordedAtIso },
     { expiresAt: claim.extension.expiresAt, ttlSeconds: claim.extension.ttlSeconds, updatedAt: claim.extension.recordedAtIso },
   );
@@ -300,7 +382,7 @@ function noAnswer(claimId, revision, roots, reasons) {
   };
 }
 
-function recallFor(claim, input, changedSurfaces, byId, ctx, revision) {
+function recallFor(claim, input, changedSurfaces, byId, supersession, ctx, revision) {
   const base = () => ({
     claim_id: claim.id,
     claim: claim.claim,
@@ -314,20 +396,21 @@ function recallFor(claim, input, changedSurfaces, byId, ctx, revision) {
     status,
     ...extra,
     freshness: freshnessFor(claim, ctx),
-    supersession_chain: supersessionChain(claim, byId, ctx),
+    supersession_chain: supersessionChain(claim, byId, supersession, ctx),
     reasons,
   });
-  const reasons = [];
   // Knowledge time first: an unknown instant is indeterminate and is never guessed (Surface).
   if (claim.extension.recordedAt === undefined) return entry("unverifiable", ["knowledge_time_unknown"]);
-  const edge = edgeState(claim, byId, ctx);
-  if (edge.state === "hidden") return entry("unverifiable", ["successor_not_visible_or_unresolved"]);
-  if (edge.state === "unknown_time") return entry("unverifiable", ["supersession_time_unknown"]);
-  if (edge.state === "unknown_boundary") return entry("unverifiable", ["succession_boundary_unknown"]);
-  if (edge.state === "slot_mismatch") return entry("unverifiable", ["supersession_slot_mismatch"]);
-  if (edge.state === "active") return entry("superseded", ["superseded_by_known_successor"], { superseded_by: edge.successor.id });
-  if (edge.state === "not_known") reasons.push("successor_not_known_at_as_of");
-  if (edge.state === "inactive") reasons.push(edge.kind === "correction" ? "correction_interval_excludes_valid_at" : "succession_not_effective_at_valid_at");
+  const { view } = supersession;
+  // A cycle among claims this reader can see selects no winner.
+  if (view.unresolvedClaimIds.includes(claim.id)) return entry("unverifiable", ["supersession_cycle"]);
+  // The stored status is never served as is: supersession is whatever Surface's view of this reader says, so a
+  // successor the reader cannot see leaves the claim current for them, with no trace of it.
+  const successor = view.supersededBy[claim.id]?.[0];
+  if (successor !== undefined) return entry("superseded", ["superseded_by_known_successor"], { superseded_by: successor });
+  const annotation = edgeAnnotation(claim, supersession, ctx);
+  if (annotation.unverifiable) return entry("unverifiable", [annotation.unverifiable]);
+  const reasons = annotation.note ? [annotation.note] : [];
   const validTime = claim.extension.validTime;
   if (validTime && ((validTime.from !== undefined && ctx.validAt < validTime.from) || (validTime.until !== undefined && ctx.validAt >= validTime.until))) {
     return { kind: "not_valid" };
@@ -340,7 +423,7 @@ function recallFor(claim, input, changedSurfaces, byId, ctx, revision) {
 function orderedRequestIds(input, byId, changedSurfaces, ctx) {
   if (input.claim_ids) return input.claim_ids;
   // A claim recorded after known_at does not exist yet at that instant and must not be named by a scan.
-  const visible = [...byId.values()].filter((claim) => isVisible(claim, ctx) && !(claim.extension.recordedAt !== undefined && claim.extension.recordedAt > ctx.knownAt));
+  const visible = [...byId.values()].filter((claim) => isVisible(claim, ctx) && isKnown(claim, ctx));
   if (visible.length === 0) return ["no-matching-claims"];
   const overlaps = (claim) => claim.affected_surfaces.some((surface) => changedSurfaces.includes(surface));
   return visible.sort((a, b) => Number(overlaps(b)) - Number(overlaps(a)) || a.id.localeCompare(b.id)).map((claim) => claim.id);
@@ -351,6 +434,7 @@ function orderedRequestIds(input, byId, changedSurfaces, ctx) {
  * instead of trusting a caller-supplied result.
  */
 export function deriveLivingContext({ repoRoot, input }) {
+  assertSurfaceVisibility();
   const inputErrors = validateLivingContextInput(input);
   if (inputErrors.length) {
     const identityMissing = inputErrors.some((message) => /missing required property 'reader'|\$\/reader/.test(message));
@@ -362,18 +446,21 @@ export function deriveLivingContext({ repoRoot, input }) {
   if (new Set(input.knowledge_roots.map((knowledgeRoot) => knowledgeRoot.id)).size !== input.knowledge_roots.length) {
     throw error("DUPLICATE_KNOWLEDGE_ROOT_ID", "selected Knowledge root ids must be unique");
   }
-  const extension = extensionFor(input.reader);
-  const manifests = input.knowledge_roots.map((knowledgeRoot) => readManifestAtRevision(resolvedRoot, revision, knowledgeRoot, extension));
-  const byId = indexClaims(manifests);
+  const extension = extensionFor(input.reader, ctx.knownAt);
+  // Phase one admits the reader at every root before phase two parses a single claim of any root.
+  const documents = input.knowledge_roots.map((knowledgeRoot) => readManifestDocument(resolvedRoot, revision, knowledgeRoot, extension));
+  const manifests = documents.map((document, index) => normalizeManifestClaims(document, input.knowledge_roots[index], extension));
+  const byId = indexClaims(manifests, ctx);
+  const supersession = evaluateSupersession(byId, ctx);
   const requestedIds = orderedRequestIds(input, byId, changedSurfaces, ctx);
 
   const candidates = requestedIds.map((claimId) => {
     const claim = byId.get(claimId);
     // Absent, hidden from this reader, and not yet known at known_at are indistinguishable: one plain no-answer.
-    if (!claim || !isVisible(claim, ctx) || (claim.extension.recordedAt !== undefined && claim.extension.recordedAt > ctx.knownAt)) {
+    if (!claim || !isVisible(claim, ctx) || !isKnown(claim, ctx)) {
       return { claimId, entry: noAnswer(claimId, revision, input.knowledge_roots), claim: undefined };
     }
-    const recalled = recallFor(claim, input, changedSurfaces, byId, ctx, revision);
+    const recalled = recallFor(claim, input, changedSurfaces, byId, supersession, ctx, revision);
     if (recalled.kind === "not_valid") return { claimId, entry: noAnswer(claimId, revision, [{ id: claim.root.id, manifest_path: claim.manifestPath }], ["not_valid_at_as_of"]), claim };
     return { claimId, entry: recalled, claim };
   });

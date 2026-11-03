@@ -19,10 +19,12 @@
       "affected_surfaces": [
         "src/context-adapter.js"
       ],
-      "visibility": [
-        "engineer",
-        "auditor"
-      ],
+      "visibility": {
+        "audiences": [
+          "engineer",
+          "auditor"
+        ]
+      },
       "recorded_at": "2026-01-10T00:00:00Z",
       "valid_time": {
         "from": "2026-01-10T00:00:00Z"
@@ -51,10 +53,12 @@
       "affected_surfaces": [
         "src/context-adapter.js"
       ],
-      "visibility": [
-        "engineer",
-        "auditor"
-      ],
+      "visibility": {
+        "audiences": [
+          "engineer",
+          "auditor"
+        ]
+      },
       "recorded_at": "2025-12-01T00:00:00Z",
       "slot": "context-contract",
       "supersession_recorded_at": "2026-01-10T00:00:00Z"
@@ -74,10 +78,12 @@
       "affected_surfaces": [
         "src/cli.js"
       ],
-      "visibility": [
-        "engineer",
-        "auditor"
-      ],
+      "visibility": {
+        "audiences": [
+          "engineer",
+          "auditor"
+        ]
+      },
       "recorded_at": "2026-01-05T00:00:00Z"
     },
     {
@@ -97,10 +103,12 @@
       "affected_surfaces": [
         "src/retry.js"
       ],
-      "visibility": [
-        "engineer",
-        "auditor"
-      ],
+      "visibility": {
+        "audiences": [
+          "engineer",
+          "auditor"
+        ]
+      },
       "recorded_at": "2025-06-01T00:00:00Z",
       "valid_time": {
         "from": "2025-06-01T00:00:00Z"
@@ -123,10 +131,12 @@
       "affected_surfaces": [
         "src/retry.js"
       ],
-      "visibility": [
-        "engineer",
-        "auditor"
-      ],
+      "visibility": {
+        "audiences": [
+          "engineer",
+          "auditor"
+        ]
+      },
       "recorded_at": "2026-03-02T00:00:00Z",
       "valid_time": {
         "from": "2026-03-01T00:00:00Z"
@@ -148,9 +158,11 @@
       "affected_surfaces": [
         "src/audit.js"
       ],
-      "visibility": [
-        "auditor"
-      ],
+      "visibility": {
+        "audiences": [
+          "auditor"
+        ]
+      },
       "recorded_at": "2026-01-02T00:00:00Z"
     },
     {
@@ -187,10 +199,12 @@
       "affected_surfaces": [
         "src/deploy.js"
       ],
-      "visibility": [
-        "engineer",
-        "auditor"
-      ],
+      "visibility": {
+        "audiences": [
+          "engineer",
+          "auditor"
+        ]
+      },
       "recorded_at": "2025-09-01T00:00:00Z",
       "slot": "scheduler",
       "supersession_recorded_at": "2026-02-01T00:00:00Z"
@@ -210,9 +224,11 @@
       "affected_surfaces": [
         "src/deploy.js"
       ],
-      "visibility": [
-        "auditor"
-      ],
+      "visibility": {
+        "audiences": [
+          "auditor"
+        ]
+      },
       "recorded_at": "2026-02-01T00:00:00Z",
       "slot": "scheduler"
     },
@@ -231,10 +247,12 @@
       "affected_surfaces": [
         "src/cache.js"
       ],
-      "visibility": [
-        "engineer",
-        "auditor"
-      ],
+      "visibility": {
+        "audiences": [
+          "engineer",
+          "auditor"
+        ]
+      },
       "recorded_at": "2026-01-15T00:00:00Z",
       "expires_at": "2026-02-01T00:00:00Z"
     },
@@ -253,9 +271,11 @@
       "affected_surfaces": [
         "src/session.js"
       ],
-      "visibility": [
-        "engineer"
-      ],
+      "visibility": {
+        "audiences": [
+          "engineer"
+        ]
+      },
       "recorded_at": "2026-01-15T00:00:00Z",
       "verified_at": "2026-05-01T00:00:00Z",
       "ttl_seconds": 864000
@@ -275,9 +295,11 @@
       "affected_surfaces": [
         "src/unrecorded.js"
       ],
-      "visibility": [
-        "engineer"
-      ]
+      "visibility": {
+        "audiences": [
+          "engineer"
+        ]
+      }
     },
     {
       "id": "bounded-validity",
@@ -294,9 +316,11 @@
       "affected_surfaces": [
         "src/beta.js"
       ],
-      "visibility": [
-        "engineer"
-      ],
+      "visibility": {
+        "audiences": [
+          "engineer"
+        ]
+      },
       "recorded_at": "2026-01-01T00:00:00Z",
       "valid_time": {
         "from": "2026-01-01T00:00:00Z",

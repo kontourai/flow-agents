@@ -23,20 +23,22 @@ exact `1.0` behavior and loading the `1.0` module still needs no Surface or Surv
 ## Decision
 
 - **Identity fails closed.** `reader` is required. A missing, blank, or unrecognised reader is
-  refused before any claim is parsed or any file written, and a claim with no `visibility` is
+  refused at every selected root before any claim of any root is parsed or any file written, and a claim with no `visibility` is
   visible to no one. A reader must be listed by every selected root. Context Check does not
   authenticate; the host supplies an authenticated identity.
-- **Limited leak, stated.** Asked for by id, hidden, absent, and not-yet-known claims return the same
-  plain `no_answer`; a scan never names them; parse and duplicate errors name no hidden claim; a
-  hidden successor is never named. A visible predecessor whose recorded successor is hidden becomes
-  `unverifiable`, which discloses that something unreadable bears on it. That is the price of not
-  serving it as current.
-- **A superseded claim is never current while its successor is known and in effect.** When the
-  successor is not visible to the reader, or its recording time or succession boundary is
-  unknown, the predecessor is `unverifiable`. This is deliberately more conservative than the
-  per-viewer supersession proposed in kontourai/surface#350 ("a viewer without access sees the
-  prior current value"), which is not yet accepted: serving the predecessor as `current` would
-  present a claim the corpus has superseded as current. Revisit when #350 is decided.
+- **Visibility and per-viewer supersession are Surface's** (kontourai/surface#350, `readDeclaredVisibility`,
+  `visibilityAllows`, `viewerSupersessionView`), not a local rule. A claim's `visibility` is a Surface
+  declared form; unreadable or undeclared is sealed. Admission of an edge at the as-of instants (time, slot,
+  kind) is this kit's; what a given reader may see of the admitted edges is Surface's. **A successor the
+  reader cannot see leaves the predecessor `current` for that reader with no trace**, and a superseded claim
+  is never `current` for a reader who can see a recorded, in-effect, same-slot successor. This reverses an
+  earlier, more conservative local rule (`unverifiable` for a hidden successor), which is no longer needed
+  now that Surface defines the per-viewer view.
+- **Limited disclosure, stated.** Asked for by id, hidden, absent, and not-yet-known claims return the same
+  plain `no_answer`; a scan never names them; parse errors for claims the reader may not see are dropped;
+  diagnostics name the claim, never its position; a duplicate id is an error only when every copy is
+  visible. Admission of a chain through a hidden claim uses that claim's times and slot, so it can decide
+  whether the chain collapses, though never what the reader is shown.
 - **As-of follows the merged Surface accumulation decision** (kontourai/surface#204, Surface main
   `7486c6d`, `docs/decisions/knowledge-accumulation.md`). Knowledge time filters on a
   receiver-recorded `recorded_at` and never on an authored time; valid time is a half-open
