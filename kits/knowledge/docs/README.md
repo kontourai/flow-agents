@@ -353,11 +353,19 @@ there is more than one, no copy can stand for the id and no combination of them 
 hidden cycle that makes Surface drop a real supersession), so the id is ambiguous: a visible claim whose
 recorded, visible edge chain reaches it is `unverifiable` (`supersession_ambiguous`), never current or
 superseded, in any file order. Identical hidden copies count as disagreeing: an id carried twice is a
-manifest defect, and Context Check does not decide which copy was meant. An edge the reader may not see (its
+manifest defect, and Context Check does not decide which copy was meant. The walk follows recorded,
+reader-visible edges through hidden claims and stops at the first claim the reader can see; it does not
+re-apply slot or interval admission to the ambiguous id, so it can over-trigger but never under-trigger, and
+an untimed claim reports `knowledge_time_unknown` first. The cost is disclosure of one bit: because the
+ambiguous id is left out of the structure, every claim on that chain loses its history beyond it, which can
+change their chains, token costs (and so budget admission and answers), and a hidden cycle it was part of. An edge the reader may not see (its
 `supersession_visibility`) explains nothing: no chain link, no reason, no status change, so for a reader who may not see the edge an
 untimed or cross-slot successor also leaves both claims current. Asked for by id, a hidden, absent, or
 not-yet-known claim returns the same plain `no_answer`; a default scan never names one. Reconciliation
-and proposals cover only claims the reader may see. Stated limits: admission of an edge uses the times and
+and proposals cover only claims the reader may see. A claim that is unverifiable because of its own
+validity (stale, untimed, outside its valid time, or declared unverifiable) reconciles as `unverifiable`;
+supersession trouble (a cycle, an ambiguous id, a missing edge time) says nothing about whether the change
+contradicts the claim, so recorded contradiction evidence and ordinary `affected` status are reported as usual. Stated limits: admission of an edge uses the times and
 slot of both ends, so a hidden claim's times can decide whether a chain through it collapses, though never
 what the reader is shown; and a dangling pointer is indistinguishable from a hidden successor.
 

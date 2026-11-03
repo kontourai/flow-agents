@@ -41,7 +41,8 @@ exact `1.0` behavior and loading the `1.0` module still needs no Surface or Surv
   the copies they may see, so a hidden duplicate changes nothing whatever its content or file order (a group
   whose copies are all hidden and more than one is ambiguous, identical copies included: no copy stands for it and no union is safe, because it can
   create a hidden cycle that makes Surface drop a real supersession, so a visible claim whose recorded, visible
-  edge chain reaches it is `unverifiable` with `supersession_ambiguous`, in any file order)
+  edge chain reaches it is `unverifiable` with `supersession_ambiguous`, in any file order; the one bit this discloses
+  also shows in the history, token cost and answers of the other claims on that chain)
   and two entitled copies are an error; an edge the reader may not see explains nothing. Admission of a chain through a hidden claim uses that claim's times and slot, so it can decide
   whether the chain collapses, though never what the reader is shown.
 - **As-of follows the merged Surface accumulation decision** (kontourai/surface#204, Surface main
@@ -71,6 +72,10 @@ a supersession edge has its own recording time and must join one slot (`slot`), 
   edges itself (recording time, slot, kind, interval) and hands only the admitted edges to Surface's visibility
   view. That local admission is a stopgap, not a second derivation to keep, and `contested` is not reported.
   Consuming the projection is tracked in kontourai/flow-agents#1586.
+- **Hidden cycles are Surface's rule.** Per Surface's `viewerSupersessionView`, "a cycle that exists only through
+  hidden claims must not change what the viewer sees": with `a -> h(hidden) -> z -> a`, a reader who sees `a` and
+  `z` is shown `a` as current and `z` as superseded by it. The never-current guarantee therefore holds along an
+  acyclic chain, or a cycle the reader can see (which is `unverifiable`); it does not override Surface here.
 - **Freshness is Surface's.** Expiry resolves through `claimIntrinsicExpiry` (`expiresAt` wins;
   `ttlSeconds` anchors on a verification at or before `known_at`, else recording) and a claim is stale when `now > expiry`,
   checked against Surface's own `reapplyVerifiedFreshness` at the boundary. A stale claim that would

@@ -529,7 +529,12 @@ export function deriveLivingContext({ repoRoot, input }) {
     const evidenceKnown = claim.extension.reconciliationRecordedAt !== undefined && claim.extension.reconciliationRecordedAt <= ctx.knownAt;
     const { reconciliation_evidence: evidence, ...rest } = claim;
     const known = evidence && evidenceKnown ? { ...rest, reconciliation_evidence: evidence } : rest;
-    return entry.status === "unverifiable" && known.status !== "unverifiable" ? { ...known, status: "unverifiable" } : known;
+    // Only facts about the claim itself turn reconciliation unverifiable. Supersession trouble (a cycle, an ambiguous
+    // id, a missing time) says nothing about whether the change contradicts the claim, so recorded contradiction
+    // evidence and ordinary affected status are reported exactly as they would be without it.
+    const intrinsic = ["knowledge_time_unknown", "declared_unverifiable", "stale_at_as_of", "not_valid_at_as_of"];
+    const ownReasons = [...(entry.reasons ?? []), ...(entry.reason === "no_answer" ? ["not_valid_at_as_of"] : [])];
+    return entry.status === "unverifiable" && known.status !== "unverifiable" && ownReasons.some((reason) => intrinsic.includes(reason)) ? { ...known, status: "unverifiable" } : known;
   };
   const reconciliation = reconcilable.map((candidate) => reconciliationFor(view(candidate), changedSurfaces, revision));
   const proposals = reconcilable.map((candidate, index) => proposalFor(view(candidate), reconciliation[index], revision)).filter(Boolean);

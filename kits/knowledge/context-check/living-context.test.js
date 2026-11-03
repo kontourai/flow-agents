@@ -1071,6 +1071,42 @@ describe("Living Context: review round 3 regressions (#1572)", () => {
     assert.match(entry(open, true), /supersession_ambiguous/, "control: the same graph with a visible edge is ambiguous");
   });
 
+  test("supersession trouble never hides contradiction evidence or an ordinary affected claim in reconciliation", () => {
+    const hidden = { visibility: { audiences: ["auditor"] } };
+    const evidence = { reconciliation_evidence: { status: "contradicted", authority: { path: "d.md", citation: "Contradiction" } }, reconciliation_recorded_at: "2026-02-01T00:00:00Z" };
+    const reconcile = (twin, extra) => {
+      const claims = [mk("a", { ...edge("h"), supersession_visibility: "public", ...extra }), mk("h", hidden), ...(twin ? [mk("h", { ...hidden, slot: "other" })] : [])];
+      const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims });
+      const result = run(repo, revision, { claim_ids: ["a"], changed_surfaces: ["src/x.js"] });
+      remove(repo);
+      return [recallOf(result, "a").reasons[0], result.reconciliation[0].status, result.proposals[0]?.rationale.replaceAll(/[0-9a-f]{40}/g, "<commit>")];
+    };
+    for (const extra of [evidence, {}]) {
+      const [baselineReason, baselineStatus, baselineRationale] = reconcile(false, extra);
+      const [reason, status, rationale] = reconcile(true, extra);
+      assert.equal(reason, "supersession_ambiguous");
+      assert.notEqual(baselineReason, reason);
+      assert.equal(status, baselineStatus, "reconciliation is the same with or without the ambiguity");
+      assert.equal(rationale, baselineRationale);
+    }
+    assert.equal(reconcile(true, evidence)[1], "contradicted");
+    const intrinsic = seed({ readers: ["engineer"], claims: [mk("s", { ...evidence, expires_at: "2026-02-01T00:00:00Z" })] });
+    assert.equal(run(intrinsic.repo, intrinsic.revision, { claim_ids: ["s"], changed_surfaces: ["src/x.js"] }).reconciliation[0].status, "unverifiable", "a stale claim stays unverifiable: its own validity is what is in doubt");
+    remove(intrinsic.repo);
+  });
+
+  test("an edge with no recording time is not on the chain, so it cannot make a claim ambiguous", () => {
+    const hidden = { visibility: { audiences: ["auditor"] } };
+    const status = (edgeExtra) => {
+      const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [mk("a", { ...edge("h"), supersession_visibility: "public", ...edgeExtra }), mk("h", hidden), mk("h", { ...hidden, slot: "other" })] });
+      const entry = recallOf(run(repo, revision, { claim_ids: ["a"] }), "a");
+      remove(repo);
+      return [entry.status, entry.reasons[0]];
+    };
+    assert.deepEqual(status({}), ["unverifiable", "supersession_ambiguous"], "control: a recorded edge to the ambiguous id");
+    assert.deepEqual(status({ supersession_recorded_at: undefined }), ["current", "current_at_as_of"], "an unrecorded edge is not followed");
+  });
+
   test("ambiguity is judged only up to the first claim the reader can see", () => {
     const hidden = { visibility: { audiences: ["auditor"] } };
     const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims: [mk("a", edge("v")), mk("v", edge("h")), mk("h", hidden), mk("h", { ...hidden, slot: "other" }), mk("z", {})] });
