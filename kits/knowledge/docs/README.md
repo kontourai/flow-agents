@@ -720,3 +720,5 @@ opt-in: install the packed `@kontourai/corpus-store` in a scratch directory and
 set `CORPUS_STORE_ENTRY` to its absolute `dist/index.js` before running
 `node --test kits/knowledge/promote/store-target.corpus.test.js`. Without that
 variable the test reports skipped; it does not claim Corpus interoperability.
+Set `KNOWLEDGE_OPS_ROOT` to a checkout of the Ops host as well to exercise
+its registry and MCP server in an isolated temporary XDG home.
