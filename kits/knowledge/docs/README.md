@@ -687,6 +687,71 @@ remains; a rerun with a new id can create another capture. There is no automatic
 retry, rollback or resumption. Use a fresh workspace for experiments and inspect
 both the kit trace and `flow status <run-id> --format json --cwd <workspace>`.
 
+## Residue sources (runtime-session ingest)
+
+`promote/ingest.js` turns a session into **residue**: candidate input for later
+distillation. Residue is not evidence, policy or instruction authority, even
+after it is distilled. Both variants are defined by
+[`schemas/knowledge/residue.schema.json`](../../../schemas/knowledge/residue.schema.json).
+`ingestFromSource(source, input)` selects one of two sources:
+
+| Source | Input | Output |
+|---|---|---|
+| `workflow-sidecar` | A completed `.kontourai/flow-agents/<slug>/` session directory. | `{ residues: [ingestSession(dir)] }`. The residue is the existing `ingestSession` output, unchanged. |
+| `runtime-session` | `{ telemetryFile, transcriptRoots, cursor?, idleGapMs?, now? }` | `{ residues, report, candidateCursor }`, with one residue per new or changed sitting. |
+
+The `runtime-session` source reads canonical telemetry (schema `0.3.0`) after the
+cursor. It needs the full channel, because the analytics channel redacts
+`hook.transcript_path`. For each `claude-code` or `codex` event it reads the
+referenced Claude Code project JSONL or Codex rollout. Then it:
+
+- keeps only user and assistant **text**. It drops tool calls and results,
+  thinking and reasoning, images, sidechains and subagent rollouts, meta and
+  compact-summary entries, and harness-originated entries such as task
+  notifications. It also drops harness tags, such as `<system-reminder>` and
+  `<environment_context>`, and any block wrapped in the injected-memory marker
+  (`INJECTED_MEMORY_OPEN`/`INJECTED_MEMORY_CLOSE`,
+  `<flow-agents-injected-memory>`). Injection (#672) must use that marker, so
+  memory it injects can never be re-ingested as conversation;
+- splits the conversation into **sittings** at an idle gap (default 30
+  minutes). Each sitting has the stable id `<harness>:<sessionId>:<n>`, a
+  `contentHash`, and a `complete` flag (the idle gap has elapsed since its last
+  turn). Its provenance records the harness, session id, transcript path
+  relative to its authorized root, cwd, git branch, and start and end times;
+- scrubs every output string deterministically (`scrubResidueText`). Provider
+  tokens, JWTs, private keys, URL credentials and secret-named assignments
+  become `<SECRET>`, emails become `<EMAIL>`, and home directories become `~`.
+  No model is involved, so transcript text cannot argue its way past the scrub.
+
+Ownership boundaries:
+
+- The **host** supplies the telemetry file and the authorized transcript roots;
+  ingest discovers nothing by itself. A transcript outside every root is skipped
+  and reported.
+- **Ingest writes nothing.** It returns `candidateCursor`. The transaction owner
+  (the dream job, #671) commits it with `commitRuntimeCursor` (an atomic
+  rename), and only after its own work with the residue succeeds.
+  `readRuntimeCursor` treats a missing file as an empty cursor.
+- The cursor stores a telemetry byte offset, a digest of the bytes before it,
+  and the content hash of every sitting already returned. The offset never
+  passes a line whose content was not fully read: a malformed or
+  unknown-version telemetry line, or a transcript that is drifted, unreadable or
+  over its size limit. Later lines are still processed, and their sitting hashes
+  stop a re-run from returning them twice. A trailing partial line (in either
+  file) is left for the next run. A truncated, rotated or rewritten telemetry
+  file makes the prefix digest mismatch, so the run blocks and the cursor stays
+  where it was.
+- Unknown record *types* are ignored, because both runtimes add metadata types.
+  Drift means a conversation record this parser cannot read, or a file in a
+  different format from the one its telemetry runtime names. Drift is reported
+  as `UNKNOWN_TRANSCRIPT_FORMAT` and never crashes the run.
+
+Out of scope here: store writes (#670), scheduling or dreaming (#671),
+injection (#672), OpenCode and pi transcripts, and telemetry schema changes.
+Known gaps: the cursor does not drain a rotated telemetry predecessor (a
+rotation blocks until an operator resets the cursor), and the map of sitting
+hashes is never pruned.
+
 ## Reviewed learning lifecycle
 
 [The versioned lifecycle API](learning-lifecycle.md) separates learning proposals,
