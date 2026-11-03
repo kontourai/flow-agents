@@ -877,6 +877,23 @@ describe("review round 1 regressions (PR #1575)", () => {
     assert.equal(scrubResidueText("max_tokens: 4096 bypass=value tokenizer=fast"), "max_tokens: 4096 bypass=value tokenizer=fast");
   });
 
+  test("M6: mixed-case key spellings, URL passwords that look like assignments, and trailing digits", () => {
+    const canary = ["Minimal", "Own", "Canary7319"].join("");
+    for (const key of ["passWord", "pAssword", "toKen", "aUthorization", "sEcret", "APIkEy", "client_sEcret", "AccessToken", "x-Api-Key"]) {
+      const out = scrubResidueText(`${key}=${canary}`);
+      assert.equal(out.includes(canary), false, key);
+      assert.equal(scrubResidueText(out), out, key);
+    }
+    // the password of a URL is one password, even when it contains assignment syntax
+    const url = scrubResidueText(`https://u:token='ok'${canary}@localhost/path and postgres://app:pw${canary}@db:5432/x`);
+    assert.equal(url.includes(canary), false);
+    assert.equal(url, "https://u:<SECRET>@localhost/path and postgres://app:<SECRET>@db:5432/x");
+    // not secret-named: left alone, including near-misses and `max_tokens`
+    for (const text of ["tokenizer2=fast", "Passwords=none", "compass=north", "spwd=1", "secretary=jane", "HTTP2=on", "max_tokens: 4096"]) {
+      assert.equal(scrubResidueText(text), text);
+    }
+  });
+
   test("the scrub is linear on pathological runs, and a data blob is replaced whole", () => {
     const inputs = {
       "a-": "a-".repeat(80000),
@@ -887,6 +904,10 @@ describe("review round 1 regressions (PR #1575)", () => {
       "BEGIN": "-----BEGIN PRIVATE KEY-----\n".repeat(8000),
       "token_ in quotes": `password="${"token_".repeat(30000)}"`,
       "stray quotes": 'password:"'.repeat(30000),
+      "repeated key=": "token=".repeat(60000),
+      "many keys in one quoted span": `password="${"token=a ".repeat(40000)}"`,
+      "trailing digits": `${"1".repeat(2_000_000)}x`,
+      "one huge identifier": `${"a-".repeat(1_000_000)}token=${"S".repeat(10)}`,
     };
     for (const [name, input] of Object.entries(inputs)) {
       const started = process.hrtime.bigint();
@@ -896,7 +917,8 @@ describe("review round 1 regressions (PR #1575)", () => {
       assert.equal(scrubResidueText(out), out, `${name}: idempotent`);
     }
     assert.equal(scrubResidueText(`before ${"A".repeat(2000)} after`), "before <BLOB> after");
-    assert.equal(scrubResidueText(`k ${"A".repeat(256)} z`), `k ${"A".repeat(256)} z`);
+    assert.equal(scrubResidueText(`k ${"A".repeat(200)} z`), `k ${"A".repeat(200)} z`);
+    assert.equal(scrubResidueText(`k ${"A".repeat(201)} z`), "k <BLOB> z");
     const pem = ["-----BEGIN RSA ", "PRIVATE KEY-----\nMIIBOgIBAAJB\n-----END RSA ", "PRIVATE KEY-----"].join("");
     assert.equal(scrubResidueText(`a ${pem} b`), "a <SECRET> b");
   });
