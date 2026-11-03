@@ -4,10 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadRun, runDir, startRun } from "@kontourai/flow";
 import { memoryClaim } from "@kontourai/flow-agents/memory-claims";
-import { buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
+import { buildMemoryReviewItem, deriveMemoryRunMetrics, presentMemoryClaims, recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
+import { jsonSnapshot } from "@kontourai/flow-agents/memory-json";
 import {
   MEMORY_METRICS_EVIDENCE_KIND, MEMORY_REVIEW_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND, readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence,
-  canonicalRunPath, readLatestMemoryMetrics, readMemoryReviewRecords, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting, supersedeMemoryRoutingEvidence,
+  canonicalRunPath, memoryHistoryLimit, readLatestMemoryMetrics, readMemoryReviewRecords, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting, supersedeMemoryRoutingEvidence,
 } from "@kontourai/flow-agents/memory-routing-flow";
 import { attachEvidence } from "@kontourai/flow";
 import { canonicalJson } from "@kontourai/relay";
@@ -791,4 +792,107 @@ test("review state is copied per item: a long list of small items is not over a 
   await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: decisionsList, reviewEvents: syntheticEvents(0, 2500) });
   const stored = await readMemoryReviewRecords("run-1", cwd);
   assert.deepEqual([stored.decisions.length, stored.events.length], [2500, 2500]);
+});
+
+// --- review round 12 --------------------------------------------------------------------------------------------------------
+
+const attachedCount = async cwd => (await loadRun("run-1", cwd)).manifest.evidence.length;
+
+test("recovery is whole or nothing: with two bad records, superseding one is refused and attaches nothing", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  const wrong = { ...decisions[1], outcome: "proposed", reasons: [] };
+  const badA = await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [wrong] }, "a.json");
+  const badB = await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-2", decisions: [decisions[0]] }, "b.json");
+  const before = await attachedCount(cwd);
+  await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [badA.id], decisions: [] }), /another run or an unsupported version/, "the other bad record still blocks");
+  assert.equal(await attachedCount(cwd), before, "so the replacement was not attached");
+  assert.deepEqual((await readMemoryRoutingEvidence("run-1", cwd)).map(entry => entry.superseded), [false, false, false]);
+  await supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [badA.id, badB.id], decisions: [] });
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 3, "and with both, the live figures are right straight away");
+});
+
+test("a recovery that already happened is replayable: the same request returns the record it made and writes nothing", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  const bad = await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [{ ...decisions[1], outcome: "proposed", reasons: [] }] });
+  const request = { ...where(cwd), supersedes: [bad.id], decisions: [] };
+  const first = await supersedeMemoryRoutingEvidence(request);
+  const count = await attachedCount(cwd);
+  const again = await supersedeMemoryRoutingEvidence(request);
+  assert.equal(again.id, first.id);
+  assert.equal(await attachedCount(cwd), count, "the lost-reply retry attached nothing");
+  await assert.rejects(supersedeMemoryRoutingEvidence({ ...request, decisions: [decisions[0]] }), /not live routing records/, "a different request naming records that are no longer live is still refused");
+});
+
+test("recovery holds the history limit, and what recall reads after it is the corrected routing", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  const claim = decisions[1].input.claim;
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  const wrong = { ...decisions[1], outcome: "proposed", reasons: [] };
+  const bad = await rawAttach(cwd, "route-gate", MEMORY_ROUTING_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [wrong] });
+  const count = await attachedCount(cwd);
+  await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [bad.id], decisions: [decisions[0], decisions[1]], maxHistoryEntries: 1 }), /would hold 3 routing decisions, over its limit of 1/);
+  assert.equal(await attachedCount(cwd), count);
+  await supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [bad.id], decisions: [] });
+  const read = await readMemoryRoutingDecisions("run-1", cwd);
+  assert.equal(read.find(decision => decision.id === decisions[1].id).outcome, decisions[1].outcome, "the public reader returns the live decision, not the superseded payload");
+  const shown = presentMemoryClaims([claim], { routing: read }).presented[0];
+  assert.equal(shown.review.routing, decisions[1].outcome === "routed" ? "routed" : "uncontested", "and recall labels the claim from it");
+  assert.equal((await readMemoryRoutingEvidence("run-1", cwd)).find(entry => entry.evidenceId === bad.id).superseded, true, "the original is still there for audit");
+  // A quarantine is not a block-list: recording a quarantined batch again records it again.
+  const quarantined = await recordMemoryRoutingEvidence({ ...where(cwd), decisions: [wrong.outcome === "proposed" ? decisions[0] : decisions[1]] });
+  assert.ok(quarantined.id);
+});
+
+test("recovery request shapes: ids must be non-empty strings, once each", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  const first = await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  for (const supersedes of [[1], [""], [first.id, first.id], [null]]) await assert.rejects(supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes, decisions: [] }), /name the live routing records/, JSON.stringify(supersedes));
+});
+
+test("a stored review record that is bad blocks every write that depends on it, before it writes", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions });
+  await rawAttach(cwd, "route-gate", MEMORY_REVIEW_EVIDENCE_KIND, { schema_version: "1.0", runId: "run-1", decisions: [{ kind: "ReviewDecision", metadata: { name: "d" }, spec: { reviewItemName: "i", status: "weird", reviewedAt: "2026-11-02T10:00:00.000Z" } }], events: [] });
+  const before = await attachedCount(cwd);
+  const more = routeMemoryChange({ type: "claim", claim: make({ property: "x" }), agreement: { passes: 2, agreeing: 2 } });
+  await assert.rejects(recordMemoryRoutingEvidence({ ...where(cwd), decisions: [more] }), /status Survey does not define/);
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: MORE() }), /status Survey does not define/);
+  await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), reviewEvents: syntheticEvents(0, 1) }), /status Survey does not define/);
+  assert.equal(await attachedCount(cwd), before, "none of them wrote anything");
+});
+
+test("the deepest claim a claim may be is recorded, recovered with, and read back", async t => {
+  const cwd = await workspace(t);
+  let value = "leaf", depth = 0;
+  const nest = n => { let v = "leaf"; for (let i = 0; i < n; i++) v = { a: v }; return v; };
+  for (let n = 1; n < 40; n++) { try { jsonSnapshot(make({ value: nest(n) }), "t"); depth = n; } catch { break; } }
+  value = nest(depth);
+  const decision = routeMemoryChange({ type: "claim", claim: make({ value }), agreement: { passes: 2, agreeing: 2 } });
+  const entry = await recordMemoryRoutingEvidence({ ...where(cwd), decisions: [decision] });
+  assert.deepEqual((await readMemoryRoutingDecisions("run-1", cwd)).map(d => d.id), [decision.id]);
+  const other = routeMemoryChange({ type: "claim", claim: make({ value, property: "other" }), agreement: { passes: 2, agreeing: 2 } });
+  const replaced = await supersedeMemoryRoutingEvidence({ ...where(cwd), supersedes: [entry.id], decisions: [other] });
+  assert.deepEqual((await readMemoryRoutingDecisions("run-1", cwd)).map(d => d.id), [other.id]);
+  assert.ok(replaced.id);
+});
+
+test("the history limit: its default is the most the Kit derives from, a host may lower it, and nothing else is accepted", () => {
+  assert.equal(memoryHistoryLimit({}), 1_000_000);
+  assert.equal(memoryHistoryLimit({ maxHistoryEntries: 7 }), 7);
+  for (const bad of [0, -1, 1.5, "7", null, 1_000_001]) assert.throws(() => memoryHistoryLimit({ maxHistoryEntries: bad }), /maxHistoryEntries must be an integer/, String(bad));
+});
+
+test("a routing decision count past the stored limit is refused by name: held decisions count, repeats do not", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions, maxHistoryEntries: 3 });
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions: [decisions[0]], maxHistoryEntries: 3 });
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: MORE(), maxHistoryEntries: 3 }), /would hold 4 routing decisions, over its limit of 3/);
 });

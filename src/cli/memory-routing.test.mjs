@@ -932,3 +932,12 @@ test("a verification record is bounded: a record padded past its allowance is re
   assert.doesNotThrow(() => routeMemoryChange(change(claim, { verifications: [padded(1_900)], accumulation: null })), "just inside 2,000 values");
   assert.throws(() => routeMemoryChange(change(claim, { verifications: [padded(2_100)], accumulation: null })), /routing change verifications\[0\].*too large/);
 });
+
+test("figures derive over a run's whole history, which may be longer than any one request list", () => {
+  const decisions = Array.from({ length: 20_001 }, (_, i) => ({ changeId: `c${i}`, changeType: "claim", outcome: "proposed", reasons: [] }));
+  assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions }).decisions, 20_001);
+  const reviewDecisions = Array.from({ length: 20_001 }, (_, i) => ({ kind: "ReviewDecision", metadata: { name: `d${i}` }, spec: { reviewItemName: `i${i}`, status: "rejected", reviewedAt: "2026-11-02T10:00:00.000Z" } }));
+  assert.doesNotThrow(() => deriveMemoryRunMetrics({ runId: "r", decisions: [], reviewDecisions }));
+  const reviewEvents = Array.from({ length: 20_001 }, (_, i) => ({ kind: "ReviewSessionEvent", metadata: { name: `e${i}` }, spec: { sessionName: "s", sequence: i, eventType: "item-selected", occurredAt: "2026-11-02T10:00:00.000Z" } }));
+  assert.doesNotThrow(() => deriveMemoryRunMetrics({ runId: "r", decisions: [], reviewEvents }));
+});
