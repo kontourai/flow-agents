@@ -21,7 +21,7 @@ import { jsonSnapshotList } from "./memory-json.js";
 import type { ReviewDecision, ReviewItem, ReviewSessionEvent } from "@kontourai/survey";
 import {
   MEMORY_ROUTING_VERSION, buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChanges,
-  type MemoryChange, type MemoryEntityChange, type MemoryRoutingDecision, type MemoryRoutingPolicy, type MemoryRunMetrics, type SurveyEntityProposalLike,
+  type MemoryChange, type MemoryEntityChange, type MemoryRoutingDecision, type MemoryRoutingPolicy, type MemoryRunMetrics, type SurveyEntityProposal,
 } from "./memory-routing.js";
 
 export const MEMORY_ROUTING_EVIDENCE_KIND = "memory.routing-decisions";
@@ -195,7 +195,7 @@ export interface MemoryRoutingRun {
    * The Survey entity proposals the routing sent to review, as given. Survey owns their review item: pass each to
    * Survey's `entityProposalToReviewItem`, and record the outcome with its `entityOutcomeFromDecision`.
    */
-  entityProposals: SurveyEntityProposalLike[];
+  entityProposals: SurveyEntityProposal[];
   /** Item names handed to the queue. Empty when no queue was given: the items exist but nobody has been asked. */
   published: string[];
   routing: FlowEvidenceEntry;
@@ -226,7 +226,7 @@ export async function runMemoryRouting(input: Location & {
     const recorded = await recordRouting({ runId: input.runId, gate: input.gate, cwd: input.cwd, decisions });
     return { routing: recorded.entry, metrics: await refreshMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd, review }) };
   });
-  const items: ReviewItem[] = [], entityProposals: SurveyEntityProposalLike[] = [], published: string[] = [];
+  const items: ReviewItem[] = [], entityProposals: SurveyEntityProposal[] = [], published: string[] = [];
   for (const [index, decision] of decisions.entries()) {
     if (decision.outcome !== "routed") continue;
     if (decision.input.type === "entity") { entityProposals.push((input.changes[index] as MemoryEntityChange).proposal); continue; }

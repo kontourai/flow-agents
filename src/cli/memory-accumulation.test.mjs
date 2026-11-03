@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { memoryAccumulationClaims, memoryAccumulationFact, memoryAccumulationQuery, memoryClaimToAccumulationClaim } from "@kontourai/flow-agents/memory-accumulation";
 import { memoryClaim, MemoryClaimError } from "@kontourai/flow-agents/memory-claims";
 import { createHash } from "node:crypto";
-import { pathToFileURL } from "node:url";
 import { canonicalJson } from "@kontourai/relay";
 import { buildMemoryReviewItem, recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import { distillFixtureSitting, readJson } from "./memory-claims-support.mjs";
@@ -182,11 +181,10 @@ test("a projection that names a rival the Kit was not given is refused: every bo
   assert.match(check.mismatches.join("\n"), /not among the current claims/);
 });
 
-test("with the real Surface projection, every committed fact is reproduced and the mapped claims are the ones it accepted", async t => {
-  // Runs for real when the installed Surface exports the projection. Until then MEMORY_SURFACE_MODULE can point at a build of
-  // surface@b7d932b so this check can be exercised today; with neither, it skips and says why.
-  const surface = await import(process.env.MEMORY_SURFACE_MODULE ? pathToFileURL(process.env.MEMORY_SURFACE_MODULE).href : "@kontourai/surface");
-  if (typeof surface.projectAccumulation !== "function") { t.skip("surface#359 is merged but unreleased; the committed facts were produced by its projectAccumulation at b7d932b"); return; }
+test("with the real Surface projection (surface@6.3.0), every committed fact is reproduced and the mapped claims are the ones it accepted", async () => {
+  // The committed facts were produced by Surface's projectAccumulation; the pinned release must still reproduce them.
+  const surface = await import("@kontourai/surface");
+  assert.equal(typeof surface.projectAccumulation, "function", "the pinned Surface exports the projection");
   const { c0, c1 } = await claims();
   let checked = 0;
   for (const [name, scenario] of Object.entries(fixture().scenarios)) {

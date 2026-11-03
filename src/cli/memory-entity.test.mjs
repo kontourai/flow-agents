@@ -94,10 +94,20 @@ test("the committed proposals are what the Kit's emitter produces, made by Surve
   for (const proposal of Object.values(fixtures)) assert.match(proposal.id, /^sha256:[0-9a-f]{64}$/);
 });
 
-test("when the installed Survey exports createEntityProposal it accepts the emitter's input and yields the committed ids", async t => {
+test("the pinned Survey (survey@8.3.0) accepts the emitter's input and yields the committed proposals, ids and review items", async () => {
   const survey = await import("@kontourai/survey");
-  if (typeof survey.createEntityProposal !== "function") { t.skip("survey#358 is merged but unreleased; the committed proposals were made by its createEntityProposal"); return; }
-  assert.equal(survey.createEntityProposal(memoryEntityProposalInput(await request())).id, loadEntityProposals().merge.id);
+  assert.equal(typeof survey.createEntityProposal, "function", "the pinned Survey exports entity review");
+  const { owner } = await claims();
+  const fixtures = loadEntityProposals();
+  const requests = {
+    merge: await request(),
+    split: await request({ candidates: [{ operation: "split", subjects: SUBJECTS, claims: [{ claim: owner, stance: "supports" }], confidenceComponents: { name: 0.8 } }] }),
+  };
+  for (const [name, req] of Object.entries(requests)) {
+    const proposal = survey.createEntityProposal(memoryEntityProposalInput(req));
+    assert.deepEqual(proposal, fixtures[name], `${name}: the emitter's input produces the committed proposal`);
+    assert.equal(survey.entityProposalToReviewItem(proposal).kind, "ReviewItem", `${name}: Survey turns it into a review item`);
+  }
 });
 
 test("routing takes the proposal the emitter built and records it; every entity change goes to review whatever its scores", async () => {

@@ -164,7 +164,7 @@ one also becomes a Survey review item. Each routing decision embeds the input an
 policy it was computed from, so `recomputeMemoryRouting` can re-derive it, and is
 recorded as custom-kind Flow evidence on a gate the host names. Flow 5.4 gates accept
 only `trust.bundle` expectations, so that evidence is recomputable but not yet
-required. The visibility order is Surface's and entity proposals are Survey's contract; both are merged upstream but unreleased, so the Kit holds two thin, tested stand-ins until the packages are bumped. The host supplies the model call, the Survey verifier and the Flow run. See
+required. The visibility order is Surface's (`meetVisibility`) and entity proposals are Survey's contract; both are consumed from the pinned releases (surface 6.3.0, survey 8.3.0), not restated. The host supplies the model call, the Survey verifier and the Flow run. See
 the [memory claim contract](../kits/knowledge/docs/memory-claims.md) for the rules, the
 evidence and the metrics.
 
