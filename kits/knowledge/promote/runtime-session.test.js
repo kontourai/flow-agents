@@ -895,26 +895,35 @@ describe("review round 1 regressions (PR #1575)", () => {
   });
 
   test("the scrub is linear on pathological runs, and a data blob is replaced whole", () => {
+    const REDACTION = path.join(HERE, "runtime-redaction.js");
+    // Each input is built and scrubbed in a child process with a hard timeout, so a quadratic
+    // regression fails in seconds instead of hanging the suite.
     const inputs = {
-      "a-": "a-".repeat(80000),
-      "a.": "a.".repeat(80000),
-      "eyJ-": "eyJ-".repeat(40000),
-      "sk-": "sk-".repeat(60000),
-      "http-ish": "a://b:".repeat(30000),
-      "BEGIN": "-----BEGIN PRIVATE KEY-----\n".repeat(8000),
-      "token_ in quotes": `password="${"token_".repeat(30000)}"`,
-      "stray quotes": 'password:"'.repeat(30000),
-      "repeated key=": "token=".repeat(60000),
-      "many keys in one quoted span": `password="${"token=a ".repeat(40000)}"`,
-      "trailing digits": `${"1".repeat(2_000_000)}x`,
-      "one huge identifier": `${"a-".repeat(1_000_000)}token=${"S".repeat(10)}`,
+      "a-": '"a-".repeat(80000)',
+      "a.": '"a.".repeat(80000)',
+      "eyJ-": '"eyJ-".repeat(40000)',
+      "sk-": '"sk-".repeat(60000)',
+      "http-ish": '"a://b:".repeat(30000)',
+      "BEGIN": '"-----BEGIN PRIVATE KEY-----\\n".repeat(8000)',
+      "token_ in quotes": '`password="${"token_".repeat(30000)}"`',
+      "stray quotes": "'password:\"'.repeat(30000)",
+      "repeated key=": '"token=".repeat(60000)',
+      "many keys in one quoted span": '`password="${"token=a ".repeat(40000)}"`',
+      "trailing digits": '`${"1".repeat(2000000)}x`',
+      "one huge identifier": '`${"a-".repeat(1000000)}token=${"S".repeat(10)}`',
+      "camelCase identifier": '"camelCaseIdentifierSegment".repeat(40000)',
     };
-    for (const [name, input] of Object.entries(inputs)) {
-      const started = process.hrtime.bigint();
-      const out = scrubResidueText(input);
-      const ms = Number(process.hrtime.bigint() - started) / 1e6;
-      assert.ok(ms < 3000, `${name}: ${ms.toFixed(0)} ms for ${input.length} bytes`);
-      assert.equal(scrubResidueText(out), out, `${name}: idempotent`);
+    for (const [name, expression] of Object.entries(inputs)) {
+      const code =
+        `import { scrubResidueText } from ${JSON.stringify(`file://${REDACTION}`)};` +
+        `const input = ${expression}; const started = Date.now(); const out = scrubResidueText(input);` +
+        `console.log(JSON.stringify({ ms: Date.now() - started, idempotent: scrubResidueText(out) === out }));`;
+      const child = spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8", timeout: 20000, maxBuffer: 1 << 20 });
+      assert.equal(child.error, undefined, `${name}: did not finish in 20 s (${child.error?.code})`);
+      assert.equal(child.status, 0, `${name}: ${child.stderr.slice(0, 200)}`);
+      const result = JSON.parse(child.stdout);
+      assert.ok(result.ms < 3000, `${name}: ${result.ms} ms`);
+      assert.equal(result.idempotent, true, `${name}: idempotent`);
     }
     assert.equal(scrubResidueText(`before ${"A".repeat(2000)} after`), "before <BLOB> after");
     assert.equal(scrubResidueText(`k ${"A".repeat(200)} z`), `k ${"A".repeat(200)} z`);
