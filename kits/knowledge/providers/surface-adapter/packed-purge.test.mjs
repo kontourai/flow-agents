@@ -164,10 +164,13 @@ for (const [profile, KitAdapter] of [["default", DefaultKnowledgeStore], ["vault
           .map((name) => join(root, "store", name));
         const bytes = () => protectedPaths.map((file) => existsSync(file) ? readFileSync(file) : null);
         const beforeAttempts = bytes();
+        await assert.rejects(
+          () => legacy.link(survivor, [{ target_id: id, kind: "related", label: "erased title" }], { agent: "test" }),
+          { code: "PURGED" }, "related tombstone link must be refused",
+        );
         const attempts = [
           () => legacy.update(id, { body: "reintroduced" }, { agent: "test" }),
           () => legacy.link(id, [{ target_id: other, kind: "related" }], { agent: "test" }),
-          () => legacy.link(survivor, [{ target_id: id, kind: "related", label: "erased title" }], { agent: "test" }),
           () => legacy.link(survivor, [{ target_id: id, kind: "source" }], { agent: "test" }),
           () => legacy.update(survivor, { links: [{ target_id: id, kind: "source" }] }, { agent: "test" }),
           () => legacy.create({ type: "raw", title: "new", body: "new", category: "private",
