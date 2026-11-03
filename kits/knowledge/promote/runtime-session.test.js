@@ -915,6 +915,10 @@ describe("review round 1 regressions (PR #1575)", () => {
       assert.equal(out.includes(canary), false, name);
       assert.equal(scrubResidueText(out), out, `${name}: idempotent`);
     }
+    // Unicode whitespace ends a URL password exactly as it did in the original regex: no "@" follows it
+    // directly, so this is not a credential and the text is left as it was.
+    assert.equal(scrubResidueText("https://u:ab\u00a0cd@h/x"), "https://u:ab\u00a0cd@h/x");
+    assert.equal(scrubResidueText("https://us\u3000er:pw@h/x"), "https://us\u3000er:pw@h/x");
     // a real URL password and a real scheme are still found
     assert.equal(scrubResidueText(`(ftp://u:p${canary}@h/x) and HTTPS://a:b@c`), "(ftp://u:<SECRET>@h/x) and HTTPS://a:<SECRET>@c");
   });
