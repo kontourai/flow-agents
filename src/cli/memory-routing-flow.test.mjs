@@ -19,12 +19,10 @@ import { makeFixtureDir } from "./fixture-temp-dir.mjs";
 import { loadEntityProposals } from "./memory-claims-support.mjs";
 
 /**
- * What the host that authenticated the reviewer attests as `reviewerKind` (kontourai/survey#359). Survey's workbench builders do not set it
- * yet, so a decision these tests build is attested by the host here, as `human` unless a test names another kind: the tests below are
- * about human reviewers, and the tests that are about agents and rules say so.
+ * The host that authenticated the reviewer attests `reviewerKind` on the session snapshot (Survey 8.4.0), and Survey stamps it on the
+ * decisions and events it builds. The tests below are about human reviewers unless one names another kind.
  */
-const attestedAs = (decisions, reviewerKind) => decisions.map(decision => ({ ...decision, spec: { ...decision.spec, reviewerKind } }));
-const buildReviewDecisionsFromSession = (session, reviewerKind = "human") => attestedAs(surveyDecisionsFromSession(session), reviewerKind);
+const buildReviewDecisionsFromSession = (session, reviewerKind = "human") => surveyDecisionsFromSession({ ...session, reviewerKind });
 
 // A host flow owns the gate. This probe flow is the smallest one that has one.
 const HOST_FLOW = {
@@ -226,7 +224,7 @@ const MORE = () => {
 
 /** A real Survey rejection of the first routed item, with its dwell: selected, then submitted `seconds` later. */
 function rejection(item, seconds, reviewerKind = "human") {
-  const session = { ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: "reject-proposed" } };
+  const session = { ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", reviewerKind, decisionsByItemName: { [item.metadata.name]: "reject-proposed" } };
   const start = Date.parse("2026-11-02T10:00:00.000Z");
   const reviewEvents = buildReviewSessionEvents(session, "session-1").map(event => ({ ...event, spec: { ...event.spec, occurredAt: new Date(event.spec.eventType === "decision-submitted" ? start + seconds * 1000 : start).toISOString() } }));
   return { reviewDecisions: buildReviewDecisionsFromSession(session, reviewerKind), reviewEvents };

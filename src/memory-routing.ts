@@ -14,8 +14,8 @@ import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
 import { meetVisibility } from "@kontourai/surface";
 import {
-  currentProposedReviewItem, foldCandidateVerifications, reviewResourceApiVersion, runSupportVerifier,
-  type CandidateVerification, type EntityProposal, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
+  currentProposedReviewItem, foldCandidateVerifications, isReviewerKind, reviewResourceApiVersion, runSupportVerifier,
+  type CandidateVerification, type EntityProposal, type ReviewerKind, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
 import { memoryAccumulationFact, memoryAccumulationMembers, readMemoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
 import { MAX_DECISION_DEPTH, MAX_DECISION_NODES, MAX_HISTORY_ENTRIES, MAX_PEERS, MAX_POLICY_NODES, MAX_VERIFICATIONS, MAX_VERIFICATION_NODES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
@@ -77,7 +77,7 @@ export interface MemoryEntityRoutingInput {
   /** Every subject the proposal names, as Survey's `SubjectRef`, sorted. Not flattened: a type or id may hold any character. */
   subjects: { subjectType: string; subjectId: string }[];
 }
-/** The part of Survey's `EntityProposal` (`createEntityProposal`, survey@8.3.0) this Kit reads: pass the real proposal object. */
+/** The part of Survey's `EntityProposal` (`createEntityProposal`, survey@8.4.0) this Kit reads: pass the real proposal object. */
 export type SurveyEntityProposal = Pick<EntityProposal, "id" | "spec">;
 export type MemoryRoutingInput = MemoryClaimRoutingInput | MemoryEntityRoutingInput;
 
@@ -524,9 +524,8 @@ export function memoryReviewOutcome(decision: ReviewDecision, itemName: string):
 /** When a value is an instant, as a number; anything else sorts before every real instant, so it never beats one. */
 const instantOf = (text: string | undefined): number => { const ms = text === undefined ? NaN : Date.parse(text); return Number.isFinite(ms) ? ms : -Infinity; };
 
-/** Who made a review decision, as the host that authenticated the reviewer attested it. `unattested` is anything that is not one of the three. */
-export type MemoryReviewerKind = "human" | "agent" | "rule" | "unattested";
-const REVIEWER_KINDS: readonly string[] = ["human", "agent", "rule"];
+/** Who made a review decision, as the host that authenticated the reviewer attested it (Survey's `ReviewerKind`). `unattested` is anything that is not one of the three. */
+export type MemoryReviewerKind = ReviewerKind | "unattested";
 
 /** One own data property, read as data (no getter, nothing inherited), or undefined. */
 const ownValue = (record: unknown, key: string): unknown => {
@@ -536,30 +535,27 @@ const ownValue = (record: unknown, key: string): unknown => {
 };
 
 /**
- * SHIM for the host-attested reviewer kind (kontourai/survey#360, merged as 5387632; it ships in Survey 8.4.0, which is not on npm yet).
- * Survey adds `reviewerKind: "human" | "agent" | "rule"` to review outcomes, decisions and session events: asserted by the host that
- * authenticated the reviewer, never by the reviewer, and absent on records made before it existed. Survey 8.3.0 does not have it, so
- * until 8.4.0 is installed this is the one place the Kit reads it: the decision's own `spec.reviewerKind`, as data (verified against a
- * build of 5387632: that is where Survey's workbench builders put it, on decisions and on events). When 8.4.0 is the installed
- * Survey, replace the local kind list below with Survey's `REVIEWER_KINDS` / `isReviewerKind`.
- *
- * It fails closed. A missing field (a record made before the kind existed: Survey's projection would call that an INFERRED kind), an
- * unknown value, a value that is not text, or one that is only inherited reads as `unattested`, and `unattested` is not human: it
- * can annotate a routed claim and cannot promote it. A kind that Survey marks inferred is not an attestation either (Survey's own
- * rule for a consumer that requires a human is `reviewerKind === "human"` and `reviewerKindInferred === false`): a
- * `reviewerKindInferred` that is present and not exactly `false`, on the decision's `spec` or under `metadata.survey`, makes the kind
- * `unattested`. On a stored decision the flag is normally absent and the kind present means attested.
+ * The host-attested reviewer kind of a review decision (Survey 8.4.0, kontourai/survey#360): `spec.reviewerKind`, `"human" | "agent" |
+ * "rule"`, asserted by the host that authenticated the reviewer, never by the reviewer, and absent on a record made before it existed.
+ * This is the one place the Kit reads it, and it fails closed. A missing field (Survey's projection calls that an INFERRED kind), an
+ * unknown value (Survey's own `isReviewerKind` decides), a value that is not text, or one that is only inherited or a getter reads as
+ * `unattested`, and `unattested` is not human: it can annotate a routed claim and cannot promote it. A kind Survey marks inferred is not
+ * an attestation either (Survey's rule for a consumer that requires a human is `reviewerKind === "human"` and
+ * `reviewerKindInferred === false`): a `reviewerKindInferred` that is present and not exactly `false`, on the decision's `spec` or under
+ * `metadata.survey` (where a projection carries it), makes the kind `unattested`. On a stored decision the flag is normally absent, and
+ * a kind that is present means attested. Survey's `resolveReviewerKind` is deliberately not used: it infers a kind for a record that
+ * has none, which is what a human-required rule must not do.
  */
 export function memoryReviewerKind(decision: ReviewDecision): MemoryReviewerKind {
   const spec = ownValue(decision, "spec");
   if (!spec || typeof spec !== "object") return "unattested";
   const kind = ownValue(spec, "reviewerKind");
-  if (typeof kind !== "string" || !REVIEWER_KINDS.includes(kind)) return "unattested";
+  if (!isReviewerKind(kind)) return "unattested";
   const survey = ownValue(ownValue(decision, "metadata"), "survey");
   for (const inferred of [ownValue(spec, "reviewerKindInferred"), ownValue(survey, "reviewerKindInferred")]) {
     if (inferred !== undefined && inferred !== false) return "unattested";
   }
-  return kind as MemoryReviewerKind;
+  return kind;
 }
 
 /**

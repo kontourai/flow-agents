@@ -1,10 +1,9 @@
 import test from "node:test";
-import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
 import assert from "node:assert/strict";
 import { Ajv } from "ajv";
-import { buildCandidateVerification } from "@kontourai/survey";
+import { REVIEWER_KINDS, buildCandidateVerification, isReviewerKind } from "@kontourai/survey";
 import {
   buildReviewDecisionsFromSession as surveyDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState,
 } from "@kontourai/survey/review-workbench";
@@ -18,12 +17,10 @@ import {
 import { SCHEMAS, distillFixtureSitting, loadEntityProposals, matchesFixture, readJson } from "./memory-claims-support.mjs";
 
 /**
- * What the host that authenticated the reviewer attests as `reviewerKind` (kontourai/survey#359). Survey's workbench builders do not set it
- * yet, so a decision these tests build is attested by the host here, as `human` unless a test names another kind: the tests below are
- * about human reviewers, and the tests that are about agents and rules say so.
+ * The host that authenticated the reviewer attests `reviewerKind` on the session snapshot (Survey 8.4.0), and Survey stamps it on the
+ * decisions and events it builds. The tests below are about human reviewers unless one names another kind.
  */
-const attestedAs = (decisions, reviewerKind) => decisions.map(decision => ({ ...decision, spec: { ...decision.spec, reviewerKind } }));
-const buildReviewDecisionsFromSession = (session, reviewerKind = "human") => attestedAs(surveyDecisionsFromSession(session), reviewerKind);
+const buildReviewDecisionsFromSession = (session, reviewerKind = "human") => surveyDecisionsFromSession({ ...session, reviewerKind });
 
 const ajv = new Ajv({ strict: false, allErrors: true });
 const validateDecision = ajv.compile(readJson(SCHEMAS, "memory-routing-decision.schema.json"));
@@ -1028,7 +1025,7 @@ test("optional text on a claim is text: a label, a role or an extractor that is 
 const assertMemoryClaimFor = claim => assertMemoryClaim(claim);
 const base_ = base;
 
-// --- routed review needs a human reviewer (owner decision 2026-11-03; kontourai/survey#359 adds reviewerKind) ---------------------
+// --- routed review needs a human reviewer (owner decision 2026-11-03; Survey 8.4.0 adds reviewerKind) ------------------------------
 
 /** A claim that routes (a contradiction with a peer), its routing decision, and its Survey review item. */
 function routedClaim() {
@@ -1045,7 +1042,7 @@ const decide = (item, kind, how = "accept-proposed", at = "2026-11-02T10:00:00.0
 test("the reviewer kind is read strictly, and anything that is not exactly human, agent or rule is unattested, which is not human", () => {
   const { item } = routedClaim();
   for (const kind of ["human", "agent", "rule"]) assert.equal(memoryReviewerKind(decide(item, kind)), kind);
-  assert.equal(memoryReviewerKind(decide(item, undefined)), "unattested", "absent (a record made before survey#359)");
+  assert.equal(memoryReviewerKind(decide(item, undefined)), "unattested", "absent (a record made before Survey 8.4.0)");
   for (const bad of ["Human", " human", "human ", "person", "operator", "", 1, true, null, ["human"], { kind: "human" }]) {
     assert.equal(memoryReviewerKind(decide(item, bad)), "unattested", JSON.stringify(bad));
     assert.equal(memoryDecisionMayPromote(decide(item, bad)), false, `${JSON.stringify(bad)} cannot promote`);
@@ -1299,25 +1296,31 @@ test("review time: events are the deciding reviewer's by their own kind as well 
   assert.equal(seconds(pair(undefined, undefined, "l", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z")), 20, "a legacy event with neither kind nor actor stays");
 });
 
-test("against the real Survey builders: the decisions and events its workbench stamps are the ones the shim reads", async t => {
-  // Survey 8.4.0 (kontourai/survey#360) stamps `reviewerKind` from the session snapshot onto decisions and events. Until it is the
-  // installed version this skips; `MEMORY_SURVEY_MODULE=<build of survey@5387632>/dist/src/review-workbench/review-workbench.js` runs it today.
-  const workbench = await import(process.env.MEMORY_SURVEY_MODULE ? pathToFileURL(process.env.MEMORY_SURVEY_MODULE).href : "@kontourai/survey/review-workbench");
+test("against the real Survey builders: the decisions and events its workbench stamps are the ones the Kit reads", async () => {
+  // Survey 8.4.0 (kontourai/survey#360) stamps `reviewerKind` from the session snapshot onto decisions and events; an unknown kind and
+  // `human` on `auto-accept-policy` are refused, and a session that attests nothing yields records with no kind.
+  const workbench = await import("@kontourai/survey/review-workbench");
   const { item } = routedClaim();
   const session = extra => ({ ...workbench.initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: "2026-11-02T10:00:00.000Z", decisionsByItemName: { [item.metadata.name]: "accept-proposed" }, ...extra });
-  if (workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "agent" }))[0].spec.reviewerKind === undefined) { t.skip("the installed Survey predates reviewerKind (survey#360, ships in 8.4.0)"); return; }
   for (const kind of ["human", "agent", "rule"]) {
     const [made] = workbench.buildReviewDecisionsFromSession(session({ reviewerKind: kind }));
+    assert.equal(made.spec.reviewerKind, kind, `Survey stamps the decision, ${kind}`);
     assert.equal(memoryReviewerKind(made), kind, `decision, ${kind}`);
     assert.equal(memoryDecisionMayPromote(made), kind === "human");
-    for (const event of workbench.buildReviewSessionEvents(session({ reviewerKind: kind }), "s1")) assert.equal(event.spec.reviewerKind, kind, `event, ${kind}`);
+    const events = workbench.buildReviewSessionEvents(session({ reviewerKind: kind }), "s1");
+    assert.ok(events.length > 0);
+    for (const event of events) { assert.equal(event.spec.reviewerKind, kind, `event, ${kind}`); assert.equal(memoryReviewerKind(event), kind); }
   }
   const [legacy] = workbench.buildReviewDecisionsFromSession(session({}));
-  assert.equal(memoryReviewerKind(legacy), "unattested", "a session that attests nothing: an inferred kind, which is not human");
+  assert.equal(legacy.spec.reviewerKind, undefined, "a session that attests nothing stamps nothing");
+  assert.equal(memoryReviewerKind(legacy), "unattested", "an inferred kind, which is not human");
   assert.throws(() => workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "robot" })), /reviewerKind must be one of human, agent, rule/);
-  // And the full path: a decision Survey stamped as an agent's leaves a routed claim in review.
+  assert.throws(() => workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "human", actorId: "auto-accept-policy" })), /contradicts/);
+  // The Kit's validity check is Survey's: every kind Survey defines is accepted, and nothing it refuses is.
+  for (const kind of REVIEWER_KINDS) assert.equal(isReviewerKind(kind), true);
+  assert.deepEqual([...REVIEWER_KINDS].sort(), ["agent", "human", "rule"]);
+  // And the full path: a decision Survey stamped as an agent's leaves a routed claim in review; a human's confirms it.
   const { claim, decision } = routedClaim();
-  const agentMade = workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "agent" }));
-  assert.equal(presentMemoryClaims([claim], { routing: [decision], reviewDecisions: agentMade }).presented[0].review.label, "in-review");
+  assert.equal(presentMemoryClaims([claim], { routing: [decision], reviewDecisions: workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "agent" })) }).presented[0].review.label, "in-review");
   assert.equal(presentMemoryClaims([claim], { routing: [decision], reviewDecisions: workbench.buildReviewDecisionsFromSession(session({ reviewerKind: "human" })) }).presented[0].review.label, "confirmed");
 });

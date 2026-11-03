@@ -15,7 +15,7 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 | Claim shape, routing policy, run metrics | This Kit. |
 | Support verification, review items, reviewer decisions | Survey. |
 | Which claims are current in a slot, whether it is contested, supersession over time | Surface (`projectAccumulation`, surface@6.3.0). The host runs it (it needs observations with custody and an authority snapshot the Kit does not hold); the Kit maps its claims in (`memoryAccumulationClaims`, which carries every claim a replacement chain reaches and gives one claim one Surface claim: edges in id order, instants as the UTC date-times Surface parses for years 0000-9999, and the claim's JSON content copied so an undefined field and an absent one are the same; a subject id or claim type with surrounding whitespace, or a blank slot field, is refused because Surface refuses that slot), reads the result back together with the query it answered (`memoryAccumulationFact(result, query)`: the fact carries the query's slot, outcome, candidates and supporting claims) and routes on it. A result without its query is refused, and a fact whose query slot is not the claim's own (compared as Surface compares slots) is refused. That is a check on what the host says, not on the result: a projection result carries no query of its own, so the Kit cannot tell a genuine result for the claim's slot from a genuine result for another slot passed with the claim's query. Binding the query, the result and the projection's inputs together is the trusted host's job. The design is [Surface's knowledge-accumulation decision](https://github.com/kontourai/surface/blob/7486c6d8b3d942b1b2aa11e4cdd958f8b1b8aa9f/docs/decisions/knowledge-accumulation.md). The Kit still takes the current claims as input, for the visibility bounds and the review item. |
-| Entity merge, split and alias review | Survey (entity review, survey@8.3.0). The Kit emits proposals in Survey's `EntityProposalInput` and routes them to its review. |
+| Entity merge, split and alias review | Survey (entity review and the host-attested reviewer kind, survey@8.4.0). The Kit emits proposals in Survey's `EntityProposalInput` and routes them to its review. |
 | Visibility lattice | Surface ([Surface derived visibility](https://github.com/kontourai/surface/blob/18e3570636cdb5f9e73d38d9274a2bcd1dc04b9f/docs/decisions/derived-visibility.md), surface@6.3.0). A claim's `visibility` is Surface's form and the Kit's order is Surface's own `meetVisibility`, called, not restated. |
 | Gates and evidence | Flow. |
 
@@ -138,14 +138,16 @@ When a claim has several records the strictest (routed) stands, whatever order t
 closed. Among the human decisions on an item the latest by instant stands; a later agent decision never displaces an earlier human
 one, and an earlier agent decision never blocks a later human one.
 
-The kind is `reviewerKind: "human" | "agent" | "rule"` on the Survey decision, **asserted by the host that authenticated the reviewer,
-never by the reviewer** (kontourai/survey#359). Survey 8.3.0 does not carry it yet, so `memoryReviewerKind(decision)` is the one
-documented shim: it reads the decision's own `spec.reviewerKind` as data and fails closed. A missing field (a record made before
-survey#359), an unknown value, a value that is not text, an inherited or getter-defined one, or one nested under `actor` reads as
-`unattested`, and `unattested` is not human. Stored review state with a `reviewerKind` that is not one of the three is refused, as
-Survey will refuse it. When Survey releases the field, the shim is the function to repoint; if it lands somewhere other than
-`spec.reviewerKind`, routed claims stay unpromoted until it is repointed, and nothing is promoted wrongly, so survey#359 is not a
-MERGE-AFTER for this change. `memoryReviewOutcome(decision, itemName)` only says what a decision *means* (confirm, correct, reject, hold) and does not look at who made it: a host that acts on it directly asks `memoryDecisionMayPromote` first. `memoryDecisionMayPromote(decision, {routed})` (exported by the adapter with `memoryReviewerKind`) is the check a host makes before passing a decision to
+The kind is `reviewerKind: "human" | "agent" | "rule"` on the Survey decision and on its session events, **asserted by the host that
+authenticated the reviewer, never by the reviewer** (Survey 8.4.0, kontourai/survey#360). `memoryReviewerKind(decision)` is the one
+place the Kit reads it: the decision's own `spec.reviewerKind`, as data, validated by Survey's `isReviewerKind`, failing closed. A
+missing field (a record made before Survey 8.4.0, which Survey's projection calls an *inferred* kind), an unknown value, a value that is
+not text, an inherited or getter-defined one, or one nested under `actor` reads as `unattested`, and `unattested` is not human. A kind
+Survey marks inferred is not an attestation either: a `reviewerKindInferred` that is present and not exactly `false`, on the decision's
+`spec` or under `metadata.survey` (where a projection carries it), makes the kind `unattested`; Survey's own rule for a consumer that
+requires a human is `reviewerKind === "human"` and `reviewerKindInferred === false`. The Kit does not use Survey's
+`resolveReviewerKind`, which infers a kind for a record that has none. Stored review state with a `reviewerKind` that is not one of
+the three, or a `reviewerKindInferred` that is not a boolean, is refused, as Survey refuses an unknown kind. `memoryReviewOutcome(decision, itemName)` only says what a decision *means* (confirm, correct, reject, hold) and does not look at who made it: a host that acts on it directly asks `memoryDecisionMayPromote` first. `memoryDecisionMayPromote(decision, {routed})` (exported by the adapter with `memoryReviewerKind`) is the check a host makes before passing a decision to
 Survey's `entityOutcomeFromDecision` (entity review is Survey's; the Kit does not call it). Each routed claim's review item carries the
 label `memory.reviewer: human-required`, so a workbench can show what the item needs. Review time is the deciding reviewer's own: session events tagged `agent` or `rule`, or by another actor than the decision's, are not borrowed as its time (Survey names decisions per session, so a name can recur). Recall reports the annotations it ignored
 (`review.annotations`) and metrics count them (`reviewer.annotated`); an item with only annotations is `pending`.
@@ -318,8 +320,8 @@ consumed here, and `presentMemoryClaims` does not apply it.
   (`#671`). Claims are returned and recorded as evidence; staging into a store is the
   next lane.
 - Anything newer than the pinned releases. This package pins `@kontourai/surface` 6.3.0 and `@kontourai/survey`
-  8.3.0 (exact versions, as released on npm). The Kit calls Surface's `meetVisibility` for the widening rule, takes
-  Survey's `EntityProposal` as the type it reads, and fills Surface's own `AccumulationClaim` and
+  8.4.0 (exact versions, as released on npm). The Kit calls Surface's `meetVisibility` for the widening rule, takes
+  Survey's `EntityProposal` as the type it reads and its `isReviewerKind` for the reviewer kind, and fills Surface's own `AccumulationClaim` and
   `AccumulationQuery`. Tests replay Surface's meet vectors and a 37 x 37 grid of good and malformed visibilities
   through the pinned release, and run Survey's `createEntityProposal` over the emitter's output.
 - Running Surface's projection. It needs custody (observations with digests and authenticated publishers) and an

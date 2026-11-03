@@ -18,7 +18,7 @@ import { attachEvidence, loadRun, type FlowEvidenceEntry } from "@kontourai/flow
 import { canonicalJson } from "@kontourai/relay";
 import { MemoryClaimError } from "./memory-claims.js";
 import { MAX_HISTORY_ENTRIES, jsonSnapshot, jsonSnapshotEach, ownEntries, ownField } from "./memory-json.js";
-import type { ReviewDecision, ReviewItem, ReviewSessionEvent, ReviewSessionEventType } from "@kontourai/survey";
+import { isReviewerKind, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type ReviewSessionEventType } from "@kontourai/survey";
 import {
   DECISION_BOUNDS, MEMORY_ROUTING_VERSION, buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChanges,
   type MemoryChange, type MemoryRoutingDecision, type MemoryRoutingPolicy, type MemoryRunMetrics, type SurveyEntityProposal,
@@ -470,9 +470,9 @@ function assertReviewDecision(value: unknown): void {
   if (!goodInstant(spec.reviewedAt)) return bad("a decision needs a reviewedAt that is a date-time");
   assertReviewerKind(spec);
 }
-/** Survey refuses an unknown `reviewerKind` (survey#359); so does the Kit. Absent is allowed: it reads as not human. */
+/** Survey refuses an unknown `reviewerKind` (8.4.0); so does the Kit, by Survey's own check. Absent is allowed: it reads as not human. */
 function assertReviewerKind(spec: Record<string, unknown>): void {
-  if (spec.reviewerKind !== undefined && (typeof spec.reviewerKind !== "string" || !["human", "agent", "rule"].includes(spec.reviewerKind))) bad(`a reviewerKind is human, agent or rule: ${String(spec.reviewerKind)}`);
+  if (spec.reviewerKind !== undefined && !isReviewerKind(spec.reviewerKind)) bad(`a reviewerKind is human, agent or rule: ${String(spec.reviewerKind)}`);
   // The inferred flag is Survey's, computed on a projection; where it is carried at all it is a boolean, and only `false` is an attestation.
   if (spec.reviewerKindInferred !== undefined && typeof spec.reviewerKindInferred !== "boolean") bad(`a reviewerKindInferred is true or false: ${String(spec.reviewerKindInferred)}`);
 }
