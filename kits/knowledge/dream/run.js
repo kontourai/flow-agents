@@ -35,7 +35,7 @@ import {
   routeMemoryChange,
 } from "../adapters/memory-claims/index.mjs";
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
-import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, isSealed, writeBriefs } from "./brief.js";
+import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, classifyCurrent, effectiveItems, isSealed, writeBriefs } from "./brief.js";
 import { memorySlotKey } from "@kontourai/flow-agents/memory-claims";
 
 import { MAX_CLAIM_BYTES, fitPlan, indexProposals, verifyEntry, visibilityKey } from "./envelope.js";
@@ -190,18 +190,19 @@ export async function runDream(host, options = {}) {
   const briefsDir = path.join(dreamDir, "briefs");
   const reportsDir = path.join(dreamDir, "reports");
 
-  const release = dryRun ? () => {} : acquireDreamLock(path.join(dreamDir, "dream.lock"));
+  // Everything that can throw before the lock is taken happens before it, so nothing is leaked.
   const runId = `${now().replace(/[^0-9A-Za-z]/g, "")}-${randomUUID().slice(0, 8)}`;
+  const startedAt = now();
   const report = {
     schema_version: REPORT_SCHEMA_VERSION,
     run_id: runId,
     trigger: options.trigger ?? "manual",
     status: "running",
     dry_run: dryRun,
-    started_at: now(),
+    started_at: startedAt,
     ingest: null,
     sittings: { seen: 0, distilled: 0, resumed: 0, reused: 0, deferred_incomplete: 0, deferred_over_cap: 0 },
-    claims: { distilled: 0, rejected: 0, truncated: 0, peers_capped: 0, rerouted: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
+    claims: { distilled: 0, rejected: 0, truncated: 0, peers_capped: 0, rerouted: 0, contested_routed: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
     receipts: [],
     review_items: 0,
     unreadable_proposals: 0,
@@ -213,6 +214,7 @@ export async function runDream(host, options = {}) {
     cursor: { committed: false },
   };
   let cursorCommitted = false;
+  const release = dryRun ? () => {} : acquireDreamLock(path.join(dreamDir, "dream.lock"));
   const writeReport = () => writePrivateAtomic(path.join(reportsDir, `${runId}.json`), `${JSON.stringify(report, null, 2)}\n`);
 
   try {
@@ -273,15 +275,26 @@ export async function runDream(host, options = {}) {
       }
     };
     reslot();
-    const MAX_PEERS = 64; // routing refuses a slot with more than this many peers
+    // Which peers can change a decision: one that disagrees, or one the claim would be wider than. A peer that agrees
+    // and is no narrower adds nothing to the decision's outcome, so it is not embedded: routing validates and stores
+    // every peer it is given, and a slot can hold thousands. Relevant peers beyond the cap leave the outcome unchanged
+    // (one is enough to route), and are counted so the cut is visible.
+    const MAX_RELEVANT_PEERS = 16;
     const route = (claim, agreement, siblings = []) => {
       const slot = memorySlotKey(claim);
-      const peers = [...(slotPeers.get(slot) ?? []), ...siblings.filter((other) => other.id !== claim.id && memorySlotKey(other) === slot)]
+      const candidates = [...(slotPeers.get(slot) ?? []), ...siblings.filter((other) => other.id !== claim.id && memorySlotKey(other) === slot)]
         // A peer over the claim size bound cannot be this run's, and would make the stored decision too large.
         .filter((peer) => peer.id !== claim.id && Buffer.byteLength(JSON.stringify(peer)) <= MAX_CLAIM_BYTES)
         .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-      if (peers.length > MAX_PEERS) report.claims.peers_capped += 1; // reported, never silent
-      return routeMemoryChange({ type: "claim", claim, current: peers.slice(0, MAX_PEERS), agreement, sourceVisibility: options.visibility ?? null }, policy);
+      const base = { type: "claim", claim, agreement, sourceVisibility: options.visibility ?? null };
+      const alone = routeMemoryChange({ ...base, current: [] }, policy);
+      const relevant = candidates.filter((peer) => {
+        const withPeer = routeMemoryChange({ ...base, current: [peer] }, policy);
+        return withPeer.outcome !== alone.outcome || withPeer.reasons.length !== alone.reasons.length;
+      });
+      if (relevant.length === 0) return alone;
+      if (relevant.length > MAX_RELEVANT_PEERS) report.claims.peers_capped += 1; // reported, never silent
+      return routeMemoryChange({ ...base, current: relevant.slice(0, MAX_RELEVANT_PEERS) }, policy);
     };
 
     if (dryRun) {
@@ -350,6 +363,24 @@ export async function runDream(host, options = {}) {
       reslot();
     }
 
+    // Briefs derive from the store every run, because review changes them without any new telemetry. The briefs
+    // are written below; what they hold back as contested is decided here, because a contested claim belongs in the
+    // review queue: a pending claim the brief held back for a rival, whose own decision never said so (a rival from
+    // another writer, or one that arrived later), is routed now and handed to the same publish as everything else.
+    const latest = indexProposals(await store.listProposals(), proposerId);
+    const { items, excluded } = await briefItems(store, latest, proposerId);
+    const { views, byView } = effectiveItems(items, reviewDecisions);
+    const contestedNow = classifyCurrent(views, policy).contested.map((view) => byView.get(view));
+    const alreadyRouted = new Set(decisions.filter((decision) => decision.outcome === "routed").map((decision) => decision.changeId));
+    for (const item of contestedNow) {
+      if (item.state !== "pending" || alreadyRouted.has(item.claim.id)) continue;
+      const decision = route(item.claim, item.agreement);
+      if (decision.outcome === "routed") {
+        decisions.push(decision);
+        report.claims.contested_routed += 1;
+      }
+    }
+
     for (const decision of decisions) report.claims[decision.outcome === "routed" ? "routed" : "uncontested"] += 1;
     const reviewItems = decisions.filter((decision) => decision.outcome === "routed").map((decision) => buildMemoryReviewItem(decision)).filter(Boolean);
     report.review_items = reviewItems.length;
@@ -359,10 +390,7 @@ export async function runDream(host, options = {}) {
       await host.publish({ runId, decisions, reviewItems, metrics: report.metrics });
     }
 
-    // Briefs derive from the store every run, because review changes them without any new telemetry.
     await stage("brief");
-    const latest = indexProposals(await store.listProposals(), proposerId);
-    const { items, excluded } = await briefItems(store, latest, proposerId);
     const written = writeBriefs({
       briefsDir,
       items,

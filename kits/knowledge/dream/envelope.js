@@ -44,11 +44,12 @@ export const MAX_PLAN_BYTES = 192 * 1024;
 /** The most bytes one claim may weigh to be proposed. Larger ones are left out and counted. */
 export const MAX_CLAIM_BYTES = 8 * 1024;
 /**
- * What a stored envelope may weigh before it is refused unread. By construction an envelope is at most the plan
- * (<= 192 KiB), its own claim (<= 8 KiB) and its routing decision, which embeds the claim and at most 64 same-slot
- * peers (<= 8 KiB each, see `MAX_CLAIM_BYTES`): about 0.8 MiB.
+ * What a stored envelope may weigh before it is refused unread. An envelope is the plan (<= 192 KiB), its own claim
+ * (<= 8 KiB) and its routing decision, which embeds the claim, at most 16 relevant peers (<= 8 KiB each) and the
+ * reasons, which repeat the peers' values: about 0.6 MiB. The bound is 4 MiB so that no honest input can reach it,
+ * and a proposal is still far below Corpus's own 16 MiB limit.
  */
-export const MAX_ENVELOPE_BYTES = 1024 * 1024;
+export const MAX_ENVELOPE_BYTES = 4 * 1024 * 1024;
 
 const digestOf = (value) => `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
 export const planDigest = (plan) => digestOf(plan);
@@ -171,7 +172,8 @@ export function indexProposals(proposals, proposerId) {
       if (proposal.proposer_id === proposerId && proposal.state !== "rejected") {
         let format = "";
         try {
-          const written = JSON.parse(proposal.candidate.body)?.dream;
+          // The size bound applies here too: an over-size body is never parsed, not even to name its format.
+          const written = Buffer.byteLength(proposal.candidate.body) <= MAX_ENVELOPE_BYTES ? JSON.parse(proposal.candidate.body)?.dream : undefined;
           if (written && written !== ENVELOPE_VERSION) format = ` (written in envelope format ${String(written).slice(0, 16)}; this run reads ${ENVELOPE_VERSION})`;
         } catch {
           // not JSON at all

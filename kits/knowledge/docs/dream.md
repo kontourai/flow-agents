@@ -67,8 +67,9 @@ the digest of the cursor it was about to commit). Each earlier step is replay-sa
   the model would now word everything differently. A sitting whose plan is fully in the
   store is reused the same way. A claim over 8 KiB is left out. A plan holds at most 32
   claims and 192 KiB; the run keeps the first by claim id that fit, and counts what it left
-  out in `claims.truncated`. By construction an envelope stays under 1 MiB, and a stored body
-  over that is refused before it is parsed. The envelope format changed while this was under
+  out in `claims.truncated`. A decision embeds only the peers that change it (at most 16,
+  counted in `claims.peers_capped` if more exist), so an envelope is about 0.6 MiB in the
+  worst case, and a stored body over 4 MiB is refused before it is parsed. The envelope format changed while this was under
   review (now `1.2`); a proposal written by an earlier push of this branch fails with
   `DREAM_RECEIPT_CORRUPT` naming the format, and rejecting it in the store clears it.
 - **Routing is decided now, not then.** The plan holds no routing decision, because a
@@ -103,19 +104,21 @@ the digest of the cursor it was about to commit). Each earlier step is replay-sa
 
 **Why the lock is small.** `dream.lock/` is mutual exclusion and nothing more, built so that
 nothing is ever removed from under a live owner. It holds numbered epoch directories, and the
-owner is whoever made the highest. A caller reads the highest epoch; if its process is alive
-the lock is held. Otherwise (none, released, or its process is gone) it makes the next epoch
-with `mkdir`, which succeeds for exactly one caller, and then re-reads: if a higher epoch has
-appeared it was passed by others, removes only its own epoch and reports the lock held. Only
-the winner removes older epochs, and the highest stays after release, so an epoch number is
-never reused. An epoch with no readable owner is held until it is a minute old. A live pid is
-never evicted for being old, so a reused pid can delay recovery until that process exits.
-Failing to mark the epoch released at the end never fails a finished run. `@kontourai/monument`
-owns idempotency keys, dedup, record-before-effect and owner liveness, and it is `private: true`
-in the Station workspace, so this repository cannot consume it. The cursor, Corpus proposals and
-the lock are the only durable state. Adopting Monument later replaces the lock and the
-reconciliation, and makes this repository its first consumer outside Station. See
-[the tracking issue](https://github.com/kontourai/station/issues/4485).
+owner is whoever made the highest. An epoch appears whole: its owner record is written into a
+private staging directory that is then renamed to `<n>`, and a rename onto an existing epoch
+fails, so one caller makes each epoch and no one can see an epoch without its owner (there is
+no half-made state to mistake for debris, however long a caller pauses). A caller reads the
+highest epoch; if its process is alive the lock is held. Otherwise (none, released, or its
+process is gone) it makes the next epoch and re-reads: if a higher epoch has appeared it was
+passed by others, removes only its own epoch and reports the lock held. Only the winner
+removes older epochs (best effort), and the highest stays after release, so an epoch number is
+never reused. A live pid is never evicted for being old, so a reused pid keeps the lock until
+that process exits. Failing to mark the epoch released, or to remove an old one, never fails a
+run. `@kontourai/monument` owns idempotency keys, dedup, record-before-effect and owner
+liveness, and it is `private: true` in the Station workspace, so this repository cannot
+consume it. The cursor, Corpus proposals and the lock are the only durable state. Adopting
+Monument later replaces the lock and the reconciliation, and makes this repository its first
+consumer outside Station. See [the tracking issue](https://github.com/kontourai/station/issues/4485).
 
 **Flow gates.** `flows/dream.flow.json` declares a gate per step and the claim each expects.
 `runDream` does not evaluate them: gate evaluation belongs to the host's Flow run. The seam
@@ -158,10 +161,18 @@ id is the sitting's working-directory name. Nothing else decides scope.
   contested slot leaves the brief, applied or not: a pending rival contests a reviewed
   claim until review settles it, and rejecting the rival (or retiring the loser's record)
   brings the survivor back. A contested pair is a review-queue matter, not brief content:
-  the later claim is routed to review when it is proposed (`conflicting-current-values`), and
-  `brief_excluded.contested` counts what the brief held back. A claim a stated claim by the
-  same speaker replaced (a `succession` edge), or that a retraction withdrew (a `correction`
-  edge), is superseded; a hypothetical or retracted claim asserts nothing about the present.
+  the later claim is routed to review when it is proposed (`conflicting-current-values`), a
+  pending claim the brief holds back for a rival that its own decision never flagged (the
+  earlier of two, or a rival from another writer) is routed on the run that finds the contest
+  and handed to `publish` (`claims.contested_routed`), and `brief_excluded.contested` counts
+  what the brief held back. The same `publish` is therefore called with some decisions again on
+  later runs, which is why it must be idempotent. A claim replaced by a *reviewed* (applied) stated claim
+  of the same speaker in the same slot (a `succession` edge), or withdrawn by that speaker's own
+  retraction of the same value (a `correction` edge), is superseded: an edge from an unreviewed
+  claim replaces nothing and does not make a contest, so the reviewed claim stays in the brief
+  until the replacement is reviewed; another speaker's edge, or an edge into another slot,
+  replaces nothing. Values are read as review left them: a Survey correction presents the
+  reviewer's value, and a claim rejected in review contests nothing; a hypothetical or retracted claim asserts nothing about the present.
   A plan (`proposed` posture) neither contests nor is contested. This is a local stand-in for
   Surface's accumulation projection (surface#359), which owns "which claims are current", is
   merged but unpublished, and needs host-supplied admission decisions. See

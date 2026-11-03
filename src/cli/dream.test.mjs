@@ -568,8 +568,9 @@ test("a resumed plan is routed against the claims, policy and visibility in forc
   const retry = await runDream(host, runOptions(ws));
   assert.equal(retry.sittings.resumed, 1);
   assert.equal(retry.claims.rerouted, 1, "the landed claim now conflicts with the rival");
-  assert.equal(retry.review_items, 1);
-  assert.equal(host.published.at(-1).reviewItems.length, 1, "and the reviewer is told");
+  assert.equal(retry.claims.routed, 2, "the landed claim is routed on resume; the rival is a pending claim the brief now holds back, routed too");
+  assert.equal(retry.review_items, 2);
+  assert.equal(host.published.at(-1).reviewItems.length, 2, "and the reviewer is told about both");
   assert.equal(JSON.parse((await store.listProposals())[0].candidate.body).decision.outcome, "proposed", "the stored plan is untouched");
 });
 
@@ -676,7 +677,7 @@ test("changing the visibility starts a new plan: a half-proposed sitting is not 
   assert.ok(visibilities.some((v) => v.includes("user:other")));
 });
 
-// ── the lock: epochs, so nothing is ever removed from under a live owner ─────────────────────────────────────
+// ── the lock: epochs made whole by a rename, so nothing is ever removed from under a live owner ───────────────
 
 const DEAD = 2 ** 22 + 1;
 function epochDir(lock, n, owner, extra = {}) {
@@ -686,19 +687,19 @@ function epochDir(lock, n, owner, extra = {}) {
   if (extra.released) fs.writeFileSync(path.join(dir, "released"), "\n");
   return dir;
 }
-/** Run `fn` while `hook(target)` runs before every mkdirSync whose target ends with `suffix`, once. */
-function beforeMkdir(suffix, hook, fn) {
-  const original = fs.mkdirSync;
+/** Run `fn` while `hook` runs once, just before the first renameSync whose destination ends with `suffix`. */
+function beforeRename(suffix, hook, fn) {
+  const original = fs.renameSync;
   let fired = false;
-  fs.mkdirSync = (target, ...rest) => {
-    if (!fired && String(target).endsWith(suffix)) {
+  fs.renameSync = (from, to, ...rest) => {
+    if (!fired && String(to).endsWith(suffix)) {
       fired = true;
       hook();
     }
-    return original(target, ...rest);
+    return original(from, to, ...rest);
   };
   syncBuiltinESMExports();
-  try { return fn(); } finally { fs.mkdirSync = original; syncBuiltinESMExports(); }
+  try { return fn(); } finally { fs.renameSync = original; syncBuiltinESMExports(); }
 }
 
 test("lock: a live owner holds it, a released or dead one does not, and the epoch only grows", (t) => {
@@ -713,15 +714,12 @@ test("lock: a live owner holds it, a released or dead one does not, and the epoc
   again();
   assert.deepEqual(fs.readdirSync(lock), ["2"], "the highest epoch stays so a slow caller can never reuse a number");
 
-  // A dead owner, a fresh half-made epoch, and an old one.
   fs.rmSync(lock, { recursive: true });
   epochDir(lock, 3, { pid: DEAD, started_at: 1, token: "dead" });
   acquireDreamLock(lock)();
+  // An epoch with no owner cannot be made by this protocol (it appears whole), so it is corruption, not a caller mid-way.
   fs.rmSync(lock, { recursive: true });
   epochDir(lock, 3, null);
-  assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED", "a fresh epoch with no owner yet is being made, not debris");
-  const old = new Date(Date.now() - 120_000);
-  fs.utimesSync(path.join(lock, "3"), old, old);
   acquireDreamLock(lock)();
   // A live owner is never evicted for being old.
   fs.rmSync(lock, { recursive: true });
@@ -729,15 +727,34 @@ test("lock: a live owner holds it, a released or dead one does not, and the epoc
   assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED");
 });
 
+test("lock: an owner that paused for longer than any grace period is not mistaken for debris, because it was never half-made", (t) => {
+  const dir = tempDir("dream-lock-pause-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lock = path.join(dir, "dream.lock");
+  // A has staged epoch 1 and is about to rename it into place. The pause is long (the clock is not consulted at all).
+  let b;
+  let aRelease;
+  beforeRename(`${path.sep}1`, () => {
+    // While A is paused, B looks: there is no epoch 1 yet, so B makes it.
+    b = acquireDreamLock(lock);
+  }, () => {
+    try { aRelease = acquireDreamLock(lock); } catch (error) { assert.equal(error.code, "DREAM_LOCKED"); }
+  });
+  assert.equal(typeof b, "function", "B owns epoch 1");
+  assert.equal(aRelease, undefined, "A found epoch 1 taken (its rename onto a non-empty directory failed) and saw B's live owner");
+  assert.deepEqual(fs.readdirSync(lock).sort(), ["1"], "A's staging directory is gone");
+  assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED");
+  b();
+});
+
 test("lock: two callers that both found the owner dead cannot both own it", (t) => {
   const dir = tempDir("dream-lock-race-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const lock = path.join(dir, "dream.lock");
   epochDir(lock, 3, { pid: DEAD, started_at: 1, token: "dead" });
-  // A has read epoch 3 as dead and is about to make epoch 4. B makes it first.
   let b;
   let aError;
-  beforeMkdir(`${path.sep}4`, () => { b = acquireDreamLock(lock); }, () => {
+  beforeRename(`${path.sep}4`, () => { b = acquireDreamLock(lock); }, () => {
     try { acquireDreamLock(lock); } catch (error) { aError = error; }
   });
   assert.equal(typeof b, "function", "B took epoch 4");
@@ -751,32 +768,128 @@ test("lock: a caller that was slow enough to be passed by two others backs out a
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const lock = path.join(dir, "dream.lock");
   epochDir(lock, 3, { pid: DEAD, started_at: 1, token: "dead" });
-  // A read epoch 3 as dead. Before A makes epoch 4, B takes and releases 4 and C takes 5, which removes epoch 4.
   let c;
   let aError;
-  beforeMkdir(`${path.sep}4`, () => {
+  beforeRename(`${path.sep}4`, () => {
     acquireDreamLock(lock)();
     c = acquireDreamLock(lock);
-    assert.deepEqual(fs.readdirSync(lock), ["5"], "epoch 4 is gone, so A's mkdir will succeed");
+    assert.deepEqual(fs.readdirSync(lock).filter((name) => !name.startsWith(".stage-")), ["5"], "epoch 4 is gone, so A's rename will succeed");
   }, () => {
     try { acquireDreamLock(lock); } catch (error) { aError = error; }
   });
   assert.equal(typeof c, "function");
   assert.equal(aError?.code, "DREAM_LOCKED", "A made epoch 4, saw epoch 5 above it, and gave way");
   assert.deepEqual(fs.readdirSync(lock), ["5"], "A removed its own epoch and left C's");
-  assert.equal(JSON.parse(fs.readFileSync(path.join(lock, "5", "owner.json"), "utf8")).pid, process.pid);
   assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED", "C still holds it");
   c();
 });
 
-test("lock: debris beside the epochs does not wedge it", (t) => {
+test("lock: failing to remove an older epoch never costs the lock that was won", (t) => {
+  const dir = tempDir("dream-lock-clean-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lock = path.join(dir, "dream.lock");
+  epochDir(lock, 3, { pid: DEAD, started_at: 1, token: "dead" });
+  const original = fs.rmSync;
+  fs.rmSync = (target, ...rest) => {
+    if (String(target).endsWith(`${path.sep}3`)) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+    return original(target, ...rest);
+  };
+  syncBuiltinESMExports();
+  let release;
+  try { release = acquireDreamLock(lock); } finally { fs.rmSync = original; syncBuiltinESMExports(); }
+  assert.equal(typeof release, "function");
+  assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCKED", "the winner holds it, with debris below");
+  release();
+  acquireDreamLock(lock)();
+});
+
+test("lock: debris beside the epochs, and epoch names that are not epochs, do not wedge it", (t) => {
   const dir = tempDir("dream-lock-debris-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const lock = path.join(dir, "dream.lock");
   epochDir(lock, 1, { pid: DEAD, started_at: 1, token: "dead" });
   fs.writeFileSync(path.join(lock, "stray.tmp"), "{");
+  fs.mkdirSync(path.join(lock, ".stage-crashed-0"));
   fs.mkdirSync(path.join(lock, "not-an-epoch"));
   fs.mkdirSync(path.join(lock, "0"));
+  fs.mkdirSync(path.join(lock, "9007199254740993")); // sixteen digits: not read as an epoch
   acquireDreamLock(lock)();
   assert.ok(fs.existsSync(path.join(lock, "2")));
+});
+
+test("lock: an exhausted epoch counter is refused by name instead of wrapping", (t) => {
+  const dir = tempDir("dream-lock-max-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const lock = path.join(dir, "dream.lock");
+  epochDir(lock, 999999999999999, { pid: DEAD, started_at: 1, token: "dead" });
+  assert.throws(() => acquireDreamLock(lock), (error) => error.code === "DREAM_LOCK_EXHAUSTED");
+});
+
+test("the 64-peer limit cannot hide the one rival: a slot with many agreeing claims and one that disagrees still routes", async (t) => {
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const vis = { kind: "restricted", audiences: ["user:owner"] };
+  const claimOf = (value, n) => memoryClaim({ subject: { type: "service", id: "ledger", label: "ledger" }, claimType: "knowledge.memory-claim", property: "rounding mode", value, speaker: "user", source: { ref: "sitting:seed", locator: `chars:0-${n}`, excerpt: `e${n}`, observedAt: "2026-10-01T00:00:00.000Z" }, posture: "stated", visibility: vis });
+  // 80 earlier-sorting claims that agree with the new one, and one that does not.
+  const seed = [...Array.from({ length: 80 }, (_, i) => claimOf("banker's rounding", i)), claimOf("half up", 999)];
+  for (const [i, claim] of seed.entries()) {
+    const entry = { claim, agreement: { passes: 2, agreeing: 2 }, project: null };
+    const decision = routeMemoryChange({ type: "claim", claim, current: [], agreement: entry.agreement, sourceVisibility: vis });
+    await store.proposeCreate({ title: `seed ${i}`, category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: `seed:${i}`, contentHash: "h", visibilityKey: visibilityKey(vis) } }) }, "knowledge.dream", { agent: "x", proposal: "x" });
+  }
+  const one = (content) => (content.includes("banker's rounding") ? [{ quote: "I switched to banker's rounding on the total.", subject: "ledger", subjectType: "service", property: "rounding mode", value: "banker's rounding", posture: "stated" }] : []);
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf: one }));
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.status, "success");
+  const published = host.published.at(-1).decisions.find((d) => d.changeType === "claim" && d.input.claim.value === "banker's rounding" && d.input.claim.source.ref.startsWith("codex:"));
+  assert.equal(published.outcome, "routed", "the lone rival was found among 80 agreeing claims");
+  assert.ok(published.input.current.some((peer) => peer.value === "half up"));
+  assert.ok(published.input.current.length <= 16, "and the decision embeds only the peers that matter");
+  assert.ok(report.claims.created >= 1);
+});
+
+test("a foreign writer's contest of an applied claim reaches the review queue, though no sitting produced it", async (t) => {
+  const { encodeEnvelope, visibilityKey } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract());
+  await runDream(host, runOptions(ws));
+  const [first] = await store.listProposals();
+  await store.applyCreate(first.id, "a-human-reviewer");
+  const mine = JSON.parse(first.candidate.body).claim;
+  const { id: _id, schema_version: _v, ...fields } = mine;
+  const rival = memoryClaim({ ...fields, value: "something else", source: { ...fields.source, locator: "chars:0-1", excerpt: "x" } });
+  const entry = { claim: rival, agreement: { passes: 2, agreeing: 2 }, project: null };
+  const decision = routeMemoryChange({ type: "claim", claim: rival, current: [], agreement: entry.agreement, sourceVisibility: mine.visibility });
+  await store.proposeCreate({ title: "foreign", category: "memory.claim", body: encodeEnvelope({ plan: [entry], index: 0, decision, sitting: { id: "elsewhere:1", contentHash: "h", visibilityKey: visibilityKey(mine.visibility) } }) }, "another-writer", { agent: "x", proposal: "x" });
+  host.published.length = 0;
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.status, "noop", "no new telemetry");
+  assert.equal(report.claims.contested_routed, 1);
+  assert.equal(host.published.length, 1, "and the no-op run still hands the contest to review");
+  assert.equal(host.published[0].reviewItems.length, 1);
+  assert.equal(host.published[0].decisions[0].reasons[0].rule, "conflicting-current-values");
+});
+
+test("an envelope over its byte bound is refused to encode, and a stored claim over the claim bound is unverifiable", async () => {
+  const { encodeEnvelope, decodeEnvelope, MAX_ENVELOPE_BYTES, MAX_CLAIM_BYTES } = await import("../../kits/knowledge/dream/envelope.js");
+  const { memoryClaim, routeMemoryChange } = await import("../../kits/knowledge/adapters/memory-claims/index.mjs");
+  const make = (size) => memoryClaim({ subject: { type: "s", id: "s", label: "s" }, claimType: "knowledge.memory-claim", property: "p", value: "v".repeat(size), speaker: "user", source: { ref: "r", locator: "chars:0-1", excerpt: "e", observedAt: "2026-11-02T00:00:00.000Z" }, posture: "stated", visibility: { kind: "public" } });
+  const entry = (claim) => ({ claim, agreement: null, project: null });
+  const decide = (claim) => routeMemoryChange({ type: "claim", claim, current: [], agreement: null, sourceVisibility: { kind: "public" } });
+  const sitting = { id: "s", contentHash: "h", visibilityKey: "k" };
+
+  const big = make(MAX_CLAIM_BYTES + 100);
+  const body = encodeEnvelope({ plan: [entry(big)], index: 0, decision: decide(big), sitting });
+  assert.equal(decodeEnvelope(body), null, "a claim over the bound is unverifiable even when the rest of the envelope is sound");
+  const ok = make(100);
+  assert.notEqual(decodeEnvelope(encodeEnvelope({ plan: [entry(ok)], index: 0, decision: decide(ok), sitting })), null);
+
+  const huge = { ...decide(ok), pad: "x".repeat(MAX_ENVELOPE_BYTES) };
+  assert.throws(() => encodeEnvelope({ plan: [entry(ok)], index: 0, decision: huge, sitting }), (error) => error.code === "DREAM_PLAN_TOO_LARGE");
 });

@@ -32,17 +32,17 @@ test("a claim that contradicts a current one is routed to review, published once
   const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf }), { publish: (batch) => { published.push(batch); } });
   const report = await runDream(host, runOptions(ws));
 
-  assert.equal(report.claims.routed, 1, "the second sitting's value conflicts with the first's");
-  assert.equal(report.claims.uncontested, 1);
-  assert.equal(report.review_items, 1);
+  assert.equal(report.claims.routed, 2, "the second sitting's value conflicts with the first's, and the first is now contested too");
+  assert.equal(report.claims.contested_routed, 1, "the first was uncontested when proposed; the brief holds it back, so it is routed now");
+  assert.equal(report.review_items, 2);
   assert.equal(published.length, 1);
   const [batch] = published;
   assert.equal(batch.runId, report.run_id);
-  assert.equal(batch.decisions.length, 2);
+  assert.equal(batch.decisions.length, 3, "two proposed, plus the earlier claim routed now");
   assert.deepEqual(batch.decisions.filter((d) => d.outcome === "routed")[0].reasons.map((r) => r.rule), ["conflicting-current-values"]);
-  assert.equal(batch.reviewItems.length, 1);
+  assert.equal(batch.reviewItems.length, 2);
   assert.equal(batch.reviewItems[0].spec.candidates.length, 2, "a current/proposed pair for the reviewer");
-  assert.equal(batch.metrics.routed, 1);
+  assert.equal(batch.metrics.routed, 2);
   assert.ok((await store.listProposals()).every((proposal) => proposal.state === "pending"), "routed or not, the run only proposes");
   assert.equal(store.records.size, 0);
 });
@@ -229,6 +229,17 @@ test("CLI: a host module that does not load, or whose factory throws, is a confi
   }
 });
 
+test("CLI: a host factory that returns nothing is a configuration error (exit 2)", async (t) => {
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const config = writeConfig(ws);
+  const parsed = JSON.parse(fs.readFileSync(config, "utf8"));
+  const host = path.join(ws.root, "nothing.mjs");
+  fs.writeFileSync(host, "export async function createDreamHost() { return undefined; }", { mode: 0o600 });
+  fs.writeFileSync(config, JSON.stringify({ ...parsed, host }), { mode: 0o600 });
+  assert.equal(await main(["run", "--config", config], { stdout: sink(), stderr: sink() }), 2);
+});
+
 test("CLI: exit code 75 when another run holds the lock", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);
@@ -401,7 +412,7 @@ test("the invocation contract a host scheduler binds to is pinned: ids, exports,
   assert.equal(report.schema_version, "1.0");
   assert.equal(report.trigger, "station-scheduler");
   assert.deepEqual(Object.keys(report.sittings).sort(), ["deferred_incomplete", "deferred_over_cap", "distilled", "resumed", "reused", "seen"]);
-  assert.deepEqual(Object.keys(report.claims).sort(), ["created", "distilled", "peers_capped", "rejected", "rerouted", "reused", "routed", "truncated", "uncontested"]);
+  assert.deepEqual(Object.keys(report.claims).sort(), ["contested_routed", "created", "distilled", "peers_capped", "rejected", "rerouted", "reused", "routed", "truncated", "uncontested"]);
   assert.ok(["success", "noop", "dry-run", "blocked", "failed"].includes(report.status));
   assert.ok(fs.existsSync(path.join(ws.dreamDir, "reports", `${report.run_id}.json`)));
 });

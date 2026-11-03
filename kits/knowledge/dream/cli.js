@@ -64,6 +64,7 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
       if (typeof module.createDreamHost !== "function") throw dreamError("DREAM_CONFIG_INVALID", "the host module must export createDreamHost");
       // A dry run is read-only all the way down: the host is told, so it opens its store without creating anything.
       host = await module.createDreamHost({ config, dryRun: args.dryRun });
+      if (!host || typeof host !== "object") throw dreamError("DREAM_CONFIG_INVALID", "createDreamHost must return the host object");
     } catch (error) {
       if (error?.code === "DREAM_CONFIG_INVALID") throw error;
       throw dreamError("DREAM_CONFIG_INVALID", `the host module failed to load: ${String(error?.message ?? error).slice(0, 200)}`);

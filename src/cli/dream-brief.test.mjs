@@ -9,7 +9,7 @@ import test from "node:test";
 import { buildReviewDecisionsFromSession, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
 import { INJECTED_MEMORY_CLOSE, INJECTED_MEMORY_OPEN } from "../../kits/knowledge/memory-marker.js";
 import { buildMemoryReviewItem, memoryClaim, routeMemoryChange } from "../../kits/knowledge/adapters/memory-claims/index.mjs";
-import { classifyCurrent, compileBrief, isEligible, isSealed, rankItems, writeBriefs } from "../../kits/knowledge/dream/brief.js";
+import { classifyCurrent, compileBrief, effectiveItems, isEligible, isSealed, rankItems, writeBriefs } from "../../kits/knowledge/dream/brief.js";
 import { runDream } from "../../kits/knowledge/dream/run.js";
 import { truncateUtf8 } from "../../kits/knowledge/dream/util.js";
 import { FakeCorpusStore, NOW_ISO, hostFor, noApplyStore, runOptions, scriptedExtract, tempDir, workspace } from "./dream-support.mjs";
@@ -129,6 +129,63 @@ test("a replaced claim is not current, and its successor is; a retraction remove
   assert.deepEqual(out.notCurrent.map((i) => i.claim.id), [retraction.claim.id], "and the retraction itself is not a current claim");
 });
 
+test("authority to replace: only a reviewed claim, in the same slot, by the same speaker, can take another out of the brief", () => {
+  const old = item({ ...slot, value: "PostgreSQL 15" });
+  const edge = (target, kind = "succession") => [{ claimId: target.claim.id, kind, reason: "the speaker said so" }];
+
+  const pending = item({ ...slot, value: "PostgreSQL 16", state: "pending", supersedes: edge(old) });
+  const holds = classifyCurrent([old, pending]);
+  assert.deepEqual(values(holds.current), ["PostgreSQL 15", "PostgreSQL 16"], "an unreviewed replacement takes nothing out, and the pair is a replacement, not a contest");
+  assert.equal(holds.superseded.length + holds.contested.length, 0);
+  assert.deepEqual(values(rankItems([old, pending], { now: NOW_ISO })), ["PostgreSQL 15"], "the reviewed claim stays in the brief until the replacement is reviewed");
+
+  const elsewhere = item({ subject: "db", property: "backup schedule", value: "nightly" });
+  const crossSlot = item({ ...slot, value: "x", posture: "retracted", supersedes: edge(elsewhere, "correction") });
+  assert.deepEqual(values(classifyCurrent([elsewhere, crossSlot]).current), ["nightly"], "an edge into another slot replaces nothing");
+
+  const foreignRetraction = item({ ...slot, value: "PostgreSQL 15", posture: "retracted", speaker: "assistant", supersedes: edge(old, "correction") });
+  assert.deepEqual(values(classifyCurrent([old, foreignRetraction]).current), ["PostgreSQL 15"], "someone else's retraction does not withdraw a claim");
+
+  const differentValue = item({ ...slot, value: "MySQL", posture: "retracted", supersedes: edge(old, "correction") });
+  assert.deepEqual(values(classifyCurrent([old, differentValue]).current), ["PostgreSQL 15"], "a retraction withdraws the value it names, not a different one");
+
+  const own = item({ ...slot, value: "PostgreSQL 15", posture: "retracted", supersedes: edge(old, "correction") });
+  assert.deepEqual(values(classifyCurrent([old, own]).superseded), ["PostgreSQL 15"], "the speaker withdrawing their own assertion does");
+});
+
+test("review's corrections are seen: two claims that agreed and then disagree after a Survey edit are a contest, and a rejected claim contests nothing", () => {
+  const a = item({ ...slot, value: "PostgreSQL 15" });
+  const b = item({ ...slot, value: "PostgreSQL 15" });
+  assert.equal(classifyCurrent(effectiveItems([a, b], []).views).contested.length, 0);
+  const decisions = surveyDecision(b, { decision: "accept-proposed", editedValue: "PostgreSQL 16" });
+  const { views, byView } = effectiveItems([a, b], decisions);
+  const out = classifyCurrent(views);
+  assert.deepEqual(out.contested.map((v) => byView.get(v).claim.id).sort(), [a.claim.id, b.claim.id].sort());
+  const brief = compileBrief(rankItems([a, b], { now: NOW_ISO, reviewDecisions: decisions }), { budget: 2048, reviewDecisions: decisions });
+  assert.deepEqual(brief.entries, [], "neither the extracted value nor the corrected one is shown while they disagree");
+
+  const rival = item({ ...slot, value: "MySQL" });
+  const rejected = surveyDecision(rival, { decision: "reject-proposed" });
+  assert.deepEqual(values(rankItems([a, rival], { now: NOW_ISO, reviewDecisions: rejected })), ["PostgreSQL 15"], "a rival rejected in review no longer contests");
+});
+
+test("multiValued matches the way routing matches it: case, spacing and compatibility forms are folded", () => {
+  const a = item({ ...slot, property: "Primary  Language", value: "Go" });
+  const b = item({ ...slot, property: "Primary  Language", value: "Rust" });
+  assert.equal(classifyCurrent([a, b], { multiValued: ["  primary language "] }).contested.length, 0);
+  assert.equal(classifyCurrent([a, b], { multiValued: ["ｐｒｉｍａｒｙ ｌａｎｇｕａｇｅ"] }).contested.length, 0, "full-width forms fold (NFKC)");
+  assert.equal(classifyCurrent([a, b], { multiValued: ["something else"] }).contested.length, 2);
+});
+
+test("classification stays cheap on large equal values: one slot of 1,000 claims with 6 KB values", () => {
+  const big = "x".repeat(6000);
+  const many = Array.from({ length: 1000 }, (_, i) => item({ ...slot, value: big, observedAt: new Date(Date.parse(NOW_ISO) - i * 1000).toISOString() }));
+  const started = Date.now();
+  const out = classifyCurrent(many);
+  assert.equal(out.current.length, 1000);
+  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+});
+
 test("a sealed claim still contests: disagreement does not depend on who may read it", () => {
   const a = item({ ...slot, value: "PostgreSQL 15" });
   const sealed = item({ ...slot, value: "PostgreSQL 16", visibility: null });
@@ -166,8 +223,8 @@ test("end to end: conflicting claims from two sittings reach neither the brief n
   };
   const host = hostFor(ws, noApplyStore(store), await scriptedExtract({ claimsOf }));
   const first = await runDream(host, runOptions(ws));
-  assert.equal(first.claims.routed, 1, "the later claim was routed to review, which is where a contested claim belongs");
-  assert.equal(host.published.at(-1).reviewItems.length, 1);
+  assert.equal(first.claims.routed, 2, "the later claim was routed when proposed, and the earlier is routed now that it is contested");
+  assert.equal(host.published.at(-1).reviewItems.length, 2, "so each side of the contest is in the review queue");
   for (const proposal of await store.listProposals()) await store.applyCreate(proposal.id, "a-human-reviewer");
 
   const report = await runDream(host, runOptions(ws));
