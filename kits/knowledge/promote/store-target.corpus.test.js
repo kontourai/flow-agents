@@ -29,6 +29,10 @@ test('Corpus stages an unreviewed proposal without a working-set record', { skip
   const record = await store.get(recordId);
   assert.equal(record.body, 'Distilled fixture');
   assert.equal(record.provenance.note, proposal.candidate.provenance.note);
+  const rejectedId = await store.proposeCreate(proposal.candidate, 'distiller', proposal.evidence);
+  await store.rejectCreate(rejectedId, 'independent-reviewer', 'Not needed');
+  assert.equal((await store.getProposal(rejectedId)).state, 'rejected');
+  assert.equal((await store.listByType('raw')).length, 1);
 });
 
 test('the host registry exposes the authorized root through the real MCP server', { skip: !process.env.CORPUS_STORE_ENTRY || !process.env.KNOWLEDGE_HOST_ROOT }, async (t) => {
