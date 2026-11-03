@@ -39,7 +39,7 @@ test('identical batch retries reuse receipts and changed content conflicts', asy
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wi2-retry-'));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const root = path.join(base, 'memory');
-  const store = new KitDefaultStoreAdapter({ storeRoot: root, coordinationDirectory: path.join(base, 'coordination'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock });
+  const store = new KitDefaultStoreAdapter({ storeRoot: root, coordinationDirectory: path.join(base, 'coordination'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock, allowPurge: true });
   const candidates = [{ title: 'First', body: 'One', category: 'memory.learning' }, { title: 'Second', body: 'Two', category: 'memory.learning' }];
   let calls = 0;
   const unreliable = { proposeCreate: async (...args) => { const id = await store.proposeCreate(...args); if (++calls === 2) throw new Error('response lost after commit'); return id; } };
@@ -61,6 +61,10 @@ test('identical batch retries reuse receipts and changed content conflicts', asy
   await assert.rejects(runPromote({ ...options, store, candidates: [candidates[0], { ...candidates[1], category: 'Invalid Category!' }] }), (error) => error.code === 'MISSING_EVIDENCE' && error.failedCandidateIndex === 1 && error.completedProposals[0] === retried.proposals[0]);
   await assert.rejects(runPromote({ ...options, store, residue: { ...residue, provenance: { ...residue.provenance, transcriptRef: 'another-transcript.jsonl' } } }), (error) => error.code === 'REQUEST_KEY_CONFLICT');
   assert.equal((await store.listProposals({ state: 'pending' })).length, 1);
+  assert.equal((await store.listByType('raw')).length, 0);
+  const created = await store.applyCreate(retried.proposals[1], 'independent-reviewer');
+  await store.purge([created], { agent: 'independent-reviewer', rationale: 'erase' });
+  await assert.rejects(runPromote({ ...options, store }), (error) => error.code === 'REQUEST_KEY_CONFLICT' && error.failedCandidateIndex === 1);
   assert.equal((await store.listByType('raw')).length, 0);
 });
 

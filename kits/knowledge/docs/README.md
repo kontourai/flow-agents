@@ -844,14 +844,17 @@ this requirement. The host protocol is tracked in
 
 Each candidate is sent through `proposeCreate(candidate, proposerId, evidence,
 { requestKey })`. The opaque key hashes the sitting ID and candidate position; it contains no source text. Replaying the
-same ordered batch returns the original proposal IDs. Changed content or provenance at an
+same ordered batch returns the original proposal IDs while the key remains active.
+If the key is retired after a purge or scrub, Corpus refuses the replay. Changed
+content or provenance at an
 occupied position is refused as `REQUEST_KEY_CONFLICT`. The proposer identity
 is part of the stored request, so changing it at the same sitting and position
 also conflicts rather than creating another proposal. A changed sitting must
 be reconciled by the host; this bridge does not replace earlier proposals.
 The candidate provenance note encodes the session ID, transcript reference,
-sitting ID and content hash pending the structured provenance contract in
-[Corpus #46](https://github.com/kontourai/corpus/issues/46). This is a proposal request, not an approval or an applied
+sitting ID and producer-supplied content hash pending the structured provenance
+contract in [Corpus #46](https://github.com/kontourai/corpus/issues/46). The bridge validates the
+hash shape but does not recompute it from turns. This is a proposal request, not an approval or an applied
 record; the Corpus #40 contract owns persistence, review, and exclusion from
 ordinary reads. Reviewers use Corpus `applyCreate` or `rejectCreate`; this
 bridge invokes neither operation. Extraction and scheduling are not provided
@@ -862,8 +865,10 @@ not remove or reconcile previously staged proposals. The adapter/root binding is
 protocol remains subject to [#753](https://github.com/kontourai/flow-agents/issues/753). An
 error from `proposeCreate` carries already returned proposal IDs and the
 failed candidate index. A request-key conflict and Corpus `MISSING_EVIDENCE`
-are surfaced as definite refusals for the failed candidate. Other failures have an indeterminate outcome
-and require an identical retry or reconciliation. A refusal at an already-used
+are surfaced as definite refusals for the failed candidate. Other failures are
+conservatively reported as indeterminate, including coded errors not explicitly
+recognized here; inspect the cause and reconcile or retry
+only the identical batch. A refusal at an already-used
 position does not establish whether that key was previously occupied.
 Returned `posture: "proposed"` names the submitted intent; `review_state: "not_observed"` means it is not evidence
 of the current proposal state. Query Corpus before treating a replayed receipt
