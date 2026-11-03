@@ -112,6 +112,46 @@ test("supersedes edges: a succession needs the speaker to say it replaces AND a 
   assert.equal(later.result.claims.find(claim => claim.posture === "hypothetical").supersedes, undefined);
 });
 
+/** Proposals for one claim in Traverse's normalised shape (declared path form plus the stripped index). */
+function proposalsFor(fields, quote = "x") {
+  return Object.entries(fields).map(([name, candidateValue]) => ({ fieldPath: `claims[].${name}`, candidateValue, pathIndices: [0], provenance: { excerpt: quote, locator: "chars:0-1" }, extractor: "test" }));
+}
+const assembleOne = (fields, context = {}) => assembleMemoryClaims({ proposals: proposalsFor(fields) }, { sourceRef: "s", locate: () => ({ observedAt: "2026-11-01T00:00:00.000Z", role: "user" }), ...context });
+const WIDGET = { subject: "widget service", subjectType: "service", property: "primary database", posture: "stated" };
+
+test("supersedes edges are only drawn where all of the evidence is present", async () => {
+  const { earlier } = await fixtureClaims();
+  const old = earlier.result.claims.find(claim => claim.property === "primary database"); // PostgreSQL 15, no valid time
+  const owner = earlier.result.claims.find(claim => claim.property === "on-call owner");
+  const current = earlier.result.claims;
+  const edges = fields => assembleOne({ ...WIDGET, ...fields }, { current }).claims[0].supersedes;
+
+  assert.deepEqual(edges({ value: "PostgreSQL 16", validFrom: "2026-10-30", replacesPrior: true })?.map(edge => edge.claimId), [old.id], "the control: all evidence present");
+  assert.equal(edges({ value: "PostgreSQL 16", validFrom: "2026-10-30" }), undefined, "no speaker intent: a different value is a conflict, not a succession");
+  assert.equal(edges({ value: "PostgreSQL 16", replacesPrior: true }), undefined, "no start time");
+  assert.equal(edges({ value: "PostgreSQL 15", validFrom: "2026-10-30", replacesPrior: true }), undefined, "the same value replaces nothing");
+  assert.equal(edges({ value: "PostgreSQL 16", validFrom: "2026-10-30", replacesPrior: true, subject: "billing service" }), undefined, "another subject");
+
+  // The predecessor is bounded and ended before the successor starts: nothing to supersede.
+  const ended = memoryClaim({ ...old, validTime: { until: "2026-10-01" } });
+  assert.equal(assembleOne({ ...WIDGET, value: "PostgreSQL 16", validFrom: "2026-10-30", replacesPrior: true }, { current: [ended] }).claims[0].supersedes, undefined, "valid times that do not overlap");
+  // A predecessor that was itself only a plan is not superseded by a statement.
+  const planned = memoryClaim({ ...old, posture: "proposed" });
+  assert.equal(assembleOne({ ...WIDGET, value: "PostgreSQL 16", validFrom: "2026-10-30", replacesPrior: true }, { current: [planned] }).claims[0].supersedes, undefined);
+
+  const retract = fields => assembleOne({ subject: "widget service", subjectType: "service", property: "on-call owner", posture: "retracted", ...fields }, { current }).claims[0].supersedes;
+  assert.deepEqual(retract({ value: "Maya Chen" })?.map(edge => [edge.claimId, edge.kind]), [[owner.id, "correction"]], "the control");
+  assert.equal(retract({ value: "Someone Else" }), undefined, "retracting a value nobody held corrects nothing");
+});
+
+test("a value the extractor cannot place in a turn of the source is not a claim", () => {
+  const out = assembleOne({ ...WIDGET, value: "PostgreSQL 16" }, { locate: () => undefined });
+  assert.equal(out.claims.length, 0);
+  assert.match(out.rejected[0].reason, /not grounded in a known turn/);
+  const unscoped = assembleMemoryClaims({ proposals: proposalsFor({ ...WIDGET, value: "x" }).map(p => ({ ...p, provenance: { excerpt: "x", locator: "somewhere" } })) }, { sourceRef: "s", locate: () => ({ observedAt: "t" }) });
+  assert.equal(unscoped.claims.length, 0, "a locator that is not chars:<start>-<end> is not a grounding");
+});
+
 test("agreement counts passes that found the same claim; a pass that did not is a pass that disagreed", async () => {
   const { earlier, later } = await fixtureClaims();
   const budget = earlier.result.claims.find(claim => claim.property === "retry budget");
