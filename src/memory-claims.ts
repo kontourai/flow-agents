@@ -141,8 +141,11 @@ export const memoryValuesEqual = (a: unknown, b: unknown): boolean => canonicalJ
 export const memorySlotKey = (claim: Pick<MemoryClaim, "subject" | "property" | "claimType" | "qualifiers">): string =>
   canonicalJson([claim.claimType.trim().toLowerCase(), canonicalClaimKey({ subjectType: claim.subject.type, subjectId: claim.subject.id, fieldOrBehavior: claim.property, ...(claim.qualifiers ? { qualifiers: claim.qualifiers } : {}) })]);
 
-const INSTANT = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
-/** Parses an ISO 8601 date or zoned date-time (a bare date is midnight UTC); undefined for anything else, including prose Date.parse would guess at. */
+const INSTANT = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2}))?$/;
+/**
+ * Parses an ISO 8601 date or zoned date-time (a bare date is midnight UTC) to millisecond precision; undefined for anything
+ * else, including prose Date.parse would guess at and fractions finer than a millisecond, which it would silently drop.
+ */
 export function memoryInstant(value: string | undefined): number | undefined {
   if (value === undefined || !INSTANT.test(value)) return undefined;
   const ms = Date.parse(value);
@@ -209,6 +212,7 @@ export function assertMemoryClaim(value: unknown): asserts value is MemoryClaim 
     isObject(edge) && /^sha256:[0-9a-f]{64}$/.test(String(edge.claimId)) && (edge.kind === "correction" || edge.kind === "succession") && nonEmpty(edge.reason)))) {
     throw new MemoryClaimError("invalid", "supersedes edges need a claim id, kind and reason");
   }
+  if (value.supersedes !== undefined && value.posture !== "stated" && value.posture !== "retracted") throw new MemoryClaimError("invalid", "only a stated or retracted claim can supersede another: a plan or a what-if asserts nothing about the present");
   if (value.validTime !== undefined) {
     if (!isObject(value.validTime)) throw new MemoryClaimError("invalid", "validTime must be an object");
     memoryIntervalsOverlap(value.validTime as MemoryClaim["validTime"], undefined);
@@ -246,16 +250,20 @@ const FIELD = /^claims\[\]\.(\w+)$/;
  */
 export function assembleMemoryClaims(result: ExtractionResultLike, context: AssembleContext): { claims: MemoryClaim[]; rejected: RejectedProposalGroup[] } {
   const groups = new Map<number, Record<string, ExtractionProposalLike>>();
+  let unindexed = 0;
   for (const proposal of result.proposals) {
     const field = FIELD.exec(proposal.fieldPath)?.[1];
+    if (field === undefined) continue;
     const index = proposal.pathIndices?.[0];
-    if (field === undefined || index === undefined) continue;
+    if (index === undefined) { unindexed++; continue; }
     const group = groups.get(index) ?? {};
     // Two proposals for one field of one claim: keep the first, which is the provider's primary answer.
     group[field] ??= proposal;
     groups.set(index, group);
   }
   const claims: MemoryClaim[] = [], rejected: RejectedProposalGroup[] = [];
+  // A claim field with no claim index cannot be grouped into a claim; say so rather than let it vanish.
+  if (unindexed) rejected.push({ index: -1, reason: `${unindexed} claim field proposal(s) carry no claim index and cannot be grouped` });
   for (const [index, fields] of [...groups].sort((x, y) => x[0] - y[0])) {
     try {
       claims.push(assemble(fields, context));

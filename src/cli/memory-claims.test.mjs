@@ -213,6 +213,40 @@ test("equivalent spellings of one instant are one value; early years and leap da
   }
 });
 
+test("precision finer than a millisecond is refused rather than silently dropped; coarser is normalised", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const finding = validFrom => ({ quote, subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated", validFrom });
+  const run = async validFrom => distillMemoryClaims({ sitting, passes: 1, extract: traverseExtract(scriptedProvider([[finding(validFrom)]])) });
+  for (const refused of ["2026-01-01T00:00:00.0001Z", "2026-01-01T00:00:00.1234Z", "2026-01-01T00:00:00.000000001Z"]) {
+    const result = await run(refused);
+    assert.equal(result.claims.length, 0, refused);
+    assert.equal(result.rejected.length, 1, `${refused} is reported`);
+  }
+  for (const [given, stored] of [["2026-01-01T00:00:00.1Z", "2026-01-01T00:00:00.100Z"], ["2026-01-01T00:00:00.12Z", "2026-01-01T00:00:00.120Z"], ["2026-01-01T00:00:00.123Z", "2026-01-01T00:00:00.123Z"]]) {
+    assert.equal((await run(given)).claims[0].validTime.from, stored, given);
+  }
+});
+
+test("a claim field the extractor gave no claim index cannot vanish: it is reported", () => {
+  const out = assembleMemoryClaims({ proposals: [
+    { fieldPath: "claims[].value", candidateValue: "x", provenance: { excerpt: "x", locator: "chars:0-1" } },
+    { fieldPath: "claims[].property", candidateValue: "p", provenance: { excerpt: "x", locator: "chars:0-1" } },
+  ] }, { sourceRef: "s", locate: () => ({ observedAt: "t" }) });
+  assert.equal(out.claims.length, 0);
+  assert.deepEqual(out.rejected, [{ index: -1, reason: "2 claim field proposal(s) carry no claim index and cannot be grouped" }]);
+  const none = assembleMemoryClaims({ proposals: [{ fieldPath: "somethingElse", candidateValue: 1, provenance: { excerpt: "x", locator: "chars:0-1" } }] }, { sourceRef: "s", locate: () => ({ observedAt: "t" }) });
+  assert.deepEqual(none, { claims: [], rejected: [] }, "a path outside claims[] is not ours to report");
+});
+
+test("only a stated or retracted claim can carry a supersedes edge", async () => {
+  const { earlier } = await fixtureClaims();
+  const claim = earlier.result.claims[0];
+  const edge = [{ claimId: claim.id, kind: "succession", reason: "r" }];
+  for (const posture of ["stated", "retracted"]) assert.doesNotThrow(() => assertMemoryClaim(memoryClaim({ ...claim, value: "x", posture, supersedes: edge })), posture);
+  for (const posture of ["hypothetical", "proposed"]) assert.throws(() => assertMemoryClaim(memoryClaim({ ...claim, value: "x", posture, supersedes: edge })), { code: "invalid" }, posture);
+});
+
 test("a failed pass is reported and counts against agreement instead of vanishing", async () => {
   const sitting = loadSittings()[0];
   const real = traverseExtract(scriptedProvider([[{ quote: "The widget service uses PostgreSQL 15 as its primary database.", subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated" }]]));

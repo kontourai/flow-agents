@@ -49,12 +49,18 @@ interface Location { runId: string; gate: string; cwd?: string }
 // serialised here, which makes them exact. Across processes a lost race can leave a duplicate of an identical routing
 // batch (readers dedupe by decision id) or two live metrics entries (readers take the last); it cannot lose or corrupt one.
 const tails = new Map<string, Promise<unknown>>();
+/**
+ * The real path of a directory, so two spellings of it (/var and /private/var) share a chain. A directory that does
+ * not exist yet is resolved through its nearest existing ancestor, so an alias made later still maps to the same key.
+ */
+export function canonicalRunPath(dir: string): string {
+  try { return realpathSync(dir); } catch {
+    const parent = path.dirname(dir);
+    return parent === dir ? dir : path.join(canonicalRunPath(parent), path.basename(dir));
+  }
+}
 function serialized<T>(where: Location, work: () => Promise<T>): Promise<T> {
-  // Real path, so two spellings of one directory (a symlink, /tmp vs /private/tmp) share a chain.
-  const dir = path.resolve(where.cwd ?? process.cwd());
-  let real = dir;
-  try { real = realpathSync(dir); } catch { /* not there yet: the operation itself will say so */ }
-  const key = `${real}\0${where.runId}`;
+  const key = `${canonicalRunPath(path.resolve(where.cwd ?? process.cwd()))}\0${where.runId}`;
   const run = (tails.get(key) ?? Promise.resolve()).then(work, work);
   const tail = run.catch(() => undefined);
   tails.set(key, tail);
@@ -93,7 +99,13 @@ async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceE
  * does not double-record.
  */
 export async function recordMemoryRoutingEvidence(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
-  return (await serialized(input, () => recordRouting(input))).entry;
+  return (await serialized(input, async () => {
+    const recorded = await recordRouting(input);
+    // Metrics are derived from what is recorded, so recording more decisions refreshes them in the same unit; a
+    // caller of this lower-level writer cannot leave them describing fewer decisions than the run holds.
+    if (recorded.created) await refreshMetrics(input);
+    return recorded;
+  })).entry;
 }
 async function recordRouting(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<{ entry: FlowEvidenceEntry; created: boolean }> {
   for (const decision of input.decisions) {
@@ -225,20 +237,44 @@ export async function runMemoryRouting(input: Location & {
 async function recordReview(input: Location & { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): Promise<void> {
   const known = await readReview(input.runId, input.cwd);
   const seen = new Set([...known.decisions, ...known.events].map(item => canonicalJson(item)));
-  const fresh = <T extends object>(items: readonly T[] | undefined, kind: string): T[] => (items ?? []).filter(item => {
-    if (!item || (item as { kind?: unknown }).kind !== kind) throw new MemoryClaimError("invalid", `review input is not a Survey ${kind}`);
-    return !seen.has(canonicalJson(item));
+  // Everything is validated before anything is attached: evidence that later breaks every refresh cannot be removed.
+  for (const decision of input.reviewDecisions ?? []) assertReviewDecision(decision);
+  for (const event of input.reviewEvents ?? []) assertReviewEvent(event);
+  const fresh = <T extends object>(items: readonly T[] | undefined): T[] => (items ?? []).filter(item => {
+    const key = canonicalJson(item);
+    if (seen.has(key)) return false;
+    seen.add(key); // a repeat inside this batch is a repeat too
+    return true;
   });
-  const decisions = fresh(input.reviewDecisions, "ReviewDecision"), events = fresh(input.reviewEvents, "ReviewSessionEvent");
+  const decisions = fresh(input.reviewDecisions), events = fresh(input.reviewEvents);
   if (decisions.length === 0 && events.length === 0) return;
   const record: MemoryReviewRecord = { schema_version: MEMORY_ROUTING_VERSION, runId: input.runId, decisions, events };
   await attachJson(input, MEMORY_REVIEW_EVIDENCE_KIND, record);
+}
+
+const isRecord = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
+const goodInstant = (value: unknown): boolean => typeof value === "string" && Number.isFinite(Date.parse(value));
+const bad = (what: string): never => { throw new MemoryClaimError("invalid", `review input: ${what}`); };
+/** The shape of a Survey ReviewDecision the metrics read: its item, a status Survey defines, and a time. */
+function assertReviewDecision(value: unknown): void {
+  if (!isRecord(value) || value.kind !== "ReviewDecision" || !isRecord(value.spec) || !isRecord(value.metadata)) return bad("not a Survey ReviewDecision");
+  const { spec, metadata } = value;
+  if (typeof metadata.name !== "string" || !metadata.name || typeof spec.reviewItemName !== "string" || !spec.reviewItemName) return bad("a decision needs a name and the review item it decides");
+  if (!["verified", "assumed", "rejected", "proposed"].includes(spec.status)) return bad(`a decision has a status Survey does not define: ${String(spec.status)}`);
+  if (!goodInstant(spec.reviewedAt)) return bad("a decision needs a reviewedAt that is a date-time");
+}
+/** The shape of a Survey ReviewSessionEvent the review-time figure reads. */
+function assertReviewEvent(value: unknown): void {
+  if (!isRecord(value) || value.kind !== "ReviewSessionEvent" || !isRecord(value.spec)) return bad("not a Survey ReviewSessionEvent");
+  const { spec } = value;
+  if (typeof spec.sessionName !== "string" || !spec.sessionName || !Number.isInteger(spec.sequence) || typeof spec.eventType !== "string" || !goodInstant(spec.occurredAt)) return bad("an event needs a session, an integer sequence, a type and an occurredAt that is a date-time");
 }
 
 /** All review state recorded for a run, across batches, once each. */
 async function readReview(runId: string, cwd?: string): Promise<{ decisions: ReviewDecision[]; events: ReviewSessionEvent[] }> {
   const decisions = new Map<string, ReviewDecision>(), events = new Map<string, ReviewSessionEvent>();
   for (const { value } of await readStored<MemoryReviewRecord>(runId, cwd, MEMORY_REVIEW_EVIDENCE_KIND)) {
+    if (value.schema_version !== MEMORY_ROUTING_VERSION || value.runId !== runId) throw new MemoryClaimError("invalid", "a review record belongs to another run or an unsupported version");
     for (const decision of value.decisions) decisions.set(canonicalJson(decision), decision);
     for (const event of value.events) events.set(canonicalJson(event), event);
   }

@@ -382,16 +382,20 @@ export type MemoryReviewOutcome = "confirmed" | "corrected" | "rejected" | "held
 export function memoryReviewOutcome(decision: ReviewDecision, itemName: string): MemoryReviewOutcome {
   const { status, resolution, candidateId, editedValue } = decision.spec;
   if (status === "rejected" || candidateId === `${itemName}.current`) return "rejected";
-  if (status === "proposed" || resolution === "held" || resolution === "could_not_confirm") return "held";
+  // A deciding status is verified or assumed; proposed (the workbench's "could not confirm") and anything Survey does not define is undecided.
+  if ((status !== "verified" && status !== "assumed") || resolution === "held" || resolution === "could_not_confirm") return "held";
   return editedValue !== undefined ? "corrected" : "confirmed";
 }
 
-/** Latest decision per review item. A tie on time keeps the later array entry. */
+/** When a value is an instant, as a number; anything else sorts before every real instant, so it never beats one. */
+const instantOf = (text: string | undefined): number => { const ms = text === undefined ? NaN : Date.parse(text); return Number.isFinite(ms) ? ms : -Infinity; };
+
+/** Latest decision per review item, by instant (`11:00+02:00` is earlier than `10:00Z`, whatever the text says). A tie keeps the later array entry. */
 function latestDecisions(decisions: readonly ReviewDecision[]): Map<string, ReviewDecision> {
   const latest = new Map<string, ReviewDecision>();
   for (const decision of decisions) {
     const name = decision.spec.reviewItemName, previous = latest.get(name);
-    if (!previous || (decision.spec.reviewedAt ?? "") >= (previous.spec.reviewedAt ?? "")) latest.set(name, decision);
+    if (!previous || instantOf(decision.spec.reviewedAt) >= instantOf(previous.spec.reviewedAt)) latest.set(name, decision);
   }
   return latest;
 }
@@ -415,9 +419,11 @@ export interface MemoryRunMetrics {
 
 /** Selection-to-submission seconds for a decision, or undefined when the events do not show both. */
 function reviewDwell(decision: ReviewDecision, itemName: string, events: readonly ReviewSessionEvent[]): number | undefined {
+  // The submission of THIS decision. Sequence numbers are per session, so across sessions the latest submission by
+  // time is the one; the sequence only orders submissions within one session.
   const submitted = events.filter(event => event.spec.eventType === "decision-submitted" && event.spec.reviewItemName === itemName
-    && (!event.spec.reviewDecisionName || event.spec.reviewDecisionName === decision.metadata.name));
-  const end = submitted.sort((x, y) => y.spec.sequence - x.spec.sequence)[0];
+    && event.spec.reviewDecisionName === decision.metadata.name);
+  const end = submitted.sort((x, y) => instantOf(y.spec.occurredAt) - instantOf(x.spec.occurredAt) || y.spec.sequence - x.spec.sequence)[0];
   if (!end) return undefined;
   const start = events.filter(event => event.spec.eventType === "item-selected" && event.spec.sessionName === end.spec.sessionName
     && (event.spec.reviewItemName ?? event.spec.activeItemName) === itemName && event.spec.sequence < end.spec.sequence)

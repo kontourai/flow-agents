@@ -611,3 +611,56 @@ test("recall withholds, and reports, a claim with no posture, a tampered claim, 
   const accepted = presentMemoryClaims(later.result.claims, { routing: second, reviewDecisions: confirmed });
   assert.equal(accepted.presented.find(claim => claim.id === retry.changeId).review.label, "confirmed");
 });
+
+// --- review round 3: which decision, and whose time ----------------------------------------------------------------
+
+function twoDecisions(first, second) {
+  const c = make({ value: "16", source: { ...base.source, ref: "s-order" } });
+  const decision = routeMemoryChange(change(c, { current: [make()] }));
+  const item = buildMemoryReviewItem(decision);
+  const session = (verdict, at) => ({ ...initialReviewQueueSessionState([item]), actorId: "person:reviewer", reviewedAt: at, decisionsByItemName: { [item.metadata.name]: verdict } });
+  return { c, decision, item, session, made: [first, second].map(([verdict, at]) => buildReviewDecisionsFromSession(session(verdict, at))[0]) };
+}
+
+test("the later decision stands by instant, not by how the timestamp is spelled", () => {
+  // 11:00+02:00 is 09:00Z, which is BEFORE 10:00Z, though it sorts after as text.
+  const { decision, made } = twoDecisions(["accept-proposed", "2026-11-02T11:00:00+02:00"], ["reject-proposed", "2026-11-02T10:00:00Z"]);
+  for (const order of [made, [...made].reverse()]) {
+    const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: order });
+    assert.deepEqual([metrics.reviewer.confirmed, metrics.reviewer.rejected], [0, 1]);
+  }
+  const { c } = twoDecisions(["accept-proposed", "2026-11-02T11:00:00+02:00"], ["reject-proposed", "2026-11-02T10:00:00Z"]);
+  assert.deepEqual(presentMemoryClaims([c], { routing: [decision], reviewDecisions: made }).withheld, [{ id: c.id, reason: "rejected-in-review" }]);
+});
+
+test("two spellings of one instant are a tie, and a tie keeps the later entry", () => {
+  const { decision, made } = twoDecisions(["accept-proposed", "2026-11-02T10:00:00Z"], ["reject-proposed", "2026-11-02T12:00:00+02:00"]);
+  assert.deepEqual([deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: made }).reviewer.rejected, deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [...made].reverse() }).reviewer.confirmed], [1, 1]);
+});
+
+test("review time comes from the session that submitted this decision, not the highest sequence number", () => {
+  const { decision, item, session, made } = twoDecisions(["reject-proposed", "2026-11-01T10:00:00.000Z"], ["reject-proposed", "2026-11-02T10:00:00.000Z"]);
+  const events = (name, verdict, selectedAt, submittedAt, shift) => buildReviewSessionEvents(session(verdict, selectedAt), name).map(event => ({ ...event, spec: { ...event.spec, sequence: event.spec.sequence + shift, occurredAt: event.spec.eventType === "decision-submitted" ? submittedAt : selectedAt } }));
+  const older = events("session-old", "reject-proposed", "2026-11-01T10:00:00.000Z", "2026-11-01T10:01:40.000Z", 3);
+  const newer = events("session-new", "reject-proposed", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:10.000Z", 0);
+  assert.ok(Math.max(...older.map(e => e.spec.sequence)) > Math.max(...newer.map(e => e.spec.sequence)), "the older session has the higher sequence numbers");
+  for (const order of [[...older, ...newer], [...newer, ...older]]) {
+    const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: made, reviewEvents: order });
+    assert.equal(metrics.reviewSeconds, 10);
+  }
+  assert.ok(item);
+  // A submission that names a different decision is not this decision's time.
+  const other = newer.map(event => event.spec.eventType === "decision-submitted" ? { ...event, spec: { ...event.spec, reviewDecisionName: "someone-elses" } } : event);
+  assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: made, reviewEvents: other }).reviewSeconds, null);
+});
+
+test("a decision Survey defines as deciding counts; one it does not define is held, never a confirmation", () => {
+  const { decision, made } = twoDecisions(["accept-proposed", "2026-11-02T10:00:00Z"], ["accept-proposed", "2026-11-02T10:00:00Z"]);
+  const withStatus = status => [{ ...plain(made[0]), spec: { ...plain(made[0]).spec, status } }];
+  assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: withStatus("assumed") }).reviewer.confirmed, 1);
+  assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: withStatus("verified") }).reviewer.confirmed, 1);
+  for (const status of ["BANANA", "proposed", undefined]) {
+    const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: withStatus(status) });
+    assert.deepEqual([metrics.reviewer.confirmed, metrics.reviewer.held], [0, 1], String(status));
+  }
+});

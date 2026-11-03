@@ -6,8 +6,8 @@ import { loadRun, runDir, startRun } from "@kontourai/flow";
 import { memoryClaim } from "@kontourai/flow-agents/memory-claims";
 import { deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import {
-  MEMORY_METRICS_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND, readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence,
-  readLatestMemoryMetrics, readMemoryReviewRecords, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
+  MEMORY_METRICS_EVIDENCE_KIND, MEMORY_REVIEW_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND, readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence,
+  canonicalRunPath, readLatestMemoryMetrics, readMemoryReviewRecords, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
 } from "@kontourai/flow-agents/memory-routing-flow";
 import { attachEvidence } from "@kontourai/flow";
 import { buildReviewDecisionsFromSession, buildReviewSessionEvents, initialReviewQueueSessionState } from "@kontourai/survey/review-workbench";
@@ -272,4 +272,90 @@ test("two spellings of one directory are one run: concurrent recordings through 
   await Promise.all([0, 1, 2, 3].map(i => recordMemoryMetricsEvidence({ ...viaBoth(i), metrics: { ...metrics, reviewer: { ...metrics.reviewer, pending: i } } })));
   assert.equal((await readMemoryMetricsEvidence("run-1", cwd)).filter(entry => !entry.superseded).length, 1);
   assert.equal((await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.requested_kind === MEMORY_ROUTING_EVIDENCE_KIND).length, 1);
+});
+
+// --- review round 3: what the evidence layer must refuse, and keep -----------------------------------------------
+
+const reviewEvidence = async cwd => (await loadRun("run-1", cwd)).manifest.evidence.filter(entry => entry.requested_kind === MEMORY_REVIEW_EVIDENCE_KIND);
+
+test("malformed review input is refused before anything is attached, so it cannot poison later refreshes", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const good = rejection(run.items[0], 5);
+  const decision = good.reviewDecisions[0], event = good.reviewEvents[0];
+  const withSpec = (value, spec) => ({ ...JSON.parse(JSON.stringify(value)), spec: { ...JSON.parse(JSON.stringify(value)).spec, ...spec } });
+  const refused = [
+    ["a bare kind", { reviewDecisions: [{ kind: "ReviewDecision" }] }],
+    ["a status Survey does not define", { reviewDecisions: [withSpec(decision, { status: "BANANA" })] }],
+    ["a reviewedAt that is not a date-time", { reviewDecisions: [withSpec(decision, { reviewedAt: "nonsense" })] }],
+    ["a decision with no item", { reviewDecisions: [withSpec(decision, { reviewItemName: "" })] }],
+    ["an event with no session", { reviewEvents: [withSpec(event, { sessionName: undefined })] }],
+    ["an event with a fractional sequence", { reviewEvents: [withSpec(event, { sequence: 1.5 })] }],
+    ["an event whose time is nonsense", { reviewEvents: [withSpec(event, { occurredAt: "soon" })] }],
+    ["a valid decision next to a bad one", { reviewDecisions: [decision, { kind: "ReviewDecision" }] }],
+  ];
+  for (const [name, review] of refused) {
+    await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd), ...review }), /review input/, name);
+    assert.equal((await reviewEvidence(cwd)).length, 0, `${name}: nothing was attached`);
+  }
+  await refreshMemoryRunMetrics({ ...where(cwd) }); // an empty refresh still works afterwards
+  await refreshMemoryRunMetrics({ ...where(cwd), ...good });
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.reviewer.rejected, 1);
+});
+
+test("a repeat inside one review batch is recorded once", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const { reviewDecisions, reviewEvents } = rejection(run.items[0], 5);
+  await refreshMemoryRunMetrics({ ...where(cwd), reviewDecisions: [...reviewDecisions, ...reviewDecisions], reviewEvents: [...reviewEvents, ...reviewEvents, ...reviewEvents] });
+  const [record] = await reviewEvidence(cwd);
+  const stored = JSON.parse(fs.readFileSync(path.join(runDir("run-1", cwd), record.stored_path), "utf8"));
+  assert.deepEqual([stored.decisions.length, stored.events.length], [reviewDecisions.length, reviewEvents.length]);
+});
+
+test("review evidence is read back only if it is this run's, in a version we know, and unedited", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  await refreshMemoryRunMetrics({ ...where(cwd), ...rejection(run.items[0], 5) });
+  const [record] = await reviewEvidence(cwd);
+  const file = path.join(runDir("run-1", cwd), record.stored_path);
+  const original = fs.readFileSync(file, "utf8");
+  // The same bytes edited on disk are refused by the digest Flow recorded.
+  fs.writeFileSync(file, original.replace('"runId":"run-1"', '"runId":"run-2"'));
+  await assert.rejects(readMemoryReviewRecords("run-1", cwd), /no longer matches its recorded digest/);
+  fs.writeFileSync(file, original);
+  // A record attached as another run's, or in a version we do not know, is refused even though its digest is right.
+  // (Each poisons the run's review evidence for good, so each gets its own run.)
+  for (const [what, edit] of [["another run", body => ({ ...body, runId: "run-2" })], ["another version", body => ({ ...body, schema_version: "9.9" })]]) {
+    const poisoned = await workspace(t);
+    const tmp = path.join(poisoned, "record.json");
+    fs.writeFileSync(tmp, JSON.stringify(edit(JSON.parse(original))));
+    await attachEvidence("run-1", { cwd: poisoned, gate: "route-gate", file: tmp, kind: MEMORY_REVIEW_EVIDENCE_KIND });
+    await assert.rejects(readMemoryReviewRecords("run-1", poisoned), /belongs to another run or an unsupported version/, what);
+  }
+});
+
+test("recording routing directly keeps the metrics current: they can never describe fewer decisions than the run holds", async t => {
+  const cwd = await workspace(t);
+  const { decisions } = runOf();
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions: decisions.slice(0, 1) });
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, 1);
+  await Promise.all([refreshMemoryRunMetrics({ ...where(cwd) }), recordMemoryRoutingEvidence({ ...where(cwd), decisions: decisions.slice(1) }), refreshMemoryRunMetrics({ ...where(cwd) })]);
+  const recorded = (await readMemoryRoutingDecisions("run-1", cwd)).length;
+  assert.equal(recorded, 3);
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).value.decisions, recorded);
+  const before = (await loadRun("run-1", cwd)).manifest.evidence.length;
+  await recordMemoryRoutingEvidence({ ...where(cwd), decisions: decisions.slice(1) }); // the same batch again
+  assert.equal((await loadRun("run-1", cwd)).manifest.evidence.length, before, "a repeat adds nothing, not even metrics");
+});
+
+test("a directory that does not exist yet is keyed through its nearest existing ancestor, so a later alias maps to the same chain", async t => {
+  const cwd = await workspace(t);
+  const alias = fs.realpathSync(cwd);
+  if (alias === cwd) { t.skip("this temp directory has no alias (on macOS /var is /private/var)"); return; }
+  const missing = path.join(cwd, "runs", "not-yet", "r1");
+  assert.equal(canonicalRunPath(missing), path.join(alias, "runs", "not-yet", "r1"));
+  assert.equal(canonicalRunPath(path.join(alias, "runs", "not-yet", "r1")), canonicalRunPath(missing));
+  assert.equal(canonicalRunPath(cwd), alias);
+  assert.equal(canonicalRunPath("/"), "/");
 });
