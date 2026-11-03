@@ -12,6 +12,7 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@kontourai/relay";
 import { canonicalClaimKey } from "@kontourai/surface";
+import { jsonSnapshot, jsonSnapshotEach, ownField } from "./memory-json.js";
 // Type-only: proves the schema below is an ordinary Traverse TargetFieldSchema without a runtime dependency.
 import type { TargetFieldSchema } from "@kontourai/traverse";
 
@@ -433,31 +434,43 @@ export async function distillMemoryClaims(input: {
   /** The sitting's visibility. Without it the claims are sealed (see `MemoryClaim.visibility`). */
   visibility?: MemoryVisibility;
 }): Promise<DistillResult> {
-  const passes = input.passes ?? DEFAULT_DISTILL_PASSES;
+  // Each field of the request is read once, before the first await, with nothing the caller defined running, and the
+  // sitting and the current claims are copied as plain JSON. Extraction is asynchronous: reading the sitting again after it
+  // would let the claims name a source reference and a time that are not the ones the model was given.
+  const field = (record: unknown, key: string) => ownField(record, key, `distill input ${key}`);
+  const sittingInput = field(input, "sitting");
+  const sitting: DistillSitting = { sittingId: field(sittingInput, "sittingId") as string, turns: jsonSnapshotEach(field(sittingInput, "turns"), "distill sitting turns") as DistillTurn[] };
+  const extract = field(input, "extract") as MemoryExtract;
+  const passesInput = field(input, "passes");
+  const current = jsonSnapshotEach(field(input, "current"), "distill current claims") as MemoryClaim[];
+  const visibilityInput = field(input, "visibility");
+  const visibility = visibilityInput === undefined ? undefined : jsonSnapshot(visibilityInput, "distill visibility") as MemoryVisibility;
+  const passes = (passesInput ?? DEFAULT_DISTILL_PASSES) as number;
   if (!Number.isInteger(passes) || passes < 1 || passes > 8) throw new MemoryClaimError("invalid", "passes must be an integer from 1 to 8");
-  if (input.visibility !== undefined) failIfUnreadable(input.visibility); // host configuration: refuse once, up front
-  if (input.sitting.turns.length === 0) return { claims: [], agreement: {}, rejected: [], warnings: [] };
-  const { content, spans } = formatSittingForExtraction(input.sitting.turns);
+  if (typeof sitting.sittingId !== "string" || !sitting.sittingId.trim()) throw new MemoryClaimError("invalid", "a sitting needs a sittingId");
+  if (visibility !== undefined) failIfUnreadable(visibility); // host configuration: refuse once, up front
+  if (sitting.turns.length === 0) return { claims: [], agreement: {}, rejected: [], warnings: [] };
+  const { content, spans } = formatSittingForExtraction(sitting.turns);
   const locate = (locator: string) => {
     const start = Number(/^chars:(\d+)-/.exec(locator)?.[1]);
     const span = spans.find(candidate => start >= candidate.start && start < candidate.end);
     return span ? { observedAt: span.turn.at, role: span.turn.role } : undefined;
   };
-  const request: MemoryExtractionRequest = { content, contentType: "text", sourceRef: input.sitting.sittingId, targetSchema: MEMORY_CLAIM_TARGET_SCHEMA, guidance: MEMORY_CLAIM_GUIDANCE };
+  const request: MemoryExtractionRequest = { content, contentType: "text", sourceRef: sitting.sittingId, targetSchema: MEMORY_CLAIM_TARGET_SCHEMA, guidance: MEMORY_CLAIM_GUIDANCE };
 
   const found = new Map<string, { claim: MemoryClaim; passes: Set<number> }>(); // by agreementKey
   const rejected: DistillResult["rejected"] = [], warnings: string[] = [];
   for (let pass = 0; pass < passes; pass++) {
     let result: ExtractionResultLike;
     try {
-      result = await input.extract(request);
+      result = await extract(request);
     } catch (error) {
       warnings.push(`pass ${pass + 1} failed: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
     if (result.error) warnings.push(`pass ${pass + 1} reported: ${result.error}`);
     warnings.push(...(result.warnings ?? []).map(warning => `pass ${pass + 1}: ${warning}`));
-    const assembled = assembleMemoryClaims(result, { sourceRef: input.sitting.sittingId, locate, current: input.current, visibility: input.visibility });
+    const assembled = assembleMemoryClaims(result, { sourceRef: sitting.sittingId, locate, current, visibility });
     rejected.push(...assembled.rejected.map(item => ({ ...item, pass })));
     for (const claim of assembled.claims) {
       const key = agreementKey(claim);

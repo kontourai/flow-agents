@@ -126,13 +126,18 @@ Detecting which subjects to propose is the host's (or a later lane's) candidate 
 
 ### Data the Kit records is plain data
 
-Everything the Kit validates and then records (review input, the entity emitter's request) is copied once, as plain JSON
-data, and the copy is what is validated and stored. It refuses what JSON would change or drop or what could answer
-differently the next time it is read: accessors, `-0`, holes, class instances and array subclasses, cycles, a `__proto__`
-key, anything over a size or depth bound, and **any Proxy** (a Proxy answers every question as it likes, so no list of checks
-makes one safe; it is refused, not defended against). The entity emitter chooses the fields it copies without running
-anything the caller defined, and requires `confidenceComponents` to be an object (or absent), as Survey does. The Kit is
-stricter than Survey in one place: `-0` is refused, because it does not survive JSON.
+Everything the Kit validates and then records or presents is read once and copied as plain JSON, and the copy is what is
+validated and used: a routing change (claim, current claims, verifications, agreement, entity proposal), a run or evidence
+request, review input, a distill request (the sitting is copied before extraction starts, so claims name the source
+reference and times the model was given), the claims recall presents, and the claims the accumulation mapper and the
+verifier read. The Kit refuses what JSON would change or drop or what could answer differently the next time it is read:
+accessors, `-0`, holes, class instances and array subclasses, cycles, a `__proto__` key, anything over a size or depth bound,
+and **any Proxy** (a Proxy answers every question as it likes, so no list of checks makes one safe; it is refused, not
+defended against). Request fields are chosen with selectors that run nothing the caller defined (no getter, no overridden
+`map`, no trap). Two deliberate exceptions to refusing: a recall claim that cannot be copied is *withheld and reported*, and a
+`sourceVisibility` that cannot be copied is recorded as undeclared, which reads as sealed (it can only make a claim route, never
+widen it). The entity emitter requires `confidenceComponents` to be an object (or absent), as Survey does. The Kit is stricter
+than Survey in one place: `-0` is refused, because it does not survive JSON.
 
 ## Flow evidence
 
@@ -141,7 +146,10 @@ decisions, and `recordMemoryMetricsEvidence` the run's metrics, to a gate of a F
 run the host owns, as custom-kind evidence (`memory.routing-decisions`,
 `memory.run-metrics`). A decision that does not recompute is refused before anything
 is attached. Re-attaching the same content returns the existing entry; new metrics
-supersede the earlier entry; recording routing decisions refreshes the run's metrics in the
+supersede the earlier entry. `recordMemoryMetricsEvidence` records only figures equal to what the run's recorded evidence derives
+(a stale snapshot, or figures computed elsewhere, is refused rather than allowed to supersede the correct ones), and
+`refreshMemoryRunMetrics` is how figures are brought up to date. Stored review records are validated as Survey decisions and
+events when read, since a digest only proves the file is the one recorded; recording routing decisions refreshes the run's metrics in the
 same serialised unit, so metrics never describe fewer decisions than the run holds. All of
 that holds within one process, for callers that reach the run through a directory that exists
 (an alias made later for a directory that did not exist yet is resolved through its nearest

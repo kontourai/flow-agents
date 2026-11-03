@@ -18,7 +18,7 @@ import {
   type CandidateVerification, type EntityProposal, type RunSupportVerifierOptions, type ReviewDecision, type ReviewItem, type ReviewSessionEvent, type SupportVerifier,
 } from "@kontourai/survey";
 import { memoryAccumulationFact, memoryAccumulationMembers, readMemoryAccumulationFact, type MemoryAccumulationFact } from "./memory-accumulation.js";
-import { jsonSnapshot, jsonSnapshotEach, jsonSnapshotList, ownField } from "./memory-json.js";
+import { jsonSnapshot, jsonSnapshotEach, jsonSnapshotList, ownEntries, ownField } from "./memory-json.js";
 import {
   MemoryClaimError, assertMemoryClaim, foldMemoryText, memoryFieldKey, memorySlotKey, readMemoryVisibility,
   type MemoryAgreement, type MemoryClaim, type MemoryClaimPosture, type MemoryVisibility,
@@ -129,8 +129,9 @@ export const MEMORY_ROUTING_RULES: readonly RoutingRule[] = [
     // has one value policy (a single JSON value), so a property the host declares multi-valued is not projected.
     if (claim.posture !== "stated" || listed(policy.multiValued, claim.property)) return undefined;
     // Surface decides what is contested (identity, validity, retraction, replacement admission); the Kit compares no
-    // values and reads no edge. A pending replacement is contested too: until a reviewer verifies the successor, Surface
-    // keeps both candidates, so an unreviewed succession routes unless the host's authority has admitted its verification.
+    // values and reads no edge. Until a reviewer verifies a successor, Surface normally keeps both candidates, so an unreviewed
+    // succession normally routes here; the projection decides, and can answer `current` earlier (an equal-value replacement
+    // projects `current` while its edge is still pending).
     if (!accumulation) {
       // Without a projection, a slot with nothing else in it cannot be contested; one with a peer cannot be called uncontested.
       const peers = input.current.filter(other => other.posture === "stated" && other.id !== claim.id).map(other => other.id);
@@ -199,8 +200,9 @@ export interface MemoryClaimChange {
   verifications?: readonly unknown[];
   agreement?: MemoryAgreement | null;
   /**
-   * The host's `projectAccumulation` result for this claim's slot, and (required with it) the query it answered:
-   * `memoryAccumulationFact` reads the pair, so a result for another slot is refused. Null or absent: not evaluated.
+   * The host's `projectAccumulation` result for this claim's slot, and (required with it) the query the host says it ran:
+   * `memoryAccumulationFact` reads the pair and refuses a query for another slot than the claim's. The result carries no query
+   * of its own, so that is a check on the host's word, not on the result. Null or absent: not evaluated.
    */
   accumulation?: unknown;
   accumulationQuery?: unknown;
@@ -229,6 +231,8 @@ export function memorySlotPeers(claim: MemoryClaim, current: readonly MemoryClai
     throw new MemoryClaimError("invalid", "the projection answered for another slot than this claim's");
   }
   const members = new Set(fact ? memoryAccumulationMembers(fact) : []);
+  // The claim itself, if the projection names it, is held to the same rule as any other member.
+  if (members.has(claim.id) && claim.posture !== "stated") throw new MemoryClaimError("invalid", `the projection names claim ${claim.id}, which is not a stated claim`);
   const peers = new Map<string, MemoryClaim>();
   for (const other of current) {
     assertMemoryClaim(other);
@@ -318,7 +322,8 @@ export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<Me
   };
 }
 
-export const routeMemoryChanges = (changes: readonly MemoryChange[], policy?: Partial<MemoryRoutingPolicy>): MemoryRoutingDecision[] => changes.map(change => routeMemoryChange(change, policy));
+export const routeMemoryChanges = (changes: readonly MemoryChange[], policy?: Partial<MemoryRoutingPolicy>): MemoryRoutingDecision[] =>
+  (ownEntries(changes, "changes") as MemoryChange[]).map(change => routeMemoryChange(change, policy));
 
 const stringList = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === "string" && item !== "");
 /** A stored input is read back from disk: refuse a shape the rules would silently misread. */
@@ -423,6 +428,10 @@ const candidateBase = (claim: MemoryClaim, rank: number) => ({
  */
 export function buildMemoryReviewItem(decision: MemoryRoutingDecision): ReviewItem | undefined {
   if (decision.outcome !== "routed" || decision.input.type !== "claim") return undefined;
+  // The item is built from the decision's embedded claim, so a decision that no longer recomputes (an edited value under the old
+  // claim id, say) must not become a candidate the reviewer sees under that id.
+  const check = recomputeMemoryRouting(decision);
+  if (!check.ok) throw new MemoryClaimError("invalid", `routing decision ${decision.id} does not recompute, so no review item is built from it: ${check.mismatches.join("; ")}`);
   const { claim, current, verifications } = decision.input;
   const name = memoryReviewItemName(decision.changeId);
   const target = `${claim.subject.label ?? claim.subject.id}.${claim.property}`;
@@ -518,12 +527,13 @@ function reviewDwell(decision: ReviewDecision, itemName: string, events: readonl
 export function deriveMemoryRunMetrics(input: { runId: string; decisions: readonly MemoryRoutingDecision[]; reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): MemoryRunMetrics {
   // A change is decided once per run. If it was routed again (say, with more current claims), the later decision
   // stands; counting both would count one claim, and its one review, twice.
-  const decisions = [...new Map(input.decisions.map(decision => [decision.changeId, decision] as const)).values()];
+  const decisions = [...new Map((ownEntries(ownField(input, "decisions", "metrics input"), "metrics input decisions") as MemoryRoutingDecision[]).map(decision => [decision.changeId, decision] as const)).values()];
   const routed = decisions.filter(decision => decision.outcome === "routed");
   const routedByRule: Record<string, number> = {};
   for (const decision of routed) for (const reason of decision.reasons) routedByRule[reason.rule] = (routedByRule[reason.rule] ?? 0) + 1;
 
-  const latest = latestDecisions(input.reviewDecisions ?? []);
+  const reviewDecisions = ownEntries(ownField(input, "reviewDecisions", "metrics input"), "metrics input reviewDecisions") as ReviewDecision[];
+  const latest = latestDecisions(reviewDecisions);
   const counts = { confirmed: 0, corrected: 0, rejected: 0, held: 0 };
   const matched = new Set<string>();
   let seconds = 0, timed = 0;
@@ -578,15 +588,20 @@ export interface WithheldMemoryClaim { id: string; reason: "rejected-in-review" 
  * bare and never dropped silently.
  */
 export function presentMemoryClaims(claims: readonly unknown[], context: { routing?: readonly MemoryRoutingDecision[]; reviewDecisions?: readonly ReviewDecision[] } = {}): { presented: PresentedMemoryClaim[]; withheld: WithheldMemoryClaim[] } {
-  const routingByClaim = new Map((context.routing ?? []).filter(decision => decision.changeType === "claim").map(decision => [decision.changeId, decision]));
-  const latest = latestDecisions(context.reviewDecisions ?? []);
+  // Everything shown is read from a copy taken once, as plain JSON: a claim whose posture answers one way to the check and
+  // another to the presentation would otherwise print a claim with no posture. A claim that cannot be copied is withheld.
+  const routingList = jsonSnapshotEach(ownField(context, "routing", "recall context"), "recall routing") as MemoryRoutingDecision[];
+  const routingByClaim = new Map(routingList.filter(decision => decision.changeType === "claim").map(decision => [decision.changeId, decision]));
+  const latest = latestDecisions(jsonSnapshotEach(ownField(context, "reviewDecisions", "recall context"), "recall reviewDecisions") as ReviewDecision[]);
   const presented: PresentedMemoryClaim[] = [], withheld: WithheldMemoryClaim[] = [];
-  for (const raw of claims) {
-    try { assertMemoryClaim(raw); } catch (error) {
-      withheld.push({ id: String((raw as { id?: unknown } | null)?.id ?? "unknown"), reason: error instanceof MemoryClaimError && error.code === "posture-missing" ? "posture-missing" : "invalid" });
+  for (const entry of ownEntries(claims, "recall claims")) {
+    let claim: MemoryClaim;
+    try { claim = jsonSnapshot(entry, "recall claim") as MemoryClaim; } catch { withheld.push({ id: "unknown", reason: "invalid" }); continue; }
+    try { assertMemoryClaim(claim); } catch (error) {
+      withheld.push({ id: String((claim as { id?: unknown } | null)?.id ?? "unknown"), reason: error instanceof MemoryClaimError && error.code === "posture-missing" ? "posture-missing" : "invalid" });
       continue;
     }
-    const claim = raw, routing = routingByClaim.get(claim.id);
+    const routing = routingByClaim.get(claim.id);
     let label: MemoryReviewLabel = routing?.outcome === "routed" ? "in-review" : "unreviewed";
     let value = claim.value;
     // A reviewer's decision is about the claim, whether or not its routing record came along with it.

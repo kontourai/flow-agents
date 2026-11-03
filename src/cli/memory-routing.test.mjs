@@ -97,7 +97,7 @@ const RULE_CASES = {
       ["Surface accepted the replacement: reviewed and admitted, the slot is current", () => change(replacing, { current: [current], accumulation: CURRENT })],
       ["Surface has no answer, for a reason that is not a contest", () => change(make(), { accumulation: { outcome: "none", reason: "withdrawn", candidateClaimIds: [], supportingClaimIds: [], gapCodes: [] } })],
       ["a contest the claim is not part of: it was excluded as superseded or withdrawn", () => change(make({ value: "PostgreSQL 16" }), { current: [current, otherPeer], accumulation: contested(current.id, otherPeer.id) })],
-      ["a plan is never a candidate for the slot, so it is never contested", () => { const plan = make({ posture: "proposed", value: "PostgreSQL 16" }); return change(plan, { current: [current], accumulation: contested(plan.id, current.id) }); }],
+      ["a plan is never a candidate for the slot, so an unresolved projection of the slot is not its contest", () => { const plan = make({ posture: "proposed", value: "PostgreSQL 16" }); return change(plan, { current: [current], accumulation: { outcome: "invalid", reason: "identity-unresolved", candidateClaimIds: [], supportingClaimIds: [], gapCodes: [] } }); }],
       ["a what-if is never contested, projection or none", () => change(make({ posture: "hypothetical", value: "PostgreSQL 16" }), { current: [current], accumulation: null })],
       ["a property the host declares multi-valued is not projected: Surface has one value policy", () => change(make({ value: "PostgreSQL 16" }), { current: [current], accumulation: null }), { multiValued: ["primary database"] }],
       ["no projection, but nothing else is in the slot, so nothing can contest it", () => change(make(), { accumulation: null })],
@@ -731,4 +731,79 @@ test("a routing change is read once, as plain data: a Proxy, a getter or an over
   const decision = routeMemoryChange(change(live, { current: [peer], accumulation: null }));
   assert.equal(decision.input.claim.value, "PostgreSQL 17");
   assert.notEqual(decision.input.claim, live);
+});
+
+test("recall shows the posture it checked: a claim that answers differently the second time is withheld, never printed bare", () => {
+  const claim = make({ value: "PostgreSQL 16" });
+  let reads = 0;
+  const shifty = { ...claim };
+  Object.defineProperty(shifty, "posture", { enumerable: true, get: () => (++reads === 1 ? "stated" : undefined) });
+  const { presented, withheld } = presentMemoryClaims([shifty, claim]);
+  assert.equal(reads, 0, "the getter never ran");
+  assert.deepEqual(withheld.map(item => item.reason), ["invalid"]);
+  assert.deepEqual(presented.map(item => item.id), [claim.id]);
+  assert.ok(presented.every(item => /^\[stated · /.test(item.text) && item.posture === "stated"));
+  assert.deepEqual(presentMemoryClaims([new Proxy(claim, {})]).withheld.map(item => item.reason), ["invalid"], "a Proxy claim");
+  const list = [claim]; list.map = () => [];
+  assert.throws(() => presentMemoryClaims(list), /extra keys/, "an own map on the list");
+  assert.throws(() => presentMemoryClaims([claim], { routing: new Proxy([], {}) }), /Proxy/, "a Proxy routing list");
+  assert.throws(() => presentMemoryClaims([claim], Object.defineProperty({}, "reviewDecisions", { enumerable: true, get: () => [] })), /accessor/, "a getter on the context");
+});
+
+test("the projection may not name the claim being routed as support or candidate unless it is a stated claim", async () => {
+  const peer = make();
+  for (const posture of ["proposed", "hypothetical", "retracted"]) {
+    const incoming = make({ posture, value: "PostgreSQL 16", supersedes: undefined });
+    const named = { outcome: "current", candidateClaimIds: [], supportingClaimIds: [incoming.id], gapCodes: [] };
+    assert.throws(() => routeMemoryChange(change(incoming, { current: [peer], accumulation: named })), /not a stated claim/, `${posture} named as support`);
+    const stored = plain(routeMemoryChange(change(incoming, { current: [peer], accumulation: null })));
+    stored.input.accumulation = { ...named, slot: queryFor(make()).slot };
+    stored.id = `sha256:${createHash("sha256").update(canonicalJson({ input: stored.input, policy: stored.policy })).digest("hex")}`;
+    assert.equal(recomputeMemoryRouting(stored).ok, false, `${posture}, stored`);
+  }
+  assert.doesNotThrow(() => routeMemoryChange(change(make({ value: "PostgreSQL 16" }), { current: [peer], accumulation: { outcome: "current", candidateClaimIds: [], supportingClaimIds: [], gapCodes: [] } })));
+});
+
+test("a decision that no longer recomputes makes no review item: an edited claim value cannot reach a reviewer under the old id", () => {
+  const routed = routeMemoryChange(RULE_CASES["contested-by-accumulation"].routes());
+  assert.ok(buildMemoryReviewItem(routed));
+  const edited = plain(routed);
+  edited.input.claim.value = "MySQL 8";
+  assert.equal(recomputeMemoryRouting(edited).ok, false);
+  assert.throws(() => buildMemoryReviewItem(edited), /does not recompute/);
+  const flipped = { ...plain(routed), outcome: "proposed" };
+  assert.equal(buildMemoryReviewItem(flipped), undefined, "a proposed decision still makes none");
+});
+
+test("helpers that take lists read them without the caller's methods: an own map on changes or decisions is refused, not read as empty", () => {
+  const changes = [change(make({ value: "PostgreSQL 16" }), { current: [make()], accumulation: null })]; changes.map = () => [];
+  assert.throws(() => routeMemoryChanges(changes), /extra keys/);
+  const { decisions } = (() => { const d = routeMemoryChange(change(make(), { accumulation: null })); return { decisions: [d] }; })();
+  const listed = [...decisions]; listed.map = () => [];
+  assert.throws(() => deriveMemoryRunMetrics({ runId: "r", decisions: listed }), /extra keys/);
+  assert.throws(() => deriveMemoryRunMetrics({ runId: "r", decisions, reviewDecisions: new Proxy([], {}) }), /Proxy/);
+  assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions }).decisions, 1);
+});
+
+test("a source visibility that cannot be copied as plain data is sealed, not trusted and not refused; the traps never run", () => {
+  const claim = make({ value: "PostgreSQL 16", visibility: { kind: "public" } });
+  let traps = 0;
+  const tricky = [
+    new Proxy({ kind: "public" }, { get() { traps++; return "public"; }, getOwnPropertyDescriptor() { traps++; return undefined; } }),
+    Object.defineProperty({ kind: "restricted" }, "audiences", { enumerable: true, get() { traps++; return ["staff"]; } }),
+  ];
+  for (const source of tricky) {
+    const decision = routeMemoryChange(change(claim, { accumulation: null, sourceVisibility: source }));
+    assert.deepEqual(decision.input.baselines[0], { ref: "source", visibility: null }, "recorded as undeclared");
+    assert.deepEqual(rulesOf(decision), ["visibility-widening"], "a public claim from a sealed source widens");
+  }
+  assert.equal(traps, 0);
+  assert.deepEqual(rulesOf(routeMemoryChange(change(make({ value: "x" }), { accumulation: null, sourceVisibility: tricky[0] }))), [], "a sealed claim from a sealed source widens nothing");
+});
+
+test("a routing change's type is read as data", () => {
+  const ok = change(make(), { accumulation: null });
+  const getter = Object.defineProperty({ ...ok }, "type", { enumerable: true, get: () => "claim" });
+  assert.throws(() => routeMemoryChange(getter), /accessor/);
+  assert.throws(() => routeMemoryChange(Object.defineProperty({ ...ok }, "sourceVisibility", { enumerable: true, get: () => null })), /accessor/);
 });

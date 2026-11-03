@@ -387,3 +387,31 @@ test("qualifiers map names to strings, and anything else is refused", async () =
     assert.throws(() => assertMemoryClaim(memoryClaim({ ...claim, qualifiers: bad })), { code: "invalid" }, JSON.stringify(bad));
   }
 });
+
+// --- review round 9 -------------------------------------------------------------------------------------------------------
+
+test("distill reads the sitting once, before extraction: changing it while the model runs changes nothing in the claims", async () => {
+  const sitting = structuredClone(loadSittings()[0]);
+  const original = { id: sitting.sittingId, at: sitting.turns[0].at };
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const finding = { quote, subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated" };
+  const inner = traverseExtract(scriptedProvider([[finding]]));
+  const seen = [];
+  const extract = async request => { seen.push(request.sourceRef); sitting.sittingId = "someone else"; for (const turn of sitting.turns) turn.at = "2031-01-01T00:00:00Z"; return inner(request); };
+  const result = await distillMemoryClaims({ sitting, passes: 1, extract });
+  assert.equal(result.claims.length, 1);
+  assert.deepEqual(seen, [original.id], "the model was given the original source reference");
+  assert.equal(result.claims[0].source.ref, original.id, "and the claim names that same one");
+  assert.notEqual(result.claims[0].source.observedAt, "2031-01-01T00:00:00Z");
+});
+
+test("a distill request is read without running caller code: a getter, a Proxy or an overridden turns list is refused", async () => {
+  const sitting = loadSittings()[0], extract = traverseExtract(scriptedProvider([[]]));
+  const getter = Object.defineProperty({ passes: 1, extract }, "sitting", { enumerable: true, get: () => sitting });
+  await assert.rejects(distillMemoryClaims(getter), MemoryClaimError, "a getter for the sitting");
+  await assert.rejects(distillMemoryClaims(new Proxy({ sitting, passes: 1, extract }, {})), MemoryClaimError, "a Proxy request");
+  await assert.rejects(distillMemoryClaims({ sitting: new Proxy(sitting, {}), passes: 1, extract }), MemoryClaimError, "a Proxy sitting");
+  const turns = [...sitting.turns]; turns.map = () => [];
+  await assert.rejects(distillMemoryClaims({ sitting: { ...sitting, turns }, passes: 1, extract }), MemoryClaimError, "an own map on the turns");
+  await assert.rejects(distillMemoryClaims({ sitting: { ...sitting, sittingId: " " }, passes: 1, extract }), /sittingId/);
+});
