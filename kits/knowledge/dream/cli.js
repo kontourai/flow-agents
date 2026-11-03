@@ -7,8 +7,9 @@
  *
  * Disabled unless the config says `"enabled": true`. The config's `host` is an
  * operator-owned module exporting `createDreamHost({ config })`, which returns
- * the host-composed pieces the run must not discover for itself:
- *   { store, registerRoot, root, rootName, runtime?, extract?, reviewDecisions?, publish? }
+ * the host-composed pieces the run must not discover for itself (`dryRun` is true
+ * under `--dry-run`, and the host must then create and write nothing):
+ *   { store, registerRoot, root, rootName, publish, runtime?, extract?, reviewDecisions? }
  * With neither `runtime` nor `extract`, the model is the Datum role named by the
  * config (default `extraction-default`), routed through Dispatch and Relay.
  *
@@ -59,7 +60,8 @@ export async function main(argv = process.argv.slice(2), { stdout = process.stdo
   try {
     const module = await import(pathToFileURL(assertOwnerControlledFile(config.host, "host")).href);
     if (typeof module.createDreamHost !== "function") throw dreamError("DREAM_CONFIG_INVALID", "the host module must export createDreamHost");
-    const host = await module.createDreamHost({ config });
+    // A dry run is read-only all the way down: the host is told, so it opens its store without creating anything.
+    const host = await module.createDreamHost({ config, dryRun: args.dryRun });
     if (!host.extract && !args.dryRun) {
       const runtime = host.runtime ?? (await createRoleRuntime({ role: config.role ?? DEFAULT_ROLE }));
       host.extract = await extractForRuntime(runtime);

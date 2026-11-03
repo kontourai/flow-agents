@@ -15,6 +15,8 @@
  * @module dream/model
  */
 
+import { ModelInvocationError } from "@kontourai/relay";
+
 import { dreamError } from "./util.js";
 
 const TRUNCATED = new Set(["max_tokens", "max_output_tokens"]);
@@ -48,16 +50,17 @@ export async function createRelayExtractionProvider({ runtime, maxTokens = 2048,
         input.signal ? { signal: input.signal } : undefined,
       );
       const call = result.toolCalls.find((candidate) => candidate.name === tool.name);
-      const { proposals, warnings } = parseProposals(call?.input, providerName, input.contentType);
-      if (!call) warnings.push("provider returned no extraction tool call");
-      if (TRUNCATED.has(result.stopReason)) warnings.push("response truncated at maxTokens; proposals may be incomplete");
+      // A response that did not deliver the extraction is a failed pass, not an empty one. Returning no proposals
+      // would let the run read "the model said nothing" as "the sitting has nothing in it" and consume the sitting.
+      if (!call) throw new ModelInvocationError("RUNTIME_FAILURE", "provider returned no extraction tool call", false);
+      if (TRUNCATED.has(result.stopReason)) throw new ModelInvocationError("RUNTIME_FAILURE", "response truncated at maxTokens; the extraction may be incomplete", false);
+      const { proposals, warnings } = parseProposals(call.input, providerName, input.contentType);
+      if (call.input === null || typeof call.input !== "object" || !Array.isArray(call.input.proposals)) {
+        throw new ModelInvocationError("RUNTIME_FAILURE", "provider returned a malformed extraction tool input", false);
+      }
       return {
         proposals,
-        raw: {
-          response: call ? JSON.stringify(call.input ?? null) : "",
-          model: result.model,
-          ...(result.usage?.totalTokens === undefined ? {} : { tokensUsed: result.usage.totalTokens }),
-        },
+        raw: { response: JSON.stringify(call.input), model: result.model, ...(result.usage?.totalTokens === undefined ? {} : { tokensUsed: result.usage.totalTokens }) },
         ...(warnings.length || result.warnings?.length ? { warnings: [...warnings, ...(result.warnings ?? [])] } : {}),
       };
     },

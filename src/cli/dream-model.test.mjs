@@ -76,15 +76,15 @@ test("Dispatch enforces the token budget: a call that overruns it is terminal an
   assert.equal(receipts[0].outcome, "budget-exceeded");
 });
 
-test("the Relay shim reports what the runtime did: no tool call and a truncated response are warnings, not silence", async () => {
-  const none = new FakeModelRuntime([{ provider: "fake", model: "m", outputText: "", toolCalls: [], usage: {}, latencyMs: 1, stopReason: "end_turn" }]);
-  const provider = await createRelayExtractionProvider({ runtime: none });
-  const out = await provider.extract({ content: "x", contentType: "text", targetSchema: [{ path: "a", type: "string" }] });
-  assert.deepEqual(out.proposals, []);
-  assert.match(out.warnings.join("\n"), /no extraction tool call/);
-  const cut = new FakeModelRuntime([{ provider: "fake", model: "m", outputText: "", toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: { proposals: [] } }], usage: {}, latencyMs: 1, stopReason: "max_tokens" }]);
-  const truncated = await (await createRelayExtractionProvider({ runtime: cut })).extract({ content: "x", contentType: "text", targetSchema: [{ path: "a", type: "string" }] });
-  assert.match(truncated.warnings.join("\n"), /truncated/);
+test("the Relay shim fails a pass that did not deliver an extraction: no tool call, a malformed input, or a truncated response", async () => {
+  const schema = [{ path: "a", type: "string" }];
+  const run = async (result) => (await createRelayExtractionProvider({ runtime: new FakeModelRuntime([result]) })).extract({ content: "x", contentType: "text", targetSchema: schema });
+  const base = { provider: "fake", model: "m", outputText: "", usage: {}, latencyMs: 1 };
+  await assert.rejects(() => run({ ...base, toolCalls: [], stopReason: "end_turn" }), /no extraction tool call/);
+  await assert.rejects(() => run({ ...base, toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: { proposals: [] } }], stopReason: "max_tokens" }), /truncated/);
+  await assert.rejects(() => run({ ...base, toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: "nope" }], stopReason: "tool_use" }), /malformed/);
+  const ok = await run({ ...base, toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: { proposals: [] } }], stopReason: "tool_use" });
+  assert.deepEqual(ok.proposals, [], "an empty list that the model did deliver is a real, empty answer");
 });
 
 test("layer 2 of the redaction defence: no secret-shaped canary reaches the model, and the report counts the scrub markers", async (t) => {

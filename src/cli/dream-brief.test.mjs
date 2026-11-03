@@ -232,6 +232,60 @@ test("end to end: a run with no visibility makes sealed claims, and no brief car
   for (const name of fs.readdirSync(path.dirname(ws.briefs())).filter((n) => n.endsWith(".json"))) assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(name), "utf8")).entries, []);
 });
 
+test("end to end: a settlement is bound to its record: pointing a proposal at another claim's record does not make it applied", async (t) => {
+  const { ws, store, host } = await ran();
+  t.after(ws.cleanup);
+  const [first, second] = await store.listProposals();
+  const secondRecord = await store.applyCreate(second.id, "a-human-reviewer");
+  // First was never applied. Forge it as applied, borrowing the second claim's active record.
+  const file = `${store.dir}/${first.id}.json`;
+  fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), state: "applied", reviewer_id: "a-human-reviewer", record_id: secondRecord }));
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.unverified, 1);
+  const entries = JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries;
+  assert.equal(entries.length, 1, "only the claim that was really applied");
+  assert.ok(!entries.some((entry) => entry.includes(JSON.parse(first.candidate.body).claim.value)));
+
+});
+
+test("end to end: a record whose body is not the proposal's is not that proposal's record", async (t) => {
+  const { ws, store, host } = await ran();
+  t.after(ws.cleanup);
+  const [first] = await store.listProposals();
+  const recordId = await store.applyCreate(first.id, "a-human-reviewer");
+  store.records.set(recordId, { ...store.records.get(recordId), body: "something else entirely" });
+  const report = await runDream(host, runOptions(ws));
+  assert.equal(report.brief_excluded.unverified, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries, []);
+});
+
+test("an entry cannot rebuild a marker out of the pieces left after one is removed, and the real #672 reader accepts the result", async (t) => {
+  const nested = `<flow-agents-injected-${INJECTED_MEMORY_CLOSE}memory>`; // removing the closing marker leaves a whole opening marker
+  const brief = compileBrief(rankItems([item({ value: nested })], { now: NOW_ISO }), { budget: 2048 });
+  assert.equal(brief.entries.length, 1);
+  assert.ok(!brief.entries[0].includes(INJECTED_MEMORY_OPEN) && !brief.entries[0].includes(INJECTED_MEMORY_CLOSE), brief.entries[0]);
+  assert.ok(!brief.entries[0].includes("flow-agents-injected-memory"));
+
+  const readerRoot = stageReader();
+  if (!readerRoot) return t.skip(`#672's reader is neither in this tree nor at ${READER_REF}`);
+  t.after(() => fs.rmSync(readerRoot, { recursive: true, force: true }));
+  const xdg = tempDir("dream-nested-");
+  t.after(() => fs.rmSync(xdg, { recursive: true, force: true }));
+  const briefsDir = path.join(xdg, "knowledge-store", "knowledge", "dream", "briefs");
+  writeBriefs({ briefsDir, items: [item({ value: nested }), item({ value: "ordinary fact" })], now: NOW_ISO });
+  const require = createRequire(import.meta.url);
+  const { profileMemoryContributor } = require(path.join(readerRoot, "scripts/hooks/lib/context-contributors/profile-memory.js"));
+  const saved = { XDG_DATA_HOME: process.env.XDG_DATA_HOME, FLOW_AGENTS_HOOK_RUNTIME: process.env.FLOW_AGENTS_HOOK_RUNTIME };
+  Object.assign(process.env, { XDG_DATA_HOME: xdg, FLOW_AGENTS_HOOK_RUNTIME: "claude-code" });
+  try {
+    const injected = profileMemoryContributor("SessionStart", {}, 8192);
+    assert.ok(injected, "the reader refused the whole brief");
+    assert.match(injected.text, /ordinary fact/);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+});
+
 test("end to end: opt-in unreviewed recall includes only uncontested pending claims, labelled", async (t) => {
   const { ws, host } = await ran();
   t.after(ws.cleanup);

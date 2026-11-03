@@ -1,5 +1,5 @@
 /**
- * Stage a sitting's claims as Corpus create proposals (#671 on #670).
+ * Stage a sitting's plan as Corpus create proposals (#671 on #670).
  *
  * The dream run never applies or rejects a proposal: only a reviewer other than
  * the proposer can turn a `pending` proposal into a record (Corpus enforces
@@ -8,7 +8,8 @@
  * Corpus has no idempotency key yet (corpus#45), so a retry reconciles against
  * the store instead: every claim already proposed, in any state, is reused by
  * its claim id. A rejected proposal stays rejected; the same claim is never
- * proposed a second time.
+ * proposed a second time. Each envelope carries the sitting's whole plan (see
+ * envelope.js), so a retry resumes the plan and does not extract again.
  *
  * @module dream/propose
  */
@@ -20,19 +21,19 @@ import { dreamError } from "./util.js";
 /**
  * @param {object} options
  * @param {object} options.residue complete runtime-session residue (#669)
- * @param {{claim: object, agreement: object|null, decision: object, project: string|null}[]} options.claims
+ * @param {import("./envelope.js").PlanEntry[]} options.plan the sitting's whole plan, in order
  * @param {{store: object, registerRoot: Function, root: string, rootName: string}} options.host
  * @param {string} options.proposerId
  * @param {ReturnType<typeof indexProposals>} options.index proposals already in the store
  * @param {boolean} options.write false previews the candidates and writes nothing
  * @returns {Promise<{created: object[], reused: object[], preview: object[]}>}
  */
-export async function proposeSitting({ residue, claims, host, proposerId, index, write }) {
+export async function proposeSitting({ residue, plan, host, proposerId, index, write }) {
   const created = [];
   const reused = [];
   const fresh = [];
-  const sitting = { id: residue.sittingId, contentHash: residue.contentHash, count: claims.length };
-  claims.forEach((entry, position) => {
+  const sitting = { id: residue.sittingId, contentHash: residue.contentHash };
+  plan.forEach((entry, position) => {
     const known = index.byClaim.get(entry.claim.id);
     if (known) {
       // A claim id is the digest of the claim's whole content, and a stored claim is verified against it on
@@ -43,16 +44,16 @@ export async function proposeSitting({ residue, claims, host, proposerId, index,
       reused.push({ claimId: entry.claim.id, proposalId: known.proposal.id, state: known.proposal.state });
       return;
     }
-    fresh.push({ ...entry, position });
+    fresh.push({ entry, position });
   });
 
-  const candidates = fresh.map((entry) => ({
-    title: titleFor(entry.claim),
+  const candidates = fresh.map(({ position }) => ({
+    title: titleFor(plan[position].claim),
     category: MEMORY_CATEGORY,
-    body: encodeEnvelope({ ...entry, sitting: { ...sitting, index: entry.position } }),
+    body: encodeEnvelope({ plan, index: position, sitting }),
   }));
 
-  if (!write) return { created, reused, preview: candidates.map((candidate, i) => ({ ...candidate, claimId: fresh[i].claim.id })) };
+  if (!write) return { created, reused, preview: candidates.map((candidate, i) => ({ ...candidate, claimId: fresh[i].entry.claim.id })) };
   if (candidates.length === 0) return { created, reused, preview: [] };
 
   let result;
@@ -66,14 +67,16 @@ export async function proposeSitting({ residue, claims, host, proposerId, index,
   if (result.proposals.length !== candidates.length) {
     throw dreamError("DREAM_PROPOSAL_COUNT", "the store returned a different number of proposals than were requested");
   }
-  result.proposals.forEach((proposalId, i) => created.push({ claimId: fresh[i].claim.id, proposalId }));
+  result.proposals.forEach((proposalId, i) => created.push({ claimId: fresh[i].entry.claim.id, proposalId }));
   return { created, reused, preview: [] };
 }
 
 async function reconcile(store, proposerId, fresh) {
   try {
     const index = indexProposals(await store.listProposals(), proposerId);
-    return fresh.filter((entry) => index.byClaim.get(entry.claim.id)?.proposal.proposer_id === proposerId).map((entry) => entry.claim.id);
+    return fresh
+      .filter(({ entry }) => index.byClaim.get(entry.claim.id)?.proposal.proposer_id === proposerId)
+      .map(({ entry }) => ({ claimId: entry.claim.id, proposalId: index.byClaim.get(entry.claim.id).proposal.id }));
   } catch {
     return null;
   }

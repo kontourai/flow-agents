@@ -86,7 +86,6 @@ export class FakeCorpusStore {
     this.records = new Map();
     this.calls = { proposeCreate: 0, applyCreate: 0, rejectCreate: 0, listProposals: 0 };
     this.failures = [];
-    fs.mkdirSync(this.dir, { recursive: true });
   }
 
   /** Fail the nth (0-based, counting every call) proposeCreate. `after: true` stores the proposal first, then throws. */
@@ -95,7 +94,7 @@ export class FakeCorpusStore {
   }
 
   #file(id) { return path.join(this.dir, `${id}.json`); }
-  #write(proposal) { fs.writeFileSync(this.#file(proposal.id), JSON.stringify(proposal, null, 2)); }
+  #write(proposal) { fs.mkdirSync(this.dir, { recursive: true }); fs.writeFileSync(this.#file(proposal.id), JSON.stringify(proposal, null, 2)); }
 
   async proposeCreate(candidate, proposerId, evidence) {
     const call = this.calls.proposeCreate++;
@@ -105,7 +104,7 @@ export class FakeCorpusStore {
       if (typeof candidate?.[field] !== "string" || !candidate[field].trim()) throw Object.assign(new Error(`missing required field: ${field}`), { code: "MISSING_EVIDENCE" });
     }
     if (!proposerId || !evidence?.agent || !evidence?.proposal) throw Object.assign(new Error("missing evidence"), { code: "MISSING_EVIDENCE" });
-    const id = `prop-${String(fs.readdirSync(this.dir).length + 1).padStart(4, "0")}`;
+    const id = `prop-${String((fs.existsSync(this.dir) ? fs.readdirSync(this.dir).length : 0) + 1).padStart(4, "0")}`;
     this.#write({ id, state: "pending", candidate: JSON.parse(JSON.stringify(candidate)), proposer_id: proposerId, evidence: { agent: evidence.agent, proposal: evidence.proposal }, proposed_at: this.clock() });
     if (failure?.after) throw Object.assign(new Error("injected failure after the proposal was stored"), { code: "INJECTED" });
     return id;
@@ -118,6 +117,7 @@ export class FakeCorpusStore {
   async listProposals({ state } = {}) {
     this.calls.listProposals += 1;
     const wanted = state === undefined ? null : [state].flat();
+    if (!fs.existsSync(this.dir)) return [];
     return fs.readdirSync(this.dir).filter((name) => name.endsWith(".json")).sort()
       .map((name) => JSON.parse(fs.readFileSync(path.join(this.dir, name), "utf8")))
       .filter((proposal) => !wanted || wanted.includes(proposal.state))
@@ -131,7 +131,7 @@ export class FakeCorpusStore {
     if (proposal.state !== "pending") throw Object.assign(new Error("not pending"), { code: "MISSING_EVIDENCE" });
     if (proposal.proposer_id === reviewerId) throw Object.assign(new Error("SELF_APPROVAL"), { code: "SELF_APPROVAL" });
     const recordId = `rec-${proposalId}`;
-    this.records.set(recordId, { id: recordId, type: "raw", ...proposal.candidate, created_at: this.clock(), updated_at: this.clock() });
+    this.records.set(recordId, { id: recordId, type: "raw", ...proposal.candidate, created_at: this.clock(), updated_at: this.clock(), mutation_log: [{ op: "apply-create", at: this.clock(), agent: reviewerId, evidence: { proposal_id: proposalId, proposer_id: proposal.proposer_id, proposal_evidence: proposal.evidence } }] });
     this.#write({ ...proposal, state: "applied", reviewer_id: reviewerId, decided_at: this.clock(), record_id: recordId });
     return recordId;
   }
@@ -214,8 +214,10 @@ export function fakeRelayClaims(claims, { id = "fake-runtime" } = {}) {
 
 export function hostFor(ws, store, extract, extra = {}) {
   const registered = [];
+  const published = [];
   return {
-    store, extract,
+    store, extract, published,
+    publish: (batch) => { published.push(batch); },
     root: ws.memoryRoot, rootName: "memory",
     registerRoot: (name, root) => { registered.push([name, root]); },
     registered,

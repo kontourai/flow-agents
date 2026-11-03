@@ -36,7 +36,7 @@ import {
 } from "../adapters/memory-claims/index.mjs";
 import { commitRuntimeCursor, ingestRuntimeSessions, readRuntimeCursor } from "../promote/runtime-session.js";
 import { DEFAULT_GLOBAL_BUDGET_BYTES, DEFAULT_PROJECT_BUDGET_BYTES, isSealed, writeBriefs } from "./brief.js";
-import { indexProposals } from "./envelope.js";
+import { MAX_CLAIMS_PER_SITTING, indexProposals, verifyEntry } from "./envelope.js";
 import { acquireDreamLock } from "./lock.js";
 import { proposeSitting } from "./propose.js";
 import { assertAbsolute, dreamError, projectFromCwd, sha256, writePrivateAtomic } from "./util.js";
@@ -73,10 +73,14 @@ function narrowStore(store) {
   };
 }
 
-/** Memory proposals as brief input. An applied proposal whose record is gone or retired drops out; a rejected one never appears. */
+/**
+ * Memory proposals as brief input. A rejected proposal never appears. An applied one counts only when its record
+ * is the one Corpus made from it: the record's `apply-create` entry names this proposal and the record's body is the
+ * proposal's. A settlement that points at some other record, or at none, is not trusted.
+ */
 async function briefItems(store, index, proposerId) {
   const items = [];
-  const excluded = { rejected: 0, self_approved: 0, inactive: 0, sealed: 0 };
+  const excluded = { rejected: 0, self_approved: 0, unverified: 0, inactive: 0, sealed: 0 };
   for (const { proposal, envelope } of index.byClaim.values()) {
     if (proposal.state === "rejected") {
       excluded.rejected += 1;
@@ -92,17 +96,38 @@ async function briefItems(store, index, proposerId) {
         excluded.self_approved += 1;
         continue;
       }
-      if (store.get) {
-        const record = proposal.record_id ? await store.get(proposal.record_id) : null;
-        if (!record || record.status === "retired") {
-          excluded.inactive += 1;
-          continue;
-        }
+      const record = store.get && proposal.record_id ? await store.get(proposal.record_id) : null;
+      const bound = Boolean(record)
+        && record.body === proposal.candidate.body
+        && (record.mutation_log ?? []).some((entry) => entry.op === "apply-create" && entry.evidence?.proposal_id === proposal.id);
+      if (!bound) {
+        excluded.unverified += 1;
+        continue;
+      }
+      if (record.status === "retired") {
+        excluded.inactive += 1;
+        continue;
       }
     }
     items.push({ claim: envelope.claim, project: envelope.project, agreement: envelope.agreement, state: proposal.state, routing: envelope.decision });
   }
   return { items, excluded };
+}
+
+/** Counts how many extraction passes failed, by what the extract function does, not by what its warnings say. */
+function trackExtract(extract) {
+  const state = { failed: 0 };
+  const wrapped = async (request) => {
+    try {
+      const result = await extract(request);
+      if (result?.error) state.failed += 1;
+      return result;
+    } catch (error) {
+      state.failed += 1;
+      throw error;
+    }
+  };
+  return { extract: wrapped, state };
 }
 
 function pruneReports(dir) {
@@ -122,8 +147,8 @@ function pruneReports(dir) {
  * @property {string} rootName
  * @property {Function} [extract] model-backed `MemoryExtract` (see model.js); not needed for a dry run
  * @property {() => object[] | Promise<object[]>} [reviewDecisions] Survey review decisions, for brief labels and metrics
- * @property {(batch: {runId: string, decisions: object[], reviewItems: object[], metrics: object|null}) => unknown} [publish]
- *   hands routing decisions to the host's review queue and Flow evidence. It must be idempotent: a run that fails after
+ * @property {(batch: {runId: string, decisions: object[], reviewItems: object[], metrics: object|null}) => unknown} publish
+ *   required for a real run. Hands routing decisions to the host's review queue and Flow evidence. It must be idempotent: a run that fails after
  *   it is retried, and republishes the decisions of sittings it finds already proposed.
  */
 
@@ -154,6 +179,9 @@ export async function runDream(host, options = {}) {
   }
   assertAbsolute(host?.root, "root");
   if (!dryRun && typeof host.extract !== "function") throw dreamError("DREAM_CONFIG_INVALID", "the host must provide an extract function");
+  // Routed review is the only way a flagged claim is ever promoted. A run with nowhere to send it would propose
+  // claims no reviewer is ever told about, so a real run requires the delivery to exist, whether or not any claim routes.
+  if (!dryRun && typeof host.publish !== "function") throw dreamError("DREAM_CONFIG_INVALID", "the host must provide a publish function that delivers routed-review items");
   const store = narrowStore(host.store);
   const proposerId = options.proposerId ?? DREAM_PROPOSER_ID;
   const passes = options.passes ?? 2;
@@ -171,8 +199,8 @@ export async function runDream(host, options = {}) {
     dry_run: dryRun,
     started_at: now(),
     ingest: null,
-    sittings: { seen: 0, distilled: 0, reused: 0, deferred_incomplete: 0, deferred_over_cap: 0 },
-    claims: { distilled: 0, rejected: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
+    sittings: { seen: 0, distilled: 0, resumed: 0, reused: 0, deferred_incomplete: 0, deferred_over_cap: 0 },
+    claims: { distilled: 0, rejected: 0, truncated: 0, created: 0, reused: 0, uncontested: 0, routed: 0 },
     receipts: [],
     review_items: 0,
     unreadable_proposals: 0,
@@ -183,6 +211,7 @@ export async function runDream(host, options = {}) {
     metrics: null,
     cursor: { committed: false },
   };
+  let cursorCommitted = false;
   const writeReport = () => writePrivateAtomic(path.join(reportsDir, `${runId}.json`), `${JSON.stringify(report, null, 2)}\n`);
 
   try {
@@ -234,59 +263,55 @@ export async function runDream(host, options = {}) {
     }
 
     for (const residue of dryRun ? [] : selected) {
-      if (index.complete(residue.sittingId, residue.contentHash)) {
-        // Fully proposed by an earlier attempt: reuse it, and do not spend another model call.
-        for (const { proposal, envelope } of index.claimsOf(residue.sittingId, residue.contentHash)) {
-          decisions.push(envelope.decision);
-          report.receipts.push({ claim_id: envelope.claim.id, proposal_id: proposal.id, disposition: "reused", state: proposal.state, sitting_id: residue.sittingId, outcome: envelope.decision.outcome });
-          report.claims.reused += 1;
+      const known = index.sitting(residue.sittingId, residue.contentHash);
+      let plan;
+      if (known) {
+        // An earlier attempt already decided this sitting's claims. Resume that plan: asking the model again would
+        // word them differently, and the first attempt's proposals would stay beside the new ones.
+        if (!known.plan.every(verifyEntry)) throw dreamError("DREAM_RECEIPT_CORRUPT", `the stored plan for sitting ${residue.sittingId} does not verify`);
+        plan = known.plan;
+      } else {
+        await stage("distill");
+        const tracker = trackExtract(host.extract);
+        const distilled = await distillMemoryClaims({ sitting: residue, extract: tracker.extract, passes, ...(options.visibility ? { visibility: options.visibility } : {}) });
+        if (tracker.state.failed >= passes) {
+          // Every pass failed or returned an error: a model outage, not a sitting with nothing in it.
+          throw dreamError("DREAM_DISTILL_FAILED", `extraction failed for sitting ${residue.sittingId}`, { sittingId: residue.sittingId });
         }
-        report.sittings.reused += 1;
-        processed.add(residue.sittingId);
-        continue;
+        report.claims.rejected += distilled.rejected.length;
+
+        await stage("route");
+        const current = [...index.byClaim.values()].filter(({ proposal }) => proposal.state !== "rejected").map(({ envelope }) => envelope.claim);
+        const project = projectFromCwd(residue.provenance?.cwd ?? null);
+        const ordered = [...distilled.claims].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        // Read max + 1 and refuse: a silent cut would drop claims the report never mentions.
+        report.claims.truncated += Math.max(0, ordered.length - MAX_CLAIMS_PER_SITTING);
+        plan = ordered.slice(0, MAX_CLAIMS_PER_SITTING).map((claim) => {
+          const agreement = distilled.agreement[claim.id] ?? null;
+          return { claim, agreement, decision: routeMemoryChange({ type: "claim", claim, current, agreement, sourceVisibility: options.visibility ?? null }, options.routingPolicy ?? DEFAULT_MEMORY_ROUTING_POLICY), project };
+        });
+        report.claims.distilled += plan.length;
       }
-
-      await stage("distill");
-      const distilled = await distillMemoryClaims({ sitting: residue, extract: host.extract, passes, ...(options.visibility ? { visibility: options.visibility } : {}) });
-      // Traverse reports a failed provider call as `error` on its result ("reported"); a thrown extract is "failed".
-      const failedPasses = distilled.warnings.filter((warning) => /^pass \d+ (failed|reported)/.test(warning)).length;
-      if (distilled.claims.length === 0 && failedPasses >= passes) {
-        // Every pass failed: that is a model outage, not a sitting with nothing in it. Do not advance past it.
-        throw dreamError("DREAM_DISTILL_FAILED", `extraction failed for sitting ${residue.sittingId}`, { sittingId: residue.sittingId });
-      }
-      report.claims.distilled += distilled.claims.length;
-      report.claims.rejected += distilled.rejected.length;
-
-      await stage("route");
-      const current = [...index.byClaim.values()].filter(({ proposal }) => proposal.state !== "rejected").map(({ envelope }) => envelope.claim);
-      const project = projectFromCwd(residue.provenance?.cwd ?? null);
-      const entries = distilled.claims.map((claim) => {
-        const agreement = distilled.agreement[claim.id] ?? null;
-        return {
-          claim,
-          agreement,
-          project,
-          decision: routeMemoryChange({ type: "claim", claim, current, agreement, sourceVisibility: options.visibility ?? null }, options.routingPolicy ?? DEFAULT_MEMORY_ROUTING_POLICY),
-        };
-      });
-
       await stage("propose");
-      const result = await proposeSitting({ residue, claims: entries, host: { store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName }, proposerId, index, write: true })
+      const result = await proposeSitting({ residue, plan, host: { store, registerRoot: host.registerRoot, root: host.root, rootName: host.rootName }, proposerId, index, write: true })
         .catch((error) => {
           // What landed before the failure is real, and the report must say so.
-          for (const claimId of error.dreamLanded ?? []) report.receipts.push({ claim_id: claimId, proposal_id: null, disposition: "created", state: "pending", sitting_id: residue.sittingId, outcome: null });
+          for (const landed of error.dreamLanded ?? []) report.receipts.push({ claim_id: landed.claimId, proposal_id: landed.proposalId, disposition: "created", state: "pending", sitting_id: residue.sittingId, outcome: null });
           report.claims.created += (error.dreamLanded ?? []).length;
           throw error;
         });
-      await stage("receipt");
-      const outcomes = new Map(entries.map((entry) => [entry.claim.id, entry.decision.outcome]));
+      // Account for the store's change before anything else can fail.
+      const outcomes = new Map(plan.map((entry) => [entry.claim.id, entry.decision.outcome]));
       for (const item of result.created) report.receipts.push({ claim_id: item.claimId, proposal_id: item.proposalId, disposition: "created", state: "pending", sitting_id: residue.sittingId, outcome: outcomes.get(item.claimId) });
       for (const item of result.reused) report.receipts.push({ claim_id: item.claimId, proposal_id: item.proposalId, disposition: "reused", state: item.state, sitting_id: residue.sittingId, outcome: outcomes.get(item.claimId) });
       report.claims.created += result.created.length;
       report.claims.reused += result.reused.length;
-      report.sittings.distilled += 1;
-      decisions.push(...entries.map((entry) => entry.decision));
+      if (!known) report.sittings.distilled += 1;
+      else if (known.complete) report.sittings.reused += 1;
+      else report.sittings.resumed += 1;
+      decisions.push(...plan.map((entry) => entry.decision));
       processed.add(residue.sittingId);
+      await stage("receipt");
       // The next sitting routes against, and reconciles with, what this one just proposed.
       index = indexProposals(await store.listProposals(), proposerId);
     }
@@ -297,7 +322,7 @@ export async function runDream(host, options = {}) {
     report.metrics = decisions.length ? deriveMemoryRunMetrics({ runId, decisions, reviewDecisions }) : null;
     if (!dryRun && decisions.length) {
       await stage("publish");
-      await host.publish?.({ runId, decisions, reviewItems, metrics: report.metrics });
+      await host.publish({ runId, decisions, reviewItems, metrics: report.metrics });
     }
 
     // Briefs derive from the store every run, because review changes them without any new telemetry.
@@ -330,7 +355,7 @@ export async function runDream(host, options = {}) {
     };
     const changed = JSON.stringify(next) !== JSON.stringify(cursor);
     const nextBytes = `${JSON.stringify(next, null, 2)}\n`;
-    report.cursor = { committed: false, ...(changed ? { digest: sha256(nextBytes), offset: next.telemetry.offset } : {}) };
+    report.cursor = { committed: false, ...(changed ? { commit_intent: true, digest: sha256(nextBytes), offset: next.telemetry.offset } : {}) };
 
     if (dryRun) {
       report.status = "dry-run";
@@ -338,24 +363,31 @@ export async function runDream(host, options = {}) {
       return report;
     }
 
-    report.status = changed || report.sittings.distilled + report.sittings.reused > 0 ? "success" : "noop";
+    report.status = changed || report.sittings.distilled + report.sittings.resumed + report.sittings.reused > 0 ? "success" : "noop";
     report.finished_at = now();
     await stage("report");
-    writeReport();
+    writeReport(); // everything fallible is behind us: the report names the cursor it is about to commit
     pruneReports(reportsDir);
 
     if (changed) {
       await stage("cursor");
+      fs.mkdirSync(path.dirname(cursorFile), { recursive: true, mode: 0o700 }); // the file is private because its directory is
       commitRuntimeCursor(cursorFile, next);
-      fs.chmodSync(cursorFile, 0o600);
-      report.cursor = { committed: true, digest: sha256(fs.readFileSync(cursorFile)), offset: next.telemetry.offset };
-      writeReport();
+      cursorCommitted = true;
+      // Nothing below may fail the run: the cursor has moved, so a thrown error here would call a done run failed.
+      report.cursor = { committed: true, digest: sha256(nextBytes), offset: next.telemetry.offset };
+      try {
+        fs.chmodSync(cursorFile, 0o600);
+        writeReport();
+      } catch {
+        // The report already on disk says commit_intent with this digest; the cursor file is the authority.
+      }
     }
     return report;
   } catch (error) {
     report.status = "failed";
     report.error = { code: error.code ?? "DREAM_FAILED", message: String(error.message ?? error).slice(0, 500) };
-    report.cursor = { committed: false };
+    report.cursor = cursorCommitted ? { ...report.cursor, committed: true } : { committed: false };
     report.finished_at = now();
     if (error.briefs) {
       report.briefs = error.briefs;

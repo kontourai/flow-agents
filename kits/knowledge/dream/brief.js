@@ -56,12 +56,15 @@ const UNSAFE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/
 export const joinedBytes = (entries) => Buffer.byteLength(entries.join(SEPARATOR));
 
 function sanitize(text) {
-  return String(text)
-    .replaceAll(INJECTED_MEMORY_OPEN, "")
-    .replaceAll(INJECTED_MEMORY_CLOSE, "")
-    .replace(UNSAFE, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  // Removing one thing can join the pieces around it into another (a closing marker inside an opening marker), so
+  // repeat until nothing changes. The reader refuses the whole file if one entry still has a marker.
+  let value = String(text);
+  for (let pass = 0; pass < 16; pass += 1) {
+    const next = value.replaceAll(INJECTED_MEMORY_OPEN, "").replaceAll(INJECTED_MEMORY_CLOSE, "").replace(UNSAFE, " ").replace(/\s+/g, " ").trim();
+    if (next === value) return value;
+    value = next;
+  }
+  return value.includes("flow-agents-injected-memory") ? "" : value; // a pathological nesting: drop the entry rather than ship a marker
 }
 
 /**

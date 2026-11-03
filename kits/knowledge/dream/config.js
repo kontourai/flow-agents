@@ -21,14 +21,25 @@ const POSITIVE_INTEGERS = ["passes", "maxSittingsPerRun", "globalBudget", "proje
 export const DEFAULT_ROLE = "extraction-default";
 export const DEFAULT_TRIGGER_MIN_INTERVAL_MS = 15 * 60 * 1000;
 
-/** Read and validate a config file. Returns plain data; nothing is run. */
+/**
+ * Read and validate a config file. The config decides whether the run is enabled and which code it loads, so it
+ * is held to the same bar as that code: a real file, owned by the current user, in a directory chain that no other
+ * user can write. Returns plain data; nothing is run.
+ */
 export function loadDreamConfig(file) {
-  assertAbsolute(file, "config");
-  const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.size > MAX_CONFIG_BYTES) throw dreamError("DREAM_CONFIG_INVALID", "config must be a regular file under 64 KiB");
+  assertOwnerControlledFile(file, "config");
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  let text;
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > MAX_CONFIG_BYTES) throw dreamError("DREAM_CONFIG_INVALID", "config must be a regular file under 64 KiB");
+    text = fs.readFileSync(fd, "utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
   let config;
   try {
-    config = JSON.parse(fs.readFileSync(file, "utf8"));
+    config = JSON.parse(text);
   } catch {
     throw dreamError("DREAM_CONFIG_INVALID", "config is not valid JSON");
   }
@@ -53,13 +64,30 @@ export function validateDreamConfig(config) {
   return { ...config, enabled: config.enabled === true };
 }
 
-/** The host module is operator-owned code. Refuse one another user could have changed. */
+const trustedOwner = (stat, uid) => uid === null || stat.uid === uid || stat.uid === 0;
+
+/**
+ * Refuse a file, or a directory above it, that another user could have changed: any symlink on the path, an owner
+ * other than the current user (or root), or a group- or world-writable mode (a sticky directory is exempt, as for
+ * /tmp). Imported code and the config that enables the run must both pass.
+ *
+ * Residual: the check and the later read are two steps, so a process running as the same user can still swap the
+ * file between them. That attacker already owns the account the run uses.
+ */
 export function assertOwnerControlledFile(file, label) {
   assertAbsolute(file, label);
-  const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink()) throw dreamError("DREAM_CONFIG_INVALID", `${label} must be a regular file`);
+  const resolved = path.resolve(file);
+  if (fs.realpathSync(resolved) !== resolved) throw dreamError("DREAM_CONFIG_INVALID", `${label} path must not contain a symlink`);
   const uid = typeof process.getuid === "function" ? process.getuid() : null;
+  const stat = fs.lstatSync(resolved);
+  if (!stat.isFile()) throw dreamError("DREAM_CONFIG_INVALID", `${label} must be a regular file`);
   if (uid !== null && stat.uid !== uid) throw dreamError("DREAM_CONFIG_INVALID", `${label} must be owned by the current user`);
   if ((stat.mode & 0o022) !== 0) throw dreamError("DREAM_CONFIG_INVALID", `${label} must not be group or world writable`);
-  return path.resolve(file);
+  for (let dir = path.dirname(resolved); ; dir = path.dirname(dir)) {
+    const dirStat = fs.lstatSync(dir);
+    if (!trustedOwner(dirStat, uid)) throw dreamError("DREAM_CONFIG_INVALID", `${label} is under a directory owned by another user: ${dir}`);
+    if ((dirStat.mode & 0o022) !== 0 && (dirStat.mode & 0o1000) === 0) throw dreamError("DREAM_CONFIG_INVALID", `${label} is under a group or world writable directory: ${dir}`);
+    if (path.dirname(dir) === dir) break;
+  }
+  return resolved;
 }

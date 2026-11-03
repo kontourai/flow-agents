@@ -63,7 +63,7 @@ test("a failed publish fails the run, and the retry republishes the decisions of
   assert.equal((await store.listProposals()).length, 2);
 });
 
-test("a tampered stored decision is refused on read and counted unreadable", async (t) => {
+test("a tampered stored decision is refused, not skipped: the run stops and says which proposal", async (t) => {
   const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
   t.after(ws.cleanup);
   const store = new FakeCorpusStore(ws.memoryRoot);
@@ -74,8 +74,22 @@ test("a tampered stored decision is refused on read and counted unreadable", asy
   const body = JSON.parse(first.candidate.body);
   body.decision.outcome = "routed"; // an outcome its own input does not produce
   fs.writeFileSync(file, JSON.stringify({ ...first, candidate: { ...first.candidate, body: JSON.stringify(body) } }));
-  const report = await runDream(host, runOptions(ws));
-  assert.equal(report.unreadable_proposals, 1);
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.code === "DREAM_RECEIPT_CORRUPT" && error.proposalId === first.id);
+  assert.equal(ws.reports().at(-1).status, "failed");
+  // Rejecting the bad proposal in the store is the operator's way past it.
+  await store.rejectCreate(first.id, "a-human-reviewer", "corrupt");
+  assert.notEqual((await runDream(host, runOptions(ws))).status, "failed");
+});
+
+test("a real run needs a way to deliver routed review; without one nothing is written", async (t) => {
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const store = new FakeCorpusStore(ws.memoryRoot);
+  const host = hostFor(ws, noApplyStore(store), await scriptedExtract(), { publish: undefined });
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.code === "DREAM_CONFIG_INVALID" && /publish/.test(error.message));
+  assert.equal(fs.existsSync(ws.dreamDir), false);
+  assert.deepEqual(await store.listProposals(), []);
+  assert.equal((await runDream(host, runOptions(ws, { enabled: false, dryRun: true }))).status, "dry-run", "a dry run delivers nothing, so it does not need one");
 });
 
 // ── the model through the callable CLI ─────────────────────────────────────────────────────────────────────
@@ -88,13 +102,13 @@ function hostModule(dir, body) {
 function writeConfig(ws, extra = {}) {
   const host = hostModule(ws.root, `
     import { FakeCorpusStore, scriptedExtract } from ${JSON.stringify(path.resolve(import.meta.dirname, "dream-support.mjs"))};
-    export async function createDreamHost({ config }) {
+    export async function createDreamHost({ config, dryRun }) {
       const store = new FakeCorpusStore(${JSON.stringify(ws.memoryRoot)});
-      return { store, extract: await scriptedExtract(), registerRoot() {}, root: ${JSON.stringify(ws.memoryRoot)}, rootName: "memory" };
+      return { store, extract: await scriptedExtract(), registerRoot() {}, publish() {}, dryRun, root: ${JSON.stringify(ws.memoryRoot)}, rootName: "memory" };
     }
   `);
   const file = path.join(ws.root, "dream.config.json");
-  fs.writeFileSync(file, JSON.stringify({ enabled: true, telemetryFile: ws.telemetryFile, transcriptRoots: [ws.transcriptRoot], dreamDir: ws.dreamDir, host, ...extra }));
+  fs.writeFileSync(file, JSON.stringify({ enabled: true, telemetryFile: ws.telemetryFile, transcriptRoots: [ws.transcriptRoot], dreamDir: ws.dreamDir, host, ...extra }), { mode: 0o600 });
   return file;
 }
 const sink = () => { const chunks = []; return { write: (c) => { chunks.push(c); }, text: () => chunks.join("") }; };
@@ -126,9 +140,10 @@ test("CLI: disabled by default, strict about configuration, and --dry-run works 
   assert.equal(await main(["run", "--config", config, "--dry-run"], { stdout: dry, stderr: sink() }), 0);
   assert.equal(JSON.parse(dry.text()).status, "dry-run");
   assert.equal(fs.existsSync(ws.dreamDir), false);
+  assert.equal(fs.existsSync(ws.memoryRoot), false, "a dry run through the CLI creates nothing in the memory root either");
 
   const noConfig = path.join(ws.root, "none.json");
-  fs.writeFileSync(noConfig, JSON.stringify({ enabled: true, telemetryFile: ws.telemetryFile, transcriptRoots: [ws.transcriptRoot], host: "relative.mjs" }));
+  fs.writeFileSync(noConfig, JSON.stringify({ enabled: true, telemetryFile: ws.telemetryFile, transcriptRoots: [ws.transcriptRoot], host: "relative.mjs" }), { mode: 0o600 });
   assert.equal(await main(["run", "--config", noConfig], { stdout: sink(), stderr: sink() }), 2);
   assert.equal(await main(["run"], { stdout: sink(), stderr: sink() }), 2);
   assert.equal(await main(["bogus"], { stdout: sink(), stderr: sink() }), 2);
@@ -143,6 +158,47 @@ test("CLI: a host module another user could have changed is refused", async (t) 
   const err = sink();
   assert.equal(await main(["run", "--config", config], { stdout: sink(), stderr: err }), 2);
   assert.match(err.text(), /group or world writable/);
+});
+
+test("config and host trust: a writable config, a writable parent directory and a symlinked path are all refused", async (t) => {
+  const ws = workspace({ transcripts: ["codex-rollout.jsonl"] });
+  t.after(ws.cleanup);
+  const config = writeConfig(ws);
+  const refuse = async (message) => {
+    const err = sink();
+    assert.equal(await main(["run", "--config", config], { stdout: sink(), stderr: err }), 2);
+    assert.match(err.text(), message);
+  };
+  fs.chmodSync(config, 0o666);
+  await refuse(/config must not be group or world writable/);
+  fs.chmodSync(config, 0o600);
+  const sub = path.join(ws.root, "shared");
+  fs.mkdirSync(sub, { mode: 0o700 });
+  const moved = path.join(sub, "dream.config.json");
+  fs.copyFileSync(config, moved);
+  fs.chmodSync(sub, 0o770);
+  const err = sink();
+  assert.equal(await main(["run", "--config", moved], { stdout: sink(), stderr: err }), 2);
+  assert.match(err.text(), /group or world writable directory/);
+  fs.chmodSync(sub, 0o700);
+  const link = path.join(ws.root, "link.json");
+  fs.symlinkSync(config, link);
+  const linked = sink();
+  assert.equal(await main(["run", "--config", link], { stdout: sink(), stderr: linked }), 2);
+  assert.match(linked.text(), /symlink/);
+  // And a host module in a directory another user can write is refused even when its own mode is private.
+  const hostDir = path.join(ws.root, "hostdir");
+  fs.mkdirSync(hostDir, { mode: 0o700 });
+  const hostCopy = path.join(hostDir, "host.mjs");
+  fs.copyFileSync(JSON.parse(fs.readFileSync(config, "utf8")).host, hostCopy);
+  fs.chmodSync(hostCopy, 0o600);
+  fs.chmodSync(hostDir, 0o777);
+  const moreConfig = path.join(ws.root, "dream.config2.json");
+  fs.writeFileSync(moreConfig, JSON.stringify({ ...JSON.parse(fs.readFileSync(config, "utf8")), host: hostCopy }), { mode: 0o600 });
+  const e2 = sink();
+  assert.equal(await main(["run", "--config", moreConfig], { stdout: sink(), stderr: e2 }), 2);
+  assert.match(e2.text(), /group or world writable directory/);
+  fs.chmodSync(hostDir, 0o700);
 });
 
 test("CLI: exit code 75 when another run holds the lock", async (t) => {
@@ -162,7 +218,7 @@ test("config: unknown keys, relative paths and non-positive numbers are errors; 
   }
   const dir = tempDir("dream-config-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  fs.writeFileSync(`${dir}/c.json`, "{not json");
+  fs.writeFileSync(`${dir}/c.json`, "{not json", { mode: 0o600 });
   assert.throws(() => loadDreamConfig(`${dir}/c.json`), /not valid JSON/);
 });
 
@@ -172,7 +228,7 @@ function triggerFixture(t, configExtra = {}) {
   const dir = tempDir("dream-trigger-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const config = path.join(dir, "dream.config.json");
-  fs.writeFileSync(config, JSON.stringify({ enabled: true, telemetryFile: path.join(dir, "t.jsonl"), transcriptRoots: [dir], host: path.join(dir, "host.mjs"), dreamDir: path.join(dir, "dream"), ...configExtra }));
+  fs.writeFileSync(config, JSON.stringify({ enabled: true, telemetryFile: path.join(dir, "t.jsonl"), transcriptRoots: [dir], host: path.join(dir, "host.mjs"), dreamDir: path.join(dir, "dream"), ...configExtra }), { mode: 0o600 });
   const spawned = [];
   const spawn = (command, args, options) => { spawned.push({ command, args, options }); return { unref() {}, on() {} }; };
   const env = { FLOW_AGENTS_DREAM_TRIGGER: "1", FLOW_AGENTS_DREAM_CONFIG: config };

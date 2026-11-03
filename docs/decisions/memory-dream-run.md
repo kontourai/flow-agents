@@ -47,7 +47,10 @@ scheduled job of this repository.
   cursor and Corpus proposals and builds no durability layer beyond them. Adopting
   Monument later makes this repository its first consumer outside Station.
 - Corpus has no idempotency key yet ([corpus#45](https://github.com/kontourai/corpus/issues/45)),
-  so a failure partway through one sitting's proposals can leave extra pending proposals
-  on retry. They are grounded and unreviewed, and a reviewer sees them.
+  so every proposal of a sitting carries the sitting's whole plan. A retry reads the plan
+  back from the store and proposes only what is missing, with no new model call, and a
+  receipt that does not verify stops the run instead of being skipped.
+- Gate evaluation belongs to the host's Flow run. The dream declares the gates and calls
+  `onStage` at each boundary; it does not evaluate them.
 - Brief budgets (6144 bytes global, 2048 per project) and the ranking rule are defaults
   an owner may change. They are not ratified here.
