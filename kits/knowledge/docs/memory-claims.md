@@ -28,7 +28,7 @@ package exports `memory-claims`, `memory-routing` and `memory-routing-flow`.
 | `subject` | `{type, id, label}`, Surface's `(subjectType, subjectId)`. `id` is the lower-cased label until entity review says otherwise. |
 | `claimType`, `property`, `qualifiers` | Surface's `claimType`, `fieldOrBehavior` and canonical qualifiers. With the subject they are the *slot* a claim competes in. The slot key is Surface's own `canonicalClaimKey` with `claimType` added, as the decision specifies. The extractor does not produce qualifiers yet, so slots are coarser than Surface's and conflict more readily. |
 | `value` | What is asserted. Values compare by structural JSON equality, so a different spelling is a different value. |
-| `validTime` | Half-open `[from, until)` of when the value held in the world, per the Surface decision. `until` is exclusive; it is not Surface's inclusive authority-trace `validUntil`, and not `expiresAt` (freshness). An absent bound is unbounded; an absent `validTime` asserts no bound. Instants must be ISO 8601 dates or zoned date-times; an empty or unparseable interval is rejected, never guessed. |
+| `validTime` | Half-open `[from, until)` of when the value held in the world, per the Surface decision. `until` is exclusive; it is not Surface's inclusive authority-trace `validUntil`, and not `expiresAt` (freshness). An absent bound is unbounded; an absent `validTime` asserts no bound. Instants must be ISO 8601 dates or zoned date-times that exist on the calendar (`2026-02-30` is refused); the Kit stores them as UTC instants, so two spellings of one instant are one value. An empty or unparseable interval is rejected, never guessed. |
 | `speaker`, `source` | Who asserted it, and where it is grounded: source ref, `chars:<start>-<end>` locator, the verbatim excerpt, the instant of the turn, and its role. The Kit derives `source` from Traverse's verified provenance and the turn the locator falls in; the model does not supply it. |
 | `posture` | How the speaker asserted it: `stated`, `proposed`, `hypothetical` or `retracted`. It is a typed field, not a text prefix. |
 | `supersedes` | Edges to the current claims this one replaces (`succession`) or retracts (`correction`). |
@@ -109,7 +109,7 @@ are pure; there is no clock and no model call.
 
 ### Review items
 
-`runMemoryRouting` does the whole run: it decides each change, records the decisions, hands each routed claim's review item to the host's queue (`publish(item, idempotencyKey)`; the key is the decision id, so a retry is a no-op) and records the metrics. Decisions are recorded before anything is queued. `buildMemoryReviewItem(decision)` returns the Survey `ReviewItem` for a routed claim:
+`runMemoryRouting` does the whole run: it decides each change, records the decisions and the metrics as one serialised unit, then hands each routed claim's review item to the host's queue (`publish(item, idempotencyKey)`; the key is the decision id, which does not depend on the order of a claim's audience or edges, so a retry is a no-op). Decisions are recorded before anything is queued; if the queue fails, the decisions are already recorded and a retry publishes again with the same keys. `published` lists only items the queue accepted. `buildMemoryReviewItem(decision)` returns the Survey `ReviewItem` for a routed claim:
 a current/proposed pair when the decision names a current claim it conflicts with or
 replaces, otherwise one proposed candidate. Run a Survey `SupportVerifier` against the
 review candidate with `verifyMemoryClaimAgainstCurrent`, so Survey's workbench shows
@@ -154,8 +154,11 @@ this evidence. It is recorded and recomputable, not gated.
   many. It is an upper bound on attention and is `null`, never estimated, without events;
 - `reviewSecondsPerCaughtDefect`.
 
-The latest decision for an item stands. Call it again as review happens; `pending`
-falls and the review figures fill in. This is not Survey's `deriveOversightMetrics`:
+The latest decision for an item stands, and a change routed twice in one run counts once, with its later decision.
+Call it again as review happens; `pending` falls and the review figures fill in. In a Flow run the review state
+(Survey decisions and session events) is itself recorded as evidence (`memory.review-record`) the first time it is
+passed in, and metrics are always derived from everything recorded, so a later call that passes none, an identical
+retry of `runMemoryRouting` or a new batch, still counts the review already recorded instead of overwriting it. This is not Survey's `deriveOversightMetrics`:
 that reports decision pace and override rate across all decisions in a window, and
 its inter-decision gap is not time spent on an item.
 

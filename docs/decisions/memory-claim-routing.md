@@ -28,9 +28,13 @@ memory; every other piece stays with its owner.
 - **Uncontested changes are recorded as `proposed`; flagged ones are routed.**
   Routing never blocks recall. Survey records verification verdicts and reviewer
   decisions but routes on neither, so the policy is the Kit's.
-- **Unmeasured is not agreed, and unknown is not safe.** Too few extraction passes,
-  an unknown audience baseline and a malformed interval resolve toward review, not away
-  from it. One default goes the other way on purpose: with no `consequential` list the
+- **Unmeasured is not agreed, and unknown is not safe, with one deliberate exception.**
+  Too few extraction passes, malformed agreement counts, an unknown source audience for a
+  claim that asks for one, a peer with no declared audience for a claim that asks for one,
+  and a malformed interval resolve toward review. A claim that only inherits its source's
+  audience is compared with the peers that declare one: an undeclared peer gives it nothing
+  to compare with, and treating that as a widening would route everything for a host that
+  records no audiences. One default goes the other way on purpose: with no `consequential` list the
   policy routes no supersession as consequential, because the Kit cannot know what a host
   treats as consequential. A host must set it, and the metrics' `routedByRule` shows
   whether it did.
