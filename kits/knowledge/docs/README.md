@@ -349,10 +349,11 @@ never describes it; an entitled reader's error, whatever its family, names the c
 position. A reader's view of an id is built only from the copies they may see: a hidden duplicate neither
 changes their answer nor is observable, whatever its content or file order, and two copies they may see
 and that are known at `known_at` are a `DUPLICATE_CLAIM_ID` error. When every copy of an id is hidden and
-the copies disagree, no copy can stand for the id and no combination of them is safe (a union can create a
+there is more than one, no copy can stand for the id and no combination of them is safe (a union can create a
 hidden cycle that makes Surface drop a real supersession), so the id is ambiguous: a visible claim whose
 recorded, visible edge chain reaches it is `unverifiable` (`supersession_ambiguous`), never current or
-superseded, in any file order. Identical hidden copies are one claim. An edge the reader may not see (its
+superseded, in any file order. Identical hidden copies count as disagreeing: an id carried twice is a
+manifest defect, and Context Check does not decide which copy was meant. An edge the reader may not see (its
 `supersession_visibility`) explains nothing: no chain link, no reason, no status change, so for a reader who may not see the edge an
 untimed or cross-slot successor also leaves both claims current. Asked for by id, a hidden, absent, or
 not-yet-known claim returns the same plain `no_answer`; a default scan never names one. Reconciliation

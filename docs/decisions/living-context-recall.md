@@ -39,7 +39,7 @@ exact `1.0` behavior and loading the `1.0` module still needs no Surface or Surv
   plain `no_answer`; a scan never names them; parse errors for claims the reader may not see are dropped;
   diagnostics of every parser family name the claim, never its position; a reader's view of an id uses only
   the copies they may see, so a hidden duplicate changes nothing whatever its content or file order (a group
-  whose copies are all hidden and disagree is ambiguous: no copy stands for it and no union is safe, because it can
+  whose copies are all hidden and more than one is ambiguous, identical copies included: no copy stands for it and no union is safe, because it can
   create a hidden cycle that makes Surface drop a real supersession, so a visible claim whose recorded, visible
   edge chain reaches it is `unverifiable` with `supersession_ambiguous`, in any file order)
   and two entitled copies are an error; an edge the reader may not see explains nothing. Admission of a chain through a hidden claim uses that claim's times and slot, so it can decide
