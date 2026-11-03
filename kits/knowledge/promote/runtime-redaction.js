@@ -6,6 +6,16 @@
  * talked out of redacting by transcript text that tells a later distiller to
  * "preserve this token verbatim". Layer 2 (a distill prompt rule) is #671's.
  *
+ * Architecture: every stage READS THE ORIGINAL TEXT and reports edits (offset
+ * ranges and their replacement); one merge step applies the union. No stage
+ * rewrites what another stage reads, so a stage can never destroy the syntax a
+ * later one needs (the cause of the regressions of earlier designs), and the
+ * result does not depend on stage order. Overlapping edits merge, the earliest
+ * start winning. Every collector is linear in the input. A non-whitespace run
+ * longer than MAX_RUN is a data blob: it is replaced whole, and masked with
+ * spaces (offsets preserved) before the regex collectors see it, so no regex
+ * backtracks quadratically.
+ *
  * Replacements:
  *   - provider/API tokens, JWTs, private keys, URL credentials, and
  *     `<secret-ish-name> = <value>` assignments -> `<SECRET>`
@@ -78,66 +88,102 @@ const SECRET_PATTERNS = [
   /\bAIza[A-Za-z0-9_-]{30,}\b/g,
   /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
 ];
+// Authorization: Bearer <token>  (the token is group 2's range)
+const BEARER = /\b(bearer\s+)[A-Za-z0-9._~+/-]{8,}=*/gi;
+const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+const POSIX_HOME = /(^|[^A-Za-z0-9._~-])\/(?:Users|home)\/[^/\s"'`<>]+/g;
+const WINDOWS_HOME = /\b[A-Z]:\\Users\\[^\\\s"'`<>]+/gi;
+
+const PLACEHOLDER = "<SECRET>";
+const MAX_RUN = 200;
+const MAX_PASSES = 6;
+
+/** An edit: replace text[start, end) with `text`. Blobs (rank 1) lose ties to secrets (rank 0). */
+function edit(edits, start, end, replacement, rank = 0) {
+  edits.push({ start, end, text: replacement, rank });
+}
 
 /**
- * scheme://user:password@host -> keep user and host, drop the password. A linear
- * scan from each "://": the user ends at ":", the password at "@" (never past
- * whitespace or "/"), so a long run cannot make it backtrack. Runs before the
- * assignment scrub so that `u:token='x'rest@` is one password, not an assignment.
+ * Apply the union of the edits to `text`. Edits are ordered by start (longer
+ * first, then secrets before blobs); one that starts inside the previous merged
+ * edit extends it, so the earliest edit's replacement stands.
+ */
+function applyEdits(text, edits) {
+  if (edits.length === 0) return text;
+  edits.sort((a, b) => a.start - b.start || b.end - a.end || a.rank - b.rank);
+  let out = "";
+  let position = 0;
+  let current = null;
+  const flush = () => {
+    if (current === null) return;
+    out += text.slice(position, current.start) + current.text;
+    position = current.end;
+  };
+  for (const next of edits) {
+    if (current !== null && next.start < current.end) {
+      current.end = Math.max(current.end, next.end);
+      continue;
+    }
+    flush();
+    current = { ...next };
+  }
+  flush();
+  return out + text.slice(position);
+}
+
+/** PEM private key blocks. Linear: once no END follows, no later BEGIN has one either. */
+const PEM_BEGIN = /-----BEGIN[A-Z ]*PRIVATE KEY-----/g;
+const PEM_END = /-----END[A-Z ]*PRIVATE KEY-----/g;
+function collectPrivateKeys(text, edits) {
+  if (!text.includes("PRIVATE KEY-----")) return;
+  PEM_BEGIN.lastIndex = 0;
+  for (let begin = PEM_BEGIN.exec(text); begin !== null; begin = PEM_BEGIN.exec(text)) {
+    PEM_END.lastIndex = begin.index + begin[0].length;
+    const end = PEM_END.exec(text);
+    if (end === null) break;
+    const stop = end.index + end[0].length;
+    edit(edits, begin.index, stop, PLACEHOLDER);
+    PEM_BEGIN.lastIndex = stop;
+  }
+}
+
+/**
+ * scheme://user:password@host: the password. A linear scan from each "://": the
+ * user ends at ":", the password at "@" (never past whitespace or "/"). Any
+ * scheme character may precede "://" (a superset of `\b[a-z][a-z0-9+.-]*`).
  */
 const SCHEME_CHAR = /[A-Za-z0-9+.-]/;
-const LETTER = /[A-Za-z]/;
-const WORD_CHAR = /[A-Za-z0-9_]/;
 const NOT_USER = /[:\s/@]/;
 const NOT_PASSWORD = /[@\s/]/;
-
-/**
- * True when a valid scheme (`\b[a-z][a-z0-9+.-]*`) ends right before `at`: some
- * start inside the run of scheme characters is a letter at a word boundary.
- * `1://`, `-://`, `9http://` and `foo_https://` are not schemes.
- */
-function schemeEndsAt(text, at) {
-  let runStart = at;
-  while (runStart > 0 && SCHEME_CHAR.test(text[runStart - 1])) runStart -= 1;
-  for (let start = runStart; start < at; start += 1) {
-    if (LETTER.test(text[start]) && (start === 0 || !WORD_CHAR.test(text[start - 1]))) return true;
-  }
-  return false;
-}
-function scrubUrlCredentials(text) {
-  if (!text.includes("://")) return text;
-  let out = "";
-  let copied = 0;
+function collectUrlCredentials(text, edits) {
+  if (!text.includes("://")) return;
   for (let at = text.indexOf("://"); at !== -1; at = text.indexOf("://", at + 3)) {
-    if (!schemeEndsAt(text, at)) continue;
+    if (at === 0 || !SCHEME_CHAR.test(text[at - 1])) continue;
     let i = at + 3;
     while (i < text.length && !NOT_USER.test(text[i])) i += 1;
     if (i === at + 3 || text[i] !== ":") continue;
     const passwordStart = i + 1;
     let end = passwordStart;
     while (end < text.length && !NOT_PASSWORD.test(text[end])) end += 1;
-    if (end === passwordStart || text[end] !== "@" || passwordStart < copied) continue;
-    out += `${text.slice(copied, passwordStart)}${PLACEHOLDER}`;
-    copied = end;
+    if (end > passwordStart && text[end] === "@") edit(edits, passwordStart, end, PLACEHOLDER);
   }
-  return out + text.slice(copied);
 }
-const BEARER = /\b(bearer\s+)[A-Za-z0-9._~+/-]{8,}=*/gi;
+
 // YAML block scalar header: `token: |`, `"token": >-`, `- token: |2 # note`.
 const BLOCK_SCALAR_HEADER = /^([ \t]*(?:-[ \t]+)?)(["']?)([A-Za-z0-9_.-]{1,256})\2[ \t]*:[ \t]*[|>][0-9+-]*[ \t]*(?:#.*)?$/;
 
 /**
- * Replace the body of every secret-named YAML block scalar. The body is the
- * run of blank lines and lines indented deeper than the key; the first line at
- * the key's indent or less (a sibling key) ends it and is kept.
+ * The body of every secret-named YAML block scalar: the run of blank lines and
+ * lines indented deeper than the key. The first line at the key's indent or
+ * less (a sibling key) ends it and is kept.
  */
-function scrubBlockScalars(text) {
-  if (!/[|>]/.test(text)) return text;
+function collectBlockScalars(text, edits) {
+  if (!/[|>]/.test(text)) return;
   const lines = text.split("\n");
-  const out = [];
+  const starts = new Array(lines.length);
+  for (let i = 0, offset = 0; i < lines.length; offset += lines[i].length + 1, i += 1) starts[i] = offset;
   for (let i = 0; i < lines.length; i += 1) {
     const header = BLOCK_SCALAR_HEADER.exec(lines[i].replace(/\r$/, ""));
-    out.push(lines[i]);
     // `db.password: |`: any dotted part may be the secret-named one.
     if (!header || !header[3].split(".").some(isSecretName)) continue;
     const keyIndent = header[1].length;
@@ -149,13 +195,12 @@ function scrubBlockScalars(text) {
       last = j;
     }
     if (last > i) {
-      out.push(`${" ".repeat(keyIndent + 2)}<SECRET>`);
+      edit(edits, starts[i + 1], starts[last] + lines[last].length, `${" ".repeat(keyIndent + 2)}${PLACEHOLDER}`);
       i = last;
     }
   }
-  return out.join("\n");
 }
-const PLACEHOLDER = "<SECRET>";
+
 // `Bearer `/`Basic ` and every whitespace character after it (sticky: matches only at lastIndex).
 const SCHEME = /(?:bearer|basic)\s+/iy;
 // What may follow a complete value: end of text, whitespace, or a value terminator.
@@ -191,9 +236,9 @@ function assignmentValue(text, identifierEnd, run) {
   if (text[i] === '"' || text[i] === "'") return { start: i, end: closingQuoteEnd(text, text[i], i + 1) };
   const afterPlaceholder = i + PLACEHOLDER.length;
   if (text.startsWith(PLACEHOLDER, i) && (afterPlaceholder === text.length || VALUE_END.test(text[afterPlaceholder]))) {
-    // Already redacted, and nothing glued to it. Taking only the placeholder keeps a following
-    // key from being read as part of this value on a second pass, so the scrub is idempotent.
-    // `<SECRET>tail` is not this case: the whole run is the value.
+    // Already redacted, and nothing glued to it: the placeholder alone is the value, so the next
+    // key is not read as part of it on a second pass (idempotence). `<SECRET>tail` is not this
+    // case: the whole run is the value.
     return { start: i, end: afterPlaceholder };
   }
   // Every position inside one delimiter-free run shares its end, so a run is scanned once
@@ -211,17 +256,15 @@ function assignmentValue(text, identifierEnd, run) {
 }
 
 /**
- * Redact the value of every secret-named assignment (`NAME=value`,
- * `"name": "value"`, `name: value`) in one linear pass. A quoted value ends at
- * its closing quote, but if that span contains further secret-named keys it is
- * extended over each of their values too, until nothing new appears. An
- * unmatched quote therefore cannot pair with a later key's quote and leave that
- * key's value behind, and a quoted secret that mentions another key is redacted
- * whole. The cost is over-redaction of the prose in between.
+ * The value of every secret-named assignment (`NAME=value`, `"name": "value"`,
+ * `name: value`). A quoted value ends at its closing quote, but if that span
+ * contains further secret-named keys it is extended over each of their values
+ * too, until nothing new appears. An unmatched quote therefore cannot pair with
+ * a later key's quote and leave that key's value behind, and a quoted secret
+ * that mentions another key is redacted whole. The cost is over-redaction of the
+ * prose in between. Each identifier is visited once.
  */
-function scrubAssignments(text) {
-  let out = "";
-  let copied = 0;
+function collectAssignments(text, edits) {
   const run = { from: 0, to: 0 };
   IDENTIFIER.lastIndex = 0;
   const inner = new RegExp(IDENTIFIER.source, "g");
@@ -229,9 +272,6 @@ function scrubAssignments(text) {
     if (!isSecretName(match[0])) continue;
     const value = assignmentValue(text, match.index + match[0].length, run);
     if (value === null) continue;
-    // Every key inside the span is looked at once, and a value that reaches past the span grows it,
-    // so the keys in the extension are looked at too. No recursion, no skipping: each identifier is
-    // visited once and each costs O(1) beyond its own length.
     let end = value.end;
     inner.lastIndex = text[value.start] === '"' || text[value.start] === "'" ? value.start + 1 : value.start;
     for (let key = inner.exec(text); key !== null && key.index < end; key = inner.exec(text)) {
@@ -242,74 +282,74 @@ function scrubAssignments(text) {
     // A separator when the next character is not a value terminator, so the placeholder can
     // never fuse with what follows it (which a second pass would read as one longer value).
     const glued = end < text.length && !VALUE_END.test(text[end]);
-    out += `${text.slice(copied, value.start)}${PLACEHOLDER}${glued ? " " : ""}`;
-    copied = end;
+    edit(edits, value.start, end, glued ? `${PLACEHOLDER} ` : PLACEHOLDER);
     IDENTIFIER.lastIndex = end;
   }
-  return out + text.slice(copied);
-}
-
-const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
-const POSIX_HOME = /(^|[^A-Za-z0-9._~-])\/(?:Users|home)\/[^/\s"'`<>]+/g;
-const WINDOWS_HOME = /\b[A-Z]:\\Users\\[^\\\s"'`<>]+/gi;
-
-const MAX_RUN = 200;
-
-/**
- * A run of more than MAX_RUN non-whitespace characters is a data blob (base64,
- * minified code, a long dashed rule), not prose, and no credential is that long
- * in a form the other stages could still find. It is replaced whole, so what is
- * inside is redacted by omission, and the regex stages never see a run long
- * enough to make them backtrack quadratically.
- */
-function replaceBlobs(text) {
-  // `\S+` with a callback: a counted `\S{257,}` overflows the regex stack on a multi-megabyte run.
-  return text.length <= MAX_RUN ? text : text.replace(/\S+/g, (run) => (run.length > MAX_RUN ? "<BLOB>" : run));
 }
 
 /**
- * Replace every PEM private key block. Linear: once no END marker follows, no
- * later BEGIN can have one either, so the search stops.
+ * Data blobs: a run of more than MAX_RUN non-whitespace characters (base64,
+ * minified code, a long dashed rule) is replaced whole. Returns the text with
+ * those runs blanked to spaces of the same length, for the regex collectors.
  */
-const PEM_BEGIN = /-----BEGIN[A-Z ]*PRIVATE KEY-----/g;
-const PEM_END = /-----END[A-Z ]*PRIVATE KEY-----/g;
-function scrubPrivateKeys(text) {
-  if (!text.includes("PRIVATE KEY-----")) return text;
-  let out = "";
-  let copied = 0;
-  PEM_BEGIN.lastIndex = 0;
-  for (let begin = PEM_BEGIN.exec(text); begin !== null; begin = PEM_BEGIN.exec(text)) {
-    PEM_END.lastIndex = begin.index + begin[0].length;
-    const end = PEM_END.exec(text);
-    if (end === null) break;
-    out += `${text.slice(copied, begin.index)}<SECRET>`;
-    copied = end.index + end[0].length;
-    PEM_BEGIN.lastIndex = copied;
+function maskBlobs(text, edits) {
+  if (text.length <= MAX_RUN) return text;
+  let masked = "";
+  let position = 0;
+  // `\S+` with a length test: a counted `\S{201,}` overflows the regex stack on a multi-megabyte run.
+  for (const run of text.matchAll(/\S+/g)) {
+    if (run[0].length <= MAX_RUN) continue;
+    masked += text.slice(position, run.index) + " ".repeat(run[0].length);
+    position = run.index + run[0].length;
+    edit(edits, run.index, position, "<BLOB>", 1);
   }
-  return out + text.slice(copied);
+  return position === 0 ? text : masked + text.slice(position);
 }
 
 /**
- * Scrub one string. Pure and deterministic: the same input always yields the
- * same output, and scrubbing is idempotent.
+ * `Bearer <token>`. Anchored on the literal word, so it is linear and reads the
+ * original text: a blob run that ends in "=Bearer" must not hide the keyword.
+ */
+function collectBearer(text, edits) {
+  for (const m of text.matchAll(BEARER)) edit(edits, m.index + m[1].length, m.index + m[0].length, PLACEHOLDER);
+}
+
+/** The regex-shaped secrets, emails and home directories, found in the blob-masked text. */
+function collectPatterns(masked, edits) {
+  for (const pattern of SECRET_PATTERNS) {
+    for (const m of masked.matchAll(pattern)) edit(edits, m.index, m.index + m[0].length, PLACEHOLDER);
+  }
+  for (const m of masked.matchAll(EMAIL)) edit(edits, m.index, m.index + m[0].length, "<EMAIL>");
+  for (const m of masked.matchAll(WINDOWS_HOME)) edit(edits, m.index, m.index + m[0].length, "~");
+  for (const m of masked.matchAll(POSIX_HOME)) edit(edits, m.index + m[1].length, m.index + m[0].length, "~");
+}
+
+function scrubOnce(text) {
+  const edits = [];
+  collectPrivateKeys(text, edits);
+  collectUrlCredentials(text, edits);
+  collectBlockScalars(text, edits);
+  collectAssignments(text, edits);
+  collectBearer(text, edits);
+  collectPatterns(maskBlobs(text, edits), edits);
+  return applyEdits(text, edits);
+}
+
+/**
+ * Scrub one string. Pure and deterministic. Every pass only replaces text with
+ * placeholders, so repeating until nothing changes converges (in practice on the
+ * second pass, which finds nothing); that is what makes scrubbing idempotent
+ * when one edit changes the syntax another collector would have seen, for
+ * example by removing a "/" that had hidden a URL password.
  * @param {unknown} value
  * @returns {string}
  */
 export function scrubResidueText(value) {
-  let text = String(value ?? "");
-  // Structural stages first, while the syntax they depend on is intact. All are linear.
-  text = scrubPrivateKeys(text);
-  text = scrubUrlCredentials(text);
-  text = scrubBlockScalars(text);
-  text = scrubAssignments(text);
-  // The remaining stages are regexes that backtrack quadratically on a long run, so a data blob
-  // is replaced whole before they see it.
-  text = replaceBlobs(text);
-  for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, "<SECRET>");
-  // After assignments: `Bearer <8+ chars>` must not swallow a key name like `Bearer password: "..."`.
-  text = text.replace(BEARER, "$1<SECRET>");
-  text = text.replace(EMAIL, "<EMAIL>");
-  text = text.replace(WINDOWS_HOME, "~");
-  text = text.replace(POSIX_HOME, "$1~");
-  return text;
+  let current = String(value ?? "");
+  for (let pass = 0; pass < MAX_PASSES; pass += 1) {
+    const next = scrubOnce(current);
+    if (next === current) return current;
+    current = next;
+  }
+  return current;
 }
