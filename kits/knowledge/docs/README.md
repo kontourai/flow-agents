@@ -693,3 +693,24 @@ both the kit trace and `flow status <run-id> --format json --cwd <workspace>`.
 review, activation for context consumers, observed effects and retirement from
 ordinary Knowledge record storage status. It is exposed through the declared
 `knowledge.learning-lifecycle` adapter and public package exports.
+
+### Memory create proposals (Corpus #40)
+
+The explicit `runPromote({ target: "store", ... })` path accepts a complete
+`runtime-session` residue from #669 and already-distilled candidates with
+`title`, `body`, and `category`. The host supplies its authorized absolute
+`root`, a `registerRoot(name, root)` function, and a Corpus store constructed
+for that same root with host-owned locking and coordination. The default root
+name is `memory`; this path does not discover or authorize paths or edit an MCP
+registry itself. The host's registration implementation determines whether its
+MCP server lists the root.
+
+Each candidate is sent through `proposeCreate(candidate, proposerId, evidence)`.
+The candidate provenance note encodes the session ID, transcript reference,
+and sitting ID. This is a proposal request, not an approval or an applied
+record; the Corpus #40 contract owns persistence, review, and exclusion from
+ordinary reads. Extraction, retries, and scheduling are not provided here. An
+error from `proposeCreate` is indeterminate: the error carries already returned
+proposal IDs and the failed candidate index so the caller can reconcile before
+any retry. `write: false` prepares candidates without registering or writing.
+The create-proposal API and its package release are upstream dependencies.
