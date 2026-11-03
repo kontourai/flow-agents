@@ -115,6 +115,24 @@ test("partial create: a proposeCreate failure mid-sitting is reconciled on retry
   assert.equal(retry.claims.created, 2);
 });
 
+test("a claim a reviewer rejected is not proposed again when the sitting is retried part-way", async (t) => {
+  const claimsOf = (content) => (content.includes("banker's rounding")
+    ? ["alpha", "beta"].map((name) => ({ quote: "I switched to banker's rounding on the total.", subject: `svc ${name}`, subjectType: "service", property: "mode", value: name, posture: "stated" }))
+    : []);
+  const { ws, store, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] }, extract: { claimsOf } });
+  t.after(ws.cleanup);
+  store.failProposeCreate(1);
+  await assert.rejects(() => runDream(host, runOptions(ws)), (error) => error.cause?.code === "INJECTED");
+  const [landed] = await store.listProposals();
+  await store.rejectCreate(landed.id, "a-human-reviewer", "wrong");
+  const retry = await runDream(host, runOptions(ws));
+  const proposals = await store.listProposals();
+  assert.equal(proposals.length, 2, "the rejected claim is reused as rejected; only the missing one is created");
+  assert.equal(proposals.filter((p) => p.state === "rejected").length, 1);
+  assert.equal(retry.claims.reused, 1);
+  assert.equal(retry.claims.created, 1);
+});
+
 test("created-before-receipt: the store keeps a proposal whose reply was lost, and the retry reuses it", async (t) => {
   const { ws, store, extract, host } = await fixture({ workspace: { transcripts: ["codex-rollout.jsonl"] } });
   t.after(ws.cleanup);

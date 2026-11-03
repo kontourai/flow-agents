@@ -13,8 +13,6 @@
  * @module dream/propose
  */
 
-import { canonicalJson } from "@kontourai/relay";
-
 import { proposeMemory } from "../promote/store-target.js";
 import { MEMORY_CATEGORY, encodeEnvelope, indexProposals, titleFor } from "./envelope.js";
 import { dreamError } from "./util.js";
@@ -37,9 +35,10 @@ export async function proposeSitting({ residue, claims, host, proposerId, index,
   claims.forEach((entry, position) => {
     const known = index.byClaim.get(entry.claim.id);
     if (known) {
-      // The claim id covers the claim's content; the whole claim must match, and the proposal must be ours.
-      if (known.proposal.proposer_id !== proposerId || canonicalJson(known.envelope.claim) !== canonicalJson(entry.claim)) {
-        throw dreamError("DREAM_SEMANTIC_COLLISION", "an existing proposal has this claim id but different content or a different proposer", { claimId: entry.claim.id });
+      // A claim id is the digest of the claim's whole content, and a stored claim is verified against it on
+      // read, so the same id is the same claim. What can differ is who proposed it, and that must be us.
+      if (known.proposal.proposer_id !== proposerId) {
+        throw dreamError("DREAM_SEMANTIC_COLLISION", "a proposal by another proposer already holds this claim id", { claimId: entry.claim.id });
       }
       reused.push({ claimId: entry.claim.id, proposalId: known.proposal.id, state: known.proposal.state });
       return;

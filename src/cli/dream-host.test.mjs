@@ -240,12 +240,16 @@ test("trigger: as a process it exits 0 at once and starts a detached run that ou
   const off = spawnSync(process.execPath, [HOOK], { input: event("SessionEnd"), encoding: "utf8", timeout: 20_000, env: { PATH: process.env.PATH } });
   assert.equal(off.status, 0);
   assert.equal(fs.existsSync(path.join(ws.dreamDir, "trigger.stamp")), true);
-  // The detached child writes its report; wait for it.
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline && !(fs.existsSync(path.join(ws.dreamDir, "reports")) && fs.readdirSync(path.join(ws.dreamDir, "reports")).length)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-  const reports = fs.readdirSync(path.join(ws.dreamDir, "reports"));
+  // The detached child commits its cursor and rewrites its report as the last thing it does; wait for that.
+  const reportsDir = path.join(ws.dreamDir, "reports");
+  const committed = () => (fs.existsSync(reportsDir) ? fs.readdirSync(reportsDir).filter((name) => name.endsWith(".json")) : [])
+    .map((name) => JSON.parse(fs.readFileSync(path.join(reportsDir, name), "utf8"))).filter((report) => report.cursor?.committed === true);
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline && committed().length === 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  const reports = committed();
   assert.equal(reports.length, 1);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(ws.dreamDir, "reports", reports[0]), "utf8")).trigger, "SessionEnd");
+  assert.equal(reports[0].trigger, "SessionEnd");
+  assert.equal(fs.readdirSync(reportsDir).filter((name) => name.endsWith(".json")).length, 1, "one trigger, one run");
 });
 
 // ── the flow definition ──────────────────────────────────────────────────────────────────────────────────────

@@ -192,6 +192,24 @@ test("end to end: a proposal the distiller itself approved never counts, even if
   assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries, []);
 });
 
+// Corpus refuses SELF_APPROVAL, but the brief does not rely on that alone. Each guard has a case only it catches.
+for (const [name, proposer, reviewer] of [
+  ["the proposer approved its own proposal", "some-other-agent", "some-other-agent"],
+  ["the dream proposer approved someone else's proposal", "some-other-agent", "knowledge.dream"],
+]) {
+  test(`end to end: a forged settlement never counts: ${name}`, async (t) => {
+    const { ws, store, host } = await ran();
+    t.after(ws.cleanup);
+    const [first] = await store.listProposals();
+    await store.applyCreate(first.id, "a-human-reviewer");
+    const file = `${store.dir}/${first.id}.json`;
+    fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), proposer_id: proposer, reviewer_id: reviewer }));
+    const report = await runDream(host, runOptions(ws));
+    assert.equal(report.brief_excluded.self_approved, 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(ws.briefs(), "utf8")).entries, []);
+  });
+}
+
 test("end to end: opt-in unreviewed recall includes only uncontested pending claims, labelled", async (t) => {
   const { ws, host } = await ran();
   t.after(ws.cleanup);
