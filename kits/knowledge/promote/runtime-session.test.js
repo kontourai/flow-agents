@@ -781,6 +781,7 @@ describe("review round 1 regressions (PR #1575)", () => {
       `Please document password: "${"ordinary prose ".repeat(300)}API_TOKEN="${canary}" after`,
       `password: "unterminated and then api_key='${canary}' tail`,
       `note "${"words ".repeat(20)} password = '${canary}'`,
+      `Please document password: "${"ordinary prose ".repeat(300)}API_TOKEN="two words ${canary}" after`,
     ]) {
       const out = scrubResidueText(input);
       assert.equal(out.includes(canary), false, input.slice(0, 40));
