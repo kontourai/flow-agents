@@ -85,3 +85,12 @@ test('invalid, oversized, symlinked and non-fitting briefs contribute nothing', 
  fs.writeFileSync(brief,JSON.stringify({version:1,entries:['x'.repeat(33000)]})); assert.equal(profileMemoryContributor('SessionStart',{},8192),null, 'oversized file');
  const target=path.join(temp,'target.json'); fs.writeFileSync(target,JSON.stringify({version:1,entries:['symlink target']})); fs.unlinkSync(brief); fs.symlinkSync(target,brief); assert.equal(profileMemoryContributor('SessionStart',{},8192),null, 'final symlink');
 });
+
+test('a FIFO brief fails open without waiting for a writer', { skip: process.platform === 'win32' }, t => {
+ const { brief } = setup(t); fs.unlinkSync(brief);
+ const created=spawnSync('mkfifo',[brief],{encoding:'utf8'}); assert.equal(created.status,0,created.stderr);
+ const modulePath=path.join(root,'scripts/hooks/lib/context-contributors/profile-memory.js');
+ const code=`const assert=require('node:assert/strict'); const p=require(${JSON.stringify(modulePath)}); assert.equal(p.profileMemoryContributor('SessionStart',{},8192),null);`;
+ const probe=spawnSync(process.execPath,['-e',code],{env:process.env,encoding:'utf8',timeout:5000});
+ assert.equal(probe.error?.code,undefined,'profile reader must not block on FIFO'); assert.equal(probe.status,0,probe.stderr);
+});

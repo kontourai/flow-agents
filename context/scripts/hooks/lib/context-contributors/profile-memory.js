@@ -19,7 +19,7 @@ function profileMemoryContributor(event, _payload, budget) {
     const dataHome = process.env.XDG_DATA_HOME || path.join(process.env.HOME || os.homedir(), '.local', 'share');
     if (!path.isAbsolute(dataHome)) return null;
     const file = path.join(dataHome, 'knowledge-store', 'knowledge', 'dream', 'briefs', 'global.json');
-    const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
     let bytes;
     try {
       const stat = fs.fstatSync(fd);
