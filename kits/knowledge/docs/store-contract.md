@@ -780,11 +780,9 @@ It NEVER deletes records. Superseded records remain fully queryable with their p
   reverse link of kind `"supersedes"` pointing from `new_id`.
 
 **Supersede-not-delete invariant:**
-> Calling `supersede` MUST NOT remove any record. No mutation op in this contract deletes records.
-> This is a hard invariant; adapters MUST enforce it. Moving a record to `archive/`
-> MUST preserve its bytes and historical access; relocation is distinct from physical
-> purge/deletion. A purge policy is a future concern and is explicitly out of scope
-> for this version.
+> Calling `supersede` MUST NOT remove any record. Supersede remains the default for
+> ordinary changes, and moving a record to `archive/` preserves its historical access.
+> The separately authorized purge operation in Addendum K is the erasure exception.
 
 **Bundled implementation gap:** Obsidian archive path reuse can overwrite an earlier
 predecessor and make `get(earlierId)` return a later record. See the
@@ -1943,3 +1941,43 @@ returns superseded snapshots is covered for that adapter by `evals/consolidation
 (the Obsidian adapter archives superseded snapshots out of the working set; both are
 required to retain `get()` access, but the Obsidian archive collision gap above can
 violate that requirement).
+
+## Addendum K: Privileged purge (issue #1570)
+
+The owner approved an explicit erasure exception on 2026-11-02. The operation is
+owned by [Corpus Store](https://github.com/kontourai/corpus/blob/b222de99f25ceea679448dd9e4648c3bc73a5938/packages/store/README.md#owner-decisions);
+this kit must consume that operation rather than implement a second cascade.
+**Implementation status:** the bundled adapters in this revision do not yet
+implement this addendum. Hosts must not assume they support purge or erasure.
+
+The privileged interface is separate from ordinary mutations: `purge(ids,
+{ agent, rationale, note? })` requires an explicit host authorization decision,
+`allowPurge: true`, and non-empty agent and rationale. Default access is denied.
+The audit records the operation and its actor and rationale; it must not put erased
+content into the evidence. Supersede remains the default for ordinary changes.
+
+A tombstone retains the stable id, type, creation time, provenance identity
+(`agent`, `session_id`, `source_ids`), link targets and kinds, and a sanitized
+identity-oriented mutation log including `purged`. It has status and category
+`purged`, a fixed title, an empty body, and no aliases, tags, link labels,
+provenance note, expiry, unknown content-bearing fields, or content digest. Purge
+audit rationale and optional note remain, so callers must keep erased content out
+of them. Its id cannot be
+reused and mutations of it and new support links to it are refused.
+
+Support comprises provenance `source_ids` and links of kind `source`. The Corpus
+operation cascades transitively to records that had real support and lose all of
+it; a cycle cannot support itself, while a source outside the store counts as real
+support. Records with remaining support survive and log `support-purged`;
+referrers log `reference-purged`. The result identifies survivors and referrers
+for producer review: their own content may reproduce erased content and is not
+automatically scrubbed. This follows Surface's producer-owned erasure boundary.
+
+The host must rebuild or invalidate each content-bearing projection before it
+serves it again, including compiled briefs, indexes, and the `knowledge_context`
+and `knowledge_search` MCP read paths where provided. Host-built projections,
+backups, snapshots, and migration manifests are outside Corpus Store's purge
+transaction. Corpus also documents an interrupted-write journal window containing
+before-images until recovery; purge is not a secure-erasure guarantee. A completed
+integration must test each adapter and each actual read path, including a fault
+that skips the cascade and makes conformance fail.
