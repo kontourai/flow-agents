@@ -186,7 +186,8 @@ export function validateLivingContextResult(result) {
         if (value === undefined) continue;
         try { parseInstant(value, `freshness.${key}`); } catch (cause) { errors.push(`$/recalls/${index}: ${cause.message}`); }
       }
-      if (Array.isArray(recall.reasons) && recall.reasons.includes("stale_at_as_of") !== (stale === true)) errors.push(`$/recalls/${index}: the stale_at_as_of reason must match freshness.stale`);
+      // The reason implies the flag. The flag alone does not imply the reason: a superseded claim can also be stale.
+      if (Array.isArray(recall.reasons) && recall.reasons.includes("stale_at_as_of") && stale !== true) errors.push(`$/recalls/${index}: the stale_at_as_of reason requires freshness.stale`);
       if (expiresAt === undefined && stale === true) errors.push(`$/recalls/${index}: freshness cannot be stale without an expiry`);
       if (expiresAt !== undefined && stale !== (Date.parse(asOf) > Date.parse(expiresAt))) errors.push(`$/recalls/${index}: freshness.stale must equal as_of > expires_at`);
     }
@@ -240,15 +241,25 @@ function indexClaims(manifests, ctx) {
   const copies = new Map();
   for (const claim of manifests.flatMap((manifest) => manifest.claims)) copies.set(claim.id, [...(copies.get(claim.id) ?? []), claim]);
   const byId = new Map();
+  const hiddenCopies = new Map();
   for (const [id, group] of copies) {
-    // The reader's view of an id is built only from copies they may see and that are known at known_at: a hidden or
-    // not-yet-known copy must neither change their answer nor be observable, and must not discard a visible one.
-    const entitled = group.filter((claim) => isVisible(claim, ctx) && isKnown(claim, ctx));
+    // A reader's view of an id is built only from copies they may see: a hidden copy never changes their answer
+    // and cannot be observed, and never discards a visible one.
+    const seen = group.filter((claim) => isVisible(claim, ctx));
+    const entitled = seen.filter((claim) => isKnown(claim, ctx));
     if (entitled.length > 1) throw error("DUPLICATE_CLAIM_ID", `claim id '${id}' appears more than once across the selected Knowledge roots`);
-    // With no entitled copy the claim is structure only (it can sit inside a chain that collapses); the first copy stands.
-    byId.set(id, entitled[0] ?? group[0]);
+    if (entitled.length === 1) byId.set(id, entitled[0]);
+    // Visible but not yet known: the reader's own claim, which stays unknown at known_at.
+    else if (seen.length > 0) byId.set(id, seen[0]);
+    else {
+      // Every copy is hidden. They are structure only (a chain may collapse through them) and may disagree. No copy
+      // is privileged by file order: they are combined fail-closed in evaluateSupersession, where an edge counts if
+      // any copy supplies it, so a conflicting hidden copy can add supersession but never remove it.
+      byId.set(id, group[0]);
+      if (group.length > 1) hiddenCopies.set(id, group);
+    }
   }
-  return byId;
+  return { byId, hiddenCopies };
 }
 
 const viewerOf = (ctx) => ({ audiences: [ctx.reader] });
@@ -290,17 +301,20 @@ function edgeState(claim, successor, ctx) {
  * to a viewer who may see its successor, chains through hidden claims collapse, and a cycle leaves its claims
  * unresolved. The edge's own visibility is that of the claim record that carries it (the predecessor).
  */
-function evaluateSupersession(byId, ctx) {
+function evaluateSupersession(byId, hiddenCopies, ctx) {
   const visibilityByClaimId = new Map();
   for (const claim of byId.values()) if (isKnown(claim, ctx)) visibilityByClaimId.set(claim.id, claim.extension.visibility);
   const states = new Map();
   const edges = [];
-  for (const claim of byId.values()) {
+  // Sources include every hidden copy of an all-hidden id; targets are judged against every such copy.
+  const sources = [...byId.values(), ...[...hiddenCopies.values()].flatMap((group) => group.filter((copy) => copy !== byId.get(copy.id)))];
+  for (const claim of sources) {
     if (claim.superseded_by === undefined) continue;
-    const successor = byId.get(claim.superseded_by);
-    const state = edgeState(claim, successor, ctx);
-    states.set(claim.id, { ...state, successor });
-    if (state.state === "active") edges.push({ predecessorId: claim.id, successorId: successor.id, visibility: claim.extension.supersessionVisibility });
+    const targets = hiddenCopies.get(claim.superseded_by) ?? [byId.get(claim.superseded_by)];
+    const judged = targets.map((successor) => ({ successor, state: edgeState(claim, successor, ctx) }));
+    const chosen = judged.find((entry) => entry.state.state === "active") ?? judged[0];
+    if (!states.has(claim.id) || chosen.state.state === "active") states.set(claim.id, { ...chosen.state, successor: chosen.successor });
+    if (chosen.state.state === "active") edges.push({ predecessorId: claim.id, successorId: chosen.successor.id, visibility: claim.extension.supersessionVisibility });
   }
   const view = Surface.viewerSupersessionView({ visibilityByClaimId, edges, viewer: viewerOf(ctx) });
   return { view, states };
@@ -348,11 +362,14 @@ function supersessionChain(claim, byId, supersession, ctx) {
     for (const target of frontier) {
       for (const candidate of [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))) {
         if (reached.has(candidate.id) || !listed(candidate) || candidate.extension.recordedAt === undefined) continue;
-        // Only a followed edge can reach here: an inactive edge means the successor is outside its valid time at
-        // valid_at, so the successor is a no-answer and has no chain to list it in.
-        if (!view.supersededBy[candidate.id]?.includes(target)) continue;
+        const active = view.supersededBy[candidate.id]?.includes(target);
+        const state = states.get(candidate.id);
+        // An inactive edge into a claim that is itself outside its valid interval is still reachable: the claim
+        // may be superseded further on (supersession is judged before validity), so its history keeps the link.
+        const inactive = state?.state === "inactive" && state.successor?.id === target && edgeVisible(candidate, ctx);
+        if (!active && !inactive) continue;
         reached.add(candidate.id);
-        backward.unshift({ claim_id: candidate.id, relation: "supersedes", ...(direct(candidate.id, target) ? { kind: kindOf(candidate.id) } : {}), active: true });
+        backward.unshift({ claim_id: candidate.id, relation: "supersedes", ...(active && direct(candidate.id, target) || inactive ? { kind: kindOf(candidate.id) } : {}), active: Boolean(active) });
         next.push(candidate.id);
       }
     }
@@ -461,8 +478,8 @@ export function deriveLivingContext({ repoRoot, input }) {
   // Phase one admits the reader at every root before phase two parses a single claim of any root.
   const documents = input.knowledge_roots.map((knowledgeRoot) => readManifestDocument(resolvedRoot, revision, knowledgeRoot, extension));
   const manifests = documents.map((document, index) => normalizeManifestClaims(document, input.knowledge_roots[index], extension));
-  const byId = indexClaims(manifests, ctx);
-  const supersession = evaluateSupersession(byId, ctx);
+  const { byId, hiddenCopies } = indexClaims(manifests, ctx);
+  const supersession = evaluateSupersession(byId, hiddenCopies, ctx);
   const requestedIds = orderedRequestIds(input, byId, changedSurfaces, ctx);
 
   const candidates = requestedIds.map((claimId) => {

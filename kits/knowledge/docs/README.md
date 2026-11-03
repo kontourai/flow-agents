@@ -346,9 +346,11 @@ carries its own visibility (`supersession_visibility`, by default that of the cl
 unreadable one is sealed and the edge is followed for no one. A malformed claim that Surface says the
 reader may not see, or that was recorded after `known_at`, is dropped without an error, so a parse error
 never describes it; an entitled reader's error, whatever its family, names the claim, never its array
-position. A reader's view of an id is built only from the copies they may see and that are known at
-`known_at`: a hidden or not-yet-known duplicate neither changes their answer nor is observable, and two
-entitled copies are a `DUPLICATE_CLAIM_ID` error. An edge the reader may not see (its
+position. A reader's view of an id is built only from the copies they may see: a hidden duplicate neither
+changes their answer nor is observable, whatever its content or file order, and two copies they may see
+and that are known at `known_at` are a `DUPLICATE_CLAIM_ID` error. When every copy of an id is hidden, the
+copies are structure only and are combined fail-closed: an edge counts if any copy supplies it, so a
+conflicting hidden copy can add a supersession but never remove one. An edge the reader may not see (its
 `supersession_visibility`) explains nothing: no chain link, no reason, no status change. Asked for by id, a hidden, absent, or
 not-yet-known claim returns the same plain `no_answer`; a default scan never names one. Reconciliation
 and proposals cover only claims the reader may see. Stated limits: admission of an edge uses the times and
@@ -375,7 +377,8 @@ host-protected authority snapshot a Git manifest cannot supply, so consuming it 
 kontourai/flow-agents#1586 (see the decision record). `status` is the status **as of the stated instants** and the result echoes them, so a
 predecessor read at a `valid_at` before its succession, or a `known_at` before its successor was recorded,
 is `current` with a reason saying exactly why. A superseded claim is never `current` for a reader who can
-see a successor that is recorded, in effect and on the same slot.
+see a successor that is recorded, in effect and on the same slot, along an edge the reader may see
+(`supersession_visibility`): an edge the reader may not see deliberately leaves both claims current for them.
 
 **Reasons, not just rank.** Every recall carries `matched_signals`, `freshness` (Surface's
 claim-intrinsic `expiresAt`/`ttlSeconds`, judged `now > expiry` exactly as Surface does; a stale
@@ -758,7 +761,7 @@ library supports descriptor-relative `os.open`, `os.stat` and `os.unlink`, plus
 `O_NOFOLLOW`. The publisher checks this prerequisite before creating pilot
 artifacts; the CLI checks it before constructing its store. Unsupported
 platforms or a missing interpreter refuse, with the legacy runner still
-available. This distribution qualifies Flow 5.2.0 and Surface 5.0.0. The kit
+available. This distribution qualifies Flow 5.2.0 and Surface 6.3.0. The kit
 invokes Flow as a subprocess and passes recorded artifacts; it imports no Flow
 engine library. A `KnowledgeIngestFlow` instance accepts a store, workspace,
 unique run id and optionally a `flowCommand` argument array for a particular

@@ -31,13 +31,15 @@ exact `1.0` behavior and loading the `1.0` module still needs no Surface or Surv
   declared form; unreadable or undeclared is sealed. Admission of an edge at the as-of instants (time, slot,
   kind) is this kit's; what a given reader may see of the admitted edges is Surface's. **A successor the
   reader cannot see leaves the predecessor `current` for that reader with no trace**, and a superseded claim
-  is never `current` for a reader who can see a recorded, in-effect, same-slot successor. This reverses an
+  is never `current` for a reader who can see a recorded, in-effect, same-slot successor along an edge they may
+  see; an edge the reader may not see leaves both claims current for them, by design. This reverses an
   earlier, more conservative local rule (`unverifiable` for a hidden successor), which is no longer needed
   now that Surface defines the per-viewer view.
 - **Limited disclosure, stated.** Asked for by id, hidden, absent, and not-yet-known claims return the same
   plain `no_answer`; a scan never names them; parse errors for claims the reader may not see are dropped;
   diagnostics of every parser family name the claim, never its position; a reader's view of an id uses only
-  the copies they may see and that are known at `known_at`, so a hidden or future duplicate changes nothing
+  the copies they may see, so a hidden duplicate changes nothing whatever its content or file order (a group
+  whose copies are all hidden is structure only, combined fail-closed: an edge counts if any copy supplies it)
   and two entitled copies are an error; an edge the reader may not see explains nothing. Admission of a chain through a hidden claim uses that claim's times and slot, so it can decide
   whether the chain collapses, though never what the reader is shown.
 - **As-of follows the merged Surface accumulation decision** (kontourai/surface#204, Surface main

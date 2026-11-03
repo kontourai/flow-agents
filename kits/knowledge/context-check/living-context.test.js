@@ -995,7 +995,7 @@ describe("Living Context: review round 3 regressions (#1572)", () => {
     assert.equal(validateLivingContextResult(result).length, 0);
     assert.match(forge((copy) => { copy.recalls[0].freshness = { as_of: "1999-01-01T00:00:00.000Z", expires_at: "2000-01-01T00:00:00.000Z", stale: false }; }), /freshness\.as_of must equal input\.as_of\.now/);
     assert.match(forge((copy) => { copy.recalls[0].freshness.expires_at = "2027-02-31T00:00:00.000Z"; }), /real calendar instant/);
-    assert.match(forge((copy) => { copy.recalls[1].freshness.stale = false; }), /stale_at_as_of reason must match freshness\.stale/);
+    assert.match(forge((copy) => { copy.recalls[1].freshness.stale = false; }), /stale_at_as_of reason requires freshness\.stale/);
     remove(repo);
   });
 
@@ -1003,6 +1003,69 @@ describe("Living Context: review round 3 regressions (#1572)", () => {
     const { repo, revision } = seed({ readers: ["engineer"], claims: [mk("a", { visibility: { audiences: ["engineer", "engineer"] } })] });
     assert.equal(recallOf(run(repo, revision, { claim_ids: ["a"] }), "a").status, "current");
     remove(repo);
+  });
+
+  test("a stale superseded claim is returned as superseded, not rejected by the producer's own validator", () => {
+    const { repo, revision } = seed({ readers: ["engineer"], claims: [mk("a", { ...edge("z"), expires_at: "2026-02-01T00:00:00Z" }), mk("z", {})] });
+    const entry = recallOf(run(repo, revision, { claim_ids: ["a"] }), "a");
+    assert.equal(entry.status, "superseded");
+    assert.equal(entry.freshness.stale, true);
+    assert.deepEqual(entry.reasons, ["superseded_by_known_successor"]);
+    remove(repo);
+  });
+
+  test("an unreadable duplicate never decides a visible claim's answer, in either file order", async () => {
+    const hidden = { visibility: { audiences: ["auditor"] } };
+    const publicEdge = { supersession_visibility: "public" };
+    const normalise = (value) => JSON.stringify(value).replaceAll(/[0-9a-f]{40}/g, "<commit>");
+    const outcome = async (claims, overrides = {}) => {
+      const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims });
+      const request = input(revision, { claim_ids: ["a"], ...overrides });
+      const result = run(repo, revision, { claim_ids: ["a"], ...overrides });
+      const answer = await answerLivingContext({ repoRoot: repo, input: request });
+      remove(repo);
+      return { result: normalise({ ...result, written: undefined }), status: recallOf(result, "a").status, answered: answer.answers[0].outcome };
+    };
+    const chain = (extra) => [mk("a", edge("h")), ...extra, mk("z", {})];
+    const through = { ...hidden, ...edge("z"), ...publicEdge };
+    const baseline = await outcome(chain([mk("h", through)]));
+    assert.equal(baseline.status, "superseded");
+    for (const [label, copies] of [
+      ["conflicting copy first", [mk("h", { ...hidden, slot: "other" }), mk("h", through)]],
+      ["conflicting copy last", [mk("h", through), mk("h", { ...hidden, slot: "other" })]],
+      ["untimed copy first", [mk("h", { ...hidden, recorded_at: undefined }), mk("h", through)]],
+    ]) {
+      const actual = await outcome(chain(copies));
+      assert.equal(actual.status, "superseded", label);
+      assert.equal(actual.answered, "abstained", label);
+      assert.equal(actual.result, baseline.result, `${label}: the visible output is identical to the repo without the extra copy`);
+    }
+  });
+
+  test("a hidden copy cannot hide the reader's own not-yet-known claim", () => {
+    const base = (claims) => { const { repo, revision } = seed({ readers: ["engineer", "auditor"], claims }); const entry = recallOf(run(repo, revision, { claim_ids: ["a"] }), "a"); remove(repo); return JSON.stringify(entry).replaceAll(/[0-9a-f]{40}/g, "<commit>"); };
+    const future = mk("b", { recorded_at: "2030-01-01T00:00:00Z" });
+    const predecessor = mk("a", edge("b"));
+    const alone = base([predecessor, future]);
+    assert.match(alone, /successor_not_known_at_as_of/);
+    assert.equal(base([predecessor, mk("b", { visibility: { audiences: ["auditor"] } }), future]), alone, "a known hidden copy first");
+    assert.equal(base([predecessor, future, mk("b", { visibility: { audiences: ["auditor"] } })]), alone, "a known hidden copy last");
+  });
+
+  test("history keeps an inactive link into a claim that is outside its own valid interval but superseded further on", () => {
+    const manifest = { readers: ["engineer", "auditor"], claims: [
+      mk("p2", edge("p1")),
+      mk("p1", { ...edge("x"), valid_time: { from: "2026-03-01T00:00:00Z", until: "2026-04-01T00:00:00Z" } }),
+      mk("x", {}),
+    ] };
+    const { repo, revision } = seed(manifest);
+    const links = (overrides) => recallOf(run(repo, revision, { claim_ids: ["p1", "x"], ...overrides }), "x").supersession_chain.map((link) => `${link.claim_id}:${link.relation}:${link.active}`);
+    assert.equal(recallOf(run(repo, revision, { claim_ids: ["p1"] }), "p1").status, "superseded", "supersession is judged before validity");
+    assert.deepEqual(links({}), ["p2:supersedes:false", "p1:supersedes:true", "x:self:undefined"]);
+    const restricted = seed({ readers: ["engineer", "auditor"], claims: [mk("p2", edge("p1", { supersession_visibility: { audiences: ["auditor"] } })), manifest.claims[1], manifest.claims[2]] });
+    const restrictedChain = recallOf(run(restricted.repo, restricted.revision, { claim_ids: ["p1"] }), "p1").supersession_chain.map((link) => link.claim_id);
+    assert.ok(!restrictedChain.includes("p2"), "a restricted edge is never listed");
+    remove(repo, restricted.repo);
   });
 });
 
