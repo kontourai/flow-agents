@@ -178,6 +178,23 @@ test("passes that spell one finding differently still agree, while identity stay
   assert.deepEqual(other.claims.map(claim => other.agreement[claim.id].agreeing), [1, 1]);
 });
 
+test("passes that disagree on what the claim says do not collapse into agreement, and neither claim is lost", async () => {
+  const sitting = loadSittings()[0];
+  const quote = "The widget service uses PostgreSQL 15 as its primary database.";
+  const finding = extra => ({ quote, subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated", ...extra });
+  for (const [name, a, b] of [
+    ["a different start date", { validFrom: "2026-01-01" }, { validFrom: "2027-01-01" }],
+    ["start date in one pass only", { validFrom: "2026-01-01" }, {}],
+    ["a different end date", { validUntil: "2026-12-01" }, { validUntil: "2027-12-01" }],
+    ["a different posture", { posture: "stated" }, { posture: "hypothetical" }],
+    ["a different speaker", { speaker: "Maya Chen" }, { speaker: "Dana Reyes" }],
+  ]) {
+    const result = await distillMemoryClaims({ sitting, passes: 2, extract: traverseExtract(scriptedProvider([[finding(a)], [finding(b)]])) });
+    assert.equal(result.claims.length, 2, `${name}: both findings are kept`);
+    assert.deepEqual(result.claims.map(claim => result.agreement[claim.id].agreeing), [1, 1], name);
+  }
+});
+
 test("a failed pass is reported and counts against agreement instead of vanishing", async () => {
   const sitting = loadSittings()[0];
   const real = traverseExtract(scriptedProvider([[{ quote: "The widget service uses PostgreSQL 15 as its primary database.", subject: "widget service", subjectType: "service", property: "primary database", value: "PostgreSQL 15", posture: "stated" }]]));
@@ -199,6 +216,8 @@ test("an incomplete, postureless, ungrounded or malformed group is rejected with
     "bad valid time": { ...good, validFrom: "next tuesday" },
     "a date Date.parse would guess at": { ...good, validFrom: "Oct 30 2026" },
     "a year alone": { ...good, validFrom: "2026" },
+    "a day that is not on the calendar": { ...good, validFrom: "2026-02-30" },
+    "month 13": { ...good, validFrom: "2026-13-01" },
     "a date-time without a zone": { ...good, validFrom: "2026-10-30T10:00:00" },
     "empty interval": { ...good, validFrom: "2026-10-30", validUntil: "2026-10-01" },
   };
@@ -244,14 +263,15 @@ test("the slot is Surface's canonical claim key plus claimType", async () => {
   assert.notEqual(memorySlotKey({ ...claim, subject: { ...claim.subject, id: claim.subject.id.toUpperCase() } }), memorySlotKey(claim), "Surface preserves subject-id case");
 });
 
-test("claim ids bind content, not evidence: re-finding a fact elsewhere in the sitting is the same claim, a changed value is not", async () => {
+test("the id covers provenance too: an edited excerpt, locator or timestamp is a different claim, and a copy with the old id is refused", async () => {
   const { earlier } = await fixtureClaims();
   const claim = earlier.result.claims[0];
-  const reworded = memoryClaim({ ...claim, source: { ...claim.source, locator: "chars:1-2", excerpt: "different words", observedAt: "2026-11-01T00:00:00.000Z" } });
-  assert.equal(reworded.id, claim.id);
-  assert.equal(memoryClaim({ ...claim, value: "PostgreSQL 16" }).id === claim.id, false);
-  assert.equal(memoryClaim({ ...claim, posture: "hypothetical" }).id === claim.id, false);
-  assert.equal(memoryClaim({ ...claim, audience: ["user:a"] }).id === claim.id, false);
+  for (const source of [{ excerpt: "THIS WAS NEVER SAID" }, { locator: "chars:1-2" }, { observedAt: "2020-01-01T00:00:00.000Z" }, { role: "assistant" }, { extractor: "someone-else" }]) {
+    const edited = { ...asDocument(claim), source: { ...claim.source, ...source } };
+    assert.throws(() => assertMemoryClaim(edited), { code: "id-mismatch" }, JSON.stringify(source));
+    assert.notEqual(memoryClaim({ ...claim, source: { ...claim.source, ...source } }).id, claim.id);
+  }
+  assert.equal(memoryClaim({ ...claim }).id, claim.id, "rebuilding the same content gives the same id");
 });
 
 test("assertMemoryClaim fails closed: edited content, missing posture, unknown fields and bad intervals are refused", async () => {

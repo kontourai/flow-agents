@@ -1,30 +1,30 @@
 {
   "agreement": {
-    "sha256:048a244cd3b0b7f64b89ddb57397f32ba7e1c1dc5dd1f8cd454f3768815a3593": {
+    "sha256:2d5f85f46e56d3d2b0e7de9a79809d6529026f6a786149cd3241b1d7dbfc36e0": {
       "agreeing": 2,
       "passes": 2
     },
-    "sha256:46f7710b791d2b354c3e83f48093c03647571951f68ea68bc91022ffad938e73": {
+    "sha256:2e3e54aaec9179cabe7171ff11de9865dbeaf53a005e60c0c066d023629ffb65": {
       "agreeing": 2,
       "passes": 2
     },
-    "sha256:777ee4511631381fad4db992680122f4928629e730c4dd9d61498f8b3efcf60f": {
+    "sha256:617ce42d6d78ff4cdf638e8dd2acb5f987e7008c26b1732b8eb63120c8ff37f1": {
       "agreeing": 2,
       "passes": 2
     },
-    "sha256:7c8401f1c288568d270d25728262e82a1398cdec21069ff2cb2c930d80abb0db": {
-      "agreeing": 2,
-      "passes": 2
-    },
-    "sha256:d03be2fe12d2f01601964827977a6168383836cadd35f1083f4cc125d1b504a3": {
+    "sha256:a1a3140211b121922ae06d7d568eb80f8e341957aa5455be6cc12fb346c24733": {
       "agreeing": 1,
+      "passes": 2
+    },
+    "sha256:c01986a6a52309de5be412a7431def9aacd3f1a1cf910768825f110c6404473e": {
+      "agreeing": 2,
       "passes": 2
     }
   },
   "claims": [
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:048a244cd3b0b7f64b89ddb57397f32ba7e1c1dc5dd1f8cd454f3768815a3593",
+      "id": "sha256:617ce42d6d78ff4cdf638e8dd2acb5f987e7008c26b1732b8eb63120c8ff37f1",
       "posture": "stated",
       "property": "primary database",
       "schema_version": "1.0",
@@ -44,7 +44,7 @@
       },
       "supersedes": [
         {
-          "claimId": "sha256:7d93ef8b47c8a6d042f790577ed7f484086caa878cb6f7ffe22580ea6d629606",
+          "claimId": "sha256:e5b3f02afbbfa07b66a3b4e198a3ca2dd014b381ac86f20cfbd812f2ccad5876",
           "kind": "succession",
           "reason": "the speaker presented the value as replacing the earlier one"
         }
@@ -56,7 +56,7 @@
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:777ee4511631381fad4db992680122f4928629e730c4dd9d61498f8b3efcf60f",
+      "id": "sha256:2e3e54aaec9179cabe7171ff11de9865dbeaf53a005e60c0c066d023629ffb65",
       "posture": "stated",
       "property": "retry budget",
       "schema_version": "1.0",
@@ -78,7 +78,7 @@
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:46f7710b791d2b354c3e83f48093c03647571951f68ea68bc91022ffad938e73",
+      "id": "sha256:2d5f85f46e56d3d2b0e7de9a79809d6529026f6a786149cd3241b1d7dbfc36e0",
       "posture": "retracted",
       "property": "on-call owner",
       "schema_version": "1.0",
@@ -98,7 +98,7 @@
       },
       "supersedes": [
         {
-          "claimId": "sha256:f2be01b83419e95f3e698d9a8fffb4a49b55d0740d10933afd3a88a09b2c121d",
+          "claimId": "sha256:e11334e44332ae7753e778a2cb9c1cfda988e4aec79f84bb64294adb361bb2a0",
           "kind": "correction",
           "reason": "the speaker retracted this assertion"
         }
@@ -107,7 +107,7 @@
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:7c8401f1c288568d270d25728262e82a1398cdec21069ff2cb2c930d80abb0db",
+      "id": "sha256:c01986a6a52309de5be412a7431def9aacd3f1a1cf910768825f110c6404473e",
       "posture": "hypothetical",
       "property": "sharding technology",
       "schema_version": "1.0",
@@ -129,7 +129,7 @@
     },
     {
       "claimType": "knowledge.memory-claim",
-      "id": "sha256:d03be2fe12d2f01601964827977a6168383836cadd35f1083f4cc125d1b504a3",
+      "id": "sha256:a1a3140211b121922ae06d7d568eb80f8e341957aa5455be6cc12fb346c24733",
       "posture": "stated",
       "property": "lead",
       "schema_version": "1.0",

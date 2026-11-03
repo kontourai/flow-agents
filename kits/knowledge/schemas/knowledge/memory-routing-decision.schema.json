@@ -135,7 +135,7 @@
                   }
                 }
               ],
-              "description": "Null when no extraction passes were measured."
+              "description": "Null when no extraction passes were measured. passes >= 1 and 0 <= agreeing <= passes; anything else is treated as unmeasured."
             },
             "baselines": {
               "type": "array",
@@ -173,7 +173,7 @@
           "required": [
             "type",
             "proposalRef",
-            "operation",
+            "operations",
             "subjects"
           ],
           "properties": {
@@ -183,14 +183,7 @@
             "proposalRef": {
               "type": "string",
               "minLength": 1,
-              "description": "Opaque reference to the Survey entity-review proposal; Survey owns its contents."
-            },
-            "operation": {
-              "enum": [
-                "merge",
-                "split",
-                "alias"
-              ]
+              "description": "The Survey entity proposal's content-addressed id. Survey owns the proposal and its review item."
             },
             "subjects": {
               "type": "array",
@@ -198,7 +191,17 @@
               "items": {
                 "type": "string",
                 "minLength": 1
-              }
+              },
+              "description": "type:id of every subject the proposal names."
+            },
+            "operations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Every operation the Survey entity proposal's alternatives carry."
             }
           }
         }

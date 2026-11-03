@@ -7,9 +7,10 @@ import { memoryClaim } from "@kontourai/flow-agents/memory-claims";
 import { deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChange } from "@kontourai/flow-agents/memory-routing";
 import {
   MEMORY_METRICS_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND, readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence,
-  recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence,
+  readLatestMemoryMetrics, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
 } from "@kontourai/flow-agents/memory-routing-flow";
 import { makeFixtureDir } from "./fixture-temp-dir.mjs";
+import { loadEntityProposals } from "./memory-claims-support.mjs";
 
 // A host flow owns the gate. This probe flow is the smallest one that has one.
 const HOST_FLOW = {
@@ -37,7 +38,7 @@ function runOf() {
   const decisions = [
     routeMemoryChange({ type: "claim", claim: make(), agreement: { passes: 2, agreeing: 2 } }),
     routeMemoryChange({ type: "claim", claim: make({ value: "PostgreSQL 16" }), current: [make()], agreement: { passes: 2, agreeing: 2 } }),
-    routeMemoryChange({ type: "entity", proposalRef: "survey-entity-review:merge-1", operation: "merge", subjects: ["Maya Chen", "M. Chen"] }),
+    routeMemoryChange({ type: "entity", proposal: loadEntityProposals().merge }),
   ];
   return { decisions, metrics: deriveMemoryRunMetrics({ runId: "run-1", decisions }) };
 }
@@ -115,4 +116,70 @@ test("re-emitting metrics after review supersedes the earlier entry on its own; 
   assert.deepEqual(stored.map(entry => [entry.evidenceId, entry.superseded]), [[first.id, true], [second.id, false]]);
   assert.equal(stored[1].value.reviewer.pending, 0);
   assert.deepEqual((await readMemoryRoutingEvidence("run-1", cwd)).map(entry => [entry.evidenceId, entry.superseded]), [[routing.id, false]]);
+});
+
+test("concurrent identical recordings in one process make one entry; concurrent metrics leave one live answer", async t => {
+  const cwd = await workspace(t);
+  const { decisions, metrics } = runOf();
+  const entries = await Promise.all(Array.from({ length: 4 }, () => recordMemoryRoutingEvidence({ ...where(cwd), decisions })));
+  assert.equal(new Set(entries.map(entry => entry.id)).size, 1, "every caller got the same entry");
+  const variants = [0, 1, 2].map(pending => ({ ...metrics, reviewer: { ...metrics.reviewer, pending } }));
+  await Promise.all(variants.map(variant => recordMemoryMetricsEvidence({ ...where(cwd), metrics: variant })));
+  const run = await loadRun("run-1", cwd);
+  const live = run.manifest.evidence.filter(entry => entry.requested_kind === MEMORY_METRICS_EVIDENCE_KIND && !entry.superseded_by);
+  assert.equal(live.length, 1, "exactly one live metrics entry");
+  assert.equal(run.manifest.evidence.filter(entry => entry.requested_kind === MEMORY_ROUTING_EVIDENCE_KIND).length, 1);
+  assert.equal((await readLatestMemoryMetrics("run-1", cwd)).evidenceId, live[0].id);
+});
+
+const CHANGES = () => {
+  const { decisions } = runOf();
+  return decisions.map(decision => decision.input.type === "claim"
+    ? { type: "claim", claim: decision.input.claim, current: decision.input.current, agreement: decision.input.agreement }
+    : { type: "entity", proposal: loadEntityProposals().merge });
+};
+
+test("one run, end to end: decisions are recorded before anything is queued, items reach the queue once, metrics are emitted", async t => {
+  const cwd = await workspace(t);
+  const published = [];
+  const queue = { async publish(item, key) { published.push([item.metadata.name, key]); } };
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES(), queue });
+  assert.deepEqual(run.decisions.map(decision => decision.outcome), ["proposed", "routed", "routed"]);
+  assert.equal(run.items.length, 1, "the routed claim");
+  assert.deepEqual(run.entityProposals, [loadEntityProposals().merge.id], "Survey owns the entity item; the host is told which proposal to review");
+  assert.deepEqual(published, [[run.items[0].metadata.name, run.decisions[1].id]]);
+  assert.deepEqual(run.published, [run.items[0].metadata.name]);
+  const metrics = (await readLatestMemoryMetrics("run-1", cwd)).value;
+  assert.deepEqual([metrics.decisions, metrics.claimsProposed, metrics.routed, metrics.reviewer.pending], [3, 2, 2, 2]);
+  assert.equal(published.length, 1);
+
+  // A retry changes nothing: the same evidence entries, no extra metrics entry, and the queue is told with the same key.
+  const again = await runMemoryRouting({ ...where(cwd), changes: CHANGES(), queue });
+  assert.equal(again.routing.id, run.routing.id);
+  assert.equal(again.metrics.id, run.metrics.id);
+  assert.deepEqual(published[1], published[0], "the key a queue dedupes on is stable");
+  assert.equal((await loadRun("run-1", cwd)).manifest.evidence.length, 2);
+});
+
+test("a queue failure leaves the decisions recorded, so the failure is recoverable rather than lost", async t => {
+  const cwd = await workspace(t);
+  const queue = { async publish() { throw new Error("queue unavailable"); } };
+  await assert.rejects(runMemoryRouting({ ...where(cwd), changes: CHANGES(), queue }), /queue unavailable/);
+  assert.equal((await readMemoryRoutingDecisions("run-1", cwd)).length, 3);
+});
+
+test("without a queue nothing is claimed as published", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  assert.deepEqual(run.published, []);
+  assert.equal(run.items.length, 1);
+});
+
+test("refreshing metrics after review supersedes the earlier figures and reads the recorded decisions, not caller-supplied ones", async t => {
+  const cwd = await workspace(t);
+  const run = await runMemoryRouting({ ...where(cwd), changes: CHANGES() });
+  const before = (await readLatestMemoryMetrics("run-1", cwd)).value;
+  assert.equal(before.reviewer.decisions, 0);
+  const second = await refreshMemoryRunMetrics({ ...where(cwd) });
+  assert.equal(second.id, run.metrics.id, "nothing changed, so nothing new is recorded");
 });

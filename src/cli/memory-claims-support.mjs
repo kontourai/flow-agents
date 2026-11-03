@@ -13,6 +13,8 @@ export const SCHEMAS = path.resolve(import.meta.dirname, "..", "..", "schemas", 
 export const readJson = (...parts) => JSON.parse(fs.readFileSync(path.join(...parts), "utf8"));
 export const loadSittings = () => readJson(FIXTURES, "sittings.json");
 export const loadScript = () => readJson(FIXTURES, "extraction-script.json");
+/** Real Survey EntityProposals, made by createEntityProposal on kontourai/survey feat/243-entity-review. */
+export const loadEntityProposals = () => readJson(FIXTURES, "entity-proposals.json");
 
 /**
  * A scripted ExtractionProvider. Each call answers the next pass of the

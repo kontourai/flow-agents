@@ -16,7 +16,11 @@ import path from "node:path";
 import { attachEvidence, loadRun, type FlowEvidenceEntry } from "@kontourai/flow";
 import { canonicalJson } from "@kontourai/relay";
 import { MemoryClaimError } from "./memory-claims.js";
-import { MEMORY_ROUTING_VERSION, recomputeMemoryRouting, type MemoryRoutingDecision, type MemoryRunMetrics } from "./memory-routing.js";
+import type { ReviewDecision, ReviewItem, ReviewSessionEvent } from "@kontourai/survey";
+import {
+  MEMORY_ROUTING_VERSION, buildMemoryReviewItem, deriveMemoryRunMetrics, recomputeMemoryRouting, routeMemoryChanges,
+  type MemoryChange, type MemoryRoutingDecision, type MemoryRoutingPolicy, type MemoryRunMetrics,
+} from "./memory-routing.js";
 
 export const MEMORY_ROUTING_EVIDENCE_KIND = "memory.routing-decisions";
 export const MEMORY_METRICS_EVIDENCE_KIND = "memory.run-metrics";
@@ -30,6 +34,19 @@ export interface MemoryRoutingRecord {
 }
 
 interface Location { runId: string; gate: string; cwd?: string }
+
+// Flow's run lock is not re-entrant, so check-then-attach cannot run inside it. Within one process the two steps are
+// serialised here, which makes them exact. Across processes a lost race can leave a duplicate of an identical routing
+// batch (readers dedupe by decision id) or two live metrics entries (readers take the last); it cannot lose or corrupt one.
+const tails = new Map<string, Promise<unknown>>();
+function serialized<T>(where: Location, work: () => Promise<T>): Promise<T> {
+  const key = `${path.resolve(where.cwd ?? process.cwd())}\0${where.runId}`;
+  const run = (tails.get(key) ?? Promise.resolve()).then(work, work);
+  const tail = run.catch(() => undefined);
+  tails.set(key, tail);
+  void tail.then(() => { if (tails.get(key) === tail) tails.delete(key); });
+  return run;
+}
 
 const bytesOf = (body: unknown) => `${canonicalJson(body)}\n`;
 const sha256 = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
@@ -61,7 +78,10 @@ async function liveEntries(where: Location, kind: string): Promise<FlowEvidenceE
  * batch again returns the entry already there, so a retry after a lost reply
  * does not double-record.
  */
-export async function recordMemoryRoutingEvidence(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
+export function recordMemoryRoutingEvidence(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
+  return serialized(input, () => recordRouting(input));
+}
+async function recordRouting(input: Location & { decisions: readonly MemoryRoutingDecision[] }): Promise<FlowEvidenceEntry> {
   for (const decision of input.decisions) {
     const check = recomputeMemoryRouting(decision);
     if (!check.ok) throw new MemoryClaimError("invalid", `routing decision ${decision.id} does not recompute: ${check.mismatches.join("; ")}`);
@@ -79,7 +99,10 @@ export async function recordMemoryRoutingEvidence(input: Location & { decisions:
  * entry so the latest figures are the live ones and earlier figures stay in the
  * manifest. Identical metrics are not attached twice.
  */
-export async function recordMemoryMetricsEvidence(input: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
+export function recordMemoryMetricsEvidence(input: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
+  return serialized(input, () => recordMetrics(input));
+}
+async function recordMetrics(input: Location & { metrics: MemoryRunMetrics }): Promise<FlowEvidenceEntry> {
   if (input.metrics.runId !== input.runId) throw new MemoryClaimError("invalid", "metrics belong to a different run");
   const digest = sha256(bytesOf(input.metrics));
   const live = await liveEntries(input, MEMORY_METRICS_EVIDENCE_KIND);
@@ -102,6 +125,11 @@ async function readStored<T>(runId: string, cwd: string | undefined, kind: strin
 
 export const readMemoryRoutingEvidence = (runId: string, cwd?: string) => readStored<MemoryRoutingRecord>(runId, cwd, MEMORY_ROUTING_EVIDENCE_KIND);
 export const readMemoryMetricsEvidence = (runId: string, cwd?: string) => readStored<MemoryRunMetrics>(runId, cwd, MEMORY_METRICS_EVIDENCE_KIND);
+
+/** The run's current metrics: the last live entry, so two live entries from a cross-process race still read as one answer. */
+export async function readLatestMemoryMetrics(runId: string, cwd?: string): Promise<StoredMemoryEvidence<MemoryRunMetrics> | undefined> {
+  return (await readMemoryMetricsEvidence(runId, cwd)).filter(entry => !entry.superseded).at(-1);
+}
 
 /** Every routing decision recorded for a run, across batches, once each, in the order recorded. */
 export async function readMemoryRoutingDecisions(runId: string, cwd?: string): Promise<MemoryRoutingDecision[]> {
@@ -126,4 +154,54 @@ export async function recomputeRecordedMemoryRouting(runId: string, cwd?: string
     if (!check.ok) mismatches.push({ decisionId: decision.id, mismatches: check.mismatches });
   }
   return { decisions: decisions.length, mismatches };
+}
+
+/** The host's review queue. Survey leaves queue storage to the host; the key makes a retried publish a no-op. */
+export interface MemoryReviewQueue { publish(item: ReviewItem, idempotencyKey: string): Promise<void> }
+
+export interface MemoryRoutingRun {
+  decisions: MemoryRoutingDecision[];
+  /** Survey review items for the routed claim changes, in decision order. */
+  items: ReviewItem[];
+  /** Survey entity proposals the host must review itself: Survey owns that item. */
+  entityProposals: string[];
+  /** Item names handed to the queue. Empty when no queue was given: the items exist but nobody has been asked. */
+  published: string[];
+  routing: FlowEvidenceEntry;
+  metrics: FlowEvidenceEntry;
+}
+
+/**
+ * One run's routing, end to end: decide each change, record the decisions as Flow evidence, hand the review items to
+ * the host's queue, and record the run's metrics. Decisions are recorded before anything is queued, so a queued item
+ * always has a recorded reason; a retry is safe because both the evidence and the queue publish are idempotent.
+ * Metrics cover every decision recorded for the run so far, not only this batch.
+ */
+export async function runMemoryRouting(input: Location & {
+  changes: readonly MemoryChange[];
+  policy?: Partial<MemoryRoutingPolicy>;
+  queue?: MemoryReviewQueue;
+}): Promise<MemoryRoutingRun> {
+  const decisions = routeMemoryChanges(input.changes, input.policy);
+  const routing = await recordMemoryRoutingEvidence({ runId: input.runId, gate: input.gate, cwd: input.cwd, decisions });
+  const items: ReviewItem[] = [], entityProposals: string[] = [], published: string[] = [];
+  for (const decision of decisions) {
+    if (decision.outcome !== "routed") continue;
+    if (decision.input.type === "entity") { entityProposals.push(decision.input.proposalRef); continue; }
+    const item = buildMemoryReviewItem(decision)!;
+    items.push(item);
+    if (input.queue) { await input.queue.publish(item, decision.id); published.push(item.metadata.name); }
+  }
+  const metrics = await refreshMemoryRunMetrics({ runId: input.runId, gate: input.gate, cwd: input.cwd });
+  return { decisions, items, entityProposals, published, routing, metrics };
+}
+
+/**
+ * Recomputes the run's metrics from its recorded decisions and the Survey review so far, and records them as the
+ * run's current metrics. Call it as reviewers decide.
+ */
+export async function refreshMemoryRunMetrics(input: Location & { reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): Promise<FlowEvidenceEntry> {
+  const decisions = await readMemoryRoutingDecisions(input.runId, input.cwd);
+  const metrics = deriveMemoryRunMetrics({ runId: input.runId, decisions, reviewDecisions: input.reviewDecisions, reviewEvents: input.reviewEvents });
+  return recordMemoryMetricsEvidence({ runId: input.runId, gate: input.gate, cwd: input.cwd, metrics });
 }

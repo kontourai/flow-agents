@@ -10,5 +10,5 @@ export {
 } from '@kontourai/flow-agents/memory-routing';
 export {
   MEMORY_METRICS_EVIDENCE_KIND, MEMORY_ROUTING_EVIDENCE_KIND,
-  readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence,
+  readLatestMemoryMetrics, readMemoryMetricsEvidence, readMemoryRoutingDecisions, readMemoryRoutingEvidence, recomputeRecordedMemoryRouting, recordMemoryMetricsEvidence, recordMemoryRoutingEvidence, refreshMemoryRunMetrics, runMemoryRouting,
 } from '@kontourai/flow-agents/memory-routing-flow';

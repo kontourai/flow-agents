@@ -124,7 +124,11 @@ const INSTANT = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]
 export function memoryInstant(value: string | undefined): number | undefined {
   if (value === undefined || !INSTANT.test(value)) return undefined;
   const ms = Date.parse(value);
-  return Number.isFinite(ms) ? ms : undefined;
+  if (!Number.isFinite(ms)) return undefined;
+  // Date.parse rolls 2026-02-30 over to March 2. Refuse a date that is not on the calendar instead.
+  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+  const calendar = new Date(Date.UTC(year, month - 1, day));
+  return calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1 && calendar.getUTCDate() === day ? ms : undefined;
 }
 
 /** `[from, until)` overlap; an absent bound is unbounded. Throws on a malformed interval so callers fail closed. */
@@ -139,23 +143,18 @@ export function memoryIntervalsOverlap(a: MemoryClaim["validTime"], b: MemoryCla
   return x.from < y.until && y.from < x.until;
 }
 
-type IdentityFields = Omit<MemoryClaim, "id" | "source"> & { source: { ref: string } };
+/**
+ * The id is the digest of every other field, provenance included: the same id means the same content, so an edited
+ * excerpt or timestamp is a different claim, not a tampered copy of this one. Sets are ordered first.
+ */
 function identityDigest(claim: MemoryClaim): string {
-  const identity: IdentityFields = {
-    schema_version: claim.schema_version,
-    subject: { type: claim.subject.type, id: claim.subject.id },
-    claimType: claim.claimType,
-    property: claim.property,
-    ...(claim.qualifiers ? { qualifiers: claim.qualifiers } : {}),
-    value: claim.value,
-    ...(claim.validTime ? { validTime: claim.validTime } : {}),
-    speaker: claim.speaker,
-    posture: claim.posture,
-    ...(claim.supersedes ? { supersedes: [...claim.supersedes].sort((x, y) => x.claimId.localeCompare(y.claimId)) } : {}),
-    ...(claim.audience ? { audience: [...new Set(claim.audience)].sort() } : {}),
-    source: { ref: claim.source.ref },
+  const { id: _id, ...content } = claim;
+  const canonical = {
+    ...content,
+    ...(content.supersedes ? { supersedes: [...content.supersedes].sort((x, y) => x.claimId.localeCompare(y.claimId)) } : {}),
+    ...(content.audience ? { audience: [...new Set(content.audience)].sort() } : {}),
   };
-  return `sha256:${createHash("sha256").update(canonicalJson(identity)).digest("hex")}`;
+  return `sha256:${createHash("sha256").update(canonicalJson(canonical)).digest("hex")}`;
 }
 
 /** Builds a claim and assigns its id. Does not validate; use `assertMemoryClaim` for that. */
@@ -346,11 +345,12 @@ export function formatSittingForExtraction(turns: readonly DistillTurn[]): { con
 export const DEFAULT_DISTILL_PASSES = 2;
 
 /**
- * Two claims are the same finding for agreement when they share a slot, a posture and a value up to case and
- * spacing. Identity (`id`) is stricter: a different spelling is a different claim, but not a different finding.
+ * Two claims are the same finding for agreement when they share a slot, a posture, a speaker, a valid time and a
+ * value up to case and spacing. Anything that would change what the claim says is part of the finding: passes that
+ * disagree on a start date disagree. Only spelling is forgiven; identity (`id`) is stricter still.
  */
 const agreementKey = (claim: MemoryClaim): string =>
-  canonicalJson([memorySlotKey(claim), claim.posture, typeof claim.value === "string" ? foldMemoryText(claim.value) : claim.value]);
+  canonicalJson([memorySlotKey(claim), claim.posture, foldMemoryText(claim.speaker), claim.validTime ?? null, (claim.supersedes ?? []).map(edge => [edge.claimId, edge.kind]).sort(), typeof claim.value === "string" ? foldMemoryText(claim.value) : claim.value]);
 
 /**
  * Runs `passes` independent extractions over one sitting and assembles the

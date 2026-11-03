@@ -61,10 +61,20 @@ export interface MemoryClaimRoutingInput {
 }
 export interface MemoryEntityRoutingInput {
   type: "entity";
-  /** Opaque reference to the Survey entity-review proposal; Survey owns its contents. */
+  /** The Survey entity-review proposal's content-addressed id; Survey owns its contents and its review item. */
   proposalRef: string;
-  operation: "merge" | "split" | "alias";
+  /** Every operation the proposal's alternatives carry (`merge`, `split`, `alias`, `same-as`, `related-to`, `domain:*`). */
+  operations: string[];
+  /** `type:id` of every subject the proposal names. */
   subjects: string[];
+}
+/**
+ * The part of Survey's `EntityProposal` (kontourai/survey#243, `createEntityProposal`) this Kit reads. Structural so
+ * the Kit does not import an unreleased Survey; pass the real proposal object.
+ */
+export interface SurveyEntityProposalLike {
+  id: string;
+  spec: { alternatives: readonly { operation: string; subjects: readonly { subjectType: string; subjectId: string }[] }[] };
 }
 export type MemoryRoutingInput = MemoryClaimRoutingInput | MemoryEntityRoutingInput;
 
@@ -91,6 +101,8 @@ interface RoutingRule {
 const rule = <T extends MemoryRoutingInput>(id: MemoryRoutingRuleId, appliesTo: T["type"], check: (input: T, policy: MemoryRoutingPolicy) => Record<string, unknown> | undefined): RoutingRule =>
   ({ id, appliesTo, check: check as RoutingRule["check"] });
 
+const agreementWellFormed = (a: MemoryAgreement): boolean => Number.isInteger(a.passes) && Number.isInteger(a.agreeing) && a.passes >= 1 && a.agreeing >= 0 && a.agreeing <= a.passes;
+const subset = (inner: readonly string[], outer: readonly string[]): boolean => inner.every(principal => outer.includes(principal));
 const listed = (names: string[], name: string) => names.some(entry => entry === "*" || foldMemoryText(entry) === foldMemoryText(name));
 /** Same-slot stated claims the new claim is not explicitly replacing. */
 const asserted = (input: MemoryClaimRoutingInput) => input.current.filter(other => other.posture === "stated" && memorySlotKey(other) === memorySlotKey(input.claim));
@@ -104,9 +116,11 @@ export const MEMORY_ROUTING_RULES: readonly RoutingRule[] = [
   rule<MemoryClaimRoutingInput>("conflicting-current-values", "claim", (input, policy) => {
     const { claim } = input;
     if (claim.posture !== "stated" || listed(policy.multiValued, claim.property)) return undefined;
+    // An edge replaces a claim only for the same speaker. Another speaker's edge needs an authority decision this
+    // Kit cannot make (Surface leaves a third party's edge pending), so it does not clear the conflict.
     const replaced = new Set((claim.supersedes ?? []).map(edge => edge.claimId));
     const conflicts = asserted(input).filter(other => {
-      if (other.id === claim.id || replaced.has(other.id) || memoryValuesEqual(other.value, claim.value)) return false;
+      if (other.id === claim.id || (replaced.has(other.id) && other.speaker === claim.speaker) || memoryValuesEqual(other.value, claim.value)) return false;
       try { return memoryIntervalsOverlap(other.validTime, claim.validTime); } catch { return true; } // a malformed interval cannot clear a conflict
     });
     return conflicts.length ? { with: conflicts.map(other => ({ claimId: other.id, value: other.value })) } : undefined;
@@ -117,18 +131,32 @@ export const MEMORY_ROUTING_RULES: readonly RoutingRule[] = [
     if (!listed(policy.consequential.properties, claim.property) && !listed(policy.consequential.subjectTypes, claim.subject.type)) return undefined;
     return { property: claim.property, subjectType: claim.subject.type, supersedes: claim.supersedes.map(edge => ({ claimId: edge.claimId, kind: edge.kind })) };
   }),
-  rule<MemoryEntityRoutingInput>("entity-identity-change", "entity", input => ({ operation: input.operation, proposalRef: input.proposalRef })),
+  rule<MemoryEntityRoutingInput>("entity-identity-change", "entity", input => ({ operations: input.operations, proposalRef: input.proposalRef })),
   rule<MemoryClaimRoutingInput>("low-extraction-agreement", "claim", (input, policy) => {
     const { agreement } = input;
-    if (!agreement || agreement.passes < policy.minPasses) return { reason: "unmeasured", passes: agreement?.passes ?? 0, minPasses: policy.minPasses };
+    // A malformed count is unmeasured, never agreement: this rule also runs over stored, possibly edited, inputs.
+    if (!agreement || !agreementWellFormed(agreement) || agreement.passes < policy.minPasses) return { reason: "unmeasured", passes: agreement?.passes ?? 0, minPasses: policy.minPasses };
     if (agreement.agreeing < policy.minAgreement * agreement.passes - 1e-9) return { reason: "disagreement", passes: agreement.passes, agreeing: agreement.agreeing, minAgreement: policy.minAgreement };
     return undefined;
   }),
   rule<MemoryClaimRoutingInput>("visibility-widening", "claim", input => {
-    const requested = input.claim.audience;
-    if (!requested) return undefined; // omitted audience inherits the source's; omission never widens
-    const wider = input.baselines.filter(base => !base.audience || !requested.every(principal => base.audience!.includes(principal)));
-    return wider.length ? { requested, widerThan: wider.map(base => base.ref) } : undefined;
+    // What the claim would be visible to: the audience it asks for, else the one it inherits from its source.
+    const source = input.baselines.find(base => base.ref === SOURCE_BASELINE);
+    const requested = input.claim.audience ?? null;
+    const effective = requested ?? source?.audience ?? null;
+    const wider: string[] = [];
+    // Asking for more than the source allows widens; so does asking when the source's audience is unknown.
+    if (requested && (!source?.audience || !subset(requested, source.audience))) wider.push(SOURCE_BASELINE);
+    // Whatever it is visible to must also fit inside every current claim in its slot. A peer with an undeclared
+    // audience fails closed for a claim that asks for one: omission is not "everyone". A claim that merely inherits
+    // its source's audience is compared with the peers that declare one, since an undeclared peer gives nothing to
+    // compare with and a host that records no audiences would otherwise route everything. An unknown effective
+    // audience cannot be shown to fit inside a declared one.
+    for (const base of input.baselines) {
+      if (base.ref === SOURCE_BASELINE) continue;
+      if (!base.audience ? requested !== null : !effective || !subset(effective, base.audience)) wider.push(base.ref);
+    }
+    return wider.length ? { requested, effective, widerThan: wider } : undefined;
   }),
 ];
 
@@ -169,10 +197,11 @@ export interface MemoryClaimChange {
   /** Audience of the source the claim came from; null or absent is unknown. */
   sourceAudience?: readonly string[] | null;
 }
-export type MemoryEntityChange = MemoryEntityRoutingInput;
+export interface MemoryEntityChange { type: "entity"; proposal: SurveyEntityProposalLike }
 export type MemoryChange = MemoryClaimChange | MemoryEntityChange;
 
 const MAX_CURRENT_PER_SLOT = 64;
+const SOURCE_BASELINE = "source";
 
 function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
   assertMemoryClaim(change.claim);
@@ -180,20 +209,36 @@ function claimInput(change: MemoryClaimChange): MemoryClaimRoutingInput {
   const current = (change.current ?? []).filter(other => { assertMemoryClaim(other); return other.id !== change.claim.id && memorySlotKey(other) === slot; });
   // Reading max + 1 and refusing: a silently truncated slot could hide the conflicting claim.
   if (current.length > MAX_CURRENT_PER_SLOT) throw new MemoryClaimError("invalid", `more than ${MAX_CURRENT_PER_SLOT} current claims in one slot`);
+  if (change.agreement != null && !agreementWellFormed(change.agreement)) throw new MemoryClaimError("invalid", "agreement needs integer passes >= 1 and 0 <= agreeing <= passes");
   const { applicable } = foldCandidateVerifications({ candidateId: memoryProposedCandidateId(change.claim.id), value: change.claim.value }, change.verifications ?? []);
   // Everything order-dependent is sorted here, so the decision id does not depend on the order inputs arrive in.
   const ordered = [...current].sort((x, y) => x.id.localeCompare(y.id));
   return {
     type: "claim", claim: change.claim, current: ordered, verifications: [...applicable],
     agreement: change.agreement ?? null,
-    baselines: [{ ref: "source", audience: change.sourceAudience ? [...change.sourceAudience] : null }, ...ordered.map(other => ({ ref: other.id, audience: other.audience ? [...other.audience] : null }))],
+    baselines: [
+      { ref: SOURCE_BASELINE, audience: change.sourceAudience ? [...change.sourceAudience] : null },
+      ...ordered.map(other => ({ ref: other.id, audience: other.audience ? [...other.audience] : null })),
+    ],
   };
+}
+
+function entityInput(change: MemoryEntityChange): MemoryEntityRoutingInput {
+  const { proposal } = change, alternatives = proposal?.spec?.alternatives;
+  if (typeof proposal?.id !== "string" || !proposal.id.trim() || !Array.isArray(alternatives) || alternatives.length === 0) throw new MemoryClaimError("invalid", "an entity change needs a Survey entity proposal with alternatives");
+  const operations = new Set<string>(), subjects = new Set<string>();
+  for (const alternative of alternatives) {
+    if (typeof alternative.operation !== "string" || !alternative.operation) throw new MemoryClaimError("invalid", "an entity alternative needs an operation");
+    operations.add(alternative.operation);
+    for (const subject of alternative.subjects ?? []) subjects.add(`${subject.subjectType}:${subject.subjectId}`);
+  }
+  if (subjects.size === 0) throw new MemoryClaimError("invalid", "an entity proposal names no subjects");
+  return { type: "entity", proposalRef: proposal.id, operations: [...operations].sort(), subjects: [...subjects].sort() };
 }
 
 export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<MemoryRoutingPolicy>): MemoryRoutingDecision {
   const policy = normalizeMemoryRoutingPolicy(policyInput);
-  const input: MemoryRoutingInput = change.type === "claim" ? claimInput(change) : { ...change, subjects: [...change.subjects] };
-  if (input.type === "entity" && (!input.proposalRef.trim() || input.subjects.length === 0)) throw new MemoryClaimError("invalid", "an entity change needs a proposal reference and subjects");
+  const input: MemoryRoutingInput = change.type === "claim" ? claimInput(change) : entityInput(change);
   return {
     schema_version: MEMORY_ROUTING_VERSION, id: digestOf({ input, policy }),
     changeId: input.type === "claim" ? input.claim.id : input.proposalRef,
@@ -202,6 +247,20 @@ export function routeMemoryChange(change: MemoryChange, policyInput?: Partial<Me
 }
 
 export const routeMemoryChanges = (changes: readonly MemoryChange[], policy?: Partial<MemoryRoutingPolicy>): MemoryRoutingDecision[] => changes.map(change => routeMemoryChange(change, policy));
+
+const stringList = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === "string" && item !== "");
+/** A stored input is read back from disk: refuse a shape the rules would silently misread. */
+function assertStoredInputShape(input: MemoryRoutingInput): void {
+  const bad = (what: string): never => { throw new MemoryClaimError("invalid", `stored routing input: ${what}`); };
+  if (input.type === "entity") {
+    if (typeof input.proposalRef !== "string" || !input.proposalRef || !stringList(input.operations) || input.operations.length === 0 || !stringList(input.subjects) || input.subjects.length === 0) bad("entity input is malformed");
+    return;
+  }
+  if (input.type !== "claim") bad("unknown input type");
+  if (!Array.isArray(input.current) || !Array.isArray(input.verifications)) bad("current and verifications must be lists");
+  if (input.agreement !== null && (typeof input.agreement !== "object" || !agreementWellFormed(input.agreement))) bad("agreement is malformed");
+  if (!Array.isArray(input.baselines) || !input.baselines.every(base => base && typeof base.ref === "string" && base.ref && (base.audience === null || stringList(base.audience)))) bad("baselines are malformed");
+}
 
 export interface RoutingRecomputation { ok: boolean; mismatches: string[] }
 
@@ -216,6 +275,7 @@ export function recomputeMemoryRouting(decision: MemoryRoutingDecision): Routing
     if (decision.schema_version !== MEMORY_ROUTING_VERSION) throw new MemoryClaimError("invalid", "unsupported schema_version");
     const policy = normalizeMemoryRoutingPolicy(decision.policy);
     if (canonicalJson(policy) !== canonicalJson(decision.policy)) mismatches.push("policy is not in normalised form");
+    assertStoredInputShape(decision.input);
     if (decision.input.type === "claim") {
       assertMemoryClaim(decision.input.claim);
       decision.input.current.forEach(other => assertMemoryClaim(other));
@@ -356,7 +416,9 @@ function reviewDwell(decision: ReviewDecision, itemName: string, events: readonl
  * decision has events.
  */
 export function deriveMemoryRunMetrics(input: { runId: string; decisions: readonly MemoryRoutingDecision[]; reviewDecisions?: readonly ReviewDecision[]; reviewEvents?: readonly ReviewSessionEvent[] }): MemoryRunMetrics {
-  const { decisions } = input;
+  // A change is decided once per run. If it was routed again (say, with more current claims), the later decision
+  // stands; counting both would count one claim, and its one review, twice.
+  const decisions = [...new Map(input.decisions.map(decision => [decision.changeId, decision] as const)).values()];
   const routed = decisions.filter(decision => decision.outcome === "routed");
   const routedByRule: Record<string, number> = {};
   for (const decision of routed) for (const reason of decision.reasons) routedByRule[reason.rule] = (routedByRule[reason.rule] ?? 0) + 1;
@@ -395,7 +457,10 @@ export interface PresentedMemoryClaim {
   id: string;
   subject: string;
   property: string;
+  /** The value to show: the reviewer's edit when the claim was corrected, otherwise the claim's own value. */
   value: unknown;
+  /** The value the extractor produced. Differs from `value` only for a corrected claim. */
+  extractedValue: unknown;
   posture: MemoryClaimPosture;
   validTime?: MemoryClaim["validTime"];
   speaker: string;
@@ -422,22 +487,22 @@ export function presentMemoryClaims(claims: readonly unknown[], context: { routi
       continue;
     }
     const claim = raw, routing = routingByClaim.get(claim.id);
-    let label: MemoryReviewLabel = "unreviewed";
-    if (routing?.outcome === "routed") {
-      label = "in-review";
-      const name = memoryReviewItemName(claim.id), made = latest.get(name);
-      if (made) {
-        const outcome = memoryReviewOutcome(made, name);
-        if (outcome === "rejected") { withheld.push({ id: claim.id, reason: "rejected-in-review" }); continue; }
-        if (outcome === "confirmed" || outcome === "corrected") label = outcome;
-      }
+    let label: MemoryReviewLabel = routing?.outcome === "routed" ? "in-review" : "unreviewed";
+    let value = claim.value;
+    // A reviewer's decision is about the claim, whether or not its routing record came along with it.
+    const name = memoryReviewItemName(claim.id), made = latest.get(name);
+    if (made) {
+      const outcome = memoryReviewOutcome(made, name);
+      if (outcome === "rejected") { withheld.push({ id: claim.id, reason: "rejected-in-review" }); continue; }
+      if (outcome === "confirmed" || outcome === "corrected") label = outcome;
+      if (outcome === "corrected") value = made.spec.editedValue;
     }
     const subject = claim.subject.label ?? claim.subject.id;
     presented.push({
-      id: claim.id, subject, property: claim.property, value: claim.value, posture: claim.posture, ...(claim.validTime ? { validTime: claim.validTime } : {}),
+      id: claim.id, subject, property: claim.property, value, extractedValue: claim.value, posture: claim.posture, ...(claim.validTime ? { validTime: claim.validTime } : {}),
       speaker: claim.speaker, source: { ref: claim.source.ref, excerpt: claim.source.excerpt, observedAt: claim.source.observedAt },
       review: { label, routing: routing ? (routing.outcome === "routed" ? "routed" : "uncontested") : "not-evaluated", reasons: routing?.reasons.map(reason => reason.rule) ?? [] },
-      text: `[${claim.posture} · ${label}] ${subject}: ${claim.property} = ${typeof claim.value === "string" ? claim.value : canonicalJson(claim.value)}`,
+      text: `[${claim.posture} · ${label}] ${subject}: ${claim.property} = ${typeof value === "string" ? value : canonicalJson(value)}`,
     });
   }
   return { presented, withheld };

@@ -10,7 +10,7 @@ import {
   DEFAULT_MEMORY_ROUTING_POLICY, MEMORY_ROUTING_RULE_IDS, buildMemoryReviewItem, deriveMemoryRunMetrics, evaluateMemoryRouting, memoryProposedCandidateId,
   memoryReviewItemName, presentMemoryClaims, recomputeMemoryRouting, routeMemoryChange, routeMemoryChanges, verifyMemoryClaimAgainstCurrent,
 } from "@kontourai/flow-agents/memory-routing";
-import { SCHEMAS, distillFixtureSitting, matchesFixture, readJson } from "./memory-claims-support.mjs";
+import { SCHEMAS, distillFixtureSitting, loadEntityProposals, matchesFixture, readJson } from "./memory-claims-support.mjs";
 
 const ajv = new Ajv({ strict: false, allErrors: true });
 const validateDecision = ajv.compile(readJson(SCHEMAS, "memory-routing-decision.schema.json"));
@@ -24,9 +24,9 @@ const base = {
 const make = (overrides = {}) => memoryClaim({ ...base, ...overrides });
 const AGREED = { passes: 2, agreeing: 2 };
 const change = (claim, extra = {}) => ({ type: "claim", claim, agreement: AGREED, ...extra });
-const verification = (claim, result, value = claim.value) => buildCandidateVerification({
+const verification = (claim, result, value = claim.value, verifierId = "stub") => buildCandidateVerification({
   input: { candidateId: memoryProposedCandidateId(claim.id), value, evidence: [{ id: "e1", excerpt: "evidence", locator: "chars:0-1" }] },
-  verifier: { id: "stub", version: "1", method: "deterministic" },
+  verifier: { id: verifierId, version: "1", method: "deterministic" },
   verdict: result === "abstain" ? { result, abstainReason: "timeout" } : { result },
   createdAt: "2026-11-01T00:00:00.000Z",
 });
@@ -45,6 +45,10 @@ const current = make();
 const RULE_CASES = {
   "contradicted-by-verification": {
     routes: () => { const claim = make({ value: "PostgreSQL 14" }); return change(claim, { verifications: [verification(claim, "contradicted")] }); },
+    alsoRoutes: [
+      ["a supported record does not mask a contradiction recorded by another verifier", () => { const claim = make(); return change(claim, { verifications: [verification(claim, "supported"), verification(claim, "contradicted", claim.value, "other-verifier"), verification(claim, "abstain")] }); }],
+      ["the contradiction is last of several records", () => { const claim = make(); return change(claim, { verifications: [verification(claim, "supported", claim.value, "v1"), verification(claim, "supported", claim.value, "v2"), verification(claim, "contradicted", claim.value, "v3")] }); }],
+    ],
     passes: [
       ["a supported verdict", () => { const claim = make(); return change(claim, { verifications: [verification(claim, "supported")] }); }],
       ["a verifier that abstained is neither a pass nor a fail", () => { const claim = make(); return change(claim, { verifications: [verification(claim, "abstain")] }); }],
@@ -55,6 +59,8 @@ const RULE_CASES = {
   "conflicting-current-values": {
     routes: () => change(make({ value: "PostgreSQL 16" }), { current: [current] }),
     alsoRoutes: [
+      ["another speaker's edge does not clear the conflict: replacing someone else's claim needs authority the Kit cannot assert", () => change(make({ value: "PostgreSQL 16", speaker: "mallory", supersedes: [{ claimId: make().id, kind: "succession", reason: "x" }] }), { current: [current] })],
+      ["a conflict hiding behind a first, agreeing, peer is still found", () => change(make({ value: "PostgreSQL 16" }), { current: [make({ value: "PostgreSQL 16", source: { ...base.source, ref: "a" } }), make({ value: "PostgreSQL 15", source: { ...base.source, ref: "b" } })] })],
       ["values that differ only in case are different values: equality is structural JSON", () => change(make({ value: "postgresql 15" }), { current: [current] })],
       ["a field differing only in case is the same slot, because Surface lower-cases it", () => change(make({ property: "Primary Database", value: "PostgreSQL 16" }), { current: [current] })],
       ["an edge to a claim that is not in the slot replaces nothing", () => change(make({ value: "PostgreSQL 16", supersedes: [{ claimId: make({ value: "elsewhere" }).id, kind: "succession", reason: "r" }] }), { current: [current] })],
@@ -70,7 +76,7 @@ const RULE_CASES = {
       ["another qualifier: the slot includes them", () => change(make({ qualifiers: { environment: "staging" }, value: "PostgreSQL 16" }), { current: [current] })],
       ["a current claim that was only hypothetical", () => change(make({ value: "PostgreSQL 16" }), { current: [make({ posture: "hypothetical" })] })],
       ["a new claim that is only hypothetical", () => change(make({ value: "PostgreSQL 16", posture: "hypothetical" }), { current: [current] })],
-      ["a value the new claim explicitly replaces", () => change(replacing, { current: [current] })],
+      ["a value the same speaker explicitly replaces", () => change(replacing, { current: [current] })],
     ],
   },
   "consequential-supersession": {
@@ -86,9 +92,12 @@ const RULE_CASES = {
     ],
   },
   "entity-identity-change": {
-    routes: () => ({ type: "entity", proposalRef: "survey-entity-review:merge-1", operation: "merge", subjects: ["Maya Chen", "M. Chen"] }),
+    routes: () => ({ type: "entity", proposal: loadEntityProposals().merge }),
     passes: [],
-    alsoRoutes: ["split", "alias"].map(operation => [operation, () => ({ type: "entity", proposalRef: `survey-entity-review:${operation}`, operation, subjects: ["Maya Chen"] })]),
+    alsoRoutes: [
+      ...["split", "alias"].map(operation => [operation, () => ({ type: "entity", proposal: loadEntityProposals()[operation] })]),
+      ["a proposal with several alternatives records every operation", () => ({ type: "entity", proposal: loadEntityProposals().multi })],
+    ],
   },
   "low-extraction-agreement": {
     routes: () => change(make(), { agreement: { passes: 2, agreeing: 1 } }),
@@ -108,8 +117,13 @@ const RULE_CASES = {
       ["no audience requested: inherits the source, omission never widens", () => change(make(), { sourceAudience: ["user:brian"] })],
       ["an audience within the source's", () => change(make({ audience: ["user:brian"] }), { sourceAudience: ["user:brian", "team:platform"] })],
       ["an audience equal to the source's", () => change(make({ audience: ["user:brian"] }), { sourceAudience: ["user:brian"] })],
+      ["inheriting a source that fits inside the current claim's audience", () => change(make({ source: { ...base.source, ref: "s2" } }), { current: [make({ audience: ["user:brian", "team:platform"] })], sourceAudience: ["user:brian"] })],
+      ["nobody declares an audience anywhere: nothing to compare, nothing widened", () => change(make({ source: { ...base.source, ref: "s2" } }), { current: [make({})] })],
     ],
     alsoRoutes: [
+      ["inheriting a source wider than a current claim in the slot: omission is not exempt", () => change(make({ value: "PostgreSQL 15", source: { ...base.source, ref: "s2" } }), { current: [make({ audience: ["user:brian"] })], sourceAudience: ["user:brian", "public"] })],
+      ["inheriting an unknown audience cannot be shown to fit a declared one", () => change(make({ source: { ...base.source, ref: "s2" } }), { current: [make({ audience: ["user:brian"] })] })],
+      ["asking for an audience when a current claim in the slot declares none fails closed", () => change(make({ value: "PostgreSQL 15", source: { ...base.source, ref: "s2" }, audience: ["user:brian"] }), { sourceAudience: ["user:brian"], current: [make({})] })],
       ["an unknown source audience fails closed", () => change(make({ audience: ["user:brian"] }))],
       ["wider than a narrower current claim in the slot", () => change(make({ value: "PostgreSQL 15", audience: ["user:brian", "team:platform"] }), { sourceAudience: ["user:brian", "team:platform"], current: [make({ audience: ["user:brian"] })] })],
     ],
@@ -181,6 +195,48 @@ test("each layer defends itself: the entry point drops other-slot claims and sta
   // A verification of the right value still routes through the pure rules.
   const bound = { ...edited, verifications: [verification(claim, "contradicted")] };
   assert.deepEqual(evaluateMemoryRouting(bound, DEFAULT_MEMORY_ROUTING_POLICY).reasons.map(reason => reason.rule), ["contradicted-by-verification"]);
+});
+
+test("agreement counts are validated at the door and cannot fail open when read back", () => {
+  for (const bad of [{ passes: 2 }, { agreeing: 2 }, { passes: 2, agreeing: 3 }, { passes: 0, agreeing: 0 }, { passes: 2.5, agreeing: 1 }, { passes: 2, agreeing: -1 }, { passes: "2", agreeing: "2" }]) {
+    assert.throws(() => routeMemoryChange(change(make(), { agreement: bad })), /agreement needs integer passes/, JSON.stringify(bad));
+  }
+  // A stored input edited to carry one is read as unmeasured, so it routes; the recorded outcome then fails to recompute.
+  const stored = plain(routeMemoryChange(change(make())));
+  stored.input.agreement = { passes: 2 };
+  assert.deepEqual(evaluateMemoryRouting(stored.input, DEFAULT_MEMORY_ROUTING_POLICY).reasons.map(reason => reason.rule), ["low-extraction-agreement"]);
+  const check = recomputeMemoryRouting(stored);
+  assert.equal(check.ok, false);
+  assert.match(check.mismatches.join("\n"), /agreement is malformed/);
+});
+
+test("stored inputs with a shape the rules would misread are refused by recomputation", () => {
+  const good = routeMemoryChange(change(make()));
+  for (const [what, mutate] of [
+    ["current is not a list", d => { d.input.current = "none"; }],
+    ["baselines are not a list", d => { d.input.baselines = null; }],
+    ["a baseline audience is not a list", d => { d.input.baselines[0].audience = "alice"; }],
+    ["an unknown input type", d => { d.input.type = "other"; }],
+  ]) {
+    const d = plain(good);
+    mutate(d);
+    assert.equal(recomputeMemoryRouting(d).ok, false, what);
+  }
+  const entity = plain(routeMemoryChange(RULE_CASES["entity-identity-change"].routes()));
+  entity.input.operations = [];
+  assert.equal(recomputeMemoryRouting(entity).ok, false);
+});
+
+test("an entity change takes Survey's EntityProposal by structure and refuses anything that is not one", () => {
+  const { merge, multi } = loadEntityProposals();
+  const decision = routeMemoryChange({ type: "entity", proposal: multi });
+  assert.equal(decision.changeId, multi.id, "Survey's content-addressed proposal id, which is also its review item name");
+  assert.deepEqual(decision.input.operations, ["merge", "same-as"]);
+  assert.deepEqual(decision.input.subjects, ["person:m. chen", "person:maya c.", "person:maya chen"]);
+  assert.deepEqual(routeMemoryChange({ type: "entity", proposal: merge }).input.operations, ["merge"]);
+  for (const bad of [null, {}, { id: "x" }, { id: "x", spec: { alternatives: [] } }, { id: "", spec: { alternatives: [{ operation: "merge", subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ subjects: [{ subjectType: "p", subjectId: "a" }] }] } }, { id: "x", spec: { alternatives: [{ operation: "merge", subjects: [] }] } }]) {
+    assert.throws(() => routeMemoryChange({ type: "entity", proposal: bad }), /entity/, JSON.stringify(bad));
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -362,6 +418,28 @@ test("metrics: proposed count, routed share, reviewer decisions and review time,
   assert.equal(actual, expected, "metrics.json drifted; rerun with UPDATE_MEMORY_FIXTURES=1 and review the diff");
 });
 
+test("a claim routed twice in one run is counted once, with its later decision; its one review is not double-counted", async () => {
+  const { second } = await endToEnd();
+  const first = byProperty(second, "retry budget");
+  const again = routeMemoryChange(change(first.input.claim, { current: first.input.current, agreement: AGREED, sourceAudience: SOURCE_AUDIENCE }), { minAgreement: 0.5 });
+  assert.notEqual(again.id, first.id, "a different decision about the same claim");
+  assert.equal(again.changeId, first.changeId);
+  const item = buildMemoryReviewItem(first);
+  const review = buildReviewDecisionsFromSession(reviewSession(item, { decision: "accept-proposed", editedValue: "9 attempts per request" }));
+  const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [first, again], reviewDecisions: review });
+  assert.deepEqual([metrics.decisions, metrics.claimsProposed], [1, 1]);
+  assert.deepEqual([metrics.reviewer.decisions, metrics.reviewer.corrected, metrics.reviewer.defectsCaught, metrics.reviewer.pending], [1, 1, 1, 0]);
+});
+
+test("an entity change is matched to the Survey decision on its proposal, whose review item name is the proposal id", () => {
+  const { merge } = loadEntityProposals();
+  const decision = routeMemoryChange({ type: "entity", proposal: merge });
+  const reviewed = [{ apiVersion: "survey.kontourai.io/v1alpha1", kind: "ReviewDecision", metadata: { name: "d1" }, spec: { reviewItemName: merge.id, candidateId: "c", status: "verified", reviewedAt: "2026-11-02T10:00:00.000Z" } }];
+  const metrics = deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: reviewed });
+  assert.deepEqual([metrics.claimsProposed, metrics.routed, metrics.reviewer.confirmed, metrics.reviewer.pending], [0, 1, 1, 0]);
+  assert.equal(deriveMemoryRunMetrics({ runId: "r", decisions: [decision] }).reviewer.pending, 1);
+});
+
 test("when a reviewer changes their mind the later decision stands, whatever order the decisions arrive in", async () => {
   const { second } = await endToEnd();
   const decision = byProperty(second, "retry budget");
@@ -408,6 +486,24 @@ test("recall without routing information still labels the claim unreviewed and s
   const { earlier } = await endToEnd();
   const { presented } = presentMemoryClaims(earlier.result.claims);
   assert.ok(presented.every(claim => claim.review.label === "unreviewed" && claim.review.routing === "not-evaluated"));
+});
+
+test("recall shows what the reviewer decided: a corrected claim presents the reviewer's value, and a rejection applies even without the routing record", async () => {
+  const { later, second } = await endToEnd();
+  const retry = byProperty(second, "retry budget");
+  const item = buildMemoryReviewItem(retry);
+  const corrected = buildReviewDecisionsFromSession(reviewSession(item, { decision: "accept-proposed", editedValue: "9 attempts per request" }));
+  const out = presentMemoryClaims(later.result.claims, { routing: second, reviewDecisions: corrected });
+  const shown = out.presented.find(claim => claim.id === retry.changeId);
+  assert.equal(shown.review.label, "corrected");
+  assert.equal(shown.value, "9 attempts per request");
+  assert.equal(shown.extractedValue, "8 attempts per request");
+  assert.match(shown.text, /^\[stated · corrected\] .*= 9 attempts per request$/);
+  // The decision is about the claim; the routing record need not travel with it.
+  const withoutRouting = presentMemoryClaims(later.result.claims, { reviewDecisions: corrected });
+  assert.equal(withoutRouting.presented.find(claim => claim.id === retry.changeId).value, "9 attempts per request");
+  const rejected = buildReviewDecisionsFromSession(reviewSession(item, { decision: "reject-proposed" }));
+  assert.deepEqual(presentMemoryClaims(later.result.claims, { reviewDecisions: rejected }).withheld, [{ id: retry.changeId, reason: "rejected-in-review" }]);
 });
 
 test("recall withholds, and reports, a claim with no posture, a tampered claim, and a claim review rejected; it never prints one bare", async () => {
