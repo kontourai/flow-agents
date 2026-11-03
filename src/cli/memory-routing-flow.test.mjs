@@ -589,4 +589,10 @@ test("a stored review record is validated when read: a digest-valid record with 
   await attach({ schema_version: "1.0", runId: "run-1", decisions: [{ ...good, spec: { ...good.spec, status: "weird" } }], events: [] });
   await assert.rejects(readMemoryReviewRecords("run-1", cwd), /status Survey does not define/);
   await assert.rejects(refreshMemoryRunMetrics({ ...where(cwd) }), /status Survey does not define/, "and metrics are not derived from it");
+  // The same for a stored event (each poisons its run's review evidence, so it gets its own run).
+  const other = await workspace(t);
+  const file = path.join(other, "review-record.json");
+  fs.writeFileSync(file, JSON.stringify({ schema_version: "1.0", runId: "run-1", decisions: [], events: [{ kind: "Something" }] }));
+  await attachEvidence("run-1", { cwd: other, gate: "route-gate", file, kind: MEMORY_REVIEW_EVIDENCE_KIND });
+  await assert.rejects(readMemoryReviewRecords("run-1", other), /not a Survey ReviewSessionEvent/);
 });

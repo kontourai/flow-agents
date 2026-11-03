@@ -414,4 +414,7 @@ test("a distill request is read without running caller code: a getter, a Proxy o
   const turns = [...sitting.turns]; turns.map = () => [];
   await assert.rejects(distillMemoryClaims({ sitting: { ...sitting, turns }, passes: 1, extract }), MemoryClaimError, "an own map on the turns");
   await assert.rejects(distillMemoryClaims({ sitting: { ...sitting, sittingId: " " }, passes: 1, extract }), /sittingId/);
+  await assert.rejects(distillMemoryClaims({ sitting, passes: 1, extract, current: new Proxy([], {}) }), MemoryClaimError, "a Proxy list of current claims");
+  await assert.rejects(distillMemoryClaims({ sitting, passes: 1, extract, visibility: new Proxy({ kind: "public" }, {}) }), MemoryClaimError, "a Proxy visibility");
+  await assert.rejects(distillMemoryClaims({ sitting, passes: 1, extract, visibility: Object.defineProperty({ kind: "restricted" }, "audiences", { enumerable: true, get: () => ["a"] }) }), MemoryClaimError, "a visibility with a getter");
 });
