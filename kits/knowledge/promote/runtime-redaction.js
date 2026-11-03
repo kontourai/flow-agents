@@ -29,11 +29,6 @@ const SECRET_WORD_PAIRS = new Set(["api key", "access key", "private key", "conn
 const ALNUM_RUN = /[A-Za-z0-9]+/g;
 // camelCase pieces: `API` + `Key`, `access` + `Token`, `PASSWORD` + `2`.
 const CAMEL_PIECE = /[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+/g;
-// Keys are short. A longer identifier is inspected at its head and tail only, so a
-// multi-megabyte run is never walked word by word.
-const LONG_IDENTIFIER = 1024;
-const IDENTIFIER_EDGE = 256;
-
 function trimTrailingDigits(word) {
   let end = word.length;
   while (end > 0 && word.charCodeAt(end - 1) >= 48 && word.charCodeAt(end - 1) <= 57) end -= 1;
@@ -59,13 +54,10 @@ function secretWordMatcher() {
  * the camelCase reading are tried, so adding camelCase never loses a spelling.
  */
 function isSecretName(identifier) {
-  const probe =
-    identifier.length > LONG_IDENTIFIER
-      ? `${identifier.slice(0, IDENTIFIER_EDGE)}_${identifier.slice(-IDENTIFIER_EDGE)}`
-      : identifier;
   const plain = secretWordMatcher();
   const camel = secretWordMatcher();
-  for (const run of probe.matchAll(ALNUM_RUN)) {
+  // Lazy: stops at the first hit and keeps nothing, so even a multi-megabyte run is walked once.
+  for (const run of identifier.matchAll(ALNUM_RUN)) {
     if (plain(trimTrailingDigits(run[0].toLowerCase()))) return true;
     for (const piece of run[0].matchAll(CAMEL_PIECE)) {
       if (camel(trimTrailingDigits(piece[0].toLowerCase()))) return true;
@@ -94,14 +86,30 @@ const SECRET_PATTERNS = [
  * assignment scrub so that `u:token='x'rest@` is one password, not an assignment.
  */
 const SCHEME_CHAR = /[A-Za-z0-9+.-]/;
+const LETTER = /[A-Za-z]/;
+const WORD_CHAR = /[A-Za-z0-9_]/;
 const NOT_USER = /[:\s/@]/;
 const NOT_PASSWORD = /[@\s/]/;
+
+/**
+ * True when a valid scheme (`\b[a-z][a-z0-9+.-]*`) ends right before `at`: some
+ * start inside the run of scheme characters is a letter at a word boundary.
+ * `1://`, `-://`, `9http://` and `foo_https://` are not schemes.
+ */
+function schemeEndsAt(text, at) {
+  let runStart = at;
+  while (runStart > 0 && SCHEME_CHAR.test(text[runStart - 1])) runStart -= 1;
+  for (let start = runStart; start < at; start += 1) {
+    if (LETTER.test(text[start]) && (start === 0 || !WORD_CHAR.test(text[start - 1]))) return true;
+  }
+  return false;
+}
 function scrubUrlCredentials(text) {
   if (!text.includes("://")) return text;
   let out = "";
   let copied = 0;
   for (let at = text.indexOf("://"); at !== -1; at = text.indexOf("://", at + 3)) {
-    if (at === 0 || !SCHEME_CHAR.test(text[at - 1])) continue;
+    if (!schemeEndsAt(text, at)) continue;
     let i = at + 3;
     while (i < text.length && !NOT_USER.test(text[i])) i += 1;
     if (i === at + 3 || text[i] !== ":") continue;
@@ -168,9 +176,10 @@ function closingQuoteEnd(text, quote, from) {
 
 /**
  * If a secret-named key (`NAME=`, `"name":`, `name :`) ends at `identifierEnd`,
- * return where its value starts and ends; otherwise null.
+ * return where its value starts and ends; otherwise null. `run` memoizes the last
+ * unquoted value run so that scanning is linear.
  */
-function assignmentValue(text, identifierEnd) {
+function assignmentValue(text, identifierEnd, run) {
   let i = identifierEnd;
   if (text[i] === '"' || text[i] === "'") i += 1;
   while (i < text.length && WHITESPACE.test(text[i])) i += 1;
@@ -187,8 +196,17 @@ function assignmentValue(text, identifierEnd) {
     // `<SECRET>tail` is not this case: the whole run is the value.
     return { start: i, end: afterPlaceholder };
   }
-  let end = i;
-  while (end < text.length && !WHITESPACE.test(text[end]) && !`"',;}`.includes(text[end])) end += 1;
+  // Every position inside one delimiter-free run shares its end, so a run is scanned once
+  // however many keys sit in it (`token=token=token=...`).
+  let end;
+  if (i >= run.from && i < run.to) {
+    end = run.to;
+  } else {
+    end = i;
+    while (end < text.length && !WHITESPACE.test(text[end]) && !`"',;}`.includes(text[end])) end += 1;
+    run.from = i;
+    run.to = end;
+  }
   return end - i < 4 ? null : { start: i, end };
 }
 
@@ -204,27 +222,22 @@ function assignmentValue(text, identifierEnd) {
 function scrubAssignments(text) {
   let out = "";
   let copied = 0;
+  const run = { from: 0, to: 0 };
   IDENTIFIER.lastIndex = 0;
+  const inner = new RegExp(IDENTIFIER.source, "g");
   for (let match = IDENTIFIER.exec(text); match !== null; match = IDENTIFIER.exec(text)) {
     if (!isSecretName(match[0])) continue;
-    const value = assignmentValue(text, match.index + match[0].length);
+    const value = assignmentValue(text, match.index + match[0].length, run);
     if (value === null) continue;
+    // Every key inside the span is looked at once, and a value that reaches past the span grows it,
+    // so the keys in the extension are looked at too. No recursion, no skipping: each identifier is
+    // visited once and each costs O(1) beyond its own length.
     let end = value.end;
-    // Keys inside a QUOTED span: scan them, growing the span as their values reach past it. (Inside
-    // an unquoted value every key shares that value's end, so there is nothing to extend, and
-    // rescanning them would be quadratic.)
-    if (text[value.start] === '"' || text[value.start] === "'") {
-      IDENTIFIER.lastIndex = value.start + 1;
-      for (let inner = IDENTIFIER.exec(text); inner !== null && inner.index < end; inner = IDENTIFIER.exec(text)) {
-        if (!isSecretName(inner[0])) continue;
-        const nested = assignmentValue(text, inner.index + inner[0].length);
-        if (nested === null) continue;
-        if (nested.end > end) end = nested.end;
-        // An unquoted nested value runs to a delimiter, and every key inside it shares that end.
-        if (text[nested.start] !== '"' && text[nested.start] !== "'") {
-          IDENTIFIER.lastIndex = Math.max(IDENTIFIER.lastIndex, nested.end);
-        }
-      }
+    inner.lastIndex = text[value.start] === '"' || text[value.start] === "'" ? value.start + 1 : value.start;
+    for (let key = inner.exec(text); key !== null && key.index < end; key = inner.exec(text)) {
+      if (!isSecretName(key[0])) continue;
+      const nested = assignmentValue(text, key.index + key[0].length, run);
+      if (nested !== null && nested.end > end) end = nested.end;
     }
     // A separator when the next character is not a value terminator, so the placeholder can
     // never fuse with what follows it (which a second pass would read as one longer value).

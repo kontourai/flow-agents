@@ -894,6 +894,35 @@ describe("review round 1 regressions (PR #1575)", () => {
     }
   });
 
+  test("M6: long keys, invalid URL schemes, quoted values nested in unquoted ones, and exotic whitespace", () => {
+    const canary = ["Review", "Seven", "Canary7319"].join("");
+    const cases = {
+      "secret word in the middle of a very long key": `${"a_".repeat(300)}password${"_b".repeat(300)} = ${canary}`,
+      "1:// is not a URL": `1://u:token=abcd@h/${canary}`,
+      "-:// is not a URL": `-://u:token=abcd@h/${canary}`,
+      "digit-led scheme": `9http://u:token=abcd@h/${canary}`,
+      "underscore-led scheme": `foo_https://u:token=abcd@h/${canary}`,
+      "double-quoted URL password": `https://u:"${canary}"@localhost/path`,
+      "single-quoted URL password": `https://u:'${canary}'@localhost/path`,
+      "quoted value nested in an unquoted one": `token=prefix_password="${canary}"`,
+      "quoted value nested in a quoted one": `password='token=prefix_password='${canary}''`,
+      "nbsp between URL parts": `https://u:ab\u00a0token="${canary}"@h/x`,
+      "nbsp before a key": `x\u00a0password=${canary}`,
+      "ideographic space before a key": `x\u3000token: "${canary}"`,
+    };
+    for (const [name, input] of Object.entries(cases)) {
+      const out = scrubResidueText(input);
+      assert.equal(out.includes(canary), false, name);
+      assert.equal(scrubResidueText(out), out, `${name}: idempotent`);
+    }
+    // Unicode whitespace ends a URL password exactly as it did in the original regex: no "@" follows it
+    // directly, so this is not a credential and the text is left as it was.
+    assert.equal(scrubResidueText("https://u:ab\u00a0cd@h/x"), "https://u:ab\u00a0cd@h/x");
+    assert.equal(scrubResidueText("https://us\u3000er:pw@h/x"), "https://us\u3000er:pw@h/x");
+    // a real URL password and a real scheme are still found
+    assert.equal(scrubResidueText(`(ftp://u:p${canary}@h/x) and HTTPS://a:b@c`), "(ftp://u:<SECRET>@h/x) and HTTPS://a:<SECRET>@c");
+  });
+
   test("the scrub is linear on pathological runs, and a data blob is replaced whole", () => {
     const REDACTION = path.join(HERE, "runtime-redaction.js");
     // Each input is built and scrubbed in a child process with a hard timeout, so a quadratic
