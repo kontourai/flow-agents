@@ -721,7 +721,8 @@ referenced Claude Code project JSONL or Codex rollout. Then it:
 - scrubs the text, cwd, branch and transcript ref deterministically (`scrubResidueText`). Provider
   tokens, JWTs, private keys, URL credentials and secret-named assignments
   become `<SECRET>`, emails become `<EMAIL>`, and home directories become `~`.
-  No model is involved, so transcript text cannot argue its way past the scrub.
+  No model is involved, so transcript text cannot argue its way past the scrub. The scrub fails toward over-redaction: a
+  quoted value runs to the next matching quote, however far.
 
 Ownership boundaries:
 
@@ -747,7 +748,10 @@ Ownership boundaries:
   (`TRANSCRIPT_MISSING_RECENT`) while its telemetry event is younger than
   `missingTranscriptGraceMs` (default 1 hour), and is skipped
   (`TRANSCRIPT_MISSING`) after that, because retention cleanup deletes old
-  transcripts for good. Content appended after a read is newer than the
+  transcripts for good. A missing transcript whose event has no usable
+  timestamp (it must be epoch milliseconds, as telemetry writes it, and not more
+  than five minutes ahead of the clock) holds the cursor as
+  `TELEMETRY_BAD_TIMESTAMP`. Content appended after a read is newer than the
   telemetry event being served; the next event for that transcript re-reads it. The transcript is opened without following a final symlink,
   read through that one descriptor, and its path and inode are re-checked after
   the read. A truncated, rotated or rewritten telemetry
