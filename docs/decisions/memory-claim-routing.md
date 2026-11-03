@@ -21,7 +21,7 @@ memory; every other piece stays with its owner.
 - **The claim schema is caller-owned.** The Kit hands Traverse an ordinary
   `TargetFieldSchema[]` (subject, property, value, valid time, speaker, posture).
   Traverse learns no field name and stays proposals-only. The Kit never asks the
-  model for an audience or a consequence flag.
+  model for a visibility or a consequence flag.
 - **Posture is not review state.** `stated`, `proposed`, `hypothetical` and
   `retracted` say how the speaker spoke. Whether anyone reviewed the claim is
   derived from its routing decision and any Survey decision, never stored on it.
@@ -29,26 +29,25 @@ memory; every other piece stays with its owner.
   Routing never blocks recall. Survey records verification verdicts and reviewer
   decisions but routes on neither, so the policy is the Kit's.
 - **Unmeasured is not agreed, and unknown is not safe, with one deliberate exception.**
-  Too few extraction passes, malformed agreement counts, an unknown source audience for a
-  claim that asks for one, a peer with no declared audience for a claim that asks for one,
-  and a malformed interval resolve toward review. A claim that only inherits its source's
-  audience is compared with the peers that declare one: an undeclared peer gives it nothing
-  to compare with, and treating that as a widening would route everything for a host that
-  records no audiences. One default goes the other way on purpose: with no `consequential` list the
-  policy routes no supersession as consequential, because the Kit cannot know what a host
-  treats as consequential. A host must set it, and the metrics' `routedByRule` shows
-  whether it did.
+  Too few extraction passes, malformed agreement counts, a malformed interval, and a visibility
+  Surface cannot read all resolve toward review or toward sealed, never toward open. Visibility
+  follows Surface's derived-visibility record: undeclared is sealed, a claim is bounded by the meet
+  of its inputs, and omission cannot widen. One default goes the other way on purpose: with no
+  `consequential` list the policy routes no supersession as consequential, because the Kit cannot
+  know what a host treats as consequential. A host must set it, and the metrics' `routedByRule`
+  shows whether it did.
 - **A decision is recomputable.** It embeds the input and policy its pure rules
   read, and is recorded as Flow evidence. Recomputation reports an edited outcome, a
   changed policy, or a rule set that has drifted.
-- **Consume, do not fork.** Which claims are current is Surface's
-  (`kontourai/surface#204`, design merged at `7486c6d`; slot identity uses Surface's
-  `canonicalClaimKey` plus `claimType`, values compare by structural JSON equality, and
-  `validTime` is half-open); entity merge and split review is Survey's
-  (`kontourai/survey#243`, whose `EntityProposal` the Kit reads by structure); the visibility lattice is Surface's
-  (`kontourai/surface#350`). The Kit takes the current claims and an opaque entity
-  proposal reference as input, and compares audiences by set inclusion until the
-  lattice exists.
+- **Consume, do not fork.** Which claims are current is Surface's (`kontourai/surface#204`,
+  design merged at `7486c6d`; slot identity uses Surface's `canonicalClaimKey` plus `claimType`,
+  values compare by structural JSON equality, and `validTime` is half-open). The visibility
+  lattice is Surface's (`kontourai/surface#350`, merged at `18e3570`): a claim's `visibility`
+  has Surface's form and the Kit's order is Surface's meet. Entity merge and split review is
+  Survey's (`kontourai/survey#243`, merged at `da1e74c`): the Kit emits `EntityProposalInput`
+  and routes the proposal, and Survey builds the item and records the outcome. Neither is in a
+  published release, so the Kit holds two thin stand-ins (`memoryVisibilityWithin`,
+  `SurveyEntityProposalLike`), pinned by tests and to be deleted when the packages are bumped.
 
 ## Consequences
 
