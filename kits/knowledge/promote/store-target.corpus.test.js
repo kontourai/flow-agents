@@ -35,6 +35,30 @@ test('Corpus stages an unreviewed proposal without a working-set record', { skip
   assert.equal((await store.listByType('raw')).length, 1);
 });
 
+test('identical batch retries reuse receipts and changed content conflicts', { skip: !process.env.CORPUS_STORE_ENTRY }, async (t) => {
+  const { KitDefaultStoreAdapter, standaloneFileMutationLock } = await import(pathToFileURL(process.env.CORPUS_STORE_ENTRY).href);
+  const residue = JSON.parse(fs.readFileSync(new URL('./fixtures/runtime-residue-669.json', import.meta.url), 'utf8'));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wi2-retry-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const root = path.join(base, 'memory');
+  const store = new KitDefaultStoreAdapter({ storeRoot: root, coordinationDirectory: path.join(base, 'coordination'), coordinationIdentity: () => () => {}, lock: standaloneFileMutationLock });
+  const candidates = [{ title: 'First', body: 'One', category: 'memory.learning' }, { title: 'Second', body: 'Two', category: 'memory.learning' }];
+  let calls = 0;
+  const unreliable = { proposeCreate: async (...args) => { const id = await store.proposeCreate(...args); if (++calls === 2) throw new Error('response lost after commit'); return id; } };
+  const options = { target: 'store', residue, candidates, proposerId: 'distiller', root, rootName: 'memory', store: unreliable, registerRoot: async () => {} };
+  let firstId;
+  await assert.rejects(runPromote(options), (error) => { firstId = error.completedProposals[0]; assert.equal(error.failedCandidateIndex, 1); return /unconfirmed/.test(error.message); });
+  assert.equal((await store.listProposals({ state: 'pending' })).length, 2);
+  const retried = await runPromote({ ...options, store });
+  assert.equal(retried.proposals[0], firstId);
+  assert.equal(new Set(retried.proposals).size, 2);
+  assert.equal((await store.listProposals({ state: 'pending' })).length, 2);
+  assert.deepEqual((await runPromote({ ...options, store })).proposals, retried.proposals);
+  await assert.rejects(runPromote({ ...options, store, candidates: [{ ...candidates[0], body: 'Changed' }, candidates[1]] }), (error) => error.code === 'REQUEST_KEY_CONFLICT');
+  assert.equal((await store.listProposals({ state: 'pending' })).length, 2);
+  assert.equal((await store.listByType('raw')).length, 0);
+});
+
 test('the host registry exposes the authorized root through the real MCP server', { skip: !process.env.CORPUS_STORE_ENTRY || !process.env.KNOWLEDGE_HOST_ROOT }, async (t) => {
   const { spawn } = await import('node:child_process');
   const { once } = await import('node:events');

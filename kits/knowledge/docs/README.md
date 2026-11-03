@@ -709,21 +709,26 @@ registry currently replaces the existing root silently, so it does not satisfy
 this requirement. The host protocol is tracked in
 [#753](https://github.com/kontourai/flow-agents/issues/753).
 
-Each candidate is sent through `proposeCreate(candidate, proposerId, evidence)`.
+Each candidate is sent through `proposeCreate(candidate, proposerId, evidence,
+{ requestKey })`. The opaque key hashes the session ID, transcript reference,
+sitting ID and candidate position; it contains no source text. Replaying the
+same ordered batch returns the original proposal IDs. Changed content at an
+occupied position is refused as `REQUEST_KEY_CONFLICT`.
 The candidate provenance note encodes the session ID, transcript reference,
 and sitting ID pending the structured provenance contract in
 [Corpus #46](https://github.com/kontourai/corpus/issues/46). This is a proposal request, not an approval or an applied
 record; the Corpus #40 contract owns persistence, review, and exclusion from
 ordinary reads. Reviewers use Corpus `applyCreate` or `rejectCreate`; this
-bridge invokes neither operation. Extraction, retries, and scheduling are not provided here. Identical calls
-can create duplicate proposals until [Corpus #45](https://github.com/kontourai/corpus/issues/45)
-provides a durable idempotency key. The host must reconcile outcomes before
-retrying. The adapter/root binding is a host obligation pending
+bridge invokes neither operation. Extraction and scheduling are not provided
+here. Retry only the same ordered batch and provenance after an uncertain
+response. The store deduplicates individual proposals; a shorter batch does
+not remove or reconcile previously staged proposals. The adapter/root binding is a host obligation pending
 [Corpus #47](https://github.com/kontourai/corpus/issues/47); the registry
 protocol remains subject to [#753](https://github.com/kontourai/flow-agents/issues/753). An
-error from `proposeCreate` is indeterminate: the error carries already returned
-proposal IDs and the failed candidate index so the caller can reconcile before
-any retry. `write: false` returns `preview` without registering or writing; an empty
+error from `proposeCreate` carries already returned proposal IDs and the
+failed candidate index. A request-key conflict is surfaced as such; other
+failures have an indeterminate outcome and require an identical retry or
+reconciliation. `write: false` returns `preview` without registering or writing; an empty
 candidate list returns `noop`.
 The create-proposal API and its package release are upstream dependencies.
 

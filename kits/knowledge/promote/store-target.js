@@ -5,6 +5,7 @@
  */
 
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 /** @typedef {Pick<import('@kontourai/corpus-store').KnowledgeStoreCreateProposals, 'proposeCreate'>} CreateProposalStore */
 
@@ -46,12 +47,16 @@ export async function proposeMemory({ residue, candidates, proposerId, store, re
   if (prepared.length === 0) return { root: rootName, posture: 'noop', proposals: [] };
   await registerRoot(rootName, root);
   const proposals = [];
-  for (const candidate of prepared) {
+  for (const [index, candidate] of prepared.entries()) {
+    // Identity excludes candidate content: changed content at the same position
+    // must conflict, not mint a new proposal. Corpus owns durable deduplication.
+    const requestKey = `knowledge.promote:${createHash('sha256').update(JSON.stringify([sessionId, transcriptRef, sittingId, index])).digest('hex')}`;
     try {
-      const id = await store.proposeCreate(candidate, proposerId, { agent: proposerId, proposal: 'Create distilled memory candidate' });
+      const id = await store.proposeCreate(candidate, proposerId, { agent: proposerId, proposal: 'Create distilled memory candidate' }, { requestKey });
       proposals.push(id);
     } catch (cause) {
-      throw Object.assign(new Error('Corpus proposal outcome is unconfirmed; do not retry without reconciliation', { cause }), { completedProposals: proposals, failedCandidateIndex: proposals.length });
+      const conflict = cause && typeof cause === 'object' && 'code' in cause && cause.code === 'REQUEST_KEY_CONFLICT';
+      throw Object.assign(new Error(conflict ? 'Corpus request key conflict; reconcile the batch' : 'Corpus proposal outcome is unconfirmed; retry only the identical batch', { cause }), { ...(conflict ? { code: 'REQUEST_KEY_CONFLICT' } : {}), completedProposals: proposals, failedCandidateIndex: index });
     }
   }
   return { root: rootName, posture: 'proposed', proposals };

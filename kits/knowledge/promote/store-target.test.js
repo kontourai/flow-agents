@@ -24,10 +24,14 @@ test('store target registers the host root and passes distilled content and all 
   assert.deepEqual(result, { root: 'memory', posture: 'proposed', proposals: ['proposal-1'] });
   assert.deepEqual(calls[0], ['register', 'memory', '/authorized/memory']);
   assert.equal(calls.length, 2);
-  const [, candidate, proposer, evidence] = calls[1];
+  const [, candidate, proposer, evidence, options] = calls[1];
   assert.deepEqual(candidate, { type: 'raw', ...candidates[0], provenance: { agent: 'distiller', session_id: residue.provenance.sessionId, note: JSON.stringify({ session_id: residue.provenance.sessionId, transcript_ref: residue.provenance.transcriptRef, sitting_id: residue.sittingId }) } });
   assert.equal(proposer, 'distiller');
   assert.equal(evidence.agent, 'distiller');
+  assert.match(options.requestKey, /^knowledge\.promote:[a-f0-9]{64}$/);
+  await runPromote(opts);
+  assert.equal(calls[3][4].requestKey, options.requestKey);
+  assert.ok(!options.requestKey.includes(residue.provenance.sessionId));
 });
 
 test('missing provenance, incomplete sittings and invalid candidates fail before registration or writes', async () => {
@@ -68,6 +72,9 @@ test('registration failure stops before Corpus; an uncertain proposal failure is
     return true;
   });
   assert.equal(attempts, 2);
+  const third = setup();
+  third.opts.store.proposeCreate = async () => { throw Object.assign(new Error('conflict'), { code: 'REQUEST_KEY_CONFLICT' }); };
+  await assert.rejects(runPromote(third.opts), (error) => error.code === 'REQUEST_KEY_CONFLICT' && error.failedCandidateIndex === 0);
 });
 
 
