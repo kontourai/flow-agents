@@ -1335,6 +1335,21 @@ test("recall reads and recomputes the routing records of the claims it presents 
   assert.throws(() => presentMemoryClaims([other], { routing: [cyclic] }), /cycle/);
 });
 
+test("review time: two sessions that share the decision's instant give no time, in either order, and one session's last submission stands (review 17)", () => {
+  const { decision, item } = routedClaim();
+  const human = { ...decide(item, "human"), metadata: { name: "decision-1" }, spec: { ...decide(item, "human").spec, actor: { id: "person:reviewer" }, reviewedAt: "2026-11-02T10:00:20.000Z" } };
+  const session = (name, start, end, sequence = 1) => [["item-selected", start, sequence], ["decision-submitted", end, sequence + 1]].map(([eventType, at, seq]) => ({ kind: "ReviewSessionEvent", metadata: { name: `${name}-${seq}` },
+    spec: { sessionName: name, sequence: seq, eventType, occurredAt: at, actor: { id: "person:reviewer" }, reviewItemName: item.metadata.name, ...(eventType === "decision-submitted" ? { reviewDecisionName: "decision-1" } : {}) } }));
+  const seconds = events => deriveMemoryRunMetrics({ runId: "r", decisions: [decision], reviewDecisions: [human], reviewEvents: events }).reviewSeconds;
+  const quick = session("quick", "2026-11-02T10:00:00.000Z", "2026-11-02T10:00:20.000Z"), slow = session("slow", "2026-11-02T09:00:00.000Z", "2026-11-02T10:00:20.000Z", 7);
+  for (const order of [[...quick, ...slow], [...slow, ...quick]]) assert.equal(seconds(order), null, "which session made the decision is not in the data");
+  assert.equal(seconds(quick), 20);
+  assert.equal(seconds(slow), 3620);
+  // The same session submitting the decision twice at that instant: the later submission in that session stands.
+  const again = [...quick, { ...quick[1], metadata: { name: "quick-3" }, spec: { ...quick[1].spec, sequence: 3 } }];
+  assert.equal(seconds(again), 20);
+});
+
 test("against the real Survey builders: the decisions and events its workbench stamps are the ones the Kit reads", async () => {
   // Survey 8.4.0 (kontourai/survey#360) stamps `reviewerKind` from the session snapshot onto decisions and events; an unknown kind and
   // `human` on `auto-accept-policy` are refused, and a session that attests nothing yields records with no kind.

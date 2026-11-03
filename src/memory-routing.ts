@@ -638,16 +638,20 @@ function reviewDwell(decision: ReviewDecision, itemName: string, allEvents: read
     const actor = (event.spec.actor as { id?: unknown } | undefined)?.id;
     return typeof decider !== "string" || actor === undefined || actor === decider;
   });
-  // The submission of THIS decision. A decision does not name its session, but Survey stamps a submission with the same
-  // `reviewedAt` as the decision it submits, so a submission is this decision's only when it happened at the instant the
-  // decision says it was reviewed: a different session of the same reviewer reusing the decision name is not. A decision with no
-  // `reviewedAt`, or none matched, has no time (null, never borrowed). Sequence numbers are per session, so the latest
-  // submission by time is the one; the sequence only orders submissions within one session.
+  // The submission of THIS decision. A decision does not name its session. When a session is built directly, Survey stamps a
+  // submission with the same `reviewedAt` as the decision it submits, so a submission is this decision's only when it happened at
+  // the instant the decision says it was reviewed. That is a narrowing, not an identity: replay keeps the snapshot's `reviewedAt`
+  // rather than the submission's, so an honest review can match nothing, and two sessions can share an instant. A decision with no
+  // `reviewedAt`, none matched, or more than one session matched has no time (null, never borrowed or guessed).
   const reviewedAt = instantOf(decision.spec.reviewedAt);
   if (reviewedAt === -Infinity) return undefined; // explicit; an unreadable instant could never equal a real one (the seconds check below also refuses it)
   const submitted = events.filter(event => event.spec.eventType === "decision-submitted" && event.spec.reviewItemName === itemName
     && event.spec.reviewDecisionName === decision.metadata.name && instantOf(event.spec.occurredAt) === reviewedAt);
-  const end = submitted.sort((x, y) => instantOf(y.spec.occurredAt) - instantOf(x.spec.occurredAt) || y.spec.sequence - x.spec.sequence)[0];
+  // An instant narrows the candidates; it does not name the session. If submissions from more than one session match, nothing in the
+  // data says whose they are (sequence numbers are local to a session and cannot rank across sessions), so there is no time (null,
+  // never a guess). Within one session, the last submission of the decision is the one.
+  if (new Set(submitted.map(event => event.spec.sessionName)).size > 1) return undefined;
+  const end = submitted.sort((x, y) => y.spec.sequence - x.spec.sequence)[0];
   if (!end) return undefined;
   const start = events.filter(event => event.spec.eventType === "item-selected" && event.spec.sessionName === end.spec.sessionName
     && (event.spec.reviewItemName ?? event.spec.activeItemName) === itemName && event.spec.sequence < end.spec.sequence)
