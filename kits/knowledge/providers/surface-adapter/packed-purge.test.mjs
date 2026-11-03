@@ -95,7 +95,7 @@ for (const [profile, KitAdapter] of [["default", DefaultKnowledgeStore], ["vault
       });
       const survivor = await store.create({
         type: "concept", title: "Survives", body: "independent content", category: "private",
-        links: [{ kind: "source", target_id: id }, { kind: "source", target_id: other }],
+        links: [{ kind: "source", target_id: id, label: "PURGE_SURFACE_SECRET" }, { kind: "source", target_id: other }],
         provenance: { agent: "test", source_ids: [id, other] },
       });
       const soleProposal = await store.proposeCreate({
@@ -151,7 +151,8 @@ for (const [profile, KitAdapter] of [["default", DefaultKnowledgeStore], ["vault
       await assert.rejects(() => store.update(id, { body: "reintroduced" }, { agent: "test" }), { code: "PURGED" });
       assert.equal(await store.get("purge-secret-alias"), null);
       const reads = [
-        await store.get(id), await store.get(dependent), await store.getLinks(id),
+        await store.get(id), await store.get(dependent), await store.get(survivor),
+        await store.getLinks(id), await store.getLinks(survivor),
         await store.listByType("raw", { includeHistory: true }),
         await store.listByType("compiled", { includeHistory: true }),
         await store.listByCategory("private", { includeHistory: true }),
